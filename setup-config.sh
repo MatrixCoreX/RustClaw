@@ -18,6 +18,7 @@ fi
 
 python3 - <<'PY'
 import getpass
+import os
 import re
 import sys
 import tomllib
@@ -27,6 +28,7 @@ cfg_path = Path("configs/config.toml")
 text = cfg_path.read_text(encoding="utf-8")
 cfg = tomllib.loads(text)
 changed = False
+force = str(os.environ.get("RUSTCLAW_SETUP_FORCE", "1")).strip().lower() not in ("0", "false", "no")
 
 try:
     tty_in = open("/dev/tty", "r", encoding="utf-8", errors="ignore")
@@ -92,23 +94,26 @@ admins = get_nested(cfg, "telegram", "admins", default=[])
 selected_vendor = str(get_nested(cfg, "llm", "selected_vendor", default="") or "")
 selected_model = str(get_nested(cfg, "llm", "selected_model", default="") or "")
 
-if is_empty_or_placeholder(telegram_token):
+if force or is_empty_or_placeholder(telegram_token):
     token = ask("Enter Telegram bot_token: ").strip()  # zh: 请输入 Telegram bot_token:
     while is_empty_or_placeholder(token):
         token = ask("bot_token cannot be empty or placeholder; enter again: ").strip()  # zh: bot_token 不能为空且不能是占位值，请重新输入:
     text = set_key_in_section(text, "telegram", "bot_token", quote_toml_string(token))
     changed = True
 
-if not isinstance(admins, list) or len(admins) == 0:
+if force or (not isinstance(admins, list) or len(admins) == 0):
     admin_raw = ask("Enter admin Telegram user_id (number): ").strip()  # zh: 请输入管理员 Telegram user_id（数字）:
     while (not admin_raw) or (not re.fullmatch(r"-?\d+", admin_raw)):
         admin_raw = ask("Invalid format, enter numeric user_id: ").strip()  # zh: 格式不正确，请输入数字 user_id:
     text = set_key_in_section(text, "telegram", "admins", f"[{admin_raw}]")
     changed = True
 
-vendors = ["openai", "google", "anthropic"]
+vendors = ["openai", "google", "anthropic", "grok"]
 available_vendors = [v for v in vendors if isinstance(get_nested(cfg, "llm", v, default=None), dict)]
-if not selected_vendor:
+if not available_vendors:
+    print("No selectable vendors found under [llm]. Please check config.", file=sys.stderr)  # zh: [llm] 下未发现可选厂商，请检查配置。
+    raise SystemExit(1)
+if force or (not selected_vendor):
     print("Select model vendor:")  # zh: 请选择模型厂商:
     for i, v in enumerate(available_vendors, start=1):
         print(f"  {i}) {v}")
@@ -128,7 +133,7 @@ default_vendor_model = str(vendor_cfg.get("model", "") or "")
 if default_vendor_model and default_vendor_model not in vendor_models:
     vendor_models.insert(0, default_vendor_model)
 
-if not selected_model:
+if force or (not selected_model):
     if vendor_models:
         print(f"Select model for {selected_vendor}:")  # zh: 请选择 {selected_vendor} 的模型:
         for i, m in enumerate(vendor_models, start=1):
@@ -145,7 +150,7 @@ if not selected_model:
     changed = True
 
 selected_api_key = str(get_nested(cfg, "llm", selected_vendor, "api_key", default="") or "")
-if is_empty_or_placeholder(selected_api_key):
+if force or is_empty_or_placeholder(selected_api_key):
     key = getpass.getpass(f"Enter {selected_vendor} api_key (input hidden): ").strip()  # zh: 请输入 {selected_vendor} 的 api_key（输入不回显）:
     while is_empty_or_placeholder(key):
         key = getpass.getpass("api_key cannot be empty or placeholder; enter again: ").strip()  # zh: api_key 不能为空且不能是占位值，请重新输入:
