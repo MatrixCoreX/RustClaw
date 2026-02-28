@@ -34,11 +34,29 @@ else
   OUT_DIR="$SCRIPT_DIR/target/debug"
 fi
 
-# Ensure core runtime binaries exist for deployment/start scripts.
+# Ensure runtime binaries exist for deployment/start scripts.
+# Keep this list aligned with configs/config.toml -> [skills].skills_list.
 REQUIRED_BINS=(
   "clawd"
   "telegramd"
   "skill-runner"
+  "x-skill"
+  "system-basic-skill"
+  "http-basic-skill"
+  "git-basic-skill"
+  "install-module-skill"
+  "process-basic-skill"
+  "package-manager-skill"
+  "archive-basic-skill"
+  "db-basic-skill"
+  "docker-basic-skill"
+  "fs-search-skill"
+  "rss-fetch-skill"
+  "image-vision-skill"
+  "image-generate-skill"
+  "image-edit-skill"
+  "audio-transcribe-skill"
+  "audio-synthesize-skill"
 )
 
 MISSING=0
