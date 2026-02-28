@@ -198,6 +198,7 @@ skills_list = [
 ]
 
 [telegram]
+bot_token = "setup-config.sh"
 admins = [1985996990]
 allowlist = []
 audio_inbox_dir = "audio/upload"
