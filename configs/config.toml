@@ -1,0 +1,241 @@
+[audio_synthesize]
+default_format = "opus"
+default_model = "gpt-4o-mini-tts"
+default_output_dir = "audio/download"
+default_vendor = "openai"
+default_voice = "alloy"
+max_concurrency = 1
+max_input_chars = 4000
+timeout_seconds = 60
+
+[audio_transcribe]
+default_model = "whisper-1"
+default_vendor = "openai"
+max_concurrency = 1
+max_input_bytes = 26214400
+timeout_seconds = 90
+
+[database]
+busy_timeout_ms = 2000
+sqlite_path = "data/rustclaw.db"
+
+[file_generation]
+default_output_dir = "document"
+
+[image_edit]
+default_model = "gpt-image-1"
+default_output_dir = "image/download"
+default_vendor = "openai"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+
+[image_generation]
+default_model = "gpt-image-1"
+default_output_dir = "image/download"
+default_vendor = "openai"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+
+[image_vision]
+default_model = "gpt-4o-mini"
+default_output_dir = "image/upload"
+default_vendor = "openai"
+max_concurrency = 1
+max_images = 6
+max_input_bytes = 10485760
+timeout_seconds = 90
+
+[limits]
+global_rpm = 60
+user_rpm = 20
+
+[llm]
+selected_model = "gpt-5.2"
+selected_vendor = "openai"
+
+[llm.anthropic]
+api_key = "REPLACE_ME_ANTHROPIC_API_KEY"
+base_url = "https://api.anthropic.com/v1"
+max_concurrency = 1
+model = "claude-3-7-sonnet-latest"
+models = [
+    "claude-3-7-sonnet-latest",
+    "claude-3-5-haiku-latest",
+]
+timeout_seconds = 30
+
+[llm.google]
+api_key = "REPLACE_ME_GOOGLE_API_KEY"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+max_concurrency = 1
+model = "gemini-2.5-pro"
+models = [
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+]
+timeout_seconds = 30
+
+[llm.grok]
+api_key = "REPLACE_ME_GROK_API_KEY"
+base_url = "https://api.x.ai/v1"
+max_concurrency = 1
+model = "grok-2-latest"
+models = [
+    "grok-2-latest",
+    "grok-2-vision-latest",
+]
+timeout_seconds = 30
+
+[llm.openai]
+api_key = "YOUR_API_KEY_HERE"
+base_url = "https://api.openai.com/v1"
+max_concurrency = 1
+model = "gpt-4o-mini"
+models = [
+    "gpt-5.2-chat-latest",
+    "gpt-5.2",
+    "gpt-5.1-chat-latest",
+    "gpt-5.1",
+    "gpt-5-chat-latest",
+    "gpt-5",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+]
+timeout_seconds = 60
+
+[maintenance]
+audit_max_rows = 10000
+audit_retention_days = 14
+cleanup_interval_seconds = 300
+tasks_max_rows = 2000
+tasks_retention_days = 7
+
+[memory]
+item_max_chars = 1200
+long_term_enabled = true
+long_term_every_rounds = 8
+long_term_max_rows = 5000
+long_term_recall_max_chars = 700
+long_term_retention_days = 120
+long_term_source_rounds = 12
+long_term_summary_max_chars = 1600
+max_rows = 30000
+prompt_max_chars = 4500
+recall_limit = 6
+retention_days = 21
+
+[routing]
+debug_log_prompt = false
+hard_route_enabled = false
+image_edit_keywords = [
+    "改图",
+    "修图",
+    "扩图",
+    "换风格",
+    "增删元素",
+    "编辑图片",
+    "edit image",
+    "outpaint",
+    "restyle",
+]
+image_generate_keywords = [
+    "帮我生成",
+    "给我生成",
+    "请生成",
+    "生成图片",
+    "生成图",
+    "画图",
+    "出图",
+    "generate image",
+    "draw image",
+    "text to image",
+]
+image_vision_keywords = [
+    "识图",
+    "看图",
+    "分析图片",
+    "读图",
+    "多图对比",
+    "截图要点",
+    "image understanding",
+    "describe image",
+    "extract from image",
+    "compare images",
+]
+
+[server]
+listen = "127.0.0.1:8787"
+request_timeout_seconds = 30
+
+[skills]
+skill_max_concurrency = 1
+skill_runner_path = "target/debug/skill-runner"
+skill_timeout_seconds = 30
+skills_list = [
+    "x",
+    "system_basic",
+    "http_basic",
+    "git_basic",
+    "install_module",
+    "process_basic",
+    "package_manager",
+    "archive_basic",
+    "db_basic",
+    "docker_basic",
+    "fs_search",
+    "rss_fetch",
+    "image_vision",
+    "image_generate",
+    "image_edit",
+    "audio_transcribe",
+    "audio_synthesize",
+]
+
+[telegram]
+admins = [1985996990]
+allowlist = []
+audio_inbox_dir = "audio/upload"
+auto_vision_on_image_only = false
+max_audio_input_bytes = 26214400
+quick_result_wait_seconds = 10
+voice_reply_mode = "voice"
+
+[telegram.voice_reply_mode_by_chat]
+1985996990 = "text"
+
+[tools]
+allow = ["*"]
+allow_path_outside_workspace = true
+allow_sudo = true
+cmd_timeout_seconds = 60
+deny = []
+max_cmd_length = 2400
+profile = "full"
+
+[tools.by_provider.anthropic]
+allow = []
+deny = []
+
+[tools.by_provider.google]
+allow = []
+deny = []
+
+[tools.by_provider.grok]
+allow = []
+deny = []
+
+[tools.by_provider.openai]
+allow = []
+deny = []
+
+[worker]
+concurrency = 1
+poll_interval_ms = 500
+queue_limit = 128
+task_timeout_seconds = 180

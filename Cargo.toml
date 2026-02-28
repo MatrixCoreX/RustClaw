@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/claw-core",
+  "crates/clawd",
+  "crates/telegramd",
+  "crates/skill-runner",
+  "crates/skills/x",
+  "crates/skills/system_basic",
+  "crates/skills/http_basic",
+  "crates/skills/git_basic",
+  "crates/skills/install_module",
+  "crates/skills/process_basic",
+  "crates/skills/package_manager",
+  "crates/skills/archive_basic",
+  "crates/skills/db_basic",
+  "crates/skills/docker_basic",
+  "crates/skills/fs_search",
+  "crates/skills/rss_fetch",
+  "crates/skills/image_vision",
+  "crates/skills/image_generate",
+  "crates/skills/image_edit",
+  "crates/skills/audio_transcribe",
+  "crates/skills/audio_synthesize",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["RustClaw Team"]
+
+[workspace.dependencies]
+anyhow = "1"
+axum = "0.8"
+config = "0.15"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.33", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+teloxide = { version = "0.13", default-features = false, features = ["rustls", "ctrlc_handler"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "process", "io-util"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
