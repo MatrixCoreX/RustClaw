@@ -91,7 +91,7 @@ models = [
 timeout_seconds = 30
 
 [llm.openai]
-api_key = "YOUR_API_KEY_HERE"
+api_key = ""
 base_url = "https://api.openai.com/v1"
 max_concurrency = 1
 model = "gpt-4o-mini"
@@ -125,49 +125,26 @@ long_term_recall_max_chars = 700
 long_term_retention_days = 120
 long_term_source_rounds = 12
 long_term_summary_max_chars = 1600
+mark_llm_reply_in_short_term = true
 max_rows = 30000
+prefer_llm_assistant_memory = false
 prompt_max_chars = 4500
+prompt_recall_limit = 3
 recall_limit = 6
 retention_days = 21
 
 [routing]
 debug_log_prompt = false
-hard_route_enabled = false
-image_edit_keywords = [
-    "改图",
-    "修图",
-    "扩图",
-    "换风格",
-    "增删元素",
-    "编辑图片",
-    "edit image",
-    "outpaint",
-    "restyle",
-]
-image_generate_keywords = [
-    "帮我生成",
-    "给我生成",
-    "请生成",
-    "生成图片",
-    "生成图",
-    "画图",
-    "出图",
-    "generate image",
-    "draw image",
-    "text to image",
-]
-image_vision_keywords = [
-    "识图",
-    "看图",
-    "分析图片",
-    "读图",
-    "多图对比",
-    "截图要点",
-    "image understanding",
-    "describe image",
-    "extract from image",
-    "compare images",
-]
+
+[command_intent]
+default_locale = "zh-CN"
+llm_fallback_enabled = true
+rules_dir = "configs/command_intent"
+
+[schedule]
+timezone = "Asia/Shanghai"
+intent_prompt_path = "prompts/schedule_intent_prompt.md"
+intent_rules_path = "prompts/schedule_intent_rules.md"
 
 [server]
 listen = "127.0.0.1:8787"
@@ -175,7 +152,7 @@ request_timeout_seconds = 30
 
 [skills]
 skill_max_concurrency = 1
-skill_runner_path = "target/debug/skill-runner"
+skill_runner_path = "target/release/skill-runner"
 skill_timeout_seconds = 30
 skills_list = [
     "x",
@@ -198,11 +175,11 @@ skills_list = [
 ]
 
 [telegram]
-bot_token = "setup-config.sh"
 admins = [1985996990]
 allowlist = []
 audio_inbox_dir = "audio/upload"
 auto_vision_on_image_only = false
+bot_token = ""
 max_audio_input_bytes = 26214400
 quick_result_wait_seconds = 10
 voice_reply_mode = "voice"
