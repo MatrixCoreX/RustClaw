@@ -34,5 +34,67 @@ else
   OUT_DIR="$SCRIPT_DIR/target/debug"
 fi
 
+# Ensure core runtime binaries exist for deployment/start scripts.
+REQUIRED_BINS=(
+  "clawd"
+  "telegramd"
+  "skill-runner"
+)
+
+MISSING=0
+for bin in "${REQUIRED_BINS[@]}"; do
+  if [[ ! -x "$OUT_DIR/$bin" ]]; then
+    echo "Missing binary: $OUT_DIR/$bin" # zh: 缺少二进制：$OUT_DIR/$bin
+    MISSING=1
+  fi
+done
+
+if [[ "$MISSING" == "1" ]]; then
+  echo "Build finished but required binaries are missing." # zh: 编译结束，但关键二进制缺失。
+  if [[ "$PROFILE" == "release" ]]; then
+    echo "Try: cargo build -p skill-runner --release" # zh: 可尝试：单独编译 skill-runner（release）。
+  else
+    echo "Try: cargo build -p skill-runner" # zh: 可尝试：单独编译 skill-runner（debug）。
+  fi
+  exit 1
+fi
+
+# Sync runtime path in config after build.
+CONFIG_PATH="$SCRIPT_DIR/configs/config.toml"
+SKILL_RUNNER_REL="target/$PROFILE/skill-runner"
+if [[ -f "$CONFIG_PATH" ]]; then
+  export RUSTCLAW_CONFIG_PATH="$CONFIG_PATH"
+  export RUSTCLAW_SKILL_RUNNER_PATH="$SKILL_RUNNER_REL"
+  python3 - <<'PY'
+import os
+import re
+from pathlib import Path
+
+cfg_path = Path(os.environ["RUSTCLAW_CONFIG_PATH"])
+runner_path = os.environ["RUSTCLAW_SKILL_RUNNER_PATH"].strip()
+text = cfg_path.read_text(encoding="utf-8")
+
+section_pat = r"(?ms)^(\[skills\]\n)(.*?)(?=^\[|\Z)"
+m = re.search(section_pat, text)
+line = f'skill_runner_path = "{runner_path}"'
+
+if not m:
+    text = text.rstrip() + f"\n\n[skills]\n{line}\n"
+else:
+    body = m.group(2)
+    if re.search(r'(?m)^skill_runner_path\s*=\s*".*?"\s*$', body):
+        body = re.sub(r'(?m)^skill_runner_path\s*=\s*".*?"\s*$', line, body, count=1)
+    else:
+        body = line + "\n" + body
+    text = text[:m.start()] + m.group(1) + body + text[m.end():]
+
+cfg_path.write_text(text, encoding="utf-8")
+PY
+  echo "Updated config: skills.skill_runner_path = \"$SKILL_RUNNER_REL\"" # zh: 已更新配置 skills.skill_runner_path。
+else
+  echo "Config file not found, skip path sync: $CONFIG_PATH" # zh: 配置文件不存在，跳过路径回写。
+fi
+
 echo "Build completed." # zh: 编译完成。
 echo "Output directory: $OUT_DIR" # zh: 输出目录：$OUT_DIR
+echo "Verified binaries: ${REQUIRED_BINS[*]}" # zh: 已校验二进制：${REQUIRED_BINS[*]}
