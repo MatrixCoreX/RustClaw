@@ -35,29 +35,42 @@ else
 fi
 
 # Ensure runtime binaries exist for deployment/start scripts.
-# Keep this list aligned with configs/config.toml -> [skills].skills_list.
-REQUIRED_BINS=(
-  "clawd"
-  "telegramd"
-  "skill-runner"
-  "x-skill"
-  "system-basic-skill"
-  "http-basic-skill"
-  "git-basic-skill"
-  "install-module-skill"
-  "process-basic-skill"
-  "package-manager-skill"
-  "archive-basic-skill"
-  "db-basic-skill"
-  "docker-basic-skill"
-  "fs-search-skill"
-  "rss-fetch-skill"
-  "image-vision-skill"
-  "image-generate-skill"
-  "image-edit-skill"
-  "audio-transcribe-skill"
-  "audio-synthesize-skill"
+# Auto-discover all workspace bin targets to avoid missing newly added skills.
+WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
+export RUSTCLAW_WORKSPACE_METADATA="$WORKSPACE_METADATA"
+
+mapfile -t REQUIRED_BINS < <(
+  python3 - <<'PY'
+import json
+import os
+import sys
+
+raw = os.environ.get("RUSTCLAW_WORKSPACE_METADATA", "").strip()
+if not raw:
+    raise SystemExit(1)
+data = json.loads(raw)
+workspace_members = set(data.get("workspace_members", []))
+bins = set()
+
+for pkg in data.get("packages", []):
+    if pkg.get("id") not in workspace_members:
+        continue
+    for target in pkg.get("targets", []):
+        kinds = target.get("kind", [])
+        if "bin" in kinds:
+            name = (target.get("name") or "").strip()
+            if name:
+                bins.add(name)
+
+for name in sorted(bins):
+    print(name)
+PY
 )
+
+if [[ "${#REQUIRED_BINS[@]}" -eq 0 ]]; then
+  echo "No workspace binary targets discovered via cargo metadata." # zh: 未通过 cargo metadata 发现 workspace 二进制目标。
+  exit 1
+fi
 
 MISSING=0
 for bin in "${REQUIRED_BINS[@]}"; do

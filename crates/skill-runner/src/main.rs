@@ -128,145 +128,40 @@ fn execute_skill(req: SkillRequest) -> SkillResponse {
 }
 
 fn skill_binary_path(skill_name: &str) -> Result<String, String> {
-    match skill_name {
-        "x" => {
-            let path = "target/debug/x-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("x skill binary not found, build it first".to_string())
-            }
-        }
-        "system_basic" => {
-            let path = "target/debug/system-basic-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("system_basic skill binary not found, build it first".to_string())
-            }
-        }
-        "http_basic" => {
-            let path = "target/debug/http-basic-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("http_basic skill binary not found, build it first".to_string())
-            }
-        }
-        "git_basic" => {
-            let path = "target/debug/git-basic-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("git_basic skill binary not found, build it first".to_string())
-            }
-        }
-        "install_module" => {
-            let path = "target/debug/install-module-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("install_module skill binary not found, build it first".to_string())
-            }
-        }
-        "process_basic" => {
-            let path = "target/debug/process-basic-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("process_basic skill binary not found, build it first".to_string())
-            }
-        }
-        "package_manager" => {
-            let path = "target/debug/package-manager-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("package_manager skill binary not found, build it first".to_string())
-            }
-        }
-        "archive_basic" => {
-            let path = "target/debug/archive-basic-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("archive_basic skill binary not found, build it first".to_string())
-            }
-        }
-        "db_basic" => {
-            let path = "target/debug/db-basic-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("db_basic skill binary not found, build it first".to_string())
-            }
-        }
-        "docker_basic" => {
-            let path = "target/debug/docker-basic-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("docker_basic skill binary not found, build it first".to_string())
-            }
-        }
-        "fs_search" => {
-            let path = "target/debug/fs-search-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("fs_search skill binary not found, build it first".to_string())
-            }
-        }
-        "rss_fetch" => {
-            let path = "target/debug/rss-fetch-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("rss_fetch skill binary not found, build it first".to_string())
-            }
-        }
-        "image_vision" => {
-            let path = "target/debug/image-vision-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("image_vision skill binary not found, build it first".to_string())
-            }
-        }
-        "image_generate" => {
-            let path = "target/debug/image-generate-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("image_generate skill binary not found, build it first".to_string())
-            }
-        }
-        "image_edit" => {
-            let path = "target/debug/image-edit-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("image_edit skill binary not found, build it first".to_string())
-            }
-        }
-        "audio_transcribe" => {
-            let path = "target/debug/audio-transcribe-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("audio_transcribe skill binary not found, build it first".to_string())
-            }
-        }
-        "audio_synthesize" => {
-            let path = "target/debug/audio-synthesize-skill".to_string();
-            if Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err("audio_synthesize skill binary not found, build it first".to_string())
-            }
-        }
-        _ => Err(format!("unknown skill: {skill_name}")),
+    let bin_name = match skill_name {
+        "x" => "x-skill",
+        "system_basic" => "system-basic-skill",
+        "http_basic" => "http-basic-skill",
+        "git_basic" => "git-basic-skill",
+        "install_module" => "install-module-skill",
+        "process_basic" => "process-basic-skill",
+        "package_manager" => "package-manager-skill",
+        "archive_basic" => "archive-basic-skill",
+        "db_basic" => "db-basic-skill",
+        "docker_basic" => "docker-basic-skill",
+        "fs_search" => "fs-search-skill",
+        "rss_fetch" => "rss-fetch-skill",
+        "image_vision" => "image-vision-skill",
+        "image_generate" => "image-generate-skill",
+        "image_edit" => "image-edit-skill",
+        "audio_transcribe" => "audio-transcribe-skill",
+        "audio_synthesize" => "audio-synthesize-skill",
+        _ => return Err(format!("unknown skill: {skill_name}")),
+    };
+
+    let debug_path = format!("target/debug/{bin_name}");
+    if Path::new(&debug_path).exists() {
+        return Ok(debug_path);
     }
+
+    let release_path = format!("target/release/{bin_name}");
+    if Path::new(&release_path).exists() {
+        return Ok(release_path);
+    }
+
+    Err(format!(
+        "{skill_name} skill binary not found in target/debug or target/release, build it first"
+    ))
 }
 
 fn run_child_skill(child_bin: &str, input_line: &str, timeout: Duration) -> Result<String, String> {

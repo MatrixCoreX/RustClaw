@@ -28,6 +28,10 @@ pub struct AppConfig {
     pub image_edit: ImageSkillConfig,
     #[serde(default)]
     pub routing: RoutingConfig,
+    #[serde(default)]
+    pub command_intent: CommandIntentConfig,
+    #[serde(default)]
+    pub schedule: ScheduleConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -183,6 +187,12 @@ impl Default for MaintenanceConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MemoryConfig {
+    #[serde(default = "default_memory_mark_llm_reply_in_short_term")]
+    pub mark_llm_reply_in_short_term: bool,
+    #[serde(default = "default_memory_prefer_llm_assistant_memory")]
+    pub prefer_llm_assistant_memory: bool,
+    #[serde(default = "default_memory_prompt_recall_limit")]
+    pub prompt_recall_limit: usize,
     #[serde(default = "default_memory_recall_limit")]
     pub recall_limit: usize,
     #[serde(default = "default_memory_item_max_chars")]
@@ -212,6 +222,9 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            mark_llm_reply_in_short_term: default_memory_mark_llm_reply_in_short_term(),
+            prefer_llm_assistant_memory: default_memory_prefer_llm_assistant_memory(),
+            prompt_recall_limit: default_memory_prompt_recall_limit(),
             recall_limit: default_memory_recall_limit(),
             item_max_chars: default_memory_item_max_chars(),
             prompt_max_chars: default_memory_prompt_max_chars(),
@@ -305,26 +318,52 @@ impl Default for ImageSkillConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoutingConfig {
-    #[serde(default = "default_routing_hard_route_enabled")]
-    pub hard_route_enabled: bool,
     #[serde(default)]
     pub debug_log_prompt: bool,
-    #[serde(default = "default_routing_image_generate_keywords")]
-    pub image_generate_keywords: Vec<String>,
-    #[serde(default = "default_routing_image_edit_keywords")]
-    pub image_edit_keywords: Vec<String>,
-    #[serde(default = "default_routing_image_vision_keywords")]
-    pub image_vision_keywords: Vec<String>,
 }
 
 impl Default for RoutingConfig {
     fn default() -> Self {
+        Self { debug_log_prompt: false }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommandIntentConfig {
+    #[serde(default = "default_command_intent_default_locale")]
+    pub default_locale: String,
+    #[serde(default = "default_command_intent_rules_dir")]
+    pub rules_dir: String,
+    #[serde(default = "default_command_intent_llm_fallback_enabled")]
+    pub llm_fallback_enabled: bool,
+}
+
+impl Default for CommandIntentConfig {
+    fn default() -> Self {
         Self {
-            hard_route_enabled: default_routing_hard_route_enabled(),
-            debug_log_prompt: false,
-            image_generate_keywords: default_routing_image_generate_keywords(),
-            image_edit_keywords: default_routing_image_edit_keywords(),
-            image_vision_keywords: default_routing_image_vision_keywords(),
+            default_locale: default_command_intent_default_locale(),
+            rules_dir: default_command_intent_rules_dir(),
+            llm_fallback_enabled: default_command_intent_llm_fallback_enabled(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleConfig {
+    #[serde(default = "default_schedule_timezone")]
+    pub timezone: String,
+    #[serde(default = "default_schedule_intent_prompt_path")]
+    pub intent_prompt_path: String,
+    #[serde(default = "default_schedule_intent_rules_path")]
+    pub intent_rules_path: String,
+}
+
+impl Default for ScheduleConfig {
+    fn default() -> Self {
+        Self {
+            timezone: default_schedule_timezone(),
+            intent_prompt_path: default_schedule_intent_prompt_path(),
+            intent_rules_path: default_schedule_intent_rules_path(),
         }
     }
 }
@@ -388,6 +427,18 @@ fn default_audit_retention_days() -> u64 {
 
 fn default_audit_max_rows() -> usize {
     10000
+}
+
+fn default_memory_mark_llm_reply_in_short_term() -> bool {
+    true
+}
+
+fn default_memory_prefer_llm_assistant_memory() -> bool {
+    false
+}
+
+fn default_memory_prompt_recall_limit() -> usize {
+    3
 }
 
 fn default_memory_recall_limit() -> usize {
@@ -498,52 +549,28 @@ fn default_image_max_input_bytes() -> usize {
     10 * 1024 * 1024
 }
 
-fn default_routing_hard_route_enabled() -> bool {
+fn default_command_intent_default_locale() -> String {
+    "zh-CN".to_string()
+}
+
+fn default_command_intent_rules_dir() -> String {
+    "configs/command_intent".to_string()
+}
+
+fn default_command_intent_llm_fallback_enabled() -> bool {
     true
 }
 
-fn default_routing_image_generate_keywords() -> Vec<String> {
-    vec![
-        "帮我生成".to_string(),
-        "给我生成".to_string(),
-        "请生成".to_string(),
-        "生成图片".to_string(),
-        "生成图".to_string(),
-        "画图".to_string(),
-        "出图".to_string(),
-        "generate image".to_string(),
-        "draw image".to_string(),
-        "text to image".to_string(),
-    ]
+fn default_schedule_timezone() -> String {
+    "Asia/Shanghai".to_string()
 }
 
-fn default_routing_image_edit_keywords() -> Vec<String> {
-    vec![
-        "改图".to_string(),
-        "修图".to_string(),
-        "扩图".to_string(),
-        "换风格".to_string(),
-        "增删元素".to_string(),
-        "编辑图片".to_string(),
-        "edit image".to_string(),
-        "outpaint".to_string(),
-        "restyle".to_string(),
-    ]
+fn default_schedule_intent_prompt_path() -> String {
+    "prompts/schedule_intent_prompt.md".to_string()
 }
 
-fn default_routing_image_vision_keywords() -> Vec<String> {
-    vec![
-        "识图".to_string(),
-        "看图".to_string(),
-        "分析图片".to_string(),
-        "读图".to_string(),
-        "多图对比".to_string(),
-        "截图要点".to_string(),
-        "image understanding".to_string(),
-        "describe image".to_string(),
-        "extract from image".to_string(),
-        "compare images".to_string(),
-    ]
+fn default_schedule_intent_rules_path() -> String {
+    "prompts/schedule_intent_rules.md".to_string()
 }
 
 impl AppConfig {

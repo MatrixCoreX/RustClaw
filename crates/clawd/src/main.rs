@@ -10,8 +10,11 @@ use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use chrono::{Datelike, Duration as ChronoDuration, NaiveDateTime, TimeZone, Utc, Weekday};
+use chrono_tz::Tz;
 use claw_core::config::{
-    AppConfig, LlmProviderConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
+    AppConfig, CommandIntentConfig, LlmProviderConfig, MaintenanceConfig, MemoryConfig, RoutingConfig,
+    ScheduleConfig, ToolsConfig,
 };
 use claw_core::types::{
     ApiResponse, HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse, TaskStatus,
@@ -36,12 +39,29 @@ const MAX_READ_FILE_BYTES: usize = 64 * 1024;
 const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
 const MODEL_IO_LOG_MAX_CHARS: usize = 16000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
+const LLM_SHORT_TERM_MEMORY_PREFIX: &str = "[LLM_REPLY] ";
 const AGENT_RUNTIME_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/agent_runtime_prompt.md");
 const INTENT_ROUTER_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/intent_router_prompt.md");
 const INTENT_ROUTER_RULES_TEMPLATE: &str = include_str!("../../../prompts/intent_router_rules.md");
 const CHAT_RESPONSE_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/chat_response_prompt.md");
+const COMMAND_SANITIZER_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/command_sanitizer_prompt.md");
+const COMMAND_FAILURE_SUGGEST_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/command_failure_suggest_prompt.md");
+const IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/image_output_rewrite_prompt.md");
+const LANGUAGE_INFER_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/language_infer_prompt.md");
+const IMAGE_REFERENCE_RESOLVER_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/image_reference_resolver_prompt.md");
+const IMAGE_TAIL_ROUTING_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/image_tail_routing_prompt.md");
 const LONG_TERM_SUMMARY_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/long_term_summary_prompt.md");
+const SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT: &str =
+    include_str!("../../../prompts/schedule_intent_prompt.md");
+const SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT: &str =
+    include_str!("../../../prompts/schedule_intent_rules.md");
 
 #[derive(Clone)]
 struct AppState {
@@ -65,6 +85,10 @@ struct AppState {
     allow_sudo: bool,
     worker_task_timeout_seconds: u64,
     routing: RoutingConfig,
+    command_intent: CommandIntentRuntime,
+    schedule: ScheduleRuntime,
+    telegram_bot_token: String,
+    http_client: Client,
 }
 
 #[derive(Clone)]
@@ -80,6 +104,27 @@ struct ClaimedTask {
     chat_id: i64,
     kind: String,
     payload_json: String,
+}
+
+struct AskReply {
+    text: String,
+    is_llm_reply: bool,
+}
+
+impl AskReply {
+    fn llm(text: String) -> Self {
+        Self {
+            text,
+            is_llm_reply: true,
+        }
+    }
+
+    fn non_llm(text: String) -> Self {
+        Self {
+            text,
+            is_llm_reply: false,
+        }
+    }
 }
 
 struct RateLimiter {
@@ -115,6 +160,97 @@ enum RoutedMode {
     Chat,
     Act,
     ChatAct,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CommandIntentRules {
+    #[serde(default)]
+    locale: String,
+    #[serde(default)]
+    execute_prefixes: Vec<String>,
+    #[serde(default)]
+    result_suffixes: Vec<String>,
+    #[serde(default)]
+    negative_markers: Vec<String>,
+}
+
+#[derive(Clone)]
+struct CommandIntentRuntime {
+    default_locale: String,
+    llm_fallback_enabled: bool,
+    rules_by_locale: HashMap<String, CommandIntentRules>,
+    all_result_suffixes: Vec<String>,
+}
+
+#[derive(Clone)]
+struct ScheduleRuntime {
+    timezone: String,
+    intent_prompt_template: String,
+    intent_rules_template: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ScheduleIntentOutput {
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    timezone: String,
+    #[serde(default)]
+    schedule: ScheduleIntentSchedule,
+    #[serde(default)]
+    task: ScheduleIntentTask,
+    #[serde(default)]
+    target_job_id: String,
+    #[serde(default)]
+    confidence: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ScheduleIntentSchedule {
+    #[serde(default)]
+    r#type: String,
+    #[serde(default)]
+    run_at: String,
+    #[serde(default)]
+    time: String,
+    #[serde(default)]
+    weekday: i64,
+    #[serde(default)]
+    every_minutes: i64,
+    #[serde(default)]
+    cron: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ScheduleIntentTask {
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    payload: Value,
+}
+
+struct ScheduledJobDue {
+    job_id: String,
+    user_id: i64,
+    chat_id: i64,
+    task_kind: String,
+    task_payload_json: String,
+    next_run_at: i64,
+    schedule_type: String,
+    time_of_day: Option<String>,
+    weekday: Option<i64>,
+    every_minutes: Option<i64>,
+    timezone: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommandSanitizerOutput {
+    #[serde(default)]
+    should_execute: bool,
+    #[serde(default)]
+    command: String,
+    #[serde(default)]
+    confidence: f64,
 }
 
 impl RateLimiter {
@@ -342,6 +478,629 @@ fn wildcard_match(pattern: &str, text: &str) -> bool {
     true
 }
 
+fn normalize_locale_key(locale: &str) -> String {
+    locale.trim().to_ascii_lowercase()
+}
+
+fn load_command_intent_runtime(
+    workspace_root: &Path,
+    cfg: &CommandIntentConfig,
+) -> CommandIntentRuntime {
+    let default_locale = if cfg.default_locale.trim().is_empty() {
+        "zh-CN".to_string()
+    } else {
+        cfg.default_locale.trim().to_string()
+    };
+    let rules_dir = workspace_root.join(cfg.rules_dir.trim());
+    let mut rules_by_locale: HashMap<String, CommandIntentRules> = HashMap::new();
+
+    for locale in ["zh-CN", "en-US"] {
+        let path = rules_dir.join(format!("{locale}.toml"));
+        match std::fs::read_to_string(&path) {
+            Ok(raw) => match toml::from_str::<CommandIntentRules>(&raw) {
+                Ok(mut rules) => {
+                    if rules.locale.trim().is_empty() {
+                        rules.locale = locale.to_string();
+                    }
+                    let key = normalize_locale_key(&rules.locale);
+                    rules_by_locale.insert(key, rules);
+                }
+                Err(err) => {
+                    warn!("load command intent rules failed: path={} err={err}", path.display());
+                }
+            },
+            Err(err) => {
+                warn!(
+                    "read command intent rules failed: path={} err={err}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    let mut all_result_suffixes: Vec<String> = Vec::new();
+    for rules in rules_by_locale.values() {
+        for marker in &rules.result_suffixes {
+            let m = marker.trim();
+            if !m.is_empty() && !all_result_suffixes.iter().any(|x| x.eq_ignore_ascii_case(m)) {
+                all_result_suffixes.push(m.to_string());
+            }
+        }
+    }
+
+    CommandIntentRuntime {
+        default_locale,
+        llm_fallback_enabled: cfg.llm_fallback_enabled,
+        rules_by_locale,
+        all_result_suffixes,
+    }
+}
+
+fn load_schedule_runtime(workspace_root: &Path, cfg: &ScheduleConfig) -> ScheduleRuntime {
+    let timezone = if cfg.timezone.trim().is_empty() {
+        "Asia/Shanghai".to_string()
+    } else {
+        cfg.timezone.trim().to_string()
+    };
+
+    let prompt_path = workspace_root.join(cfg.intent_prompt_path.trim());
+    let intent_prompt_template = match std::fs::read_to_string(&prompt_path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            warn!(
+                "read schedule intent prompt failed: path={} err={err}; fallback to built-in",
+                prompt_path.display()
+            );
+            SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT.to_string()
+        }
+    };
+
+    let rules_path = workspace_root.join(cfg.intent_rules_path.trim());
+    let intent_rules_template = match std::fs::read_to_string(&rules_path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            warn!(
+                "read schedule intent rules failed: path={} err={err}; fallback to built-in",
+                rules_path.display()
+            );
+            SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT.to_string()
+        }
+    };
+
+    ScheduleRuntime {
+        timezone,
+        intent_prompt_template,
+        intent_rules_template,
+    }
+}
+
+fn pick_rules_for_request<'a>(
+    runtime: &'a CommandIntentRuntime,
+    request: &str,
+) -> Option<&'a CommandIntentRules> {
+    if runtime.rules_by_locale.is_empty() {
+        return None;
+    }
+
+    let default_key = normalize_locale_key(&runtime.default_locale);
+    let zh = runtime.rules_by_locale.get("zh-cn");
+    let en = runtime.rules_by_locale.get("en-us");
+    let default_rules = runtime
+        .rules_by_locale
+        .get(&default_key)
+        .or(zh)
+        .or(en)
+        .or_else(|| runtime.rules_by_locale.values().next());
+
+    // Lightweight language hint: CJK chars -> zh, otherwise prefer en.
+    let has_cjk = request
+        .chars()
+        .any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c));
+    if has_cjk {
+        zh.or(default_rules)
+    } else {
+        en.or(default_rules)
+    }
+}
+
+fn trim_command_text(mut s: String) -> String {
+    s = s.trim().to_string();
+    while s.ends_with(|c: char| {
+        matches!(
+            c,
+            '。' | '，' | ',' | ';' | '；' | ':' | '：' | '!' | '！' | '?' | '？'
+        )
+    }) {
+        s.pop();
+        s = s.trim_end().to_string();
+    }
+    if (s.starts_with('`') && s.ends_with('`')) || (s.starts_with('"') && s.ends_with('"')) {
+        s = s[1..s.len().saturating_sub(1)].trim().to_string();
+    }
+    s
+}
+
+fn strip_result_suffixes(command: &str, suffixes: &[String]) -> String {
+    let mut out = command.trim().to_string();
+    if out.is_empty() {
+        return out;
+    }
+    let lowered = out.to_lowercase();
+    let mut cut_idx: Option<usize> = None;
+    for marker in suffixes {
+        let needle = marker.trim().to_lowercase();
+        if needle.is_empty() {
+            continue;
+        }
+        if let Some(idx) = lowered.find(&needle) {
+            if idx > 0 {
+                cut_idx = Some(match cut_idx {
+                    Some(old) => old.min(idx),
+                    None => idx,
+                });
+            }
+        }
+    }
+    if let Some(idx) = cut_idx {
+        out = out[..idx].trim().to_string();
+    }
+    trim_command_text(out)
+}
+
+fn extract_command_by_rules(rules: &CommandIntentRules, request: &str) -> Option<String> {
+    let raw = request.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let raw_lower = raw.to_lowercase();
+    let mut prefixes: Vec<&str> = rules
+        .execute_prefixes
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    prefixes.sort_by_key(|s| usize::MAX - s.len());
+
+    let has_negative = rules
+        .negative_markers
+        .iter()
+        .map(|v| v.trim().to_lowercase())
+        .filter(|v| !v.is_empty())
+        .any(|v| raw_lower.contains(&v));
+
+    for prefix in prefixes {
+        let prefix_lower = prefix.to_lowercase();
+        if !raw_lower.starts_with(&prefix_lower) {
+            continue;
+        }
+        let mut rest = raw[prefix.len()..].trim_start().to_string();
+        rest = rest
+            .trim_start_matches(|c: char| matches!(c, ':' | '：' | ',' | '，'))
+            .trim_start()
+            .to_string();
+        let cleaned = strip_result_suffixes(&rest, &rules.result_suffixes);
+        if cleaned.is_empty() {
+            return None;
+        }
+        return Some(cleaned);
+    }
+
+    if has_negative {
+        return None;
+    }
+    None
+}
+
+fn sanitize_command_before_execute(runtime: &CommandIntentRuntime, command: &str) -> String {
+    if runtime.all_result_suffixes.is_empty() {
+        return trim_command_text(command.trim().to_string());
+    }
+    strip_result_suffixes(command, &runtime.all_result_suffixes)
+}
+
+fn has_schedule_signal(request: &str) -> bool {
+    let raw = request.trim();
+    if raw.is_empty() {
+        return false;
+    }
+    let lower = raw.to_ascii_lowercase();
+    let markers = [
+        "定时", "每天", "每周", "每隔", "提醒我", "提醒", "明天", "后天", "下周", "schedule", "every day",
+        "every week", "every ", "remind me", "at ", "tomorrow",
+    ];
+    markers.iter().any(|m| lower.contains(&m.to_ascii_lowercase()))
+}
+
+async fn parse_schedule_intent(
+    state: &AppState,
+    task: &ClaimedTask,
+    request: &str,
+) -> Option<ScheduleIntentOutput> {
+    if !has_schedule_signal(request) {
+        return None;
+    }
+
+    let tz = parse_timezone(&state.schedule.timezone);
+    let now_local = Utc::now().with_timezone(&tz);
+    let prompt = state
+        .schedule
+        .intent_prompt_template
+        .replace("__NOW__", &now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string())
+        .replace("__TIMEZONE__", &state.schedule.timezone)
+        .replace("__RULES__", &state.schedule.intent_rules_template)
+        .replace("__REQUEST__", request);
+
+    let llm_out = match run_llm_with_fallback(state, task, &prompt).await {
+        Ok(v) => v,
+        Err(err) => {
+            warn!("parse_schedule_intent llm failed: task_id={} err={err}", task.task_id);
+            return None;
+        }
+    };
+
+    let json_str = extract_json_object(&llm_out).or_else(|| extract_first_json_object_any(&llm_out))?;
+    let parsed: ScheduleIntentOutput = serde_json::from_str(&json_str).ok()?;
+    let kind = parsed.kind.trim().to_ascii_lowercase();
+    if kind.is_empty() || kind == "none" {
+        return None;
+    }
+    Some(parsed)
+}
+
+fn parse_timezone(raw: &str) -> Tz {
+    raw.trim().parse::<Tz>().unwrap_or(chrono_tz::Asia::Shanghai)
+}
+
+fn parse_hhmm(raw: &str) -> Option<(u32, u32)> {
+    let mut parts = raw.trim().split(':');
+    let h = parts.next()?.trim().parse::<u32>().ok()?;
+    let m = parts.next()?.trim().parse::<u32>().ok()?;
+    if parts.next().is_some() || h > 23 || m > 59 {
+        return None;
+    }
+    Some((h, m))
+}
+
+fn weekday_from_monday_num(n: i64) -> Option<Weekday> {
+    match n {
+        1 => Some(Weekday::Mon),
+        2 => Some(Weekday::Tue),
+        3 => Some(Weekday::Wed),
+        4 => Some(Weekday::Thu),
+        5 => Some(Weekday::Fri),
+        6 => Some(Weekday::Sat),
+        7 => Some(Weekday::Sun),
+        _ => None,
+    }
+}
+
+fn parse_local_datetime(raw: &str, tz: Tz) -> Option<i64> {
+    let dt = NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%d %H:%M:%S")
+        .ok()
+        .or_else(|| NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%d %H:%M").ok())?;
+    tz.from_local_datetime(&dt)
+        .earliest()
+        .map(|v| v.with_timezone(&Utc).timestamp())
+}
+
+fn compute_next_run_for_schedule(
+    schedule_type: &str,
+    time_of_day: Option<&str>,
+    weekday: Option<i64>,
+    every_minutes: Option<i64>,
+    timezone: &str,
+    now_ts: i64,
+) -> Option<i64> {
+    let tz = parse_timezone(timezone);
+    let now_utc = chrono::DateTime::<Utc>::from_timestamp(now_ts, 0)?;
+    let now_local = now_utc.with_timezone(&tz);
+    let now_local_naive = now_local.naive_local();
+
+    match schedule_type {
+        "once" => None,
+        "interval" => {
+            let mins = every_minutes.unwrap_or(0).max(1);
+            Some(now_ts + mins * 60)
+        }
+        "daily" => {
+            let (h, m) = parse_hhmm(time_of_day?)?;
+            let mut date = now_local.date_naive();
+            let mut candidate = date.and_hms_opt(h, m, 0)?;
+            if candidate <= now_local_naive {
+                date += ChronoDuration::days(1);
+                candidate = date.and_hms_opt(h, m, 0)?;
+            }
+            tz.from_local_datetime(&candidate)
+                .earliest()
+                .map(|v| v.with_timezone(&Utc).timestamp())
+        }
+        "weekly" => {
+            let target = weekday_from_monday_num(weekday?)?;
+            let (h, m) = parse_hhmm(time_of_day?)?;
+            let current = now_local.weekday().number_from_monday() as i64;
+            let target_num = target.number_from_monday() as i64;
+            let mut days = (target_num - current + 7) % 7;
+            let mut date = now_local.date_naive() + ChronoDuration::days(days);
+            let mut candidate = date.and_hms_opt(h, m, 0)?;
+            if days == 0 && candidate <= now_local_naive {
+                days = 7;
+                date = now_local.date_naive() + ChronoDuration::days(days);
+                candidate = date.and_hms_opt(h, m, 0)?;
+            }
+            tz.from_local_datetime(&candidate)
+                .earliest()
+                .map(|v| v.with_timezone(&Utc).timestamp())
+        }
+        _ => None,
+    }
+}
+
+fn clean_schedule_kind(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
+fn schedule_timezone_from_intent(state: &AppState, intent_tz: &str) -> String {
+    let chosen = if intent_tz.trim().is_empty() {
+        state.schedule.timezone.clone()
+    } else {
+        intent_tz.trim().to_string()
+    };
+    if chosen.parse::<Tz>().is_ok() {
+        chosen
+    } else {
+        state.schedule.timezone.clone()
+    }
+}
+
+async fn try_handle_schedule_request(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+) -> Result<Option<String>, String> {
+    let Some(intent) = parse_schedule_intent(state, task, prompt).await else {
+        return Ok(None);
+    };
+
+    let kind = clean_schedule_kind(&intent.kind);
+    debug!(
+        "schedule intent parsed: task_id={} kind={} confidence={}",
+        task.task_id, kind, intent.confidence
+    );
+    match kind.as_str() {
+        "list" => {
+            let db = state
+                .db
+                .lock()
+                .map_err(|_| "db lock poisoned".to_string())?;
+            let mut stmt = db
+                .prepare(
+                    "SELECT job_id, schedule_type, time_of_day, weekday, every_minutes, timezone, enabled, next_run_at
+                     FROM scheduled_jobs
+                     WHERE user_id = ?1 AND chat_id = ?2
+                     ORDER BY id DESC
+                     LIMIT 20",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![task.user_id, task.chat_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, Option<i64>>(7)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?;
+
+            let mut lines = Vec::new();
+            for row in rows {
+                let (job_id, schedule_type, time_of_day, weekday, every_minutes, timezone, enabled, next_run_at) =
+                    row.map_err(|e| e.to_string())?;
+                let desc = match schedule_type.as_str() {
+                    "daily" => format!("daily {}", time_of_day.unwrap_or_else(|| "??:??".to_string())),
+                    "weekly" => format!(
+                        "weekly weekday={} {}",
+                        weekday.unwrap_or(0),
+                        time_of_day.unwrap_or_else(|| "??:??".to_string())
+                    ),
+                    "interval" => format!("every {}m", every_minutes.unwrap_or(0)),
+                    "once" => "once".to_string(),
+                    "cron" => "cron".to_string(),
+                    _ => schedule_type.clone(),
+                };
+                let status = if enabled == 1 { "enabled" } else { "paused" };
+                let next = next_run_at.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string());
+                lines.push(format!("- {} | {} | tz={} | {} | next={}", job_id, desc, timezone, status, next));
+            }
+            if lines.is_empty() {
+                Ok(Some("当前没有定时任务。".to_string()))
+            } else {
+                Ok(Some(format!("定时任务列表：\n{}", lines.join("\n"))))
+            }
+        }
+        "delete" => {
+            if intent.target_job_id.trim().is_empty() {
+                return Ok(Some("请提供要删除的任务ID，例如：删除定时任务 job_xxx".to_string()));
+            }
+            let db = state
+                .db
+                .lock()
+                .map_err(|_| "db lock poisoned".to_string())?;
+            let affected = db
+                .execute(
+                    "DELETE FROM scheduled_jobs WHERE job_id = ?1 AND user_id = ?2 AND chat_id = ?3",
+                    params![intent.target_job_id.trim(), task.user_id, task.chat_id],
+                )
+                .map_err(|e| e.to_string())?;
+            if affected == 0 {
+                Ok(Some(format!("未找到任务ID：{}", intent.target_job_id.trim())))
+            } else {
+                Ok(Some(format!("已删除定时任务：{}", intent.target_job_id.trim())))
+            }
+        }
+        "pause" | "resume" => {
+            if intent.target_job_id.trim().is_empty() {
+                return Ok(Some("请提供任务ID，例如：暂停定时任务 job_xxx".to_string()));
+            }
+            let enabled = if kind == "resume" { 1 } else { 0 };
+            let db = state
+                .db
+                .lock()
+                .map_err(|_| "db lock poisoned".to_string())?;
+            let affected = db
+                .execute(
+                    "UPDATE scheduled_jobs SET enabled = ?4, updated_at = ?5
+                     WHERE job_id = ?1 AND user_id = ?2 AND chat_id = ?3",
+                    params![
+                        intent.target_job_id.trim(),
+                        task.user_id,
+                        task.chat_id,
+                        enabled,
+                        now_ts()
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+            if affected == 0 {
+                Ok(Some(format!("未找到任务ID：{}", intent.target_job_id.trim())))
+            } else if enabled == 1 {
+                Ok(Some(format!("已恢复定时任务：{}", intent.target_job_id.trim())))
+            } else {
+                Ok(Some(format!("已暂停定时任务：{}", intent.target_job_id.trim())))
+            }
+        }
+        "create" => {
+            let timezone = schedule_timezone_from_intent(state, &intent.timezone);
+            let schedule_type = clean_schedule_kind(&intent.schedule.r#type);
+            let task_kind = clean_schedule_kind(&intent.task.kind);
+            if !matches!(task_kind.as_str(), "ask" | "run_skill") {
+                return Ok(Some("创建失败：task.kind 仅支持 ask 或 run_skill。".to_string()));
+            }
+            if schedule_type == "cron" {
+                if intent.schedule.cron.trim().is_empty() {
+                    return Ok(Some("当前版本暂不支持 cron 表达式，请先用每天/每周/每隔N分钟。".to_string()));
+                }
+                return Ok(Some(format!(
+                    "当前版本暂不支持 cron 表达式（{}），请先用每天/每周/每隔N分钟。",
+                    intent.schedule.cron.trim()
+                )));
+            }
+
+            let now = now_ts_u64() as i64;
+            let run_at = if schedule_type == "once" {
+                let ts = parse_local_datetime(&intent.schedule.run_at, parse_timezone(&timezone));
+                let Some(ts) = ts else {
+                    return Ok(Some("创建失败：一次性任务 run_at 格式无效，期望 YYYY-MM-DD HH:MM[:SS]。".to_string()));
+                };
+                if ts <= now {
+                    return Ok(Some("创建失败：执行时间必须晚于当前时间。".to_string()));
+                }
+                Some(ts)
+            } else {
+                None
+            };
+
+            let next_run_at = if schedule_type == "once" {
+                run_at
+            } else {
+                compute_next_run_for_schedule(
+                    &schedule_type,
+                    if intent.schedule.time.trim().is_empty() {
+                        None
+                    } else {
+                        Some(intent.schedule.time.trim())
+                    },
+                    if intent.schedule.weekday <= 0 {
+                        None
+                    } else {
+                        Some(intent.schedule.weekday)
+                    },
+                    if intent.schedule.every_minutes <= 0 {
+                        None
+                    } else {
+                        Some(intent.schedule.every_minutes)
+                    },
+                    &timezone,
+                    now,
+                )
+            };
+            let Some(next_run_at) = next_run_at else {
+                return Ok(Some("创建失败：无法计算下次执行时间，请检查时间格式。".to_string()));
+            };
+
+            let payload = if task_kind == "ask" {
+                let mut v = intent.task.payload.clone();
+                if let Value::Object(map) = &mut v {
+                    let has_text = map
+                        .get("text")
+                        .and_then(|x| x.as_str())
+                        .map(|s| !s.trim().is_empty())
+                        .unwrap_or(false);
+                    if !has_text {
+                        map.insert("text".to_string(), Value::String(prompt.to_string()));
+                    }
+                    v
+                } else {
+                    json!({ "text": prompt })
+                }
+            } else {
+                intent.task.payload.clone()
+            };
+
+            let job_id = format!("job_{}", &Uuid::new_v4().simple().to_string()[..10]);
+            let created_at = now_ts();
+            let db = state
+                .db
+                .lock()
+                .map_err(|_| "db lock poisoned".to_string())?;
+            db.execute(
+                "INSERT INTO scheduled_jobs (
+                    job_id, user_id, chat_id, schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr,
+                    timezone, task_kind, task_payload_json, enabled, notify_on_success, notify_on_failure,
+                    last_run_at, next_run_at, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, ?11, 1, 1, 1, NULL, ?12, ?13, ?13)",
+                params![
+                    job_id,
+                    task.user_id,
+                    task.chat_id,
+                    schedule_type,
+                    run_at,
+                    if intent.schedule.time.trim().is_empty() {
+                        None::<String>
+                    } else {
+                        Some(intent.schedule.time.trim().to_string())
+                    },
+                    if intent.schedule.weekday <= 0 {
+                        None::<i64>
+                    } else {
+                        Some(intent.schedule.weekday)
+                    },
+                    if intent.schedule.every_minutes <= 0 {
+                        None::<i64>
+                    } else {
+                        Some(intent.schedule.every_minutes)
+                    },
+                    timezone,
+                    task_kind,
+                    payload.to_string(),
+                    next_run_at,
+                    created_at
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+            Ok(Some(format!(
+                "已创建定时任务：{}\n类型：{}\n时区：{}\n下次执行时间(ts)：{}",
+                job_id, intent.schedule.r#type, timezone, next_run_at
+            )))
+        }
+        _ => Ok(None),
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -356,8 +1115,12 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|err| anyhow::anyhow!("invalid tools config: {err}"))?;
     let db = init_db(&config)?;
     seed_users(&db, &config)?;
+    ensure_schedule_schema(&db)?;
 
     let workspace_root = std::env::current_dir()?;
+    let command_intent = load_command_intent_runtime(&workspace_root, &config.command_intent);
+    let schedule = load_schedule_runtime(&workspace_root, &config.schedule);
+    let routing = config.routing.clone();
 
     let llm_providers = build_llm_providers(&config);
     info!("Loaded LLM providers count={}", llm_providers.len());
@@ -373,6 +1136,12 @@ async fn main() -> anyhow::Result<()> {
         config.tools.max_cmd_length.max(16),
         config.tools.allow_path_outside_workspace,
         config.tools.allow_sudo
+    );
+    info!(
+        "schedule config: timezone={}, prompt_chars={}, rules_chars={}",
+        schedule.timezone,
+        schedule.intent_prompt_template.chars().count(),
+        schedule.intent_rules_template.chars().count()
     );
     let startup_rss = current_rss_bytes();
     info!("Startup memory RSS bytes={}", startup_rss.unwrap_or(0));
@@ -404,11 +1173,16 @@ async fn main() -> anyhow::Result<()> {
         allow_path_outside_workspace: config.tools.allow_path_outside_workspace,
         allow_sudo: config.tools.allow_sudo,
         worker_task_timeout_seconds: config.worker.task_timeout_seconds.max(1),
-        routing: config.routing.clone(),
+        routing,
+        command_intent,
+        schedule,
+        telegram_bot_token: config.telegram.bot_token.clone(),
+        http_client: Client::new(),
     };
 
     spawn_worker(state.clone(), config.worker.poll_interval_ms);
     spawn_cleanup_worker(state.clone());
+    spawn_schedule_worker(state.clone());
 
     let app = Router::new()
         .route("/v1/health", get(health))
@@ -601,6 +1375,110 @@ fn spawn_cleanup_worker(state: AppState) {
     });
 }
 
+fn spawn_schedule_worker(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            if let Err(err) = schedule_once(&state) {
+                error!("Schedule worker tick failed: {}", err);
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+}
+
+fn schedule_once(state: &AppState) -> anyhow::Result<()> {
+    let now = now_ts_u64() as i64;
+    let mut due_jobs: Vec<ScheduledJobDue> = Vec::new();
+
+    {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        let mut stmt = db.prepare(
+            "SELECT job_id, user_id, chat_id, task_kind, task_payload_json, next_run_at,
+                    schedule_type, time_of_day, weekday, every_minutes, timezone
+             FROM scheduled_jobs
+             WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?1
+             ORDER BY next_run_at ASC
+             LIMIT 16",
+        )?;
+        let rows = stmt.query_map(params![now], |row| {
+            Ok(ScheduledJobDue {
+                job_id: row.get(0)?,
+                user_id: row.get(1)?,
+                chat_id: row.get(2)?,
+                task_kind: row.get(3)?,
+                task_payload_json: row.get(4)?,
+                next_run_at: row.get(5)?,
+                schedule_type: row.get(6)?,
+                time_of_day: row.get(7)?,
+                weekday: row.get(8)?,
+                every_minutes: row.get(9)?,
+                timezone: row.get(10)?,
+            })
+        })?;
+        for row in rows {
+            due_jobs.push(row?);
+        }
+    }
+
+    if due_jobs.is_empty() {
+        return Ok(());
+    }
+
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+
+    for job in due_jobs {
+        let next_run = compute_next_run_for_schedule(
+            &job.schedule_type,
+            job.time_of_day.as_deref(),
+            job.weekday,
+            job.every_minutes,
+            &job.timezone,
+            now,
+        );
+
+        let mut payload = serde_json::from_str::<Value>(&job.task_payload_json).unwrap_or_else(|_| json!({}));
+        if let Value::Object(map) = &mut payload {
+            map.insert("schedule_triggered".to_string(), Value::Bool(true));
+            map.insert("schedule_job_id".to_string(), Value::String(job.job_id.clone()));
+        }
+
+        let task_id = Uuid::new_v4().to_string();
+        let now_text = now_ts();
+        db.execute(
+            "INSERT INTO tasks (task_id, user_id, chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5, 'queued', NULL, NULL, ?6, ?6)",
+            params![task_id, job.user_id, job.chat_id, job.task_kind, payload.to_string(), now_text],
+        )?;
+
+        match next_run {
+            Some(ts) => {
+                db.execute(
+                    "UPDATE scheduled_jobs
+                     SET last_run_at = ?2, next_run_at = ?3, updated_at = ?2
+                     WHERE job_id = ?1 AND next_run_at = ?4",
+                    params![job.job_id, now.to_string(), ts, job.next_run_at],
+                )?;
+            }
+            None => {
+                db.execute(
+                    "UPDATE scheduled_jobs
+                     SET enabled = 0, last_run_at = ?2, next_run_at = NULL, updated_at = ?2
+                     WHERE job_id = ?1 AND next_run_at = ?3",
+                    params![job.job_id, now.to_string(), job.next_run_at],
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
     let db = state
         .db
@@ -692,6 +1570,27 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .get("text")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
+            if let Ok(Some(schedule_reply)) = try_handle_schedule_request(state, &task, prompt).await {
+                let result = json!({ "text": schedule_reply });
+                update_task_success(state, &task.task_id, &result.to_string())?;
+                let _ = insert_memory(
+                    state,
+                    task.user_id,
+                    task.chat_id,
+                    "user",
+                    prompt,
+                    state.memory.item_max_chars.max(256),
+                );
+                let _ = insert_memory(
+                    state,
+                    task.user_id,
+                    task.chat_id,
+                    "assistant",
+                    &schedule_reply,
+                    state.memory.item_max_chars.max(256),
+                );
+                return Ok(());
+            }
             info!(
                 "worker_once: ask received_message task_id={} user_id={} chat_id={} text={}",
                 task.task_id,
@@ -706,9 +1605,13 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 state,
                 task.user_id,
                 task.chat_id,
-                state.memory.recall_limit.max(1),
+                state.memory.prompt_recall_limit.max(1),
             )
             .unwrap_or_default();
+            let recalled = filter_memories_for_prompt_recall(
+                recalled,
+                state.memory.prefer_llm_assistant_memory,
+            );
             let prompt_with_memory = build_prompt_with_memory(
                 prompt,
                 long_term_summary.as_deref(),
@@ -743,7 +1646,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .unwrap_or(false);
 
             let routed_mode = if agent_mode {
-                force_routed_mode(state, prompt).unwrap_or(route_request_mode(state, &task, prompt).await)
+                route_request_mode(state, &task, prompt).await
             } else {
                 RoutedMode::Chat
             };
@@ -757,7 +1660,9 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     let chat_prompt = CHAT_RESPONSE_PROMPT_TEMPLATE
                         .replace("__CONTEXT__", &prompt_with_memory)
                         .replace("__REQUEST__", prompt);
-                    run_llm_with_fallback(state, &task, &chat_prompt).await
+                    run_llm_with_fallback(state, &task, &chat_prompt)
+                        .await
+                        .map(AskReply::llm)
                 }
                 RoutedMode::Act => run_agent_with_tools(state, &task, &prompt_with_memory, prompt).await,
                 RoutedMode::ChatAct => {
@@ -770,9 +1675,11 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             };
 
             match result {
-                Ok(answer_text) => {
-                    let result = json!({ "text": answer_text });
+                Ok(answer) => {
+                    let answer_text = answer.text;
+                    let result = json!({ "text": answer_text.clone() });
                     update_task_success(state, &task.task_id, &result.to_string())?;
+                    maybe_notify_schedule_result(state, &task, &payload, true, &answer_text).await;
                     let _ = insert_memory(
                         state,
                         task.user_id,
@@ -781,12 +1688,19 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                         prompt,
                         state.memory.item_max_chars.max(256),
                     );
+                    let assistant_memory_text = if answer.is_llm_reply
+                        && state.memory.mark_llm_reply_in_short_term
+                    {
+                        format!("{LLM_SHORT_TERM_MEMORY_PREFIX}{answer_text}")
+                    } else {
+                        answer_text.clone()
+                    };
                     let _ = insert_memory(
                         state,
                         task.user_id,
                         task.chat_id,
                         "assistant",
-                        &answer_text,
+                        &assistant_memory_text,
                         state.memory.item_max_chars.max(256),
                     );
                     if let Err(err) = maybe_refresh_long_term_summary(state, &task).await {
@@ -799,6 +1713,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                         task.task_id, err_text
                     );
                     update_task_failure(state, &task.task_id, &err_text)?;
+                    maybe_notify_schedule_result(state, &task, &payload, false, &err_text).await;
                 }
             }
         }
@@ -822,6 +1737,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 Ok(text) => {
                     let result = json!({ "text": text });
                     update_task_success(state, &task.task_id, &result.to_string())?;
+                    maybe_notify_schedule_result(state, &task, &payload, true, &text).await;
                     let _ = insert_memory(
                         state,
                         task.user_id,
@@ -852,6 +1768,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                         task.task_id, skill_name, err_text
                     );
                     update_task_failure(state, &task.task_id, &err_text)?;
+                    maybe_notify_schedule_result(state, &task, &payload, false, &err_text).await;
                     let action = if err_text.contains("timeout") {
                         "timeout"
                     } else {
@@ -885,6 +1802,57 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn maybe_notify_schedule_result(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+    success: bool,
+    text: &str,
+) {
+    let is_scheduled = payload
+        .get("schedule_triggered")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !is_scheduled {
+        return;
+    }
+    let Some(job_id) = payload.get("schedule_job_id").and_then(|v| v.as_str()) else {
+        return;
+    };
+    let prefix = if success { "定时任务执行成功" } else { "定时任务执行失败" };
+    let message = format!("{prefix}\n任务ID: {job_id}\n{text}");
+    if let Err(err) = send_telegram_message(state, task.chat_id, &message).await {
+        warn!(
+            "schedule notify failed: task_id={} chat_id={} err={}",
+            task.task_id, task.chat_id, err
+        );
+    }
+}
+
+async fn send_telegram_message(state: &AppState, chat_id: i64, text: &str) -> Result<(), String> {
+    let token = state.telegram_bot_token.trim();
+    if token.is_empty() {
+        return Err("telegram bot token is empty".to_string());
+    }
+    let url = format!("https://api.telegram.org/bot{token}/sendMessage");
+    let resp = state
+        .http_client
+        .post(&url)
+        .json(&json!({
+            "chat_id": chat_id,
+            "text": text
+        }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("status={status} body={body}"));
+    }
     Ok(())
 }
 
@@ -1065,16 +2033,9 @@ async fn rewrite_image_vision_output_language(
     if original_text.trim().is_empty() {
         return Ok(original_text.to_string());
     }
-    let prompt = format!(
-        "Rewrite the following image analysis output strictly in {target_language}.\n\
-Requirements:\n\
-- Keep all facts unchanged.\n\
-- Do not add or remove details.\n\
-- Keep concise style.\n\
-- Return plain text only.\n\
-\n\
-Original output:\n{original_text}"
-    );
+    let prompt = IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE
+        .replace("__TARGET_LANGUAGE__", target_language)
+        .replace("__ORIGINAL_OUTPUT__", original_text);
     let out = run_llm_with_fallback(state, task, &prompt).await?;
     let trimmed = out.trim();
     if trimmed.is_empty() {
@@ -1163,14 +2124,7 @@ async fn infer_language_preference_from_memory_llm(
         .map(|s| utf8_safe_prefix(s, 220))
         .collect::<Vec<_>>()
         .join("\n");
-    let prompt = format!(
-        "You are a language selector.\n\
-Decide the user's preferred reply language from memory snippets.\n\
-Return JSON only: {{\"language\":\"Chinese (Simplified)\"}} or {{\"language\":\"English\"}} or {{\"language\":\"unknown\"}}.\n\
-Prefer the most recent user preference and latest user message style.\n\
-Memory snippets (user only):\n{}\n",
-        memory_context
-    );
+    let prompt = LANGUAGE_INFER_PROMPT_TEMPLATE.replace("__MEMORY_SNIPPETS__", &memory_context);
     info!(
         "infer_language_preference_from_memory_llm prompt: task_id={} user_id={} chat_id={} memory_items={} prompt={}",
         task.task_id,
@@ -1491,7 +2445,69 @@ fn agent_action_log_value(action: &AgentAction) -> Value {
     }
 }
 
+async fn maybe_force_command_routed_mode(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_request: &str,
+) -> Option<RoutedMode> {
+    let Some(rules) = pick_rules_for_request(&state.command_intent, user_request) else {
+        return None;
+    };
+
+    if let Some(cmd) = extract_command_by_rules(rules, user_request) {
+        if !cmd.trim().is_empty() {
+            info!(
+                "command intent forced by rules: task_id={} locale={} command={}",
+                task.task_id,
+                rules.locale,
+                truncate_for_log(&cmd)
+            );
+            return Some(RoutedMode::Act);
+        }
+    }
+
+    if !state.command_intent.llm_fallback_enabled {
+        return None;
+    }
+
+    // Only trigger fallback on plausible command-intent text to reduce false positives.
+    let req_lower = user_request.to_lowercase();
+    let has_cue = req_lower.contains("执行")
+        || req_lower.contains("run")
+        || req_lower.contains("execute")
+        || req_lower.contains("命令")
+        || req_lower.contains("command");
+    if !has_cue {
+        return None;
+    }
+
+    let prompt = COMMAND_SANITIZER_PROMPT_TEMPLATE
+        .replace("__LOCALE__", &rules.locale)
+        .replace("__REQUEST__", user_request.trim());
+    let llm_out = run_llm_with_fallback(state, task, &prompt).await.ok()?;
+    let json_str = extract_json_object(&llm_out)?;
+    let parsed: CommandSanitizerOutput = serde_json::from_str(&json_str).ok()?;
+    if !parsed.should_execute {
+        return None;
+    }
+    let cleaned = strip_result_suffixes(&parsed.command, &rules.result_suffixes);
+    if cleaned.trim().is_empty() {
+        return None;
+    }
+    info!(
+        "command intent forced by llm fallback: task_id={} locale={} confidence={} command={}",
+        task.task_id,
+        rules.locale,
+        parsed.confidence,
+        truncate_for_log(&cleaned)
+    );
+    Some(RoutedMode::Act)
+}
+
 async fn route_request_mode(state: &AppState, task: &ClaimedTask, user_request: &str) -> RoutedMode {
+    if let Some(mode) = maybe_force_command_routed_mode(state, task, user_request).await {
+        return mode;
+    }
     let prompt = INTENT_ROUTER_PROMPT_TEMPLATE
         .replace("__ROUTING_RULES__", INTENT_ROUTER_RULES_TEMPLATE)
         .replace("__REQUEST__", user_request.trim());
@@ -1552,30 +2568,39 @@ fn parse_routed_mode(raw: &str) -> Option<RoutedMode> {
     None
 }
 
-fn force_routed_mode(state: &AppState, user_request: &str) -> Option<RoutedMode> {
-    if !state.routing.hard_route_enabled {
-        return None;
+async fn should_apply_image_tail_handling_with_llm(
+    state: &AppState,
+    task: &ClaimedTask,
+    request: &str,
+) -> bool {
+    let req = request.trim();
+    if req.is_empty() {
+        return false;
     }
-    if is_image_generate_goal(state, user_request)
-        || is_image_edit_goal(state, user_request)
-        || is_image_vision_goal(state, user_request)
-    {
-        return Some(RoutedMode::Act);
-    }
-    None
+    let prompt = IMAGE_TAIL_ROUTING_PROMPT_TEMPLATE.replace("__REQUEST__", req);
+    let out = match run_llm_with_fallback(state, task, &prompt).await {
+        Ok(v) => v,
+        Err(err) => {
+            warn!(
+                "image tail routing llm failed: task_id={} err={}",
+                task.task_id, err
+            );
+            return false;
+        }
+    };
+    serde_json::from_str::<Value>(out.trim())
+        .ok()
+        .or_else(|| extract_first_json_object_any(&out).and_then(|s| serde_json::from_str::<Value>(&s).ok()))
+        .and_then(|v| v.get("image_goal").and_then(|x| x.as_bool()))
+        .unwrap_or(false)
 }
-
-fn is_image_vision_goal(state: &AppState, goal: &str) -> bool {
-    contains_any_vec(goal, &state.routing.image_vision_keywords)
-}
-
 
 async fn run_agent_with_tools(
     state: &AppState,
     task: &ClaimedTask,
     goal: &str,
     user_request: &str,
-) -> Result<String, String> {
+) -> Result<AskReply, String> {
     info!(
         "run_agent_with_tools: task_id={} user_id={} chat_id={} goal={}",
         task.task_id,
@@ -1670,11 +2695,7 @@ async fn run_agent_with_tools(
             .map_err(|err| format!("parse agent action failed: {err}; raw={json_str}"))?;
         let original_action = action.clone();
         let routing_goal = user_request.trim().to_string();
-        let (mut action, rewrite_note) = rewrite_agent_action_for_safety(
-            state,
-            action,
-            &routing_goal,
-        );
+        let (mut action, rewrite_note) = rewrite_agent_action_for_safety(action, &routing_goal);
         if is_mkdir_action(&action) && !request_has_explicit_folder_name(&routing_goal) {
             let fallback_dir = resolve_file_default_output_dir_from_config(&state.workspace_root);
             let command = format!(
@@ -1797,20 +2818,24 @@ async fn run_agent_with_tools(
                     "task completed with final respond",
                 );
                 let image_goal =
-                    is_image_generate_goal(state, &routing_goal_seed) || is_image_edit_goal(state, &routing_goal_seed);
+                    should_apply_image_tail_handling_with_llm(state, task, &routing_goal_seed).await;
                 let content = if image_goal {
                     normalize_delivery_tokens_to_file(&content)
                 } else {
                     content
                 };
                 if !last_image_file_tokens.is_empty() {
-                    return Ok(build_hardcoded_image_saved_reply(&last_image_file_tokens));
+                    return Ok(AskReply::non_llm(build_hardcoded_image_saved_reply(
+                        &last_image_file_tokens,
+                    )));
                 }
                 if image_goal {
                     if let Some(last_out) = last_tool_or_skill_output.as_deref() {
                         let file_tokens = extract_delivery_file_tokens(last_out);
                         if !file_tokens.is_empty() {
-                            return Ok(build_hardcoded_image_saved_reply(&file_tokens));
+                            return Ok(AskReply::non_llm(build_hardcoded_image_saved_reply(
+                                &file_tokens,
+                            )));
                         }
                     }
                 }
@@ -1822,18 +2847,18 @@ async fn run_agent_with_tools(
                             // If agent respond is empty, fallback to full skill output so
                             // user still gets the success text plus FILE token together.
                             if content.trim().is_empty() {
-                                return Ok(normalized_last_out);
+                                return Ok(AskReply::non_llm(normalized_last_out));
                             }
                             let mut merged = content.trim().to_string();
                             if !merged.is_empty() {
                                 merged.push('\n');
                             }
                             merged.push_str(&file_tokens.join("\n"));
-                            return Ok(merged);
+                            return Ok(AskReply::non_llm(merged));
                         }
                     }
                 }
-                return Ok(content);
+                return Ok(AskReply::llm(content));
             }
             AgentAction::CallSkill { skill, args } => {
                 if tool_calls >= AGENT_MAX_TOOL_CALLS {
@@ -1906,6 +2931,23 @@ async fn run_agent_with_tools(
                                 "error": truncate_for_agent_trace(&err),
                             }),
                         );
+                        if tool == "run_cmd" {
+                            let command = args
+                                .as_object()
+                                .and_then(|m| m.get("command"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if is_simple_system_command(command) {
+                                let suggest_prompt = COMMAND_FAILURE_SUGGEST_PROMPT_TEMPLATE
+                                    .replace("__COMMAND__", command)
+                                    .replace("__ERROR__", &err);
+                                if let Ok(suggestion) = run_llm_with_fallback(state, task, &suggest_prompt).await {
+                                    if !suggestion.trim().is_empty() {
+                                        return Ok(AskReply::llm(suggestion));
+                                    }
+                                }
+                            }
+                        }
                         return Err(err);
                     }
                 };
@@ -1973,6 +3015,22 @@ async fn run_agent_with_tools(
                     }
                 }
 
+                if tool == "run_cmd" {
+                    let command = args
+                        .as_object()
+                        .and_then(|m| m.get("command"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if is_simple_system_command(command) {
+                        info!(
+                            "run_agent_with_tools: task_id={} direct return run_cmd output for command={}",
+                            task.task_id,
+                            truncate_for_log(command)
+                        );
+                        return Ok(AskReply::non_llm(out));
+                    }
+                }
+
                 history.push(format!("tool({}): {}", tool, out));
             }
         }
@@ -2019,7 +3077,7 @@ async fn run_agent_with_tools(
     if tool_calls == 0 && !has_explicit_task_requirements {
         if let Ok(chat_reply) = run_llm_with_fallback(state, task, &routing_goal_seed).await {
             if !chat_reply.trim().is_empty() {
-                return Ok(chat_reply);
+                return Ok(AskReply::llm(chat_reply));
             }
         }
     }
@@ -2035,7 +3093,7 @@ async fn run_agent_with_tools(
             message.push_str(&truncate_for_log(last_trimmed));
         }
     }
-    Ok(message)
+    Ok(AskReply::non_llm(message))
 }
 
 fn append_agent_trace_log(
@@ -2125,60 +3183,7 @@ fn truncate_for_agent_trace(text: &str) -> String {
     out
 }
 
-fn rewrite_agent_action_for_safety(
-    state: &AppState,
-    action: AgentAction,
-    goal: &str,
-) -> (AgentAction, Option<String>) {
-    if state.routing.hard_route_enabled && is_image_generate_goal(state, goal) {
-        if let AgentAction::Respond { content } = &action {
-            if contains_delivery_file_token(content) {
-                // If model already returned delivery token, do not rewrite again.
-                return (action, None);
-            }
-        }
-        let prompt = extract_image_generate_prompt(goal);
-        let rewritten = match action {
-            AgentAction::CallSkill { skill, args } if canonical_skill_name(&skill) == "image_generate" => {
-                AgentAction::CallSkill {
-                    skill: "image_generate".to_string(),
-                    args: normalize_image_generate_args(args, &prompt),
-                }
-            }
-            _ => AgentAction::CallSkill {
-                skill: "image_generate".to_string(),
-                args: json!({
-                    "prompt": prompt,
-                    "size": "1024x1024"
-                }),
-            },
-        };
-        return (rewritten, Some("rewrote action to skill image_generate".to_string()));
-    }
-    if state.routing.hard_route_enabled && is_image_edit_goal(state, goal) {
-        let rewritten = match action {
-            AgentAction::CallSkill { skill, args }
-                if canonical_skill_name(&skill) == "image_edit" =>
-            {
-                AgentAction::CallSkill {
-                    skill: "image_edit".to_string(),
-                    args,
-                }
-            }
-            _ => AgentAction::CallSkill {
-                skill: "image_edit".to_string(),
-                args: json!({
-                    "action": "edit",
-                    "instruction": goal.trim()
-                }),
-            },
-        };
-        return (
-            rewritten,
-            Some("rewrote action to skill image_edit (image resolved later by llm)".to_string()),
-        );
-    }
-
+fn rewrite_agent_action_for_safety(action: AgentAction, goal: &str) -> (AgentAction, Option<String>) {
     match action {
         AgentAction::CallTool { tool, args } if tool == "run_cmd" => {
             let command = args
@@ -2215,22 +3220,6 @@ fn rewrite_agent_action_for_safety(
         }
         _ => (action, None),
     }
-}
-
-fn normalize_image_generate_args(args: Value, fallback_prompt: &str) -> Value {
-    let mut obj = args.as_object().cloned().unwrap_or_default();
-    let prompt_missing = obj
-        .get("prompt")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().is_empty())
-        .unwrap_or(true);
-    if prompt_missing {
-        obj.insert("prompt".to_string(), Value::String(fallback_prompt.to_string()));
-    }
-    if !obj.contains_key("size") {
-        obj.insert("size".to_string(), Value::String("1024x1024".to_string()));
-    }
-    Value::Object(obj)
 }
 
 fn normalize_image_edit_args(args: Value, fallback_instruction: &str, image_path: &str) -> Value {
@@ -2278,23 +3267,6 @@ fn image_edit_args_has_image(obj: &serde_json::Map<String, Value>) -> bool {
         })
         .unwrap_or(false);
     image_obj_has_path || image_str || images_array_has_path
-}
-
-fn is_image_generate_goal(state: &AppState, goal: &str) -> bool {
-    let exclude_terms = ["识图", "看图", "分析图片", "compare", "对比", "改图", "扩图", "换风格", "edit image"];
-    contains_any_vec(goal, &state.routing.image_generate_keywords) && !contains_any(goal, &exclude_terms)
-}
-
-fn is_image_edit_goal(state: &AppState, goal: &str) -> bool {
-    contains_any_vec(goal, &state.routing.image_edit_keywords)
-}
-
-fn contains_any_vec(text: &str, terms: &[String]) -> bool {
-    let lowered = text.to_ascii_lowercase();
-    terms.iter().any(|t| {
-        let needle = t.trim();
-        !needle.is_empty() && lowered.contains(&needle.to_ascii_lowercase())
-    })
 }
 
 fn contains_delivery_file_token(text: &str) -> bool {
@@ -2378,19 +3350,10 @@ async fn resolve_image_for_edit_from_context_llm(
         .map(|(i, p)| format!("{i}: {p}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let prompt = format!(
-        "You are an image-reference resolver.\n\
-Choose which candidate image the user is referring to for an image edit.\n\
-Candidates are ordered newest first.\n\
-Return JSON only: {{\"selected_index\":<number>}}.\n\
-Use -1 if there is no confident match.\n\
-\n\
-Recent conversation memory:\n{memory_text}\n\
-\n\
-Current user edit request:\n{goal}\n\
-\n\
-Image candidates:\n{candidate_lines}\n"
-    );
+    let prompt = IMAGE_REFERENCE_RESOLVER_PROMPT_TEMPLATE
+        .replace("__MEMORY_TEXT__", &memory_text)
+        .replace("__GOAL__", goal)
+        .replace("__CANDIDATES__", &candidate_lines);
     info!(
         "resolve_image_for_edit_from_context_llm prompt: task_id={} user_id={} chat_id={} candidate_count={} prompt={}",
         task.task_id,
@@ -2581,47 +3544,6 @@ fn build_hardcoded_image_saved_reply(file_tokens: &[String]) -> String {
     out.push('\n');
     out.push_str(&file_tokens.join("\n"));
     out
-}
-
-fn extract_image_generate_prompt(goal: &str) -> String {
-    let trimmed = goal.trim();
-    let prefixes = [
-        "帮我生成",
-        "给我生成",
-        "请生成",
-        "生成",
-        "帮我画",
-        "给我画",
-        "请画",
-        "画",
-        "generate",
-        "draw",
-        "create",
-    ];
-    for p in prefixes {
-        if trimmed.starts_with(p) {
-            let rest = trimmed[p.len()..].trim();
-            if !rest.is_empty() {
-                return cleanup_image_prompt(rest);
-            }
-        }
-    }
-    cleanup_image_prompt(trimmed)
-}
-
-fn cleanup_image_prompt(text: &str) -> String {
-    let mut out = text.trim().to_string();
-    for suffix in ["的图片", "图片", "图像", "一张图", "一张图片", "photo", "image", "picture"] {
-        if out.ends_with(suffix) {
-            out = out.trim_end_matches(suffix).trim().to_string();
-            break;
-        }
-    }
-    if out.is_empty() {
-        "A high-quality image".to_string()
-    } else {
-        out
-    }
 }
 
 fn normalize_fs_search_args(args: Value, goal: &str) -> Value {
@@ -3512,6 +4434,17 @@ async fn execute_builtin_tool(state: &AppState, tool: &str, args: &Value) -> Res
         "run_cmd" => {
             ensure_only_keys(map, &["command", "cwd"])?;
             let command = required_string(map, "command")?;
+            let sanitized_command = sanitize_command_before_execute(&state.command_intent, command);
+            if sanitized_command.is_empty() {
+                return Err("empty command after sanitize".to_string());
+            }
+            if sanitized_command != command.trim() {
+                info!(
+                    "run_cmd sanitized command: before={} after={}",
+                    truncate_for_log(command),
+                    truncate_for_log(&sanitized_command)
+                );
+            }
             let cwd = optional_string(map, "cwd").unwrap_or(".");
             let cwd_path = resolve_workspace_path(
                 &state.workspace_root,
@@ -3520,7 +4453,7 @@ async fn execute_builtin_tool(state: &AppState, tool: &str, args: &Value) -> Res
             )?;
             run_safe_command(
                 &cwd_path,
-                command,
+                &sanitized_command,
                 state.max_cmd_length,
                 state.cmd_timeout_seconds,
                 state.allow_sudo,
@@ -3612,13 +4545,16 @@ async fn run_safe_command(
         .map_err(|_| "command timeout".to_string())
         .and_then(|r| r.map_err(|err| format!("run command failed: {err}")))?;
 
+    let stdout_text = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr_text = String::from_utf8_lossy(&out.stderr).to_string();
+
     let mut text = String::new();
-    text.push_str(&String::from_utf8_lossy(&out.stdout));
-    if !out.stderr.is_empty() {
+    text.push_str(&stdout_text);
+    if !stderr_text.is_empty() {
         if !text.is_empty() {
             text.push('\n');
         }
-        text.push_str(&String::from_utf8_lossy(&out.stderr));
+        text.push_str(&stderr_text);
     }
 
     if text.len() > 8000 {
@@ -3638,7 +4574,22 @@ async fn run_safe_command(
     } else if text.trim().is_empty() {
         Err(format!("Command failed with exit code {}", exit_code))
     } else {
-        Err(text)
+        let mut detail = String::new();
+        if !stderr_text.trim().is_empty() {
+            detail.push_str("stderr:\n");
+            detail.push_str(stderr_text.trim());
+        }
+        if !stdout_text.trim().is_empty() {
+            if !detail.is_empty() {
+                detail.push_str("\n\n");
+            }
+            detail.push_str("stdout:\n");
+            detail.push_str(stdout_text.trim());
+        }
+        if detail.len() > 8000 {
+            detail.truncate(8000);
+        }
+        Err(format!("Command failed with exit code {}\n{}", exit_code, detail))
     }
 }
 
@@ -4081,6 +5032,24 @@ fn recall_recent_memories(
     Ok(out)
 }
 
+fn filter_memories_for_prompt_recall(
+    memories: Vec<(String, String)>,
+    prefer_llm_assistant_memory: bool,
+) -> Vec<(String, String)> {
+    if !prefer_llm_assistant_memory {
+        return memories;
+    }
+    memories
+        .into_iter()
+        .filter(|(role, content)| {
+            if role != "assistant" {
+                return true;
+            }
+            content.starts_with(LLM_SHORT_TERM_MEMORY_PREFIX)
+        })
+        .collect()
+}
+
 fn recall_long_term_summary(
     state: &AppState,
     user_id: i64,
@@ -4256,6 +5225,12 @@ fn build_prompt_with_memory(
     }
     let mut lines = Vec::new();
     for (role, content) in memories {
+        if role == "assistant" {
+            if let Some(raw) = content.strip_prefix(LLM_SHORT_TERM_MEMORY_PREFIX) {
+                lines.push(format!("assistant(llm): {raw}"));
+                continue;
+            }
+        }
         lines.push(format!("{role}: {content}"));
     }
     let mut memory_block = lines.join("\n");
@@ -4318,6 +5293,36 @@ fn seed_users(db: &Connection, config: &AppConfig) -> anyhow::Result<()> {
         )?;
     }
 
+    Ok(())
+}
+
+fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS scheduled_jobs (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id            TEXT NOT NULL UNIQUE,
+            user_id           INTEGER NOT NULL,
+            chat_id           INTEGER NOT NULL,
+            schedule_type     TEXT NOT NULL CHECK (schedule_type IN ('once', 'daily', 'weekly', 'interval', 'cron')),
+            run_at            INTEGER,
+            time_of_day       TEXT,
+            weekday           INTEGER,
+            every_minutes     INTEGER,
+            cron_expr         TEXT,
+            timezone          TEXT NOT NULL,
+            task_kind         TEXT NOT NULL CHECK (task_kind IN ('ask', 'run_skill')),
+            task_payload_json TEXT NOT NULL,
+            enabled           INTEGER NOT NULL DEFAULT 1,
+            notify_on_success INTEGER NOT NULL DEFAULT 1,
+            notify_on_failure INTEGER NOT NULL DEFAULT 1,
+            last_run_at       TEXT,
+            next_run_at       INTEGER,
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due ON scheduled_jobs(enabled, next_run_at);
+        CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_user_chat ON scheduled_jobs(user_id, chat_id);",
+    )?;
     Ok(())
 }
 

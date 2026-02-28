@@ -1,0 +1,13 @@
+Scheduling rules (important):
+- Prefer user's explicit timezone if provided; otherwise use __TIMEZONE__.
+- For "每天 HH:mm", map to `type=daily` + `time`.
+- For "每周X HH:mm", map to `type=weekly` + `weekday`(1=Mon,7=Sun) + `time`.
+- For one-shot moments ("明天8点", "2026-03-01 09:30"), map to `type=once` + `run_at`.
+- For "每隔N分钟/小时", map to `type=interval` with `every_minutes`.
+- For explicit cron text, map to `type=cron` + `cron`.
+- If user says "取消/删除定时任务", set `kind=delete` and try to extract `target_job_id`.
+- If user asks "查看定时任务", set `kind=list`.
+- If task action is plain question/summary/report, set `task.kind=ask` and store prompt in `task.payload.text`.
+- If user explicitly requests a skill, set `task.kind=run_skill` and provide `task.payload`.
+- If intent is ambiguous, keep best-effort parse and lower `confidence`.
+- If request is not about scheduling, output `kind=none`.

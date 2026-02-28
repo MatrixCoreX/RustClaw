@@ -31,6 +31,7 @@ Rules:
 14) In `respond.content`, use plain text. Do not use Markdown emphasis or list markers like `*`.
 15) If user does not specify a folder for generic file writes, use the configured default from `[file_generation].default_output_dir` and create the folder if missing.
 16) For image edit requests that refer to an already-shared image (e.g. "this one", "the previous image", "that picture"), call `image_edit` first even if no explicit image path is present. The system may resolve the target image from conversation memory/history. Ask user to re-upload only after a real edit attempt fails due to missing/unusable image input.
+17) For `run_cmd`, set `args.command` to pure executable command only. Do not include conversational suffixes such as "tell me the result/output", "reply to me", "然后告诉我结果".
 Context:
 __TOOL_SPEC__ Goal: __GOAL__ Step: __STEP__ History: __HISTORY__
 

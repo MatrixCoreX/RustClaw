@@ -8,6 +8,7 @@ Routing rules (important):
 - If user asks to generate/create/draw an image, choose `act`.
 - If user asks to edit/retouch/outpaint/restyle/add-remove elements in an image, choose `act`.
 - If user asks to analyze/describe/extract/compare images or summarize screenshots, choose `act`.
+- If user asks to execute shell/system commands (e.g. "你执行 ls -la", "please run uname -a"), choose `act`.
 - If user request contains both action and conversational request, choose `chat_act`.
 - Only choose `chat` when no tool/skill/action is needed.
 
@@ -15,5 +16,7 @@ Examples:
 - "帮我生成一张赛博朋克海报" -> {"mode":"act"}
 - "请把这张图改成水彩风格" -> {"mode":"act"}
 - "分析这两张图片差异" -> {"mode":"act"}
+- "你执行 lsb_release -a 告诉我结果" -> {"mode":"act"}
+- "please run uname -a and tell me the result" -> {"mode":"act"}
 - "先生成一张图，再告诉我为什么这样设计" -> {"mode":"chat_act"}
 - "你是谁" -> {"mode":"chat"}

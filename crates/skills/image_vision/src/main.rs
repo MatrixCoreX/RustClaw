@@ -282,13 +282,26 @@ fn build_prompt(
     response_language: Option<&str>,
 ) -> String {
     let template = load_image_vision_prompt_template(workspace_root);
-    let task_instruction = action_instruction(action, detail_level, schema);
+    let task_instruction = action_instruction(workspace_root, action, detail_level, schema);
     let schema_hint = schema
         .map(|s| s.to_string())
         .unwrap_or_else(|| "none".to_string());
     let language_hint = response_language
-        .map(|s| format!("Reply strictly in {s}."))
-        .unwrap_or_else(|| "Follow the user's language preference from context.".to_string());
+        .map(|s| {
+            load_prompt_fragment(
+                workspace_root,
+                "prompts/image_vision_language_hint_with_target.md",
+                DEFAULT_IMAGE_VISION_LANGUAGE_HINT_WITH_TARGET_TEMPLATE,
+            )
+            .replace("__RESPONSE_LANGUAGE__", s)
+        })
+        .unwrap_or_else(|| {
+            load_prompt_fragment(
+                workspace_root,
+                "prompts/image_vision_language_hint_default.md",
+                DEFAULT_IMAGE_VISION_LANGUAGE_HINT_DEFAULT_TEMPLATE,
+            )
+        });
     template
         .replace("__ACTION__", action)
         .replace("__DETAIL_LEVEL__", detail_level)
@@ -297,29 +310,53 @@ fn build_prompt(
         .replace("__LANGUAGE_HINT__", &language_hint)
 }
 
-fn action_instruction(action: &str, detail_level: &str, schema: Option<&Value>) -> String {
+fn action_instruction(workspace_root: &Path, action: &str, detail_level: &str, schema: Option<&Value>) -> String {
     match action {
-        "describe" => format!(
-            "Describe this image in {detail_level} detail. Focus on objects, scene, visible text, and likely intent."
+        "describe" => load_prompt_fragment(
+            workspace_root,
+            "prompts/image_vision_action_describe.md",
+            DEFAULT_IMAGE_VISION_ACTION_DESCRIBE_TEMPLATE,
+        )
+        .replace("__DETAIL_LEVEL__", detail_level),
+        "compare" => load_prompt_fragment(
+            workspace_root,
+            "prompts/image_vision_action_compare.md",
+            DEFAULT_IMAGE_VISION_ACTION_COMPARE_TEMPLATE,
         ),
-        "compare" => {
-            "Compare all provided images and explain key similarities, differences, and notable changes."
-                .to_string()
-        }
-        "screenshot_summary" => {
-            "Read the screenshot and output key points: purpose, critical text, warnings, and next actions."
-                .to_string()
-        }
+        "screenshot_summary" => load_prompt_fragment(
+            workspace_root,
+            "prompts/image_vision_action_screenshot_summary.md",
+            DEFAULT_IMAGE_VISION_ACTION_SCREENSHOT_SUMMARY_TEMPLATE,
+        ),
         "extract" => {
             if let Some(s) = schema {
-                format!(
-                    "Extract structured data from image(s) and return valid JSON matching this schema: {s}"
+                load_prompt_fragment(
+                    workspace_root,
+                    "prompts/image_vision_action_extract_with_schema.md",
+                    DEFAULT_IMAGE_VISION_ACTION_EXTRACT_WITH_SCHEMA_TEMPLATE,
                 )
+                .replace("__SCHEMA__", &s.to_string())
             } else {
-                "Extract structured data from image(s) and return compact valid JSON.".to_string()
+                load_prompt_fragment(
+                    workspace_root,
+                    "prompts/image_vision_action_extract_default.md",
+                    DEFAULT_IMAGE_VISION_ACTION_EXTRACT_DEFAULT_TEMPLATE,
+                )
             }
         }
-        _ => "Analyze image(s).".to_string(),
+        _ => load_prompt_fragment(
+            workspace_root,
+            "prompts/image_vision_action_fallback.md",
+            DEFAULT_IMAGE_VISION_ACTION_FALLBACK_TEMPLATE,
+        ),
+    }
+}
+
+fn load_prompt_fragment(workspace_root: &Path, relative_path: &str, default_template: &str) -> String {
+    let path = workspace_root.join(relative_path);
+    match std::fs::read_to_string(path) {
+        Ok(s) if !s.trim().is_empty() => s,
+        _ => default_template.to_string(),
     }
 }
 
@@ -333,6 +370,22 @@ fn load_image_vision_prompt_template(workspace_root: &Path) -> String {
 
 const DEFAULT_IMAGE_VISION_PROMPT_TEMPLATE: &str =
     include_str!("../../../../prompts/image_vision_prompt.md");
+const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_WITH_TARGET_TEMPLATE: &str =
+    include_str!("../../../../prompts/image_vision_language_hint_with_target.md");
+const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_DEFAULT_TEMPLATE: &str =
+    include_str!("../../../../prompts/image_vision_language_hint_default.md");
+const DEFAULT_IMAGE_VISION_ACTION_DESCRIBE_TEMPLATE: &str =
+    include_str!("../../../../prompts/image_vision_action_describe.md");
+const DEFAULT_IMAGE_VISION_ACTION_COMPARE_TEMPLATE: &str =
+    include_str!("../../../../prompts/image_vision_action_compare.md");
+const DEFAULT_IMAGE_VISION_ACTION_SCREENSHOT_SUMMARY_TEMPLATE: &str =
+    include_str!("../../../../prompts/image_vision_action_screenshot_summary.md");
+const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_WITH_SCHEMA_TEMPLATE: &str =
+    include_str!("../../../../prompts/image_vision_action_extract_with_schema.md");
+const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_DEFAULT_TEMPLATE: &str =
+    include_str!("../../../../prompts/image_vision_action_extract_default.md");
+const DEFAULT_IMAGE_VISION_ACTION_FALLBACK_TEMPLATE: &str =
+    include_str!("../../../../prompts/image_vision_action_fallback.md");
 
 fn call_vendor_vision(
     vendor: VendorKind,
