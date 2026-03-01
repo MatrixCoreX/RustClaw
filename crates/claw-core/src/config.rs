@@ -58,6 +58,28 @@ pub struct TelegramConfig {
     pub voice_reply_mode_by_chat: HashMap<String, String>,
     #[serde(default = "default_telegram_max_audio_input_bytes")]
     pub max_audio_input_bytes: usize,
+    #[serde(default)]
+    pub sendfile: SendfileConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SendfileConfig {
+    #[serde(default = "default_sendfile_admin_only")]
+    pub admin_only: bool,
+    #[serde(default = "default_sendfile_full_access")]
+    pub full_access: bool,
+    #[serde(default = "default_sendfile_allowed_dirs")]
+    pub allowed_dirs: Vec<String>,
+}
+
+impl Default for SendfileConfig {
+    fn default() -> Self {
+        Self {
+            admin_only: default_sendfile_admin_only(),
+            full_access: default_sendfile_full_access(),
+            allowed_dirs: default_sendfile_allowed_dirs(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -398,6 +420,10 @@ fn default_skills_list() -> Vec<String> {
         "image_edit".to_string(),
         "audio_transcribe".to_string(),
         "audio_synthesize".to_string(),
+        "health_check".to_string(),
+        "log_analyze".to_string(),
+        "service_control".to_string(),
+        "config_guard".to_string(),
     ]
 }
 
@@ -511,6 +537,18 @@ fn default_telegram_voice_reply_mode() -> String {
 
 fn default_telegram_max_audio_input_bytes() -> usize {
     25 * 1024 * 1024
+}
+
+fn default_sendfile_admin_only() -> bool {
+    false
+}
+
+fn default_sendfile_full_access() -> bool {
+    true
+}
+
+fn default_sendfile_allowed_dirs() -> Vec<String> {
+    vec!["image/download".to_string(), "document".to_string()]
 }
 
 fn default_tool_cmd_timeout_seconds() -> u64 {

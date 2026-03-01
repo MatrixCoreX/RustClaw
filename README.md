@@ -1,96 +1,129 @@
 # RustClaw
 
-RustClaw is a lightweight Rust daemon suite for Raspberry Pi-first deployments.
+RustClaw is a Rust-based local agent stack with:
+- `clawd` (HTTP task daemon),
+- `telegramd` (Telegram bridge + command surface),
+- `skill-runner` (skill process host),
+- and multiple built-in operational/media skills.
 
-## Workspace
+## Current Workspace Layout
 
-- `crates/claw-core`: shared types, config, errors
-- `crates/clawd`: core HTTP daemon
-- `crates/telegramd`: telegram channel daemon (M1 placeholder loop)
-- `crates/skill-runner`: skill execution protocol runner
-- `crates/skills/*`: built-in operational skills
-- `configs/config.toml`: default 1g-friendly config
-- `migrations/`: sqlite schema init
-- `systemd/`: service files
+- `crates/claw-core`: shared config/types/error models
+- `crates/clawd`: main HTTP daemon, queue/worker, routing, scheduling
+- `crates/telegramd`: Telegram bot runtime and command handlers
+- `crates/skill-runner`: dispatches skill requests to child skill binaries
+- `crates/skills/*`: built-in skills (system/http/git/files/db/docker/media/X/etc.)
+- `configs/config.toml`: main runtime config
+- `configs/command_intent/`: intent routing rules
+- `configs/x.toml`: X OAuth/app config
+- `migrations/`: SQLite schema initialization
+- `prompts/`: prompt templates (including schedule/voice-related prompts)
+- `systemd/`: service unit files
+
+## Built-in Skills (Current)
+
+- `x`
+- `system_basic`
+- `http_basic`
+- `git_basic`
+- `install_module`
+- `process_basic`
+- `package_manager`
+- `archive_basic`
+- `db_basic`
+- `docker_basic`
+- `fs_search`
+- `rss_fetch`
+- `image_vision`
+- `image_generate`
+- `image_edit`
+- `audio_transcribe`
+- `audio_synthesize`
+
+## HTTP API (clawd)
+
+Default listen address comes from `configs/config.toml` (typically `127.0.0.1:8787`).
+
+- `GET /v1/health`  
+  Returns daemon/queue/worker status, uptime/version, and Telegram process health hints.
+- `POST /v1/tasks`  
+  Submits `ask` or `run_skill` tasks.
+- `GET /v1/tasks/{task_id}`  
+  Polls task status/result.
+- `POST /v1/tasks/cancel`  
+  Cancels queued/running tasks for `(user_id, chat_id)`.
+
+Example health check:
+
+`curl http://127.0.0.1:8787/v1/health`
+
+Example ask task:
+
+`curl -X POST http://127.0.0.1:8787/v1/tasks -H "Content-Type: application/json" -d "{\"user_id\":1,\"chat_id\":1,\"kind\":\"ask\",\"payload\":{\"text\":\"hello\",\"agent_mode\":true}}"`
 
 ## Quick Start
 
 1. Install Rust toolchain:
    - `rustup default stable`
-2. Build all crates:
-   - `cargo build --workspace`
-3. Run clawd:
-   - `cargo run -p clawd`
-4. Run telegramd in another shell:
-   - `cargo run -p telegramd`
+2. Build all workspace binaries:
+   - `./build-all.sh release`
+3. Configure secrets and runtime options:
+   - `./setup-config.sh`
+4. Start both daemons:
+   - Source mode: `./start-all.sh`
+   - Binary mode: `./start-all-bin.sh release`
+5. Check logs:
+   - `./check-logs.sh -n 120`
 
-## HTTP Smoke Test
+## Telegram Commands (Current)
 
-Check health:
+`telegramd` currently supports:
+- `/start`, `/help`
+- `/agent on|off`
+- `/status`
+- `/cancel`
+- `/skills`
+- `/run <skill> <args>`
+- `/sendfile <path>`
+- `/voicemode show|voice|text|both|reset` (admin)
+- `/openclaw config show|vendors|set <vendor> <model>` (admin)
 
-`curl http://127.0.0.1:8787/v1/health`
+## Shell Scripts and What They Do
 
-Health response now also includes telegram daemon check fields:
-- `telegramd_healthy` (optional)
-- `telegramd_process_count` (optional)
+- `build-all.sh`  
+  Builds all workspace binaries (`release` or `debug`), optionally runs `cargo clean`, verifies required binaries, and syncs `skills.skill_runner_path` in `configs/config.toml`.
 
-Submit task:
+- `setup-config.sh`  
+  Interactive config bootstrap for Telegram token/admin, model vendor/model, selected provider API key, and key tool limits.
 
-`curl -X POST http://127.0.0.1:8787/v1/tasks -H "Content-Type: application/json" -d "{\"user_id\":1,\"chat_id\":1,\"kind\":\"ask\",\"payload\":{\"text\":\"hello\"}}"`
+- `start-clawd.sh`  
+  Starts `clawd` via `cargo run -p clawd`, with first-run interactive model/provider safeguards and config persistence.
+
+- `start-telegramd.sh`  
+  Starts `telegramd` via `cargo run -p telegramd` after preflight checks for duplicate polling workers and webhook/polling conflicts.
+
+- `start-all.sh`  
+  One-command daemon startup wrapper: **prefers prebuilt binaries first** (`target/<profile>/clawd` and `target/<profile>/telegramd`), and falls back to source mode (`start-clawd.sh` + `start-telegramd.sh`) only when binaries are missing. Supports provider/model overrides.
+
+- `start-all-bin.sh`  
+  One-command daemon startup wrapper (binary mode): starts prebuilt `target/<profile>/clawd` and `target/<profile>/telegramd`.
+
+- `stop-rustclaw.sh`  
+  Stops both daemons using PID files first, then process-pattern fallback; clears stale PID files.
+
+- `check-logs.sh`  
+  Prints recent `clawd`/`telegramd` logs, highlights error keywords, and optionally follows logs (`-f`).
+
+- `simulate-telegramd.sh`  
+  Simulates Telegram-side submit/poll behavior against `clawd` without calling Telegram API (supports `ask` and `run_skill`).
+
+- `x-oauth-login.sh`  
+  Local OAuth2 PKCE helper for X: opens browser login, captures callback code, exchanges tokens, and writes `configs/x.toml`.
+
+- `rollback.sh`  
+  Hard rollback helper (`git reset --hard` + `git clean -fd`) to restore a target commit-ish. **Dangerous: removes uncommitted and untracked changes.**
 
 ## Notes
 
-- This generation is M1/M2 scaffold level.
-- Telegram bot command handling and LLM provider routing are not wired yet.
-- Database migration execution should be added in next step.
-
-## Image Skills
-
-RustClaw now includes three image skills:
-
-- `image_vision`: image understanding (`describe`, `extract`, `compare`, `screenshot_summary`)
-- `image_generate`: text-to-image (`prompt -> image file`)
-- `image_edit`: image editing (`edit`, `outpaint`, `restyle`, `add_remove`)
-
-All three follow the same `run_skill` protocol and can be called via `call_skill`.
-
-Minimal examples:
-
-- Vision:
-  `{"type":"call_skill","skill":"image_vision","args":{"action":"describe","images":[{"path":"image/demo.png"}]}}`
-- Generate:
-  `{"type":"call_skill","skill":"image_generate","args":{"prompt":"A cyberpunk cat","size":"1024x1024"}}`
-- Edit:
-  `{"type":"call_skill","skill":"image_edit","args":{"action":"restyle","image":{"path":"image/in.png"},"instruction":"turn it into watercolor style"}}`
-
-## X Skill
-
-`x` skill posts content to X API v2 (`/tweets`) through `skill-runner`.
-Default mode uses official `xurl` CLI for user-context auth.
-
-Standalone config file:
-- `configs/x.toml`
-- Optional override path: `X_CONFIG_PATH=/custom/path/x.toml`
-
-Args:
-- Minimal: `{"text":"hello from RustClaw"}`
-- Dry run: `{"text":"hello from RustClaw","dry_run":true}`
-- Publish: `{"text":"hello from RustClaw","send":true}`
-
-Environment variables:
-- `XURL_BIN` (optional, default `xurl`)
-- `XURL_APP` (optional, xurl app profile name)
-- `XURL_AUTH` (optional, e.g. `oauth2`)
-- `XURL_USERNAME` (optional, select OAuth2 user in xurl)
-- `XURL_TIMEOUT_SECONDS` (optional, default `30`)
-- `X_REQUIRE_EXPLICIT_SEND` (optional, default `true`; when true, missing `send=true` will only preview)
-- `X_MAX_TEXT_CHARS` (optional, default `280`)
-
-Safety default:
-- Without explicit `send=true`, the skill returns preview text and does not publish.
-
-Quick xurl setup:
-1. Install xurl
-2. `xurl auth apps add my-app --client-id <id> --client-secret <secret>`
-3. `xurl auth oauth2`
-4. (optional) set default app/user by `xurl auth default`
+- Runtime behavior is config-driven; review `configs/config.toml` before production deployment.
+- For service deployment, use the files under `systemd/` as a base.

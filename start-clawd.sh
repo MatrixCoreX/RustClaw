@@ -8,6 +8,21 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
+PROFILE="${1:-${RUSTCLAW_START_PROFILE:-debug}}"
+case "$PROFILE" in
+  release|debug)
+    ;;
+  *)
+    echo "Usage: ./start-clawd.sh [release|debug]" # zh: 用法：./start-clawd.sh [release|debug]
+    exit 1
+    ;;
+esac
+
+CARGO_PROFILE_FLAG=()
+if [[ "$PROFILE" == "release" ]]; then
+  CARGO_PROFILE_FLAG=(--release)
+fi
+
 # First startup policy:
 # - if llm.selected_vendor/selected_model is empty, MUST select interactively and persist
 # - if both not empty, start directly with default settings
@@ -199,4 +214,4 @@ PY
   fi
 fi
 
-exec cargo run -p clawd
+exec cargo run "${CARGO_PROFILE_FLAG[@]}" -p clawd

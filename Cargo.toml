@@ -22,6 +22,10 @@ members = [
   "crates/skills/image_edit",
   "crates/skills/audio_transcribe",
   "crates/skills/audio_synthesize",
+  "crates/skills/health_check",
+  "crates/skills/log_analyze",
+  "crates/skills/service_control",
+  "crates/skills/config_guard",
 ]
 
 [workspace.package]

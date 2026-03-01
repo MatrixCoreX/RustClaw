@@ -8,10 +8,25 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
+PROFILE="${1:-${RUSTCLAW_START_PROFILE:-debug}}"
+case "$PROFILE" in
+  release|debug)
+    ;;
+  *)
+    echo "Usage: ./start-telegramd.sh [release|debug]" # zh: 用法：./start-telegramd.sh [release|debug]
+    exit 1
+    ;;
+esac
+
+CARGO_PROFILE_FLAG=()
+if [[ "$PROFILE" == "release" ]]; then
+  CARGO_PROFILE_FLAG=(--release)
+fi
+
 # Preflight 1: avoid local duplicate polling workers.
-if pgrep -f 'target/debug/telegramd|cargo run -p telegramd' >/dev/null 2>&1; then
+if pgrep -f 'target/(debug|release)/telegramd|cargo run -p telegramd' >/dev/null 2>&1; then
   echo "Detected telegramd already running on this host. Stop old instance first to avoid polling conflicts." # zh: 检测到本机已有 telegramd 在运行。请先停止旧实例，避免轮询冲突。
-  echo "You can run: pkill -f 'target/debug/telegramd|cargo run -p telegramd'" # zh: 可执行: pkill -f 'target/debug/telegramd|cargo run -p telegramd'
+  echo "You can run: pkill -f 'target/(debug|release)/telegramd|cargo run -p telegramd'" # zh: 可执行: pkill -f 'target/(debug|release)/telegramd|cargo run -p telegramd'
   exit 1
 fi
 
@@ -74,4 +89,4 @@ if not check.get("ok", False):
 print("Telegram preflight passed.")  # zh: Telegram 预检通过。
 PY
 
-exec cargo run -p telegramd
+exec cargo run "${CARGO_PROFILE_FLAG[@]}" -p telegramd

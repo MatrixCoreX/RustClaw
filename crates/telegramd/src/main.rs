@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -37,6 +37,9 @@ struct BotState {
     voice_reply_mode: String,
     voice_reply_mode_by_chat: Arc<Mutex<HashMap<i64, String>>>,
     max_audio_input_bytes: usize,
+    sendfile_admin_only: bool,
+    sendfile_full_access: bool,
+    sendfile_allowed_dirs: Arc<Vec<String>>,
     voice_chat_prompt_template: String,
     i18n: Arc<TextCatalog>,
 }
@@ -122,6 +125,7 @@ impl TextCatalog {
                 ("telegram.msg.process_failed", "Processing failed"), // zh: 处理失败
                 ("telegram.msg.process_failed_with_error", "Processing failed: {error}"), // zh: 处理失败：{error}
                 ("telegram.msg.wait_task_timeout", "Waiting for task result timed out"), // zh: 等待任务结果超时
+                ("telegram.msg.task_still_running_background", "Task is still running after {seconds}s. It will continue in background and I will send the result when finished."), // zh: 任务已运行超过 {seconds} 秒，将继续在后台执行，完成后自动发送结果。
                 ("telegram.msg.task_done_no_text", "Task finished, but there is no displayable text result."), // zh: 任务完成，但没有可显示的文本结果。
                 ("telegram.msg.no_error_text", "No error details"), // zh: 无错误详情
                 ("telegram.msg.status_text", "State: {worker_state}\nQueue length: {queue_length}\nRunning: {running_length}\nOldest running age: {running_oldest_age_seconds}s\nTask timeout: {task_timeout_seconds}s\nUptime: {uptime_seconds}s\nVersion: {version}"), // zh: 状态: {worker_state}\n队列长度: {queue_length}\n运行中: {running_length}\n最久运行时长: {running_oldest_age_seconds}s\n任务超时: {task_timeout_seconds}s\n运行时长: {uptime_seconds}s\n版本: {version}
@@ -229,6 +233,9 @@ async fn main() -> anyhow::Result<()> {
         voice_reply_mode: config.telegram.voice_reply_mode.clone(),
         voice_reply_mode_by_chat: Arc::new(Mutex::new(voice_reply_mode_by_chat)),
         max_audio_input_bytes: config.telegram.max_audio_input_bytes.max(1024),
+        sendfile_admin_only: config.telegram.sendfile.admin_only,
+        sendfile_full_access: config.telegram.sendfile.full_access,
+        sendfile_allowed_dirs: Arc::new(config.telegram.sendfile.allowed_dirs.clone()),
         voice_chat_prompt_template: load_prompt_template(
             "prompts/voice_chat_prompt.md",
             DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE,
@@ -653,14 +660,33 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             return Ok(());
         }
 
+        if state.sendfile_admin_only && !state.admins.contains(&user_id) {
+            bot.send_message(msg.chat.id, "Only admins can use /sendfile.")
+                .await
+                .context("send /sendfile admin-only rejection failed")?;
+            return Ok(());
+        }
+
         let path = normalize_path_token(raw);
-        let p = Path::new(path);
+        let p = match resolve_sendfile_path(
+            path,
+            state.sendfile_full_access,
+            state.sendfile_allowed_dirs.as_ref(),
+        ) {
+            Ok(v) => v,
+            Err(err) => {
+                bot.send_message(msg.chat.id, format!("Invalid sendfile path: {err}"))
+                    .await
+                    .context("send /sendfile path rejection failed")?;
+                return Ok(());
+            }
+        };
         if !p.exists() {
             bot.send_message(
                 msg.chat.id,
                 state
                     .i18n
-                    .t_with("telegram.msg.file_not_found", &[("path", path)]),
+                    .t_with("telegram.msg.file_not_found", &[("path", &p.display().to_string())]),
             )
                 .await
                 .context("send /sendfile not found failed")?;
@@ -669,19 +695,22 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         if !p.is_file() {
             bot.send_message(
                 msg.chat.id,
-                state.i18n.t_with("telegram.msg.not_a_file", &[("path", path)]),
+                state
+                    .i18n
+                    .t_with("telegram.msg.not_a_file", &[("path", &p.display().to_string())]),
             )
                 .await
                 .context("send /sendfile not file failed")?;
             return Ok(());
         }
 
-        if is_image_file(path) {
-            bot.send_photo(msg.chat.id, InputFile::file(path.to_string()))
+        let path_s = p.display().to_string();
+        if is_image_file(&path_s) {
+            bot.send_photo(msg.chat.id, InputFile::file(path_s))
                 .await
                 .context("send /sendfile image failed")?;
         } else {
-            bot.send_document(msg.chat.id, InputFile::file(path.to_string()))
+            bot.send_document(msg.chat.id, InputFile::file(path_s))
                 .await
                 .context("send /sendfile document failed")?;
         }
@@ -846,7 +875,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                     state.clone(),
                     msg.chat.id,
                     task_id,
-                    Some(state.task_wait_seconds.max(300)),
+                    None,
                     state.i18n.t("telegram.msg.process_failed"),
                 );
             }
@@ -1355,6 +1384,52 @@ fn normalize_path_token(token: &str) -> &str {
     })
 }
 
+fn resolve_sendfile_path(
+    raw: &str,
+    full_access: bool,
+    allowed_dirs: &[String],
+) -> Result<PathBuf, String> {
+    let token = normalize_path_token(raw);
+    if token.is_empty() {
+        return Err("empty path".to_string());
+    }
+
+    let cwd = std::env::current_dir().map_err(|err| format!("read current_dir failed: {err}"))?;
+    let candidate = if Path::new(token).is_absolute() {
+        PathBuf::from(token)
+    } else {
+        cwd.join(token)
+    };
+    if candidate
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
+        return Err("path with '..' is not allowed".to_string());
+    }
+    if full_access {
+        return Ok(candidate);
+    }
+
+    for dir in allowed_dirs {
+        if dir == "*" {
+            return Ok(candidate);
+        }
+        let base = if Path::new(dir).is_absolute() {
+            PathBuf::from(dir)
+        } else {
+            cwd.join(dir)
+        };
+        if candidate.starts_with(&base) {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!(
+        "path is outside allowed dirs: {}",
+        allowed_dirs.join(", ")
+    ))
+}
+
 fn is_image_file(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     lower.ends_with(".png")
@@ -1369,26 +1444,123 @@ fn spawn_task_result_delivery(
     state: BotState,
     chat_id: ChatId,
     task_id: String,
-    wait_override_seconds: Option<u64>,
+    soft_notice_override_seconds: Option<u64>,
     fail_prefix: String,
 ) {
     tokio::spawn(async move {
-        match poll_task_result(&state, &task_id, wait_override_seconds).await {
-            Ok(answer) => {
-                let _ = send_text_or_image(&bot, chat_id, &answer).await;
-            }
-            Err(err) => {
-                let detail = if err.to_string() == "task_result_wait_timeout" {
-                    state.i18n.t("telegram.msg.wait_task_timeout")
-                } else {
-                    err.to_string()
-                };
-                let _ = bot
-                    .send_message(chat_id, format!("{fail_prefix}：{detail}"))
-                    .await;
+        let poll_interval_ms = state.poll_interval_ms.max(1);
+        let soft_notice_seconds = soft_notice_override_seconds
+            .unwrap_or(state.task_wait_seconds)
+            .max(1);
+        let started_at = tokio::time::Instant::now();
+        let mut soft_notice_sent = false;
+
+        loop {
+            match query_task_status(&state, &task_id).await {
+                Ok(task) => match task.status {
+                    TaskStatus::Queued | TaskStatus::Running => {
+                        if !soft_notice_sent
+                            && started_at.elapsed() >= Duration::from_secs(soft_notice_seconds)
+                        {
+                            let msg = state.i18n.t_with(
+                                "telegram.msg.task_still_running_background",
+                                &[("seconds", &soft_notice_seconds.to_string())],
+                            );
+                            let _ = bot.send_message(chat_id, msg).await;
+                            soft_notice_sent = true;
+                        }
+                        tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
+                    }
+                    TaskStatus::Succeeded => {
+                        let answer = task_success_text(&state, &task);
+                        let _ = send_text_or_image(&bot, chat_id, &answer).await;
+                        break;
+                    }
+                    TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
+                        let detail = task_terminal_error_text(&state, &task);
+                        let _ = bot
+                            .send_message(chat_id, format!("{fail_prefix}：{detail}"))
+                            .await;
+                        break;
+                    }
+                },
+                Err(err) => {
+                    let _ = bot
+                        .send_message(chat_id, format!("{fail_prefix}：{}", err))
+                        .await;
+                    break;
+                }
             }
         }
     });
+}
+
+fn task_success_text(state: &BotState, task: &TaskQueryResponse) -> String {
+    task.result_json
+        .as_ref()
+        .and_then(|v| v.get("text"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| state.i18n.t("telegram.msg.task_done_no_text"))
+}
+
+fn task_terminal_error_text(state: &BotState, task: &TaskQueryResponse) -> String {
+    state.i18n.t_with(
+        "telegram.error.task_finished_with_detail",
+        &[
+            ("status", &format!("{:?}", task.status)),
+            (
+                "detail",
+                &task
+                    .error_text
+                    .clone()
+                    .unwrap_or_else(|| state.i18n.t("telegram.msg.no_error_text")),
+            ),
+        ],
+    )
+}
+
+async fn query_task_status(state: &BotState, task_id: &str) -> anyhow::Result<TaskQueryResponse> {
+    let url = format!("{}/v1/tasks/{task_id}", state.clawd_base_url);
+    let resp = state
+        .client
+        .get(&url)
+        .send()
+        .await
+        .context("query task status failed")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(anyhow!(
+            "{}",
+            state.i18n.t_with(
+                "telegram.error.query_task_failed_http",
+                &[("status", &status.to_string()), ("body", &body)],
+            )
+        ));
+    }
+
+    let body: ApiResponse<TaskQueryResponse> = resp
+        .json()
+        .await
+        .context("decode query task response failed")?;
+
+    if !body.ok {
+        return Err(anyhow!(
+            "{}",
+            state.i18n.t_with(
+                "telegram.error.query_task_failed",
+                &[(
+                    "error",
+                    &body.error.unwrap_or_else(|| state.i18n.t("common.unknown_error"))
+                )],
+            )
+        ));
+    }
+
+    body.data
+        .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.query_task_missing_data")))
 }
 
 async fn submit_task_only(
@@ -1468,77 +1640,16 @@ async fn poll_task_result(
     let max_rounds = ((wait_seconds * 1000) / poll_interval_ms).max(1);
 
     for _ in 0..max_rounds {
-        let url = format!("{}/v1/tasks/{task_id}", state.clawd_base_url);
-        let resp = state
-            .client
-            .get(&url)
-            .send()
-            .await
-            .context("query task status failed")?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(anyhow!(
-                "{}",
-                state.i18n.t_with(
-                    "telegram.error.query_task_failed_http",
-                    &[("status", &status.to_string()), ("body", &body)],
-                )
-            ));
-        }
-
-        let body: ApiResponse<TaskQueryResponse> = resp
-            .json()
-            .await
-            .context("decode query task response failed")?;
-
-        if !body.ok {
-            return Err(anyhow!(
-                "{}",
-                state.i18n.t_with(
-                    "telegram.error.query_task_failed",
-                    &[(
-                        "error",
-                        &body.error.unwrap_or_else(|| state.i18n.t("common.unknown_error"))
-                    )],
-                )
-            ));
-        }
-
-        let task = body
-            .data
-            .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.query_task_missing_data")))?;
+        let task = query_task_status(state, task_id).await?;
         match task.status {
             TaskStatus::Queued | TaskStatus::Running => {
                 tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
             }
             TaskStatus::Succeeded => {
-                let answer = task
-                    .result_json
-                    .as_ref()
-                    .and_then(|v| v.get("text"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| state.i18n.t("telegram.msg.task_done_no_text"));
-                return Ok(answer);
+                return Ok(task_success_text(state, &task));
             }
             TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
-                return Err(anyhow!(
-                    "{}",
-                    state.i18n.t_with(
-                        "telegram.error.task_finished_with_detail",
-                        &[
-                            ("status", &format!("{:?}", task.status)),
-                            (
-                                "detail",
-                                &task
-                                    .error_text
-                                    .unwrap_or_else(|| state.i18n.t("telegram.msg.no_error_text"))
-                            ),
-                        ],
-                    )
-                ));
+                return Err(anyhow!("{}", task_terminal_error_text(state, &task)));
             }
         }
     }
