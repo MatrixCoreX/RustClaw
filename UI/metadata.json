@@ -1,0 +1,5 @@
+{
+  "name": "OpenClaw Dashboard",
+  "description": "A Rust-powered management interface for Raspberry Pi claw machines, featuring real-time controls, hardware monitoring, and AI-powered video generation.",
+  "requestFramePermissions": ["camera"]
+}

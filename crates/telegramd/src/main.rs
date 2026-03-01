@@ -35,18 +35,32 @@ struct BotState {
     image_inbox_dir: String,
     audio_inbox_dir: String,
     voice_reply_mode: String,
+    voice_mode_nl_intent_enabled: bool,
     voice_reply_mode_by_chat: Arc<Mutex<HashMap<i64, String>>>,
+    voice_mode_intent_aliases: Arc<VoiceModeIntentAliases>,
     max_audio_input_bytes: usize,
     sendfile_admin_only: bool,
     sendfile_full_access: bool,
     sendfile_allowed_dirs: Arc<Vec<String>>,
+    ephemeral_image_saved_seconds: u64,
     voice_chat_prompt_template: String,
+    voice_mode_intent_prompt_template: String,
     i18n: Arc<TextCatalog>,
 }
 
 #[derive(Debug, Clone)]
+struct VoiceModeIntentAliases {
+    voice: Vec<String>,
+    text: Vec<String>,
+    both: Vec<String>,
+    reset: Vec<String>,
+    show: Vec<String>,
+    none: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 struct TextCatalog {
-    current: HashMap<&'static str, &'static str>,
+    current: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +72,109 @@ enum VoiceReplyMode {
 
 const DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/voice_chat_prompt.md");
+const DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/voice_mode_intent_prompt.md");
+const VOICE_MODE_INTENT_ALIASES_PATH: &str = "configs/command_intent/voice_mode_intent_aliases.toml";
+
+impl VoiceModeIntentAliases {
+    fn defaults() -> Self {
+        Self {
+            voice: vec![
+                "voice-only".to_string(),
+                "voice only".to_string(),
+                "only voice".to_string(),
+                "切到语音".to_string(),
+                "语音回复".to_string(),
+                "只用语音".to_string(),
+                "仅语音".to_string(),
+            ],
+            text: vec![
+                "text-only".to_string(),
+                "text only".to_string(),
+                "only text".to_string(),
+                "切回文字".to_string(),
+                "文字回复".to_string(),
+                "只要文字".to_string(),
+                "仅文字".to_string(),
+                "只用文字".to_string(),
+                "只打字".to_string(),
+            ],
+            both: vec![
+                "both".to_string(),
+                "voice and text".to_string(),
+                "text and voice".to_string(),
+                "语音和文字都要".to_string(),
+                "语音和文本都发".to_string(),
+                "两种都回复".to_string(),
+            ],
+            reset: vec![
+                "reset".to_string(),
+                "default mode".to_string(),
+                "恢复默认".to_string(),
+                "重置".to_string(),
+            ],
+            show: vec![
+                "show".to_string(),
+                "status".to_string(),
+                "current mode".to_string(),
+                "查看语音模式".to_string(),
+                "当前是语音还是文字".to_string(),
+            ],
+            none: vec![
+                "none".to_string(),
+                "not a mode".to_string(),
+                "no mode switch".to_string(),
+                "不是模式切换".to_string(),
+                "非模式切换".to_string(),
+            ],
+        }
+    }
+}
+
+fn parse_alias_list(value: &TomlValue, key: &str, fallback: &[String]) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.trim().to_ascii_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| fallback.to_vec())
+}
+
+fn load_voice_mode_intent_aliases(path: &str) -> VoiceModeIntentAliases {
+    let defaults = VoiceModeIntentAliases::defaults();
+    let raw = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(err) => {
+            warn!("load voice mode aliases failed: path={} err={}", path, err);
+            return defaults;
+        }
+    };
+    let value: TomlValue = match toml::from_str(&raw) {
+        Ok(v) => v,
+        Err(err) => {
+            warn!("parse voice mode aliases failed: path={} err={}", path, err);
+            return defaults;
+        }
+    };
+    VoiceModeIntentAliases {
+        voice: parse_alias_list(&value, "voice_aliases", &defaults.voice),
+        text: parse_alias_list(&value, "text_aliases", &defaults.text),
+        both: parse_alias_list(&value, "both_aliases", &defaults.both),
+        reset: parse_alias_list(&value, "reset_aliases", &defaults.reset),
+        show: parse_alias_list(&value, "show_aliases", &defaults.show),
+        none: parse_alias_list(&value, "none_aliases", &defaults.none),
+    }
+}
+
+fn contains_any_alias(normalized: &str, aliases: &[String]) -> bool {
+    aliases.iter().any(|x| normalized.contains(x))
+}
 
 fn parse_voice_reply_mode(raw: &str) -> VoiceReplyMode {
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -76,6 +193,119 @@ fn normalize_voice_reply_mode(raw: &str) -> Option<String> {
     }
 }
 
+fn can_change_voice_mode(state: &BotState, user_id: i64) -> bool {
+    state.admins.contains(&user_id) || state.allowlist.contains(&user_id)
+}
+
+fn parse_voice_mode_intent_label(raw: &str, aliases: &VoiceModeIntentAliases) -> Option<&'static str> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if let Ok(v) = serde_json::from_str::<JsonValue>(&normalized) {
+        if let Some(mode) = v.get("mode").and_then(|x| x.as_str()) {
+            return parse_voice_mode_intent_label(mode, aliases);
+        }
+    }
+    if let (Some(start), Some(end)) = (normalized.find('{'), normalized.rfind('}')) {
+        if start < end {
+            let part = &normalized[start..=end];
+            if let Ok(v) = serde_json::from_str::<JsonValue>(part) {
+                if let Some(mode) = v.get("mode").and_then(|x| x.as_str()) {
+                    return parse_voice_mode_intent_label(mode, aliases);
+                }
+            }
+        }
+    }
+    for token in ["voice", "text", "both", "reset", "show", "none"] {
+        if normalized == token {
+            return Some(token);
+        }
+    }
+    // Avoid aggressive fuzzy mapping to reduce false positives.
+    // Only accept explicit labels from model output.
+    let first = normalized
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .find(|p| !p.is_empty())
+        .unwrap_or("");
+    match first {
+        "voice" => Some("voice"),
+        "text" => Some("text"),
+        "both" => Some("both"),
+        "reset" => Some("reset"),
+        "show" => Some("show"),
+        "none" => Some("none"),
+        _ => {
+            // Soft fallback for non-token classifier outputs.
+            // Keep this conservative and only map clear intent phrases.
+            if contains_any_alias(&normalized, &aliases.none) {
+                return Some("none");
+            }
+            if contains_any_alias(&normalized, &aliases.reset) {
+                return Some("reset");
+            }
+            if contains_any_alias(&normalized, &aliases.show) {
+                return Some("show");
+            }
+            if contains_any_alias(&normalized, &aliases.both) {
+                return Some("both");
+            }
+            if contains_any_alias(&normalized, &aliases.voice) {
+                return Some("voice");
+            }
+            if contains_any_alias(&normalized, &aliases.text) {
+                return Some("text");
+            }
+            if normalized.contains("voice") || normalized.contains("语音") {
+                return Some("voice");
+            }
+            if normalized.contains("text")
+                || normalized.contains("文字")
+                || normalized.contains("文本")
+                || normalized.contains("打字")
+            {
+                return Some("text");
+            }
+            None
+        }
+    }
+}
+
+async fn detect_voice_mode_intent_with_llm(
+    state: &BotState,
+    user_id: i64,
+    chat_id: i64,
+    text: &str,
+) -> Option<&'static str> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    let prompt = render_voice_mode_intent_prompt(&state.voice_mode_intent_prompt_template, text);
+    let task_id = match submit_task_only(
+        state,
+        user_id,
+        chat_id,
+        TaskKind::Ask,
+        json!({ "text": prompt, "agent_mode": false, "source": "voice_mode_intent_detect" }),
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(err) => {
+            warn!("voice mode llm detect submit failed: {err}");
+            return None;
+        }
+    };
+    let out = match poll_task_result(state, &task_id, Some(12)).await {
+        Ok(v) => v,
+        Err(err) => {
+            warn!("voice mode llm detect poll failed: {err}");
+            return None;
+        }
+    };
+    parse_voice_mode_intent_label(&out, state.voice_mode_intent_aliases.as_ref())
+}
+
 fn effective_voice_reply_mode_for_chat(state: &BotState, chat_id: i64) -> String {
     let fallback = normalize_voice_reply_mode(&state.voice_reply_mode).unwrap_or_else(|| "voice".to_string());
     if let Ok(map) = state.voice_reply_mode_by_chat.lock() {
@@ -87,82 +317,37 @@ fn effective_voice_reply_mode_for_chat(state: &BotState, chat_id: i64) -> String
 }
 
 impl TextCatalog {
-    fn zh_cn() -> Self {
-        Self {
-            current: HashMap::from([
-                ("common.unknown_error", "Unknown error"), // zh: 未知错误
-                ("telegram.log.started", "telegramd started, admins={admins}, allowlist={allowlist}, skills={skills}, quick_result_wait_seconds={quick_result_wait_seconds}"), // zh: telegramd 已启动, admins={admins}, allowlist={allowlist}, skills={skills}, quick_result_wait_seconds={quick_result_wait_seconds}
-                ("telegram.log.startup_memory_rss", "Startup memory RSS bytes={bytes}"), // zh: 启动内存 RSS bytes={bytes}
-                ("telegram.log.unauthorized_user", "Unauthorized Telegram user: {user_id}"), // zh: 未授权 Telegram 用户: {user_id}
-                ("telegram.msg.unauthorized", "Unauthorized: contact admin to be added to allowlist."), // zh: 未授权：请联系管理员加入 allowlist。
-                ("telegram.msg.start", "RustClaw is running.\nYou can ask directly in chat or use skill commands.\nAvailable commands: /start /help /agent on|off /status /cancel /skills /run <skill> <args> /sendfile <path> /voicemode show|voice|text|both|reset /openclaw config ..."), // zh: RustClaw 已启动。\n支持直接聊天提问，也支持技能命令。\n可用命令：/start /help /agent on|off /status /cancel /skills /run <skill> <args> /sendfile <path> /voicemode show|voice|text|both|reset /openclaw config ...
-                ("telegram.msg.help", "Send messages directly to ask.\n/agent on|off toggles agent tool mode\n/status shows queue and runtime status\n/cancel stops queued/running tasks for this chat\n/skills lists skills\n/run <skill> <args> runs a skill\n/sendfile <path> sends a local file to this chat\n/voicemode show|voice|text|both|reset (admin)\n/openclaw config show|vendors|set <vendor> <model>"), // zh: 直接发消息即可提问。\n/agent on|off 开关代理工具模式\n/status 查看队列与运行状态\n/cancel 结束当前聊天的排队/执行任务\n/skills 查看技能\n/run <skill> <args> 运行技能\n/sendfile <path> 发送本地文件到当前聊天\n/voicemode show|voice|text|both|reset（管理员）\n/openclaw config show|vendors|set <vendor> <model>
-                ("telegram.msg.openclaw_admin_only", "Only admins can use /openclaw config commands."), // zh: 仅管理员可使用 /openclaw 配置命令。
-                ("telegram.msg.voicemode_admin_only", "Only admins can use /voicemode."), // zh: 仅管理员可使用 /voicemode。
-                ("telegram.msg.voicemode_usage", "Usage: /voicemode show|voice|text|both|reset"), // zh: 用法：/voicemode show|voice|text|both|reset
-                ("telegram.msg.voicemode_show", "Current chat voice mode: {chat_mode}\nGlobal default: {global_mode}"), // zh: 当前聊天语音模式：{chat_mode}\n全局默认：{global_mode}
-                ("telegram.msg.voicemode_set_ok", "Voice mode updated for this chat: {mode}"), // zh: 当前聊天语音模式已更新：{mode}
-                ("telegram.msg.voicemode_reset_ok", "Voice mode reset for this chat. Fallback to global: {global_mode}"), // zh: 当前聊天语音模式已重置，回退到全局：{global_mode}
-                ("telegram.msg.config_failed", "Config update failed: {error}"), // zh: 配置失败：{error}
-                ("telegram.msg.agent_on", "Agent mode is ON (default): normal messages may use tools/skills."), // zh: Agent 模式已开启（默认）：普通消息会允许工具/技能决策执行。
-                ("telegram.msg.agent_off", "Agent mode is OFF: normal messages use plain Q&A only."), // zh: Agent 模式已关闭：普通消息仅走普通问答。
-                ("telegram.msg.agent_usage_status", "Usage: /agent on|off\nCurrent status: {status}"), // zh: 用法：/agent on|off\n当前状态：{status}
-                ("telegram.msg.read_status_failed", "Read status failed: {error}"), // zh: 读取状态失败：{error}
-                ("telegram.msg.no_skills", "No available skills"), // zh: 暂无可用技能
-                ("telegram.msg.skills_list", "Available skills: {skills}"), // zh: 可用技能：{skills}
-                ("telegram.msg.run_usage", "Usage: /run <skill_name> <args>"), // zh: 用法：/run <skill_name> <args>
-                ("telegram.msg.queue_full", "Too many queued tasks ({queued}/{limit}). Please try again later."), // zh: 当前任务过多（排队 {queued} / 上限 {limit}），请稍后再试。
-                ("telegram.msg.skill_exec_failed", "Skill execution failed"), // zh: 技能执行失败
-                ("telegram.msg.skill_exec_failed_with_error", "Skill execution failed: {error}"), // zh: 技能执行失败：{error}
-                ("telegram.msg.accepted_processing", "Received, processing... (queued: {queued})"), // legacy, no longer used
-                ("telegram.msg.sendfile_usage", "Usage: /sendfile <local_file_path>"), // zh: 用法：/sendfile <本地文件路径>
-                ("telegram.msg.file_not_found", "File not found: {path}"), // zh: 文件不存在：{path}
-                ("telegram.msg.not_a_file", "Not a file: {path}"), // zh: 不是文件：{path}
-                ("telegram.msg.unknown_command", "Unknown command. Send a message directly or use /help."), // zh: 未知命令。直接发消息即可提问，或使用 /help。
-                ("telegram.msg.empty_prompt", "Please provide a prompt."), // zh: 请输入问题内容。
-                ("telegram.msg.image_saved_path", "Image saved: {path}"), // zh: 图片已保存：{path}
-                ("telegram.msg.image_received_wait_prompt", "Image received. Please send your edit prompt."), // zh: 已收到图片，请发送编辑提示词。
-                ("telegram.msg.process_failed", "Processing failed"), // zh: 处理失败
-                ("telegram.msg.process_failed_with_error", "Processing failed: {error}"), // zh: 处理失败：{error}
-                ("telegram.msg.wait_task_timeout", "Waiting for task result timed out"), // zh: 等待任务结果超时
-                ("telegram.msg.task_still_running_background", "Task is still running after {seconds}s. It will continue in background and I will send the result when finished."), // zh: 任务已运行超过 {seconds} 秒，将继续在后台执行，完成后自动发送结果。
-                ("telegram.msg.task_done_no_text", "Task finished, but there is no displayable text result."), // zh: 任务完成，但没有可显示的文本结果。
-                ("telegram.msg.no_error_text", "No error details"), // zh: 无错误详情
-                ("telegram.msg.status_text", "State: {worker_state}\nQueue length: {queue_length}\nRunning: {running_length}\nOldest running age: {running_oldest_age_seconds}s\nTask timeout: {task_timeout_seconds}s\nUptime: {uptime_seconds}s\nVersion: {version}"), // zh: 状态: {worker_state}\n队列长度: {queue_length}\n运行中: {running_length}\n最久运行时长: {running_oldest_age_seconds}s\n任务超时: {task_timeout_seconds}s\n运行时长: {uptime_seconds}s\n版本: {version}
-                ("telegram.msg.openclaw_set_usage", "Usage: /openclaw config set <vendor> <model>"), // zh: 用法：/openclaw config set <vendor> <model>
-                ("telegram.msg.openclaw_usage", "OpenClaw config commands:\n/openclaw config show\n/openclaw config vendors\n/openclaw config set <vendor> <model>\nExample: /openclaw config set openai gpt-4o-mini\nExample: /openclaw config set google gemini-2.5-pro\nExample: /openclaw config set anthropic claude-3-7-sonnet-latest\nExample: /openclaw config set grok grok-2-latest"), // zh: OpenClaw 配置命令：\n/openclaw config show\n/openclaw config vendors\n/openclaw config set <vendor> <model>\n示例：/openclaw config set openai gpt-4o-mini\n示例：/openclaw config set google gemini-2.5-pro\n示例：/openclaw config set anthropic claude-3-7-sonnet-latest
-                ("telegram.msg.openclaw_supported_vendors", "Supported model vendors:\n- openai\n- google\n- anthropic\n- grok"), // zh: 支持的模型厂商(vendor)：\n- openai\n- google\n- anthropic
-                ("telegram.msg.openclaw_current_selection", "Current selection: vendor={vendor}, model={model}"), // zh: 当前选择：vendor={vendor}, model={model}
-                ("telegram.msg.openclaw_preset_vendors", "Preset vendor configs:"), // zh: 预设厂商配置：
-                ("telegram.msg.openclaw_vendor_line", "- {vendor}: model={model}; models=[{models}]"), // zh: - {vendor}: model={model}; models=[{models}]
-                ("telegram.msg.openclaw_restart_hint", "Restart clawd for changes to take effect."), // zh: 修改后请重启 clawd 生效。
-                ("telegram.msg.openclaw_unsupported_vendor", "Unsupported vendor: {vendor}"), // zh: 不支持的 vendor: {vendor}
-                ("telegram.msg.openclaw_set_ok", "Primary model updated: vendor={vendor}, model={model}\nRestart clawd for changes to take effect."), // zh: 已更新主模型：vendor={vendor}, model={model}\n请重启 clawd 生效。
-                ("telegram.error.submit_task_failed_http", "Submit task failed ({status}): {body}"), // zh: 提交任务失败({status}): {body}
-                ("telegram.error.submit_task_rejected", "Submit task rejected: {error}"), // zh: 提交任务被拒绝: {error}
-                ("telegram.error.submit_task_missing_task_id", "Submit task response missing task_id"), // zh: 提交任务返回缺少 task_id
-                ("telegram.error.query_task_failed_http", "Query task failed ({status}): {body}"), // zh: 查询任务失败({status}): {body}
-                ("telegram.error.query_task_failed", "Task query returned failure: {error}"), // zh: 任务查询返回失败: {error}
-                ("telegram.error.query_task_missing_data", "Task query missing data"), // zh: 任务查询缺少 data
-                ("telegram.error.task_finished_with_detail", "Task finished with status={status}, detail={detail}"), // zh: 任务结束状态={status}, 详情={detail}
-                ("telegram.error.health_http_failed", "Health endpoint failed ({status}): {body}"), // zh: health 接口失败({status}): {body}
-                ("telegram.error.health_failed", "Health returned failure: {error}"), // zh: health 返回失败: {error}
-                ("telegram.error.health_missing_data", "Health response missing data"), // zh: health 缺少 data
-                ("telegram.error.read_config_failed", "Failed to read configs/config.toml"), // zh: 读取 configs/config.toml 失败
-                ("telegram.error.parse_config_failed", "Failed to parse config.toml"), // zh: 解析 config.toml 失败
-                ("telegram.error.llm_config_missing", "Missing llm config"), // zh: llm 配置缺失
-                ("telegram.error.config_not_table", "Config is not a valid TOML table"), // zh: config 不是有效 toml 表
-                ("telegram.error.llm_struct_invalid", "Invalid llm structure"), // zh: llm 结构无效
-                ("telegram.error.vendor_struct_invalid", "Invalid vendor structure"), // zh: vendor 结构无效
-                ("telegram.error.models_struct_invalid", "Invalid models structure"), // zh: models 结构无效
-                ("telegram.error.serialize_config_failed", "Failed to serialize TOML text"), // zh: 写回 toml 文本失败
-                ("telegram.error.write_config_failed", "Failed to write configs/config.toml"), // zh: 写入 configs/config.toml 失败
-            ]),
+    fn load(path: &str) -> anyhow::Result<Self> {
+        let raw = fs::read_to_string(path)?;
+        let value: TomlValue = toml::from_str(&raw)?;
+        let dict = value
+            .get("dict")
+            .and_then(|v| v.as_table())
+            .ok_or_else(|| anyhow!("missing [dict] table in i18n file: {path}"))?;
+
+        let mut current = HashMap::new();
+        for (k, v) in dict {
+            if let Some(text) = v.as_str() {
+                current.insert(k.to_string(), text.to_string());
+            }
         }
+        Ok(Self { current })
+    }
+
+    fn fallback() -> Self {
+        let mut current = HashMap::new();
+        current.insert(
+            "common.unknown_error".to_string(),
+            "Unknown error".to_string(),
+        );
+        Self { current }
     }
 
     fn t(&self, key: &str) -> String {
-        self.current.get(key).copied().unwrap_or(key).to_string()
+        self.current
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| key.to_string())
     }
 
     fn t_with(&self, key: &str, vars: &[(&str, &str)]) -> String {
@@ -172,6 +357,17 @@ impl TextCatalog {
         }
         out
     }
+}
+
+fn resolve_i18n_path(language: &str, configured_path: &str) -> String {
+    let lang = language.trim();
+    if !lang.is_empty() {
+        let candidate = format!("configs/i18n/telegramd.{lang}.toml");
+        if Path::new(&candidate).exists() {
+            return candidate;
+        }
+    }
+    configured_path.to_string()
 }
 
 #[tokio::main]
@@ -184,9 +380,21 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = AppConfig::load("configs/config.toml")?;
-    let i18n = Arc::new(TextCatalog::zh_cn());
+    let i18n_path = resolve_i18n_path(&config.telegram.language, &config.telegram.i18n_path);
+    let i18n = match TextCatalog::load(&i18n_path) {
+        Ok(v) => Arc::new(v),
+        Err(err) => {
+            warn!(
+                "load i18n file failed: path={} err={}",
+                i18n_path, err
+            );
+            Arc::new(TextCatalog::fallback())
+        }
+    };
     let bot = Bot::new(config.telegram.bot_token.clone());
-    if let Err(err) = register_telegram_commands_and_menu(&config.telegram.bot_token).await {
+    if let Err(err) =
+        register_telegram_commands_and_menu(&config.telegram.bot_token, i18n.as_ref()).await
+    {
         warn!("register Telegram menu failed: {err}");
     } else {
         info!("registered Telegram menu commands");
@@ -207,6 +415,7 @@ async fn main() -> anyhow::Result<()> {
         .timeout(Duration::from_secs(config.server.request_timeout_seconds))
         .build()
         .context("build reqwest client failed")?;
+    let voice_mode_intent_aliases = load_voice_mode_intent_aliases(VOICE_MODE_INTENT_ALIASES_PATH);
     let mut voice_reply_mode_by_chat = HashMap::new();
     for (chat_id_raw, mode_raw) in &config.telegram.voice_reply_mode_by_chat {
         if let (Ok(chat_id), Some(mode)) = (chat_id_raw.parse::<i64>(), normalize_voice_reply_mode(mode_raw)) {
@@ -231,14 +440,21 @@ async fn main() -> anyhow::Result<()> {
         image_inbox_dir: "image/upload".to_string(),
         audio_inbox_dir: config.telegram.audio_inbox_dir.clone(),
         voice_reply_mode: config.telegram.voice_reply_mode.clone(),
+        voice_mode_nl_intent_enabled: config.telegram.voice_mode_nl_intent_enabled,
         voice_reply_mode_by_chat: Arc::new(Mutex::new(voice_reply_mode_by_chat)),
+        voice_mode_intent_aliases: Arc::new(voice_mode_intent_aliases),
         max_audio_input_bytes: config.telegram.max_audio_input_bytes.max(1024),
         sendfile_admin_only: config.telegram.sendfile.admin_only,
         sendfile_full_access: config.telegram.sendfile.full_access,
         sendfile_allowed_dirs: Arc::new(config.telegram.sendfile.allowed_dirs.clone()),
+        ephemeral_image_saved_seconds: config.telegram.ephemeral_image_saved_seconds,
         voice_chat_prompt_template: load_prompt_template(
             "prompts/voice_chat_prompt.md",
             DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE,
+        ),
+        voice_mode_intent_prompt_template: load_prompt_template(
+            "prompts/voice_mode_intent_prompt.md",
+            DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE,
         ),
         i18n,
     };
@@ -282,7 +498,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn register_telegram_commands_and_menu(bot_token: &str) -> anyhow::Result<()> {
+async fn register_telegram_commands_and_menu(
+    bot_token: &str,
+    i18n: &TextCatalog,
+) -> anyhow::Result<()> {
     let api_base = format!("https://api.telegram.org/bot{bot_token}");
     let client = Client::builder()
         .timeout(Duration::from_secs(15))
@@ -291,16 +510,16 @@ async fn register_telegram_commands_and_menu(bot_token: &str) -> anyhow::Result<
 
     let commands_payload = json!({
         "commands": [
-            { "command": "start", "description": "Start bot and show basic usage" },
-            { "command": "help", "description": "Show help and command examples" },
-            { "command": "agent", "description": "Toggle agent mode on or off" },
-            { "command": "status", "description": "Show queue and worker status" },
-            { "command": "cancel", "description": "Cancel queued/running tasks for this chat" },
-            { "command": "skills", "description": "List available skills" },
-            { "command": "run", "description": "Run a skill: /run <skill> <args>" },
-            { "command": "sendfile", "description": "Send local file: /sendfile <path>" },
-            { "command": "voicemode", "description": "Set voice reply mode for this chat (admin)" },
-            { "command": "openclaw", "description": "Model config commands for admins" }
+            { "command": "start", "description": i18n.t("telegram.menu.start_desc") },
+            { "command": "help", "description": i18n.t("telegram.menu.help_desc") },
+            { "command": "agent", "description": i18n.t("telegram.menu.agent_desc") },
+            { "command": "status", "description": i18n.t("telegram.menu.status_desc") },
+            { "command": "cancel", "description": i18n.t("telegram.menu.cancel_desc") },
+            { "command": "skills", "description": i18n.t("telegram.menu.skills_desc") },
+            { "command": "run", "description": i18n.t("telegram.menu.run_desc") },
+            { "command": "sendfile", "description": i18n.t("telegram.menu.sendfile_desc") },
+            { "command": "voicemode", "description": i18n.t("telegram.menu.voicemode_desc") },
+            { "command": "openclaw", "description": i18n.t("telegram.menu.openclaw_desc") }
         ]
     });
 
@@ -460,18 +679,72 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     }
 
     if text.starts_with("/voicemode") {
-        let is_admin = state.admins.contains(&user_id);
-        if !is_admin {
+        if !can_change_voice_mode(&state, user_id) {
             bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.voicemode_admin_only"))
                 .await
                 .context("send /voicemode unauthorized failed")?;
             return Ok(());
         }
+        let mode = text.strip_prefix("/voicemode").unwrap_or_default().trim();
         let reply = handle_voicemode_command(&state, msg.chat.id.0, text)?;
+        info!(
+            "voice mode command: source=slash chat_id={} user_id={} command={}",
+            msg.chat.id.0,
+            user_id,
+            mode
+        );
         bot.send_message(msg.chat.id, reply)
             .await
             .context("send /voicemode reply failed")?;
         return Ok(());
+    }
+
+    if state.voice_mode_nl_intent_enabled {
+        if let Some(mode) = detect_voice_mode_intent_with_llm(&state, user_id, msg.chat.id.0, text).await {
+        if mode == "none" {
+            // no-op, fall through to normal ask flow
+        } else {
+        if !can_change_voice_mode(&state, user_id) {
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.voicemode_admin_only"))
+                .await
+                .context("send nl voicemode unauthorized failed")?;
+            return Ok(());
+        }
+        let reply = match mode {
+            "reset" => {
+                set_chat_voice_mode(&state, msg.chat.id.0, None)?;
+                let global_mode = normalize_voice_reply_mode(&state.voice_reply_mode)
+                    .unwrap_or_else(|| "voice".to_string());
+                state.i18n.t_with(
+                    "telegram.msg.voicemode_reset_ok",
+                    &[("global_mode", &global_mode)],
+                )
+            }
+            "show" => {
+                let chat_mode = effective_voice_reply_mode_for_chat(&state, msg.chat.id.0);
+                let global_mode = normalize_voice_reply_mode(&state.voice_reply_mode)
+                    .unwrap_or_else(|| "voice".to_string());
+                state.i18n.t_with(
+                    "telegram.msg.voicemode_show",
+                    &[("chat_mode", &chat_mode), ("global_mode", &global_mode)],
+                )
+            }
+            _ => {
+                set_chat_voice_mode(&state, msg.chat.id.0, Some(mode))?;
+                state.i18n
+                    .t_with("telegram.msg.voicemode_set_ok_nl", &[("mode", mode)])
+            }
+        };
+        info!(
+            "voice mode command: source=nl_llm chat_id={} user_id={} mode={}",
+            msg.chat.id.0, user_id, mode
+        );
+        bot.send_message(msg.chat.id, reply)
+            .await
+            .context("send nl voicemode reply failed")?;
+        return Ok(());
+        }
+        }
     }
 
     if text.starts_with("/agent") {
@@ -531,9 +804,11 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         match cancel_tasks_for_chat(&state, user_id, msg.chat.id.0).await {
             Ok(canceled) => {
                 let reply = if canceled > 0 {
-                    format!("Canceled {} queued/running task(s) for this chat.", canceled)
+                    state
+                        .i18n
+                        .t_with("telegram.msg.cancel_ok", &[("count", &canceled.to_string())])
                 } else {
-                    "No queued or running tasks to cancel for this chat.".to_string()
+                    state.i18n.t("telegram.msg.cancel_none")
                 };
                 bot.send_message(msg.chat.id, reply)
                     .await
@@ -542,7 +817,9 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             Err(err) => {
                 bot.send_message(
                     msg.chat.id,
-                    format!("Cancel failed: {}", err),
+                    state
+                        .i18n
+                        .t_with("telegram.msg.cancel_failed", &[("error", &err.to_string())]),
                 )
                 .await
                 .context("send /cancel error failed")?;
@@ -661,7 +938,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         }
 
         if state.sendfile_admin_only && !state.admins.contains(&user_id) {
-            bot.send_message(msg.chat.id, "Only admins can use /sendfile.")
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.sendfile_admin_only"))
                 .await
                 .context("send /sendfile admin-only rejection failed")?;
             return Ok(());
@@ -675,7 +952,12 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         ) {
             Ok(v) => v,
             Err(err) => {
-                bot.send_message(msg.chat.id, format!("Invalid sendfile path: {err}"))
+                bot.send_message(
+                    msg.chat.id,
+                    state
+                        .i18n
+                        .t_with("telegram.msg.sendfile_invalid_path", &[("error", &err)]),
+                )
                     .await
                     .context("send /sendfile path rejection failed")?;
                 return Ok(());
@@ -1048,10 +1330,12 @@ async fn handle_audio_message(
         if meta.len() as usize > state.max_audio_input_bytes {
             bot.send_message(
                 msg.chat.id,
-                format!(
-                    "语音文件过大（{} bytes），当前上限 {} bytes。",
-                    meta.len(),
-                    state.max_audio_input_bytes
+                state.i18n.t_with(
+                    "telegram.msg.audio_too_large",
+                    &[
+                        ("size", &meta.len().to_string()),
+                        ("limit", &state.max_audio_input_bytes.to_string()),
+                    ],
                 ),
             )
             .await
@@ -1080,7 +1364,7 @@ async fn handle_audio_message(
         .context("poll audio_transcribe result failed")?;
     let transcript = transcript.trim();
     if transcript.is_empty() {
-        bot.send_message(msg.chat.id, "语音转写结果为空，请重试。")
+        bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.audio_transcript_empty"))
             .await
             .context("send empty transcript message failed")?;
         return Ok(());
@@ -1109,7 +1393,7 @@ async fn handle_audio_message(
         .context("poll ask result for transcript failed")?;
     let mode = parse_voice_reply_mode(&effective_voice_reply_mode_for_chat(state, msg.chat.id.0));
     if matches!(mode, VoiceReplyMode::Text | VoiceReplyMode::Both) {
-        send_text_or_image(bot, msg.chat.id, &answer).await?;
+        send_text_or_image(bot, state, msg.chat.id, &answer).await?;
     }
 
     if matches!(mode, VoiceReplyMode::Voice | VoiceReplyMode::Both) {
@@ -1125,7 +1409,7 @@ async fn handle_audio_message(
             match submit_task_only(state, user_id, msg.chat.id.0, TaskKind::RunSkill, tts_payload).await {
                 Ok(tts_task_id) => match poll_task_result(state, &tts_task_id, Some(90)).await {
                     Ok(tts_answer) => {
-                        let _ = send_text_or_image(bot, msg.chat.id, &tts_answer).await;
+                        let _ = send_text_or_image(bot, state, msg.chat.id, &tts_answer).await;
                     }
                     Err(err) => {
                         warn!("audio_synthesize poll failed: {err}");
@@ -1137,7 +1421,7 @@ async fn handle_audio_message(
             }
         } else if matches!(mode, VoiceReplyMode::Voice) {
             // Voice-only mode but no speakable text: fallback to original answer.
-            send_text_or_image(bot, msg.chat.id, &answer).await?;
+            send_text_or_image(bot, state, msg.chat.id, &answer).await?;
         }
     }
     Ok(())
@@ -1259,6 +1543,10 @@ fn render_voice_chat_prompt(template: &str, transcript: &str) -> String {
     template.replace("__TRANSCRIPT__", transcript.trim())
 }
 
+fn render_voice_mode_intent_prompt(template: &str, user_text: &str) -> String {
+    template.replace("__USER_TEXT__", user_text.trim())
+}
+
 fn is_image_ext(ext: &str) -> bool {
     matches!(
         ext,
@@ -1283,7 +1571,7 @@ async fn try_deliver_quick_result(
 ) -> anyhow::Result<bool> {
     match poll_task_result(state, task_id, wait_override_seconds).await {
         Ok(answer) => {
-            send_text_or_image(bot, chat_id, &answer).await?;
+            send_text_or_image(bot, state, chat_id, &answer).await?;
             Ok(true)
         }
         Err(err) => {
@@ -1299,7 +1587,12 @@ async fn try_deliver_quick_result(
     }
 }
 
-async fn send_text_or_image(bot: &Bot, chat_id: ChatId, answer: &str) -> anyhow::Result<()> {
+fn is_image_saved_preface(text: &str) -> bool {
+    let t = text.trim();
+    t.starts_with("Image saved") || t.starts_with("Images saved")
+}
+
+async fn send_text_or_image(bot: &Bot, state: &BotState, chat_id: ChatId, answer: &str) -> anyhow::Result<()> {
     const PREFIX: &str = "IMAGE_FILE:";
     const FILE_PREFIX: &str = "FILE:";
     const VOICE_PREFIX: &str = "VOICE_FILE:";
@@ -1312,9 +1605,19 @@ async fn send_text_or_image(bot: &Bot, chat_id: ChatId, answer: &str) -> anyhow:
         let text_without_tokens =
             strip_prefixed_tokens(answer, &[PREFIX, FILE_PREFIX, VOICE_PREFIX]).trim().to_string();
         if !text_without_tokens.is_empty() {
-            bot.send_message(chat_id, text_without_tokens)
+            let sent = bot
+                .send_message(chat_id, &text_without_tokens)
                 .await
                 .context("send file preface text failed")?;
+            if state.ephemeral_image_saved_seconds > 0 && is_image_saved_preface(&text_without_tokens) {
+                let bot_clone = bot.clone();
+                let msg_id = sent.id;
+                let secs = state.ephemeral_image_saved_seconds;
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(secs)).await;
+                    let _ = bot_clone.delete_message(chat_id, msg_id).await;
+                });
+            }
         }
 
         for path in image_paths {
@@ -1452,8 +1755,10 @@ fn spawn_task_result_delivery(
         let soft_notice_seconds = soft_notice_override_seconds
             .unwrap_or(state.task_wait_seconds)
             .max(1);
+        let hard_notice_seconds = state.task_wait_seconds.max(1);
         let started_at = tokio::time::Instant::now();
         let mut soft_notice_sent = false;
+        let mut hard_notice_sent = false;
 
         loop {
             match query_task_status(&state, &task_id).await {
@@ -1462,6 +1767,12 @@ fn spawn_task_result_delivery(
                         if !soft_notice_sent
                             && started_at.elapsed() >= Duration::from_secs(soft_notice_seconds)
                         {
+                            info!(
+                                "task still running notice: phase=quick task_id={} chat_id={} elapsed_seconds={}",
+                                task_id,
+                                chat_id.0,
+                                soft_notice_seconds
+                            );
                             let msg = state.i18n.t_with(
                                 "telegram.msg.task_still_running_background",
                                 &[("seconds", &soft_notice_seconds.to_string())],
@@ -1469,11 +1780,28 @@ fn spawn_task_result_delivery(
                             let _ = bot.send_message(chat_id, msg).await;
                             soft_notice_sent = true;
                         }
+                        if !hard_notice_sent
+                            && hard_notice_seconds > soft_notice_seconds
+                            && started_at.elapsed() >= Duration::from_secs(hard_notice_seconds)
+                        {
+                            info!(
+                                "task still running notice: phase=worker_timeout task_id={} chat_id={} elapsed_seconds={}",
+                                task_id,
+                                chat_id.0,
+                                hard_notice_seconds
+                            );
+                            let msg = state.i18n.t_with(
+                                "telegram.msg.task_still_running_worker_timeout",
+                                &[("seconds", &hard_notice_seconds.to_string())],
+                            );
+                            let _ = bot.send_message(chat_id, msg).await;
+                            hard_notice_sent = true;
+                        }
                         tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
                     }
                     TaskStatus::Succeeded => {
                         let answer = task_success_text(&state, &task);
-                        let _ = send_text_or_image(&bot, chat_id, &answer).await;
+                        let _ = send_text_or_image(&bot, &state, chat_id, &answer).await;
                         break;
                     }
                     TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {

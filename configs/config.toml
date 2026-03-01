@@ -1,19 +1,7 @@
-[audio_synthesize]
-default_format = "opus"
-default_model = "gpt-4o-mini-tts"
-default_output_dir = "audio/download"
-default_vendor = "openai"
-default_voice = "alloy"
-max_concurrency = 1
-max_input_chars = 4000
-timeout_seconds = 60
-
-[audio_transcribe]
-default_model = "whisper-1"
-default_vendor = "openai"
-max_concurrency = 1
-max_input_bytes = 26214400
-timeout_seconds = 90
+[command_intent]
+default_locale = "zh-CN"
+llm_fallback_enabled = true
+rules_dir = "configs/command_intent"
 
 [database]
 busy_timeout_ms = 2000
@@ -22,6 +10,15 @@ sqlite_path = "data/rustclaw.db"
 [file_generation]
 default_output_dir = "document"
 
+# Image edit (in-place image modification) / 图像编辑（原图修改）
+# Supported vendors (current): openai, google, anthropic, grok / 当前支持厂商：openai、google、anthropic、grok
+# Native adapters: openai, google / 原生适配：openai、google
+# OpenAI-compatible required: anthropic, grok / anthropic、grok 需提供 OpenAI 兼容图像编辑接口
+# Compatibility switch: image_edit.allow_compat_adapters (default false) / 兼容开关：image_edit.allow_compat_adapters（默认 false）
+# Models by vendor / 厂商模型备注:
+# - openai: gpt-image-1（当前默认）
+# - google: 建议可产出图片的 Gemini 模型（例如 Gemini 图像能力模型）
+# - anthropic / grok: model 填对应兼容接口支持的模型名
 [image_edit]
 default_model = "gpt-image-1"
 default_output_dir = "image/download"
@@ -30,7 +27,17 @@ max_concurrency = 1
 max_images = 4
 max_input_bytes = 10485760
 timeout_seconds = 120
+allow_compat_adapters = false
 
+# Image generation (text to image) / 图像生成（文生图）
+# Supported vendors (current): openai, google, anthropic, grok / 当前支持厂商：openai、google、anthropic、grok
+# Native adapters: openai, google / 原生适配：openai、google
+# OpenAI-compatible required: anthropic, grok / anthropic、grok 需提供 OpenAI 兼容文生图接口
+# Compatibility switch: image_generation.allow_compat_adapters (default false) / 兼容开关：image_generation.allow_compat_adapters（默认 false）
+# Models by vendor / 厂商模型备注:
+# - openai: gpt-image-1（当前默认）
+# - google: 建议可产出图片的 Gemini 模型（例如 Gemini 图像能力模型）
+# - anthropic / grok: model 填对应兼容接口支持的模型名
 [image_generation]
 default_model = "gpt-image-1"
 default_output_dir = "image/download"
@@ -39,7 +46,19 @@ max_concurrency = 1
 max_images = 4
 max_input_bytes = 10485760
 timeout_seconds = 120
+allow_compat_adapters = false
 
+# Image vision (image understanding) / 图像理解（视觉分析）
+# Supported vendors (current): openai, google, anthropic / 当前支持厂商：openai、google、anthropic
+# Not available yet: grok / 暂不支持：grok
+# This skill has a unified input/output contract, but internally uses vendor-native adapters. / 该技能对外参数与返回是统一的，但内部走各厂商原生适配器。
+# Selection priority: request.vendor > image_vision.default_vendor > llm.selected_vendor / 厂商选择优先级：请求 vendor > image_vision.default_vendor > llm.selected_vendor
+# Model priority: request.model > image_vision.default_model > llm.<vendor>.model / 模型优先级：请求 model > image_vision.default_model > llm.<vendor>.model
+# Models by vendor / 厂商模型备注:
+# - openai: 建议用 llm.openai.models 里的多模态模型（如 gpt-4o / gpt-4o-mini）
+# - google: 建议用 llm.google.models（如 gemini-2.5-pro / gemini-2.5-flash）
+# - anthropic: 建议用 llm.anthropic.models（如 claude-sonnet-4-6）
+# - grok: 当前未接入 image_vision 适配器
 [image_vision]
 default_model = "gpt-4o-mini"
 default_output_dir = "image/upload"
@@ -48,6 +67,47 @@ max_concurrency = 1
 max_images = 6
 max_input_bytes = 10485760
 timeout_seconds = 90
+
+# Audio synthesize (TTS) / 语音合成（TTS）
+# Vendor selection supports: openai, google, anthropic, grok / 可选厂商：openai、google、anthropic、grok
+# Native adapters: google / 原生适配：google
+# OpenAI-compatible adapters: openai, anthropic, grok / 兼容接口适配：openai、anthropic、grok
+# Compatibility switch: audio_synthesize.allow_compat_adapters (default false) / 兼容开关：audio_synthesize.allow_compat_adapters（默认 false）
+# Selection priority: request.vendor > audio_synthesize.default_vendor > llm.selected_vendor / 厂商选择优先级：请求 vendor > audio_synthesize.default_vendor > llm.selected_vendor
+# Model priority: request.model > audio_synthesize.default_model > llm.<vendor>.model / 模型优先级：请求 model > audio_synthesize.default_model > llm.<vendor>.model
+# Models by vendor / 厂商模型备注:
+# - openai: gpt-4o-mini-tts（当前默认，可按官方可用 TTS 模型替换）
+# - google: 填可输出音频的 Gemini 模型（响应里应包含音频 base64）
+# - anthropic / grok: 需 base_url 提供 OpenAI 兼容 TTS 接口，model 填该接口支持的模型名
+[audio_synthesize]
+default_format = "opus"
+default_model = "gpt-4o-mini-tts"
+default_output_dir = "audio/download"
+default_vendor = "openai"
+default_voice = "nova"
+max_concurrency = 1
+max_input_chars = 4000
+timeout_seconds = 60
+allow_compat_adapters = false
+
+# Audio transcribe (STT) / 语音转写（STT）
+# Vendor selection supports: openai, google, anthropic, grok / 可选厂商：openai、google、anthropic、grok
+# Native adapters: google / 原生适配：google
+# OpenAI-compatible adapters: openai, anthropic, grok / 兼容接口适配：openai、anthropic、grok
+# Compatibility switch: audio_transcribe.allow_compat_adapters (default false) / 兼容开关：audio_transcribe.allow_compat_adapters（默认 false）
+# Selection priority: request.vendor > audio_transcribe.default_vendor > llm.selected_vendor / 厂商选择优先级：请求 vendor > audio_transcribe.default_vendor > llm.selected_vendor
+# Model priority: request.model > audio_transcribe.default_model > llm.<vendor>.model / 模型优先级：请求 model > audio_transcribe.default_model > llm.<vendor>.model
+# Models by vendor / 厂商模型备注:
+# - openai: whisper-1（当前默认，可按官方可用 STT 模型替换）
+# - google: 填支持音频输入的 Gemini 模型（返回文本候选）
+# - anthropic / grok: 需 base_url 提供 OpenAI 兼容 STT 接口，model 填该接口支持的模型名
+[audio_transcribe]
+default_model = "whisper-1"
+default_vendor = "openai"
+max_concurrency = 1
+max_input_bytes = 26214400
+timeout_seconds = 90
+allow_compat_adapters = false
 
 [limits]
 global_rpm = 60
@@ -61,12 +121,18 @@ selected_vendor = "openai"
 api_key = "REDACTED_API_KEY"
 base_url = "https://api.anthropic.com/v1"
 max_concurrency = 1
-model = "claude-3-7-sonnet-latest"
+model = "claude-sonnet-4-6"
 models = [
+    # 4.6 (latest / 最新)
+    "claude-opus-4-6",           # Top intelligence, agent/coding 最强智能 $5/$25
+    "claude-sonnet-4-6",         # Balanced speed/intelligence 均衡推荐 $3/$15
+    # 4.5
+    "claude-haiku-4-5-20251001", # Fastest, high-throughput 最快低延迟 $1/$5
+    # Legacy / 旧版
     "claude-3-7-sonnet-latest",
     "claude-3-5-haiku-latest",
 ]
-timeout_seconds = 30
+timeout_seconds = 60
 
 [llm.google]
 api_key = "REDACTED_API_KEY"
@@ -74,21 +140,35 @@ base_url = "https://generativelanguage.googleapis.com/v1beta"
 max_concurrency = 1
 model = "gemini-2.5-pro"
 models = [
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
+    # 3.x (latest preview / 最新预览)
+    "gemini-3.1-pro-preview",  # Flagship reasoning+agent 旗舰推理 preview
+    "gemini-3-flash-preview",  # Frontier low-cost 前沿低成本 preview
+    # 2.5 (stable / 稳定版)
+    "gemini-2.5-pro",          # Advanced reasoning w/ thinking 高级推理
+    "gemini-2.5-flash",        # Fast & cost-effective 高性价比低延迟
+    "gemini-2.5-flash-lite",   # Cheapest & fastest 最快最便宜
 ]
-timeout_seconds = 30
+timeout_seconds = 90
 
 [llm.grok]
 api_key = "REDACTED_API_KEY"
 base_url = "https://api.x.ai/v1"
 max_concurrency = 1
-model = "grok-2-latest"
+model = "grok-3"
 models = [
-    "grok-2-latest",
-    "grok-2-vision-latest",
+    # Grok 4
+    "grok-4-0709",                 # Flagship reasoning 旗舰推理 256k $3/$15
+    "grok-4-1-fast-reasoning",     # Fast reasoning 快速推理 2M ctx $0.2/$0.5
+    "grok-4-1-fast-non-reasoning", # Fast non-reasoning 快速非推理 2M ctx $0.2/$0.5
+    # Grok 3
+    "grok-3",                      # General purpose 通用 131k $3/$15
+    "grok-3-mini",                 # Lightweight 轻量高性价比 131k $0.3/$0.5
+    # Specialized / 专用
+    "grok-code-fast-1",            # Code-dedicated 代码专用 256k
+    # Legacy / 旧版
+    "grok-2-vision-1212",          # Vision model 视觉 32k
 ]
-timeout_seconds = 30
+timeout_seconds = 60
 
 [llm.openai]
 api_key = "REDACTED_API_KEY"
@@ -117,34 +197,21 @@ tasks_max_rows = 2000
 tasks_retention_days = 7
 
 [memory]
-item_max_chars = 1200
-long_term_enabled = true
-long_term_every_rounds = 8
-long_term_max_rows = 5000
-long_term_recall_max_chars = 700
-long_term_retention_days = 120
-long_term_source_rounds = 12
-long_term_summary_max_chars = 1600
-mark_llm_reply_in_short_term = true
-max_rows = 30000
-prefer_llm_assistant_memory = false
-prompt_max_chars = 4500
-prompt_recall_limit = 3
-recall_limit = 6
-retention_days = 21
+config_path = "configs/memory.toml"
+
+[persona]
+dir = "prompts/personas"
+profile = "executor"
 
 [routing]
 debug_log_prompt = false
 
-[command_intent]
-default_locale = "zh-CN"
-llm_fallback_enabled = true
-rules_dir = "configs/command_intent"
-
 [schedule]
-timezone = "Asia/Shanghai"
+i18n_dir = "configs/i18n"
 intent_prompt_path = "prompts/schedule_intent_prompt.md"
 intent_rules_path = "prompts/schedule_intent_rules.md"
+locale = "zh-CN"
+timezone = "Asia/Shanghai"
 
 [server]
 listen = "127.0.0.1:8787"
@@ -180,21 +247,29 @@ skills_list = [
 
 [telegram]
 admins = [1985996990]
+# 图片保存类回复（如 "Image saved: ..."）在 N 秒后自动删除，0 表示不删除
+ephemeral_image_saved_seconds = 15
 allowlist = []
 audio_inbox_dir = "audio/upload"
 auto_vision_on_image_only = false
 bot_token = "REDACTED_TELEGRAM_BOT_TOKEN"
+i18n_path = "configs/i18n/telegramd.zh-CN.toml"
+language = "zh-CN"
 max_audio_input_bytes = 26214400
 quick_result_wait_seconds = 10
+voice_mode_nl_intent_enabled = false
 voice_reply_mode = "voice"
-
-[telegram.voice_reply_mode_by_chat]
-1985996990 = "text"
 
 [telegram.sendfile]
 admin_only = false
+allowed_dirs = [
+    "image/download",
+    "document",
+]
 full_access = true
-allowed_dirs = ["image/download", "document"]
+
+[telegram.voice_reply_mode_by_chat]
+1985996990 = "text"
 
 [tools]
 allow = ["*"]

@@ -4,7 +4,7 @@ Candidates are ordered newest first.
 Return JSON only: {"selected_index":<number>}.
 Use -1 if there is no confident match.
 
-Recent conversation memory:
+Memory context (recent snippets + preferences + long-term summary):
 __MEMORY_TEXT__
 
 Current user edit request:

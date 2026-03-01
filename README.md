@@ -88,6 +88,37 @@ Example ask task:
 - `/voicemode show|voice|text|both|reset` (admin)
 - `/openclaw config show|vendors|set <vendor> <model>` (admin)
 
+## Media Vendor Support Matrix
+
+Current support in built-in media skills:
+
+- `image_generate`
+  - Native: `openai`, `google`
+  - Optional compatible mode for `anthropic`, `grok` (default off)
+- `image_edit`
+  - Native: `openai`, `google`
+  - Optional compatible mode for `anthropic`, `grok` (default off)
+- `image_vision`
+  - Native: `openai`, `google`, `anthropic`
+- `audio_synthesize`
+  - Native: `openai`, `google`
+  - Optional compatible mode for `anthropic`, `grok` (default off)
+- `audio_transcribe`
+  - Native: `openai`, `google`
+  - Optional compatible mode for `anthropic`, `grok` (default off)
+
+Resolution priority for media vendor/model selection:
+
+- vendor: request args `vendor` > skill section `default_vendor` > `llm.selected_vendor`
+- model: request args `model` > skill section `default_model` > `llm.<vendor>.model`
+
+Compatibility switches in `configs/config.toml` (all default `false`):
+
+- `image_generation.allow_compat_adapters`
+- `image_edit.allow_compat_adapters`
+- `audio_synthesize.allow_compat_adapters`
+- `audio_transcribe.allow_compat_adapters`
+
 ## Shell Scripts and What They Do
 
 - `build-all.sh`  

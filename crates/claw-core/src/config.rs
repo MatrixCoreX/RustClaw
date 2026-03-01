@@ -31,6 +31,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub command_intent: CommandIntentConfig,
     #[serde(default)]
+    pub persona: PersonaConfig,
+    #[serde(default)]
     pub schedule: ScheduleConfig,
 }
 
@@ -46,6 +48,10 @@ pub struct TelegramConfig {
     pub admins: Vec<i64>,
     #[serde(default)]
     pub allowlist: Vec<i64>,
+    #[serde(default = "default_telegram_language")]
+    pub language: String,
+    #[serde(default = "default_telegram_i18n_path")]
+    pub i18n_path: String,
     #[serde(default = "default_telegram_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
     #[serde(default = "default_telegram_auto_vision_on_image_only")]
@@ -54,10 +60,14 @@ pub struct TelegramConfig {
     pub audio_inbox_dir: String,
     #[serde(default = "default_telegram_voice_reply_mode")]
     pub voice_reply_mode: String,
+    #[serde(default = "default_telegram_voice_mode_nl_intent_enabled")]
+    pub voice_mode_nl_intent_enabled: bool,
     #[serde(default)]
     pub voice_reply_mode_by_chat: HashMap<String, String>,
     #[serde(default = "default_telegram_max_audio_input_bytes")]
     pub max_audio_input_bytes: usize,
+    #[serde(default = "default_telegram_ephemeral_image_saved_seconds")]
+    pub ephemeral_image_saved_seconds: u64,
     #[serde(default)]
     pub sendfile: SendfileConfig,
 }
@@ -209,6 +219,8 @@ impl Default for MaintenanceConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MemoryConfig {
+    #[serde(default = "default_memory_config_path")]
+    pub config_path: String,
     #[serde(default = "default_memory_mark_llm_reply_in_short_term")]
     pub mark_llm_reply_in_short_term: bool,
     #[serde(default = "default_memory_prefer_llm_assistant_memory")]
@@ -239,11 +251,52 @@ pub struct MemoryConfig {
     pub long_term_retention_days: u64,
     #[serde(default = "default_memory_long_term_max_rows")]
     pub long_term_max_rows: usize,
+    #[serde(default = "default_memory_write_filter_enabled")]
+    pub write_filter_enabled: bool,
+    #[serde(default = "default_memory_write_min_chars")]
+    pub write_min_chars: usize,
+    #[serde(default = "default_memory_enable_preference_extraction")]
+    pub enable_preference_extraction: bool,
+    #[serde(default = "default_memory_preference_recall_limit")]
+    pub preference_recall_limit: usize,
+    #[serde(default = "default_memory_recent_relevance_enabled")]
+    pub recent_relevance_enabled: bool,
+    #[serde(default = "default_memory_recent_relevance_min_score")]
+    pub recent_relevance_min_score: f32,
+    #[serde(default = "default_memory_safety_filter_enabled")]
+    pub safety_filter_enabled: bool,
+    #[serde(default = "default_memory_long_term_refresh_min_new_chars")]
+    pub long_term_refresh_min_new_chars: usize,
+    #[serde(default = "default_memory_long_term_refresh_max_repeat_ratio")]
+    pub long_term_refresh_max_repeat_ratio: f32,
+    #[serde(default = "default_memory_route_memory_enabled")]
+    pub route_memory_enabled: bool,
+    #[serde(default = "default_memory_route_memory_max_chars")]
+    pub route_memory_max_chars: usize,
+    #[serde(default = "default_memory_skill_memory_enabled")]
+    pub skill_memory_enabled: bool,
+    #[serde(default = "default_memory_skill_memory_max_chars")]
+    pub skill_memory_max_chars: usize,
+    #[serde(default = "default_memory_schedule_memory_include_long_term")]
+    pub schedule_memory_include_long_term: bool,
+    #[serde(default = "default_memory_schedule_memory_include_preferences")]
+    pub schedule_memory_include_preferences: bool,
+    #[serde(default = "default_memory_schedule_memory_max_chars")]
+    pub schedule_memory_max_chars: usize,
+    #[serde(default = "default_memory_image_memory_include_long_term")]
+    pub image_memory_include_long_term: bool,
+    #[serde(default = "default_memory_image_memory_include_preferences")]
+    pub image_memory_include_preferences: bool,
+    #[serde(default = "default_memory_image_memory_max_chars")]
+    pub image_memory_max_chars: usize,
+    #[serde(default)]
+    pub rules: MemoryRulesConfig,
 }
 
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            config_path: default_memory_config_path(),
             mark_llm_reply_in_short_term: default_memory_mark_llm_reply_in_short_term(),
             prefer_llm_assistant_memory: default_memory_prefer_llm_assistant_memory(),
             prompt_recall_limit: default_memory_prompt_recall_limit(),
@@ -259,6 +312,78 @@ impl Default for MemoryConfig {
             long_term_recall_max_chars: default_memory_long_term_recall_max_chars(),
             long_term_retention_days: default_memory_long_term_retention_days(),
             long_term_max_rows: default_memory_long_term_max_rows(),
+            write_filter_enabled: default_memory_write_filter_enabled(),
+            write_min_chars: default_memory_write_min_chars(),
+            enable_preference_extraction: default_memory_enable_preference_extraction(),
+            preference_recall_limit: default_memory_preference_recall_limit(),
+            recent_relevance_enabled: default_memory_recent_relevance_enabled(),
+            recent_relevance_min_score: default_memory_recent_relevance_min_score(),
+            safety_filter_enabled: default_memory_safety_filter_enabled(),
+            long_term_refresh_min_new_chars: default_memory_long_term_refresh_min_new_chars(),
+            long_term_refresh_max_repeat_ratio: default_memory_long_term_refresh_max_repeat_ratio(),
+            route_memory_enabled: default_memory_route_memory_enabled(),
+            route_memory_max_chars: default_memory_route_memory_max_chars(),
+            skill_memory_enabled: default_memory_skill_memory_enabled(),
+            skill_memory_max_chars: default_memory_skill_memory_max_chars(),
+            schedule_memory_include_long_term: default_memory_schedule_memory_include_long_term(),
+            schedule_memory_include_preferences: default_memory_schedule_memory_include_preferences(),
+            schedule_memory_max_chars: default_memory_schedule_memory_max_chars(),
+            image_memory_include_long_term: default_memory_image_memory_include_long_term(),
+            image_memory_include_preferences: default_memory_image_memory_include_preferences(),
+            image_memory_max_chars: default_memory_image_memory_max_chars(),
+            rules: MemoryRulesConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryRulesConfig {
+    #[serde(default = "default_memory_rule_assistant_ack_skip")]
+    pub assistant_ack_skip: Vec<String>,
+    #[serde(default = "default_memory_rule_instruction_markers")]
+    pub instruction_markers: Vec<String>,
+    #[serde(default = "default_memory_rule_injection_markers")]
+    pub injection_markers: Vec<String>,
+    #[serde(default = "default_memory_rule_salience_boost_markers")]
+    pub salience_boost_markers: Vec<String>,
+    #[serde(default)]
+    pub preferences: MemoryPreferenceRulesConfig,
+}
+
+impl Default for MemoryRulesConfig {
+    fn default() -> Self {
+        Self {
+            assistant_ack_skip: default_memory_rule_assistant_ack_skip(),
+            instruction_markers: default_memory_rule_instruction_markers(),
+            injection_markers: default_memory_rule_injection_markers(),
+            salience_boost_markers: default_memory_rule_salience_boost_markers(),
+            preferences: MemoryPreferenceRulesConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryPreferenceRulesConfig {
+    #[serde(default = "default_memory_rule_pref_language_zh")]
+    pub language_zh: Vec<String>,
+    #[serde(default = "default_memory_rule_pref_language_en")]
+    pub language_en: Vec<String>,
+    #[serde(default = "default_memory_rule_pref_style_concise")]
+    pub style_concise: Vec<String>,
+    #[serde(default = "default_memory_rule_pref_style_detailed")]
+    pub style_detailed: Vec<String>,
+    #[serde(default = "default_memory_rule_pref_format_plain_text")]
+    pub format_plain_text: Vec<String>,
+}
+
+impl Default for MemoryPreferenceRulesConfig {
+    fn default() -> Self {
+        Self {
+            language_zh: default_memory_rule_pref_language_zh(),
+            language_en: default_memory_rule_pref_language_en(),
+            style_concise: default_memory_rule_pref_style_concise(),
+            style_detailed: default_memory_rule_pref_style_detailed(),
+            format_plain_text: default_memory_rule_pref_format_plain_text(),
         }
     }
 }
@@ -351,6 +476,23 @@ impl Default for RoutingConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct PersonaConfig {
+    #[serde(default = "default_persona_profile")]
+    pub profile: String,
+    #[serde(default = "default_persona_dir")]
+    pub dir: String,
+}
+
+impl Default for PersonaConfig {
+    fn default() -> Self {
+        Self {
+            profile: default_persona_profile(),
+            dir: default_persona_dir(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct CommandIntentConfig {
     #[serde(default = "default_command_intent_default_locale")]
     pub default_locale: String,
@@ -378,6 +520,10 @@ pub struct ScheduleConfig {
     pub intent_prompt_path: String,
     #[serde(default = "default_schedule_intent_rules_path")]
     pub intent_rules_path: String,
+    #[serde(default = "default_schedule_locale")]
+    pub locale: String,
+    #[serde(default = "default_schedule_i18n_dir")]
+    pub i18n_dir: String,
 }
 
 impl Default for ScheduleConfig {
@@ -386,6 +532,8 @@ impl Default for ScheduleConfig {
             timezone: default_schedule_timezone(),
             intent_prompt_path: default_schedule_intent_prompt_path(),
             intent_rules_path: default_schedule_intent_rules_path(),
+            locale: default_schedule_locale(),
+            i18n_dir: default_schedule_i18n_dir(),
         }
     }
 }
@@ -459,6 +607,10 @@ fn default_memory_mark_llm_reply_in_short_term() -> bool {
     true
 }
 
+fn default_memory_config_path() -> String {
+    "configs/memory.toml".to_string()
+}
+
 fn default_memory_prefer_llm_assistant_memory() -> bool {
     false
 }
@@ -515,12 +667,182 @@ fn default_memory_long_term_max_rows() -> usize {
     10000
 }
 
+fn default_memory_write_filter_enabled() -> bool {
+    true
+}
+
+fn default_memory_write_min_chars() -> usize {
+    12
+}
+
+fn default_memory_enable_preference_extraction() -> bool {
+    true
+}
+
+fn default_memory_preference_recall_limit() -> usize {
+    8
+}
+
+fn default_memory_recent_relevance_enabled() -> bool {
+    true
+}
+
+fn default_memory_recent_relevance_min_score() -> f32 {
+    0.16
+}
+
+fn default_memory_safety_filter_enabled() -> bool {
+    true
+}
+
+fn default_memory_long_term_refresh_min_new_chars() -> usize {
+    80
+}
+
+fn default_memory_long_term_refresh_max_repeat_ratio() -> f32 {
+    0.7
+}
+
+fn default_memory_route_memory_enabled() -> bool {
+    true
+}
+
+fn default_memory_route_memory_max_chars() -> usize {
+    1400
+}
+
+fn default_memory_skill_memory_enabled() -> bool {
+    true
+}
+
+fn default_memory_skill_memory_max_chars() -> usize {
+    1800
+}
+
+fn default_memory_schedule_memory_include_long_term() -> bool {
+    true
+}
+
+fn default_memory_schedule_memory_include_preferences() -> bool {
+    true
+}
+
+fn default_memory_schedule_memory_max_chars() -> usize {
+    1600
+}
+
+fn default_memory_image_memory_include_long_term() -> bool {
+    true
+}
+
+fn default_memory_image_memory_include_preferences() -> bool {
+    true
+}
+
+fn default_memory_image_memory_max_chars() -> usize {
+    1400
+}
+
+fn default_memory_rule_assistant_ack_skip() -> Vec<String> {
+    vec![
+        "ok".to_string(),
+        "okay".to_string(),
+        "done".to_string(),
+        "received".to_string(),
+        "收到".to_string(),
+        "好的".to_string(),
+        "明白了".to_string(),
+    ]
+}
+
+fn default_memory_rule_instruction_markers() -> Vec<String> {
+    vec![
+        "请".to_string(),
+        "执行".to_string(),
+        "run ".to_string(),
+        "please ".to_string(),
+    ]
+}
+
+fn default_memory_rule_injection_markers() -> Vec<String> {
+    vec![
+        "ignore previous instructions".to_string(),
+        "ignore all previous rules".to_string(),
+        "system prompt".to_string(),
+        "泄露提示词".to_string(),
+        "忽略之前所有规则".to_string(),
+        "忽略系统规则".to_string(),
+    ]
+}
+
+fn default_memory_rule_salience_boost_markers() -> Vec<String> {
+    vec!["以后".to_string(), "always".to_string(), "默认".to_string()]
+}
+
+fn default_memory_rule_pref_language_zh() -> Vec<String> {
+    vec![
+        "以后都用中文".to_string(),
+        "请用中文".to_string(),
+        "中文回复".to_string(),
+        "默认中文".to_string(),
+        "都说中文".to_string(),
+    ]
+}
+
+fn default_memory_rule_pref_language_en() -> Vec<String> {
+    vec![
+        "以后都用英文".to_string(),
+        "请用英文".to_string(),
+        "英文回复".to_string(),
+        "reply in english".to_string(),
+        "speak english".to_string(),
+    ]
+}
+
+fn default_memory_rule_pref_style_concise() -> Vec<String> {
+    vec![
+        "简洁".to_string(),
+        "简短".to_string(),
+        "精简".to_string(),
+        "concise".to_string(),
+        "brief".to_string(),
+    ]
+}
+
+fn default_memory_rule_pref_style_detailed() -> Vec<String> {
+    vec![
+        "详细".to_string(),
+        "展开".to_string(),
+        "细一点".to_string(),
+        "detailed".to_string(),
+        "step by step".to_string(),
+    ]
+}
+
+fn default_memory_rule_pref_format_plain_text() -> Vec<String> {
+    vec![
+        "不要markdown".to_string(),
+        "别用markdown".to_string(),
+        "纯文本".to_string(),
+        "plain text".to_string(),
+        "no markdown".to_string(),
+    ]
+}
+
 fn default_tools_profile() -> String {
     "full".to_string()
 }
 
 fn default_telegram_quick_result_wait_seconds() -> u64 {
     3
+}
+
+fn default_telegram_i18n_path() -> String {
+    "configs/i18n/telegramd.zh-CN.toml".to_string()
+}
+
+fn default_telegram_language() -> String {
+    "zh-CN".to_string()
 }
 
 fn default_telegram_auto_vision_on_image_only() -> bool {
@@ -535,8 +857,16 @@ fn default_telegram_voice_reply_mode() -> String {
     "voice".to_string()
 }
 
+fn default_telegram_voice_mode_nl_intent_enabled() -> bool {
+    true
+}
+
 fn default_telegram_max_audio_input_bytes() -> usize {
     25 * 1024 * 1024
+}
+
+fn default_telegram_ephemeral_image_saved_seconds() -> u64 {
+    15
 }
 
 fn default_sendfile_admin_only() -> bool {
@@ -609,6 +939,22 @@ fn default_schedule_intent_prompt_path() -> String {
 
 fn default_schedule_intent_rules_path() -> String {
     "prompts/schedule_intent_rules.md".to_string()
+}
+
+fn default_schedule_locale() -> String {
+    "zh-CN".to_string()
+}
+
+fn default_schedule_i18n_dir() -> String {
+    "configs/i18n".to_string()
+}
+
+fn default_persona_profile() -> String {
+    "executor".to_string()
+}
+
+fn default_persona_dir() -> String {
+    "prompts/personas".to_string()
 }
 
 impl AppConfig {

@@ -37,6 +37,12 @@ struct LlmConfig {
     selected_vendor: Option<String>,
     #[serde(default)]
     openai: Option<VendorConfig>,
+    #[serde(default)]
+    google: Option<VendorConfig>,
+    #[serde(default)]
+    anthropic: Option<VendorConfig>,
+    #[serde(default)]
+    grok: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -58,6 +64,8 @@ struct ImageSkillConfig {
     default_model: Option<String>,
     #[serde(default)]
     timeout_seconds: Option<u64>,
+    #[serde(default)]
+    allow_compat_adapters: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -65,6 +73,7 @@ enum VendorKind {
     OpenAI,
     Google,
     Anthropic,
+    Grok,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -152,17 +161,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     )?;
 
     let mut provider_errors: Vec<String> = Vec::new();
-    let mut unsupported_errors: Vec<String> = Vec::new();
-    let mut attempted = 0usize;
     for vendor in providers {
-        if !supports_generate(vendor) {
-            unsupported_errors.push(format!(
-                "vendor {} does not support image_generate",
-                vendor_name(vendor)
-            ));
-            continue;
-        }
-        attempted += 1;
         match call_generate(
             vendor,
             cfg,
@@ -190,13 +189,6 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
             }
             Err(err) => provider_errors.push(err),
         }
-    }
-    if attempted == 0 {
-        return Err(format!(
-            "no supported provider for image_generate; requested vendor={}; {}",
-            requested_vendor.unwrap_or("auto"),
-            unsupported_errors.join("; ")
-        ));
     }
     Err(format!(
         "all providers failed: {}",
@@ -233,8 +225,9 @@ fn call_generate(
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
                 .build()
                 .map_err(|err| format!("build openai client failed: {err}"))?;
-            openai_generate(
+            openai_compatible_generate(
                 &client,
+                "openai",
                 vcfg,
                 &model,
                 prompt,
@@ -246,14 +239,85 @@ fn call_generate(
             )?;
             Ok(model)
         }
-        VendorKind::Google => Err("google image generation adapter is not available yet".to_string()),
-        VendorKind::Anthropic => Err("anthropic image generation adapter is not available yet".to_string()),
+        VendorKind::Google => {
+            let vcfg = cfg
+                .llm
+                .google
+                .as_ref()
+                .ok_or_else(|| "google config missing".to_string())?;
+            check_api_key("google", &vcfg.api_key)?;
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .build()
+                .map_err(|err| format!("build google client failed: {err}"))?;
+            google_generate(
+                &client, vcfg, &model, prompt, size, style, quality, n, output_path,
+            )?;
+            Ok(model)
+        }
+        VendorKind::Anthropic => {
+            if !cfg.image_generation.allow_compat_adapters {
+                return Err(
+                    "anthropic native image generation adapter is not available; set image_generation.allow_compat_adapters=true to use compatible endpoint"
+                        .to_string(),
+                );
+            }
+            let vcfg = cfg
+                .llm
+                .anthropic
+                .as_ref()
+                .ok_or_else(|| "anthropic config missing".to_string())?;
+            check_api_key("anthropic", &vcfg.api_key)?;
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .build()
+                .map_err(|err| format!("build anthropic client failed: {err}"))?;
+            openai_compatible_generate(
+                &client,
+                "anthropic",
+                vcfg,
+                &model,
+                prompt,
+                size,
+                style,
+                quality,
+                n,
+                output_path,
+            )?;
+            Ok(model)
+        }
+        VendorKind::Grok => {
+            if !cfg.image_generation.allow_compat_adapters {
+                return Err(
+                    "grok native image generation adapter is not available; set image_generation.allow_compat_adapters=true to use compatible endpoint"
+                        .to_string(),
+                );
+            }
+            let vcfg = cfg
+                .llm
+                .grok
+                .as_ref()
+                .ok_or_else(|| "grok config missing".to_string())?;
+            check_api_key("grok", &vcfg.api_key)?;
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .build()
+                .map_err(|err| format!("build grok client failed: {err}"))?;
+            openai_compatible_generate(
+                &client, "grok", vcfg, &model, prompt, size, style, quality, n, output_path,
+            )?;
+            Ok(model)
+        }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn openai_generate(
+fn openai_compatible_generate(
     client: &Client,
+    vendor_name: &str,
     cfg: &VendorConfig,
     model: &str,
     prompt: &str,
@@ -285,20 +349,28 @@ fn openai_generate(
         .bearer_auth(&cfg.api_key)
         .json(&body)
         .send()
-        .map_err(|err| format!("openai request failed: {err}"))?;
+        .map_err(|err| format!("{vendor_name} request failed: {err}"))?;
     let status = resp.status().as_u16();
     let v: Value = resp
         .json()
-        .map_err(|err| format!("parse openai response failed: {err}"))?;
+        .map_err(|err| format!("parse {vendor_name} response failed: {err}"))?;
     if status >= 300 {
-        return Err(format!("openai error status={status}: {}", truncate(&v.to_string(), 400)));
+        return Err(format!(
+            "{vendor_name} error status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
     }
 
     let item = v
         .get("data")
         .and_then(|v| v.as_array())
         .and_then(|arr| arr.first())
-        .ok_or_else(|| format!("openai response missing data: {}", truncate(&v.to_string(), 400)))?;
+        .ok_or_else(|| {
+            format!(
+                "{vendor_name} response missing data: {}",
+                truncate(&v.to_string(), 400)
+            )
+        })?;
     if let Some(b64) = item.get("b64_json").and_then(|v| v.as_str()) {
         let bytes = STANDARD
             .decode(b64)
@@ -319,13 +391,80 @@ fn openai_generate(
         return Ok(());
     }
     Err(format!(
-        "openai response contains no image payload: {}",
+        "{vendor_name} response contains no image payload: {}",
         truncate(&v.to_string(), 400)
     ))
 }
 
-fn supports_generate(vendor: VendorKind) -> bool {
-    matches!(vendor, VendorKind::OpenAI)
+#[allow(clippy::too_many_arguments)]
+fn google_generate(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    prompt: &str,
+    size: &str,
+    style: Option<&str>,
+    quality: Option<&str>,
+    _n: u64,
+    output_path: &Path,
+) -> Result<(), String> {
+    let mut full_prompt = format!("Generate one image. Size hint: {size}. Prompt: {prompt}");
+    if let Some(v) = style {
+        full_prompt.push_str(&format!(" Style: {v}."));
+    }
+    if let Some(v) = quality {
+        full_prompt.push_str(&format!(" Quality: {v}."));
+    }
+    let body = json!({
+        "contents": [{"parts":[{"text": full_prompt}]}],
+        "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}
+    });
+    let url = format!(
+        "{}/models/{}:generateContent?key={}",
+        trim_trailing_slash(&cfg.base_url),
+        model,
+        cfg.api_key
+    );
+    let resp = client
+        .post(url)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("google request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let v: Value = resp
+        .json()
+        .map_err(|err| format!("parse google response failed: {err}"))?;
+    if status >= 300 {
+        return Err(format!("google error status={status}: {}", truncate(&v.to_string(), 400)));
+    }
+    if let Some(parts) = v
+        .get("candidates")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(|p| p.as_array())
+    {
+        for part in parts {
+            if let Some(b64) = part
+                .get("inlineData")
+                .or_else(|| part.get("inline_data"))
+                .and_then(|i| i.get("data"))
+                .and_then(|d| d.as_str())
+            {
+                let bytes = STANDARD
+                    .decode(b64)
+                    .map_err(|err| format!("decode google image base64 failed: {err}"))?;
+                ensure_parent_dir(output_path)?;
+                std::fs::write(output_path, bytes)
+                    .map_err(|err| format!("write output failed: {err}"))?;
+                return Ok(());
+            }
+        }
+    }
+    Err(format!(
+        "google response contains no image payload: {}",
+        truncate(&v.to_string(), 400)
+    ))
 }
 
 fn resolve_output_path(
@@ -390,6 +529,7 @@ fn vendor_order(
         Some("openai"),
         Some("google"),
         Some("anthropic"),
+        Some("grok"),
     ]
     .into_iter()
     .flatten()
@@ -408,6 +548,7 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "openai" => Some(VendorKind::OpenAI),
         "google" | "gemini" => Some(VendorKind::Google),
         "anthropic" | "claude" => Some(VendorKind::Anthropic),
+        "grok" | "xai" => Some(VendorKind::Grok),
         _ => None,
     }
 }
@@ -417,6 +558,7 @@ fn vendor_name(v: VendorKind) -> &'static str {
         VendorKind::OpenAI => "openai",
         VendorKind::Google => "google",
         VendorKind::Anthropic => "anthropic",
+        VendorKind::Grok => "grok",
     }
 }
 
@@ -455,5 +597,6 @@ mod tests {
         assert_eq!(parse_vendor("openai"), Some(VendorKind::OpenAI));
         assert_eq!(parse_vendor("gemini"), Some(VendorKind::Google));
         assert_eq!(parse_vendor("claude"), Some(VendorKind::Anthropic));
+        assert_eq!(parse_vendor("xai"), Some(VendorKind::Grok));
     }
 }

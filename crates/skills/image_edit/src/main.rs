@@ -37,6 +37,12 @@ struct LlmConfig {
     selected_vendor: Option<String>,
     #[serde(default)]
     openai: Option<VendorConfig>,
+    #[serde(default)]
+    google: Option<VendorConfig>,
+    #[serde(default)]
+    anthropic: Option<VendorConfig>,
+    #[serde(default)]
+    grok: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -60,6 +66,8 @@ struct ImageSkillConfig {
     timeout_seconds: Option<u64>,
     #[serde(default)]
     max_input_bytes: Option<usize>,
+    #[serde(default)]
+    allow_compat_adapters: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,6 +75,7 @@ enum VendorKind {
     OpenAI,
     Google,
     Anthropic,
+    Grok,
 }
 
 #[derive(Debug, Clone)]
@@ -179,17 +188,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     let n = obj.get("n").and_then(|v| v.as_u64()).unwrap_or(1).clamp(1, 2);
 
     let mut provider_errors: Vec<String> = Vec::new();
-    let mut unsupported_errors: Vec<String> = Vec::new();
-    let mut attempted = 0usize;
     for vendor in providers {
-        if !supports_edit(vendor) {
-            unsupported_errors.push(format!(
-                "vendor {} does not support image_edit",
-                vendor_name(vendor)
-            ));
-            continue;
-        }
-        attempted += 1;
         match call_edit(
             vendor,
             cfg,
@@ -220,13 +219,6 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
             }
             Err(err) => provider_errors.push(err),
         }
-    }
-    if attempted == 0 {
-        return Err(format!(
-            "no supported provider for image_edit; requested vendor={}; {}",
-            requested_vendor.unwrap_or("auto"),
-            unsupported_errors.join("; ")
-        ));
     }
     Err(format!(
         "all providers failed: {}",
@@ -265,7 +257,35 @@ fn call_edit(
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
                 .build()
                 .map_err(|err| format!("build openai client failed: {err}"))?;
-            openai_edit(
+            openai_compatible_edit(
+                &client,
+                "openai",
+                vcfg,
+                &model,
+                instruction,
+                image,
+                mask,
+                size,
+                quality,
+                n,
+                max_input_bytes,
+                output_path,
+            )?;
+            Ok(model)
+        }
+        VendorKind::Google => {
+            let vcfg = cfg
+                .llm
+                .google
+                .as_ref()
+                .ok_or_else(|| "google config missing".to_string())?;
+            check_api_key("google", &vcfg.api_key)?;
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .build()
+                .map_err(|err| format!("build google client failed: {err}"))?;
+            google_edit(
                 &client,
                 vcfg,
                 &model,
@@ -280,14 +300,81 @@ fn call_edit(
             )?;
             Ok(model)
         }
-        VendorKind::Google => Err("google image edit adapter is not available yet".to_string()),
-        VendorKind::Anthropic => Err("anthropic image edit adapter is not available yet".to_string()),
+        VendorKind::Anthropic => {
+            if !cfg.image_edit.allow_compat_adapters {
+                return Err(
+                    "anthropic native image edit adapter is not available; set image_edit.allow_compat_adapters=true to use compatible endpoint"
+                        .to_string(),
+                );
+            }
+            let vcfg = cfg
+                .llm
+                .anthropic
+                .as_ref()
+                .ok_or_else(|| "anthropic config missing".to_string())?;
+            check_api_key("anthropic", &vcfg.api_key)?;
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .build()
+                .map_err(|err| format!("build anthropic client failed: {err}"))?;
+            openai_compatible_edit(
+                &client,
+                "anthropic",
+                vcfg,
+                &model,
+                instruction,
+                image,
+                mask,
+                size,
+                quality,
+                n,
+                max_input_bytes,
+                output_path,
+            )?;
+            Ok(model)
+        }
+        VendorKind::Grok => {
+            if !cfg.image_edit.allow_compat_adapters {
+                return Err(
+                    "grok native image edit adapter is not available; set image_edit.allow_compat_adapters=true to use compatible endpoint"
+                        .to_string(),
+                );
+            }
+            let vcfg = cfg
+                .llm
+                .grok
+                .as_ref()
+                .ok_or_else(|| "grok config missing".to_string())?;
+            check_api_key("grok", &vcfg.api_key)?;
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .build()
+                .map_err(|err| format!("build grok client failed: {err}"))?;
+            openai_compatible_edit(
+                &client,
+                "grok",
+                vcfg,
+                &model,
+                instruction,
+                image,
+                mask,
+                size,
+                quality,
+                n,
+                max_input_bytes,
+                output_path,
+            )?;
+            Ok(model)
+        }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn openai_edit(
+fn openai_compatible_edit(
     client: &Client,
+    vendor_name: &str,
     cfg: &VendorConfig,
     model: &str,
     instruction: &str,
@@ -330,20 +417,28 @@ fn openai_edit(
         .bearer_auth(&cfg.api_key)
         .multipart(form)
         .send()
-        .map_err(|err| format!("openai request failed: {err}"))?;
+        .map_err(|err| format!("{vendor_name} request failed: {err}"))?;
     let status = resp.status().as_u16();
     let v: Value = resp
         .json()
-        .map_err(|err| format!("parse openai response failed: {err}"))?;
+        .map_err(|err| format!("parse {vendor_name} response failed: {err}"))?;
     if status >= 300 {
-        return Err(format!("openai error status={status}: {}", truncate(&v.to_string(), 400)));
+        return Err(format!(
+            "{vendor_name} error status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
     }
 
     let item = v
         .get("data")
         .and_then(|v| v.as_array())
         .and_then(|arr| arr.first())
-        .ok_or_else(|| format!("openai response missing data: {}", truncate(&v.to_string(), 400)))?;
+        .ok_or_else(|| {
+            format!(
+                "{vendor_name} response missing data: {}",
+                truncate(&v.to_string(), 400)
+            )
+        })?;
     if let Some(b64) = item.get("b64_json").and_then(|v| v.as_str()) {
         let bytes = STANDARD
             .decode(b64)
@@ -365,7 +460,91 @@ fn openai_edit(
     }
 
     Err(format!(
-        "openai response contains no image payload: {}",
+        "{vendor_name} response contains no image payload: {}",
+        truncate(&v.to_string(), 400)
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn google_edit(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    instruction: &str,
+    image: &ImageSource,
+    mask: Option<&ImageSource>,
+    size: &str,
+    quality: Option<&str>,
+    _n: u64,
+    max_input_bytes: usize,
+    output_path: &Path,
+) -> Result<(), String> {
+    let mut parts = vec![json!({"text": format!(
+        "Edit this image. Size hint: {size}. {}{}",
+        instruction,
+        quality.map(|q| format!(" Quality: {q}.")).unwrap_or_default()
+    )})];
+    let (image_bytes, image_mime) = load_image_bytes(client, image, max_input_bytes)?;
+    parts.push(json!({"inline_data": {
+        "mime_type": image_mime,
+        "data": STANDARD.encode(image_bytes)
+    }}));
+    if let Some(mask_source) = mask {
+        let (mask_bytes, mask_mime) = load_image_bytes(client, mask_source, max_input_bytes)?;
+        parts.push(json!({"inline_data": {
+            "mime_type": mask_mime,
+            "data": STANDARD.encode(mask_bytes)
+        }}));
+        parts.push(json!({"text": "Second image is mask guidance."}));
+    }
+    let body = json!({
+        "contents": [{"parts": parts}],
+        "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}
+    });
+    let url = format!(
+        "{}/models/{}:generateContent?key={}",
+        trim_trailing_slash(&cfg.base_url),
+        model,
+        cfg.api_key
+    );
+    let resp = client
+        .post(url)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("google request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let v: Value = resp
+        .json()
+        .map_err(|err| format!("parse google response failed: {err}"))?;
+    if status >= 300 {
+        return Err(format!("google error status={status}: {}", truncate(&v.to_string(), 400)));
+    }
+    if let Some(parts) = v
+        .get("candidates")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(|p| p.as_array())
+    {
+        for part in parts {
+            if let Some(b64) = part
+                .get("inlineData")
+                .or_else(|| part.get("inline_data"))
+                .and_then(|i| i.get("data"))
+                .and_then(|d| d.as_str())
+            {
+                let bytes = STANDARD
+                    .decode(b64)
+                    .map_err(|err| format!("decode google image base64 failed: {err}"))?;
+                ensure_parent_dir(output_path)?;
+                std::fs::write(output_path, bytes)
+                    .map_err(|err| format!("write output failed: {err}"))?;
+                return Ok(());
+            }
+        }
+    }
+    Err(format!(
+        "google response contains no image payload: {}",
         truncate(&v.to_string(), 400)
     ))
 }
@@ -471,10 +650,6 @@ fn rewrite_instruction(action: &str, instruction: &str) -> String {
     }
 }
 
-fn supports_edit(vendor: VendorKind) -> bool {
-    matches!(vendor, VendorKind::OpenAI)
-}
-
 fn resolve_output_path(
     workspace_root: &Path,
     default_dir: &str,
@@ -537,6 +712,7 @@ fn vendor_order(
         Some("openai"),
         Some("google"),
         Some("anthropic"),
+        Some("grok"),
     ]
     .into_iter()
     .flatten()
@@ -555,6 +731,7 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "openai" => Some(VendorKind::OpenAI),
         "google" | "gemini" => Some(VendorKind::Google),
         "anthropic" | "claude" => Some(VendorKind::Anthropic),
+        "grok" | "xai" => Some(VendorKind::Grok),
         _ => None,
     }
 }
@@ -564,6 +741,7 @@ fn vendor_name(v: VendorKind) -> &'static str {
         VendorKind::OpenAI => "openai",
         VendorKind::Google => "google",
         VendorKind::Anthropic => "anthropic",
+        VendorKind::Grok => "grok",
     }
 }
 
@@ -629,6 +807,14 @@ fn unix_ts() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_vendor_aliases() {
+        assert_eq!(parse_vendor("openai"), Some(VendorKind::OpenAI));
+        assert_eq!(parse_vendor("gemini"), Some(VendorKind::Google));
+        assert_eq!(parse_vendor("claude"), Some(VendorKind::Anthropic));
+        assert_eq!(parse_vendor("xai"), Some(VendorKind::Grok));
+    }
 
     #[test]
     fn rewrite_for_restyle() {

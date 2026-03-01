@@ -6,6 +6,10 @@ Scheduling rules (important):
 - For "每隔N分钟/小时", map to `type=interval` with `every_minutes`.
 - For explicit cron text, map to `type=cron` + `cron`.
 - If user says "取消/删除定时任务", set `kind=delete` and try to extract `target_job_id`.
+- If user says "暂停定时任务", set `kind=pause`; if user says "恢复/开启定时任务", set `kind=resume`.
+- `target_job_id` must be a real task id like `job_xxx` from user text; never fabricate ids.
+- For bulk intent ("全部/所有/all") without concrete `job_xxx`, keep the requested action kind and set `target_job_id=""`; explain in `reason` and lower `confidence`.
+- If both bulk words and concrete `job_xxx` appear, prefer concrete `job_xxx` and mention conflict resolution in `reason`.
 - If user asks "查看定时任务", set `kind=list`.
 - If task action is plain question/summary/report, set `task.kind=ask` and store prompt in `task.payload.text`.
 - If user explicitly requests a skill, set `task.kind=run_skill` and provide `task.payload`.

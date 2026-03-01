@@ -2,6 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::blocking::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -62,6 +63,8 @@ struct AudioTranscribeConfig {
     timeout_seconds: Option<u64>,
     #[serde(default)]
     max_input_bytes: Option<usize>,
+    #[serde(default)]
+    allow_compat_adapters: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -147,11 +150,9 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     );
     let (vendor_name, provider_cfg) = resolve_vendor_config(cfg, vendor)?;
     check_api_key(vendor_name, &provider_cfg.api_key)?;
-    let model = cfg
-        .audio_transcribe
-        .default_model
-        .as_deref()
-        .or_else(|| args_obj.and_then(|v| v.get("model")).and_then(|v| v.as_str()))
+    let requested_model = args_obj.and_then(|v| v.get("model")).and_then(|v| v.as_str());
+    let model = requested_model
+        .or(cfg.audio_transcribe.default_model.as_deref())
         .unwrap_or(&provider_cfg.model)
         .to_string();
     let timeout_seconds = cfg
@@ -163,9 +164,11 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .timeout(Duration::from_secs(timeout_seconds))
         .build()
         .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
-    let text = openai_compatible_transcribe(
+    let text = transcribe_by_vendor(
         &client,
         provider_cfg,
+        vendor,
+        cfg.audio_transcribe.allow_compat_adapters,
         vendor_name,
         &model,
         &audio_path,
@@ -174,9 +177,37 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     let extra = json!({
         "provider": vendor_name,
         "model": model,
-        "audio_path": audio_path.to_string_lossy().to_string()
+        "audio_path": audio_path.to_string_lossy().to_string(),
+        "outputs": [{"type":"text","preview": truncate(&text, 800)}],
+        "latency_ms": 0
     });
     Ok((text, extra))
+}
+
+fn transcribe_by_vendor(
+    client: &Client,
+    cfg: &VendorConfig,
+    vendor: VendorKind,
+    allow_compat_adapters: bool,
+    vendor_name: &str,
+    model: &str,
+    audio_path: &Path,
+    prompt: &str,
+) -> Result<String, String> {
+    match vendor {
+        VendorKind::Google => google_native_transcribe(client, cfg, model, audio_path, prompt),
+        VendorKind::OpenAI => {
+            openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)
+        }
+        VendorKind::Anthropic | VendorKind::Grok => {
+            if !allow_compat_adapters {
+                return Err(format!(
+                    "{vendor_name} native stt adapter is not available; set audio_transcribe.allow_compat_adapters=true to use compatible endpoint"
+                ));
+            }
+            openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)
+        }
+    }
 }
 
 fn parse_audio_path(args: &Value, workspace_root: &Path) -> Result<PathBuf, String> {
@@ -242,6 +273,74 @@ fn openai_compatible_transcribe(
     let out = body.trim();
     if out.is_empty() {
         return Err("transcription result is empty".to_string());
+    }
+    Ok(out.to_string())
+}
+
+fn google_native_transcribe(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    audio_path: &Path,
+    prompt: &str,
+) -> Result<String, String> {
+    if !audio_path.exists() || !audio_path.is_file() {
+        return Err("audio file does not exist".to_string());
+    }
+    let bytes = std::fs::read(audio_path).map_err(|err| format!("read audio failed: {err}"))?;
+    let mime = guess_audio_mime(audio_path);
+    let body = json!({
+        "contents": [{
+            "parts": [
+                {"text": format!("Transcribe this audio verbatim. {}", prompt)},
+                {"inline_data": {"mime_type": mime, "data": STANDARD.encode(bytes)}}
+            ]
+        }]
+    });
+    let url = format!(
+        "{}/models/{}:generateContent?key={}",
+        trim_trailing_slash(&cfg.base_url),
+        model,
+        cfg.api_key
+    );
+    let resp = client
+        .post(url)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("google transcription request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let v: Value = resp
+        .json()
+        .map_err(|err| format!("parse google transcription response failed: {err}"))?;
+    if status >= 300 {
+        return Err(format!(
+            "google transcription failed status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
+    }
+    let mut out = String::new();
+    if let Some(parts) = v
+        .get("candidates")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(|p| p.as_array())
+    {
+        for part in parts {
+            if let Some(t) = part.get("text").and_then(|v| v.as_str()) {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(t);
+            }
+        }
+    }
+    let out = out.trim();
+    if out.is_empty() {
+        return Err(format!(
+            "google transcription response missing text: {}",
+            truncate(&v.to_string(), 400)
+        ));
     }
     Ok(out.to_string())
 }
@@ -342,6 +441,24 @@ fn to_workspace_path(workspace_root: &Path, input: &str) -> Result<PathBuf, Stri
     Ok(joined)
 }
 
+fn guess_audio_mime(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "wav" => "audio/wav",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "ogg" => "audio/ogg",
+        "opus" => "audio/ogg",
+        "flac" => "audio/flac",
+        _ => "application/octet-stream",
+    }
+}
+
 fn check_api_key(vendor: &str, key: &str) -> Result<(), String> {
     let t = key.trim();
     if t.is_empty() || t.starts_with("REPLACE_ME_") {
@@ -359,4 +476,30 @@ fn truncate(s: &str, max: usize) -> String {
         return s.to_string();
     }
     s.chars().take(max).collect::<String>() + "..."
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_vendor_aliases() {
+        assert!(matches!(parse_vendor("openai"), Some(VendorKind::OpenAI)));
+        assert!(matches!(parse_vendor("gemini"), Some(VendorKind::Google)));
+        assert!(matches!(parse_vendor("claude"), Some(VendorKind::Anthropic)));
+        assert!(matches!(parse_vendor("xai"), Some(VendorKind::Grok)));
+    }
+
+    #[test]
+    fn mime_guess_from_ext() {
+        assert_eq!(guess_audio_mime(Path::new("a.wav")), "audio/wav");
+        assert_eq!(guess_audio_mime(Path::new("a.mp3")), "audio/mpeg");
+        assert_eq!(guess_audio_mime(Path::new("a.ogg")), "audio/ogg");
+    }
+
+    #[test]
+    fn render_prompt_with_hint() {
+        let got = render_transcribe_prompt("A __TRANSCRIBE_HINT__ B", "hint");
+        assert_eq!(got, "A hint B");
+    }
 }

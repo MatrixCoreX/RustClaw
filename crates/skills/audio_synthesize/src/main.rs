@@ -2,6 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -68,6 +69,8 @@ struct AudioSynthesizeConfig {
     timeout_seconds: Option<u64>,
     #[serde(default)]
     max_input_chars: Option<usize>,
+    #[serde(default)]
+    allow_compat_adapters: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -169,11 +172,9 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     );
     let (vendor_name, provider_cfg) = resolve_vendor_config(cfg, vendor)?;
     check_api_key(vendor_name, &provider_cfg.api_key)?;
-    let model = cfg
-        .audio_synthesize
-        .default_model
-        .as_deref()
-        .or_else(|| obj.get("model").and_then(|v| v.as_str()))
+    let requested_model = obj.get("model").and_then(|v| v.as_str());
+    let model = requested_model
+        .or(cfg.audio_synthesize.default_model.as_deref())
         .unwrap_or(&provider_cfg.model)
         .to_string();
     let timeout_seconds = cfg
@@ -185,9 +186,11 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .timeout(Duration::from_secs(timeout_seconds))
         .build()
         .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
-    openai_compatible_synthesize(
+    synthesize_by_vendor(
         &client,
         provider_cfg,
+        vendor,
+        cfg.audio_synthesize.allow_compat_adapters,
         vendor_name,
         &model,
         &voice,
@@ -201,9 +204,64 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         "model": model,
         "voice": voice,
         "response_format": normalized_format,
-        "output_path": saved_path
+        "output_path": saved_path,
+        "outputs": [{"type":"audio_file","path": saved_path}],
+        "latency_ms": 0
     });
     Ok((format!("VOICE_FILE:{saved_path}"), extra))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn synthesize_by_vendor(
+    client: &Client,
+    cfg: &VendorConfig,
+    vendor: VendorKind,
+    allow_compat_adapters: bool,
+    vendor_name: &str,
+    model: &str,
+    voice: &str,
+    response_format: &str,
+    input: &str,
+    output_path: &Path,
+) -> Result<(), String> {
+    match vendor {
+        VendorKind::Google => google_native_synthesize(
+            client,
+            cfg,
+            model,
+            voice,
+            response_format,
+            input,
+            output_path,
+        ),
+        VendorKind::OpenAI => openai_compatible_synthesize(
+            client,
+            cfg,
+            vendor_name,
+            model,
+            voice,
+            response_format,
+            input,
+            output_path,
+        ),
+        VendorKind::Anthropic | VendorKind::Grok => {
+            if !allow_compat_adapters {
+                return Err(format!(
+                    "{vendor_name} native tts adapter is not available; set audio_synthesize.allow_compat_adapters=true to use compatible endpoint"
+                ));
+            }
+            openai_compatible_synthesize(
+                client,
+                cfg,
+                vendor_name,
+                model,
+                voice,
+                response_format,
+                input,
+                output_path,
+            )
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -244,6 +302,75 @@ fn openai_compatible_synthesize(
     ensure_parent_dir(output_path)?;
     std::fs::write(output_path, &bytes).map_err(|err| format!("write audio output failed: {err}"))?;
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn google_native_synthesize(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    voice: &str,
+    response_format: &str,
+    input: &str,
+    output_path: &Path,
+) -> Result<(), String> {
+    let body = json!({
+        "contents": [{"parts":[{"text": input}]}],
+        "generationConfig": {"responseModalities": ["AUDIO"]},
+        "speechConfig": {
+            "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}
+        },
+        "audioConfig": {"audioEncoding": google_audio_encoding(response_format)}
+    });
+    let url = format!(
+        "{}/models/{}:generateContent?key={}",
+        trim_trailing_slash(&cfg.base_url),
+        model,
+        cfg.api_key
+    );
+    let resp = client
+        .post(url)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("google tts request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let v: Value = resp
+        .json()
+        .map_err(|err| format!("parse google tts response failed: {err}"))?;
+    if status >= 300 {
+        return Err(format!(
+            "google tts failed status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
+    }
+    if let Some(parts) = v
+        .get("candidates")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(|p| p.as_array())
+    {
+        for part in parts {
+            if let Some(b64) = part
+                .get("inlineData")
+                .or_else(|| part.get("inline_data"))
+                .and_then(|i| i.get("data"))
+                .and_then(|d| d.as_str())
+            {
+                let bytes = STANDARD
+                    .decode(b64)
+                    .map_err(|err| format!("decode google tts base64 failed: {err}"))?;
+                ensure_parent_dir(output_path)?;
+                std::fs::write(output_path, bytes)
+                    .map_err(|err| format!("write audio output failed: {err}"))?;
+                return Ok(());
+            }
+        }
+    }
+    Err(format!(
+        "google tts response missing audio payload: {}",
+        truncate(&v.to_string(), 400)
+    ))
 }
 
 fn parse_vendor(name: &str) -> Option<VendorKind> {
@@ -328,6 +455,16 @@ fn normalize_format(raw: &str) -> String {
     }
 }
 
+fn google_audio_encoding(response_format: &str) -> &'static str {
+    match response_format {
+        "mp3" => "MP3",
+        "wav" => "LINEAR16",
+        "aac" => "AAC",
+        // Keep default compact codec for voice.
+        _ => "OGG_OPUS",
+    }
+}
+
 fn output_ext(response_format: &str) -> &'static str {
     match response_format {
         "mp3" => "mp3",
@@ -393,4 +530,25 @@ fn unix_ts() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_vendor_aliases() {
+        assert!(matches!(parse_vendor("openai"), Some(VendorKind::OpenAI)));
+        assert!(matches!(parse_vendor("gemini"), Some(VendorKind::Google)));
+        assert!(matches!(parse_vendor("claude"), Some(VendorKind::Anthropic)));
+        assert!(matches!(parse_vendor("xai"), Some(VendorKind::Grok)));
+    }
+
+    #[test]
+    fn normalize_and_ext() {
+        assert_eq!(normalize_format("mp3"), "mp3");
+        assert_eq!(normalize_format("unknown"), "opus");
+        assert_eq!(google_audio_encoding("mp3"), "MP3");
+        assert_eq!(output_ext("opus"), "ogg");
+    }
 }

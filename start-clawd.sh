@@ -8,6 +8,18 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
+LOG_DIR="$SCRIPT_DIR/logs"
+LOG_FILE="$LOG_DIR/clawd.log"
+mkdir -p "$LOG_DIR"
+
+# If launched from an interactive terminal, mirror output to logs/clawd.log.
+# For non-interactive callers (e.g. start-all.sh with nohup redirection),
+# keep caller-managed redirection to avoid duplicate log lines.
+if [[ -t 1 ]]; then
+  exec > >(tee -a "$LOG_FILE") 2>&1
+  echo "Logging to: $LOG_FILE" # zh: 日志输出到：$LOG_FILE
+fi
+
 PROFILE="${1:-${RUSTCLAW_START_PROFILE:-debug}}"
 case "$PROFILE" in
   release|debug)
@@ -21,6 +33,44 @@ esac
 CARGO_PROFILE_FLAG=()
 if [[ "$PROFILE" == "release" ]]; then
   CARGO_PROFILE_FLAG=(--release)
+fi
+
+# Ensure skill-runner binary exists before starting clawd.
+SKILL_RUNNER_PATH="$(
+python3 - <<'PY'
+import tomllib
+from pathlib import Path
+
+cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
+skills = cfg.get("skills", {})
+print(str(skills.get("skill_runner_path", "target/debug/skill-runner") or "target/debug/skill-runner"))
+PY
+)"
+
+if [[ "$SKILL_RUNNER_PATH" = /* ]]; then
+  SKILL_RUNNER_ABS="$SKILL_RUNNER_PATH"
+else
+  SKILL_RUNNER_ABS="$SCRIPT_DIR/$SKILL_RUNNER_PATH"
+fi
+
+if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
+  echo "skill-runner missing, trying to build: $SKILL_RUNNER_ABS" # zh: 未找到 skill-runner，尝试自动编译。
+  BUILD_SKILL_RELEASE=0
+  if [[ "$SKILL_RUNNER_PATH" == *"/release/"* || "$SKILL_RUNNER_PATH" == *"target/release/"* ]]; then
+    BUILD_SKILL_RELEASE=1
+  fi
+  if [[ "$BUILD_SKILL_RELEASE" == "1" ]]; then
+    cargo build -p skill-runner --release
+  else
+    cargo build -p skill-runner
+  fi
+fi
+
+if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
+  echo "skill-runner still missing after build: $SKILL_RUNNER_ABS" # zh: 自动编译后仍未找到 skill-runner。
+  echo "Try: ./build-all.sh release" # zh: 可尝试：./build-all.sh release
+  echo "Or:  ./build-all.sh debug"   # zh: 可尝试：./build-all.sh debug
+  exit 1
 fi
 
 # First startup policy:
