@@ -243,6 +243,7 @@ skills_list = [
     "log_analyze",
     "service_control",
     "config_guard",
+    "crypto",
 ]
 
 # Channel configs are split into:

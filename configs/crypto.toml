@@ -1,0 +1,36 @@
+[crypto]
+# default exchange for quote/trade/order actions: paper|binance|okx|coingecko
+default_exchange = "paper"
+# execution_mode is used when action does not explicitly set exchange.
+execution_mode = "paper"
+# i18n language for crypto skill messages. e.g. zh-CN / en-US
+language = "zh-CN"
+# optional override path relative to workspace root.
+# i18n_path = "configs/i18n/crypto.zh-CN.toml"
+timeout_seconds = 20
+# keep true in production to require explicit confirm=true for trade_submit.
+require_explicit_send = true
+# hard risk cap per order (USD notional). Set small value first.
+max_notional_usd = 1000
+allowed_exchanges = ["paper", "binance", "okx", "coingecko"]
+allowed_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+blocked_actions = []
+paper_state_path = "data/crypto-paper-orders.jsonl"
+
+[binance]
+# set true only after api_key/api_secret are filled and permission-scoped.
+enabled = false
+base_url = "https://api.binance.com"
+api_key = "REPLACE_ME_BINANCE_API_KEY"
+api_secret = "REPLACE_ME_BINANCE_API_SECRET"
+recv_window = 5000
+
+[okx]
+# set true only after api_key/api_secret/passphrase are filled.
+enabled = false
+base_url = "https://www.okx.com"
+api_key = "REPLACE_ME_OKX_API_KEY"
+api_secret = "REPLACE_ME_OKX_API_SECRET"
+passphrase = "REPLACE_ME_OKX_PASSPHRASE"
+# Set true for demo trading environment with production endpoint.
+simulated = true

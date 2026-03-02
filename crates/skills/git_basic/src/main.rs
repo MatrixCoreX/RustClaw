@@ -1,9 +1,14 @@
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use toml::Value as TomlValue;
+
+static I18N: OnceLock<TextCatalog> = OnceLock::new();
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -19,9 +24,111 @@ struct Resp {
     error_text: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct GitBasicConfig {
+    #[serde(default)]
+    git_basic: GitBasicSection,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct GitBasicSection {
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    i18n_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TextCatalog {
+    current: HashMap<String, String>,
+}
+
+fn tr(key: &str) -> String {
+    I18N.get()
+        .and_then(|c| c.current.get(key))
+        .cloned()
+        .unwrap_or_else(|| key.to_string())
+}
+
+fn tr_with(key: &str, vars: &[(&str, &str)]) -> String {
+    let mut out = tr(key);
+    for (name, value) in vars {
+        out = out.replace(&format!("{{{name}}}"), value);
+    }
+    out
+}
+
+fn default_catalog(lang: &str) -> TextCatalog {
+    let mut current = HashMap::new();
+    let _ = lang;
+    current.insert("git_basic.err.invalid_input".to_string(), "invalid input: {error}".to_string());
+    current.insert("git_basic.err.args_object".to_string(), "args must be object".to_string());
+    current.insert(
+        "git_basic.msg.not_git_repo".to_string(),
+        "current directory is not a git repository. Please use git_basic in a git repo.".to_string(),
+    );
+    current.insert(
+        "git_basic.err.unsupported_action".to_string(),
+        "unsupported action; use status|log|diff|branch|show|rev_parse".to_string(),
+    );
+    current.insert("git_basic.err.run_git_failed".to_string(), "run git failed: {error}".to_string());
+    TextCatalog { current }
+}
+
+fn load_external_i18n(path: &Path) -> Option<HashMap<String, String>> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value: TomlValue = toml::from_str(&raw).ok()?;
+    let dict = value.get("dict")?.as_table()?;
+    let mut out = HashMap::new();
+    for (k, v) in dict {
+        if let Some(text) = v.as_str() {
+            out.insert(k.to_string(), text.to_string());
+        }
+    }
+    Some(out)
+}
+
+fn load_git_basic_config(workspace_root: &Path) -> GitBasicConfig {
+    let path = workspace_root.join("configs/git_basic.toml");
+    let raw = match std::fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return GitBasicConfig::default(),
+    };
+    toml::from_str::<GitBasicConfig>(&raw).unwrap_or_default()
+}
+
+fn init_i18n(workspace_root: &Path) {
+    let cfg = load_git_basic_config(workspace_root);
+    let lang = cfg
+        .git_basic
+        .language
+        .as_deref()
+        .unwrap_or("zh-CN")
+        .trim()
+        .to_string();
+    let mut catalog = default_catalog(&lang);
+    let path = cfg
+        .git_basic
+        .i18n_path
+        .as_deref()
+        .map(|p| workspace_root.join(p))
+        .unwrap_or_else(|| workspace_root.join(format!("configs/i18n/git_basic.{lang}.toml")));
+    if let Some(overrides) = load_external_i18n(&path) {
+        for (k, v) in overrides {
+            catalog.current.insert(k, v);
+        }
+    }
+    let _ = I18N.set(catalog);
+}
+
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+    let workspace_root = std::env::var("WORKSPACE_ROOT")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    init_i18n(&workspace_root);
 
     for line in stdin.lock().lines() {
         let line = line?;
@@ -45,7 +152,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                error_text: Some(format!("invalid input: {err}")),
+                error_text: Some(tr_with("git_basic.err.invalid_input", &[("error", &err.to_string())])),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -57,7 +164,7 @@ fn main() -> anyhow::Result<()> {
 fn execute(args: Value) -> Result<String, String> {
     let obj = args
         .as_object()
-        .ok_or_else(|| "args must be object".to_string())?;
+        .ok_or_else(|| tr("git_basic.err.args_object"))?;
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
@@ -68,7 +175,7 @@ fn execute(args: Value) -> Result<String, String> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     if !is_git_repo(&root) {
-        return Ok("当前目录不是 git 仓库。请在 git 仓库目录中使用 git_basic。".to_string());
+        return Ok(tr("git_basic.msg.not_git_repo"));
     }
 
     let (subcmd, mut extra): (&str, Vec<String>) = match action {
@@ -96,9 +203,7 @@ fn execute(args: Value) -> Result<String, String> {
         }
         "rev_parse" => ("rev-parse", vec!["HEAD".to_string()]),
         _ => {
-            return Err(
-                "unsupported action; use status|log|diff|branch|show|rev_parse".to_string(),
-            );
+            return Err(tr("git_basic.err.unsupported_action"));
         }
     };
 
@@ -112,7 +217,7 @@ fn execute(args: Value) -> Result<String, String> {
 
     let out = cmd
         .output()
-        .map_err(|err| format!("run git failed: {err}"))?;
+        .map_err(|err| tr_with("git_basic.err.run_git_failed", &[("error", &err.to_string())]))?;
 
     let mut text = String::new();
     text.push_str(&String::from_utf8_lossy(&out.stdout));

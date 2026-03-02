@@ -2,7 +2,10 @@
 
 RustClaw is a Rust-based local agent stack with:
 - `clawd` (HTTP task daemon),
-- `telegramd` (Telegram bridge + command surface),
+- messaging adapters:
+  - `telegramd` (Telegram bridge + command surface)
+  - `whatsappd` (WhatsApp Cloud adapter)
+  - `whatsapp_webd` + `services/wa-web-bridge` (WhatsApp Web adapter)
 - `skill-runner` (skill process host),
 - and multiple built-in operational/media skills.
 
@@ -44,6 +47,7 @@ RustClaw is a Rust-based local agent stack with:
 - `image_edit`
 - `audio_transcribe`
 - `audio_synthesize`
+- `crypto`
 
 ## HTTP API (clawd)
 
@@ -82,13 +86,19 @@ Example ask task:
    - `./build-all.sh release`
 3. Configure secrets and runtime options:
    - `./setup-config.sh`
-4. Start both daemons:
+4. Start core daemons:
    - Source mode: `./start-all.sh`
    - Binary mode: `./start-all-bin.sh release`
-5. Check logs:
+5. Start messaging adapters as needed:
+   - Telegram: `./start-telegramd.sh`
+   - WhatsApp Cloud: `./start-whatsappd.sh`
+   - WhatsApp Web: `./start-whatsapp-webd.sh` and `./start-wa-web-bridge.sh`
+6. Check logs:
    - `./check-logs.sh -n 120`
 
-## Telegram Commands (Current)
+## Messaging Adapters (Telegram + WhatsApp)
+
+### Telegram Commands (Current)
 
 `telegramd` currently supports:
 - `/start`, `/help`
@@ -100,6 +110,12 @@ Example ask task:
 - `/sendfile <path>`
 - `/voicemode show|voice|text|both|reset` (admin)
 - `/openclaw config show|vendors|set <vendor> <model>` (admin)
+
+### WhatsApp Adapters (Current)
+
+- `whatsappd`: WhatsApp Cloud API adapter runtime.
+- `whatsapp_webd`: WhatsApp Web adapter daemon (works with `services/wa-web-bridge`).
+- Both adapters submit tasks to `clawd` through the same core task pipeline.
 
 ## Media Vendor Support Matrix
 
@@ -120,6 +136,32 @@ Current support in built-in media skills:
   - Native: `openai`, `google`
   - Optional compatible mode for `anthropic`, `grok` (default off)
 
+## Crypto Skill (Market + Insight + Trade Guard)
+
+`crypto` skill supports:
+
+- market data: `quote`, `multi_quote`, `candles`, `indicator`
+- insight data: `news`, `onchain`
+- guarded trade flow: `trade_preview`, `trade_submit`, `order_status`, `cancel_order`, `positions`
+
+Safety defaults:
+
+- `trade_submit` requires `confirm=true` when `crypto.require_explicit_send=true`
+- hard limits can be set by config (`max_notional_usd`, `allowed_symbols`, `allowed_exchanges`, `blocked_actions`)
+- default execution mode is `paper` (writes to `data/crypto-paper-orders.jsonl`)
+- skill-specific config is in `configs/crypto.toml` (separate from `configs/config.toml`)
+- real exchange APIs are supported for `binance` and `okx` (requires enabling and filling API credentials in `configs/crypto.toml`)
+- Binance order submit uses `newOrderRespType=RESULT`, and `recvWindow` is clamped to `1..60000`
+- OKX spot market submit uses `tgtCcy=base_ccy` so `qty` remains base-asset sized
+- `order_status` / `cancel_order` accept either `order_id` or `client_order_id`
+
+Minimal examples:
+
+- `{"action":"quote","symbol":"BTCUSDT"}`
+- `{"action":"news","limit":5}`
+- `{"action":"trade_preview","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01}`
+- `{"action":"trade_submit","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01,"confirm":true}`
+
 Resolution priority for media vendor/model selection:
 
 - vendor: request args `vendor` > skill section `default_vendor` > `llm.selected_vendor`
@@ -137,7 +179,7 @@ Compatibility switches in `configs/config.toml` (all default `false`):
 - `build-all.sh`  
   Builds all workspace binaries (`release` or `debug`), optionally runs `cargo clean`, verifies required binaries, and syncs `skills.skill_runner_path` in `configs/config.toml`.
 
-- `setup/setup-config.sh`  
+- `setup-config.sh`  
   Interactive config bootstrap for Telegram token/admin, model vendor/model, selected provider API key, and key tool limits.
 
 - `start-clawd.sh`  
@@ -148,6 +190,18 @@ Compatibility switches in `configs/config.toml` (all default `false`):
 
 - `start-telegramd.sh`  
   Starts `telegramd` via `cargo run -p telegramd` after preflight checks for duplicate polling workers and webhook/polling conflicts.
+
+- `start-whatsappd.sh`  
+  Starts `whatsappd` (WhatsApp Cloud adapter) with config and runtime preflight checks.
+
+- `start-whatsapp-webd.sh`  
+  Starts `whatsapp_webd` (WhatsApp Web adapter daemon) for bridge-mode routing.
+
+- `start-wa-web-bridge.sh`  
+  Starts the `services/wa-web-bridge` process used by `whatsapp_webd`.
+
+- `start-future-adapters.sh`  
+  Starts placeholder/future adapter processes defined by the adapter rollout strategy.
 
 - `start-all.sh`  
   One-command daemon startup wrapper: **prefers prebuilt binaries first** (`target/<profile>/clawd` and `target/<profile>/telegramd`), and falls back to source mode (`start-clawd.sh` + `start-telegramd.sh`) only when binaries are missing. Supports provider/model overrides.
@@ -164,11 +218,8 @@ Compatibility switches in `configs/config.toml` (all default `false`):
 - `simulate-telegramd.sh`  
   Simulates Telegram-side submit/poll behavior against `clawd` without calling Telegram API (supports `ask` and `run_skill`).
 
-- `x-oauth-login.sh`  
-  Local OAuth2 PKCE helper for X: opens browser login, captures callback code, exchanges tokens, and writes `configs/x.toml`.
-
-- `rollback.sh`  
-  Hard rollback helper (`git reset --hard` + `git clean -fd`) to restore a target commit-ish. **Dangerous: removes uncommitted and untracked changes.**
+- `package-release.sh`  
+  Builds and packages a releasable RustClaw runtime bundle for distribution/deployment.
 
 ## Notes
 

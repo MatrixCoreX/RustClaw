@@ -1,0 +1,26 @@
+[crypto]
+default_exchange = "paper"
+execution_mode = "paper"
+language = "zh-CN"
+timeout_seconds = 20
+require_explicit_send = true
+max_notional_usd = 1000
+allowed_exchanges = ["paper", "binance", "okx", "coingecko"]
+allowed_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+blocked_actions = []
+paper_state_path = "data/crypto-paper-orders.jsonl"
+
+[binance]
+enabled = false
+base_url = "https://api.binance.com"
+api_key = "__REDACTED__"
+api_secret = "__REDACTED__"
+recv_window = 5000
+
+[okx]
+enabled = false
+base_url = "https://www.okx.com"
+api_key = "__REDACTED__"
+api_secret = "__REDACTED__"
+passphrase = "__REDACTED__"
+simulated = true

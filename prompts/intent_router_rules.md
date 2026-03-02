@@ -9,6 +9,9 @@ Routing rules (important):
 - If user asks to edit/retouch/outpaint/restyle/add-remove elements in an image, choose `act`.
 - If user asks to analyze/describe/extract/compare images or summarize screenshots, choose `act`.
 - If user asks to execute shell/system commands (e.g. "你执行 ls -la", "please run uname -a"), choose `act`.
+- If user asks crypto market data (price/quote/涨跌/K线/指标/SMA/news/onchain/手续费), choose `act`.
+- If user asks crypto trading actions (预览下单/确认下单/查订单/撤单/持仓), choose `act`.
+- If user asks strategy discussion only ("怎么做策略/为什么涨跌/解释概念") without direct execution intent, choose `chat`.
 - If the user says "continue/继续/接着做", first inspect RECENT_EXECUTION_CONTEXT for pending action target; if a concrete tool/skill/command target exists, choose `act`.
 - If RECENT_EXECUTION_CONTEXT contains schedule list/create/delete/pause/resume result and user says "全部删除/全部停止/全部恢复", choose `act`.
 - If user asks only to interpret/explain previous output without new action, choose `chat`.
@@ -25,6 +28,11 @@ Examples:
 - "please run uname -a and tell me the result" -> {"mode":"chat_act"}
 - "先生成一张图，再告诉我为什么这样设计" -> {"mode":"chat_act"}
 - "请解释这段命令输出是什么意思" -> {"mode":"chat"}
+- "现在 BTCUSDT 多少钱" -> {"mode":"act"}
+- "算下 ETHUSDT 的 SMA14" -> {"mode":"act"}
+- "确认执行：paper 模式 ETHUSDT 限价买 0.02，价格 1000" -> {"mode":"act"}
+- "只做预览，不要执行交易，BTC 买 0.01" -> {"mode":"act"}
+- "为什么比特币今天涨这么多？" -> {"mode":"chat"}
 - "你是谁" -> {"mode":"chat"}
 - "继续" + recent#1 shows `run_cmd: echo ROUTE_MEMORY_OK` -> {"mode":"act","reason":"follow-up to recent command intent","confidence":0.82,"evidence_refs":["recent#1"]}
 - "全部删除" + recent#1 shows schedule list with multiple jobs -> {"mode":"act","reason":"bulk schedule delete from recent list","confidence":0.84,"evidence_refs":["recent#1"]}

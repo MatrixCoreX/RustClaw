@@ -14,7 +14,7 @@ use claw_core::types::{
 use reqwest::Client;
 use serde_json::{Value as JsonValue, json};
 use teloxide::prelude::*;
-use teloxide::types::{ChatAction, InputFile};
+use teloxide::types::{ChatAction, InputFile, KeyboardButton, KeyboardMarkup};
 use tokio::sync::oneshot;
 use toml::Value as TomlValue;
 use tracing::{debug, info, warn};
@@ -675,6 +675,30 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                 )
                     .await
                     .context("send /openclaw error failed")?;
+            }
+        }
+        return Ok(());
+    }
+
+    if text.starts_with("/cryptoapi") {
+        let is_admin = state.admins.contains(&user_id);
+        if !is_admin {
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.openclaw_admin_only"))
+                .await
+                .context("send /cryptoapi unauthorized failed")?;
+            return Ok(());
+        }
+        let raw = text.strip_prefix("/cryptoapi").unwrap_or_default().trim();
+        match handle_cryptoapi_command(raw) {
+            Ok(reply) => {
+                bot.send_message(msg.chat.id, reply)
+                    .await
+                    .context("send /cryptoapi reply failed")?;
+            }
+            Err(err) => {
+                bot.send_message(msg.chat.id, format!("cryptoapi 配置失败：{err}"))
+                    .await
+                    .context("send /cryptoapi error failed")?;
             }
         }
         return Ok(());
@@ -1686,10 +1710,30 @@ async fn send_text_or_image(bot: &Bot, state: &BotState, chat_id: ChatId, answer
         return Ok(());
     }
 
-    bot.send_message(chat_id, answer.to_string())
-        .await
-        .context("send text message failed")?;
+    if is_crypto_trade_confirm_prompt(answer) {
+        let keyboard = KeyboardMarkup::new(vec![vec![
+            KeyboardButton::new("yes"),
+            KeyboardButton::new("no"),
+        ]])
+        .resize_keyboard()
+        .one_time_keyboard();
+        bot.send_message(chat_id, answer.to_string())
+            .reply_markup(keyboard)
+            .await
+            .context("send text message with confirm keyboard failed")?;
+    } else {
+        bot.send_message(chat_id, answer.to_string())
+            .await
+            .context("send text message failed")?;
+    }
     Ok(())
+}
+
+fn is_crypto_trade_confirm_prompt(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    (t.contains("请确认是否下单") || t.contains("confirm") || t.contains("trade_preview"))
+        && t.contains("yes")
+        && t.contains("no")
 }
 
 fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
@@ -2315,6 +2359,154 @@ fn handle_openclaw_config_command(state: &BotState, text: &str) -> anyhow::Resul
         }
         _ => Ok(openclaw_usage_text(state)),
     }
+}
+
+fn cryptoapi_usage_text() -> String {
+    [
+        "用法：",
+        "/cryptoapi show",
+        "/cryptoapi set binance <api_key> <api_secret>",
+        "/cryptoapi set okx <api_key> <api_secret> <passphrase>",
+    ]
+    .join("\n")
+}
+
+fn mask_secret(input: &str) -> String {
+    let s = input.trim();
+    if s.is_empty() {
+        return "<empty>".to_string();
+    }
+    if s.len() <= 8 {
+        return "***".to_string();
+    }
+    format!("{}***{}", &s[..4], &s[s.len() - 4..])
+}
+
+fn handle_cryptoapi_command(raw: &str) -> anyhow::Result<String> {
+    let cmd = raw.trim();
+    if cmd.is_empty() {
+        return Ok(cryptoapi_usage_text());
+    }
+    let mut parts = cmd.split_whitespace();
+    let action = parts.next().unwrap_or_default().to_ascii_lowercase();
+    match action.as_str() {
+        "show" => show_cryptoapi_status(),
+        "set" => {
+            let exchange = parts.next().unwrap_or_default().to_ascii_lowercase();
+            match exchange.as_str() {
+                "binance" => {
+                    let api_key = parts.next().unwrap_or_default();
+                    let api_secret = parts.next().unwrap_or_default();
+                    if api_key.is_empty() || api_secret.is_empty() {
+                        return Ok(cryptoapi_usage_text());
+                    }
+                    persist_crypto_api_config_binance(api_key, api_secret)?;
+                    Ok(format!(
+                        "已写入 Binance API 配置并启用。\napi_key={}\napi_secret={}",
+                        mask_secret(api_key),
+                        mask_secret(api_secret)
+                    ))
+                }
+                "okx" => {
+                    let api_key = parts.next().unwrap_or_default();
+                    let api_secret = parts.next().unwrap_or_default();
+                    let passphrase = parts.next().unwrap_or_default();
+                    if api_key.is_empty() || api_secret.is_empty() || passphrase.is_empty() {
+                        return Ok(cryptoapi_usage_text());
+                    }
+                    persist_crypto_api_config_okx(api_key, api_secret, passphrase)?;
+                    Ok(format!(
+                        "已写入 OKX API 配置并启用。\napi_key={}\napi_secret={}\npassphrase={}",
+                        mask_secret(api_key),
+                        mask_secret(api_secret),
+                        mask_secret(passphrase)
+                    ))
+                }
+                _ => Ok(cryptoapi_usage_text()),
+            }
+        }
+        _ => Ok(cryptoapi_usage_text()),
+    }
+}
+
+fn show_cryptoapi_status() -> anyhow::Result<String> {
+    let path = "configs/crypto.toml";
+    let raw = fs::read_to_string(path).context("读取 configs/crypto.toml 失败")?;
+    let value: TomlValue = toml::from_str(&raw).context("解析 configs/crypto.toml 失败")?;
+    let bin = value.get("binance").and_then(|v| v.as_table());
+    let okx = value.get("okx").and_then(|v| v.as_table());
+    let bin_enabled = bin
+        .and_then(|t| t.get("enabled"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let okx_enabled = okx
+        .and_then(|t| t.get("enabled"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let bin_key = bin
+        .and_then(|t| t.get("api_key"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let okx_key = okx
+        .and_then(|t| t.get("api_key"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    Ok(format!(
+        "crypto api 状态：\n- binance: enabled={} api_key={}\n- okx: enabled={} api_key={}",
+        bin_enabled,
+        mask_secret(bin_key),
+        okx_enabled,
+        mask_secret(okx_key)
+    ))
+}
+
+fn persist_crypto_api_config_binance(api_key: &str, api_secret: &str) -> anyhow::Result<()> {
+    let path = "configs/crypto.toml";
+    let raw = fs::read_to_string(path).context("读取 configs/crypto.toml 失败")?;
+    let mut value: TomlValue = toml::from_str(&raw).context("解析 configs/crypto.toml 失败")?;
+    let root = value
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("crypto config 根节点不是 table"))?;
+    let entry = root
+        .entry("binance")
+        .or_insert(TomlValue::Table(toml::map::Map::new()));
+    if !entry.is_table() {
+        *entry = TomlValue::Table(toml::map::Map::new());
+    }
+    let table = entry
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("binance 节点不是 table"))?;
+    table.insert("enabled".to_string(), TomlValue::Boolean(true));
+    table.insert("api_key".to_string(), TomlValue::String(api_key.to_string()));
+    table.insert("api_secret".to_string(), TomlValue::String(api_secret.to_string()));
+    let output = toml::to_string_pretty(&value).context("序列化 configs/crypto.toml 失败")?;
+    fs::write(path, output).context("写入 configs/crypto.toml 失败")?;
+    Ok(())
+}
+
+fn persist_crypto_api_config_okx(api_key: &str, api_secret: &str, passphrase: &str) -> anyhow::Result<()> {
+    let path = "configs/crypto.toml";
+    let raw = fs::read_to_string(path).context("读取 configs/crypto.toml 失败")?;
+    let mut value: TomlValue = toml::from_str(&raw).context("解析 configs/crypto.toml 失败")?;
+    let root = value
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("crypto config 根节点不是 table"))?;
+    let entry = root
+        .entry("okx")
+        .or_insert(TomlValue::Table(toml::map::Map::new()));
+    if !entry.is_table() {
+        *entry = TomlValue::Table(toml::map::Map::new());
+    }
+    let table = entry
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("okx 节点不是 table"))?;
+    table.insert("enabled".to_string(), TomlValue::Boolean(true));
+    table.insert("api_key".to_string(), TomlValue::String(api_key.to_string()));
+    table.insert("api_secret".to_string(), TomlValue::String(api_secret.to_string()));
+    table.insert("passphrase".to_string(), TomlValue::String(passphrase.to_string()));
+    let output = toml::to_string_pretty(&value).context("序列化 configs/crypto.toml 失败")?;
+    fs::write(path, output).context("写入 configs/crypto.toml 失败")?;
+    Ok(())
 }
 
 fn openclaw_usage_text(state: &BotState) -> String {

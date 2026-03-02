@@ -216,7 +216,11 @@ pub(crate) async fn generate_clarify_question(
         Ok(v) => {
             let out = v.trim();
             if out.is_empty() {
-                "我需要确认一下：你这条消息是针对哪件事情？请补充目标或上下文。".to_string()
+                crate::i18n_t_with_default(
+                    state,
+                    "clawd.msg.clarify_question_fallback",
+                    "I need to clarify: what task is this message about? Please provide the target or context.",
+                )
             } else {
                 out.to_string()
             }
@@ -226,7 +230,11 @@ pub(crate) async fn generate_clarify_question(
                 "generate_clarify_question llm failed, fallback default: task_id={} err={}",
                 task.task_id, err
             );
-            "我需要确认一下：你这条消息是针对哪件事情？请补充目标或上下文。".to_string()
+            crate::i18n_t_with_default(
+                state,
+                "clawd.msg.clarify_question_fallback",
+                "I need to clarify: what task is this message about? Please provide the target or context.",
+            )
         }
     }
 }

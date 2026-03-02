@@ -19,6 +19,7 @@ use claw_core::types::{
     TaskStatus,
 };
 use reqwest::Client;
+use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -51,6 +52,7 @@ const MAX_READ_FILE_BYTES: usize = 64 * 1024;
 const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
 const MODEL_IO_LOG_MAX_CHARS: usize = 16000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
+const CRYPTO_CONFIRM_TTL_SECONDS: u64 = 600;
 const LOG_CALL_WRAP: &str = "########################################################";
 pub(crate) const AGENT_RUNTIME_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/agent_runtime_prompt.md");
 const CHAT_RESPONSE_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/chat_response_prompt.md");
@@ -103,6 +105,13 @@ struct AppState {
     whatsapp_web_bridge_base_url: String,
     future_adapters_enabled: Arc<Vec<String>>,
     http_client: Client,
+    pending_crypto_confirms: Arc<Mutex<HashMap<String, PendingCryptoConfirm>>>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingCryptoConfirm {
+    submit_args: Value,
+    created_ts: u64,
 }
 
 #[derive(Clone)]
@@ -446,6 +455,7 @@ impl ToolsPolicy {
                 "skill:image_vision",
                 "skill:image_generate",
                 "skill:image_edit",
+                "skill:crypto",
             ],
             "minimal" => vec!["tool:read_file", "tool:list_dir", "skill:system_basic"],
             "messaging" => vec!["skill:system_basic"],
@@ -613,89 +623,89 @@ fn load_schedule_runtime(workspace_root: &Path, cfg: &ScheduleConfig) -> Schedul
         }
     }
     if i18n_dict.is_empty() {
-        i18n_dict.insert("schedule.desc.daily".to_string(), "每天 {time}".to_string());
+        i18n_dict.insert("schedule.desc.daily".to_string(), "daily {time}".to_string());
         i18n_dict.insert(
             "schedule.desc.weekly".to_string(),
-            "每周 weekday={weekday} {time}".to_string(),
+            "weekly weekday={weekday} {time}".to_string(),
         );
         i18n_dict.insert(
             "schedule.desc.interval".to_string(),
-            "每隔 {minutes} 分钟".to_string(),
+            "every {minutes}m".to_string(),
         );
-        i18n_dict.insert("schedule.desc.once".to_string(), "一次性".to_string());
-        i18n_dict.insert("schedule.status.enabled".to_string(), "已启用".to_string());
-        i18n_dict.insert("schedule.status.paused".to_string(), "已暂停".to_string());
+        i18n_dict.insert("schedule.desc.once".to_string(), "once".to_string());
+        i18n_dict.insert("schedule.status.enabled".to_string(), "enabled".to_string());
+        i18n_dict.insert("schedule.status.paused".to_string(), "paused".to_string());
         i18n_dict.insert(
             "schedule.msg.list_empty".to_string(),
-            "当前没有定时任务。".to_string(),
+            "There are no scheduled jobs right now.".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.list_header".to_string(),
-            "定时任务列表：\n{lines}".to_string(),
+            "Scheduled jobs:\n{lines}".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.delete_none".to_string(),
-            "当前没有可删除的定时任务。".to_string(),
+            "There are no scheduled jobs to delete.".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.job_id_not_found".to_string(),
-            "未找到任务ID：{job_id}".to_string(),
+            "Job ID not found: {job_id}".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.delete_all_ok".to_string(),
-            "已删除全部定时任务，共 {count} 条。".to_string(),
+            "Deleted all scheduled jobs ({count} total).".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.delete_one_ok".to_string(),
-            "已删除定时任务：{job_id}".to_string(),
+            "Deleted scheduled job: {job_id}".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.update_none".to_string(),
-            "当前没有可操作的定时任务。".to_string(),
+            "There are no scheduled jobs to update.".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.resume_all_ok".to_string(),
-            "已恢复全部定时任务，共 {count} 条。".to_string(),
+            "Resumed all scheduled jobs ({count} total).".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.pause_all_ok".to_string(),
-            "已暂停全部定时任务，共 {count} 条。".to_string(),
+            "Paused all scheduled jobs ({count} total).".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.resume_one_ok".to_string(),
-            "已恢复定时任务：{job_id}".to_string(),
+            "Resumed scheduled job: {job_id}".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.pause_one_ok".to_string(),
-            "已暂停定时任务：{job_id}".to_string(),
+            "Paused scheduled job: {job_id}".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.create_fail_task_kind".to_string(),
-            "创建失败：task.kind 仅支持 ask 或 run_skill。".to_string(),
+            "Create failed: task.kind only supports ask or run_skill.".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.cron_not_supported".to_string(),
-            "当前版本暂不支持 cron 表达式，请先用每天/每周/每隔N分钟。".to_string(),
+            "Cron expressions are not supported in this version yet. Please use daily/weekly/every-N-minutes.".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.cron_not_supported_with_expr".to_string(),
-            "当前版本暂不支持 cron 表达式（{cron}），请先用每天/每周/每隔N分钟。".to_string(),
+            "Cron expressions are not supported in this version yet ({cron}). Please use daily/weekly/every-N-minutes.".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.create_fail_invalid_run_at".to_string(),
-            "创建失败：一次性任务 run_at 格式无效，期望 YYYY-MM-DD HH:MM[:SS]。".to_string(),
+            "Create failed: invalid run_at for one-time job. Expected YYYY-MM-DD HH:MM[:SS].".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.create_fail_run_at_must_be_future".to_string(),
-            "创建失败：执行时间必须晚于当前时间。".to_string(),
+            "Create failed: execution time must be later than now.".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.create_fail_cannot_compute_next_run".to_string(),
-            "创建失败：无法计算下次执行时间，请检查时间格式。".to_string(),
+            "Create failed: cannot compute next run time; please check the time format.".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.create_ok".to_string(),
-            "已创建定时任务：{job_id}\n类型：{type}\n时区：{timezone}\n下次执行时间(ts)：{next_run_at}".to_string(),
+            "Scheduled job created: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}".to_string(),
         );
     }
 
@@ -1051,6 +1061,7 @@ async fn main() -> anyhow::Result<()> {
                 .collect(),
         ),
         http_client: Client::new(),
+        pending_crypto_confirms: Arc::new(Mutex::new(HashMap::new())),
     };
 
     spawn_worker(
@@ -1452,6 +1463,55 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 task.chat_id,
                 truncate_for_log(prompt)
             );
+            if let Some(hard_route_result) = try_handle_crypto_trade_hard_route(state, &task, prompt).await {
+                match hard_route_result {
+                    Ok(answer) => {
+                        let answer_text = answer.text;
+                        let result = json!({ "text": answer_text.clone() });
+                        repo::update_task_success(state, &task.task_id, &result.to_string())?;
+                        maybe_notify_schedule_result(state, &task, &payload, true, &answer_text).await;
+                        let _ = memory::service::insert_memory(
+                            state,
+                            task.user_id,
+                            task.chat_id,
+                            "user",
+                            prompt,
+                            state.memory.item_max_chars.max(256),
+                        );
+                        let _ = memory::service::insert_memory(
+                            state,
+                            task.user_id,
+                            task.chat_id,
+                            "assistant",
+                            &answer_text,
+                            state.memory.item_max_chars.max(256),
+                        );
+                        info!("{}", LOG_CALL_WRAP);
+                        info!(
+                            "task_call_end task_id={} kind=ask status=success path=crypto_hard_route",
+                            task.task_id
+                        );
+                        info!("{}", LOG_CALL_WRAP);
+                        return Ok(());
+                    }
+                    Err(err_text) => {
+                        error!(
+                            "worker_once: ask hard_route task_id={} failed: {}",
+                            task.task_id, err_text
+                        );
+                        repo::update_task_failure(state, &task.task_id, &err_text)?;
+                        maybe_notify_schedule_result(state, &task, &payload, false, &err_text).await;
+                        info!("{}", LOG_CALL_WRAP);
+                        info!(
+                            "task_call_end task_id={} kind=ask status=failed path=crypto_hard_route error={}",
+                            task.task_id,
+                            truncate_for_log(&err_text)
+                        );
+                        info!("{}", LOG_CALL_WRAP);
+                        return Ok(());
+                    }
+                }
+            }
             let context_resolution =
                 intent_router::resolve_user_request_with_context(state, &task, prompt).await;
             let resolved_prompt = context_resolution.resolved_user_intent.clone();
@@ -1780,8 +1840,27 @@ async fn maybe_notify_schedule_result(
     let Some(job_id) = payload.get("schedule_job_id").and_then(|v| v.as_str()) else {
         return;
     };
-    let prefix = if success { "定时任务执行成功" } else { "定时任务执行失败" };
-    let message = format!("{prefix}\n任务ID: {job_id}\n{text}");
+    let prefix = if success {
+        i18n_t_with_default(
+            state,
+            "clawd.msg.schedule_run_success_prefix",
+            "Scheduled job executed successfully",
+        )
+    } else {
+        i18n_t_with_default(
+            state,
+            "clawd.msg.schedule_run_failed_prefix",
+            "Scheduled job execution failed",
+        )
+    };
+    let job_id_label = i18n_t_with_default(state, "clawd.msg.schedule_run_job_id_label", "Job ID");
+    let status_block = format!("{prefix}\n{job_id_label}: {job_id}");
+    let text_trimmed = text.trim();
+    let message = if text_trimmed.is_empty() {
+        status_block
+    } else {
+        format!("{text_trimmed}\n\n{status_block}")
+    };
     if let Err(err) = send_task_channel_message(state, task, payload, &message).await {
         warn!(
             "schedule notify failed: task_id={} chat_id={} err={}",
@@ -1975,6 +2054,7 @@ async fn run_skill_with_runner(
         "image_vision" => state.skill_timeout_seconds.max(90),
         "audio_transcribe" => state.skill_timeout_seconds.max(120),
         "audio_synthesize" => state.skill_timeout_seconds.max(90),
+        "crypto" => state.skill_timeout_seconds.max(60),
         _ => state.skill_timeout_seconds,
     };
 
@@ -3385,6 +3465,247 @@ pub(crate) fn normalize_agent_action_value(value: Value) -> Result<Value, String
     Ok(Value::Object(obj))
 }
 
+fn pending_crypto_confirm_key(user_id: i64, chat_id: i64) -> String {
+    format!("{user_id}:{chat_id}")
+}
+
+fn cleanup_expired_crypto_confirms(state: &AppState, now: u64) {
+    if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
+        guard.retain(|_, v| now.saturating_sub(v.created_ts) <= CRYPTO_CONFIRM_TTL_SECONDS);
+    }
+}
+
+async fn try_handle_crypto_trade_hard_route(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+) -> Option<Result<AskReply, String>> {
+    let text = prompt.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    let now = now_ts_u64();
+    cleanup_expired_crypto_confirms(state, now);
+    let key = pending_crypto_confirm_key(task.user_id, task.chat_id);
+
+    let pending = state
+        .pending_crypto_confirms
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&key).cloned());
+
+    if let Some(p) = pending {
+        if is_yes_confirmation(text) {
+            if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
+                guard.remove(&key);
+            }
+            let mut submit_args = p.submit_args;
+            if let Some(obj) = submit_args.as_object_mut() {
+                obj.insert("confirm".to_string(), Value::Bool(true));
+            }
+            let result = execution_adapters::run_skill(state, task, "crypto", submit_args).await;
+            return Some(match result {
+                Ok(out) => Ok(AskReply::non_llm(
+                    i18n_t_with_default(
+                        state,
+                        "clawd.msg.crypto_trade_confirmed",
+                        "Order confirmed and submitted.\n{out}",
+                    )
+                    .replace("{out}", &out),
+                )),
+                Err(err) => Err(format!(
+                    "{}{}",
+                    i18n_t_with_default(
+                        state,
+                        "clawd.msg.skill_exec_error_prefix",
+                        "Skill execution error: ",
+                    ),
+                    err
+                )),
+            });
+        }
+        if is_no_confirmation(text) {
+            if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
+                guard.remove(&key);
+            }
+            return Some(Ok(AskReply::non_llm(i18n_t_with_default(
+                state,
+                "clawd.msg.crypto_trade_canceled",
+                "This order request has been canceled and no trade will be executed.",
+            ))));
+        }
+    }
+
+    let Some((preview_args, submit_args)) = parse_crypto_trade_preview_submit_args(text) else {
+        return None;
+    };
+
+    let preview_out = execution_adapters::run_skill(state, task, "crypto", preview_args).await;
+    Some(match preview_out {
+        Ok(out) => {
+            if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
+                guard.insert(
+                    key,
+                    PendingCryptoConfirm {
+                        submit_args,
+                        created_ts: now,
+                    },
+                );
+            }
+            Ok(AskReply::non_llm(
+                i18n_t_with_default(
+                    state,
+                    "clawd.msg.crypto_trade_confirm_prompt",
+                    "{out}\n\nPlease confirm order placement: reply `yes`/`no`. Valid for 10 minutes.",
+                )
+                .replace("{out}", &out),
+            ))
+        }
+        Err(err) => Err(format!(
+            "{}{}",
+            i18n_t_with_default(
+                state,
+                "clawd.msg.skill_exec_error_prefix",
+                "Skill execution error: ",
+            ),
+            err
+        )),
+    })
+}
+
+fn parse_crypto_trade_preview_submit_args(text: &str) -> Option<(Value, Value)> {
+    if !contains_trade_intent(text) {
+        return None;
+    }
+    let side = detect_trade_side(text)?;
+    let symbol = extract_trade_symbol(text)?;
+    let order_type = detect_order_type(text);
+    let qty = extract_trade_qty(text, &symbol, order_type)?;
+    if qty <= 0.0 {
+        return None;
+    }
+    let price = if order_type == "limit" {
+        extract_trade_price(text)?
+    } else {
+        0.0
+    };
+    let exchange = detect_trade_exchange(text);
+
+    let mut base = serde_json::Map::new();
+    base.insert("exchange".to_string(), Value::String(exchange));
+    base.insert("symbol".to_string(), Value::String(symbol));
+    base.insert("side".to_string(), Value::String(side.to_string()));
+    base.insert("order_type".to_string(), Value::String(order_type.to_string()));
+    base.insert("qty".to_string(), Value::from(qty));
+    if order_type == "limit" {
+        base.insert("price".to_string(), Value::from(price));
+    }
+
+    let mut preview = base.clone();
+    preview.insert("action".to_string(), Value::String("trade_preview".to_string()));
+    let mut submit = base;
+    submit.insert("action".to_string(), Value::String("trade_submit".to_string()));
+    submit.insert("confirm".to_string(), Value::Bool(true));
+    Some((Value::Object(preview), Value::Object(submit)))
+}
+
+fn contains_trade_intent(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    let keywords = [
+        "下单", "买入", "卖出", "开仓", "平仓", "交易", "buy", "sell", "order", "submit",
+    ];
+    keywords.iter().any(|k| t.contains(k))
+}
+
+fn detect_trade_side(text: &str) -> Option<&'static str> {
+    let t = text.to_ascii_lowercase();
+    if ["sell", "卖出", "卖", "平仓"].iter().any(|k| t.contains(k)) {
+        return Some("sell");
+    }
+    if ["buy", "买入", "买", "开仓"].iter().any(|k| t.contains(k)) {
+        return Some("buy");
+    }
+    None
+}
+
+fn detect_order_type(text: &str) -> &'static str {
+    let t = text.to_ascii_lowercase();
+    if t.contains("limit") || t.contains("限价") {
+        "limit"
+    } else {
+        "market"
+    }
+}
+
+fn detect_trade_exchange(text: &str) -> String {
+    let t = text.to_ascii_lowercase();
+    if t.contains("okx") || t.contains("欧易") {
+        "okx".to_string()
+    } else if t.contains("binance") || t.contains("币安") {
+        "binance".to_string()
+    } else {
+        "paper".to_string()
+    }
+}
+
+fn extract_trade_symbol(text: &str) -> Option<String> {
+    let upper = text.to_ascii_uppercase().replace('-', "").replace('/', "");
+    let re = Regex::new(r"([A-Z]{2,10}(USDT|USD))").ok()?;
+    re.captures(&upper)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+fn extract_trade_qty(text: &str, symbol: &str, order_type: &str) -> Option<f64> {
+    let re = Regex::new(r"(?i)(?:qty|数量|买入|买|卖出|卖)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)").ok()?;
+    if let Some(c) = re.captures(text) {
+        if let Some(m) = c.get(1) {
+            return m.as_str().parse::<f64>().ok();
+        }
+    }
+    let by_symbol = Regex::new(&format!(
+        r"(?i){}\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)",
+        regex::escape(symbol)
+    ))
+    .ok()?;
+    if let Some(c) = by_symbol.captures(text) {
+        if let Some(m) = c.get(1) {
+            return m.as_str().parse::<f64>().ok();
+        }
+    }
+    if order_type == "market" {
+        let generic = Regex::new(r"([0-9]+(?:\.[0-9]+)?)").ok()?;
+        let mut last_num: Option<f64> = None;
+        for cap in generic.captures_iter(text) {
+            if let Some(m) = cap.get(1) {
+                if let Ok(v) = m.as_str().parse::<f64>() {
+                    last_num = Some(v);
+                }
+            }
+        }
+        return last_num;
+    }
+    None
+}
+
+fn extract_trade_price(text: &str) -> Option<f64> {
+    let re = Regex::new(r"(?i)(?:price|px|价格|限价)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)").ok()?;
+    re.captures(text)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<f64>().ok())
+}
+
+fn is_yes_confirmation(text: &str) -> bool {
+    let t = text.trim().to_ascii_lowercase();
+    matches!(t.as_str(), "yes" | "y" | "ok" | "确认" | "是" | "好的" | "同意")
+}
+
+fn is_no_confirmation(text: &str) -> bool {
+    let t = text.trim().to_ascii_lowercase();
+    matches!(t.as_str(), "no" | "n" | "取消" | "否" | "不用了" | "不")
+}
+
 pub(crate) fn canonical_skill_name(name: &str) -> &str {
     match name {
         // file search
@@ -3404,6 +3725,7 @@ pub(crate) fn canonical_skill_name(name: &str) -> &str {
         "image_vision_skill" | "vision" | "vision_image" | "image-analyze" => "image_vision",
         "image_generation" | "generate_image" | "draw_image" | "text_to_image" => "image_generate",
         "image_modify" | "image_editor" | "edit_image" | "image_outpaint" => "image_edit",
+        "coin" | "coins" | "crypto_trade" | "market_data" | "crypto_market" => "crypto",
         "git" => "git_basic",
         "http" => "http_basic",
         "system" => "system_basic",

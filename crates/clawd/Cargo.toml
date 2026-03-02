@@ -20,3 +20,4 @@ toml.workspace = true
 chrono = "0.4.44"
 chrono-tz = "0.10.4"
 tower-http = { version = "0.6", features = ["fs"] }
+regex = "1"

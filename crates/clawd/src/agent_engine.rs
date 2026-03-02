@@ -48,7 +48,7 @@ pub(crate) async fn run_agent_with_tools(
     history.push("planner: llm-driven dynamic action planning".to_string());
 
     for step in 1..=crate::AGENT_MAX_STEPS {
-        let tool_spec = "Tools: read_file(path), write_file(path,content), list_dir(path), run_cmd(command). Skills: image_vision(action=describe|extract|compare|screenshot_summary, images=[{path|url|base64}]), image_generate(prompt,size?,style?,quality?,n?,output_path?), image_edit(action=edit|outpaint|restyle|add_remove, image?, instruction, mask?, output_path?), x(text, dry_run?, send?). Return exactly one action JSON per turn. For simple save-a-file tasks, prefer write_file directly (use run_cmd mkdir -p once only when target folder is missing). For image generation requests, prefer call_skill image_generate directly. For image edit requests that reference an earlier image without explicit path, still call image_edit with instruction; backend may resolve the image from memory/history. For X posting requests, call_skill x with text first; keep dry_run=true unless user explicitly asks to publish and set send=true.";
+        let tool_spec = "Tools: read_file(path), write_file(path,content), list_dir(path), run_cmd(command). Skills: image_vision(action=describe|extract|compare|screenshot_summary, images=[{path|url|base64}]), image_generate(prompt,size?,style?,quality?,n?,output_path?), image_edit(action=edit|outpaint|restyle|add_remove, image?, instruction, mask?, output_path?), crypto(action=quote|multi_quote|candles|indicator|news|onchain|trade_preview|trade_submit|order_status|cancel_order|positions, symbol?, symbols?, side?, order_type?, qty?, price?, confirm?), x(text, dry_run?, send?). Return exactly one action JSON per turn. For simple save-a-file tasks, prefer write_file directly (use run_cmd mkdir -p once only when target folder is missing). For image generation requests, prefer call_skill image_generate directly. For image edit requests that reference an earlier image without explicit path, still call image_edit with instruction; backend may resolve the image from memory/history. For trade requests, call crypto trade_preview first and only use trade_submit when user explicitly confirms. For X posting requests, call_skill x with text first; keep dry_run=true unless user explicitly asks to publish and set send=true.";
         let hist_text = if history.is_empty() {
             "(empty)".to_string()
         } else {
@@ -338,9 +338,11 @@ pub(crate) async fn run_agent_with_tools(
                             return Ok(AskReply::non_llm(normalized_last_out));
                         }
                     }
-                    return Ok(AskReply::non_llm(
-                        "图片已生成成功，已停止重复生成以避免任务循环。".to_string(),
-                    ));
+                    return Ok(AskReply::non_llm(crate::i18n_t_with_default(
+                        state,
+                        "clawd.msg.image_loop_stopped",
+                        "Image generation succeeded. Repeated generation has been stopped to avoid task loops.",
+                    )));
                 }
                 if tool_calls >= crate::AGENT_MAX_TOOL_CALLS {
                     return Err("agent tool call limit exceeded".to_string());
@@ -371,7 +373,7 @@ pub(crate) async fn run_agent_with_tools(
                         let prefix = crate::i18n_t_with_default(
                             state,
                             "clawd.msg.skill_exec_error_prefix",
-                            "技能执行错误：",
+                            "Skill execution error: ",
                         );
                         return Err(format!("{prefix}{err}"));
                     }
@@ -446,14 +448,14 @@ pub(crate) async fn run_agent_with_tools(
                             let prefix = crate::i18n_t_with_default(
                                 state,
                                 "clawd.msg.command_exec_error_prefix",
-                                "命令执行错误：",
+                                "Command execution error: ",
                             );
                             format!("{prefix}{err}")
                         } else {
                             let prefix = crate::i18n_t_with_default(
                                 state,
                                 "clawd.msg.tool_exec_error_prefix",
-                                "工具执行错误：",
+                                "Tool execution error: ",
                             );
                             format!("{prefix}{err}")
                         };
@@ -474,7 +476,7 @@ pub(crate) async fn run_agent_with_tools(
                                     let suggest_title = crate::i18n_t_with_default(
                                         state,
                                         "clawd.msg.suggestion_title",
-                                        "建议：",
+                                        "Suggestion:",
                                     );
                                     final_err.push_str("\n\n");
                                     final_err.push_str(&suggest_title);

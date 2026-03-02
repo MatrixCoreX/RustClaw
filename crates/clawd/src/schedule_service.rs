@@ -213,6 +213,48 @@ fn schedule_kind_desc(
     }
 }
 
+fn humanize_next_run_at(next_run_at: i64, timezone: &str) -> String {
+    let tz = parse_timezone(timezone);
+    chrono::DateTime::<Utc>::from_timestamp(next_run_at, 0)
+        .map(|dt| dt.with_timezone(&tz).format("%Y-%m-%d %H:%M:%S %:z").to_string())
+        .unwrap_or_else(|| next_run_at.to_string())
+}
+
+fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &str) -> String {
+    if task_kind == "ask" {
+        if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
+            let t = text.trim();
+            if !t.is_empty() {
+                return t.to_string();
+            }
+        }
+        let p = fallback_prompt.trim();
+        if !p.is_empty() {
+            return p.to_string();
+        }
+    } else if task_kind == "run_skill" {
+        let skill = payload
+            .get("skill_name")
+            .or_else(|| payload.get("skill"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let args_str = payload
+            .get("args")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "{}".to_string());
+        if !skill.is_empty() {
+            return format!("run_skill:{skill} args={args_str}");
+        }
+    }
+    let payload_str = payload.to_string();
+    if payload_str.trim().is_empty() {
+        "-".to_string()
+    } else {
+        payload_str
+    }
+}
+
 pub(crate) async fn try_handle_schedule_request(
     state: &AppState,
     task: &ClaimedTask,
@@ -523,6 +565,8 @@ pub(crate) async fn try_handle_schedule_request(
             )
             .map_err(|e| e.to_string())?;
 
+            let next_run_human = humanize_next_run_at(next_run_at, &timezone);
+            let task_content = summarize_task_content(&task_kind, &payload, prompt);
             Ok(Some(schedule_t_with(
                 state,
                 "schedule.msg.create_ok",
@@ -530,7 +574,8 @@ pub(crate) async fn try_handle_schedule_request(
                     ("job_id", &job_id),
                     ("type", &intent.schedule.r#type),
                     ("timezone", &timezone),
-                    ("next_run_at", &next_run_at.to_string()),
+                    ("next_run_human", &next_run_human),
+                    ("task_content", &task_content),
                 ],
             )))
         }
