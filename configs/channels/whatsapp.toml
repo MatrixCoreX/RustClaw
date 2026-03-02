@@ -1,0 +1,39 @@
+[whatsapp]
+enabled = false
+api_base = "https://graph.facebook.com"
+access_token = "REPLACE_ME_WHATSAPP_ACCESS_TOKEN"
+app_secret = "REPLACE_ME_META_APP_SECRET"
+verify_token = "REPLACE_ME_WHATSAPP_VERIFY_TOKEN"
+phone_number_id = "REPLACE_ME_PHONE_NUMBER_ID"
+webhook_listen = "127.0.0.1:8091"
+webhook_path = "/webhook"
+admins = []
+allowlist = []
+quick_result_wait_seconds = 3
+image_inbox_dir = "image/upload"
+audio_inbox_dir = "audio/upload"
+
+[whatsapp_cloud]
+enabled = false
+api_base = "https://graph.facebook.com"
+access_token = ""
+app_secret = ""
+verify_token = ""
+phone_number_id = ""
+webhook_listen = "127.0.0.1:8091"
+webhook_path = "/webhook"
+admins = []
+allowlist = []
+quick_result_wait_seconds = 3
+image_inbox_dir = "image/upload"
+audio_inbox_dir = "audio/upload"
+
+[whatsapp_web]
+enabled = true
+bridge_listen = "127.0.0.1:8092"
+wrapper_listen = "127.0.0.1:8094"
+bridge_base_url = "http://127.0.0.1:8092"
+auth_dir = "data/wa-web-auth"
+quick_result_wait_seconds = 3
+admins = []
+allowlist = []

@@ -1,0 +1,34 @@
+[telegram]
+admins = [1985996990]
+# 图片保存类回复（如 "Image saved: ..."）在 N 秒后自动删除，0 表示不删除
+ephemeral_image_saved_seconds = 15
+allowlist = []
+audio_inbox_dir = "audio/upload"
+auto_vision_on_image_only = false
+bot_token = "8713989782:AAFxiUWJeUZ-XXL4LUORMmpH-z7nN6bOyaM"
+i18n_path = "configs/i18n/telegramd.zh-CN.toml"
+language = "zh-CN"
+max_audio_input_bytes = 26214400
+quick_result_wait_seconds = 10
+voice_mode_nl_intent_enabled = false
+voice_reply_mode = "voice"
+
+[telegram.sendfile]
+admin_only = false
+allowed_dirs = [
+    "image/download",
+    "document",
+]
+full_access = true
+
+[telegram.voice_reply_mode_by_chat]
+1985996990 = "text"
+
+[telegram_bot]
+enabled = true
+bot_token = ""
+admins = []
+allowlist = []
+language = "zh-CN"
+i18n_path = "configs/i18n/telegramd.zh-CN.toml"
+quick_result_wait_seconds = 3

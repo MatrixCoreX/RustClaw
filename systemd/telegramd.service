@@ -1,0 +1,17 @@
+[Unit]
+Description=RustClaw Telegram Daemon
+After=network.target clawd.service
+Requires=clawd.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/rustclaw
+ExecStart=/opt/rustclaw/bin/telegramd
+Restart=always
+RestartSec=2
+TasksMax=96
+MemoryMax=256M
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

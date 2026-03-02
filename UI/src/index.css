@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply antialiased;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl;
+  }
+
+  .chat-markdown {
+    @apply whitespace-normal break-words leading-relaxed;
+  }
+
+  .chat-markdown p {
+    @apply my-2;
+  }
+
+  .chat-markdown ul {
+    @apply my-2 list-disc pl-5;
+  }
+
+  .chat-markdown ol {
+    @apply my-2 list-decimal pl-5;
+  }
+
+  .chat-markdown li {
+    @apply my-1;
+  }
+
+  .chat-markdown pre {
+    @apply my-2 overflow-x-auto rounded-lg border border-white/10 bg-[#12151f] p-3;
+  }
+
+  .chat-markdown code {
+    @apply rounded bg-black/30 px-1 py-0.5 font-mono text-[12px];
+  }
+}
