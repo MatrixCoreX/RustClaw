@@ -1,3 +1,8 @@
+# RustClaw   
+Lightweight Claw
+
+<img src="./RustClaw.png" width="420" />
+
 # RustClaw
 
 RustClaw is a Rust-based local agent stack with:
@@ -47,7 +52,6 @@ RustClaw is a Rust-based local agent stack with:
 - `image_edit`
 - `audio_transcribe`
 - `audio_synthesize`
-- `crypto`
 
 ## HTTP API (clawd)
 
@@ -136,39 +140,6 @@ Current support in built-in media skills:
   - Native: `openai`, `google`
   - Optional compatible mode for `anthropic`, `grok` (default off)
 
-## Crypto Skill (Market + Insight + Trade Guard)
-
-`crypto` skill supports:
-
-- market data: `quote`, `multi_quote`, `candles`, `indicator`
-- insight data: `onchain` (news moved to `rss_fetch`)
-- guarded trade flow: `trade_preview`, `trade_submit`, `order_status`, `cancel_order`, `positions`
-
-Safety defaults:
-
-- `trade_submit` requires `confirm=true` when `crypto.require_explicit_send=true`
-- hard limits can be set by config (`max_notional_usd`, `allowed_symbols`, `allowed_exchanges`, `blocked_actions`)
-- default execution mode is `cextest` (backward compatible alias: `paper`, writes to `data/crypto-paper-orders.jsonl`)
-- skill-specific config is in `configs/crypto.toml` (separate from `configs/config.toml`)
-- news sources are configurable via `rss` section in `configs/rss.toml` with layered fallback (`primary/secondary/fallback`)
-- query API endpoints are configurable via `crypto.*_api_url` in `configs/crypto.toml` (onchain + coingecko)
-- real exchange APIs are supported for `binance` and `okx` (requires enabling and filling API credentials in `configs/crypto.toml`)
-- Binance order submit uses `newOrderRespType=RESULT`, and `recvWindow` is clamped to `1..60000`
-- OKX spot market submit uses `tgtCcy=base_ccy` so `qty` remains base-asset sized
-- `order_status` / `cancel_order` accept either `order_id` or `client_order_id`
-
-Minimal examples:
-
-- `{"action":"quote","symbol":"BTCUSDT"}`
-- `{"action":"get_price","symbol":"BTCUSDT","exchange":"auto"}` (returns Binance + OKX in one response)
-- `{"action":"get_book_ticker","symbol":"BTCUSDT","exchange":"auto"}`
-- `{"action":"healthcheck","symbol":"BTCUSDT"}`
-- `rss_fetch {"action":"latest","category":"general","limit":5}`
-- `{"action":"onchain","chain":"ethereum","address":"0x...","token":"usdt","tx_limit":5}`
-- `{"action":"trade_preview","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01}`
-- `{"action":"trade_preview","symbol":"BTCUSDT","side":"buy","order_type":"market","quote_qty_usd":10}`
-- `{"action":"trade_submit","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01,"confirm":true}`
-
 Resolution priority for media vendor/model selection:
 
 - vendor: request args `vendor` > skill section `default_vendor` > `llm.selected_vendor`
@@ -184,7 +155,7 @@ Compatibility switches in `configs/config.toml` (all default `false`):
 ## Shell Scripts and What They Do
 
 - `build-all.sh`  
-  Builds workspace binaries (default: both `release` and `debug`), optionally runs `cargo clean`, and verifies required binaries.
+  Builds all workspace binaries (`release` or `debug`), optionally runs `cargo clean`, verifies required binaries, and syncs `skills.skill_runner_path` in `configs/config.toml`.
 
 - `setup-config.sh`  
   Interactive config bootstrap for Telegram token/admin, model vendor/model, selected provider API key, and key tool limits.
@@ -260,3 +231,5 @@ RustClaw uses an adapter-first ingress architecture:
 3. Submit tasks via `POST /v1/tasks` with `channel` and `external_*` metadata.
 4. Register sender route in `clawd` channel dispatcher.
 5. Add independent start/stop hooks and health probes.
+
+
