@@ -144,7 +144,11 @@ echo "Step 2/3: Build check" # zh: 第 2/3 步：检查编译产物
 if [[ ! -x "$CLAWD_BIN" || ! -x "$TELEGRAMD_BIN" ]]; then
   echo "Prebuilt binaries missing for profile=$PROFILE, starting foreground build..." # zh: 缺少预编译二进制，先前台编译。
   if [[ -f "$SCRIPT_DIR/Cargo.toml" ]]; then
-    cargo build --workspace --release
+    if [[ "$PROFILE" == "release" ]]; then
+      cargo build --workspace --release
+    else
+      cargo build --workspace
+    fi
   else
     echo "Cargo.toml not found in runtime package; cannot compile. Please use a package containing release binaries." # zh: 运行包内未找到 Cargo.toml，无法编译。请使用包含 release 二进制的运行包。
     exit 1
@@ -156,6 +160,17 @@ fi
 
 # Ensure skill-runner binary exists for run_skill tasks.
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
+if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
+  ALT_PROFILE="debug"
+  if [[ "$PROFILE" == "debug" ]]; then
+    ALT_PROFILE="release"
+  fi
+  ALT_RUNNER="$SCRIPT_DIR/target/$ALT_PROFILE/skill-runner"
+  if [[ -x "$ALT_RUNNER" ]]; then
+    echo "skill-runner missing in $PROFILE, fallback to $ALT_PROFILE: $ALT_RUNNER" # zh: 当前 profile 未找到 skill-runner，回退到另一 profile。
+    SKILL_RUNNER_ABS="$ALT_RUNNER"
+  fi
+fi
 
 if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
   echo "skill-runner missing, trying to build: $SKILL_RUNNER_ABS" # zh: 未找到 skill-runner，尝试自动编译。

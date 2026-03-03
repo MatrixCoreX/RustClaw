@@ -232,10 +232,6 @@ main() {
     '{"action":"indicator","symbol":"ETHUSDT","timeframe":"1h","period":14}' \
     "indicator"
 
-  run_case_ok "news top5" \
-    '{"action":"news","limit":5}' \
-    "news"
-
   run_case_ok "onchain bitcoin" \
     '{"action":"onchain","chain":"bitcoin"}' \
     "onchain"

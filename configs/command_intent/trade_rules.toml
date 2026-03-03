@@ -1,0 +1,39 @@
+[intent]
+keywords = [
+  "下单",
+  "买入",
+  "卖出",
+  "开仓",
+  "平仓",
+  "交易",
+  "buy",
+  "sell",
+  "order",
+  "submit",
+]
+
+[side]
+buy_keywords = ["buy", "买入", "买", "开仓"]
+sell_keywords = ["sell", "卖出", "卖", "平仓"]
+
+[order_type]
+limit_keywords = ["limit", "限价"]
+
+[exchange]
+default = "paper"
+
+[exchange.aliases]
+okx = ["okx", "欧易","okex"]
+binance = ["binance", "币安"]
+
+[confirm]
+yes = ["yes", "y", "ok", "确认", "是", "好的", "同意"]
+no = ["no", "n", "取消", "否", "不用了", "不"]
+
+[regex]
+qty_patterns = [
+  "(?i)(?:qty|数量|买入|买|卖出|卖)\\s*[:=]?\\s*([0-9]+(?:\\.[0-9]+)?)",
+]
+price_patterns = [
+  "(?i)(?:price|px|价格|限价)\\s*[:=]?\\s*([0-9]+(?:\\.[0-9]+)?)",
+]

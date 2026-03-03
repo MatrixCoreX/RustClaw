@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Utc;
@@ -72,6 +72,42 @@ struct CryptoConfig {
     language: Option<String>,
     #[serde(default)]
     i18n_path: Option<String>,
+    #[serde(default = "default_btc_onchain_fees_api_url")]
+    btc_onchain_fees_api_url: String,
+    #[serde(default = "default_eth_onchain_stats_api_url")]
+    eth_onchain_stats_api_url: String,
+    #[serde(default = "default_coingecko_simple_price_api_url")]
+    coingecko_simple_price_api_url: String,
+    #[serde(default = "default_gateio_quote_ticker_api_path")]
+    gateio_quote_ticker_api_path: String,
+    #[serde(default = "default_coinbase_quote_ticker_api_path")]
+    coinbase_quote_ticker_api_path: String,
+    #[serde(default = "default_kraken_quote_ticker_api_path")]
+    kraken_quote_ticker_api_path: String,
+    #[serde(default = "default_gateio_book_ticker_api_path")]
+    gateio_book_ticker_api_path: String,
+    #[serde(default = "default_coinbase_book_ticker_api_path")]
+    coinbase_book_ticker_api_path: String,
+    #[serde(default = "default_kraken_book_ticker_api_path")]
+    kraken_book_ticker_api_path: String,
+    #[serde(default = "default_binance_quote_24hr_api_path")]
+    binance_quote_24hr_api_path: String,
+    #[serde(default = "default_binance_quote_price_api_path")]
+    binance_quote_price_api_path: String,
+    #[serde(default = "default_binance_book_ticker_api_path")]
+    binance_book_ticker_api_path: String,
+    #[serde(default = "default_okx_market_ticker_api_path")]
+    okx_market_ticker_api_path: String,
+    #[serde(default = "default_eth_address_native_balance_api_url")]
+    eth_address_native_balance_api_url: String,
+    #[serde(default = "default_eth_address_token_balance_api_url")]
+    eth_address_token_balance_api_url: String,
+    #[serde(default = "default_eth_address_tx_list_api_url")]
+    eth_address_tx_list_api_url: String,
+    #[serde(default)]
+    eth_token_contracts: HashMap<String, String>,
+    #[serde(default)]
+    eth_token_decimals: HashMap<String, u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +179,17 @@ struct Quote {
     source: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct BookTicker {
+    symbol: String,
+    bid_price: f64,
+    bid_qty: f64,
+    ask_price: f64,
+    ask_qty: f64,
+    exchange: String,
+    source: String,
+}
+
 #[derive(Debug, Clone)]
 struct TradeInput {
     exchange: String,
@@ -150,6 +197,7 @@ struct TradeInput {
     side: String,
     order_type: String,
     qty: f64,
+    quote_qty_usd: Option<f64>,
     price: Option<f64>,
     client_order_id: Option<String>,
     confirm: bool,
@@ -235,7 +283,6 @@ fn default_crypto_catalog(lang: &str) -> TextCatalog {
         "crypto.err.indicator_requires_close_prices".to_string(),
         "indicator requires close_prices".to_string(),
     );
-    current.insert("crypto.err.news_no_items".to_string(), "news feed has no items".to_string());
     current.insert(
         "crypto.err.unsupported_chain".to_string(),
         "unsupported chain; use bitcoin|ethereum".to_string(),
@@ -331,20 +378,56 @@ fn default_crypto_catalog(lang: &str) -> TextCatalog {
     current.insert("crypto.msg.no_orders_yet".to_string(), "no orders yet".to_string());
     current.insert("crypto.msg.no_filled_positions".to_string(), "no filled positions".to_string());
     current.insert("crypto.msg.no_balances".to_string(), "no balances".to_string());
+    current.insert(
+        "crypto.msg.market_quote_line_gateio".to_string(),
+        "- GATEIO ${price} [source: GateIO]".to_string(),
+    );
+    current.insert(
+        "crypto.msg.market_quote_line_coinbase".to_string(),
+        "- COINBASE ${price} [source: Coinbase]".to_string(),
+    );
+    current.insert(
+        "crypto.msg.market_quote_line_kraken".to_string(),
+        "- KRAKEN ${price} [source: Kraken]".to_string(),
+    );
     TextCatalog { current }
+}
+
+fn flatten_toml_table(prefix: &str, table: &toml::map::Map<String, toml::Value>, out: &mut HashMap<String, String>) {
+    for (k, v) in table {
+        let key = if prefix.is_empty() {
+            k.to_string()
+        } else {
+            format!("{prefix}.{k}")
+        };
+        match v {
+            toml::Value::String(text) => {
+                out.insert(key, text.to_string());
+            }
+            toml::Value::Table(child) => {
+                flatten_toml_table(&key, child, out);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn load_external_i18n(path: &Path) -> Option<HashMap<String, String>> {
     let raw = std::fs::read_to_string(path).ok()?;
     let value: toml::Value = toml::from_str(&raw).ok()?;
-    let dict = value.get("dict")?.as_table()?;
     let mut out = HashMap::new();
-    for (k, v) in dict {
-        if let Some(text) = v.as_str() {
-            out.insert(k.to_string(), text.to_string());
-        }
+    if let Some(dict) = value.get("dict").and_then(|v| v.as_table()) {
+        flatten_toml_table("", dict, &mut out);
+        return Some(out);
     }
-    Some(out)
+    if let Some(root) = value.as_table() {
+        flatten_toml_table("", root, &mut out);
+        if out.is_empty() {
+            return None;
+        }
+        return Some(out);
+    }
+    None
 }
 
 fn init_i18n(cfg: &RootConfig, workspace_root: &Path) {
@@ -415,6 +498,11 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .unwrap_or("quote")
         .trim()
         .to_ascii_lowercase();
+    let action = match action.as_str() {
+        "get_price" => "quote".to_string(),
+        "get_multi_price" => "multi_quote".to_string(),
+        other => other.to_string(),
+    };
     if cfg
         .crypto
         .blocked_actions
@@ -436,10 +524,12 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     match action.as_str() {
         "quote" => handle_quote(&client, cfg, obj),
         "multi_quote" => handle_multi_quote(&client, cfg, obj),
+        "get_book_ticker" | "book_ticker" => handle_book_ticker(&client, cfg, obj),
+        "normalize_symbol" => handle_normalize_symbol(obj),
+        "healthcheck" => handle_healthcheck(&client, cfg, obj),
         "candles" => handle_candles(&client, cfg, obj),
         "indicator" => handle_indicator(&client, cfg, obj),
-        "news" => handle_news(&client, obj),
-        "onchain" => handle_onchain(&client, obj),
+        "onchain" => handle_onchain(&client, cfg, obj),
         "trade_preview" => handle_trade_preview(&client, cfg, obj),
         "trade_submit" => handle_trade_submit(&client, cfg, workspace_root, obj),
         "order_status" => handle_order_status(&client, cfg, workspace_root, obj),
@@ -454,18 +544,79 @@ fn handle_quote(client: &Client, cfg: &RootConfig, obj: &serde_json::Map<String,
         .get("symbol")
         .and_then(|v| v.as_str())
         .ok_or_else(|| tr("crypto.err.symbol_required"))?;
-    let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
-    let quote = fetch_quote(client, cfg, symbol, &exchange)?;
-    let text = format!(
-        "{} ${:.6} ({})",
-        quote.symbol,
-        quote.price_usd,
-        quote
-            .change_24h_pct
-            .map(|v| format!("{v:+.2}%"))
-            .unwrap_or_else(|| "24h n/a".to_string())
+    let b = fetch_quote_from_binance(client, cfg, symbol);
+    let o = fetch_quote_from_okx(client, cfg, symbol);
+    let g = fetch_quote_from_gateio(client, cfg, symbol);
+    let cb = fetch_quote_from_coinbase(client, cfg, symbol);
+    let k = fetch_quote_from_kraken(client, cfg, symbol);
+    let c = fetch_quote_from_coingecko(client, cfg, symbol);
+    let mut errors = Vec::new();
+    if let Err(err) = &b {
+        errors.push(format!("binance={err}"));
+    }
+    if let Err(err) = &o {
+        errors.push(format!("okx={err}"));
+    }
+    if let Err(err) = &g {
+        errors.push(format!("gateio={err}"));
+    }
+    if let Err(err) = &cb {
+        errors.push(format!("coinbase={err}"));
+    }
+    if let Err(err) = &k {
+        errors.push(format!("kraken={err}"));
+    }
+    if let Err(err) = &c {
+        errors.push(format!("coingecko={err}"));
+    }
+    let binance = b.ok();
+    let okx = o.ok();
+    let gateio = g.ok();
+    let coinbase = cb.ok();
+    let kraken = k.ok();
+    let coingecko = c.ok();
+    if binance.is_none()
+        && okx.is_none()
+        && gateio.is_none()
+        && coinbase.is_none()
+        && kraken.is_none()
+        && coingecko.is_none()
+    {
+        return Err(format!("all market sources failed: {}", errors.join("; ")));
+    }
+    let pref = binance
+        .clone()
+        .or(okx.clone())
+        .or(gateio.clone())
+        .or(coinbase.clone())
+        .or(kraken.clone())
+        .or(coingecko.clone())
+        .ok_or_else(|| "no quote available".to_string())?;
+    let text = format_market_quote_line(
+        &pref.symbol,
+        binance.as_ref(),
+        okx.as_ref(),
+        gateio.as_ref(),
+        coinbase.as_ref(),
+        kraken.as_ref(),
+        coingecko.as_ref(),
     );
-    Ok((text, json!({ "action": "quote", "quote": quote })))
+    Ok((
+        text,
+        json!({
+            "action": "quote",
+            "quote": pref,
+            "quotes_by_exchange": {
+                "binance": binance,
+                "okx": okx,
+                "gateio": gateio,
+                "coinbase": coinbase,
+                "kraken": kraken,
+                "coingecko": coingecko
+            },
+            "errors": errors
+        }),
+    ))
 }
 
 fn handle_multi_quote(
@@ -489,25 +640,282 @@ fn handle_multi_quote(
     if symbols.is_empty() {
         return Err(tr("crypto.err.symbols_empty"));
     }
-    let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
     let mut quotes = Vec::new();
     let mut lines = Vec::new();
+    let mut by_exchange_rows = Vec::new();
     for s in symbols {
-        let q = fetch_quote(client, cfg, &s, &exchange)?;
-        lines.push(format!(
-            "{} ${:.6} ({})",
-            q.symbol,
-            q.price_usd,
-            q.change_24h_pct
-                .map(|v| format!("{v:+.2}%"))
-                .unwrap_or_else(|| "24h n/a".to_string())
+        let b = fetch_quote_from_binance(client, cfg, &s).ok();
+        let o = fetch_quote_from_okx(client, cfg, &s).ok();
+        let g = fetch_quote_from_gateio(client, cfg, &s).ok();
+        let cb = fetch_quote_from_coinbase(client, cfg, &s).ok();
+        let k = fetch_quote_from_kraken(client, cfg, &s).ok();
+        let c = fetch_quote_from_coingecko(client, cfg, &s).ok();
+        if b.is_none() && o.is_none() && g.is_none() && cb.is_none() && k.is_none() && c.is_none() {
+            return Err(format!("quote failed on all sources for symbol={}", normalize_symbol(&s)));
+        }
+        let chosen = b
+            .clone()
+            .or(o.clone())
+            .or(g.clone())
+            .or(cb.clone())
+            .or(k.clone())
+            .or(c.clone())
+            .ok_or_else(|| "no quote available".to_string())?;
+        lines.push(format_market_quote_line(
+            &chosen.symbol,
+            b.as_ref(),
+            o.as_ref(),
+            g.as_ref(),
+            cb.as_ref(),
+            k.as_ref(),
+            c.as_ref(),
         ));
-        quotes.push(q);
+        quotes.push(chosen.clone());
+        by_exchange_rows.push(json!({
+            "symbol": chosen.symbol,
+            "binance": b,
+            "okx": o,
+            "gateio": g,
+            "coinbase": cb,
+            "kraken": k,
+            "coingecko": c
+        }));
     }
+    let mut extra = json!({ "action": "multi_quote", "quotes": quotes });
+    extra["quotes_by_exchange"] = Value::Array(by_exchange_rows);
+    Ok((lines.join("\n"), extra))
+}
+
+fn format_market_quote_line(
+    symbol: &str,
+    binance: Option<&Quote>,
+    okx: Option<&Quote>,
+    gateio: Option<&Quote>,
+    coinbase: Option<&Quote>,
+    kraken: Option<&Quote>,
+    coingecko: Option<&Quote>,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push(tr_with("crypto.msg.market_quote_header", &[("symbol", symbol)]));
+    if let Some(q) = binance {
+        let price = format!("{:.6}", q.price_usd);
+        lines.push(tr_with(
+            "crypto.msg.market_quote_line_binance",
+            &[("price", &price)],
+        ));
+    }
+    if let Some(q) = okx {
+        let price = format!("{:.6}", q.price_usd);
+        lines.push(tr_with(
+            "crypto.msg.market_quote_line_okx",
+            &[("price", &price)],
+        ));
+    }
+    if let Some(q) = gateio {
+        let price = format!("{:.6}", q.price_usd);
+        lines.push(tr_with(
+            "crypto.msg.market_quote_line_gateio",
+            &[("price", &price)],
+        ));
+    }
+    if let Some(q) = coinbase {
+        let price = format!("{:.6}", q.price_usd);
+        lines.push(tr_with(
+            "crypto.msg.market_quote_line_coinbase",
+            &[("price", &price)],
+        ));
+    }
+    if let Some(q) = kraken {
+        let price = format!("{:.6}", q.price_usd);
+        lines.push(tr_with(
+            "crypto.msg.market_quote_line_kraken",
+            &[("price", &price)],
+        ));
+    }
+    if let Some(q) = coingecko {
+        let price = format!("{:.6}", q.price_usd);
+        lines.push(tr_with(
+            "crypto.msg.market_quote_line_coingecko",
+            &[("price", &price)],
+        ));
+    }
+    if lines.len() == 1 {
+        return tr_with("crypto.msg.market_quote_unavailable", &[("symbol", symbol)]);
+    }
+    lines.join("\n")
+}
+
+fn handle_book_ticker(
+    client: &Client,
+    cfg: &RootConfig,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(String, Value), String> {
+    let symbol = obj
+        .get("symbol")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| tr("crypto.err.symbol_required"))?;
+    let exchange_input = obj.get("exchange").and_then(|v| v.as_str()).unwrap_or("dual");
+    let dual_mode = matches!(
+        exchange_input.trim().to_ascii_lowercase().as_str(),
+        "" | "dual" | "both" | "all" | "auto"
+    );
+    if dual_mode {
+        let b = fetch_book_ticker_from_binance(client, cfg, symbol).ok();
+        let o = fetch_book_ticker_from_okx(client, cfg, symbol).ok();
+        let g = fetch_book_ticker_from_gateio(client, cfg, symbol).ok();
+        let cb = fetch_book_ticker_from_coinbase(client, cfg, symbol).ok();
+        let k = fetch_book_ticker_from_kraken(client, cfg, symbol).ok();
+        if b.is_none() && o.is_none() && g.is_none() && cb.is_none() && k.is_none() {
+            return Err(format!(
+                "book ticker failed on all exchanges for symbol={}",
+                normalize_symbol(symbol)
+            ));
+        }
+        let s = normalize_symbol(symbol);
+        let mut lines = vec![format!("{s} | 盘口来源：")];
+        if let Some(x) = b.as_ref() {
+            lines.push(format!(
+                "- BINANCE bid/ask={} / {}",
+                fmt_num(x.bid_price),
+                fmt_num(x.ask_price)
+            ));
+        }
+        if let Some(x) = o.as_ref() {
+            lines.push(format!(
+                "- OKX bid/ask={} / {}",
+                fmt_num(x.bid_price),
+                fmt_num(x.ask_price)
+            ));
+        }
+        if let Some(x) = g.as_ref() {
+            lines.push(format!(
+                "- GATEIO bid/ask={} / {}",
+                fmt_num(x.bid_price),
+                fmt_num(x.ask_price)
+            ));
+        }
+        if let Some(x) = cb.as_ref() {
+            lines.push(format!(
+                "- COINBASE bid/ask={} / {}",
+                fmt_num(x.bid_price),
+                fmt_num(x.ask_price)
+            ));
+        }
+        if let Some(x) = k.as_ref() {
+            lines.push(format!(
+                "- KRAKEN bid/ask={} / {}",
+                fmt_num(x.bid_price),
+                fmt_num(x.ask_price)
+            ));
+        }
+        let text = lines.join("\n");
+        return Ok((
+            text,
+            json!({
+                "action":"book_ticker",
+                "symbol": s,
+                "book_ticker_by_exchange": {
+                    "binance": b,
+                    "okx": o,
+                    "gateio": g,
+                    "coinbase": cb,
+                    "kraken": k
+                }
+            }),
+        ));
+    }
+    let exchange = resolve_exchange(Some(exchange_input), cfg);
+    let bt = match exchange.as_str() {
+        "okx" => fetch_book_ticker_from_okx(client, cfg, symbol)?,
+        "gateio" => fetch_book_ticker_from_gateio(client, cfg, symbol)?,
+        "coinbase" => fetch_book_ticker_from_coinbase(client, cfg, symbol)?,
+        "kraken" => fetch_book_ticker_from_kraken(client, cfg, symbol)?,
+        _ => fetch_book_ticker_from_binance(client, cfg, symbol)?,
+    };
+    let text = format!(
+        "{} {} bid/ask={} / {}",
+        bt.symbol,
+        bt.exchange.to_ascii_uppercase(),
+        fmt_num(bt.bid_price),
+        fmt_num(bt.ask_price)
+    );
+    Ok((text, json!({"action":"book_ticker","book_ticker":bt})))
+}
+
+fn handle_normalize_symbol(obj: &serde_json::Map<String, Value>) -> Result<(String, Value), String> {
+    let symbol_raw = obj
+        .get("symbol")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| tr("crypto.err.symbol_required"))?;
+    let binance_symbol = normalize_symbol(symbol_raw);
+    let okx_symbol = to_okx_inst_id(symbol_raw);
+    let text = format!("symbol={} -> binance={} okx={}", symbol_raw, binance_symbol, okx_symbol);
     Ok((
-        lines.join("\n"),
-        json!({ "action": "multi_quote", "quotes": quotes }),
+        text,
+        json!({
+            "action":"normalize_symbol",
+            "symbol_raw": symbol_raw,
+            "binance_symbol": binance_symbol,
+            "okx_inst_id": okx_symbol
+        }),
     ))
+}
+
+fn handle_healthcheck(
+    client: &Client,
+    cfg: &RootConfig,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(String, Value), String> {
+    let symbol = obj
+        .get("symbol")
+        .and_then(|v| v.as_str())
+        .unwrap_or("BTCUSDT");
+    let normalized = normalize_symbol(symbol);
+    let okx_inst = to_okx_inst_id(symbol);
+    let binance_url = build_exchange_url(
+        cfg.binance.base_url.trim_end_matches('/'),
+        cfg.crypto.binance_quote_price_api_path.trim(),
+        &[("symbol", &normalized)],
+    );
+    let okx_url = build_exchange_url(
+        cfg.okx.base_url.trim_end_matches('/'),
+        cfg.crypto.okx_market_ticker_api_path.trim(),
+        &[("inst_id", &okx_inst), ("instId", &okx_inst)],
+    );
+    let mut checks = Vec::new();
+    for (exchange, url) in [("binance", binance_url), ("okx", okx_url)] {
+        let started = Instant::now();
+        let out = client.get(&url).send();
+        let latency_ms = started.elapsed().as_millis() as u64;
+        match out {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                checks.push(json!({
+                    "exchange": exchange,
+                    "ok": status >= 200 && status < 300,
+                    "latency_ms": latency_ms,
+                    "url": url,
+                    "http_status": status
+                }));
+            }
+            Err(err) => {
+                checks.push(json!({
+                    "exchange": exchange,
+                    "ok": false,
+                    "latency_ms": latency_ms,
+                    "url": url,
+                    "error": err.to_string()
+                }));
+            }
+        }
+    }
+    let ok = checks.iter().all(|x| x.get("ok").and_then(|v| v.as_bool()) == Some(true));
+    let text = if ok {
+        "crypto healthcheck ok (binance+okx)".to_string()
+    } else {
+        "crypto healthcheck degraded".to_string()
+    };
+    Ok((text, json!({"action":"healthcheck","ok":ok,"checks":checks})))
 }
 
 fn handle_candles(
@@ -609,57 +1017,8 @@ fn handle_indicator(
     ))
 }
 
-fn handle_news(client: &Client, obj: &serde_json::Map<String, Value>) -> Result<(String, Value), String> {
-    let limit = obj
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(5)
-        .clamp(1, 20) as usize;
-    let feed_url = obj
-        .get("feed_url")
-        .and_then(|v| v.as_str())
-        .unwrap_or("https://www.coindesk.com/arc/outboundfeeds/rss/");
-    let xml = client
-        .get(feed_url)
-        .header("User-Agent", "RustClaw-Crypto-Skill/1.0")
-        .send()
-        .map_err(|err| format!("fetch news failed: {err}"))?
-        .text()
-        .map_err(|err| format!("read news response failed: {err}"))?;
-    let mut items = Vec::new();
-    for blk in extract_blocks(&xml, "item").into_iter().take(limit) {
-        let title = extract_tag_text(blk, "title").unwrap_or_else(|| "(no title)".to_string());
-        let link = extract_tag_text(blk, "link").unwrap_or_default();
-        let date = extract_tag_text(blk, "pubDate").unwrap_or_default();
-        items.push(json!({"title":title,"link":link,"date":date}));
-    }
-    if items.is_empty() {
-        for blk in extract_blocks(&xml, "entry").into_iter().take(limit) {
-            let title = extract_tag_text(blk, "title").unwrap_or_else(|| "(no title)".to_string());
-            let link = extract_atom_link(blk).unwrap_or_default();
-            let date = extract_tag_text(blk, "updated").unwrap_or_default();
-            items.push(json!({"title":title,"link":link,"date":date}));
-        }
-    }
-    if items.is_empty() {
-        return Err(tr("crypto.err.news_no_items"));
-    }
-    let text = items
-        .iter()
-        .enumerate()
-        .map(|(idx, item)| {
-            format!(
-                "{}. {}",
-                idx + 1,
-                item.get("title").and_then(|v| v.as_str()).unwrap_or("")
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    Ok((text, json!({"action":"news","items":items})))
-}
 
-fn handle_onchain(client: &Client, obj: &serde_json::Map<String, Value>) -> Result<(String, Value), String> {
+fn handle_onchain(client: &Client, cfg: &RootConfig, obj: &serde_json::Map<String, Value>) -> Result<(String, Value), String> {
     let chain = obj
         .get("chain")
         .and_then(|v| v.as_str())
@@ -668,8 +1027,9 @@ fn handle_onchain(client: &Client, obj: &serde_json::Map<String, Value>) -> Resu
         .to_ascii_lowercase();
     match chain.as_str() {
         "bitcoin" | "btc" => {
+            let fees_api = cfg.crypto.btc_onchain_fees_api_url.trim();
             let v: Value = client
-                .get("https://mempool.space/api/v1/fees/recommended")
+                .get(fees_api)
                 .send()
                 .map_err(|err| format!("fetch bitcoin onchain failed: {err}"))?
                 .json()
@@ -683,8 +1043,17 @@ fn handle_onchain(client: &Client, obj: &serde_json::Map<String, Value>) -> Resu
             ))
         }
         "ethereum" | "eth" => {
+            if let Some(address) = obj
+                .get("address")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                return handle_eth_address_onchain(client, cfg, obj, address);
+            }
+            let stats_api = cfg.crypto.eth_onchain_stats_api_url.trim();
             let v: Value = client
-                .get("https://api.blockchair.com/ethereum/stats")
+                .get(stats_api)
                 .send()
                 .map_err(|err| format!("fetch ethereum onchain failed: {err}"))?
                 .json()
@@ -708,6 +1077,124 @@ fn handle_onchain(client: &Client, obj: &serde_json::Map<String, Value>) -> Resu
         }
         _ => Err(tr("crypto.err.unsupported_chain")),
     }
+}
+
+fn handle_eth_address_onchain(
+    client: &Client,
+    cfg: &RootConfig,
+    obj: &serde_json::Map<String, Value>,
+    address: &str,
+) -> Result<(String, Value), String> {
+    let token = obj
+        .get("token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("eth")
+        .trim()
+        .to_ascii_lowercase();
+    let tx_limit = obj
+        .get("tx_limit")
+        .and_then(|v| v.as_u64())
+        .or_else(|| obj.get("limit").and_then(|v| v.as_u64()))
+        .unwrap_or(5)
+        .clamp(1, 30) as usize;
+    let tx_url = render_url_template(
+        &cfg.crypto.eth_address_tx_list_api_url,
+        &[("address", address), ("limit", &tx_limit.to_string())],
+    );
+    let tx_resp: Value = client
+        .get(&tx_url)
+        .send()
+        .map_err(|err| format!("fetch ethereum tx list failed: {err}"))?
+        .json()
+        .map_err(|err| format!("parse ethereum tx list failed: {err}"))?;
+    let tx_items = parse_evm_tx_list(&tx_resp, address, tx_limit);
+
+    if matches!(token.as_str(), "eth" | "native") {
+        let bal_url = render_url_template(
+            &cfg.crypto.eth_address_native_balance_api_url,
+            &[("address", address)],
+        );
+        let bal_resp: Value = client
+            .get(&bal_url)
+            .send()
+            .map_err(|err| format!("fetch ethereum native balance failed: {err}"))?
+            .json()
+            .map_err(|err| format!("parse ethereum native balance failed: {err}"))?;
+        let raw = parse_evm_api_result_string(&bal_resp)
+            .ok_or_else(|| "ethereum native balance response missing result".to_string())?;
+        let amount = raw_to_decimal_string(&raw, 18);
+        let text = format!(
+            "ETH address={} token=ETH balance={} recent_txs={}",
+            address,
+            amount,
+            tx_items.len()
+        );
+        return Ok((
+            text,
+            json!({
+                "action":"onchain",
+                "chain":"ethereum",
+                "address":address,
+                "token":"ETH",
+                "balance": {
+                    "raw": raw,
+                    "decimals": 18,
+                    "formatted": amount
+                },
+                "recent_txs": tx_items
+            }),
+        ));
+    }
+
+    let contract = cfg
+        .crypto
+        .eth_token_contracts
+        .get(&token)
+        .or_else(|| cfg.crypto.eth_token_contracts.get(&token.to_ascii_uppercase()))
+        .ok_or_else(|| format!("token contract not configured for ethereum token: {token}"))?;
+    let decimals = cfg
+        .crypto
+        .eth_token_decimals
+        .get(&token)
+        .or_else(|| cfg.crypto.eth_token_decimals.get(&token.to_ascii_uppercase()))
+        .copied()
+        .unwrap_or(6);
+    let bal_url = render_url_template(
+        &cfg.crypto.eth_address_token_balance_api_url,
+        &[("address", address), ("contract", contract)],
+    );
+    let bal_resp: Value = client
+        .get(&bal_url)
+        .send()
+        .map_err(|err| format!("fetch ethereum token balance failed: {err}"))?
+        .json()
+        .map_err(|err| format!("parse ethereum token balance failed: {err}"))?;
+    let raw = parse_evm_api_result_string(&bal_resp)
+        .ok_or_else(|| "ethereum token balance response missing result".to_string())?;
+    let amount = raw_to_decimal_string(&raw, decimals);
+    let text = format!(
+        "ETH address={} token={} balance={} recent_txs={}",
+        address,
+        token.to_ascii_uppercase(),
+        amount,
+        tx_items.len()
+    );
+    Ok((
+        text,
+        json!({
+            "action":"onchain",
+            "chain":"ethereum",
+            "address":address,
+            "token":token.to_ascii_uppercase(),
+            "contract":contract,
+            "balance": {
+                "raw": raw,
+                "decimals": decimals,
+                "formatted": amount
+            },
+            "recent_txs": tx_items
+        }),
+    ))
 }
 
 fn handle_trade_preview(
@@ -748,7 +1235,7 @@ fn handle_trade_submit(
     let trade = parse_trade_input(obj, cfg)?;
     let checks = risk_checks(client, cfg, &trade, true)?;
     let event = match trade.exchange.as_str() {
-        "paper" => submit_paper_order(client, cfg, workspace_root, &trade)?,
+        "cextest" => submit_paper_order(client, cfg, workspace_root, &trade)?,
         "binance" => submit_binance_order(client, cfg, &trade)?,
         "okx" => submit_okx_order(client, cfg, &trade)?,
         other => return Err(tr_with("crypto.err.unsupported_execution_exchange", &[("exchange", other)])),
@@ -776,7 +1263,7 @@ fn handle_order_status(
 ) -> Result<(String, Value), String> {
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
     match exchange.as_str() {
-        "paper" => handle_order_status_paper(cfg, workspace_root, obj),
+        "cextest" => handle_order_status_paper(cfg, workspace_root, obj),
         "binance" => handle_order_status_binance(client, cfg, obj),
         "okx" => handle_order_status_okx(client, cfg, obj),
         _ => Err(tr_with("crypto.err.unsupported_exchange_for_order_status", &[("exchange", &exchange)])),
@@ -791,7 +1278,7 @@ fn handle_cancel_order(
 ) -> Result<(String, Value), String> {
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
     match exchange.as_str() {
-        "paper" => handle_cancel_order_paper(cfg, workspace_root, obj),
+        "cextest" => handle_cancel_order_paper(cfg, workspace_root, obj),
         "binance" => handle_cancel_order_binance(client, cfg, obj),
         "okx" => handle_cancel_order_okx(client, cfg, obj),
         _ => Err(tr_with("crypto.err.unsupported_exchange_for_cancel_order", &[("exchange", &exchange)])),
@@ -806,7 +1293,7 @@ fn handle_positions(
 ) -> Result<(String, Value), String> {
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
     match exchange.as_str() {
-        "paper" => handle_positions_paper(cfg, workspace_root, obj),
+        "cextest" => handle_positions_paper(cfg, workspace_root, obj),
         "binance" => handle_positions_binance(client, cfg),
         "okx" => handle_positions_okx(client, cfg),
         _ => Err(tr_with("crypto.err.unsupported_exchange_for_positions", &[("exchange", &exchange)])),
@@ -1149,12 +1636,20 @@ fn parse_trade_input(obj: &serde_json::Map<String, Value>, cfg: &RootConfig) -> 
     if !matches!(order_type.as_str(), "market" | "limit") {
         return Err(tr("crypto.err.order_type_invalid"));
     }
-    let qty = obj
-        .get("qty")
-        .and_then(|v| v.as_f64())
-        .ok_or_else(|| tr("crypto.err.qty_required_number"))?;
-    if qty <= 0.0 {
-        return Err(tr("crypto.err.qty_must_gt_zero"));
+    let quote_qty_usd = obj
+        .get("quote_qty_usd")
+        .and_then(value_to_f64)
+        .or_else(|| obj.get("quote_qty").and_then(value_to_f64))
+        .or_else(|| obj.get("amount_usd").and_then(value_to_f64))
+        .or_else(|| obj.get("notional_usd").and_then(value_to_f64));
+    let mut qty = obj.get("qty").and_then(value_to_f64).unwrap_or(0.0);
+    if let Some(v) = quote_qty_usd {
+        if v <= 0.0 {
+            return Err(tr("crypto.err.qty_must_gt_zero"));
+        }
+        qty = 0.0;
+    } else if qty <= 0.0 {
+        return Err(tr("crypto.err.qty_required_number"));
     }
     let price = obj.get("price").and_then(|v| v.as_f64());
     if order_type == "limit" && price.unwrap_or(0.0) <= 0.0 {
@@ -1166,6 +1661,7 @@ fn parse_trade_input(obj: &serde_json::Map<String, Value>, cfg: &RootConfig) -> 
         side,
         order_type,
         qty,
+        quote_qty_usd,
         price,
         client_order_id: obj
             .get("client_order_id")
@@ -1218,12 +1714,33 @@ fn risk_checks(client: &Client, cfg: &RootConfig, trade: &TradeInput, for_submit
 }
 
 fn estimate_notional_usd(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Result<f64, String> {
+    if let Some(v) = trade.quote_qty_usd {
+        return Ok(v.max(0.0));
+    }
     let price = if let Some(p) = trade.price {
         p
     } else {
         fetch_quote(client, cfg, &trade.symbol, &trade.exchange)?.price_usd
     };
     Ok((trade.qty * price).max(0.0))
+}
+
+fn resolve_base_qty(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Result<f64, String> {
+    if trade.qty > 0.0 {
+        return Ok(trade.qty);
+    }
+    let quote = trade
+        .quote_qty_usd
+        .ok_or_else(|| tr("crypto.err.qty_required_number"))?;
+    let price = if let Some(p) = trade.price {
+        p
+    } else {
+        fetch_quote(client, cfg, &trade.symbol, &trade.exchange)?.price_usd
+    };
+    if price <= 0.0 {
+        return Err("invalid price for quote_qty_usd conversion".to_string());
+    }
+    Ok((quote / price).max(0.0))
 }
 
 fn submit_paper_order(
@@ -1233,6 +1750,7 @@ fn submit_paper_order(
     trade: &TradeInput,
 ) -> Result<OrderEvent, String> {
     let notional = estimate_notional_usd(client, cfg, trade)?;
+    let base_qty = resolve_base_qty(client, cfg, trade)?;
     let order_id = format!("paper-{}", now_ts_ms());
     let status = if trade.order_type == "market" {
         "FILLED"
@@ -1247,7 +1765,7 @@ fn submit_paper_order(
         symbol: trade.symbol.clone(),
         side: trade.side.clone(),
         order_type: trade.order_type.clone(),
-        qty: trade.qty,
+        qty: base_qty,
         price: trade.price,
         notional_usd: notional,
         status: status.to_string(),
@@ -1264,9 +1782,18 @@ fn submit_binance_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -
         ("symbol", trade.symbol.clone()),
         ("side", trade.side.to_ascii_uppercase()),
         ("type", trade.order_type.to_ascii_uppercase()),
-        ("quantity", fmt_num(trade.qty)),
         ("newOrderRespType", "RESULT".to_string()),
     ];
+    let base_qty = resolve_base_qty(client, cfg, trade)?;
+    if trade.order_type == "market" && trade.side == "buy" {
+        if let Some(quote_qty) = trade.quote_qty_usd {
+            params.push(("quoteOrderQty", fmt_num(quote_qty)));
+        } else {
+            params.push(("quantity", fmt_num(base_qty)));
+        }
+    } else {
+        params.push(("quantity", fmt_num(base_qty)));
+    }
     if trade.order_type == "limit" {
         params.push(("timeInForce", "GTC".to_string()));
         let limit_price = trade
@@ -1298,7 +1825,7 @@ fn submit_binance_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -
         symbol: trade.symbol.clone(),
         side: trade.side.clone(),
         order_type: trade.order_type.clone(),
-        qty: trade.qty,
+        qty: base_qty,
         price: trade.price,
         notional_usd: notional,
         status,
@@ -1309,12 +1836,13 @@ fn submit_binance_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -
 
 fn submit_okx_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Result<OrderEvent, String> {
     ensure_okx_config(cfg)?;
+    let base_qty = resolve_base_qty(client, cfg, trade)?;
     let mut body = json!({
         "instId": to_okx_inst_id(&trade.symbol),
         "tdMode": "cash",
         "side": trade.side,
         "ordType": trade.order_type,
-        "sz": fmt_num(trade.qty)
+        "sz": fmt_num(base_qty)
     });
     if trade.order_type == "limit" {
         let limit_price = trade
@@ -1357,7 +1885,7 @@ fn submit_okx_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Re
         symbol: trade.symbol.clone(),
         side: trade.side.clone(),
         order_type: trade.order_type.clone(),
-        qty: trade.qty,
+        qty: base_qty,
         price: trade.price,
         notional_usd: notional,
         status,
@@ -1435,35 +1963,176 @@ fn fetch_quote(client: &Client, cfg: &RootConfig, symbol_input: &str, exchange_i
     let exchange = exchange_input.trim().to_ascii_lowercase();
     let symbol = normalize_symbol(symbol_input);
     match exchange.as_str() {
-        "coingecko" => fetch_quote_from_coingecko(client, &symbol),
+        "coingecko" => fetch_quote_from_coingecko(client, cfg, &symbol),
         "okx" => fetch_quote_from_okx(client, cfg, &symbol),
-        "binance" | "paper" => fetch_quote_from_binance(client, cfg, &symbol),
+        "binance" | "cextest" | "paper" => fetch_quote_from_binance(client, cfg, &symbol),
         _ => fetch_quote_from_binance(client, cfg, &symbol)
             .or_else(|_| fetch_quote_from_okx(client, cfg, &symbol))
-            .or_else(|_| fetch_quote_from_coingecko(client, &symbol)),
+            .or_else(|_| fetch_quote_from_coingecko(client, cfg, &symbol)),
+    }
+}
+
+fn value_to_f64(v: &Value) -> Option<f64> {
+    if let Some(n) = v.as_f64() {
+        return Some(n);
+    }
+    v.as_str().and_then(|s| s.parse::<f64>().ok())
+}
+
+fn number_field(obj: &Value, keys: &[&str]) -> Option<f64> {
+    for key in keys {
+        if let Some(v) = obj.get(*key).and_then(value_to_f64) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+fn render_url_template(template: &str, vars: &[(&str, &str)]) -> String {
+    let mut out = template.to_string();
+    for (k, v) in vars {
+        let encoded = encode(v).into_owned();
+        out = out.replace(&format!("{{{k}}}"), &encoded);
+    }
+    out
+}
+
+fn build_exchange_url(base: &str, path_or_url: &str, vars: &[(&str, &str)]) -> String {
+    let rendered = render_url_template(path_or_url, vars);
+    if rendered.starts_with("http://") || rendered.starts_with("https://") {
+        return rendered;
+    }
+    let b = base.trim_end_matches('/');
+    let p = rendered.trim_start_matches('/');
+    format!("{b}/{p}")
+}
+
+fn parse_evm_api_result_string(v: &Value) -> Option<String> {
+    v.get("result")
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            v.get("data")
+                .and_then(|x| x.get("result"))
+                .and_then(|x| x.as_str())
+                .map(str::to_string)
+        })
+}
+
+fn parse_evm_tx_list(v: &Value, address: &str, limit: usize) -> Vec<Value> {
+    let addr_lc = address.to_ascii_lowercase();
+    let mut items = Vec::new();
+    let arr_opt = v
+        .get("result")
+        .and_then(|x| x.as_array())
+        .or_else(|| v.get("data").and_then(|x| x.as_array()));
+    let Some(arr) = arr_opt else {
+        return items;
+    };
+    for it in arr.iter().take(limit) {
+        let from = it.get("from").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let to = it.get("to").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let hash = it.get("hash").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let ts = it
+            .get("timeStamp")
+            .or_else(|| it.get("timestamp"))
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let value_raw = it.get("value").and_then(|x| x.as_str()).unwrap_or("0");
+        let direction = if to.eq_ignore_ascii_case(&addr_lc) {
+            "in"
+        } else if from.eq_ignore_ascii_case(&addr_lc) {
+            "out"
+        } else {
+            "other"
+        };
+        items.push(json!({
+            "hash": hash,
+            "from": from,
+            "to": to,
+            "direction": direction,
+            "value_raw": value_raw,
+            "timestamp": ts
+        }));
+    }
+    items
+}
+
+fn raw_to_decimal_string(raw: &str, decimals: u32) -> String {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return "0".to_string();
+    }
+    let sign = if raw.starts_with('-') { "-" } else { "" };
+    let digits = raw.trim_start_matches('-').trim_start_matches('0');
+    if digits.is_empty() {
+        return "0".to_string();
+    }
+    if decimals == 0 {
+        return format!("{sign}{digits}");
+    }
+    let d = decimals as usize;
+    if digits.len() <= d {
+        let frac = format!("{:0>width$}", digits, width = d).trim_end_matches('0').to_string();
+        if frac.is_empty() {
+            "0".to_string()
+        } else {
+            format!("{sign}0.{frac}")
+        }
+    } else {
+        let int_part = &digits[..digits.len() - d];
+        let frac_part = digits[digits.len() - d..].trim_end_matches('0').to_string();
+        if frac_part.is_empty() {
+            format!("{sign}{int_part}")
+        } else {
+            format!("{sign}{int_part}.{frac_part}")
+        }
     }
 }
 
 fn fetch_quote_from_binance(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<Quote, String> {
     let base = cfg.binance.base_url.trim_end_matches('/');
-    let url = format!("{base}/api/v3/ticker/24hr?symbol={}", normalize_symbol(symbol));
+    let normalized_symbol = normalize_symbol(symbol);
+    let url = build_exchange_url(
+        base,
+        cfg.crypto.binance_quote_24hr_api_path.trim(),
+        &[("symbol", &normalized_symbol)],
+    );
     let v: Value = client
         .get(url)
         .send()
         .map_err(|err| format!("binance quote request failed: {err}"))?
         .json()
         .map_err(|err| format!("binance quote parse failed: {err}"))?;
-    let price = v
-        .get("lastPrice")
-        .and_then(|x| x.as_str())
-        .and_then(|x| x.parse::<f64>().ok())
-        .ok_or_else(|| "binance quote missing lastPrice".to_string())?;
+    if v.get("lastPrice").is_none() && v.get("price").is_none() {
+        let err_code = v.get("code").and_then(|x| x.as_i64()).unwrap_or(0);
+        if err_code != 0 {
+            let msg = v.get("msg").and_then(|x| x.as_str()).unwrap_or("unknown");
+            return Err(format!("binance quote api error code={err_code}: {msg}"));
+        }
+    }
+    let mut price = number_field(&v, &["lastPrice", "price", "last", "close"]);
+    if price.is_none() {
+        let fallback_url = build_exchange_url(
+            base,
+            cfg.crypto.binance_quote_price_api_path.trim(),
+            &[("symbol", &normalized_symbol)],
+        );
+        let fallback_v: Value = client
+            .get(fallback_url)
+            .send()
+            .map_err(|err| format!("binance quote fallback request failed: {err}"))?
+            .json()
+            .map_err(|err| format!("binance quote fallback parse failed: {err}"))?;
+        price = number_field(&fallback_v, &["price", "lastPrice", "last", "close"]);
+    }
+    let price = price.ok_or_else(|| "binance quote missing price field".to_string())?;
     let change = v
         .get("priceChangePercent")
-        .and_then(|x| x.as_str())
-        .and_then(|x| x.parse::<f64>().ok());
+        .and_then(value_to_f64);
     Ok(Quote {
-        symbol: normalize_symbol(symbol),
+        symbol: normalized_symbol,
         price_usd: price,
         change_24h_pct: change,
         exchange: "binance".to_string(),
@@ -1474,7 +2143,11 @@ fn fetch_quote_from_binance(client: &Client, cfg: &RootConfig, symbol: &str) -> 
 fn fetch_quote_from_okx(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<Quote, String> {
     let base = cfg.okx.base_url.trim_end_matches('/');
     let inst_id = to_okx_inst_id(symbol);
-    let url = format!("{base}/api/v5/market/ticker?instId={}", encode(&inst_id));
+    let url = build_exchange_url(
+        base,
+        cfg.crypto.okx_market_ticker_api_path.trim(),
+        &[("inst_id", &inst_id), ("instId", &inst_id)],
+    );
     let v: Value = client
         .get(url)
         .send()
@@ -1516,14 +2189,19 @@ fn fetch_quote_from_okx(client: &Client, cfg: &RootConfig, symbol: &str) -> Resu
     })
 }
 
-fn fetch_quote_from_coingecko(client: &Client, symbol: &str) -> Result<Quote, String> {
+fn fetch_quote_from_coingecko(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<Quote, String> {
     let coin_id = symbol_to_coingecko_id(symbol).ok_or_else(|| {
         "coingecko mapping missing for symbol; try exchange=binance or map this symbol".to_string()
     })?;
-    let url = format!(
-        "https://api.coingecko.com/api/v3/simple/price?ids={}&vs_currencies=usd&include_24hr_change=true",
-        coin_id
-    );
+    let ids = encode(coin_id).into_owned();
+    let template = cfg.crypto.coingecko_simple_price_api_url.trim();
+    let url = if template.contains("{ids}") {
+        template.replace("{ids}", &ids)
+    } else if template.contains('?') {
+        format!("{template}&ids={ids}&vs_currencies=usd&include_24hr_change=true")
+    } else {
+        format!("{template}?ids={ids}&vs_currencies=usd&include_24hr_change=true")
+    };
     let v: Value = client
         .get(url)
         .send()
@@ -1544,6 +2222,352 @@ fn fetch_quote_from_coingecko(client: &Client, symbol: &str) -> Result<Quote, St
         change_24h_pct: change,
         exchange: "coingecko".to_string(),
         source: "coingecko_api".to_string(),
+    })
+}
+
+fn fetch_quote_from_gateio(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<Quote, String> {
+    let pair = to_gateio_pair(symbol);
+    let path_or_url = cfg.crypto.gateio_quote_ticker_api_path.trim();
+    let url = build_exchange_url(
+        "https://api.gateio.ws",
+        path_or_url,
+        &[("currency_pair", &pair)],
+    );
+    let v: Value = client
+        .get(url)
+        .send()
+        .map_err(|err| format!("gateio quote request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("gateio quote parse failed: {err}"))?;
+    let row = v
+        .as_array()
+        .and_then(|arr| arr.first())
+        .ok_or_else(|| "gateio quote missing data".to_string())?;
+    let price = row
+        .get("last")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "gateio quote missing last".to_string())?;
+    Ok(Quote {
+        symbol: normalize_symbol(symbol),
+        price_usd: price,
+        change_24h_pct: row.get("change_percentage").and_then(value_to_f64),
+        exchange: "gateio".to_string(),
+        source: "gateio_api".to_string(),
+    })
+}
+
+fn fetch_quote_from_coinbase(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<Quote, String> {
+    let product = to_coinbase_product(symbol);
+    let path_or_url = cfg.crypto.coinbase_quote_ticker_api_path.trim();
+    let url = build_exchange_url(
+        "https://api.exchange.coinbase.com",
+        path_or_url,
+        &[("product_id", &product), ("product", &product)],
+    );
+    let v: Value = client
+        .get(url)
+        .header("User-Agent", "RustClaw-Crypto-Skill/1.0")
+        .send()
+        .map_err(|err| format!("coinbase quote request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("coinbase quote parse failed: {err}"))?;
+    let price = number_field(&v, &["price", "ask", "bid"])
+        .ok_or_else(|| "coinbase quote missing price".to_string())?;
+    Ok(Quote {
+        symbol: normalize_symbol(symbol),
+        price_usd: price,
+        change_24h_pct: None,
+        exchange: "coinbase".to_string(),
+        source: "coinbase_api".to_string(),
+    })
+}
+
+fn fetch_quote_from_kraken(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<Quote, String> {
+    let pair = to_kraken_pair(symbol);
+    let path_or_url = cfg.crypto.kraken_quote_ticker_api_path.trim();
+    let url = build_exchange_url("https://api.kraken.com", path_or_url, &[("pair", &pair)]);
+    let v: Value = client
+        .get(url)
+        .send()
+        .map_err(|err| format!("kraken quote request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("kraken quote parse failed: {err}"))?;
+    let error = v
+        .get("error")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !error.is_empty() {
+        return Err(format!("kraken quote error: {}", error.join("; ")));
+    }
+    let result = v
+        .get("result")
+        .and_then(|x| x.as_object())
+        .ok_or_else(|| "kraken quote missing result".to_string())?;
+    let first = result
+        .values()
+        .next()
+        .ok_or_else(|| "kraken quote missing ticker node".to_string())?;
+    let price = first
+        .get("c")
+        .and_then(|x| x.as_array())
+        .and_then(|x| x.first())
+        .and_then(value_to_f64)
+        .ok_or_else(|| "kraken quote missing c[0]".to_string())?;
+    Ok(Quote {
+        symbol: normalize_symbol(symbol),
+        price_usd: price,
+        change_24h_pct: None,
+        exchange: "kraken".to_string(),
+        source: "kraken_api".to_string(),
+    })
+}
+
+fn fetch_book_ticker_from_binance(
+    client: &Client,
+    cfg: &RootConfig,
+    symbol: &str,
+) -> Result<BookTicker, String> {
+    let base = cfg.binance.base_url.trim_end_matches('/');
+    let normalized_symbol = normalize_symbol(symbol);
+    let url = build_exchange_url(
+        base,
+        cfg.crypto.binance_book_ticker_api_path.trim(),
+        &[("symbol", &normalized_symbol)],
+    );
+    let v: Value = client
+        .get(url)
+        .send()
+        .map_err(|err| format!("binance bookTicker request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("binance bookTicker parse failed: {err}"))?;
+    let bid_price = v
+        .get("bidPrice")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "binance bookTicker missing bidPrice".to_string())?;
+    let bid_qty = v
+        .get("bidQty")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "binance bookTicker missing bidQty".to_string())?;
+    let ask_price = v
+        .get("askPrice")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "binance bookTicker missing askPrice".to_string())?;
+    let ask_qty = v
+        .get("askQty")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "binance bookTicker missing askQty".to_string())?;
+    Ok(BookTicker {
+        symbol: normalized_symbol,
+        bid_price,
+        bid_qty,
+        ask_price,
+        ask_qty,
+        exchange: "binance".to_string(),
+        source: "binance_api".to_string(),
+    })
+}
+
+fn fetch_book_ticker_from_okx(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<BookTicker, String> {
+    let base = cfg.okx.base_url.trim_end_matches('/');
+    let inst_id = to_okx_inst_id(symbol);
+    let url = build_exchange_url(
+        base,
+        cfg.crypto.okx_market_ticker_api_path.trim(),
+        &[("inst_id", &inst_id), ("instId", &inst_id)],
+    );
+    let v: Value = client
+        .get(url)
+        .send()
+        .map_err(|err| format!("okx bookTicker request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("okx bookTicker parse failed: {err}"))?;
+    if v.get("code").and_then(|x| x.as_str()).unwrap_or("0") != "0" {
+        return Err(format!(
+            "okx bookTicker error: {}",
+            v.get("msg").and_then(|x| x.as_str()).unwrap_or("unknown")
+        ));
+    }
+    let data = v
+        .get("data")
+        .and_then(|x| x.as_array())
+        .and_then(|x| x.first())
+        .ok_or_else(|| "okx bookTicker missing data".to_string())?;
+    let bid_price = data
+        .get("bidPx")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "okx bookTicker missing bidPx".to_string())?;
+    let bid_qty = data
+        .get("bidSz")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "okx bookTicker missing bidSz".to_string())?;
+    let ask_price = data
+        .get("askPx")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "okx bookTicker missing askPx".to_string())?;
+    let ask_qty = data
+        .get("askSz")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "okx bookTicker missing askSz".to_string())?;
+    Ok(BookTicker {
+        symbol: normalize_symbol(symbol),
+        bid_price,
+        bid_qty,
+        ask_price,
+        ask_qty,
+        exchange: "okx".to_string(),
+        source: "okx_api".to_string(),
+    })
+}
+
+fn fetch_book_ticker_from_gateio(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<BookTicker, String> {
+    let pair = to_gateio_pair(symbol);
+    let url = build_exchange_url(
+        "https://api.gateio.ws",
+        cfg.crypto.gateio_book_ticker_api_path.trim(),
+        &[("currency_pair", &pair)],
+    );
+    let v: Value = client
+        .get(url)
+        .send()
+        .map_err(|err| format!("gateio bookTicker request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("gateio bookTicker parse failed: {err}"))?;
+    let row = v
+        .as_array()
+        .and_then(|arr| arr.first())
+        .ok_or_else(|| "gateio bookTicker missing data".to_string())?;
+    let bid_price = row
+        .get("highest_bid")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "gateio bookTicker missing highest_bid".to_string())?;
+    let bid_qty = row
+        .get("highest_size")
+        .and_then(value_to_f64)
+        .unwrap_or(0.0);
+    let ask_price = row
+        .get("lowest_ask")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "gateio bookTicker missing lowest_ask".to_string())?;
+    let ask_qty = row
+        .get("lowest_size")
+        .and_then(value_to_f64)
+        .unwrap_or(0.0);
+    Ok(BookTicker {
+        symbol: normalize_symbol(symbol),
+        bid_price,
+        bid_qty,
+        ask_price,
+        ask_qty,
+        exchange: "gateio".to_string(),
+        source: "gateio_api".to_string(),
+    })
+}
+
+fn fetch_book_ticker_from_coinbase(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<BookTicker, String> {
+    let product = to_coinbase_product(symbol);
+    let url = build_exchange_url(
+        "https://api.exchange.coinbase.com",
+        cfg.crypto.coinbase_book_ticker_api_path.trim(),
+        &[("product_id", &product), ("product", &product)],
+    );
+    let v: Value = client
+        .get(url)
+        .header("User-Agent", "RustClaw-Crypto-Skill/1.0")
+        .send()
+        .map_err(|err| format!("coinbase bookTicker request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("coinbase bookTicker parse failed: {err}"))?;
+    let bid_price = v
+        .get("bid")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "coinbase bookTicker missing bid".to_string())?;
+    let ask_price = v
+        .get("ask")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "coinbase bookTicker missing ask".to_string())?;
+    Ok(BookTicker {
+        symbol: normalize_symbol(symbol),
+        bid_price,
+        bid_qty: 0.0,
+        ask_price,
+        ask_qty: 0.0,
+        exchange: "coinbase".to_string(),
+        source: "coinbase_api".to_string(),
+    })
+}
+
+fn fetch_book_ticker_from_kraken(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<BookTicker, String> {
+    let pair = to_kraken_pair(symbol);
+    let url = build_exchange_url(
+        "https://api.kraken.com",
+        cfg.crypto.kraken_book_ticker_api_path.trim(),
+        &[("pair", &pair)],
+    );
+    let v: Value = client
+        .get(url)
+        .send()
+        .map_err(|err| format!("kraken bookTicker request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("kraken bookTicker parse failed: {err}"))?;
+    let error = v
+        .get("error")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !error.is_empty() {
+        return Err(format!("kraken bookTicker error: {}", error.join("; ")));
+    }
+    let result = v
+        .get("result")
+        .and_then(|x| x.as_object())
+        .ok_or_else(|| "kraken bookTicker missing result".to_string())?;
+    let first = result
+        .values()
+        .next()
+        .ok_or_else(|| "kraken bookTicker missing ticker node".to_string())?;
+    let bid_price = first
+        .get("b")
+        .and_then(|x| x.as_array())
+        .and_then(|x| x.first())
+        .and_then(value_to_f64)
+        .ok_or_else(|| "kraken bookTicker missing b[0]".to_string())?;
+    let bid_qty = first
+        .get("b")
+        .and_then(|x| x.as_array())
+        .and_then(|x| x.get(1))
+        .and_then(value_to_f64)
+        .unwrap_or(0.0);
+    let ask_price = first
+        .get("a")
+        .and_then(|x| x.as_array())
+        .and_then(|x| x.first())
+        .and_then(value_to_f64)
+        .ok_or_else(|| "kraken bookTicker missing a[0]".to_string())?;
+    let ask_qty = first
+        .get("a")
+        .and_then(|x| x.as_array())
+        .and_then(|x| x.get(1))
+        .and_then(value_to_f64)
+        .unwrap_or(0.0);
+    Ok(BookTicker {
+        symbol: normalize_symbol(symbol),
+        bid_price,
+        bid_qty,
+        ask_price,
+        ask_qty,
+        exchange: "kraken".to_string(),
+        source: "kraken_api".to_string(),
     })
 }
 
@@ -1765,12 +2789,16 @@ fn is_placeholder(v: &str) -> bool {
 }
 
 fn resolve_exchange(input: Option<&str>, cfg: &RootConfig) -> String {
-    input
+    let raw = input
         .or(cfg.crypto.execution_mode.as_deref())
         .or(cfg.crypto.default_exchange.as_deref())
-        .unwrap_or("paper")
+        .unwrap_or("cextest")
         .trim()
-        .to_ascii_lowercase()
+        .to_ascii_lowercase();
+    match raw.as_str() {
+        "paper" => "cextest".to_string(),
+        _ => raw,
+    }
 }
 
 fn symbol_to_coingecko_id(symbol: &str) -> Option<&'static str> {
@@ -1787,11 +2815,32 @@ fn symbol_to_coingecko_id(symbol: &str) -> Option<&'static str> {
 }
 
 fn normalize_symbol(input: &str) -> String {
-    input
+    let s = input
         .trim()
         .to_ascii_uppercase()
         .replace('/', "")
         .replace('-', "")
+        .replace('_', "");
+    if s.is_empty() {
+        return s;
+    }
+    if has_known_quote_suffix(&s) {
+        return s;
+    }
+    // For coin symbols without explicit quote, default quote is USDT.
+    if s.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return format!("{s}USDT");
+    }
+    s
+}
+
+fn has_known_quote_suffix(symbol: &str) -> bool {
+    [
+        "USDT", "USD", "USDC", "BUSD", "FDUSD", "USDE", "BTC", "ETH", "BNB", "EUR", "TRY",
+        "BRL", "DAI",
+    ]
+        .iter()
+        .any(|q| symbol.ends_with(q))
 }
 
 fn to_okx_inst_id(symbol: &str) -> String {
@@ -1807,6 +2856,37 @@ fn to_okx_inst_id(symbol: &str) -> String {
         return format!("{base}-USD");
     }
     format!("{s}-USDT")
+}
+
+fn split_symbol_base_quote(symbol: &str) -> (String, String) {
+    let normalized = normalize_symbol(symbol);
+    for q in [
+        "USDT", "USD", "USDC", "BUSD", "FDUSD", "USDE", "BTC", "ETH", "BNB", "EUR", "TRY", "BRL",
+        "DAI",
+    ] {
+        if let Some(base) = normalized.strip_suffix(q) {
+            if !base.is_empty() {
+                return (base.to_string(), q.to_string());
+            }
+        }
+    }
+    (normalized, "USDT".to_string())
+}
+
+fn to_gateio_pair(symbol: &str) -> String {
+    let (base, quote) = split_symbol_base_quote(symbol);
+    format!("{base}_{quote}")
+}
+
+fn to_coinbase_product(symbol: &str) -> String {
+    let (base, _quote) = split_symbol_base_quote(symbol);
+    format!("{base}-USD")
+}
+
+fn to_kraken_pair(symbol: &str) -> String {
+    let (base_raw, quote) = split_symbol_base_quote(symbol);
+    let base = if base_raw == "BTC" { "XBT" } else { &base_raw };
+    format!("{base}{quote}")
 }
 
 fn map_interval_binance(input: &str) -> &'static str {
@@ -1842,6 +2922,7 @@ fn trade_to_json(t: &TradeInput) -> Value {
         "side": t.side,
         "order_type": t.order_type,
         "qty": t.qty,
+        "quote_qty_usd": t.quote_qty_usd,
         "price": t.price,
         "client_order_id": t.client_order_id,
         "confirm": t.confirm
@@ -1937,75 +3018,79 @@ fn default_okx_base_url() -> String {
     "https://www.okx.com".to_string()
 }
 
+fn default_btc_onchain_fees_api_url() -> String {
+    "https://mempool.space/api/v1/fees/recommended".to_string()
+}
+
+fn default_eth_onchain_stats_api_url() -> String {
+    "https://api.blockchair.com/ethereum/stats".to_string()
+}
+
+fn default_coingecko_simple_price_api_url() -> String {
+    "https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true"
+        .to_string()
+}
+
+fn default_gateio_quote_ticker_api_path() -> String {
+    "/api/v4/spot/tickers?currency_pair={currency_pair}".to_string()
+}
+
+fn default_coinbase_quote_ticker_api_path() -> String {
+    "/products/{product_id}/ticker".to_string()
+}
+
+fn default_kraken_quote_ticker_api_path() -> String {
+    "/0/public/Ticker?pair={pair}".to_string()
+}
+
+fn default_gateio_book_ticker_api_path() -> String {
+    "/api/v4/spot/tickers?currency_pair={currency_pair}".to_string()
+}
+
+fn default_coinbase_book_ticker_api_path() -> String {
+    "/products/{product_id}/ticker".to_string()
+}
+
+fn default_kraken_book_ticker_api_path() -> String {
+    "/0/public/Ticker?pair={pair}".to_string()
+}
+
+fn default_binance_quote_24hr_api_path() -> String {
+    "/api/v3/ticker/24hr?symbol={symbol}".to_string()
+}
+
+fn default_binance_quote_price_api_path() -> String {
+    "/api/v3/ticker/price?symbol={symbol}".to_string()
+}
+
+fn default_binance_book_ticker_api_path() -> String {
+    "/api/v3/ticker/bookTicker?symbol={symbol}".to_string()
+}
+
+fn default_okx_market_ticker_api_path() -> String {
+    "/api/v5/market/ticker?instId={inst_id}".to_string()
+}
+
+fn default_eth_address_native_balance_api_url() -> String {
+    "https://eth.blockscout.com/api?module=account&action=balance&address={address}".to_string()
+}
+
+fn default_eth_address_token_balance_api_url() -> String {
+    "https://eth.blockscout.com/api?module=account&action=tokenbalance&contractaddress={contract}&address={address}"
+        .to_string()
+}
+
+fn default_eth_address_tx_list_api_url() -> String {
+    "https://eth.blockscout.com/api?module=account&action=txlist&address={address}&sort=desc&offset={limit}"
+        .to_string()
+}
+
 fn default_recv_window() -> u64 {
     5000
 }
 
 fn default_okx_simulated() -> bool {
     true
-}
-
-fn extract_blocks<'a>(xml: &'a str, tag: &str) -> Vec<&'a str> {
-    let mut out = Vec::new();
-    let open = format!("<{tag}");
-    let close = format!("</{tag}>");
-    let mut pos = 0usize;
-    while let Some(start_rel) = xml[pos..].find(&open) {
-        let start = pos + start_rel;
-        let gt_rel = match xml[start..].find('>') {
-            Some(v) => v,
-            None => break,
-        };
-        let body_start = start + gt_rel + 1;
-        let end_rel = match xml[body_start..].find(&close) {
-            Some(v) => v,
-            None => break,
-        };
-        let end = body_start + end_rel;
-        out.push(&xml[body_start..end]);
-        pos = end + close.len();
-    }
-    out
-}
-
-fn extract_tag_text(xml: &str, tag: &str) -> Option<String> {
-    extract_blocks(xml, tag)
-        .into_iter()
-        .next()
-        .map(|v| xml_unescape(v.trim()))
-}
-
-fn extract_atom_link(xml: &str) -> Option<String> {
-    let mut pos = 0usize;
-    while let Some(start_rel) = xml[pos..].find("<link") {
-        let start = pos + start_rel;
-        let end_rel = xml[start..].find('>')?;
-        let head = &xml[start..start + end_rel + 1];
-        if let Some(href) = extract_attr(head, "href") {
-            if !href.is_empty() {
-                return Some(xml_unescape(&href));
-            }
-        }
-        pos = start + end_rel + 1;
-    }
-    None
-}
-
-fn extract_attr(tag_text: &str, attr: &str) -> Option<String> {
-    let key = format!("{attr}=\"");
-    let start = tag_text.find(&key)? + key.len();
-    let rem = &tag_text[start..];
-    let end = rem.find('"')?;
-    Some(rem[..end].to_string())
-}
-
-fn xml_unescape(input: &str) -> String {
-    input
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
 }
 
 #[cfg(test)]
@@ -2016,6 +3101,10 @@ mod tests {
     fn normalize_symbol_ok() {
         assert_eq!(normalize_symbol("btc/usdt"), "BTCUSDT");
         assert_eq!(normalize_symbol("eth-usd"), "ETHUSD");
+        assert_eq!(normalize_symbol("sol"), "SOLUSDT");
+        assert_eq!(normalize_symbol("bnb"), "BNBUSDT");
+        assert_eq!(normalize_symbol("1000pepe"), "1000PEPEUSDT");
+        assert_eq!(normalize_symbol("solbtc"), "SOLBTC");
     }
 
     #[test]
@@ -2034,5 +3123,12 @@ mod tests {
         m.insert("order_type".to_string(), Value::String("limit".to_string()));
         m.insert("qty".to_string(), Value::from(0.1_f64));
         assert!(parse_trade_input(&m, &cfg).is_err());
+    }
+
+    #[test]
+    fn quote_symbol_mapping_for_new_exchanges() {
+        assert_eq!(to_gateio_pair("BTCUSDT"), "BTC_USDT");
+        assert_eq!(to_coinbase_product("BTCUSDT"), "BTC-USD");
+        assert_eq!(to_kraken_pair("BTCUSDT"), "XBTUSDT");
     }
 }

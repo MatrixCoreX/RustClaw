@@ -14,12 +14,15 @@ use claw_core::config::{
     AppConfig, CommandIntentConfig, LlmProviderConfig, MaintenanceConfig, MemoryConfig, PersonaConfig,
     RoutingConfig, ScheduleConfig, ToolsConfig,
 };
+use claw_core::hard_rules::trade::{
+    CompiledTradeRules, is_no_confirmation, is_yes_confirmation, load_compiled_trade_rules,
+    parse_trade_preview_submit_args,
+};
 use claw_core::types::{
     ApiResponse, ChannelKind, HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse,
     TaskStatus,
 };
 use reqwest::Client;
-use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -27,7 +30,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 use toml::Value as TomlValue;
-use tracing::{debug, error, info, warn};
+use tracing::{Instrument, debug, error, info, info_span, warn};
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
@@ -48,16 +51,22 @@ const LLM_RETRY_TIMES: usize = 2;
 pub(crate) const AGENT_MAX_STEPS: usize = 32;
 pub(crate) const AGENT_MAX_TOOL_CALLS: usize = 12;
 pub(crate) const AGENT_REPEAT_SAME_ACTION_LIMIT: usize = 4;
+pub(crate) const RESUME_CONTEXT_ERROR_PREFIX: &str = "__RESUME_CTX__";
 const MAX_READ_FILE_BYTES: usize = 64 * 1024;
 const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
 const MODEL_IO_LOG_MAX_CHARS: usize = 16000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
 const CRYPTO_CONFIRM_TTL_SECONDS: u64 = 600;
+const TRADE_RULES_PATH: &str = "configs/command_intent/trade_rules.toml";
 const LOG_CALL_WRAP: &str = "########################################################";
 pub(crate) const AGENT_RUNTIME_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/agent_runtime_prompt.md");
 const CHAT_RESPONSE_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/chat_response_prompt.md");
 pub(crate) const COMMAND_FAILURE_SUGGEST_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/command_failure_suggest_prompt.md");
+const RESUME_INTENT_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/resume_intent_prompt.md");
+const RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/resume_continue_execute_prompt.md");
 const IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/image_output_rewrite_prompt.md");
 const LANGUAGE_INFER_PROMPT_TEMPLATE: &str =
@@ -106,6 +115,7 @@ struct AppState {
     future_adapters_enabled: Arc<Vec<String>>,
     http_client: Client,
     pending_crypto_confirms: Arc<Mutex<HashMap<String, PendingCryptoConfirm>>>,
+    trade_rules: Arc<CompiledTradeRules>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +156,7 @@ enum WhatsappDeliveryRoute {
 
 struct AskReply {
     text: String,
+    messages: Vec<String>,
     is_llm_reply: bool,
 }
 
@@ -153,6 +164,7 @@ impl AskReply {
     pub(crate) fn llm(text: String) -> Self {
         Self {
             text,
+            messages: Vec::new(),
             is_llm_reply: true,
         }
     }
@@ -160,8 +172,14 @@ impl AskReply {
     pub(crate) fn non_llm(text: String) -> Self {
         Self {
             text,
+            messages: Vec::new(),
             is_llm_reply: false,
         }
+    }
+
+    pub(crate) fn with_messages(mut self, messages: Vec<String>) -> Self {
+        self.messages = messages;
+        self
     }
 }
 
@@ -930,43 +948,26 @@ async fn main() -> anyhow::Result<()> {
     let memory_runtime = load_memory_runtime_config(&workspace_root, &config.memory);
     let command_intent = load_command_intent_runtime(&workspace_root, &config.command_intent);
     let schedule = load_schedule_runtime(&workspace_root, &config.schedule);
+    let trade_rules = load_compiled_trade_rules(TRADE_RULES_PATH);
     let routing = config.routing.clone();
     let persona_prompt = load_persona_prompt(&workspace_root, &config.persona);
-    let configured_skill_runner_path = {
-        let raw = config.skills.skill_runner_path.trim();
-        if raw.is_empty() {
-            workspace_root.join("target/release/skill-runner")
-        } else {
-            let p = PathBuf::from(raw);
-            if p.is_absolute() {
-                p
-            } else {
-                workspace_root.join(p)
-            }
-        }
-    };
-    let mut effective_skill_runner_path = configured_skill_runner_path.clone();
-    if !effective_skill_runner_path.exists() {
-        let release_fallback = workspace_root.join("target/release/skill-runner");
-        let debug_fallback = workspace_root.join("target/debug/skill-runner");
-        if release_fallback.exists() {
-            effective_skill_runner_path = release_fallback;
-        } else if debug_fallback.exists() {
-            effective_skill_runner_path = debug_fallback;
+    let mut preferred_runner = workspace_root.join("target/release/skill-runner");
+    if let Ok(exe) = std::env::current_exe() {
+        let exe_lc = exe.to_string_lossy().to_ascii_lowercase();
+        if exe_lc.contains("/target/debug/") {
+            preferred_runner = workspace_root.join("target/debug/skill-runner");
         }
     }
-    if effective_skill_runner_path != configured_skill_runner_path {
-        warn!(
-            "skill_runner_path configured path missing, fallback applied: configured={} effective={}",
-            configured_skill_runner_path.display(),
-            effective_skill_runner_path.display()
-        );
+    let release_fallback = workspace_root.join("target/release/skill-runner");
+    let debug_fallback = workspace_root.join("target/debug/skill-runner");
+    let effective_skill_runner_path = if preferred_runner.exists() {
+        preferred_runner
+    } else if release_fallback.exists() {
+        release_fallback
     } else {
-        info!(
-            "skill_runner_path: {}",
-            effective_skill_runner_path.display()
-        );
-    }
+        debug_fallback
+    };
+    info!("skill_runner_path resolved: {}", effective_skill_runner_path.display());
 
     let llm_providers = llm_gateway::build_providers(&config);
     info!("Loaded LLM providers count={}", llm_providers.len());
@@ -1062,6 +1063,7 @@ async fn main() -> anyhow::Result<()> {
         ),
         http_client: Client::new(),
         pending_crypto_confirms: Arc::new(Mutex::new(HashMap::new())),
+        trade_rules: Arc::new(trade_rules),
     };
 
     spawn_worker(
@@ -1404,116 +1406,171 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    info!(
-        "worker_once: picked task_id={} user_id={} chat_id={} kind={}",
-        task.task_id, task.user_id, task.chat_id, task.kind
+    let call_id = task.task_id.clone();
+    let call_span = info_span!(
+        "task_call",
+        call_id = %call_id,
+        task_id = %task.task_id,
+        user_id = task.user_id,
+        chat_id = task.chat_id,
+        kind = %task.kind,
+        channel = %task.channel
     );
-    info!("{}", LOG_CALL_WRAP);
-    info!(
-        "task_call_begin task_id={} kind={} user_id={} chat_id={}",
-        task.task_id, task.kind, task.user_id, task.chat_id
-    );
-    info!("{}", LOG_CALL_WRAP);
+    async {
+        info!(
+            "worker_once: picked task_id={} user_id={} chat_id={} kind={}",
+            task.task_id, task.user_id, task.chat_id, task.kind
+        );
+        info!("{}", LOG_CALL_WRAP);
+        info!(
+            "task_call_begin call_id={} task_id={} kind={} user_id={} chat_id={}",
+            call_id, task.task_id, task.kind, task.user_id, task.chat_id
+        );
+        info!("{}", LOG_CALL_WRAP);
 
-    let payload = serde_json::from_str::<serde_json::Value>(&task.payload_json)
-        .map_err(|err| anyhow::anyhow!("invalid payload_json for task {}: {err}", task.task_id))?;
+        let payload = serde_json::from_str::<serde_json::Value>(&task.payload_json)
+            .map_err(|err| anyhow::anyhow!("invalid payload_json for task {}: {err}", task.task_id))?;
 
-    let task_kind_for_timeout_log = task.kind.clone();
-    let worker_timeout_secs = state.worker_task_timeout_seconds.max(1);
-    let task_result = tokio::time::timeout(Duration::from_secs(worker_timeout_secs), async {
+        let task_kind_for_timeout_log = task.kind.clone();
+        let worker_timeout_secs = state.worker_task_timeout_seconds.max(1);
+        let task_result = tokio::time::timeout(Duration::from_secs(worker_timeout_secs), async {
         match task.kind.as_str() {
         "ask" => {
             let prompt = payload
                 .get("text")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            if let Ok(Some(schedule_reply)) =
-                intent_router::try_handle_schedule_request(state, &task, prompt).await
-            {
-                let result = json!({ "text": schedule_reply });
-                repo::update_task_success(state, &task.task_id, &result.to_string())?;
-                let _ = memory::service::insert_memory(
-                    state,
-                    task.user_id,
-                    task.chat_id,
-                    "user",
-                    prompt,
-                    state.memory.item_max_chars.max(256),
-                );
-                let _ = memory::service::insert_memory(
-                    state,
-                    task.user_id,
-                    task.chat_id,
-                    "assistant",
-                    &schedule_reply,
-                    state.memory.item_max_chars.max(256),
-                );
-                info!("{}", LOG_CALL_WRAP);
-                info!(
-                    "task_call_end task_id={} kind=ask status=success path=schedule_direct",
-                    task.task_id
-                );
-                info!("{}", LOG_CALL_WRAP);
-                return Ok(());
+            let source = payload
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let runtime_prompt = if source == "resume_continue_execute" {
+                build_resume_continue_execute_prompt(&payload, prompt)
+            } else {
+                prompt.to_string()
+            };
+            if source != "resume_continue_execute" {
+                if let Ok(Some(schedule_reply)) =
+                    intent_router::try_handle_schedule_request(state, &task, prompt).await
+                {
+                    let result = json!({ "text": schedule_reply });
+                    repo::update_task_success(state, &task.task_id, &result.to_string())?;
+                    let _ = memory::service::insert_memory(
+                        state,
+                        task.user_id,
+                        task.chat_id,
+                        "user",
+                        prompt,
+                        state.memory.item_max_chars.max(256),
+                    );
+                    let _ = memory::service::insert_memory(
+                        state,
+                        task.user_id,
+                        task.chat_id,
+                        "assistant",
+                        &schedule_reply,
+                        state.memory.item_max_chars.max(256),
+                    );
+                    info!("{}", LOG_CALL_WRAP);
+                    info!(
+                        "task_call_end task_id={} kind=ask status=success path=schedule_direct",
+                        task.task_id
+                    );
+                    info!("{}", LOG_CALL_WRAP);
+                    return Ok(());
+                }
             }
             info!(
                 "worker_once: ask received_message task_id={} user_id={} chat_id={} text={}",
                 task.task_id,
                 task.user_id,
                 task.chat_id,
-                truncate_for_log(prompt)
+                truncate_for_log(&runtime_prompt)
             );
-            if let Some(hard_route_result) = try_handle_crypto_trade_hard_route(state, &task, prompt).await {
-                match hard_route_result {
-                    Ok(answer) => {
-                        let answer_text = answer.text;
-                        let result = json!({ "text": answer_text.clone() });
-                        repo::update_task_success(state, &task.task_id, &result.to_string())?;
-                        maybe_notify_schedule_result(state, &task, &payload, true, &answer_text).await;
-                        let _ = memory::service::insert_memory(
-                            state,
-                            task.user_id,
-                            task.chat_id,
-                            "user",
-                            prompt,
-                            state.memory.item_max_chars.max(256),
-                        );
-                        let _ = memory::service::insert_memory(
-                            state,
-                            task.user_id,
-                            task.chat_id,
-                            "assistant",
-                            &answer_text,
-                            state.memory.item_max_chars.max(256),
-                        );
-                        info!("{}", LOG_CALL_WRAP);
-                        info!(
-                            "task_call_end task_id={} kind=ask status=success path=crypto_hard_route",
-                            task.task_id
-                        );
-                        info!("{}", LOG_CALL_WRAP);
-                        return Ok(());
-                    }
-                    Err(err_text) => {
-                        error!(
-                            "worker_once: ask hard_route task_id={} failed: {}",
-                            task.task_id, err_text
-                        );
-                        repo::update_task_failure(state, &task.task_id, &err_text)?;
-                        maybe_notify_schedule_result(state, &task, &payload, false, &err_text).await;
-                        info!("{}", LOG_CALL_WRAP);
-                        info!(
-                            "task_call_end task_id={} kind=ask status=failed path=crypto_hard_route error={}",
-                            task.task_id,
-                            truncate_for_log(&err_text)
-                        );
-                        info!("{}", LOG_CALL_WRAP);
-                        return Ok(());
+            if source != "resume_continue_execute" {
+                if let Some(hard_route_result) =
+                    try_handle_crypto_trade_hard_route(state, &task, &runtime_prompt).await
+                {
+                    match hard_route_result {
+                        Ok(answer) => {
+                            let answer_text = answer.text;
+                            let mut result = json!({ "text": answer_text.clone() });
+                            if has_pending_crypto_confirm(state, task.user_id, task.chat_id) {
+                                result["requires_confirmation"] =
+                                    Value::String("crypto_trade".to_string());
+                            }
+                            repo::update_task_success(state, &task.task_id, &result.to_string())?;
+                            maybe_notify_schedule_result(state, &task, &payload, true, &answer_text).await;
+                            let _ = memory::service::insert_memory(
+                                state,
+                                task.user_id,
+                                task.chat_id,
+                                "user",
+                                prompt,
+                                state.memory.item_max_chars.max(256),
+                            );
+                            let _ = memory::service::insert_memory(
+                                state,
+                                task.user_id,
+                                task.chat_id,
+                                "assistant",
+                                &answer_text,
+                                state.memory.item_max_chars.max(256),
+                            );
+                            info!("{}", LOG_CALL_WRAP);
+                            info!(
+                                "task_call_end task_id={} kind=ask status=success path=crypto_hard_route",
+                                task.task_id
+                            );
+                            info!("{}", LOG_CALL_WRAP);
+                            return Ok(());
+                        }
+                        Err(err_text) => {
+                            if let Some((user_error, resume_ctx)) = parse_resume_context_error(&err_text) {
+                                let resume_payload = resume_ctx
+                                    .get("resume_context")
+                                    .cloned()
+                                    .unwrap_or(resume_ctx);
+                                let result = json!({
+                                    "text": user_error.clone(),
+                                    "resume_context": resume_payload,
+                                });
+                                repo::update_task_failure_with_result(
+                                    state,
+                                    &task.task_id,
+                                    &result.to_string(),
+                                    &user_error,
+                                )?;
+                                maybe_notify_schedule_result(state, &task, &payload, false, &user_error).await;
+                                info!("{}", LOG_CALL_WRAP);
+                                info!(
+                                    "task_call_end task_id={} kind=ask status=failed path=crypto_hard_route error={} resume_context=true",
+                                    task.task_id,
+                                    truncate_for_log(&user_error)
+                                );
+                                info!("{}", LOG_CALL_WRAP);
+                                return Ok(());
+                            }
+                            error!(
+                                "worker_once: ask hard_route task_id={} failed: {}",
+                                task.task_id, err_text
+                            );
+                            repo::update_task_failure(state, &task.task_id, &err_text)?;
+                            maybe_notify_schedule_result(state, &task, &payload, false, &err_text).await;
+                            info!("{}", LOG_CALL_WRAP);
+                            info!(
+                                "task_call_end task_id={} kind=ask status=failed path=crypto_hard_route error={}",
+                                task.task_id,
+                                truncate_for_log(&err_text)
+                            );
+                            info!("{}", LOG_CALL_WRAP);
+                            return Ok(());
+                        }
                     }
                 }
             }
             let context_resolution =
-                intent_router::resolve_user_request_with_context(state, &task, prompt).await;
+                intent_router::resolve_user_request_with_context(state, &task, &runtime_prompt).await;
             let resolved_prompt = context_resolution.resolved_user_intent.clone();
             info!(
                 "worker_once: ask resolved_message task_id={} needs_clarify={} confidence={} reason={} resolved_text={}",
@@ -1565,12 +1622,9 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .get("agent_mode")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let source = payload
-                .get("source")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let classifier_direct_mode =
-                source == "voice_mode_intent_detect" || source == "voice_mode_intent_detect_regression";
+            let classifier_direct_mode = source == "voice_mode_intent_detect"
+                || source == "voice_mode_intent_detect_regression"
+                || source == "resume_intent_detect";
 
             let low_confidence = context_resolution.confidence.unwrap_or(0.0) < 0.6;
             let force_clarify = context_resolution.needs_clarify && low_confidence;
@@ -1578,7 +1632,20 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             let result = if classifier_direct_mode {
                 // Classifier-style sub-requests (like telegram voice mode intent detection)
                 // need raw label outputs, so bypass chat response wrapping.
-                llm_gateway::run_with_fallback(state, &task, &resolved_prompt)
+                let detect_prompt = if source == "resume_intent_detect" {
+                    let resume_user_text = payload
+                        .get("resume_user_text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(prompt);
+                    let resume_context = payload
+                        .get("resume_context")
+                        .cloned()
+                        .unwrap_or_else(|| json!({}));
+                    build_resume_intent_detect_prompt(resume_user_text, &resume_context)
+                } else {
+                    resolved_prompt.clone()
+                };
+                llm_gateway::run_with_fallback(state, &task, &detect_prompt)
                     .await
                     .map(|s| AskReply::llm(s.trim().to_string()))
             } else if force_clarify {
@@ -1632,7 +1699,12 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             match result {
                 Ok(answer) => {
                     let answer_text = answer.text;
-                    let result = json!({ "text": answer_text.clone() });
+                    let answer_messages = answer.messages;
+                    let result = if answer_messages.is_empty() {
+                        json!({ "text": answer_text.clone() })
+                    } else {
+                        json!({ "text": answer_text.clone(), "messages": answer_messages })
+                    };
                     repo::update_task_success(state, &task.task_id, &result.to_string())?;
                     maybe_notify_schedule_result(state, &task, &payload, true, &answer_text).await;
                     let _ = memory::service::insert_memory(
@@ -1669,6 +1741,31 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     info!("{}", LOG_CALL_WRAP);
                 }
                 Err(err_text) => {
+                    if let Some((user_error, resume_ctx)) = parse_resume_context_error(&err_text) {
+                        let resume_payload = resume_ctx
+                            .get("resume_context")
+                            .cloned()
+                            .unwrap_or(resume_ctx);
+                        let result = json!({
+                            "text": user_error.clone(),
+                            "resume_context": resume_payload,
+                        });
+                        repo::update_task_failure_with_result(
+                            state,
+                            &task.task_id,
+                            &result.to_string(),
+                            &user_error,
+                        )?;
+                        maybe_notify_schedule_result(state, &task, &payload, false, &user_error).await;
+                        info!("{}", LOG_CALL_WRAP);
+                        info!(
+                            "task_call_end task_id={} kind=ask status=failed path=normal error={} resume_context=true",
+                            task.task_id,
+                            truncate_for_log(&user_error)
+                        );
+                        info!("{}", LOG_CALL_WRAP);
+                        return Ok(());
+                    }
                     error!(
                         "worker_once: ask task_id={} failed: {}",
                         task.task_id, err_text
@@ -1793,34 +1890,36 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         }
     }
         Ok::<(), anyhow::Error>(())
-    })
-    .await;
+        })
+        .await;
 
-    match task_result {
-        Ok(inner) => inner?,
-        Err(_) => {
-            let timeout_err = format!(
-                "worker timeout after {}s while processing kind={}",
-                worker_timeout_secs, task_kind_for_timeout_log
-            );
-            error!(
-                "worker_once timeout: task_id={} kind={} timeout_seconds={}",
-                task.task_id, task_kind_for_timeout_log, worker_timeout_secs
-            );
-            update_task_timeout(state, &task.task_id, &timeout_err)?;
-            maybe_notify_schedule_result(state, &task, &payload, false, &timeout_err).await;
-            info!("{}", LOG_CALL_WRAP);
-            info!(
-                "task_call_end task_id={} kind={} status=timeout error={}",
-                task.task_id,
-                task_kind_for_timeout_log,
-                truncate_for_log(&timeout_err)
-            );
-            info!("{}", LOG_CALL_WRAP);
+        match task_result {
+            Ok(inner) => inner?,
+            Err(_) => {
+                let timeout_err = format!(
+                    "worker timeout after {}s while processing kind={}",
+                    worker_timeout_secs, task_kind_for_timeout_log
+                );
+                error!(
+                    "worker_once timeout: task_id={} kind={} timeout_seconds={}",
+                    task.task_id, task_kind_for_timeout_log, worker_timeout_secs
+                );
+                update_task_timeout(state, &task.task_id, &timeout_err)?;
+                maybe_notify_schedule_result(state, &task, &payload, false, &timeout_err).await;
+                info!("{}", LOG_CALL_WRAP);
+                info!(
+                    "task_call_end task_id={} kind={} status=timeout error={}",
+                    task.task_id,
+                    task_kind_for_timeout_log,
+                    truncate_for_log(&timeout_err)
+                );
+                info!("{}", LOG_CALL_WRAP);
+            }
         }
+        Ok(())
     }
-
-    Ok(())
+    .instrument(call_span)
+    .await
 }
 
 async fn maybe_notify_schedule_result(
@@ -2615,6 +2714,7 @@ fn append_model_io_log(
 
     let line = json!({
         "ts": now_ts_u64(),
+        "call_id": task.task_id,
         "task_id": task.task_id,
         "user_id": task.user_id,
         "chat_id": task.chat_id,
@@ -2666,6 +2766,7 @@ pub(crate) fn append_routing_log(
 
     let line = json!({
         "ts": now_ts_u64(),
+        "call_id": task.task_id,
         "task_id": task.task_id,
         "user_id": task.user_id,
         "chat_id": task.chat_id,
@@ -2728,6 +2829,64 @@ pub(crate) fn append_subtask_result(
     }
 }
 
+fn parse_resume_context_error(error_text: &str) -> Option<(String, Value)> {
+    let trimmed = error_text.trim();
+    let payload = trimmed.strip_prefix(RESUME_CONTEXT_ERROR_PREFIX)?;
+    let value: Value = serde_json::from_str(payload).ok()?;
+    let user_error = value
+        .get("user_error")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Task execution failed")
+        .to_string();
+    Some((user_error, value))
+}
+
+fn build_resume_intent_detect_prompt(user_text: &str, resume_context: &Value) -> String {
+    let ctx = serde_json::to_string_pretty(resume_context)
+        .unwrap_or_else(|_| resume_context.to_string());
+    format!(
+        "{template}\n\nUser message:\n{user_text}\n\nInterrupted task context JSON:\n{ctx}",
+        template = RESUME_INTENT_PROMPT_TEMPLATE
+    )
+}
+
+fn build_resume_continue_execute_prompt(payload: &Value, fallback_user_text: &str) -> String {
+    let user_text = payload
+        .get("resume_user_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or(fallback_user_text);
+    let resume_context = payload
+        .get("resume_context")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let resume_instruction = payload
+        .get("resume_instruction")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let resume_steps = payload
+        .get("resume_steps")
+        .cloned()
+        .filter(|v| v.as_array().map(|arr| !arr.is_empty()).unwrap_or(false))
+        .unwrap_or_else(|| {
+            resume_context
+                .get("remaining_steps")
+                .cloned()
+                .unwrap_or_else(|| json!([]))
+        });
+    let resume_context_json = serde_json::to_string_pretty(&resume_context)
+        .unwrap_or_else(|_| resume_context.to_string());
+    let resume_steps_json =
+        serde_json::to_string_pretty(&resume_steps).unwrap_or_else(|_| resume_steps.to_string());
+
+    RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE
+        .replace("__USER_TEXT__", user_text)
+        .replace("__RESUME_CONTEXT__", &resume_context_json)
+        .replace("__RESUME_STEPS__", &resume_steps_json)
+        .replace("__RESUME_INSTRUCTION__", resume_instruction)
+}
+
 pub(crate) fn i18n_t_with_default(state: &AppState, key: &str, default_text: &str) -> String {
     state
         .schedule
@@ -2759,6 +2918,7 @@ pub(crate) fn append_agent_trace_log(
     };
     let line = json!({
         "ts": now_ts_u64(),
+        "call_id": task.task_id,
         "task_id": task.task_id,
         "user_id": task.user_id,
         "chat_id": task.chat_id,
@@ -2796,6 +2956,7 @@ pub(crate) fn append_act_plan_log(
     };
     let line = json!({
         "ts": now_ts_u64(),
+        "call_id": task.task_id,
         "task_id": task.task_id,
         "user_id": task.user_id,
         "chat_id": task.chat_id,
@@ -3469,6 +3630,16 @@ fn pending_crypto_confirm_key(user_id: i64, chat_id: i64) -> String {
     format!("{user_id}:{chat_id}")
 }
 
+fn has_pending_crypto_confirm(state: &AppState, user_id: i64, chat_id: i64) -> bool {
+    let key = pending_crypto_confirm_key(user_id, chat_id);
+    state
+        .pending_crypto_confirms
+        .lock()
+        .ok()
+        .map(|m| m.contains_key(&key))
+        .unwrap_or(false)
+}
+
 fn cleanup_expired_crypto_confirms(state: &AppState, now: u64) {
     if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
         guard.retain(|_, v| now.saturating_sub(v.created_ts) <= CRYPTO_CONFIRM_TTL_SECONDS);
@@ -3496,7 +3667,7 @@ async fn try_handle_crypto_trade_hard_route(
         .and_then(|m| m.get(&key).cloned());
 
     if let Some(p) = pending {
-        if is_yes_confirmation(text) {
+        if is_yes_confirmation(text, state.trade_rules.as_ref()) {
             if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
                 guard.remove(&key);
             }
@@ -3525,7 +3696,7 @@ async fn try_handle_crypto_trade_hard_route(
                 )),
             });
         }
-        if is_no_confirmation(text) {
+        if is_no_confirmation(text, state.trade_rules.as_ref()) {
             if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
                 guard.remove(&key);
             }
@@ -3537,7 +3708,9 @@ async fn try_handle_crypto_trade_hard_route(
         }
     }
 
-    let Some((preview_args, submit_args)) = parse_crypto_trade_preview_submit_args(text) else {
+    let Some((preview_args, submit_args)) =
+        parse_trade_preview_submit_args(text, state.trade_rules.as_ref())
+    else {
         return None;
     };
 
@@ -3572,138 +3745,6 @@ async fn try_handle_crypto_trade_hard_route(
             err
         )),
     })
-}
-
-fn parse_crypto_trade_preview_submit_args(text: &str) -> Option<(Value, Value)> {
-    if !contains_trade_intent(text) {
-        return None;
-    }
-    let side = detect_trade_side(text)?;
-    let symbol = extract_trade_symbol(text)?;
-    let order_type = detect_order_type(text);
-    let qty = extract_trade_qty(text, &symbol, order_type)?;
-    if qty <= 0.0 {
-        return None;
-    }
-    let price = if order_type == "limit" {
-        extract_trade_price(text)?
-    } else {
-        0.0
-    };
-    let exchange = detect_trade_exchange(text);
-
-    let mut base = serde_json::Map::new();
-    base.insert("exchange".to_string(), Value::String(exchange));
-    base.insert("symbol".to_string(), Value::String(symbol));
-    base.insert("side".to_string(), Value::String(side.to_string()));
-    base.insert("order_type".to_string(), Value::String(order_type.to_string()));
-    base.insert("qty".to_string(), Value::from(qty));
-    if order_type == "limit" {
-        base.insert("price".to_string(), Value::from(price));
-    }
-
-    let mut preview = base.clone();
-    preview.insert("action".to_string(), Value::String("trade_preview".to_string()));
-    let mut submit = base;
-    submit.insert("action".to_string(), Value::String("trade_submit".to_string()));
-    submit.insert("confirm".to_string(), Value::Bool(true));
-    Some((Value::Object(preview), Value::Object(submit)))
-}
-
-fn contains_trade_intent(text: &str) -> bool {
-    let t = text.to_ascii_lowercase();
-    let keywords = [
-        "下单", "买入", "卖出", "开仓", "平仓", "交易", "buy", "sell", "order", "submit",
-    ];
-    keywords.iter().any(|k| t.contains(k))
-}
-
-fn detect_trade_side(text: &str) -> Option<&'static str> {
-    let t = text.to_ascii_lowercase();
-    if ["sell", "卖出", "卖", "平仓"].iter().any(|k| t.contains(k)) {
-        return Some("sell");
-    }
-    if ["buy", "买入", "买", "开仓"].iter().any(|k| t.contains(k)) {
-        return Some("buy");
-    }
-    None
-}
-
-fn detect_order_type(text: &str) -> &'static str {
-    let t = text.to_ascii_lowercase();
-    if t.contains("limit") || t.contains("限价") {
-        "limit"
-    } else {
-        "market"
-    }
-}
-
-fn detect_trade_exchange(text: &str) -> String {
-    let t = text.to_ascii_lowercase();
-    if t.contains("okx") || t.contains("欧易") {
-        "okx".to_string()
-    } else if t.contains("binance") || t.contains("币安") {
-        "binance".to_string()
-    } else {
-        "paper".to_string()
-    }
-}
-
-fn extract_trade_symbol(text: &str) -> Option<String> {
-    let upper = text.to_ascii_uppercase().replace('-', "").replace('/', "");
-    let re = Regex::new(r"([A-Z]{2,10}(USDT|USD))").ok()?;
-    re.captures(&upper)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_string())
-}
-
-fn extract_trade_qty(text: &str, symbol: &str, order_type: &str) -> Option<f64> {
-    let re = Regex::new(r"(?i)(?:qty|数量|买入|买|卖出|卖)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)").ok()?;
-    if let Some(c) = re.captures(text) {
-        if let Some(m) = c.get(1) {
-            return m.as_str().parse::<f64>().ok();
-        }
-    }
-    let by_symbol = Regex::new(&format!(
-        r"(?i){}\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)",
-        regex::escape(symbol)
-    ))
-    .ok()?;
-    if let Some(c) = by_symbol.captures(text) {
-        if let Some(m) = c.get(1) {
-            return m.as_str().parse::<f64>().ok();
-        }
-    }
-    if order_type == "market" {
-        let generic = Regex::new(r"([0-9]+(?:\.[0-9]+)?)").ok()?;
-        let mut last_num: Option<f64> = None;
-        for cap in generic.captures_iter(text) {
-            if let Some(m) = cap.get(1) {
-                if let Ok(v) = m.as_str().parse::<f64>() {
-                    last_num = Some(v);
-                }
-            }
-        }
-        return last_num;
-    }
-    None
-}
-
-fn extract_trade_price(text: &str) -> Option<f64> {
-    let re = Regex::new(r"(?i)(?:price|px|价格|限价)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)").ok()?;
-    re.captures(text)
-        .and_then(|c| c.get(1))
-        .and_then(|m| m.as_str().parse::<f64>().ok())
-}
-
-fn is_yes_confirmation(text: &str) -> bool {
-    let t = text.trim().to_ascii_lowercase();
-    matches!(t.as_str(), "yes" | "y" | "ok" | "确认" | "是" | "好的" | "同意")
-}
-
-fn is_no_confirmation(text: &str) -> bool {
-    let t = text.trim().to_ascii_lowercase();
-    matches!(t.as_str(), "no" | "n" | "取消" | "否" | "不用了" | "不")
 }
 
 pub(crate) fn canonical_skill_name(name: &str) -> &str {
@@ -4440,6 +4481,35 @@ fn update_task_success(state: &AppState, task_id: &str, result_json: &str) -> an
     Ok(())
 }
 
+fn update_task_progress_result(state: &AppState, task_id: &str, result_json: &str) -> anyhow::Result<()> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    db.execute(
+        "UPDATE tasks SET result_json = ?2, updated_at = ?3 WHERE task_id = ?1 AND status IN ('queued','running')",
+        params![task_id, result_json, now_ts()],
+    )?;
+    Ok(())
+}
+
+fn update_task_failure_with_result(
+    state: &AppState,
+    task_id: &str,
+    result_json: &str,
+    error_text: &str,
+) -> anyhow::Result<()> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    db.execute(
+        "UPDATE tasks SET status = 'failed', result_json = ?2, error_text = ?3, updated_at = ?4 WHERE task_id = ?1",
+        params![task_id, result_json, error_text, now_ts()],
+    )?;
+    Ok(())
+}
+
 fn update_task_failure(state: &AppState, task_id: &str, error_text: &str) -> anyhow::Result<()> {
     let db = state
         .db
@@ -5114,6 +5184,7 @@ async fn submit_task(
     }
 
     let task_id = Uuid::new_v4();
+    let call_id = task_id.to_string();
     let channel = req.channel.unwrap_or(ChannelKind::Telegram);
     let mut payload = req.payload;
     if let Some(obj) = payload.as_object_mut() {
@@ -5128,6 +5199,7 @@ async fn submit_task(
         if let Some(v) = req.external_chat_id.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
             obj.insert("external_chat_id".to_string(), Value::String(v.to_string()));
         }
+        obj.insert("call_id".to_string(), Value::String(call_id.clone()));
     }
     let payload_text = payload.to_string();
     let now = now_ts();
@@ -5180,8 +5252,12 @@ async fn submit_task(
         &state,
         Some(req.user_id),
         "submit_task",
-        Some(&json!({ "task_id": task_id, "kind": kind, "chat_id": req.chat_id }).to_string()),
+        Some(&json!({ "call_id": call_id, "task_id": task_id, "kind": kind, "chat_id": req.chat_id }).to_string()),
         None,
+    );
+    info!(
+        "task_submit accepted call_id={} task_id={} kind={} user_id={} chat_id={}",
+        task_id, task_id, kind, req.user_id, req.chat_id
     );
 
     (

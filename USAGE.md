@@ -144,8 +144,8 @@ The repository includes a release script:
 
 ## 9. Crypto 技能快速用法 / Crypto Skill Quick Usage
 
-先确认 `configs/crypto.toml`（crypto 技能独立配置），默认是 `paper` 模式并要求显式确认。  
-Check `configs/crypto.toml` first (crypto skill has its own config file); default mode is `paper` with explicit confirmation.
+先确认 `configs/crypto.toml`（crypto 技能独立配置），默认是 `cextest` 模式（兼容别名 `paper`）并要求显式确认。  
+Check `configs/crypto.toml` first (crypto skill has its own config file); default mode is `cextest` (backward-compatible alias `paper`) with explicit confirmation.
 
 示例（Telegram `/run`）/ Examples (`/run` in Telegram):
 
@@ -153,7 +153,7 @@ Check `configs/crypto.toml` first (crypto skill has its own config file); defaul
 /run crypto {"action":"quote","symbol":"BTCUSDT"}
 /run crypto {"action":"multi_quote","symbols":["BTCUSDT","ETHUSDT","SOLUSDT"]}
 /run crypto {"action":"indicator","symbol":"ETHUSDT","timeframe":"1h","period":20}
-/run crypto {"action":"news","limit":5}
+/run rss_fetch {"action":"latest","category":"general","limit":5}
 /run crypto {"action":"onchain","chain":"bitcoin"}
 ```
 
@@ -171,7 +171,7 @@ Check `configs/crypto.toml` first (crypto skill has its own config file); defaul
 
 - `trade_submit` 在未 `confirm=true` 时会被拒绝（默认策略）。
 - 风控字段：`max_notional_usd`、`allowed_symbols`、`allowed_exchanges`、`blocked_actions`。
-- `paper` 模式订单事件保存在 `data/crypto-paper-orders.jsonl`。
+- `cextest`（兼容 `paper`）订单事件保存在 `data/crypto-paper-orders.jsonl`。
 - 实盘接入支持：`binance` 与 `okx`（在 `configs/crypto.toml` 设置 `enabled=true` 并填写密钥后生效）。
 - Binance 下单会自动携带 `newOrderRespType=RESULT`，并约束 `recvWindow` 在 `1..60000`。
 - OKX 现货 `market` 单会自动设置 `tgtCcy=base_ccy`，保证 `qty` 语义统一为“基础币数量”。
@@ -186,7 +186,7 @@ default_exchange = "binance"        # 或 "okx"
 execution_mode = "binance"          # 或 "okx"
 require_explicit_send = true
 max_notional_usd = 200
-allowed_exchanges = ["paper", "binance", "okx", "coingecko"]
+allowed_exchanges = ["cextest", "paper", "binance", "okx", "gateio", "coinbase", "kraken", "coingecko"]
 allowed_symbols = ["BTCUSDT", "ETHUSDT"]
 
 [binance]

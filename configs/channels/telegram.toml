@@ -1,11 +1,11 @@
 [telegram]
 admins = [1985996990]
-# 图片保存类回复（如 "Image saved: ..."）在 N 秒后自动删除，0 表示不删除
+# 图片保存类回复（如 "Image saved: ..."/"Generated successfully and saved: ..."/"图片生成成功并已保存：..."）在 N 秒后自动删除，0 表示不删除
 ephemeral_image_saved_seconds = 15
 allowlist = []
 audio_inbox_dir = "audio/upload"
 auto_vision_on_image_only = false
-bot_token = "8713989782:AAFxiUWJeUZ-XXL4LUORMmpH-z7nN6bOyaM"
+bot_token = "8713989782:AAFSmsLqTWhlOSwtuWJY4IdTz8x7TkjNKjg"
 i18n_path = "configs/i18n/telegramd.zh-CN.toml"
 language = "zh-CN"
 max_audio_input_bytes = 26214400

@@ -231,7 +231,6 @@ for extra in ("configs/channels/telegram.toml", "configs/channels/whatsapp.toml"
         cfg.update(tomllib.loads(p.read_text(encoding="utf-8")))
 
 skills = cfg.get("skills", {}) if isinstance(cfg, dict) else {}
-skill_runner_path = str(skills.get("skill_runner_path", "target/debug/skill-runner") or "target/debug/skill-runner")
 skills_list = skills.get("skills_list", [])
 if not isinstance(skills_list, list):
     skills_list = []
@@ -243,7 +242,6 @@ if x_cfg_path.exists():
     x_cfg = tomllib.loads(x_cfg_path.read_text(encoding="utf-8"))
     xurl_bin = str(x_cfg.get("xurl_bin", "xurl") or "xurl").strip() or "xurl"
 
-print(f"SKILL_RUNNER_PATH={skill_runner_path}")
 print(f"SKILLS_LIST={','.join(skills_list)}")
 print(f"WA_WEB_ENABLED={'1' if wa_web_enabled else '0'}")
 print(f"XURL_BIN={xurl_bin}")
@@ -252,28 +250,23 @@ PY
 
 while IFS='=' read -r key value; do
   case "$key" in
-    SKILL_RUNNER_PATH) SKILL_RUNNER_PATH="$value" ;;
     SKILLS_LIST) SKILLS_LIST="$value" ;;
     WA_WEB_ENABLED) WA_WEB_ENABLED="$value" ;;
     XURL_BIN) XURL_BIN="$value" ;;
   esac
 done <<< "$CONFIG_META"
 
-BUILD_RELEASE=0
-if [[ "${SKILL_RUNNER_PATH:-}" == *"/release/"* || "${SKILL_RUNNER_PATH:-}" == *"target/release/"* ]]; then
-  BUILD_RELEASE=1
+SKILL_RUNNER_ABS="$SCRIPT_DIR/target/release/skill-runner"
+BUILD_RELEASE=1
+if [[ ! -x "$SKILL_RUNNER_ABS" && -x "$SCRIPT_DIR/target/debug/skill-runner" ]]; then
+  SKILL_RUNNER_ABS="$SCRIPT_DIR/target/debug/skill-runner"
+  BUILD_RELEASE=0
 fi
 CARGO_PROFILE_FLAG=()
 TARGET_DIR="target/debug"
 if [[ "$BUILD_RELEASE" == "1" ]]; then
   CARGO_PROFILE_FLAG=(--release)
   TARGET_DIR="target/release"
-fi
-
-if [[ "$SKILL_RUNNER_PATH" = /* ]]; then
-  SKILL_RUNNER_ABS="$SKILL_RUNNER_PATH"
-else
-  SKILL_RUNNER_ABS="$SCRIPT_DIR/$SKILL_RUNNER_PATH"
 fi
 
 if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
@@ -304,6 +297,7 @@ skill_bin_name() {
     log_analyze) echo "log-analyze-skill" ;;
     service_control) echo "service-control-skill" ;;
     config_guard) echo "config-guard-skill" ;;
+    crypto) echo "crypto-skill" ;;
     *) return 1 ;;
   esac
 }

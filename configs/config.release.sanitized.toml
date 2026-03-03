@@ -219,7 +219,6 @@ request_timeout_seconds = 30
 
 [skills]
 skill_max_concurrency = 1
-skill_runner_path = "target/release/skill-runner"
 skill_timeout_seconds = 30
 skills_list = [
     "x",

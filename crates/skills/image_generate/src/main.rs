@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -29,6 +29,14 @@ struct RootConfig {
     llm: LlmConfig,
     #[serde(default)]
     image_generation: ImageSkillConfig,
+    #[serde(default)]
+    command_intent: CommandIntentConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct CommandIntentConfig {
+    #[serde(default)]
+    default_locale: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -66,6 +74,49 @@ struct ImageSkillConfig {
     timeout_seconds: Option<u64>,
     #[serde(default)]
     allow_compat_adapters: bool,
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    i18n_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TextCatalog {
+    current: HashMap<String, String>,
+}
+
+impl TextCatalog {
+    fn for_lang(workspace_root: &Path, cfg: &ImageSkillConfig, lang: &str) -> Self {
+        let mut current = default_i18n_dict(lang);
+        let lang_tag = normalize_lang_tag(lang);
+        let default_path = workspace_root.join(format!("configs/i18n/image_generate.{lang_tag}.toml"));
+        if let Some(external) = load_external_i18n(&default_path) {
+            current.extend(external);
+        }
+        if let Some(custom) = cfg.i18n_path.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            let custom_path = if Path::new(custom).is_absolute() {
+                PathBuf::from(custom)
+            } else {
+                workspace_root.join(custom)
+            };
+            if let Some(external) = load_external_i18n(&custom_path) {
+                current.extend(external);
+            }
+        }
+        Self { current }
+    }
+
+    fn render(&self, key: &str, vars: &[(&str, String)], default: &str) -> String {
+        let mut out = self
+            .current
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| default.to_string());
+        for (k, v) in vars {
+            out = out.replace(&format!("{{{k}}}"), v);
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -159,6 +210,8 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
             .unwrap_or("image"),
         obj.get("output_path").and_then(|v| v.as_str()),
     )?;
+    let output_lang = resolve_output_language(cfg, obj);
+    let i18n = TextCatalog::for_lang(workspace_root, &cfg.image_generation, &output_lang);
 
     let mut provider_errors: Vec<String> = Vec::new();
     for vendor in providers {
@@ -176,9 +229,12 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         ) {
             Ok(model) => {
                 let saved_path = output_path.to_string_lossy().to_string();
-                let text = format!(
-                    "Generated successfully and saved: {saved_path}\nFILE:{saved_path}"
+                let preface = i18n.render(
+                    "image_generate.msg.saved",
+                    &[("path", saved_path.clone())],
+                    "Generated successfully and saved: {path}",
                 );
+                let text = format!("{preface}\nFILE:{saved_path}\nEPHEMERAL:IMAGE_SAVED");
                 let extra = json!({
                     "provider": vendor_name(vendor),
                     "model": model,
@@ -197,6 +253,78 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
             .cloned()
             .unwrap_or_else(|| "unknown error".to_string())
     ))
+}
+
+fn resolve_output_language(cfg: &RootConfig, obj: &serde_json::Map<String, Value>) -> String {
+    obj.get("response_language")
+        .or_else(|| obj.get("language"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(normalize_lang_tag)
+        .or_else(|| {
+            obj.get("_memory")
+                .and_then(|m| m.get("lang_hint"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(normalize_lang_tag)
+        })
+        .or_else(|| {
+            cfg.image_generation
+                .language
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(normalize_lang_tag)
+        })
+        .or_else(|| {
+            cfg.command_intent
+                .default_locale
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(normalize_lang_tag)
+        })
+        .unwrap_or_else(|| "en-US".to_string())
+}
+
+fn normalize_lang_tag(raw: &str) -> String {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered.starts_with("zh") || lowered.contains("cn") || lowered.contains("hans") {
+        "zh-CN".to_string()
+    } else {
+        "en-US".to_string()
+    }
+}
+
+fn default_i18n_dict(lang: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if normalize_lang_tag(lang) == "zh-CN" {
+        out.insert(
+            "image_generate.msg.saved".to_string(),
+            "图片生成成功并已保存：{path}".to_string(),
+        );
+    } else {
+        out.insert(
+            "image_generate.msg.saved".to_string(),
+            "Generated successfully and saved: {path}".to_string(),
+        );
+    }
+    out
+}
+
+fn load_external_i18n(path: &Path) -> Option<HashMap<String, String>> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value = toml::from_str::<toml::Value>(&raw).ok()?;
+    let dict = value.get("dict")?.as_table()?;
+    let mut out = HashMap::new();
+    for (k, v) in dict {
+        if let Some(s) = v.as_str() {
+            out.insert(k.to_string(), s.to_string());
+        }
+    }
+    Some(out)
 }
 
 #[allow(clippy::too_many_arguments)]

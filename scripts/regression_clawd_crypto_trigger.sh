@@ -247,12 +247,18 @@ run_case() {
     return 0
   fi
 
-  if ! printf '%s' "$text" | grep -Eqi "$expect_regex"; then
-    echo "[FAIL] expected regex not found: $expect_regex"
-    echo "text: $text"
-    FAIL=$((FAIL + 1))
-    return 0
-  fi
+  local expect_item
+  IFS=';;' read -r -a expect_items <<< "$expect_regex"
+  for expect_item in "${expect_items[@]}"; do
+    expect_item="$(printf '%s' "$expect_item" | xargs)"
+    [[ -z "$expect_item" ]] && continue
+    if ! printf '%s' "$text" | grep -Eqi "$expect_item"; then
+      echo "[FAIL] expected regex not found: $expect_item"
+      echo "text: $text"
+      FAIL=$((FAIL + 1))
+      return 0
+    fi
+  done
 
   if [[ -n "$reject_regex" ]] && printf '%s' "$text" | grep -Eqi "$reject_regex"; then
     echo "[FAIL] rejected regex matched: $reject_regex"
@@ -301,6 +307,11 @@ run_case \
   "trade-submit-confirmed" \
   "确认执行：paper 模式 ETHUSDT 限价买 0.02，价格 1000，立即提交。" \
   "trade_submitted|order_id|订单ID|提交"
+
+run_case \
+  "compound-quote-then-news" \
+  "帮我查询BTC价格，再去把最新加密新闻给我一份" \
+  "BTCUSDT|价格来源|BINANCE;;1\\.|2\\.|新闻|CoinDesk|CoinTelegraph"
 
 echo
 echo "== Summary =="

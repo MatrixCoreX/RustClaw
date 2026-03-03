@@ -29,7 +29,7 @@ image_inbox_dir = "image/upload"
 audio_inbox_dir = "audio/upload"
 
 [whatsapp_web]
-enabled = true
+enabled = false
 bridge_listen = "127.0.0.1:8092"
 wrapper_listen = "127.0.0.1:8094"
 bridge_base_url = "http://127.0.0.1:8092"

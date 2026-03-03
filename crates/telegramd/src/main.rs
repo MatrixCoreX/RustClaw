@@ -7,6 +7,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, anyhow};
 use claw_core::config::AppConfig;
+use claw_core::hard_rules::types::VoiceModeIntentAliases;
+use claw_core::hard_rules::voice_mode::{load_voice_mode_intent_aliases, parse_voice_mode_intent_label};
 use claw_core::types::{
     ApiResponse, ChannelKind, HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
@@ -47,17 +49,24 @@ struct BotState {
     ephemeral_image_saved_seconds: u64,
     voice_chat_prompt_template: String,
     voice_mode_intent_prompt_template: String,
+    pending_resume_by_chat: Arc<Mutex<HashMap<i64, PendingResumeContext>>>,
     i18n: Arc<TextCatalog>,
 }
 
 #[derive(Debug, Clone)]
-struct VoiceModeIntentAliases {
-    voice: Vec<String>,
-    text: Vec<String>,
-    both: Vec<String>,
-    reset: Vec<String>,
-    show: Vec<String>,
-    none: Vec<String>,
+struct PendingResumeContext {
+    task_id: String,
+    user_id: i64,
+    created_at_secs: u64,
+    resume_context: JsonValue,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ResumeIntentDecision {
+    should_resume: bool,
+    resume_instruction: String,
+    resume_steps: Vec<String>,
+    reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -76,107 +85,8 @@ const DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/voice_chat_prompt.md");
 const DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/voice_mode_intent_prompt.md");
+const RESUME_CONTEXT_TTL_SECONDS: u64 = 30 * 60;
 const VOICE_MODE_INTENT_ALIASES_PATH: &str = "configs/command_intent/voice_mode_intent_aliases.toml";
-
-impl VoiceModeIntentAliases {
-    fn defaults() -> Self {
-        Self {
-            voice: vec![
-                "voice-only".to_string(),
-                "voice only".to_string(),
-                "only voice".to_string(),
-                "切到语音".to_string(),
-                "语音回复".to_string(),
-                "只用语音".to_string(),
-                "仅语音".to_string(),
-            ],
-            text: vec![
-                "text-only".to_string(),
-                "text only".to_string(),
-                "only text".to_string(),
-                "切回文字".to_string(),
-                "文字回复".to_string(),
-                "只要文字".to_string(),
-                "仅文字".to_string(),
-                "只用文字".to_string(),
-                "只打字".to_string(),
-            ],
-            both: vec![
-                "both".to_string(),
-                "voice and text".to_string(),
-                "text and voice".to_string(),
-                "语音和文字都要".to_string(),
-                "语音和文本都发".to_string(),
-                "两种都回复".to_string(),
-            ],
-            reset: vec![
-                "reset".to_string(),
-                "default mode".to_string(),
-                "恢复默认".to_string(),
-                "重置".to_string(),
-            ],
-            show: vec![
-                "show".to_string(),
-                "status".to_string(),
-                "current mode".to_string(),
-                "查看语音模式".to_string(),
-                "当前是语音还是文字".to_string(),
-            ],
-            none: vec![
-                "none".to_string(),
-                "not a mode".to_string(),
-                "no mode switch".to_string(),
-                "不是模式切换".to_string(),
-                "非模式切换".to_string(),
-            ],
-        }
-    }
-}
-
-fn parse_alias_list(value: &TomlValue, key: &str, fallback: &[String]) -> Vec<String> {
-    value
-        .get(key)
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| s.trim().to_ascii_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        })
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| fallback.to_vec())
-}
-
-fn load_voice_mode_intent_aliases(path: &str) -> VoiceModeIntentAliases {
-    let defaults = VoiceModeIntentAliases::defaults();
-    let raw = match fs::read_to_string(path) {
-        Ok(v) => v,
-        Err(err) => {
-            warn!("load voice mode aliases failed: path={} err={}", path, err);
-            return defaults;
-        }
-    };
-    let value: TomlValue = match toml::from_str(&raw) {
-        Ok(v) => v,
-        Err(err) => {
-            warn!("parse voice mode aliases failed: path={} err={}", path, err);
-            return defaults;
-        }
-    };
-    VoiceModeIntentAliases {
-        voice: parse_alias_list(&value, "voice_aliases", &defaults.voice),
-        text: parse_alias_list(&value, "text_aliases", &defaults.text),
-        both: parse_alias_list(&value, "both_aliases", &defaults.both),
-        reset: parse_alias_list(&value, "reset_aliases", &defaults.reset),
-        show: parse_alias_list(&value, "show_aliases", &defaults.show),
-        none: parse_alias_list(&value, "none_aliases", &defaults.none),
-    }
-}
-
-fn contains_any_alias(normalized: &str, aliases: &[String]) -> bool {
-    aliases.iter().any(|x| normalized.contains(x))
-}
 
 fn parse_voice_reply_mode(raw: &str) -> VoiceReplyMode {
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -197,80 +107,6 @@ fn normalize_voice_reply_mode(raw: &str) -> Option<String> {
 
 fn can_change_voice_mode(state: &BotState, user_id: i64) -> bool {
     state.admins.contains(&user_id) || state.allowlist.contains(&user_id)
-}
-
-fn parse_voice_mode_intent_label(raw: &str, aliases: &VoiceModeIntentAliases) -> Option<&'static str> {
-    let normalized = raw.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return None;
-    }
-    if let Ok(v) = serde_json::from_str::<JsonValue>(&normalized) {
-        if let Some(mode) = v.get("mode").and_then(|x| x.as_str()) {
-            return parse_voice_mode_intent_label(mode, aliases);
-        }
-    }
-    if let (Some(start), Some(end)) = (normalized.find('{'), normalized.rfind('}')) {
-        if start < end {
-            let part = &normalized[start..=end];
-            if let Ok(v) = serde_json::from_str::<JsonValue>(part) {
-                if let Some(mode) = v.get("mode").and_then(|x| x.as_str()) {
-                    return parse_voice_mode_intent_label(mode, aliases);
-                }
-            }
-        }
-    }
-    for token in ["voice", "text", "both", "reset", "show", "none"] {
-        if normalized == token {
-            return Some(token);
-        }
-    }
-    // Avoid aggressive fuzzy mapping to reduce false positives.
-    // Only accept explicit labels from model output.
-    let first = normalized
-        .split(|c: char| !c.is_ascii_alphabetic())
-        .find(|p| !p.is_empty())
-        .unwrap_or("");
-    match first {
-        "voice" => Some("voice"),
-        "text" => Some("text"),
-        "both" => Some("both"),
-        "reset" => Some("reset"),
-        "show" => Some("show"),
-        "none" => Some("none"),
-        _ => {
-            // Soft fallback for non-token classifier outputs.
-            // Keep this conservative and only map clear intent phrases.
-            if contains_any_alias(&normalized, &aliases.none) {
-                return Some("none");
-            }
-            if contains_any_alias(&normalized, &aliases.reset) {
-                return Some("reset");
-            }
-            if contains_any_alias(&normalized, &aliases.show) {
-                return Some("show");
-            }
-            if contains_any_alias(&normalized, &aliases.both) {
-                return Some("both");
-            }
-            if contains_any_alias(&normalized, &aliases.voice) {
-                return Some("voice");
-            }
-            if contains_any_alias(&normalized, &aliases.text) {
-                return Some("text");
-            }
-            if normalized.contains("voice") || normalized.contains("语音") {
-                return Some("voice");
-            }
-            if normalized.contains("text")
-                || normalized.contains("文字")
-                || normalized.contains("文本")
-                || normalized.contains("打字")
-            {
-                return Some("text");
-            }
-            None
-        }
-    }
 }
 
 async fn detect_voice_mode_intent_with_llm(
@@ -299,13 +135,248 @@ async fn detect_voice_mode_intent_with_llm(
         }
     };
     let out = match poll_task_result(state, &task_id, Some(12)).await {
-        Ok(v) => v,
+        Ok(v) => v.into_iter().next().unwrap_or_default(),
         Err(err) => {
             warn!("voice mode llm detect poll failed: {err}");
             return None;
         }
     };
     parse_voice_mode_intent_label(&out, state.voice_mode_intent_aliases.as_ref())
+}
+
+fn extract_first_json_object(raw: &str) -> Option<JsonValue> {
+    let trimmed = raw.trim();
+    if let Ok(v) = serde_json::from_str::<JsonValue>(trimmed) {
+        return Some(v);
+    }
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+        if start < end {
+            return serde_json::from_str::<JsonValue>(&trimmed[start..=end]).ok();
+        }
+    }
+    None
+}
+
+fn parse_resume_intent_decision(raw: &str) -> Option<ResumeIntentDecision> {
+    let v = extract_first_json_object(raw)?;
+    Some(ResumeIntentDecision {
+        should_resume: v.get("should_resume").and_then(|x| x.as_bool()).unwrap_or(false),
+        resume_instruction: v
+            .get("resume_instruction")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        resume_steps: v
+            .get("resume_steps")
+            .and_then(|x| x.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        reason: v
+            .get("reason")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+    })
+}
+
+fn pending_resume_valid_for(
+    pending: &PendingResumeContext,
+    user_id: i64,
+    now_secs: u64,
+) -> bool {
+    if pending.user_id != user_id {
+        return false;
+    }
+    now_secs.saturating_sub(pending.created_at_secs) <= RESUME_CONTEXT_TTL_SECONDS
+}
+
+async fn detect_resume_intent_with_llm(
+    state: &BotState,
+    user_id: i64,
+    chat_id: i64,
+    user_text: &str,
+    resume_context: &JsonValue,
+) -> Option<ResumeIntentDecision> {
+    let task_id = match submit_task_only(
+        state,
+        user_id,
+        chat_id,
+        TaskKind::Ask,
+        json!({
+            "text": user_text,
+            "agent_mode": false,
+            "source": "resume_intent_detect",
+            "resume_user_text": user_text,
+            "resume_context": resume_context,
+        }),
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(err) => {
+            warn!("resume llm detect submit failed: {err}");
+            return None;
+        }
+    };
+    let out = match poll_task_result(state, &task_id, Some(12)).await {
+        Ok(v) => v.into_iter().next().unwrap_or_default(),
+        Err(err) => {
+            warn!("resume llm detect poll failed: {err}");
+            return None;
+        }
+    };
+    parse_resume_intent_decision(&out)
+}
+
+async fn maybe_handle_resume_continuation(
+    bot: &Bot,
+    msg: &Message,
+    state: &BotState,
+    user_id: i64,
+    prompt: &str,
+) -> anyhow::Result<bool> {
+    let chat_id = msg.chat.id.0;
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let pending = {
+        let guard = state
+            .pending_resume_by_chat
+            .lock()
+            .map_err(|_| anyhow!("pending resume lock poisoned"))?;
+        guard.get(&chat_id).cloned()
+    };
+    let Some(pending) = pending else {
+        return Ok(false);
+    };
+    if !pending_resume_valid_for(&pending, user_id, now_secs) {
+        if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
+            guard.remove(&chat_id);
+        }
+        return Ok(false);
+    }
+    let Some(decision) =
+        detect_resume_intent_with_llm(state, user_id, chat_id, prompt, &pending.resume_context).await
+    else {
+        return Ok(false);
+    };
+    if !decision.should_resume {
+        return Ok(false);
+    }
+
+    if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
+        guard.remove(&chat_id);
+    }
+    let queue_len = match fetch_queue_length(state).await {
+        Ok(v) => v,
+        Err(_) => 0,
+    };
+    if queue_len >= state.queue_limit {
+        bot.send_message(
+            msg.chat.id,
+            state.i18n.t_with(
+                "telegram.msg.queue_full",
+                &[
+                    ("queued", &queue_len.to_string()),
+                    ("limit", &state.queue_limit.to_string()),
+                ],
+            ),
+        )
+        .await
+        .context("send queue full for resume failed")?;
+        return Ok(true);
+    }
+    let agent_enabled = state
+        .agent_off_chats
+        .lock()
+        .map(|set| !set.contains(&chat_id))
+        .unwrap_or(true);
+    let resume_steps = if decision.resume_steps.is_empty() {
+        pending
+            .resume_context
+            .get("remaining_steps")
+            .cloned()
+            .unwrap_or_else(|| json!([]))
+    } else {
+        json!(decision.resume_steps)
+    };
+    let resume_context = pending.resume_context.clone();
+    let resume_context_id = resume_context
+        .get("resume_context_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let payload = json!({
+        "text": prompt,
+        "agent_mode": agent_enabled,
+        "source": "resume_continue_execute",
+        "resume_user_text": prompt,
+        "resume_context": resume_context,
+        "resume_instruction": decision.resume_instruction,
+        "resume_steps": resume_steps,
+        "resume_context_id": resume_context_id,
+        "resume_from_task_id": pending.task_id,
+    });
+    bot.send_message(
+        msg.chat.id,
+        if decision.reason.is_empty() {
+            state.i18n.t("telegram.msg.resume_ack")
+        } else {
+            state.i18n.t_with(
+                "telegram.msg.resume_ack_with_reason",
+                &[("reason", &decision.reason)],
+            )
+        },
+    )
+    .await
+    .context("send resume ack failed")?;
+    match submit_task_only(state, user_id, chat_id, TaskKind::Ask, payload).await {
+        Ok(task_id) => {
+            let delivered = try_deliver_quick_result(
+                bot,
+                state,
+                msg.chat.id,
+                user_id,
+                &task_id,
+                Some(state.quick_result_wait_seconds),
+                &state.i18n.t("telegram.msg.process_failed"),
+            )
+            .await
+            .context("try quick delivery for resume ask failed")?;
+            if !delivered {
+                spawn_task_result_delivery(
+                    bot.clone(),
+                    state.clone(),
+                    msg.chat.id,
+                    user_id,
+                    task_id,
+                    None,
+                    state.i18n.t("telegram.msg.process_failed"),
+                );
+            }
+        }
+        Err(err) => {
+            bot.send_message(
+                msg.chat.id,
+                state
+                    .i18n
+                    .t_with("telegram.msg.process_failed_with_error", &[("error", &err.to_string())]),
+            )
+            .await
+            .context("send resume submit error failed")?;
+        }
+    }
+    Ok(true)
 }
 
 fn effective_voice_reply_mode_for_chat(state: &BotState, chat_id: i64) -> String {
@@ -438,6 +509,7 @@ async fn main() -> anyhow::Result<()> {
         quick_result_wait_seconds: config.telegram.quick_result_wait_seconds.max(1),
         auto_vision_on_image_only: config.telegram.auto_vision_on_image_only,
         pending_image_by_chat: Arc::new(Mutex::new(HashMap::new())),
+        pending_resume_by_chat: Arc::new(Mutex::new(HashMap::new())),
         bot_token: config.telegram.bot_token.clone(),
         image_inbox_dir: "image/upload".to_string(),
         audio_inbox_dir: config.telegram.audio_inbox_dir.clone(),
@@ -521,7 +593,9 @@ async fn register_telegram_commands_and_menu(
             { "command": "run", "description": i18n.t("telegram.menu.run_desc") },
             { "command": "sendfile", "description": i18n.t("telegram.menu.sendfile_desc") },
             { "command": "voicemode", "description": i18n.t("telegram.menu.voicemode_desc") },
-            { "command": "openclaw", "description": i18n.t("telegram.menu.openclaw_desc") }
+            { "command": "rustclaw", "description": i18n.t("telegram.menu.openclaw_desc") },
+            { "command": "crypto", "description": i18n.t("telegram.menu.crypto_desc") },
+            { "command": "cryptoapi", "description": i18n.t("telegram.menu.cryptoapi_desc") }
         ]
     });
 
@@ -644,12 +718,12 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         return Ok(());
     }
 
-    if text.starts_with("/openclaw") {
+    if text.starts_with("/rustclaw") || text.starts_with("/openclaw") {
         let is_admin = state.admins.contains(&user_id);
         if !is_admin {
             bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.openclaw_admin_only"))
                 .await
-                .context("send /openclaw unauthorized failed")?;
+                .context("send /rustclaw unauthorized failed")?;
             return Ok(());
         }
 
@@ -658,13 +732,13 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         let openclaw_result =
             tokio::task::spawn_blocking(move || handle_openclaw_config_command(&state_for_cmd, &text_owned))
                 .await
-                .map_err(|err| anyhow!("join openclaw config task failed: {err}"))?;
+                .map_err(|err| anyhow!("join rustclaw config task failed: {err}"))?;
 
         match openclaw_result {
             Ok(reply) => {
                 bot.send_message(msg.chat.id, reply)
                     .await
-                    .context("send /openclaw reply failed")?;
+                    .context("send /rustclaw reply failed")?;
             }
             Err(err) => {
                 bot.send_message(
@@ -674,7 +748,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                         .t_with("telegram.msg.config_failed", &[("error", &err.to_string())]),
                 )
                     .await
-                    .context("send /openclaw error failed")?;
+                    .context("send /rustclaw error failed")?;
             }
         }
         return Ok(());
@@ -689,14 +763,20 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             return Ok(());
         }
         let raw = text.strip_prefix("/cryptoapi").unwrap_or_default().trim();
-        match handle_cryptoapi_command(raw) {
+        match handle_cryptoapi_command(&state, raw) {
             Ok(reply) => {
                 bot.send_message(msg.chat.id, reply)
                     .await
                     .context("send /cryptoapi reply failed")?;
             }
             Err(err) => {
-                bot.send_message(msg.chat.id, format!("cryptoapi 配置失败：{err}"))
+                bot.send_message(
+                    msg.chat.id,
+                    state.i18n.t_with(
+                        "telegram.msg.cryptoapi_config_failed",
+                        &[("error", &err.to_string())],
+                    ),
+                )
                     .await
                     .context("send /cryptoapi error failed")?;
             }
@@ -869,6 +949,96 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         return Ok(());
     }
 
+    if text.starts_with("/crypto") {
+        let raw = text.strip_prefix("/crypto").unwrap_or_default().trim();
+        let payload = match build_crypto_skill_payload(raw) {
+            Ok(Some(v)) => v,
+            Ok(None) => {
+                bot.send_message(msg.chat.id, crypto_command_usage_text(&state))
+                    .await
+                    .context("send /crypto usage failed")?;
+                return Ok(());
+            }
+            Err(err) => {
+                bot.send_message(
+                    msg.chat.id,
+                    format!(
+                        "{}\n\n{}",
+                        state.i18n.t_with(
+                            "telegram.msg.crypto_parse_failed",
+                            &[("error", &err.to_string())],
+                        ),
+                        crypto_command_usage_text(&state)
+                    ),
+                )
+                    .await
+                    .context("send /crypto parse error failed")?;
+                return Ok(());
+            }
+        };
+
+        let queue_len = match fetch_queue_length(&state).await {
+            Ok(v) => v,
+            Err(_) => 0,
+        };
+        if queue_len >= state.queue_limit {
+            bot.send_message(
+                msg.chat.id,
+                format!(
+                    "{}",
+                    state.i18n.t_with(
+                        "telegram.msg.queue_full",
+                        &[
+                            ("queued", &queue_len.to_string()),
+                            ("limit", &state.queue_limit.to_string()),
+                        ],
+                    )
+                ),
+            )
+            .await
+            .context("send queue full /crypto failed")?;
+            return Ok(());
+        }
+
+        match submit_task_only(&state, user_id, msg.chat.id.0, TaskKind::RunSkill, payload).await {
+            Ok(task_id) => {
+                let delivered = try_deliver_quick_result(
+                    &bot,
+                    &state,
+                    msg.chat.id,
+                    user_id,
+                    &task_id,
+                    Some(state.quick_result_wait_seconds),
+                    &state.i18n.t("telegram.msg.skill_exec_failed"),
+                )
+                .await
+                .context("try quick delivery for /crypto failed")?;
+                if !delivered {
+                    spawn_task_result_delivery(
+                        bot.clone(),
+                        state.clone(),
+                        msg.chat.id,
+                        user_id,
+                        task_id,
+                        None,
+                        state.i18n.t("telegram.msg.skill_exec_failed"),
+                    );
+                }
+            }
+            Err(err) => {
+                bot.send_message(
+                    msg.chat.id,
+                    state
+                        .i18n
+                        .t_with("telegram.msg.skill_exec_failed_with_error", &[("error", &err.to_string())]),
+                )
+                .await
+                .context("send /crypto error failed")?;
+            }
+        }
+        return Ok(());
+    }
+
     if text.starts_with("/run") {
         let rest = text.strip_prefix("/run").unwrap_or_default().trim();
         if rest.is_empty() {
@@ -923,6 +1093,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                     &bot,
                     &state,
                     msg.chat.id,
+                    user_id,
                     &task_id,
                     Some(state.quick_result_wait_seconds),
                     &state.i18n.t("telegram.msg.skill_exec_failed"),
@@ -934,6 +1105,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                     bot.clone(),
                     state.clone(),
                     msg.chat.id,
+                    user_id,
                     task_id,
                     None,
                     state.i18n.t("telegram.msg.skill_exec_failed"),
@@ -1043,6 +1215,10 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         return Ok(());
     }
 
+    if maybe_handle_resume_continuation(&bot, &msg, &state, user_id, prompt).await? {
+        return Ok(());
+    }
+
     // Two-step image edit flow when auto vision is disabled:
     // 1) user sends image only -> saved as pending image for this chat
     // 2) user sends prompt text -> run image_edit directly using pending image
@@ -1092,6 +1268,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                         &bot,
                         &state,
                         msg.chat.id,
+                        user_id,
                         &task_id,
                         Some(state.quick_result_wait_seconds),
                         &state.i18n.t("telegram.msg.skill_exec_failed"),
@@ -1103,6 +1280,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                             bot.clone(),
                             state.clone(),
                             msg.chat.id,
+                            user_id,
                             task_id,
                             None,
                             state.i18n.t("telegram.msg.skill_exec_failed"),
@@ -1171,6 +1349,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                 &bot,
                 &state,
                 msg.chat.id,
+                user_id,
                 &task_id,
                 Some(state.quick_result_wait_seconds),
                 &state.i18n.t("telegram.msg.process_failed"),
@@ -1182,6 +1361,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                     bot.clone(),
                     state.clone(),
                     msg.chat.id,
+                    user_id,
                     task_id,
                     None,
                     state.i18n.t("telegram.msg.process_failed"),
@@ -1263,6 +1443,7 @@ async fn handle_image_only_message(
                 bot,
                 state,
                 msg.chat.id,
+                user_id,
                 &task_id,
                 Some(state.quick_result_wait_seconds),
                 &state.i18n.t("telegram.msg.skill_exec_failed"),
@@ -1274,6 +1455,7 @@ async fn handle_image_only_message(
                     bot.clone(),
                     state.clone(),
                     msg.chat.id,
+                    user_id,
                     task_id,
                     None,
                     state.i18n.t("telegram.msg.skill_exec_failed"),
@@ -1389,7 +1571,8 @@ async fn handle_audio_message(
     let transcript = poll_task_result(state, &transcribe_task_id, Some(120))
         .await
         .context("poll audio_transcribe result failed")?;
-    let transcript = transcript.trim();
+    let transcript = transcript.join("\n").trim().to_string();
+    let transcript = transcript.as_str();
     if transcript.is_empty() {
         bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.audio_transcript_empty"))
             .await
@@ -1415,16 +1598,19 @@ async fn handle_audio_message(
     )
     .await
     .context("submit ask task for transcript failed")?;
-    let answer = poll_task_result(state, &ask_task_id, Some(state.task_wait_seconds.max(300)))
+    let answers = poll_task_result(state, &ask_task_id, Some(state.task_wait_seconds.max(300)))
         .await
         .context("poll ask result for transcript failed")?;
+    let answer_joined = answers.join("\n\n");
     let mode = parse_voice_reply_mode(&effective_voice_reply_mode_for_chat(state, msg.chat.id.0));
     if matches!(mode, VoiceReplyMode::Text | VoiceReplyMode::Both) {
-        send_text_or_image(bot, state, msg.chat.id, &answer).await?;
+        for answer in &answers {
+            send_text_or_image(bot, state, msg.chat.id, answer, false).await?;
+        }
     }
 
     if matches!(mode, VoiceReplyMode::Voice | VoiceReplyMode::Both) {
-        let tts_input = strip_delivery_tokens_for_tts(&answer);
+        let tts_input = strip_delivery_tokens_for_tts(&answer_joined);
         if !tts_input.is_empty() {
             let tts_payload = json!({
                 "skill_name": "audio_synthesize",
@@ -1436,7 +1622,9 @@ async fn handle_audio_message(
             match submit_task_only(state, user_id, msg.chat.id.0, TaskKind::RunSkill, tts_payload).await {
                 Ok(tts_task_id) => match poll_task_result(state, &tts_task_id, Some(90)).await {
                     Ok(tts_answer) => {
-                        let _ = send_text_or_image(bot, state, msg.chat.id, &tts_answer).await;
+                        for msg_text in tts_answer {
+                            let _ = send_text_or_image(bot, state, msg.chat.id, &msg_text, false).await;
+                        }
                     }
                     Err(err) => {
                         warn!("audio_synthesize poll failed: {err}");
@@ -1448,7 +1636,9 @@ async fn handle_audio_message(
             }
         } else if matches!(mode, VoiceReplyMode::Voice) {
             // Voice-only mode but no speakable text: fallback to original answer.
-            send_text_or_image(bot, state, msg.chat.id, &answer).await?;
+            for answer in &answers {
+                send_text_or_image(bot, state, msg.chat.id, answer, false).await?;
+            }
         }
     }
     Ok(())
@@ -1630,20 +1820,58 @@ async fn try_deliver_quick_result(
     bot: &Bot,
     state: &BotState,
     chat_id: ChatId,
+    user_id: i64,
     task_id: &str,
     wait_override_seconds: Option<u64>,
     fail_prefix: &str,
 ) -> anyhow::Result<bool> {
     let _typing_guard = TypingHeartbeatGuard::start(bot.clone(), chat_id);
     match poll_task_result(state, task_id, wait_override_seconds).await {
-        Ok(answer) => {
-            send_text_or_image(bot, state, chat_id, &answer).await?;
+        Ok(answers) => {
+            let requires_confirmation = query_task_status(state, task_id)
+                .await
+                .map(|task| task_requires_crypto_confirmation(&task))
+                .unwrap_or(false);
+            for answer in answers {
+                send_text_or_image(bot, state, chat_id, &answer, requires_confirmation).await?;
+            }
             Ok(true)
         }
         Err(err) => {
             let msg = err.to_string();
             if msg == "task_result_wait_timeout" {
                 return Ok(false);
+            }
+            if let Ok(task) = query_task_status(state, task_id).await {
+                if let Some(resume_context) = task
+                    .result_json
+                    .as_ref()
+                    .and_then(|v| v.get("resume_context"))
+                    .cloned()
+                {
+                    let pending = PendingResumeContext {
+                        task_id: task_id.to_string(),
+                        user_id,
+                        created_at_secs: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        resume_context,
+                    };
+                    if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
+                        guard.insert(chat_id.0, pending);
+                    }
+                    bot.send_message(
+                        chat_id,
+                        state.i18n.t_with(
+                            "telegram.msg.resume_interrupted_hint",
+                            &[("prefix", &fail_prefix), ("detail", &msg)],
+                        ),
+                    )
+                    .await
+                    .context("send quick error with resume message failed")?;
+                    return Ok(true);
+                }
             }
             bot.send_message(chat_id, format!("{fail_prefix}：{msg}"))
                 .await
@@ -1654,28 +1882,52 @@ async fn try_deliver_quick_result(
 }
 
 fn is_image_saved_preface(text: &str) -> bool {
-    let t = text.trim();
-    t.starts_with("Image saved") || t.starts_with("Images saved")
+    let t = text.trim().to_ascii_lowercase();
+    t.starts_with("image saved")
+        || t.starts_with("images saved")
+        || t.starts_with("generated successfully and saved:")
+        || t.starts_with("edited successfully and saved:")
+        || text.trim().starts_with("图片已保存：")
+        || text.trim().starts_with("图片生成成功并已保存：")
+        || text.trim().starts_with("图片编辑成功并已保存：")
 }
 
-async fn send_text_or_image(bot: &Bot, state: &BotState, chat_id: ChatId, answer: &str) -> anyhow::Result<()> {
+async fn send_text_or_image(
+    bot: &Bot,
+    state: &BotState,
+    chat_id: ChatId,
+    answer: &str,
+    requires_confirmation: bool,
+) -> anyhow::Result<()> {
     const PREFIX: &str = "IMAGE_FILE:";
     const FILE_PREFIX: &str = "FILE:";
     const VOICE_PREFIX: &str = "VOICE_FILE:";
+    const EPHEMERAL_PREFIX: &str = "EPHEMERAL:";
+    const EPHEMERAL_IMAGE_SAVED_TOKEN: &str = "EPHEMERAL:IMAGE_SAVED";
 
-    let image_paths = extract_prefixed_paths(answer, PREFIX);
-    let file_paths = extract_prefixed_paths(answer, FILE_PREFIX);
-    let voice_paths = extract_prefixed_paths(answer, VOICE_PREFIX);
+    let mut image_paths = dedupe_preserve_order(extract_prefixed_paths(answer, PREFIX));
+    let file_paths = dedupe_preserve_order(extract_prefixed_paths(answer, FILE_PREFIX));
+    let voice_paths = dedupe_preserve_order(extract_prefixed_paths(answer, VOICE_PREFIX));
+    // If both IMAGE_FILE and FILE contain the same path, keep FILE only.
+    let file_set = file_paths.iter().cloned().collect::<HashSet<_>>();
+    image_paths.retain(|p| !file_set.contains(p));
 
     if !image_paths.is_empty() || !file_paths.is_empty() || !voice_paths.is_empty() {
+        let ephemeral_image_saved_hint = answer
+            .lines()
+            .any(|line| line.trim().eq_ignore_ascii_case(EPHEMERAL_IMAGE_SAVED_TOKEN));
         let text_without_tokens =
-            strip_prefixed_tokens(answer, &[PREFIX, FILE_PREFIX, VOICE_PREFIX]).trim().to_string();
+            strip_prefixed_tokens(answer, &[PREFIX, FILE_PREFIX, VOICE_PREFIX, EPHEMERAL_PREFIX])
+                .trim()
+                .to_string();
         if !text_without_tokens.is_empty() {
             let sent = bot
                 .send_message(chat_id, &text_without_tokens)
                 .await
                 .context("send file preface text failed")?;
-            if state.ephemeral_image_saved_seconds > 0 && is_image_saved_preface(&text_without_tokens) {
+            if state.ephemeral_image_saved_seconds > 0
+                && (ephemeral_image_saved_hint || is_image_saved_preface(&text_without_tokens))
+            {
                 let bot_clone = bot.clone();
                 let msg_id = sent.id;
                 let secs = state.ephemeral_image_saved_seconds;
@@ -1710,7 +1962,7 @@ async fn send_text_or_image(bot: &Bot, state: &BotState, chat_id: ChatId, answer
         return Ok(());
     }
 
-    if is_crypto_trade_confirm_prompt(answer) {
+    if is_crypto_trade_confirm_prompt(answer, requires_confirmation) {
         let keyboard = KeyboardMarkup::new(vec![vec![
             KeyboardButton::new("yes"),
             KeyboardButton::new("no"),
@@ -1729,9 +1981,12 @@ async fn send_text_or_image(bot: &Bot, state: &BotState, chat_id: ChatId, answer
     Ok(())
 }
 
-fn is_crypto_trade_confirm_prompt(text: &str) -> bool {
+fn is_crypto_trade_confirm_prompt(text: &str, structured_hint: bool) -> bool {
+    if structured_hint {
+        return true;
+    }
     let t = text.to_ascii_lowercase();
-    (t.contains("请确认是否下单") || t.contains("confirm") || t.contains("trade_preview"))
+    (t.contains("confirm") || t.contains("trade_preview"))
         && t.contains("yes")
         && t.contains("no")
 }
@@ -1750,6 +2005,17 @@ fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
     out
 }
 
+fn dedupe_preserve_order(items: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for item in items {
+        if seen.insert(item.clone()) {
+            out.push(item);
+        }
+    }
+    out
+}
+
 fn strip_prefixed_tokens(answer: &str, prefixes: &[&str]) -> String {
     answer
         .lines()
@@ -1759,7 +2025,7 @@ fn strip_prefixed_tokens(answer: &str, prefixes: &[&str]) -> String {
 }
 
 fn strip_delivery_tokens_for_tts(answer: &str) -> String {
-    strip_prefixed_tokens(answer, &["IMAGE_FILE:", "FILE:", "VOICE_FILE:"])
+    strip_prefixed_tokens(answer, &["IMAGE_FILE:", "FILE:", "VOICE_FILE:", "EPHEMERAL:"])
         .trim()
         .to_string()
 }
@@ -1832,6 +2098,7 @@ fn spawn_task_result_delivery(
     bot: Bot,
     state: BotState,
     chat_id: ChatId,
+    user_id: i64,
     task_id: String,
     soft_notice_override_seconds: Option<u64>,
     fail_prefix: String,
@@ -1846,11 +2113,19 @@ fn spawn_task_result_delivery(
         let started_at = tokio::time::Instant::now();
         let mut soft_notice_sent = false;
         let mut hard_notice_sent = false;
+        let mut sent_progress_count = 0usize;
 
         loop {
             match query_task_status(&state, &task_id).await {
                 Ok(task) => match task.status {
                     TaskStatus::Queued | TaskStatus::Running => {
+                        let progress_messages = task_progress_messages(&task);
+                        if sent_progress_count < progress_messages.len() {
+                            for answer in progress_messages.iter().skip(sent_progress_count) {
+                                let _ = send_text_or_image(&bot, &state, chat_id, answer, false).await;
+                            }
+                            sent_progress_count = progress_messages.len();
+                        }
                         if !soft_notice_sent
                             && started_at.elapsed() >= Duration::from_secs(soft_notice_seconds)
                         {
@@ -1887,12 +2162,50 @@ fn spawn_task_result_delivery(
                         tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
                     }
                     TaskStatus::Succeeded => {
-                        let answer = task_success_text(&state, &task);
-                        let _ = send_text_or_image(&bot, &state, chat_id, &answer).await;
+                        let answers = task_success_messages_from_offset(&state, &task, sent_progress_count);
+                        let requires_confirmation = task_requires_crypto_confirmation(&task);
+                        for answer in answers {
+                            let _ = send_text_or_image(
+                                &bot,
+                                &state,
+                                chat_id,
+                                &answer,
+                                requires_confirmation,
+                            )
+                            .await;
+                        }
                         break;
                     }
                     TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
                         let detail = task_terminal_error_text(&state, &task);
+                        if let Some(resume_context) = task
+                            .result_json
+                            .as_ref()
+                            .and_then(|v| v.get("resume_context"))
+                            .cloned()
+                        {
+                            let pending = PendingResumeContext {
+                                task_id: task_id.clone(),
+                                user_id,
+                                created_at_secs: SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs(),
+                                resume_context,
+                            };
+                            if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
+                                guard.insert(chat_id.0, pending);
+                            }
+                            let fail_msg = format!(
+                                "{}",
+                                state.i18n.t_with(
+                                    "telegram.msg.resume_interrupted_hint",
+                                    &[("prefix", &fail_prefix), ("detail", &detail)],
+                                )
+                            );
+                            let _ = bot.send_message(chat_id, fail_msg).await;
+                            break;
+                        }
                         let _ = bot
                             .send_message(chat_id, format!("{fail_prefix}：{detail}"))
                             .await;
@@ -1910,16 +2223,90 @@ fn spawn_task_result_delivery(
     });
 }
 
-fn task_success_text(state: &BotState, task: &TaskQueryResponse) -> String {
-    task.result_json
+fn task_success_messages(state: &BotState, task: &TaskQueryResponse) -> Vec<String> {
+    task_success_messages_from_offset(state, task, 0)
+}
+
+fn task_success_messages_from_offset(
+    state: &BotState,
+    task: &TaskQueryResponse,
+    offset: usize,
+) -> Vec<String> {
+    if let Some(messages) = task
+        .result_json
+        .as_ref()
+        .and_then(|v| v.get("messages"))
+        .and_then(|v| v.as_array())
+    {
+        let out = messages
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let out = dedupe_preserve_order(out);
+        if !out.is_empty() {
+            if offset >= out.len() {
+                let text = task
+                    .result_json
+                    .as_ref()
+                    .and_then(|v| v.get("text"))
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                if let Some(text) = text {
+                    return vec![text];
+                }
+                return Vec::new();
+            }
+            return out.into_iter().skip(offset).collect();
+        }
+    }
+    vec![task
+        .result_json
         .as_ref()
         .and_then(|v| v.get("text"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| state.i18n.t("telegram.msg.task_done_no_text"))
+        .unwrap_or_else(|| state.i18n.t("telegram.msg.task_done_no_text"))]
+}
+
+fn task_progress_messages(task: &TaskQueryResponse) -> Vec<String> {
+    let out = task
+        .result_json
+        .as_ref()
+        .and_then(|v| v.get("progress_messages"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    dedupe_preserve_order(out)
+}
+
+fn task_requires_crypto_confirmation(task: &TaskQueryResponse) -> bool {
+    task.result_json
+        .as_ref()
+        .and_then(|v| v.get("requires_confirmation"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.eq_ignore_ascii_case("crypto_trade"))
+        .unwrap_or(false)
 }
 
 fn task_terminal_error_text(state: &BotState, task: &TaskQueryResponse) -> String {
+    if let Some(raw_detail) = task.error_text.as_deref() {
+        let detail = raw_detail.trim();
+        if !detail.is_empty() {
+            return detail.to_string();
+        }
+    }
     state.i18n.t_with(
         "telegram.error.task_finished_with_detail",
         &[
@@ -2052,7 +2439,7 @@ async fn poll_task_result(
     state: &BotState,
     task_id: &str,
     wait_override_seconds: Option<u64>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Vec<String>> {
     let poll_interval_ms = state.poll_interval_ms.max(1);
     let wait_seconds = wait_override_seconds.unwrap_or(state.task_wait_seconds).max(1);
     let max_rounds = ((wait_seconds * 1000) / poll_interval_ms).max(1);
@@ -2064,7 +2451,7 @@ async fn poll_task_result(
                 tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
             }
             TaskStatus::Succeeded => {
-                return Ok(task_success_text(state, &task));
+                return Ok(task_success_messages(state, &task));
             }
             TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
                 return Err(anyhow!("{}", task_terminal_error_text(state, &task)));
@@ -2334,7 +2721,11 @@ fn persist_chat_voice_mode_to_config(
 }
 
 fn handle_openclaw_config_command(state: &BotState, text: &str) -> anyhow::Result<String> {
-    let cmd = text.strip_prefix("/openclaw").unwrap_or_default().trim();
+    let cmd = text
+        .strip_prefix("/rustclaw")
+        .or_else(|| text.strip_prefix("/openclaw"))
+        .unwrap_or_default()
+        .trim();
     if cmd.is_empty() {
         return Ok(openclaw_usage_text(state));
     }
@@ -2361,14 +2752,108 @@ fn handle_openclaw_config_command(state: &BotState, text: &str) -> anyhow::Resul
     }
 }
 
-fn cryptoapi_usage_text() -> String {
-    [
-        "用法：",
-        "/cryptoapi show",
-        "/cryptoapi set binance <api_key> <api_secret>",
-        "/cryptoapi set okx <api_key> <api_secret> <passphrase>",
-    ]
-    .join("\n")
+fn cryptoapi_usage_text(state: &BotState) -> String {
+    state.i18n.t("telegram.msg.cryptoapi_usage")
+}
+
+fn crypto_command_usage_text(state: &BotState) -> String {
+    state.i18n.t("telegram.msg.crypto_usage")
+}
+
+fn parse_symbols_csv(raw: &str) -> Vec<String> {
+    raw.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .collect()
+}
+
+fn maybe_exchange_token(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "auto"
+            | "dual"
+            | "both"
+            | "all"
+            | "binance"
+            | "okx"
+            | "gateio"
+            | "coinbase"
+            | "kraken"
+            | "coingecko"
+            | "cextest"
+            | "paper"
+    )
+}
+
+fn build_crypto_skill_payload(raw: &str) -> anyhow::Result<Option<JsonValue>> {
+    let raw = raw.trim();
+    if raw.is_empty() || matches!(raw, "help" | "-h" | "--help") {
+        return Ok(None);
+    }
+    let parts = raw.split_whitespace().collect::<Vec<_>>();
+    if parts.is_empty() {
+        return Ok(None);
+    }
+    let cmd = parts[0].to_ascii_lowercase();
+    let args = match cmd.as_str() {
+        "price" => {
+            let symbol = parts.get(1).ok_or_else(|| anyhow!("missing symbol"))?;
+            let exchange = parts.get(2).copied().unwrap_or("auto");
+            json!({"action":"get_price","symbol":symbol,"exchange":exchange})
+        }
+        "prices" => {
+            if parts.len() < 2 {
+                return Err(anyhow!("missing symbols"));
+            }
+            let mut exchange = "auto";
+            let mut symbols_tokens = parts[1..].to_vec();
+            if let Some(last) = symbols_tokens.last().copied() {
+                if maybe_exchange_token(last) {
+                    exchange = last;
+                    let _ = symbols_tokens.pop();
+                }
+            }
+            let symbols_raw = symbols_tokens.join(" ");
+            let symbols = parse_symbols_csv(&symbols_raw);
+            if symbols.is_empty() {
+                return Err(anyhow!("symbols is empty"));
+            }
+            json!({"action":"get_multi_price","symbols":symbols,"exchange":exchange})
+        }
+        "book" => {
+            let symbol = parts.get(1).ok_or_else(|| anyhow!("missing symbol"))?;
+            let exchange = parts.get(2).copied().unwrap_or("auto");
+            json!({"action":"get_book_ticker","symbol":symbol,"exchange":exchange})
+        }
+        "normalize" => {
+            let symbol = parts.get(1).ok_or_else(|| anyhow!("missing symbol"))?;
+            json!({"action":"normalize_symbol","symbol":symbol})
+        }
+        "health" => {
+            let symbol = parts.get(1).copied().unwrap_or("BTCUSDT");
+            json!({"action":"healthcheck","symbol":symbol})
+        }
+        "address" => {
+            let address = parts.get(1).ok_or_else(|| anyhow!("missing eth address"))?;
+            let token = parts.get(2).copied().unwrap_or("eth");
+            let tx_limit = parts
+                .get(3)
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(5);
+            json!({
+                "action":"onchain",
+                "chain":"ethereum",
+                "address":address,
+                "token":token,
+                "tx_limit":tx_limit
+            })
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(json!({
+        "skill_name": "crypto",
+        "args": args
+    })))
 }
 
 fn mask_secret(input: &str) -> String {
@@ -2382,15 +2867,15 @@ fn mask_secret(input: &str) -> String {
     format!("{}***{}", &s[..4], &s[s.len() - 4..])
 }
 
-fn handle_cryptoapi_command(raw: &str) -> anyhow::Result<String> {
+fn handle_cryptoapi_command(state: &BotState, raw: &str) -> anyhow::Result<String> {
     let cmd = raw.trim();
     if cmd.is_empty() {
-        return Ok(cryptoapi_usage_text());
+        return Ok(cryptoapi_usage_text(state));
     }
     let mut parts = cmd.split_whitespace();
     let action = parts.next().unwrap_or_default().to_ascii_lowercase();
     match action.as_str() {
-        "show" => show_cryptoapi_status(),
+        "show" => show_cryptoapi_status(state),
         "set" => {
             let exchange = parts.next().unwrap_or_default().to_ascii_lowercase();
             match exchange.as_str() {
@@ -2398,13 +2883,17 @@ fn handle_cryptoapi_command(raw: &str) -> anyhow::Result<String> {
                     let api_key = parts.next().unwrap_or_default();
                     let api_secret = parts.next().unwrap_or_default();
                     if api_key.is_empty() || api_secret.is_empty() {
-                        return Ok(cryptoapi_usage_text());
+                        return Ok(cryptoapi_usage_text(state));
                     }
                     persist_crypto_api_config_binance(api_key, api_secret)?;
-                    Ok(format!(
-                        "已写入 Binance API 配置并启用。\napi_key={}\napi_secret={}",
-                        mask_secret(api_key),
-                        mask_secret(api_secret)
+                    let api_key_masked = mask_secret(api_key);
+                    let api_secret_masked = mask_secret(api_secret);
+                    Ok(state.i18n.t_with(
+                        "telegram.msg.cryptoapi_set_binance_ok",
+                        &[
+                            ("api_key", &api_key_masked),
+                            ("api_secret", &api_secret_masked),
+                        ],
                     ))
                 }
                 "okx" => {
@@ -2412,27 +2901,32 @@ fn handle_cryptoapi_command(raw: &str) -> anyhow::Result<String> {
                     let api_secret = parts.next().unwrap_or_default();
                     let passphrase = parts.next().unwrap_or_default();
                     if api_key.is_empty() || api_secret.is_empty() || passphrase.is_empty() {
-                        return Ok(cryptoapi_usage_text());
+                        return Ok(cryptoapi_usage_text(state));
                     }
                     persist_crypto_api_config_okx(api_key, api_secret, passphrase)?;
-                    Ok(format!(
-                        "已写入 OKX API 配置并启用。\napi_key={}\napi_secret={}\npassphrase={}",
-                        mask_secret(api_key),
-                        mask_secret(api_secret),
-                        mask_secret(passphrase)
+                    let api_key_masked = mask_secret(api_key);
+                    let api_secret_masked = mask_secret(api_secret);
+                    let passphrase_masked = mask_secret(passphrase);
+                    Ok(state.i18n.t_with(
+                        "telegram.msg.cryptoapi_set_okx_ok",
+                        &[
+                            ("api_key", &api_key_masked),
+                            ("api_secret", &api_secret_masked),
+                            ("passphrase", &passphrase_masked),
+                        ],
                     ))
                 }
-                _ => Ok(cryptoapi_usage_text()),
+                _ => Ok(cryptoapi_usage_text(state)),
             }
         }
-        _ => Ok(cryptoapi_usage_text()),
+        _ => Ok(cryptoapi_usage_text(state)),
     }
 }
 
-fn show_cryptoapi_status() -> anyhow::Result<String> {
+fn show_cryptoapi_status(state: &BotState) -> anyhow::Result<String> {
     let path = "configs/crypto.toml";
-    let raw = fs::read_to_string(path).context("读取 configs/crypto.toml 失败")?;
-    let value: TomlValue = toml::from_str(&raw).context("解析 configs/crypto.toml 失败")?;
+    let raw = fs::read_to_string(path).context("failed to read configs/crypto.toml")?;
+    let value: TomlValue = toml::from_str(&raw).context("failed to parse configs/crypto.toml")?;
     let bin = value.get("binance").and_then(|v| v.as_table());
     let okx = value.get("okx").and_then(|v| v.as_table());
     let bin_enabled = bin
@@ -2451,22 +2945,28 @@ fn show_cryptoapi_status() -> anyhow::Result<String> {
         .and_then(|t| t.get("api_key"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    Ok(format!(
-        "crypto api 状态：\n- binance: enabled={} api_key={}\n- okx: enabled={} api_key={}",
-        bin_enabled,
-        mask_secret(bin_key),
-        okx_enabled,
-        mask_secret(okx_key)
+    let binance_key_masked = mask_secret(bin_key);
+    let okx_key_masked = mask_secret(okx_key);
+    let binance_enabled_text = bin_enabled.to_string();
+    let okx_enabled_text = okx_enabled.to_string();
+    Ok(state.i18n.t_with(
+        "telegram.msg.cryptoapi_status",
+        &[
+            ("binance_enabled", &binance_enabled_text),
+            ("binance_key", &binance_key_masked),
+            ("okx_enabled", &okx_enabled_text),
+            ("okx_key", &okx_key_masked),
+        ],
     ))
 }
 
 fn persist_crypto_api_config_binance(api_key: &str, api_secret: &str) -> anyhow::Result<()> {
     let path = "configs/crypto.toml";
-    let raw = fs::read_to_string(path).context("读取 configs/crypto.toml 失败")?;
-    let mut value: TomlValue = toml::from_str(&raw).context("解析 configs/crypto.toml 失败")?;
+    let raw = fs::read_to_string(path).context("failed to read configs/crypto.toml")?;
+    let mut value: TomlValue = toml::from_str(&raw).context("failed to parse configs/crypto.toml")?;
     let root = value
         .as_table_mut()
-        .ok_or_else(|| anyhow!("crypto config 根节点不是 table"))?;
+        .ok_or_else(|| anyhow!("crypto config root is not a table"))?;
     let entry = root
         .entry("binance")
         .or_insert(TomlValue::Table(toml::map::Map::new()));
@@ -2475,22 +2975,22 @@ fn persist_crypto_api_config_binance(api_key: &str, api_secret: &str) -> anyhow:
     }
     let table = entry
         .as_table_mut()
-        .ok_or_else(|| anyhow!("binance 节点不是 table"))?;
+        .ok_or_else(|| anyhow!("binance node is not a table"))?;
     table.insert("enabled".to_string(), TomlValue::Boolean(true));
     table.insert("api_key".to_string(), TomlValue::String(api_key.to_string()));
     table.insert("api_secret".to_string(), TomlValue::String(api_secret.to_string()));
-    let output = toml::to_string_pretty(&value).context("序列化 configs/crypto.toml 失败")?;
-    fs::write(path, output).context("写入 configs/crypto.toml 失败")?;
+    let output = toml::to_string_pretty(&value).context("failed to serialize configs/crypto.toml")?;
+    fs::write(path, output).context("failed to write configs/crypto.toml")?;
     Ok(())
 }
 
 fn persist_crypto_api_config_okx(api_key: &str, api_secret: &str, passphrase: &str) -> anyhow::Result<()> {
     let path = "configs/crypto.toml";
-    let raw = fs::read_to_string(path).context("读取 configs/crypto.toml 失败")?;
-    let mut value: TomlValue = toml::from_str(&raw).context("解析 configs/crypto.toml 失败")?;
+    let raw = fs::read_to_string(path).context("failed to read configs/crypto.toml")?;
+    let mut value: TomlValue = toml::from_str(&raw).context("failed to parse configs/crypto.toml")?;
     let root = value
         .as_table_mut()
-        .ok_or_else(|| anyhow!("crypto config 根节点不是 table"))?;
+        .ok_or_else(|| anyhow!("crypto config root is not a table"))?;
     let entry = root
         .entry("okx")
         .or_insert(TomlValue::Table(toml::map::Map::new()));
@@ -2499,13 +2999,13 @@ fn persist_crypto_api_config_okx(api_key: &str, api_secret: &str, passphrase: &s
     }
     let table = entry
         .as_table_mut()
-        .ok_or_else(|| anyhow!("okx 节点不是 table"))?;
+        .ok_or_else(|| anyhow!("okx node is not a table"))?;
     table.insert("enabled".to_string(), TomlValue::Boolean(true));
     table.insert("api_key".to_string(), TomlValue::String(api_key.to_string()));
     table.insert("api_secret".to_string(), TomlValue::String(api_secret.to_string()));
     table.insert("passphrase".to_string(), TomlValue::String(passphrase.to_string()));
-    let output = toml::to_string_pretty(&value).context("序列化 configs/crypto.toml 失败")?;
-    fs::write(path, output).context("写入 configs/crypto.toml 失败")?;
+    let output = toml::to_string_pretty(&value).context("failed to serialize configs/crypto.toml")?;
+    fs::write(path, output).context("failed to write configs/crypto.toml")?;
     Ok(())
 }
 

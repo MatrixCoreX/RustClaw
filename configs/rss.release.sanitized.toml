@@ -1,0 +1,123 @@
+[rss]
+default_category = "general"
+default_limit = 5
+timeout_seconds = 15
+
+[rss.categories.crypto]
+output_language = "zh-CN"
+bilingual_summary = false
+primary = [
+  "https://www.coindesk.com/arc/outboundfeeds/rss/",
+  "https://cointelegraph.com/rss",
+]
+secondary = [
+  "https://decrypt.co/feed",
+  "https://www.theblock.co/rss.xml",
+]
+fallback = [
+  "https://www.newsbtc.com/feed/",
+]
+
+[rss.categories.general]
+output_language = "zh-CN"
+bilingual_summary = false
+primary = [
+  "https://feeds.bbci.co.uk/news/rss.xml",
+  "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+]
+secondary = [
+  "https://www.reuters.com/world/rss",
+]
+fallback = []
+
+[rss.categories.international]
+output_language = "en-US"
+bilingual_summary = true
+primary = [
+  "https://www.reuters.com/world/rss",
+  "https://feeds.apnews.com/apnews/topnews",
+  "https://feeds.bbci.co.uk/news/rss.xml",
+]
+secondary = [
+  "https://www.aljazeera.com/xml/rss/all.xml",
+  "https://www.ft.com/rss/home",
+  "https://www.economist.com/the-world-this-week/rss.xml",
+]
+fallback = [
+  "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+]
+
+[rss.categories.tech]
+output_language = "en-US"
+bilingual_summary = true
+primary = [
+  "https://www.theverge.com/rss/index.xml",
+  "https://techcrunch.com/feed/",
+  "https://www.wired.com/feed/rss",
+]
+secondary = [
+  "https://feeds.arstechnica.com/arstechnica/index",
+  "https://www.tomshardware.com/feeds/all",
+]
+fallback = [
+  "https://news.google.com/rss/search?q=technology&hl=en-US&gl=US&ceid=US:en",
+]
+
+[rss.categories.business]
+output_language = "en-US"
+bilingual_summary = true
+primary = [
+  "https://feeds.bloomberg.com/markets/news.rss",
+  "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+]
+secondary = [
+  "https://feeds.marketwatch.com/marketwatch/topstories/",
+  "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+]
+fallback = [
+  "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en",
+]
+
+[rss.categories.web3]
+output_language = "en-US"
+bilingual_summary = true
+primary = [
+  "https://www.coindesk.com/arc/outboundfeeds/rss/",
+  "https://cointelegraph.com/rss",
+]
+secondary = [
+  "https://www.theblock.co/rss.xml",
+  "https://decrypt.co/feed",
+]
+fallback = [
+  "https://messari.io/rss",
+]
+
+[rss.categories.china]
+output_language = "zh-CN"
+bilingual_summary = false
+primary = [
+  "https://www.caixinglobal.com/feed/",
+  "https://www.thepaper.cn/rss_news.jsp",
+]
+secondary = [
+  "https://www.jiemian.com/rss",
+  "https://www.yicai.com/rss",
+  "https://36kr.com/feed",
+]
+fallback = [
+  "https://news.google.com/rss/search?q=%E4%B8%AD%E5%9B%BD+%E8%B4%A2%E7%BB%8F&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+]
+
+[rss.categories.aggregator]
+output_language = "zh-CN"
+bilingual_summary = false
+primary = [
+  "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+  "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+]
+secondary = [
+  "https://news.google.com/rss/search?q=crypto&hl=en-US&gl=US&ceid=US:en",
+  "https://news.google.com/rss/search?q=web3&hl=en-US&gl=US&ceid=US:en",
+]
+fallback = []

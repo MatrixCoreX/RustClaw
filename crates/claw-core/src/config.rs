@@ -355,8 +355,6 @@ pub struct SkillsConfig {
     pub skill_timeout_seconds: u64,
     #[serde(default = "default_skill_max_concurrency")]
     pub skill_max_concurrency: usize,
-    #[serde(default = "default_skill_runner_path")]
-    pub skill_runner_path: String,
     #[serde(default = "default_skills_list")]
     pub skills_list: Vec<String>,
 }
@@ -366,7 +364,6 @@ impl Default for SkillsConfig {
         Self {
             skill_timeout_seconds: default_skill_timeout_seconds(),
             skill_max_concurrency: default_skill_max_concurrency(),
-            skill_runner_path: default_skill_runner_path(),
             skills_list: default_skills_list(),
         }
     }
@@ -742,10 +739,6 @@ fn default_skill_timeout_seconds() -> u64 {
 
 fn default_skill_max_concurrency() -> usize {
     1
-}
-
-fn default_skill_runner_path() -> String {
-    "target/release/skill-runner".to_string()
 }
 
 fn default_skills_list() -> Vec<String> {

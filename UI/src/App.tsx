@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   BellRing,
   CheckCircle2,
   Clock3,
   Database,
+  FileText,
   Loader2,
   MessageCircle,
   RefreshCw,
@@ -67,6 +68,12 @@ interface LocalInteractionContextResponse {
 interface SkillsResponse {
   skills: string[];
   skill_runner_path?: string;
+}
+
+interface LogLatestResponse {
+  file: string;
+  lines: number;
+  text: string;
 }
 
 interface WhatsappWebLoginStatus {
@@ -247,6 +254,15 @@ export default function App() {
   const [waLoginError, setWaLoginError] = useState<string | null>(null);
   const [waLoginStatus, setWaLoginStatus] = useState<WhatsappWebLoginStatus | null>(null);
   const [waLogoutLoading, setWaLogoutLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<"dashboard" | "logs">("dashboard");
+  const [selectedLogFile, setSelectedLogFile] = useState("agent_trace.log");
+  const [logTailLines, setLogTailLines] = useState(200);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logError, setLogError] = useState<string | null>(null);
+  const [logText, setLogText] = useState("");
+  const [logLastUpdated, setLogLastUpdated] = useState<number | null>(null);
+  const [logFollowTail, setLogFollowTail] = useState(true);
+  const logContainerRef = useRef<HTMLPreElement | null>(null);
 
   const t = (zh: string, en: string) => (lang === "zh" ? zh : en);
   const tSlash = (mixed: string) => {
@@ -403,6 +419,29 @@ export default function App() {
       setSkillsError(message);
     } finally {
       setSkillsLoading(false);
+    }
+  };
+
+  const fetchLatestLog = async () => {
+    setLogLoading(true);
+    setLogError(null);
+    try {
+      const params = new URLSearchParams({
+        file: selectedLogFile,
+        lines: String(logTailLines),
+      });
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/logs/latest?${params.toString()}`);
+      const body = (await res.json()) as ApiResponse<LogLatestResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `日志读取失败 (${res.status})`);
+      }
+      setLogText(body.data.text || "");
+      setLogLastUpdated(Date.now());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setLogError(message);
+    } finally {
+      setLogLoading(false);
     }
   };
 
@@ -668,6 +707,23 @@ export default function App() {
   }, [trackingTaskId, baseUrl]);
 
   useEffect(() => {
+    if (viewMode !== "logs") return;
+    void fetchLatestLog();
+    const timer = window.setInterval(() => {
+      void fetchLatestLog();
+    }, Math.max(2, pollingSeconds) * 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, baseUrl, selectedLogFile, logTailLines, pollingSeconds]);
+
+  useEffect(() => {
+    if (!logFollowTail) return;
+    const el = logContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [logText, logFollowTail]);
+
+  useEffect(() => {
     if (!waLoginDialogOpen) return;
     void fetchWhatsappWebLoginStatus();
     const timer = window.setInterval(() => {
@@ -703,14 +759,6 @@ export default function App() {
         memoryRssBytes: health?.telegram_bot_memory_rss_bytes ?? health?.telegramd_memory_rss_bytes,
       },
       {
-        key: "whatsapp_cloud",
-        label: "whatsapp_cloud",
-        serviceName: "whatsappd",
-        healthy: health?.whatsapp_cloud_healthy ?? health?.whatsappd_healthy,
-        processCount: health?.whatsapp_cloud_process_count ?? health?.whatsappd_process_count,
-        memoryRssBytes: health?.whatsapp_cloud_memory_rss_bytes ?? health?.whatsappd_memory_rss_bytes,
-      },
-      {
         key: "whatsapp_web",
         label: "whatsapp_web",
         serviceName: "whatsapp_webd",
@@ -718,9 +766,15 @@ export default function App() {
         processCount: health?.whatsapp_web_process_count,
         memoryRssBytes: health?.whatsapp_web_memory_rss_bytes,
       },
+      {
+        key: "whatsapp_cloud",
+        label: "whatsapp_cloud",
+        serviceName: "whatsappd",
+        healthy: health?.whatsapp_cloud_healthy ?? health?.whatsappd_healthy,
+        processCount: health?.whatsapp_cloud_process_count ?? health?.whatsappd_process_count,
+        memoryRssBytes: health?.whatsapp_cloud_memory_rss_bytes ?? health?.whatsappd_memory_rss_bytes,
+      },
     ];
-    // Running services first; not-started/unknown move to bottom.
-    rows.sort((a, b) => Number(b.healthy === true) - Number(a.healthy === true));
     return rows;
   }, [health]);
 
@@ -760,6 +814,15 @@ export default function App() {
             </button>
 
             <button
+              onClick={() => setViewMode((v) => (v === "dashboard" ? "logs" : "dashboard"))}
+              className="relative inline-flex items-center gap-2 rounded-xl border border-sky-400/30 bg-sky-500/15 px-3 py-2 text-sm text-white hover:bg-sky-500/25 transition"
+              title={t("查看日志页面", "Open Logs Page")}
+            >
+              <FileText className="h-4 w-4" />
+              <span className="hidden sm:inline">{viewMode === "logs" ? t("控制台", "Console") : t("日志", "Logs")}</span>
+            </button>
+
+            <button
               onClick={() => setChatDialogOpen((v) => !v)}
               className="relative inline-flex items-center gap-2 rounded-xl border border-[#f74c00]/30 bg-[#f74c00]/15 px-3 py-2 text-sm text-white hover:bg-[#f74c00]/25 transition"
               title={t("小龙虾聊天", "Lobster Chat")}
@@ -773,6 +836,88 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 p-6">
+        {viewMode === "logs" ? (
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">{t("最新日志", "Latest Logs")}</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => void fetchLatestLog()}
+                  disabled={logLoading}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {logLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  {tSlash("刷新 / Refresh")}
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-4 grid gap-3 md:grid-cols-4">
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-widest text-white/50">{t("日志文件", "Log File")}</span>
+                <select
+                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
+                  value={selectedLogFile}
+                  onChange={(e) => setSelectedLogFile(e.target.value)}
+                >
+                  <option value="agent_trace.log">agent_trace.log</option>
+                  <option value="model_io.log">model_io.log</option>
+                  <option value="routing.log">routing.log</option>
+                  <option value="act_plan.log">act_plan.log</option>
+                  <option value="clawd.log">clawd.log</option>
+                  <option value="telegramd.log">telegramd.log</option>
+                  <option value="whatsappd.log">whatsappd.log</option>
+                  <option value="whatsapp_webd.log">whatsapp_webd.log</option>
+                </select>
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-xs uppercase tracking-widest text-white/50">{t("尾部行数", "Tail Lines")}</span>
+                <select
+                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
+                  value={logTailLines}
+                  onChange={(e) => setLogTailLines(Number(e.target.value))}
+                >
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={500}>500</option>
+                  <option value={1000}>1000</option>
+                </select>
+              </label>
+
+              <div className="flex items-end">
+                <label className="inline-flex items-center gap-2 text-sm text-white/80">
+                  <input
+                    type="checkbox"
+                    checked={logFollowTail}
+                    onChange={(e) => setLogFollowTail(e.target.checked)}
+                  />
+                  {t("跟随到底部", "Follow tail")}
+                </label>
+              </div>
+
+              <div className="flex items-end text-xs text-white/50">
+                {logLastUpdated
+                  ? `${t("更新时间", "Updated")}: ${toLocalTime(logLastUpdated)}`
+                  : t("尚未加载", "Not loaded yet")}
+              </div>
+            </div>
+
+            {logError ? (
+              <p className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                {t("日志读取失败", "Log read failed")}: {logError}
+              </p>
+            ) : null}
+
+            <pre
+              ref={logContainerRef}
+              className="h-[70vh] overflow-auto rounded-xl border border-white/10 bg-[#12151f] p-3 text-xs text-white/85"
+            >
+              {logText || t("日志为空", "Log is empty")}
+            </pre>
+          </section>
+        ) : (
+          <>
         {chatDialogOpen && (
           <section className="rounded-2xl border border-white/10 bg-white/5">
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
@@ -1285,10 +1430,7 @@ export default function App() {
               </select>
             </label>
             <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm">
-              <p className="text-white/80">
-                {tSlash("本地交互账号 / Local Account")}: user_id=<span className="font-mono">{interactionUserId ?? "--"}</span>，chat_id=
-                <span className="font-mono">{interactionChatId ?? "--"}</span>
-              </p>
+              <p className="text-white/80">{tSlash("本地交互账号已就绪 / Local account is ready")}</p>
               <p className="mt-1 text-xs text-white/50">role={interactionRole}</p>
               {localContextLoading ? <p className="mt-1 text-xs text-white/50">{tSlash("加载中... / Loading...")}</p> : null}
               {localContextError ? <p className="mt-1 text-xs text-red-300">{tSlash("上下文错误 / Context error")}: {localContextError}</p> : null}
@@ -1387,7 +1529,8 @@ export default function App() {
 
             {interactionSubmittedTaskId ? (
               <span className="text-xs text-emerald-300">
-                {tSlash("已提交 / Submitted")}: `{interactionSubmittedTaskId}` {trackingTaskId ? tSlash("（自动跟踪中 / auto tracking）") : ""}
+                {tSlash("已提交 / Submitted")}
+                {trackingTaskId ? ` ${tSlash("（自动跟踪中 / auto tracking）")}` : ""}
               </span>
             ) : null}
           </div>
@@ -1447,6 +1590,8 @@ export default function App() {
             </div>
           ) : null}
         </section>
+          </>
+        )}
       </main>
 
     </div>

@@ -1,9 +1,10 @@
-use axum::extract::{Path as AxumPath, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
+use std::io::{Read, Seek, SeekFrom};
 use tokio::process::Command;
 
 use super::super::{
@@ -22,10 +23,92 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .route("/skills", get(list_skills))
+        .route("/logs/latest", get(logs_latest))
         .route("/whatsapp-web/login-status", get(whatsapp_web_login_status))
         .route("/whatsapp-web/logout", post(whatsapp_web_logout))
         .route("/services/{service}/{action}", post(control_service))
         .route("/local/interaction-context", get(local_interaction_context))
+}
+
+#[derive(Debug, serde::Deserialize, Default)]
+struct LogsLatestQuery {
+    file: Option<String>,
+    lines: Option<usize>,
+}
+
+fn normalize_log_file_name(raw: Option<&str>) -> String {
+    let fallback = "agent_trace.log".to_string();
+    let candidate = raw.unwrap_or("").trim();
+    if candidate.is_empty() {
+        return fallback;
+    }
+    let allowed = [
+        "agent_trace.log",
+        "model_io.log",
+        "routing.log",
+        "act_plan.log",
+        "clawd.log",
+        "telegramd.log",
+        "whatsappd.log",
+        "whatsapp_webd.log",
+    ];
+    if allowed.iter().any(|v| v.eq_ignore_ascii_case(candidate)) {
+        return candidate.to_string();
+    }
+    fallback
+}
+
+fn read_last_lines(path: &std::path::Path, limit_lines: usize) -> anyhow::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let total_size = file.metadata()?.len();
+    let max_tail_bytes: u64 = 512 * 1024;
+    let read_from = total_size.saturating_sub(max_tail_bytes);
+    if read_from > 0 {
+        file.seek(SeekFrom::Start(read_from))?;
+    }
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    let content = String::from_utf8_lossy(&buf);
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.is_empty() {
+        return Ok(String::new());
+    }
+    let start = lines.len().saturating_sub(limit_lines);
+    Ok(lines[start..].join("\n"))
+}
+
+async fn logs_latest(
+    State(state): State<AppState>,
+    Query(query): Query<LogsLatestQuery>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let file_name = normalize_log_file_name(query.file.as_deref());
+    let lines = query.lines.unwrap_or(200).clamp(20, 2000);
+    let path = state.workspace_root.join("logs").join(&file_name);
+    let raw = match read_last_lines(&path, lines) {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read log failed: {err}")),
+                }),
+            );
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "file": file_name,
+                "lines": lines,
+                "text": raw,
+            })),
+            error: None,
+        }),
+    )
 }
 
 fn shell_escape_arg(raw: &str) -> String {
@@ -214,6 +297,21 @@ async fn control_service(
                         ok: false,
                         data: None,
                         error: Some(format!("service start command failed: {detail}")),
+                    }),
+                );
+            }
+            // The start command may return success even if script preflight exits quickly
+            // (for example, service disabled or missing required config). Verify process is up.
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            if !service_is_running(service.as_str()) {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!(
+                            "service did not enter running state: {service}. check logs/{service}.log and channel config"
+                        )),
                     }),
                 );
             }

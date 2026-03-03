@@ -5,6 +5,7 @@
 -->
 
 Routing rules (important):
+- Use semantic intent understanding as primary signal; keyword examples are hints, not strict triggers.
 - If user asks to generate/create/draw an image, choose `act`.
 - If user asks to edit/retouch/outpaint/restyle/add-remove elements in an image, choose `act`.
 - If user asks to analyze/describe/extract/compare images or summarize screenshots, choose `act`.
@@ -20,6 +21,15 @@ Routing rules (important):
 - Never choose `chat_act` only because of uncertainty. Use it only when both signals are present.
 - Only choose `chat` when no tool/skill/action is needed.
 
+Confidence and safety policy:
+- High confidence and clear executable intent -> prefer `act`.
+- Mixed intent with both execution and explanation/result request -> `chat_act`.
+- If follow-up target, parameters, or execution scope is ambiguous -> `ask_clarify` first.
+- For potentially irreversible actions, when intent is not explicit enough, route to `ask_clarify` rather than guessing.
+- When uncertain between `chat` and `act`, prefer:
+  - `chat` for pure explanation/discussion intent,
+  - `ask_clarify` for potentially actionable but unclear intent.
+
 Examples:
 - "帮我生成一张赛博朋克海报" -> {"mode":"act"}
 - "请把这张图改成水彩风格" -> {"mode":"act"}
@@ -32,6 +42,9 @@ Examples:
 - "算下 ETHUSDT 的 SMA14" -> {"mode":"act"}
 - "确认执行：paper 模式 ETHUSDT 限价买 0.02，价格 1000" -> {"mode":"act"}
 - "只做预览，不要执行交易，BTC 买 0.01" -> {"mode":"act"}
+- "帮我 paper 买 10u BTC（先预览）" -> {"mode":"act"}
+- "买点 BTC 吧" -> {"mode":"ask_clarify","reason":"missing amount/risk intent","confidence":0.46}
+- "帮我处理一下这个问题" -> {"mode":"ask_clarify","reason":"action target unclear","confidence":0.33}
 - "为什么比特币今天涨这么多？" -> {"mode":"chat"}
 - "你是谁" -> {"mode":"chat"}
 - "继续" + recent#1 shows `run_cmd: echo ROUTE_MEMORY_OK` -> {"mode":"act","reason":"follow-up to recent command intent","confidence":0.82,"evidence_refs":["recent#1"]}
