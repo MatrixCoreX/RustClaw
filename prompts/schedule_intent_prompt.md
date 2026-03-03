@@ -63,6 +63,14 @@ User: 删除定时任务 job_9e289b4c73
 Output:
 {"kind":"delete","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"job_9e289b4c73","raw":"删除定时任务 job_9e289b4c73","confidence":0.93,"reason":"single job delete with explicit id"}
 
+User: 监控BTC，如果5分钟内涨跌超过2%通知我
+Output:
+{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"interval","run_at":"","time":"","weekday":1,"every_minutes":1,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"crypto","args":{"action":"price_alert_check","symbol":"BTCUSDT","window_minutes":5,"threshold_pct":2,"direction":"both"}}},"target_job_id":"","raw":"监控BTC，如果5分钟内涨跌超过2%通知我","confidence":0.92,"reason":"crypto monitor intent mapped to interval run_skill with default 1-minute cadence"}
+
+User: 监控BTC价格
+Output:
+{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"interval","run_at":"","time":"","weekday":1,"every_minutes":1,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"crypto","args":{"action":"price_alert_check","symbol":"BTCUSDT","window_minutes":15,"threshold_pct":5,"direction":"both"}}},"target_job_id":"","raw":"监控BTC价格","confidence":0.88,"reason":"crypto monitor shorthand with default 15-minute window and 5% threshold"}
+
 Rules:
 __RULES__
 

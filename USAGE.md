@@ -18,7 +18,7 @@ This document helps developers quickly start using `RustClaw` and follow a Git-f
 ```bash
 git clone <your-repo-url>
 cd RustClaw
-./setup-config.sh
+./start-all.sh
 ```
 
 如使用自定义配置，请先检查 `configs/` 下配置再启动。  

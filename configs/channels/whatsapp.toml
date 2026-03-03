@@ -1,5 +1,5 @@
 [whatsapp]
-enabled = false
+enabled = true
 api_base = "https://graph.facebook.com"
 access_token = "REPLACE_ME_WHATSAPP_ACCESS_TOKEN"
 app_secret = "REPLACE_ME_META_APP_SECRET"
@@ -14,7 +14,7 @@ image_inbox_dir = "image/upload"
 audio_inbox_dir = "audio/upload"
 
 [whatsapp_cloud]
-enabled = false
+enabled = true
 api_base = "https://graph.facebook.com"
 access_token = ""
 app_secret = ""
@@ -29,7 +29,7 @@ image_inbox_dir = "image/upload"
 audio_inbox_dir = "audio/upload"
 
 [whatsapp_web]
-enabled = false
+enabled = true
 bridge_listen = "127.0.0.1:8092"
 wrapper_listen = "127.0.0.1:8094"
 bridge_base_url = "http://127.0.0.1:8092"

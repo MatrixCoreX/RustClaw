@@ -59,6 +59,8 @@ const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
 const CRYPTO_CONFIRM_TTL_SECONDS: u64 = 600;
 const TRADE_RULES_PATH: &str = "configs/command_intent/trade_rules.toml";
 const LOG_CALL_WRAP: &str = "########################################################";
+const PRICE_ALERT_TRIGGERED_TAG: &str = "[PRICE_ALERT_TRIGGERED]";
+const PRICE_ALERT_NOT_TRIGGERED_TAG: &str = "[PRICE_ALERT_NOT_TRIGGERED]";
 pub(crate) const AGENT_RUNTIME_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/agent_runtime_prompt.md");
 const CHAT_RESPONSE_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/chat_response_prompt.md");
 pub(crate) const COMMAND_FAILURE_SUGGEST_PROMPT_TEMPLATE: &str =
@@ -720,6 +722,14 @@ fn load_schedule_runtime(workspace_root: &Path, cfg: &ScheduleConfig) -> Schedul
         i18n_dict.insert(
             "schedule.msg.create_fail_cannot_compute_next_run".to_string(),
             "Create failed: cannot compute next run time; please check the time format.".to_string(),
+        );
+        i18n_dict.insert(
+            "schedule.msg.create_exists_same".to_string(),
+            "An identical scheduled job already exists: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}".to_string(),
+        );
+        i18n_dict.insert(
+            "schedule.msg.update_existing_ok".to_string(),
+            "Found an existing job for the same symbol; updated it: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}".to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.create_ok".to_string(),
@@ -1788,6 +1798,11 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
             let args = payload.get("args").cloned().unwrap_or_else(|| json!(""));
+            let is_price_alert_action = is_crypto_price_alert_action(skill_name, &args);
+            let schedule_triggered = payload
+                .get("schedule_triggered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
 
             info!(
                 "worker_once: processing run_skill task_id={} user_id={} chat_id={} skill_name={} args={}",
@@ -1800,15 +1815,23 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
 
             match execution_adapters::run_skill(state, &task, skill_name, args).await {
                 Ok(text) => {
-                    let result = json!({ "text": text });
+                    let no_trigger = text.trim_start().starts_with(PRICE_ALERT_NOT_TRIGGERED_TAG);
+                    let clean_text = if is_price_alert_action {
+                        strip_price_alert_tag(&text)
+                    } else {
+                        text.clone()
+                    };
+                    let result = json!({ "text": clean_text });
                     repo::update_task_success(state, &task.task_id, &result.to_string())?;
-                    maybe_notify_schedule_result(state, &task, &payload, true, &text).await;
+                    if !(schedule_triggered && is_price_alert_action && no_trigger) {
+                        maybe_notify_schedule_result(state, &task, &payload, true, &clean_text).await;
+                    }
                     let _ = memory::service::insert_memory(
                         state,
                         task.user_id,
                         task.chat_id,
                         "assistant",
-                        &text,
+                        &clean_text,
                         state.memory.item_max_chars.max(256),
                     );
                     let _ = repo::insert_audit_log(
@@ -1977,6 +2000,30 @@ fn runtime_channel_from_payload(payload: &Value) -> RuntimeChannel {
 
 fn task_payload_value(task: &ClaimedTask) -> Option<Value> {
     serde_json::from_str::<Value>(&task.payload_json).ok()
+}
+
+fn is_crypto_price_alert_action(skill_name: &str, args: &Value) -> bool {
+    if canonical_skill_name(skill_name) != "crypto" {
+        return false;
+    }
+    let action = args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        action.as_str(),
+        "price_alert_check" | "price_monitor" | "monitor_price" | "price_alert" | "volatility_alert"
+    )
+}
+
+fn strip_price_alert_tag(text: &str) -> String {
+    text.trim()
+        .trim_start_matches(PRICE_ALERT_TRIGGERED_TAG)
+        .trim_start_matches(PRICE_ALERT_NOT_TRIGGERED_TAG)
+        .trim()
+        .to_string()
 }
 
 fn task_runtime_channel(task: &ClaimedTask) -> RuntimeChannel {
@@ -2184,6 +2231,113 @@ async fn run_skill_with_runner(
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
     };
+    let mut value = run_skill_with_runner_once(state, task, skill_name, &args, &source, skill_timeout_secs).await?;
+    let mut status = value
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("error")
+        .to_string();
+
+    if status != "ok" && canonical_skill_name(skill_name) == "crypto" {
+        let action = args
+            .as_object()
+            .and_then(|m| m.get("action"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let err_text = value
+            .get("error_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("skill execution failed")
+            .to_ascii_lowercase();
+        let unsupported = err_text.contains("unsupported action") || err_text.contains("不支持");
+        if action == "price_alert_check" && unsupported {
+            let legacy_actions = ["price_monitor", "monitor_price", "price_alert", "volatility_alert"];
+            for legacy_action in legacy_actions {
+                let mut retry_args = args.clone();
+                if let Some(map) = retry_args.as_object_mut() {
+                    map.insert("action".to_string(), Value::String(legacy_action.to_string()));
+                } else {
+                    break;
+                }
+                let retry_value =
+                    run_skill_with_runner_once(state, task, skill_name, &retry_args, &source, skill_timeout_secs)
+                        .await?;
+                let retry_status = retry_value
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("error");
+                if retry_status == "ok" {
+                    info!(
+                        "run_skill_with_runner: fallback action used for crypto task_id={} from=price_alert_check to={}",
+                        task.task_id, legacy_action
+                    );
+                    value = retry_value;
+                    status = "ok".to_string();
+                    break;
+                }
+            }
+        }
+    }
+
+    if status != "ok" {
+        return Err(value
+            .get("error_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("skill execution failed")
+            .to_string());
+    }
+
+    let mut text = value
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if canonical_skill_name(skill_name) == "image_vision" {
+        let action = args
+            .as_object()
+            .and_then(|m| m.get("action"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("describe")
+            .to_ascii_lowercase();
+        let target_language = args
+            .as_object()
+            .and_then(|m| m.get("response_language").or_else(|| m.get("language")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if let Some(lang) = target_language {
+            if matches!(action.as_str(), "describe" | "compare" | "screenshot_summary") {
+                match rewrite_image_vision_output_language(state, task, &text, &lang).await {
+                    Ok(rewritten) => {
+                        info!(
+                            "rewrite_image_vision_output_language: task_id={} lang={} action={} status=ok",
+                            task.task_id, lang, action
+                        );
+                        text = rewritten;
+                    }
+                    Err(err) => {
+                        warn!(
+                            "rewrite_image_vision_output_language: task_id={} lang={} action={} status=failed err={}",
+                            task.task_id, lang, action, err
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(text)
+}
+
+async fn run_skill_with_runner_once(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
+    args: &serde_json::Value,
+    source: &str,
+    skill_timeout_secs: u64,
+) -> Result<serde_json::Value, String> {
     let req_line = json!({
         "request_id": task.task_id,
         "user_id": task.user_id,
@@ -2267,61 +2421,7 @@ async fn run_skill_with_runner(
         return Err(format!("empty skill-runner output: {}", err_line.trim()));
     }
 
-    let value: serde_json::Value = serde_json::from_str(out_line.trim())
-        .map_err(|err| format!("invalid skill-runner json: {err}"))?;
-
-    let status = value
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("error");
-
-    if status != "ok" {
-        return Err(value
-            .get("error_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("skill execution failed")
-            .to_string());
-    }
-
-    let mut text = value
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
-    if canonical_skill_name(skill_name) == "image_vision" {
-        let action = args
-            .as_object()
-            .and_then(|m| m.get("action"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("describe")
-            .to_ascii_lowercase();
-        let target_language = args
-            .as_object()
-            .and_then(|m| m.get("response_language").or_else(|| m.get("language")))
-            .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        if let Some(lang) = target_language {
-            if matches!(action.as_str(), "describe" | "compare" | "screenshot_summary") {
-                match rewrite_image_vision_output_language(state, task, &text, &lang).await {
-                    Ok(rewritten) => {
-                        info!(
-                            "rewrite_image_vision_output_language: task_id={} lang={} action={} status=ok",
-                            task.task_id, lang, action
-                        );
-                        text = rewritten;
-                    }
-                    Err(err) => {
-                        warn!(
-                            "rewrite_image_vision_output_language: task_id={} lang={} action={} status=failed err={}",
-                            task.task_id, lang, action, err
-                        );
-                    }
-                }
-            }
-        }
-    }
-    Ok(text)
+    serde_json::from_str(out_line.trim()).map_err(|err| format!("invalid skill-runner json: {err}"))
 }
 
 async fn rewrite_image_vision_output_language(

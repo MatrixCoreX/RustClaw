@@ -4,6 +4,20 @@ Scheduling rules (important):
 - For "每周X HH:mm", map to `type=weekly` + `weekday`(1=Mon,7=Sun) + `time`.
 - For one-shot moments ("明天8点", "2026-03-01 09:30"), map to `type=once` + `run_at`.
 - For "每隔N分钟/小时", map to `type=interval` with `every_minutes`.
+- For crypto monitoring requests like "监控BTC，5分钟内涨跌超过2%通知我":
+  - Set `kind=create`, `schedule.type=interval`, `schedule.every_minutes`.
+  - If user does NOT specify check cadence ("每隔N分钟检查"), default `every_minutes=1`.
+  - Set `task.kind=run_skill`, `task.payload.skill_name="crypto"`.
+  - Set `task.payload.args.action="price_alert_check"`, with parsed:
+    - `symbol` from coin/pair text (normalize to USDT pair when missing quote, e.g. BTC -> BTCUSDT),
+    - `window_minutes` from "X分钟内",
+    - `threshold_pct` from "超过X%",
+    - `direction`: "both" for "涨跌", "up" for only rise wording, "down" for only drop wording.
+  - If user only says "监控BTC价格/盯盘BTC/监控BTC" without explicit window/threshold, default:
+    - `window_minutes=15`
+    - `threshold_pct=5`
+    - `direction="both"`
+  - Keep language/wording in payload minimal and machine-usable (numbers as numbers).
 - For explicit cron text, map to `type=cron` + `cron`.
 - If user says "取消/删除定时任务", set `kind=delete` and try to extract `target_job_id`.
 - If user says "暂停定时任务", set `kind=pause`; if user says "恢复/开启定时任务", set `kind=resume`.

@@ -16,6 +16,10 @@ allowed_exchanges = ["cextest", "paper", "binance", "okx", "coingecko"]
 allowed_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 blocked_actions = []
 paper_state_path = "data/crypto-paper-orders.jsonl"
+# price monitor defaults (price_alert_check)
+alert_default_window_minutes = 15
+alert_default_threshold_pct = 5.0
+alert_max_window_minutes = 240
 # query API endpoints used by crypto skill (configurable)
 btc_onchain_fees_api_url = "https://mempool.space/api/v1/fees/recommended"
 eth_onchain_stats_api_url = "https://api.blockchair.com/ethereum/stats"

@@ -5,7 +5,7 @@
 
 ## Intent Semantics
 - Infer intent semantically from full user context (mixed language, slang, shorthand).
-- Primary action mapping by meaning: quote/multi_quote, candles/indicator, news, onchain, trade_preview, trade_submit, order_status, cancel_order, positions.
+- Primary action mapping by meaning: quote/multi_quote, candles/indicator, price_alert_check (volatility monitor), news, onchain, trade_preview, trade_submit, order_status, cancel_order, positions.
 - When wording can map to both discussion and execution, prefer safer executable preview path.
 
 ## Parameter Contract
@@ -43,6 +43,7 @@
 - `确认执行：paper 买 0.01 BTC` -> `trade_submit` with `qty` and `confirm=true`.
 - `查下 BTCUSDT 价格` -> `quote`.
 - `看下 ETH 的 SMA14` -> `indicator`.
+- `监控 BTCUSDT，5 分钟涨跌超 3% 就提醒` -> `price_alert_check` with `window_minutes=5`, `threshold_pct=3`, `direction=both`.
 - `查 BTC 订单状态` -> `order_status`.
 
 ## Anti-patterns

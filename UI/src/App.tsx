@@ -1011,74 +1011,6 @@ export default function App() {
           </section>
         )}
 
-        {waLoginDialogOpen && (
-          <section className="rounded-2xl border border-white/10 bg-white/5">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-              <h2 className="text-sm font-semibold">{tSlash("WhatsApp Web 登录 / WhatsApp Web Login")}</h2>
-              <button
-                onClick={() => setWaLoginDialogOpen(false)}
-                className="rounded-lg p-1 text-white/60 hover:bg-white/10 hover:text-white"
-                title={t("关闭", "Close")}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="px-4 py-4 space-y-3">
-              <div className="text-sm text-white/80">
-                {tSlash("连接状态 / Connection")}:{" "}
-                <span className={waLoginStatus?.connected ? "text-emerald-300" : "text-amber-300"}>
-                  {waLoginStatus?.connected ? tSlash("已登录 / Connected") : tSlash("未登录 / Not Connected")}
-                </span>
-              </div>
-              {waLoginStatus?.connected ? (
-                <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
-                  {tSlash("WhatsApp Web 已登录，无需扫码。 / WhatsApp Web already connected.")}
-                </p>
-              ) : waLoginStatus?.qr_data_url ? (
-                <div className="inline-block rounded-xl border border-white/15 bg-white p-3">
-                  <img src={waLoginStatus.qr_data_url} alt="WhatsApp QR" className="h-64 w-64" />
-                </div>
-              ) : (
-                <p className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/70">
-                  {waLoginLoading
-                    ? tSlash("正在拉取二维码... / Fetching QR...")
-                    : tSlash("暂无可用二维码，请稍候或重启 whatsapp_webd。 / QR not ready yet, please wait or restart whatsapp_webd.")}
-                </p>
-              )}
-              {waLoginStatus?.last_error ? (
-                <p className="text-xs text-amber-300">
-                  {tSlash("最近错误 / Last error")}: {waLoginStatus.last_error}
-                </p>
-              ) : null}
-              {waLoginError ? (
-                <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                  {waLoginError}
-                </p>
-              ) : null}
-              <div>
-                <button
-                  onClick={() => void fetchWhatsappWebLoginStatus()}
-                  disabled={waLoginLoading}
-                  className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs hover:bg-white/20 disabled:opacity-50"
-                >
-                  {waLoginLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                  {tSlash("刷新状态 / Refresh")}
-                </button>
-                {waLoginStatus?.connected ? (
-                  <button
-                    onClick={() => void logoutWhatsappWeb()}
-                    disabled={waLogoutLoading}
-                    className="ml-2 inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 hover:bg-red-500/20 disabled:opacity-50"
-                  >
-                    {waLogoutLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    {tSlash("退出登录 / Logout")}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </section>
-        )}
-
         {(queuePressureHigh || runningTooOld || !isOnline) && (
           <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
             <div className="flex items-start gap-3">
@@ -1201,69 +1133,127 @@ export default function App() {
               </div>
 
               {adapterHealthRows.map((row) => (
-                <div key={row.key} className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Server className="h-4 w-4 text-white/70" />
-                    <span>{row.label}</span>
-                  </div>
-                  <div className="text-right">
-                    <span
-                      className={
-                        row.healthy === true
-                          ? "text-emerald-300"
+                <div key={row.key} className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2">
+                      <Server className="h-4 w-4 text-white/70" />
+                      <span>{row.label}</span>
+                    </div>
+                    <div className="text-right">
+                      <span
+                        className={
+                          row.healthy === true
+                            ? "text-emerald-300"
+                            : row.healthy === false
+                              ? "text-amber-300"
+                              : "text-white/50"
+                        }
+                      >
+                        {row.healthy === true
+                          ? tSlash("运行中 / Running")
                           : row.healthy === false
-                            ? "text-amber-300"
-                            : "text-white/50"
-                      }
-                    >
-                      {row.healthy === true
-                        ? tSlash("运行中 / Running")
-                        : row.healthy === false
-                          ? tSlash("未检测到 / Not Found")
-                          : tSlash("未知 / Unknown")}
-                    </span>
-                    <p className="text-[11px] text-white/40 mt-0.5">
-                      {tSlash("进程 / Proc")}: {row.processCount == null ? "--" : row.processCount} | RSS {formatBytes(row.memoryRssBytes ?? null)}
-                    </p>
-                    <div className="mt-2 flex justify-end gap-2">
-                      {row.key === "whatsapp_web" && waLoginStatus?.connected !== true ? (
-                        <button
-                          onClick={() => setWaLoginDialogOpen(true)}
-                          className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-200 hover:bg-sky-500/20"
-                        >
-                          {tSlash("扫码登录 / QR Login")}
-                        </button>
-                      ) : null}
-                      {row.key === "whatsapp_web" && waLoginStatus?.connected === true ? (
-                        <div className="flex items-center gap-2">
-                          <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200">
-                            {tSlash("已登录 / Connected")}
-                          </span>
+                            ? tSlash("未检测到 / Not Found")
+                            : tSlash("未知 / Unknown")}
+                      </span>
+                      <p className="text-[11px] text-white/40 mt-0.5">
+                        {tSlash("进程 / Proc")}: {row.processCount == null ? "--" : row.processCount} | RSS {formatBytes(row.memoryRssBytes ?? null)}
+                      </p>
+                      <div className="mt-2 flex justify-end gap-2">
+                        {row.key === "whatsapp_web" && waLoginStatus?.connected !== true ? (
                           <button
-                            onClick={() => void logoutWhatsappWeb()}
-                            disabled={waLogoutLoading}
-                            className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+                            onClick={() => setWaLoginDialogOpen(true)}
+                            className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-200 hover:bg-sky-500/20"
                           >
-                            {waLogoutLoading ? tSlash("处理中 / Working") : tSlash("退出登录 / Logout")}
+                            {tSlash("扫码登录 / QR Login")}
                           </button>
-                        </div>
-                      ) : null}
-                      <button
-                        onClick={() => void controlService(row.serviceName, "start")}
-                        disabled={Boolean(serviceActionLoading[row.serviceName]) || row.healthy === true}
-                        className="rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("启动 / Start")}
-                      </button>
-                      <button
-                        onClick={() => void controlService(row.serviceName, "stop")}
-                        disabled={Boolean(serviceActionLoading[row.serviceName]) || row.healthy !== true}
-                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("停止 / Stop")}
-                      </button>
+                        ) : null}
+                        {row.key === "whatsapp_web" && waLoginStatus?.connected === true ? (
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200">
+                              {tSlash("已登录 / Connected")}
+                            </span>
+                            <button
+                              onClick={() => void logoutWhatsappWeb()}
+                              disabled={waLogoutLoading}
+                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+                            >
+                              {waLogoutLoading ? tSlash("处理中 / Working") : tSlash("退出登录 / Logout")}
+                            </button>
+                          </div>
+                        ) : null}
+                        <button
+                          onClick={() => void controlService(row.serviceName, "start")}
+                          disabled={Boolean(serviceActionLoading[row.serviceName]) || row.healthy === true}
+                          className="rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("启动 / Start")}
+                        </button>
+                        <button
+                          onClick={() => void controlService(row.serviceName, "stop")}
+                          disabled={Boolean(serviceActionLoading[row.serviceName]) || row.healthy !== true}
+                          className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("停止 / Stop")}
+                        </button>
+                      </div>
                     </div>
                   </div>
+
+                  {row.key === "whatsapp_web" && waLoginDialogOpen ? (
+                    <div className="mt-3 border-t border-white/10 pt-3 text-left">
+                      <div className="mb-2 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold">{tSlash("WhatsApp Web 登录 / WhatsApp Web Login")}</h3>
+                        <button
+                          onClick={() => setWaLoginDialogOpen(false)}
+                          className="rounded-lg p-1 text-white/60 hover:bg-white/10 hover:text-white"
+                          title={t("收起", "Collapse")}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="text-sm text-white/80">
+                        {tSlash("连接状态 / Connection")}:{" "}
+                        <span className={waLoginStatus?.connected ? "text-emerald-300" : "text-amber-300"}>
+                          {waLoginStatus?.connected ? tSlash("已登录 / Connected") : tSlash("未登录 / Not Connected")}
+                        </span>
+                      </div>
+                      {waLoginStatus?.connected ? (
+                        <p className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                          {tSlash("WhatsApp Web 已登录，无需扫码。 / WhatsApp Web already connected.")}
+                        </p>
+                      ) : waLoginStatus?.qr_data_url ? (
+                        <div className="mt-2 inline-block rounded-xl border border-white/15 bg-white p-3">
+                          <img src={waLoginStatus.qr_data_url} alt="WhatsApp QR" className="h-56 w-56" />
+                        </div>
+                      ) : (
+                        <p className="mt-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/70">
+                          {waLoginLoading
+                            ? tSlash("正在拉取二维码... / Fetching QR...")
+                            : tSlash("暂无可用二维码，请稍候或重启 whatsapp_webd。 / QR not ready yet, please wait or restart whatsapp_webd.")}
+                        </p>
+                      )}
+                      {waLoginStatus?.last_error ? (
+                        <p className="mt-2 text-xs text-amber-300">
+                          {tSlash("最近错误 / Last error")}: {waLoginStatus.last_error}
+                        </p>
+                      ) : null}
+                      {waLoginError ? (
+                        <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                          {waLoginError}
+                        </p>
+                      ) : null}
+                      <div className="mt-2">
+                        <button
+                          onClick={() => void fetchWhatsappWebLoginStatus()}
+                          disabled={waLoginLoading}
+                          className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs hover:bg-white/20 disabled:opacity-50"
+                        >
+                          {waLoginLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                          {tSlash("刷新状态 / Refresh")}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ))}
               {serviceActionMessage ? (

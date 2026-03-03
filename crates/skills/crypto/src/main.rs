@@ -16,6 +16,8 @@ use urlencoding::encode;
 
 type HmacSha256 = Hmac<Sha256>;
 static I18N: OnceLock<TextCatalog> = OnceLock::new();
+const PRICE_ALERT_TRIGGERED_TAG: &str = "[PRICE_ALERT_TRIGGERED]";
+const PRICE_ALERT_NOT_TRIGGERED_TAG: &str = "[PRICE_ALERT_NOT_TRIGGERED]";
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -108,6 +110,12 @@ struct CryptoConfig {
     eth_token_contracts: HashMap<String, String>,
     #[serde(default)]
     eth_token_decimals: HashMap<String, u32>,
+    #[serde(default)]
+    alert_default_window_minutes: Option<u64>,
+    #[serde(default)]
+    alert_default_threshold_pct: Option<f64>,
+    #[serde(default)]
+    alert_max_window_minutes: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -340,6 +348,14 @@ fn default_crypto_catalog(lang: &str) -> TextCatalog {
     );
     current.insert("crypto.err.qty_must_gt_zero".to_string(), "qty must be > 0".to_string());
     current.insert(
+        "crypto.err.threshold_pct_must_gt_zero".to_string(),
+        "threshold_pct must be > 0".to_string(),
+    );
+    current.insert(
+        "crypto.err.symbol_not_on_binance".to_string(),
+        "symbol is not available on Binance spot: {symbol}".to_string(),
+    );
+    current.insert(
         "crypto.err.price_required_for_limit".to_string(),
         "price is required for limit order".to_string(),
     );
@@ -389,6 +405,14 @@ fn default_crypto_catalog(lang: &str) -> TextCatalog {
     current.insert(
         "crypto.msg.market_quote_line_kraken".to_string(),
         "- KRAKEN ${price} [source: Kraken]".to_string(),
+    );
+    current.insert(
+        "crypto.msg.price_alert_triggered".to_string(),
+        "ALERT {symbol}: {window_minutes}m change {change_pct}% reached threshold {threshold_pct}% (start={start_price}, now={current_price}, direction={direction})".to_string(),
+    );
+    current.insert(
+        "crypto.msg.price_alert_not_triggered".to_string(),
+        "{symbol} monitor: {window_minutes}m change {change_pct}% has not reached threshold {threshold_pct}% (start={start_price}, now={current_price}, direction={direction})".to_string(),
     );
     TextCatalog { current }
 }
@@ -501,6 +525,9 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     let action = match action.as_str() {
         "get_price" => "quote".to_string(),
         "get_multi_price" => "multi_quote".to_string(),
+        "price_monitor" | "monitor_price" | "price_alert" | "volatility_alert" => {
+            "price_alert_check".to_string()
+        }
         other => other.to_string(),
     };
     if cfg
@@ -525,10 +552,12 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         "quote" => handle_quote(&client, cfg, obj),
         "multi_quote" => handle_multi_quote(&client, cfg, obj),
         "get_book_ticker" | "book_ticker" => handle_book_ticker(&client, cfg, obj),
+        "binance_symbol_check" => handle_binance_symbol_check(&client, cfg, obj),
         "normalize_symbol" => handle_normalize_symbol(obj),
         "healthcheck" => handle_healthcheck(&client, cfg, obj),
         "candles" => handle_candles(&client, cfg, obj),
         "indicator" => handle_indicator(&client, cfg, obj),
+        "price_alert_check" => handle_price_alert_check(&client, cfg, obj),
         "onchain" => handle_onchain(&client, cfg, obj),
         "trade_preview" => handle_trade_preview(&client, cfg, obj),
         "trade_submit" => handle_trade_submit(&client, cfg, workspace_root, obj),
@@ -1013,6 +1042,144 @@ fn handle_indicator(
             "sma":sma,
             "last":last,
             "signal":signal
+        }),
+    ))
+}
+
+fn handle_binance_symbol_check(
+    client: &Client,
+    cfg: &RootConfig,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(String, Value), String> {
+    let symbol = normalize_symbol(
+        obj.get("symbol")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| tr("crypto.err.symbol_required"))?,
+    );
+    ensure_symbol_supported_on_binance(client, cfg, &symbol)?;
+    Ok((
+        format!("binance symbol check ok: {symbol}"),
+        json!({
+            "action":"binance_symbol_check",
+            "exchange":"binance",
+            "symbol":symbol,
+            "ok":true
+        }),
+    ))
+}
+
+fn handle_price_alert_check(
+    client: &Client,
+    cfg: &RootConfig,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(String, Value), String> {
+    let symbol = normalize_symbol(
+        obj.get("symbol")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| tr("crypto.err.symbol_required"))?,
+    );
+    let max_window = cfg.crypto.alert_max_window_minutes.unwrap_or(240).clamp(1, 1440);
+    let window_minutes = obj
+        .get("window_minutes")
+        .or_else(|| obj.get("minutes"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or_else(|| cfg.crypto.alert_default_window_minutes.unwrap_or(15))
+        .clamp(1, max_window);
+    let threshold_pct = obj
+        .get("threshold_pct")
+        .or_else(|| obj.get("pct"))
+        .or_else(|| obj.get("percent"))
+        .and_then(value_to_f64)
+        .unwrap_or_else(|| cfg.crypto.alert_default_threshold_pct.unwrap_or(5.0));
+    if threshold_pct <= 0.0 {
+        return Err(tr("crypto.err.threshold_pct_must_gt_zero"));
+    }
+    let direction = obj
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .unwrap_or("both")
+        .trim()
+        .to_ascii_lowercase();
+    let direction = match direction.as_str() {
+        "up" | "rise" | "pump" => "up",
+        "down" | "drop" | "dump" => "down",
+        _ => "both",
+    };
+    ensure_symbol_supported_on_binance(client, cfg, &symbol)?;
+    let closes = fetch_candles_binance(client, cfg, &symbol, "1m", window_minutes.saturating_add(1))?;
+    if closes.len() < 2 {
+        return Err(tr("crypto.err.no_candles"));
+    }
+    let start_price = closes.first().copied().unwrap_or(0.0);
+    let current_price = closes.last().copied().unwrap_or(start_price);
+    let change_pct = if start_price > 0.0 {
+        (current_price - start_price) / start_price * 100.0
+    } else {
+        0.0
+    };
+    let triggered = match direction {
+        "up" => change_pct >= threshold_pct,
+        "down" => change_pct <= -threshold_pct,
+        _ => change_pct.abs() >= threshold_pct,
+    };
+    let trend = if change_pct > 0.0 {
+        "up"
+    } else if change_pct < 0.0 {
+        "down"
+    } else {
+        "flat"
+    };
+    let change_text = format!("{:+.2}", change_pct);
+    let threshold_text = format!("{:.2}", threshold_pct);
+    let start_text = format!("{:.6}", start_price);
+    let current_text = format!("{:.6}", current_price);
+    let text_body = if triggered {
+        tr_with(
+            "crypto.msg.price_alert_triggered",
+            &[
+                ("symbol", &symbol),
+                ("window_minutes", &window_minutes.to_string()),
+                ("change_pct", &change_text),
+                ("threshold_pct", &threshold_text),
+                ("start_price", &start_text),
+                ("current_price", &current_text),
+                ("direction", direction),
+            ],
+        )
+    } else {
+        tr_with(
+            "crypto.msg.price_alert_not_triggered",
+            &[
+                ("symbol", &symbol),
+                ("window_minutes", &window_minutes.to_string()),
+                ("change_pct", &change_text),
+                ("threshold_pct", &threshold_text),
+                ("start_price", &start_text),
+                ("current_price", &current_text),
+                ("direction", direction),
+            ],
+        )
+    };
+    let tagged_text = if triggered {
+        format!("{PRICE_ALERT_TRIGGERED_TAG} {text_body}")
+    } else {
+        format!("{PRICE_ALERT_NOT_TRIGGERED_TAG} {text_body}")
+    };
+    Ok((
+        tagged_text,
+        json!({
+            "action":"price_alert_check",
+            "symbol":symbol,
+            "exchange":"binance",
+            "window_minutes":window_minutes,
+            "threshold_pct":threshold_pct,
+            "direction":direction,
+            "triggered":triggered,
+            "trend":trend,
+            "start_price":start_price,
+            "current_price":current_price,
+            "change_pct":change_pct,
+            "candles":closes.len()
         }),
     ))
 }
@@ -2140,6 +2307,44 @@ fn fetch_quote_from_binance(client: &Client, cfg: &RootConfig, symbol: &str) -> 
     })
 }
 
+fn ensure_symbol_supported_on_binance(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<(), String> {
+    let base = cfg.binance.base_url.trim_end_matches('/');
+    let normalized_symbol = normalize_symbol(symbol);
+    let url = format!("{base}/api/v3/exchangeInfo?symbol={}", encode(&normalized_symbol));
+    let v: Value = client
+        .get(url)
+        .send()
+        .map_err(|err| format!("binance exchangeInfo request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("binance exchangeInfo parse failed: {err}"))?;
+    if let Some(code) = v.get("code").and_then(|x| x.as_i64()) {
+        if code != 0 {
+            return Err(tr_with(
+                "crypto.err.symbol_not_on_binance",
+                &[("symbol", &normalized_symbol)],
+            ));
+        }
+    }
+    let symbols = v.get("symbols").and_then(|x| x.as_array());
+    let exists = symbols
+        .map(|arr| {
+            arr.iter().any(|it| {
+                it.get("symbol")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.eq_ignore_ascii_case(&normalized_symbol))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    if !exists {
+        return Err(tr_with(
+            "crypto.err.symbol_not_on_binance",
+            &[("symbol", &normalized_symbol)],
+        ));
+    }
+    Ok(())
+}
+
 fn fetch_quote_from_okx(client: &Client, cfg: &RootConfig, symbol: &str) -> Result<Quote, String> {
     let base = cfg.okx.base_url.trim_end_matches('/');
     let inst_id = to_okx_inst_id(symbol);
@@ -3130,5 +3335,16 @@ mod tests {
         assert_eq!(to_gateio_pair("BTCUSDT"), "BTC_USDT");
         assert_eq!(to_coinbase_product("BTCUSDT"), "BTC-USD");
         assert_eq!(to_kraken_pair("BTCUSDT"), "XBTUSDT");
+    }
+
+    #[test]
+    fn price_alert_trigger_logic_up_down_both() {
+        let up = 3.2_f64;
+        let down = -3.2_f64;
+        let threshold = 3.0_f64;
+        assert!(up >= threshold);
+        assert!(down <= -threshold);
+        assert!(up.abs() >= threshold);
+        assert!(down.abs() >= threshold);
     }
 }

@@ -1,11 +1,11 @@
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDateTime, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
-use rusqlite::params;
+use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::{llm_gateway, memory, AppState, ClaimedTask, ScheduleIntentOutput};
+use crate::{execution_adapters, llm_gateway, memory, AppState, ClaimedTask, ScheduleIntentOutput};
 
 pub(crate) async fn parse_schedule_intent(
     state: &AppState,
@@ -255,6 +255,181 @@ fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &st
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct CryptoPriceAlertProfile {
+    symbol: String,
+    direction: String,
+    window_minutes: u64,
+    threshold_pct: f64,
+}
+
+#[derive(Debug, Clone)]
+struct ExistingCryptoPriceAlertJob {
+    job_id: String,
+    schedule_type: String,
+    run_at: Option<i64>,
+    time_of_day: Option<String>,
+    weekday: Option<i64>,
+    every_minutes: Option<i64>,
+    timezone: String,
+    next_run_at: Option<i64>,
+    profile: CryptoPriceAlertProfile,
+}
+
+fn normalize_direction(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "up" | "long" | "rise" => "up".to_string(),
+        "down" | "short" | "fall" => "down".to_string(),
+        _ => "both".to_string(),
+    }
+}
+
+fn normalize_threshold_pct(v: f64) -> f64 {
+    (v * 10000.0).round() / 10000.0
+}
+
+fn extract_crypto_price_alert_profile(payload: &Value) -> Option<CryptoPriceAlertProfile> {
+    let obj = payload.as_object()?;
+    let skill_name = obj
+        .get("skill_name")
+        .or_else(|| obj.get("skill"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if skill_name != "crypto" {
+        return None;
+    }
+    let args = obj.get("args")?.as_object()?;
+    let action = args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(
+        action.as_str(),
+        "price_alert_check" | "price_monitor" | "monitor_price" | "price_alert" | "volatility_alert"
+    ) {
+        return None;
+    }
+    let symbol = args
+        .get("symbol")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?
+        .to_ascii_uppercase();
+    let direction = normalize_direction(
+        args.get("direction")
+            .and_then(|v| v.as_str())
+            .unwrap_or("both"),
+    );
+    let window_minutes = args
+        .get("window_minutes")
+        .or_else(|| args.get("minutes"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(15)
+        .max(1);
+    let threshold_pct = normalize_threshold_pct(
+        args.get("threshold_pct")
+            .or_else(|| args.get("pct"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(5.0)
+            .abs(),
+    );
+    Some(CryptoPriceAlertProfile {
+        symbol,
+        direction,
+        window_minutes,
+        threshold_pct,
+    })
+}
+
+fn schedule_content_matches(
+    existing: &ExistingCryptoPriceAlertJob,
+    schedule_type: &str,
+    run_at: Option<i64>,
+    time_of_day: Option<&str>,
+    weekday: Option<i64>,
+    every_minutes: Option<i64>,
+    timezone: &str,
+) -> bool {
+    let existing_time = existing
+        .time_of_day
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let input_time = time_of_day.map(str::trim).filter(|v| !v.is_empty());
+    existing.schedule_type == schedule_type
+        && existing.run_at == run_at
+        && existing_time == input_time
+        && existing.weekday == weekday
+        && existing.every_minutes == every_minutes
+        && existing.timezone.trim() == timezone.trim()
+}
+
+fn load_existing_crypto_price_alert_jobs(
+    db: &Connection,
+    user_id: i64,
+    chat_id: i64,
+) -> Result<Vec<ExistingCryptoPriceAlertJob>, String> {
+    let mut stmt = db
+        .prepare(
+            "SELECT job_id, schedule_type, run_at, time_of_day, weekday, every_minutes, timezone, next_run_at, task_payload_json
+             FROM scheduled_jobs
+             WHERE user_id = ?1 AND chat_id = ?2 AND task_kind = 'run_skill'
+             ORDER BY enabled DESC, id DESC
+             LIMIT 100",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![user_id, chat_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, String>(8)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let (
+            job_id,
+            schedule_type,
+            run_at,
+            time_of_day,
+            weekday,
+            every_minutes,
+            timezone,
+            next_run_at,
+            task_payload_json,
+        ) = row.map_err(|e| e.to_string())?;
+        let payload = serde_json::from_str::<Value>(&task_payload_json).unwrap_or_else(|_| json!({}));
+        let Some(profile) = extract_crypto_price_alert_profile(&payload) else {
+            continue;
+        };
+        out.push(ExistingCryptoPriceAlertJob {
+            job_id,
+            schedule_type,
+            run_at,
+            time_of_day,
+            weekday,
+            every_minutes,
+            timezone,
+            next_run_at,
+            profile,
+        });
+    }
+    Ok(out)
+}
+
 pub(crate) async fn try_handle_schedule_request(
     state: &AppState,
     task: &ClaimedTask,
@@ -277,7 +452,7 @@ pub(crate) async fn try_handle_schedule_request(
                 .map_err(|_| "db lock poisoned".to_string())?;
             let mut stmt = db
                 .prepare(
-                    "SELECT job_id, schedule_type, time_of_day, weekday, every_minutes, timezone, enabled, next_run_at
+                    "SELECT job_id, schedule_type, time_of_day, weekday, every_minutes, timezone, enabled, next_run_at, task_kind, task_payload_json
                      FROM scheduled_jobs
                      WHERE user_id = ?1 AND chat_id = ?2
                      ORDER BY id DESC
@@ -295,13 +470,26 @@ pub(crate) async fn try_handle_schedule_request(
                         row.get::<_, String>(5)?,
                         row.get::<_, i64>(6)?,
                         row.get::<_, Option<i64>>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
                     ))
                 })
                 .map_err(|e| e.to_string())?;
 
             let mut lines = Vec::new();
             for row in rows {
-                let (job_id, schedule_type, time_of_day, weekday, every_minutes, timezone, enabled, next_run_at) =
+                let (
+                    job_id,
+                    schedule_type,
+                    time_of_day,
+                    weekday,
+                    every_minutes,
+                    timezone,
+                    enabled,
+                    next_run_at,
+                    task_kind,
+                    task_payload_json,
+                ) =
                     row.map_err(|e| e.to_string())?;
                 let desc = schedule_kind_desc(state, &schedule_type, time_of_day, weekday, every_minutes);
                 let status = if enabled == 1 {
@@ -310,7 +498,13 @@ pub(crate) async fn try_handle_schedule_request(
                     schedule_t(state, "schedule.status.paused")
                 };
                 let next = next_run_at.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string());
-                lines.push(format!("- {} | {} | tz={} | {} | next={}", job_id, desc, timezone, status, next));
+                let payload =
+                    serde_json::from_str::<Value>(&task_payload_json).unwrap_or_else(|_| json!({}));
+                let task_content = summarize_task_content(&task_kind, &payload, "-");
+                lines.push(format!(
+                    "- {} | {} | tz={} | {} | next={} | task={}",
+                    job_id, desc, timezone, status, next, task_content
+                ));
             }
             if lines.is_empty() {
                 Ok(Some(schedule_t(state, "schedule.msg.list_empty")))
@@ -454,6 +648,21 @@ pub(crate) async fn try_handle_schedule_request(
             }
 
             let now = crate::now_ts_u64() as i64;
+            let time_of_day = if intent.schedule.time.trim().is_empty() {
+                None
+            } else {
+                Some(intent.schedule.time.trim().to_string())
+            };
+            let weekday = if intent.schedule.weekday <= 0 {
+                None
+            } else {
+                Some(intent.schedule.weekday)
+            };
+            let every_minutes = if intent.schedule.every_minutes <= 0 {
+                None
+            } else {
+                Some(intent.schedule.every_minutes)
+            };
             let run_at = if schedule_type == "once" {
                 let ts = parse_local_datetime(&intent.schedule.run_at, parse_timezone(&timezone));
                 let Some(ts) = ts else {
@@ -478,21 +687,9 @@ pub(crate) async fn try_handle_schedule_request(
             } else {
                 compute_next_run_for_schedule(
                     &schedule_type,
-                    if intent.schedule.time.trim().is_empty() {
-                        None
-                    } else {
-                        Some(intent.schedule.time.trim())
-                    },
-                    if intent.schedule.weekday <= 0 {
-                        None
-                    } else {
-                        Some(intent.schedule.weekday)
-                    },
-                    if intent.schedule.every_minutes <= 0 {
-                        None
-                    } else {
-                        Some(intent.schedule.every_minutes)
-                    },
+                    time_of_day.as_deref(),
+                    weekday,
+                    every_minutes,
                     &timezone,
                     now,
                 )
@@ -523,6 +720,100 @@ pub(crate) async fn try_handle_schedule_request(
                 intent.task.payload.clone()
             };
 
+            if task_kind == "run_skill" {
+                if let Some(profile) = extract_crypto_price_alert_profile(&payload) {
+                    let check_args = json!({
+                        "action": "binance_symbol_check",
+                        "symbol": profile.symbol
+                    });
+                    if let Err(err) =
+                        execution_adapters::run_skill(state, task, "crypto", check_args).await
+                    {
+                        return Ok(Some(err));
+                    }
+
+                    let db = state
+                        .db
+                        .lock()
+                        .map_err(|_| "db lock poisoned".to_string())?;
+                    let existing_jobs = load_existing_crypto_price_alert_jobs(&db, task.user_id, task.chat_id)?;
+
+                    if let Some(existing) = existing_jobs.iter().find(|v| {
+                        v.profile == profile
+                            && schedule_content_matches(
+                                v,
+                                &schedule_type,
+                                run_at,
+                                time_of_day.as_deref(),
+                                weekday,
+                                every_minutes,
+                                &timezone,
+                            )
+                    }) {
+                        let effective_next_run = existing.next_run_at.unwrap_or(next_run_at);
+                        let next_run_human = humanize_next_run_at(effective_next_run, &timezone);
+                        let task_content = summarize_task_content(&task_kind, &payload, prompt);
+                        return Ok(Some(schedule_t_with(
+                            state,
+                            "schedule.msg.create_exists_same",
+                            &[
+                                ("job_id", &existing.job_id),
+                                ("type", &intent.schedule.r#type),
+                                ("timezone", &timezone),
+                                ("next_run_human", &next_run_human),
+                                ("task_content", &task_content),
+                            ],
+                        )));
+                    }
+
+                    if let Some(existing) = existing_jobs.iter().find(|v| v.profile.symbol == profile.symbol) {
+                        let updated_at = crate::now_ts();
+                        db.execute(
+                            "UPDATE scheduled_jobs
+                             SET schedule_type = ?4,
+                                 run_at = ?5,
+                                 time_of_day = ?6,
+                                 weekday = ?7,
+                                 every_minutes = ?8,
+                                 timezone = ?9,
+                                 task_payload_json = ?10,
+                                 enabled = 1,
+                                 next_run_at = ?11,
+                                 updated_at = ?12
+                             WHERE job_id = ?1 AND user_id = ?2 AND chat_id = ?3",
+                            params![
+                                existing.job_id,
+                                task.user_id,
+                                task.chat_id,
+                                schedule_type,
+                                run_at,
+                                time_of_day,
+                                weekday,
+                                every_minutes,
+                                timezone,
+                                payload.to_string(),
+                                next_run_at,
+                                updated_at
+                            ],
+                        )
+                        .map_err(|e| e.to_string())?;
+                        let next_run_human = humanize_next_run_at(next_run_at, &timezone);
+                        let task_content = summarize_task_content(&task_kind, &payload, prompt);
+                        return Ok(Some(schedule_t_with(
+                            state,
+                            "schedule.msg.update_existing_ok",
+                            &[
+                                ("job_id", &existing.job_id),
+                                ("type", &intent.schedule.r#type),
+                                ("timezone", &timezone),
+                                ("next_run_human", &next_run_human),
+                                ("task_content", &task_content),
+                            ],
+                        )));
+                    }
+                }
+            }
+
             let job_id = format!("job_{}", &Uuid::new_v4().simple().to_string()[..10]);
             let created_at = crate::now_ts();
             let db = state
@@ -541,21 +832,9 @@ pub(crate) async fn try_handle_schedule_request(
                     task.chat_id,
                     schedule_type,
                     run_at,
-                    if intent.schedule.time.trim().is_empty() {
-                        None::<String>
-                    } else {
-                        Some(intent.schedule.time.trim().to_string())
-                    },
-                    if intent.schedule.weekday <= 0 {
-                        None::<i64>
-                    } else {
-                        Some(intent.schedule.weekday)
-                    },
-                    if intent.schedule.every_minutes <= 0 {
-                        None::<i64>
-                    } else {
-                        Some(intent.schedule.every_minutes)
-                    },
+                    time_of_day,
+                    weekday,
+                    every_minutes,
                     timezone,
                     task_kind,
                     payload.to_string(),
