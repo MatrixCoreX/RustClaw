@@ -356,4 +356,5 @@ mod tests {
         assert!(parse_trade_preview_submit_args("买入 BTCUSDT 数量 1 限价", &rules).is_none());
         assert!(parse_trade_preview_submit_args("买入 BTCUSDT 数量 1 限价 价格 1000", &rules).is_some());
     }
+
 }

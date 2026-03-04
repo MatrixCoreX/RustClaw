@@ -6,6 +6,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use toml::Value as TomlValue;
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -42,6 +43,10 @@ struct LlmConfig {
     anthropic: Option<VendorConfig>,
     #[serde(default)]
     grok: Option<VendorConfig>,
+    #[serde(default)]
+    qwen: Option<VendorConfig>,
+    #[serde(default)]
+    custom: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -62,6 +67,20 @@ struct AudioSynthesizeConfig {
     #[serde(default)]
     default_model: Option<String>,
     #[serde(default)]
+    models: Option<Vec<String>>,
+    #[serde(default)]
+    openai_models: Option<Vec<String>>,
+    #[serde(default)]
+    google_models: Option<Vec<String>>,
+    #[serde(default)]
+    anthropic_models: Option<Vec<String>>,
+    #[serde(default)]
+    grok_models: Option<Vec<String>>,
+    #[serde(default)]
+    qwen_models: Option<Vec<String>>,
+    #[serde(default)]
+    custom_models: Option<Vec<String>>,
+    #[serde(default)]
     default_voice: Option<String>,
     #[serde(default)]
     default_format: Option<String>,
@@ -79,6 +98,8 @@ enum VendorKind {
     Google,
     Anthropic,
     Grok,
+    Qwen,
+    Custom,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -174,7 +195,11 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     check_api_key(vendor_name, &provider_cfg.api_key)?;
     let requested_model = obj.get("model").and_then(|v| v.as_str());
     let model = requested_model
-        .or(cfg.audio_synthesize.default_model.as_deref())
+        .or(first_model_candidate(
+            cfg.audio_synthesize.default_model.as_deref(),
+            vendor_models(&cfg.audio_synthesize, vendor),
+            cfg.audio_synthesize.models.as_ref(),
+        ))
         .unwrap_or(&provider_cfg.model)
         .to_string();
     let timeout_seconds = cfg
@@ -244,7 +269,7 @@ fn synthesize_by_vendor(
             input,
             output_path,
         ),
-        VendorKind::Anthropic | VendorKind::Grok => {
+        VendorKind::Anthropic | VendorKind::Grok | VendorKind::Qwen | VendorKind::Custom => {
             if !allow_compat_adapters {
                 return Err(format!(
                     "{vendor_name} native tts adapter is not available; set audio_synthesize.allow_compat_adapters=true to use compatible endpoint"
@@ -379,6 +404,8 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "google" | "gemini" => Some(VendorKind::Google),
         "anthropic" | "claude" => Some(VendorKind::Anthropic),
         "grok" | "xai" => Some(VendorKind::Grok),
+        "qwen" => Some(VendorKind::Qwen),
+        "custom" => Some(VendorKind::Custom),
         _ => None,
     }
 }
@@ -424,17 +451,76 @@ fn resolve_vendor_config<'a>(
             .as_ref()
             .map(|v| ("grok", v))
             .ok_or_else(|| "grok config missing".to_string()),
+        VendorKind::Qwen => cfg
+            .llm
+            .qwen
+            .as_ref()
+            .map(|v| ("qwen", v))
+            .ok_or_else(|| "qwen config missing".to_string()),
+        VendorKind::Custom => cfg
+            .llm
+            .custom
+            .as_ref()
+            .map(|v| ("custom", v))
+            .ok_or_else(|| "custom config missing".to_string()),
     }
 }
 
 fn load_root_config() -> RootConfig {
     let root = workspace_root();
-    let cfg_path = root.join("configs/config.toml");
-    let raw = match std::fs::read_to_string(cfg_path) {
-        Ok(v) => v,
-        Err(_) => return RootConfig::default(),
+    let mut merged = match std::fs::read_to_string(root.join("configs/config.toml"))
+        .ok()
+        .and_then(|s| toml::from_str::<TomlValue>(&s).ok())
+    {
+        Some(v) => v,
+        None => TomlValue::Table(toml::map::Map::new()),
     };
-    toml::from_str::<RootConfig>(&raw).unwrap_or_default()
+    if let Some(audio_cfg) = std::fs::read_to_string(root.join("configs/audio.toml"))
+        .ok()
+        .and_then(|s| toml::from_str::<TomlValue>(&s).ok())
+    {
+        // Keep config.toml higher priority if same key exists, and use audio.toml as defaults.
+        merge_missing_toml(&mut merged, audio_cfg);
+    }
+    toml::from_str::<RootConfig>(&merged.to_string()).unwrap_or_default()
+}
+
+fn first_model_candidate<'a>(
+    default_model: Option<&'a str>,
+    vendor_models: Option<&'a Vec<String>>,
+    models: Option<&'a Vec<String>>,
+) -> Option<&'a str> {
+    if let Some(v) = default_model.map(str::trim).filter(|v| !v.is_empty()) {
+        return Some(v);
+    }
+    if let Some(v) = vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty())) {
+        return Some(v);
+    }
+    models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+}
+
+fn vendor_models<'a>(cfg: &'a AudioSynthesizeConfig, vendor: VendorKind) -> Option<&'a Vec<String>> {
+    match vendor {
+        VendorKind::OpenAI => cfg.openai_models.as_ref(),
+        VendorKind::Google => cfg.google_models.as_ref(),
+        VendorKind::Anthropic => cfg.anthropic_models.as_ref(),
+        VendorKind::Grok => cfg.grok_models.as_ref(),
+        VendorKind::Qwen => cfg.qwen_models.as_ref(),
+        VendorKind::Custom => cfg.custom_models.as_ref(),
+    }
+}
+
+fn merge_missing_toml(dst: &mut TomlValue, src: TomlValue) {
+    if let (TomlValue::Table(dst_map), TomlValue::Table(src_map)) = (dst, src) {
+        for (key, src_val) in src_map {
+            match dst_map.get_mut(&key) {
+                Some(dst_val) => merge_missing_toml(dst_val, src_val),
+                None => {
+                    dst_map.insert(key, src_val);
+                }
+            }
+        }
+    }
 }
 
 fn workspace_root() -> PathBuf {

@@ -51,6 +51,8 @@ struct LlmConfig {
     anthropic: Option<VendorConfig>,
     #[serde(default)]
     grok: Option<VendorConfig>,
+    #[serde(default)]
+    qwen: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -70,6 +72,18 @@ struct ImageSkillConfig {
     default_vendor: Option<String>,
     #[serde(default)]
     default_model: Option<String>,
+    #[serde(default)]
+    models: Option<Vec<String>>,
+    #[serde(default)]
+    openai_models: Option<Vec<String>>,
+    #[serde(default)]
+    google_models: Option<Vec<String>>,
+    #[serde(default)]
+    anthropic_models: Option<Vec<String>>,
+    #[serde(default)]
+    grok_models: Option<Vec<String>>,
+    #[serde(default)]
+    qwen_models: Option<Vec<String>>,
     #[serde(default)]
     timeout_seconds: Option<u64>,
     #[serde(default)]
@@ -125,6 +139,7 @@ enum VendorKind {
     Google,
     Anthropic,
     Grok,
+    Qwen,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -215,10 +230,15 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
 
     let mut provider_errors: Vec<String> = Vec::new();
     for vendor in providers {
+        let config_default_model = first_model_candidate(
+            cfg.image_generation.default_model.as_deref(),
+            vendor_models(&cfg.image_generation, vendor),
+            cfg.image_generation.models.as_ref(),
+        );
         match call_generate(
             vendor,
             cfg,
-            requested_model.or(cfg.image_generation.default_model.as_deref()),
+            requested_model.or(config_default_model),
             timeout_seconds,
             prompt,
             size,
@@ -253,6 +273,31 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
             .cloned()
             .unwrap_or_else(|| "unknown error".to_string())
     ))
+}
+
+fn first_model_candidate<'a>(
+    default_model: Option<&'a str>,
+    vendor_models: Option<&'a Vec<String>>,
+    models: Option<&'a Vec<String>>,
+) -> Option<&'a str> {
+    if let Some(v) = default_model.map(str::trim).filter(|v| !v.is_empty()) {
+        return Some(v);
+    }
+    if let Some(v) = vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty())) {
+        return Some(v);
+    }
+    models
+        .and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+}
+
+fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'a Vec<String>> {
+    match vendor {
+        VendorKind::OpenAI => cfg.openai_models.as_ref(),
+        VendorKind::Google => cfg.google_models.as_ref(),
+        VendorKind::Anthropic => cfg.anthropic_models.as_ref(),
+        VendorKind::Grok => cfg.grok_models.as_ref(),
+        VendorKind::Qwen => cfg.qwen_models.as_ref(),
+    }
 }
 
 fn resolve_output_language(cfg: &RootConfig, obj: &serde_json::Map<String, Value>) -> String {
@@ -436,6 +481,29 @@ fn call_generate(
                 .map_err(|err| format!("build grok client failed: {err}"))?;
             openai_compatible_generate(
                 &client, "grok", vcfg, &model, prompt, size, style, quality, n, output_path,
+            )?;
+            Ok(model)
+        }
+        VendorKind::Qwen => {
+            if !cfg.image_generation.allow_compat_adapters {
+                return Err(
+                    "qwen native image generation adapter is not available; set image_generation.allow_compat_adapters=true to use compatible endpoint"
+                        .to_string(),
+                );
+            }
+            let vcfg = cfg
+                .llm
+                .qwen
+                .as_ref()
+                .ok_or_else(|| "qwen config missing".to_string())?;
+            check_api_key("qwen", &vcfg.api_key)?;
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .build()
+                .map_err(|err| format!("build qwen client failed: {err}"))?;
+            openai_compatible_generate(
+                &client, "qwen", vcfg, &model, prompt, size, style, quality, n, output_path,
             )?;
             Ok(model)
         }
@@ -658,6 +726,7 @@ fn vendor_order(
         Some("google"),
         Some("anthropic"),
         Some("grok"),
+        Some("qwen"),
     ]
     .into_iter()
     .flatten()
@@ -677,6 +746,7 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "google" | "gemini" => Some(VendorKind::Google),
         "anthropic" | "claude" => Some(VendorKind::Anthropic),
         "grok" | "xai" => Some(VendorKind::Grok),
+        "qwen" => Some(VendorKind::Qwen),
         _ => None,
     }
 }
@@ -687,6 +757,7 @@ fn vendor_name(v: VendorKind) -> &'static str {
         VendorKind::Google => "google",
         VendorKind::Anthropic => "anthropic",
         VendorKind::Grok => "grok",
+        VendorKind::Qwen => "qwen",
     }
 }
 
@@ -726,5 +797,6 @@ mod tests {
         assert_eq!(parse_vendor("gemini"), Some(VendorKind::Google));
         assert_eq!(parse_vendor("claude"), Some(VendorKind::Anthropic));
         assert_eq!(parse_vendor("xai"), Some(VendorKind::Grok));
+        assert_eq!(parse_vendor("qwen"), Some(VendorKind::Qwen));
     }
 }

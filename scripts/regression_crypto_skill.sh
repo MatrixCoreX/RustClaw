@@ -90,7 +90,7 @@ assert_action() {
 
 runner_knows_crypto() {
   local resp
-  resp="$(run_skill_raw '{"action":"positions","exchange":"paper"}' 2>/dev/null || true)"
+  resp="$(run_skill_raw '{"action":"positions","exchange":"binance"}' 2>/dev/null || true)"
   [[ -n "$resp" ]] || return 1
   if echo "$resp" | jq -e '.error_text // "" | tostring | test("unknown skill: crypto")' >/dev/null; then
     return 1
@@ -237,15 +237,15 @@ main() {
     "onchain"
 
   run_case_ok "trade_preview market buy" \
-    '{"action":"trade_preview","exchange":"paper","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01}' \
+    '{"action":"trade_preview","exchange":"binance","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01}' \
     "trade_preview"
 
   run_case_err_contains "trade_submit without confirm rejected" \
-    '{"action":"trade_submit","exchange":"paper","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01}' \
+    '{"action":"trade_submit","exchange":"binance","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01}' \
     "confirm=true"
 
   TOTAL=$((TOTAL + 1))
-  submit_resp="$(run_skill_raw '{"action":"trade_submit","exchange":"paper","symbol":"ETHUSDT","side":"buy","order_type":"limit","qty":0.02,"price":1000,"confirm":true}' 2>/dev/null || true)"
+  submit_resp="$(run_skill_raw '{"action":"trade_submit","exchange":"binance","symbol":"ETHUSDT","side":"buy","order_type":"limit","qty":0.02,"price":1000,"confirm":true}' 2>/dev/null || true)"
   if [[ -z "${submit_resp:-}" ]]; then
     fail "trade_submit limit confirm=true (runner failed)"
   elif ! assert_status "$submit_resp" "ok"; then
@@ -261,16 +261,16 @@ main() {
 
   if [[ -n "$order_id" ]]; then
     run_case_ok "order_status by order_id" \
-      "$(jq -nc --arg oid "$order_id" '{"action":"order_status","order_id":$oid}')" \
+      "$(jq -nc --arg oid "$order_id" '{"action":"order_status","symbol":"ETHUSDT","order_id":$oid}')" \
       "order_status"
 
     if [[ "$order_status" == "NEW" ]]; then
       run_case_ok "cancel_order NEW order" \
-        "$(jq -nc --arg oid "$order_id" '{"action":"cancel_order","order_id":$oid}')" \
+        "$(jq -nc --arg oid "$order_id" '{"action":"cancel_order","symbol":"ETHUSDT","order_id":$oid}')" \
         "cancel_order"
 
       run_case_ok "order_status after cancel" \
-        "$(jq -nc --arg oid "$order_id" '{"action":"order_status","order_id":$oid}')" \
+        "$(jq -nc --arg oid "$order_id" '{"action":"order_status","symbol":"ETHUSDT","order_id":$oid}')" \
         "order_status"
     else
       log "[INFO] order status is $order_status, skip cancel branch"
@@ -280,8 +280,8 @@ main() {
     fail "extract order_id from submit response"
   fi
 
-  run_case_ok "positions paper" \
-    '{"action":"positions","exchange":"paper"}' \
+  run_case_ok "positions binance" \
+    '{"action":"positions","exchange":"binance"}' \
     "positions"
 
   log ""

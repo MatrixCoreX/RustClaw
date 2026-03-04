@@ -1,0 +1,14 @@
+[agent.loop_guard.crypto]
+# Action names are normalized to lowercase at runtime.
+# If any list is missing/empty/invalid, code falls back to built-in defaults.
+news_actions = ["news"]
+market_query_actions = [
+  "quote",
+  "get_price",
+  "multi_quote",
+  "get_multi_price",
+  "book_ticker",
+  "get_book_ticker",
+  "positions",
+]
+trade_preview_actions = ["trade_preview"]

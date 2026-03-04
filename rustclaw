@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+resolve_self_path() {
+  local src="${BASH_SOURCE[0]}"
+  while [[ -h "$src" ]]; do
+    local dir
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  local dir
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  echo "$dir/$(basename "$src")"
+}
+
+SELF_PATH="$(resolve_self_path)"
+ROOT_DIR="$(cd "$(dirname "$SELF_PATH")" && pwd)"
+
+START_SCRIPT="$ROOT_DIR/start-all.sh"
+STOP_SCRIPT="$ROOT_DIR/stop-rustclaw.sh"
+BUILD_SCRIPT="$ROOT_DIR/build-all.sh"
+
+print_rustclaw_banner() {
+  cat <<'EOF'
+######################################################################################
+                __!---===[[[  @@@@  ]]]===---!__
+           _!@#￥%……&*()_/      <<<<>>>>      \_!@#￥%……&*()_
+        _!@#￥%……&*()_/      <<<<  @@  >>>>      \_!@#￥%……&*()_
+      !@#￥%……&*()_+       <<<<  @@@@@@  >>>>       +_)(*&……%￥#@!
+      !@#￥%……&*()_+=======<<<<==@@@==@@@==>>>>=======+_)(*&……%￥#@!
+      !@#￥%……&*()_+       >>>>  @@@@@@  <<<<       +_)(*&……%￥#@!
+        !_)(*&……%￥#@!\      >>>>  @@  <<<<      /!@#￥%……&*()_
+           !@#￥%……&*()_\      >>>><<<<      /_)(*&……%￥#@!
+                --===!!![[[  @@@@  ]]]!!!===--
+
+########   ##    ##   #######   ########      #######   ##         ######    ##      ##
+##    ##   ##    ##   ##           ##         ##        ##        ##    ##   ##  ##  ##
+########   ##    ##   #######      ##         ##        ##        ########   ##  ##  ##
+##   ##    ##    ##        ##      ##         ##        ##        ##    ##   ##  ##  ##
+##    ##    ######    #######      ##         #######   ########  ##    ##    ###  ###
+
+########################################################################################
+EOF
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  rustclaw -start [release|debug] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--with-ui]
+  rustclaw -start [vendor] [model] [release|debug] [channels]
+  rustclaw -start --vendor <openai|google|anthropic|grok|qwen|custom> [--model <name>] [--profile <release|debug>] [--channels <...>] [--quick] [--skip-setup] [--with-ui] [--force-ui-rebuild]
+  rustclaw -stop
+  rustclaw -restart [release|debug] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--with-ui]
+  rustclaw -status
+  rustclaw -build [all|release|debug]
+  rustclaw -logs [all|clawd|telegramd|whatsappd|whatsapp_webd] [lines] [--follow]
+  rustclaw -health
+  rustclaw -h | --help | help
+
+Parameters:
+  -start / -restart:
+    vendor     : openai | google | anthropic | grok | qwen | custom
+    model      : model override string
+    profile    : release | debug (default: start-all.sh default)
+    channels   : telegram | whatsapp_web | both | whatsapp_cloud | all
+    --quick    : quick start (maps to start-all.sh 5th arg)
+    --skip-setup : skip interactive setup
+    --with-ui  : enable UI build/start path
+    --force-ui-rebuild : force rebuild UI assets when --with-ui is enabled
+
+  -build:
+    profile    : all | release | debug (default: release)
+
+  -logs:
+    service    : all | clawd | telegramd | whatsappd | whatsapp_webd (default: all)
+    lines      : integer, number of tail lines (default: 80)
+    --follow   : follow log output continuously
+
+Examples:
+  rustclaw -start
+  rustclaw -start release all --with-ui
+  rustclaw -start release all
+  rustclaw -restart debug telegram
+  rustclaw -logs clawd 200 --follow
+  rustclaw -logs telegramd --follow
+  rustclaw -health
+  rustclaw -status
+  rustclaw -stop
+EOF
+}
+
+require_file() {
+  local f="$1"
+  if [[ ! -f "$f" ]]; then
+    echo "Missing file: $f"
+    exit 1
+  fi
+}
+
+print_proc_status() {
+  local name="$1"
+  local pattern="$2"
+  local pids
+  pids="$(pgrep -f "$pattern" || true)"
+  if [[ -n "${pids// }" ]]; then
+    echo "$name: running (pid: $(echo "$pids" | tr '\n' ' ' | xargs))"
+  else
+    echo "$name: stopped"
+  fi
+}
+
+cmd_start() {
+  local vendor=""
+  local model=""
+  local profile=""
+  local channels=""
+  local quick_arg=""
+  local skip_setup="0"
+  local with_ui="0"
+  local ui_force_rebuild="0"
+
+  local args=("$@")
+  local i=0
+  while [[ $i -lt ${#args[@]} ]]; do
+    local arg="${args[$i]}"
+    case "$arg" in
+      --vendor)
+        ((i+=1))
+        [[ $i -lt ${#args[@]} ]] || { echo "Missing value for --vendor"; exit 1; }
+        vendor="${args[$i]}"
+        ;;
+      --model)
+        ((i+=1))
+        [[ $i -lt ${#args[@]} ]] || { echo "Missing value for --model"; exit 1; }
+        model="${args[$i]}"
+        ;;
+      --profile)
+        ((i+=1))
+        [[ $i -lt ${#args[@]} ]] || { echo "Missing value for --profile"; exit 1; }
+        profile="${args[$i]}"
+        ;;
+      --channels)
+        ((i+=1))
+        [[ $i -lt ${#args[@]} ]] || { echo "Missing value for --channels"; exit 1; }
+        channels="${args[$i]}"
+        ;;
+      release|debug)
+        profile="$arg"
+        ;;
+      telegram|whatsapp_web|both|whatsapp_cloud|all)
+        channels="$arg"
+        ;;
+      openai|google|anthropic|grok|qwen|custom)
+        vendor="$arg"
+        ;;
+      --quick)
+        quick_arg="quick"
+        ;;
+      --skip-setup)
+        skip_setup="1"
+        ;;
+      --with-ui)
+        with_ui="1"
+        ;;
+      --force-ui-rebuild)
+        ui_force_rebuild="1"
+        ;;
+      *)
+        if [[ -z "$model" ]]; then
+          model="$arg"
+        else
+          echo "Invalid -start argument: $arg"
+          usage
+          exit 1
+        fi
+        ;;
+    esac
+    ((i+=1))
+  done
+
+  require_file "$START_SCRIPT"
+  if [[ -n "$profile" && "$profile" != "release" && "$profile" != "debug" ]]; then
+    echo "Invalid profile: $profile"
+    exit 1
+  fi
+  if [[ -n "$vendor" && ! "$vendor" =~ ^(openai|google|anthropic|grok|qwen|custom)$ ]]; then
+    echo "Invalid vendor: $vendor"
+    exit 1
+  fi
+  if [[ -n "$channels" && ! "$channels" =~ ^(telegram|whatsapp_web|both|whatsapp_cloud|all)$ ]]; then
+    echo "Invalid channels: $channels"
+    exit 1
+  fi
+
+  if [[ -z "$profile" ]]; then
+    profile="debug"
+  fi
+
+  print_rustclaw_banner
+
+  if [[ "$skip_setup" == "1" ]]; then
+    export RUSTCLAW_SKIP_SETUP=1
+  fi
+  export RUSTCLAW_ENABLE_UI="$with_ui"
+  export RUSTCLAW_UI_FORCE_REBUILD="$ui_force_rebuild"
+  "$START_SCRIPT" "$vendor" "$model" "$profile" "$channels" "$quick_arg"
+}
+
+cmd_stop() {
+  require_file "$STOP_SCRIPT"
+  "$STOP_SCRIPT"
+}
+
+cmd_status() {
+  print_proc_status "clawd" "target/(debug|release)/clawd|cargo run -p clawd"
+  print_proc_status "telegramd" "target/(debug|release)/telegramd|cargo run -p telegramd"
+  print_proc_status "whatsappd" "target/(debug|release)/whatsappd|cargo run -p whatsappd"
+  print_proc_status "whatsapp_webd" "target/(debug|release)/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge/index.js"
+}
+
+cmd_build() {
+  local profile="${1:-release}"
+  require_file "$BUILD_SCRIPT"
+  "$BUILD_SCRIPT" "$profile"
+}
+
+cmd_logs() {
+  local service="all"
+  local lines="80"
+  local do_follow=0
+  for arg in "$@"; do
+    case "$arg" in
+      all|clawd|telegramd|whatsappd|whatsapp_webd)
+        service="$arg"
+        ;;
+      --follow)
+        do_follow=1
+        ;;
+      *)
+        if [[ "$arg" =~ ^[0-9]+$ ]]; then
+          lines="$arg"
+        else
+          echo "Invalid -logs argument: $arg"
+          usage
+          exit 1
+        fi
+        ;;
+    esac
+  done
+  if [[ ! "$lines" =~ ^[0-9]+$ ]]; then
+    echo "Invalid lines value: $lines"
+    exit 1
+  fi
+  local log_dir="$ROOT_DIR/logs"
+  local files=()
+  case "$service" in
+    all)
+      files=("$log_dir/clawd.log" "$log_dir/telegramd.log" "$log_dir/whatsappd.log" "$log_dir/whatsapp_webd.log")
+      ;;
+    clawd|telegramd|whatsappd|whatsapp_webd)
+      files=("$log_dir/$service.log")
+      ;;
+    *)
+      echo "Invalid service: $service"
+      exit 1
+      ;;
+  esac
+  if [[ "$do_follow" == "1" ]]; then
+    tail -n "$lines" -f "${files[@]}"
+  else
+    tail -n "$lines" "${files[@]}"
+  fi
+}
+
+cmd_health() {
+  local url listen
+  listen="$(
+python3 - <<'PY'
+import tomllib
+from pathlib import Path
+cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
+print((cfg.get("server", {}) or {}).get("listen", "127.0.0.1:8787"))
+PY
+  )"
+  url="http://${listen}/v1/health"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl not found."
+    exit 1
+  fi
+  echo "GET $url"
+  curl -fsS "$url"
+  echo
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+case "$1" in
+  -start)
+    shift
+    cmd_start "$@"
+    ;;
+  -stop)
+    cmd_stop
+    ;;
+  -restart)
+    shift
+    cmd_stop
+    cmd_start "$@"
+    ;;
+  -status)
+    cmd_status
+    ;;
+  -build)
+    cmd_build "${2:-release}"
+    ;;
+  -logs)
+    shift
+    cmd_logs "$@"
+    ;;
+  -health)
+    cmd_health
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac

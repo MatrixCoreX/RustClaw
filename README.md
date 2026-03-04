@@ -4,17 +4,6 @@
 
 RustClaw is a Rust-based local agent runtime stack. It is powered by `clawd` (task gateway and execution orchestration), uses Telegram / WhatsApp adapters for multi-channel messaging, and supports skills, scheduling, memory, and multimodal capabilities.
 
-## Recent Changes (vs older versions)
-
-- Added many new skill modules (ops, logs, config guard, service control, crypto trading, multimedia, and more).
-- Introduced dual WhatsApp adapters (Cloud API + Web Bridge) with a unified channel-routing design.
-- `clawd` now supports serving a local monitor UI on the same port (`UI/dist`).
-- Some legacy scripts were removed or replaced and are no longer maintained:
-  - `rollback.sh`
-  - `setup-config.sh`
-  - `script.py`
-- Use the current startup and packaging scripts as the standard entry points (see "Script Reference" below).
-
 ## Core Architecture
 
 - `crates/clawd`: HTTP API, task queue, routing, scheduling, memory, execution adapters.
@@ -28,30 +17,32 @@ RustClaw is a Rust-based local agent runtime stack. It is powered by `clawd` (ta
 - Configs: `configs/`
 - Data and migrations: `data/`, `migrations/`
 
-## Current Skill List (workspace)
+## Skill Reference (Detailed)
 
-- `x`
-- `system_basic`
-- `http_basic`
-- `git_basic`
-- `install_module`
-- `process_basic`
-- `package_manager`
-- `archive_basic`
-- `db_basic`
-- `docker_basic`
-- `fs_search`
-- `rss_fetch`
-- `image_vision`
-- `image_generate`
-- `image_edit`
-- `audio_transcribe`
-- `audio_synthesize`
-- `health_check`
-- `log_analyze`
-- `service_control`
-- `config_guard`
-- `crypto`
+Use via Telegram `/run <skill> <json-args>` or agent route-to-skill actions.
+
+- `archive_basic`: archive workflows; compress/extract/list for backup or deployment bundles.
+- `audio_synthesize`: text-to-speech generation; supports voice-style output for delivery.
+- `audio_transcribe`: speech-to-text; converts audio files into readable text with optional structure.
+- `config_guard`: safe config mutation; focuses on minimal edits, validation, and secret-safe outputs.
+- `crypto`: market/insight/trade guard; supports `quote`, `multi_quote`, `candles`, `indicator`, `onchain`, `trade_preview`, `trade_submit`, `order_status`, `cancel_order`, `positions`.
+- `db_basic`: SQL/data operations; query and controlled data mutations for local databases.
+- `docker_basic`: container operations; inspect/log/start/stop/restart/images/compose diagnostics.
+- `fs_search`: filesystem discovery; recursive file search, path filtering, and quick location tasks.
+- `git_basic`: repo operations; status/diff/branch/commit/pull/merge helper actions.
+- `health_check`: runtime diagnostics; summarizes critical checks and recommends next actions.
+- `http_basic`: HTTP/API probing; GET/POST style diagnostics and webhook/API call checks.
+- `image_edit`: image modification; applies edit instructions to existing images.
+- `image_generate`: text-to-image generation; creates images from prompt descriptions.
+- `image_vision`: visual understanding; describe scenes, OCR extraction, compare differences.
+- `install_module`: module install helper; adds runtime/dependency modules with ecosystem awareness.
+- `log_analyze`: log diagnosis; extracts failures, evidence, likely causes, and next checks.
+- `package_manager`: package lifecycle; install/update/remove/list per detected ecosystem.
+- `process_basic`: process lifecycle; list/find/kill/restart processes with status feedback.
+- `rss_fetch`: feed retrieval; latest/category/source-layered news extraction.
+- `service_control`: managed service actions; status/start/stop/restart with post-check expectations.
+- `system_basic`: OS introspection; system info/resource/network/basic command diagnostics.
+- `x`: X/Twitter workflow; draft/rewrite and optional publish actions with safe confirmation.
 
 ## API and Local UI
 
@@ -77,45 +68,51 @@ Local monitor UI:
 - Default static directory: `UI/dist`
 - Override with environment variable: `RUSTCLAW_UI_DIST`
 
-## Quick Start
+## Quick Start (Recommended: `rustclaw` CLI)
 
-1) Install Rust toolchain
+1) Prerequisites
 
 ```bash
 rustup default stable
+python3 --version   # recommend 3.11+
 ```
 
-2) Build
+2) Install the unified command
 
 ```bash
-./build-all.sh release
+# Standard install (tries /usr/local/bin, auto-fallback supported)
+bash install-rustclaw-cmd.sh
+
+# No sudo environments (macOS/Linux/Raspberry Pi OS)
+bash install-rustclaw-cmd.sh --user
 ```
 
-3) Start core services (recommended)
+3) Build and start
+
+```bash
+# Start with full start-all feature set
+rustclaw -start --vendor openai --model gpt-4.1 --profile release --channels all --with-ui --quick
+rustclaw -start --vendor qwen --model qwen-max-latest --profile release --channels all --quick
+rustclaw -start --vendor custom --model custom-model --profile release --channels all --quick
+
+# Simple start
+rustclaw -start release all
+```
+
+4) Daily ops
+
+```bash
+rustclaw -status
+rustclaw -logs clawd 200 --follow
+rustclaw -health
+rustclaw -stop
+```
+
+5) Legacy script mode (still supported)
 
 ```bash
 ./start-all.sh
-```
-
-4) Binary-only startup (optional)
-
-```bash
-./start-all-bin.sh release
-```
-
-5) Start adapters as needed
-
-```bash
-./start-telegramd.sh
-./start-whatsappd.sh
-./start-whatsapp-webd.sh
-./start-wa-web-bridge.sh
-```
-
-6) Check logs
-
-```bash
-./check-logs.sh -n 120
+./stop-rustclaw.sh
 ```
 
 ## Common Telegram Commands
@@ -130,39 +127,29 @@ rustup default stable
 - `/voicemode show|voice|text|both|reset` (admin)
 - `/openclaw config show|vendors|set <vendor> <model>` (admin)
 
-## Multimedia Vendor Support (Overview)
+## Skill Behavior Notes
 
-- `image_generate`: native `openai`, `google`; optional compat mode for `anthropic`, `grok`
-- `image_edit`: native `openai`, `google`; optional compat mode for `anthropic`, `grok`
-- `image_vision`: native `openai`, `google`, `anthropic`
-- `audio_synthesize`: native `openai`, `google`; optional compat mode for `anthropic`, `grok`
-- `audio_transcribe`: native `openai`, `google`; optional compat mode for `anthropic`, `grok`
-
-Compatibility switches are in `configs/config.toml` and default to `false`:
-
-- `image_generation.allow_compat_adapters`
-- `image_edit.allow_compat_adapters`
-- `audio_synthesize.allow_compat_adapters`
-- `audio_transcribe.allow_compat_adapters`
-
-## Crypto Skill (Market + Insight + Trade Guard)
-
-`crypto` supports:
-
-- Market: `quote`, `multi_quote`, `candles`, `indicator`
-- Insight: `onchain` (news is provided by `rss_fetch`)
-- Trading: `trade_preview`, `trade_submit`, `order_status`, `cancel_order`, `positions`
-
-Default safety behavior:
-
-- When `crypto.require_explicit_send=true`, `trade_submit` must include `confirm=true`.
-- Risk limits are configurable: `max_notional_usd`, `allowed_symbols`, `allowed_exchanges`, `blocked_actions`.
-- Default execution mode is `cextest` (backward-compatible alias: `paper`, writes to `data/crypto-paper-orders.jsonl`).
-- Dedicated config file: `configs/crypto.toml`.
-- Live exchange support: `binance` and `okx` (must be enabled and configured in `configs/crypto.toml`).
+- Multimedia compatibility flags are now in split config files and default to `false`:
+  - `image_generation.allow_compat_adapters`
+  - `image_edit.allow_compat_adapters`
+  - `audio_synthesize.allow_compat_adapters`
+  - `audio_transcribe.allow_compat_adapters`
+- Config split and precedence:
+  - `configs/config.toml`: global/base settings
+  - `configs/image.toml`: image skill settings (`image_edit` / `image_generation` / `image_vision`)
+  - `configs/audio.toml`: audio skill settings (`audio_synthesize` / `audio_transcribe`)
+  - Runtime precedence (same key): `config.toml` explicit value overrides split-file defaults.
+- Image/audio model priority:
+  - `request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model`
+- Crypto safety defaults:
+  - `trade_submit` requires `confirm=true` when `crypto.require_explicit_send=true`.
+  - Main risk fields: `max_notional_usd`, `allowed_symbols`, `allowed_exchanges`, `blocked_actions`.
+  - Default execution exchange is `binance`; live exchanges include `binance` and `okx`.
 
 ## Script Reference (Current Recommended Entrypoints)
 
+- `rustclaw`: unified runtime command (`-start/-stop/-restart/-status/-logs/-health/-build/-h`)
+- `install-rustclaw-cmd.sh`: install `rustclaw` command (cross-platform options: `--user`, `--dir`, `--force-build`)
 - `build-all.sh`: build workspace binaries (supports profile selection and verification)
 - `start-all.sh`: one-click startup (prefers prebuilt binaries, falls back to source startup)
 - `start-all-bin.sh`: start using prebuilt binaries only
@@ -179,9 +166,19 @@ Default safety behavior:
 - `package-release.sh`: build release package artifacts
 - `copy_rustclaw_safe.sh`: safely copy project for deployment/distribution
 
+## Cross-Platform Notes
+
+- Target platforms: Linux, Ubuntu, Debian/Raspberry Pi OS, macOS.
+- If `/usr/local/bin` is not writable, use `bash install-rustclaw-cmd.sh --user`.
+- If `~/.local/bin` is not in `PATH`, add:
+  - `export PATH="$HOME/.local/bin:$PATH"`
+- Startup scripts rely on Python TOML parsing (`tomllib`), so Python `3.11+` is recommended.
+
 ## Directory Reference
 
 - `configs/config.toml`: main runtime config
+- `configs/image.toml`: image skill config (default + vendor candidates)
+- `configs/audio.toml`: audio skill config (default + vendor candidates)
 - `configs/channels/*.toml`: channel config files
 - `configs/command_intent/*.toml`: intent-routing rules
 - `configs/i18n/*.toml`: i18n text resources
@@ -194,3 +191,10 @@ Default safety behavior:
 
 - Review and sanitize configs before production deployment.
 - For service deployment, use units under `systemd/` as templates first.
+
+## License
+
+This project uses a non-commercial source-available license:
+
+- English legal text: `LICENSE`
+- Chinese reference translation: `LICENSE.zh-CN.md`

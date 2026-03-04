@@ -1,0 +1,42 @@
+# Audio synthesize (TTS) / 语音合成（TTS）
+# Supported vendors: openai, google, anthropic, grok, qwen, custom / 支持厂商：openai、google、anthropic、grok、qwen、custom
+# Native adapters: google / 原生适配：google
+# OpenAI-compatible adapters: openai, anthropic, grok, qwen, custom / 兼容接口：openai、anthropic、grok、qwen、custom
+[audio_synthesize]
+default_vendor = "openai"
+default_model = "gpt-4o-mini-tts"
+# model priority: request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+openai_models = ["gpt-4o-mini-tts", "gpt-4o-realtime-preview"]
+google_models = ["gemini-2.5-flash-preview-tts"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["qwen-tts-latest"]
+custom_models = []
+models = ["gpt-4o-mini-tts"]
+default_voice = "nova"
+default_format = "opus"
+default_output_dir = "audio/download"
+max_concurrency = 1
+max_input_chars = 4000
+timeout_seconds = 60
+allow_compat_adapters = false
+
+# Audio transcribe (STT) / 语音转写（STT）
+# Supported vendors: openai, google, anthropic, grok, qwen, custom / 支持厂商：openai、google、anthropic、grok、qwen、custom
+# Native adapters: google / 原生适配：google
+# OpenAI-compatible adapters: openai, anthropic, grok, qwen, custom / 兼容接口：openai、anthropic、grok、qwen、custom
+[audio_transcribe]
+default_vendor = "openai"
+default_model = "whisper-1"
+# model priority: request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+openai_models = ["whisper-1", "gpt-4o-mini-transcribe"]
+google_models = ["gemini-2.5-flash"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["qwen-audio-asr-latest"]
+custom_models = []
+models = ["whisper-1"]
+max_concurrency = 1
+max_input_bytes = 26214400
+timeout_seconds = 90
+allow_compat_adapters = false

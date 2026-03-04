@@ -1,70 +1,63 @@
+[binance]
+api_key = "REDACTED_API_KEY"
+api_secret = "REDACTED_API_SECRET"
+base_url = "https://api.binance.com"
+enabled = true
+recv_window = 5000
+
 [crypto]
-# default exchange for quote/trade/order actions: cextest|binance|okx|coingecko
-default_exchange = "cextest"
-# execution_mode is used when action does not explicitly set exchange.
-execution_mode = "cextest"
-# i18n language for crypto skill messages. e.g. zh-CN / en-US
-language = "zh-CN"
-# optional override path relative to workspace root.
-# i18n_path = "configs/i18n/crypto.zh-CN.toml"
-timeout_seconds = 20
-# keep true in production to require explicit confirm=true for trade_submit.
-require_explicit_send = true
-# hard risk cap per order (USD notional). Set small value first.
-max_notional_usd = 1000
-allowed_exchanges = ["cextest", "paper", "binance", "okx", "coingecko"]
-allowed_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-blocked_actions = []
-paper_state_path = "data/crypto-paper-orders.jsonl"
-# price monitor defaults (price_alert_check)
-alert_default_window_minutes = 15
 alert_default_threshold_pct = 5.0
+alert_default_window_minutes = 15
 alert_max_window_minutes = 240
-# query API endpoints used by crypto skill (configurable)
-btc_onchain_fees_api_url = "https://mempool.space/api/v1/fees/recommended"
-eth_onchain_stats_api_url = "https://api.blockchair.com/ethereum/stats"
-# supports {ids} placeholder; if omitted, ids query will be auto-appended
-coingecko_simple_price_api_url = "https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true"
-gateio_quote_ticker_api_path = "/api/v4/spot/tickers?currency_pair={currency_pair}"
-coinbase_quote_ticker_api_path = "/products/{product_id}/ticker"
-kraken_quote_ticker_api_path = "/0/public/Ticker?pair={pair}"
-gateio_book_ticker_api_path = "/api/v4/spot/tickers?currency_pair={currency_pair}"
-coinbase_book_ticker_api_path = "/products/{product_id}/ticker"
-kraken_book_ticker_api_path = "/0/public/Ticker?pair={pair}"
-# exchange query API paths (supports placeholders: {symbol}, {inst_id})
+allowed_exchanges = [
+    "binance",
+    "okx",
+    "coingecko",
+]
+allowed_symbols = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "DOGEUSDT",
+]
+binance_book_ticker_api_path = "/api/v3/ticker/bookTicker?symbol={symbol}"
 binance_quote_24hr_api_path = "/api/v3/ticker/24hr?symbol={symbol}"
 binance_quote_price_api_path = "/api/v3/ticker/price?symbol={symbol}"
-binance_book_ticker_api_path = "/api/v3/ticker/bookTicker?symbol={symbol}"
-okx_market_ticker_api_path = "/api/v5/market/ticker?instId={inst_id}"
-# ethereum address query APIs (supports placeholders: {address}, {contract}, {limit})
+blocked_actions = []
+btc_onchain_fees_api_url = "https://mempool.space/api/v1/fees/recommended"
+coinbase_book_ticker_api_path = "/products/{product_id}/ticker"
+coinbase_quote_ticker_api_path = "/products/{product_id}/ticker"
+coingecko_simple_price_api_url = "https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true"
+default_exchange = "binance"
 eth_address_native_balance_api_url = "https://eth.blockscout.com/api?module=account&action=balance&address={address}"
 eth_address_token_balance_api_url = "https://eth.blockscout.com/api?module=account&action=tokenbalance&contractaddress={contract}&address={address}"
 eth_address_tx_list_api_url = "https://eth.blockscout.com/api?module=account&action=txlist&address={address}&sort=desc&offset={limit}"
+eth_onchain_stats_api_url = "https://api.blockchair.com/ethereum/stats"
+execution_mode = "binance"
+gateio_book_ticker_api_path = "/api/v4/spot/tickers?currency_pair={currency_pair}"
+gateio_quote_ticker_api_path = "/api/v4/spot/tickers?currency_pair={currency_pair}"
+kraken_book_ticker_api_path = "/0/public/Ticker?pair={pair}"
+kraken_quote_ticker_api_path = "/0/public/Ticker?pair={pair}"
+language = "zh-CN"
+max_notional_usd = 1000
+okx_market_ticker_api_path = "/api/v5/market/ticker?instId={inst_id}"
+require_explicit_send = true
+timeout_seconds = 20
 
 [crypto.eth_token_contracts]
-usdt = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-usdc = "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 dai = "0x6B175474E89094C44Da98b954EedeAC495271d0F"
+usdc = "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+usdt = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
 
 [crypto.eth_token_decimals]
-usdt = 6
-usdc = 6
 dai = 18
-
-[binance]
-# set true only after api_key/api_secret are filled and permission-scoped.
-enabled = false
-base_url = "https://api.binance.com"
-api_key = "REPLACE_ME_BINANCE_API_KEY"
-api_secret = "REPLACE_ME_BINANCE_API_SECRET"
-recv_window = 5000
+usdc = 6
+usdt = 6
 
 [okx]
-# set true only after api_key/api_secret/passphrase are filled.
-enabled = false
+api_key = "REDACTED_API_KEY"
+api_secret = "REDACTED_API_SECRET"
 base_url = "https://www.okx.com"
-api_key = "REPLACE_ME_OKX_API_KEY"
-api_secret = "REPLACE_ME_OKX_API_SECRET"
-passphrase = "REPLACE_ME_OKX_PASSPHRASE"
-# Set true for demo trading environment with production endpoint.
+enabled = false
+passphrase = "REDACTED_PASSPHRASE"
 simulated = true

@@ -38,7 +38,7 @@ PID_DIR="$SCRIPT_DIR/.pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 # Optional args:
-#   ./start-all.sh <vendor(openai|google|anthropic|grok)> [model_override] [release|debug] [channels]
+#   ./start-all.sh <vendor(openai|google|anthropic|grok|qwen|custom)> [model_override] [release|debug] [channels]
 # channels:
 #   telegram | whatsapp_web | both | whatsapp_cloud | all
 PROVIDER_OVERRIDE="${1:-${RUSTCLAW_PROVIDER_OVERRIDE:-}}"
@@ -210,7 +210,7 @@ if force or (not isinstance(admins, list) or len(admins) == 0):
             telegram_text = set_key_in_section(telegram_text, "telegram", "admins", f"[{admin_raw}]")
             telegram_changed = True
 
-vendors = ["openai", "google", "anthropic", "grok"]
+vendors = ["openai", "google", "anthropic", "grok", "qwen", "custom"]
 available_vendors = [v for v in vendors if isinstance(get_nested(cfg, "llm", v, default=None), dict)]
 if not available_vendors:
     raise SystemExit(0)

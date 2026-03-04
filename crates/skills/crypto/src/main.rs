@@ -69,8 +69,6 @@ struct CryptoConfig {
     #[serde(default)]
     blocked_actions: Vec<String>,
     #[serde(default)]
-    paper_state_path: Option<String>,
-    #[serde(default)]
     language: Option<String>,
     #[serde(default)]
     i18n_path: Option<String>,
@@ -226,20 +224,6 @@ struct OrderEvent {
     status: String,
     client_order_id: Option<String>,
     reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct OrderState {
-    order_id: String,
-    exchange: String,
-    symbol: String,
-    side: String,
-    order_type: String,
-    qty: f64,
-    price: Option<f64>,
-    notional_usd: f64,
-    status: String,
-    updated_ts: u64,
 }
 
 fn tr(key: &str) -> String {
@@ -482,7 +466,7 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(&cfg, &workspace_root, req.args) {
+            Ok(req) => match execute(&cfg, req.args) {
                 Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
@@ -512,7 +496,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(String, Value), String> {
+fn execute(cfg: &RootConfig, args: Value) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| tr("crypto.err.args_object"))?;
@@ -560,10 +544,10 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         "price_alert_check" => handle_price_alert_check(&client, cfg, obj),
         "onchain" => handle_onchain(&client, cfg, obj),
         "trade_preview" => handle_trade_preview(&client, cfg, obj),
-        "trade_submit" => handle_trade_submit(&client, cfg, workspace_root, obj),
-        "order_status" => handle_order_status(&client, cfg, workspace_root, obj),
-        "cancel_order" => handle_cancel_order(&client, cfg, workspace_root, obj),
-        "positions" => handle_positions(&client, cfg, workspace_root, obj),
+        "trade_submit" => handle_trade_submit(&client, cfg, obj),
+        "order_status" => handle_order_status(&client, cfg, obj),
+        "cancel_order" => handle_cancel_order(&client, cfg, obj),
+        "positions" => handle_positions(&client, cfg, obj),
         _ => Err(tr("crypto.err.unsupported_action")),
     }
 }
@@ -1396,13 +1380,11 @@ fn handle_trade_preview(
 fn handle_trade_submit(
     client: &Client,
     cfg: &RootConfig,
-    workspace_root: &Path,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<(String, Value), String> {
     let trade = parse_trade_input(obj, cfg)?;
     let checks = risk_checks(client, cfg, &trade, true)?;
     let event = match trade.exchange.as_str() {
-        "cextest" => submit_paper_order(client, cfg, workspace_root, &trade)?,
         "binance" => submit_binance_order(client, cfg, &trade)?,
         "okx" => submit_okx_order(client, cfg, &trade)?,
         other => return Err(tr_with("crypto.err.unsupported_execution_exchange", &[("exchange", other)])),
@@ -1425,12 +1407,10 @@ fn handle_trade_submit(
 fn handle_order_status(
     client: &Client,
     cfg: &RootConfig,
-    workspace_root: &Path,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<(String, Value), String> {
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
     match exchange.as_str() {
-        "cextest" => handle_order_status_paper(cfg, workspace_root, obj),
         "binance" => handle_order_status_binance(client, cfg, obj),
         "okx" => handle_order_status_okx(client, cfg, obj),
         _ => Err(tr_with("crypto.err.unsupported_exchange_for_order_status", &[("exchange", &exchange)])),
@@ -1440,12 +1420,10 @@ fn handle_order_status(
 fn handle_cancel_order(
     client: &Client,
     cfg: &RootConfig,
-    workspace_root: &Path,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<(String, Value), String> {
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
     match exchange.as_str() {
-        "cextest" => handle_cancel_order_paper(cfg, workspace_root, obj),
         "binance" => handle_cancel_order_binance(client, cfg, obj),
         "okx" => handle_cancel_order_okx(client, cfg, obj),
         _ => Err(tr_with("crypto.err.unsupported_exchange_for_cancel_order", &[("exchange", &exchange)])),
@@ -1455,125 +1433,14 @@ fn handle_cancel_order(
 fn handle_positions(
     client: &Client,
     cfg: &RootConfig,
-    workspace_root: &Path,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<(String, Value), String> {
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
     match exchange.as_str() {
-        "cextest" => handle_positions_paper(cfg, workspace_root, obj),
         "binance" => handle_positions_binance(client, cfg),
         "okx" => handle_positions_okx(client, cfg),
         _ => Err(tr_with("crypto.err.unsupported_exchange_for_positions", &[("exchange", &exchange)])),
     }
-}
-
-fn handle_order_status_paper(
-    cfg: &RootConfig,
-    workspace_root: &Path,
-    obj: &serde_json::Map<String, Value>,
-) -> Result<(String, Value), String> {
-    let order_id = obj.get("order_id").and_then(|v| v.as_str()).map(str::to_string);
-    let orders = paper_order_states(cfg, workspace_root)?;
-    if let Some(id) = order_id {
-        let state = orders
-            .into_iter()
-            .find(|o| o.order_id == id)
-            .ok_or_else(|| tr_with("crypto.err.order_not_found", &[("order_id", &id)]))?;
-        let text = format!(
-            "order_status {} {} {} qty={} status={}",
-            state.order_id, state.symbol, state.side, state.qty, state.status
-        );
-        return Ok((text, json!({"action":"order_status","order":state})));
-    }
-    let latest = orders.iter().max_by_key(|x| x.updated_ts).cloned();
-    let text = if let Some(v) = &latest {
-        format!("latest_order {} {} status={}", v.order_id, v.symbol, v.status)
-    } else {
-        tr("crypto.msg.no_orders_yet")
-    };
-    Ok((text, json!({"action":"order_status","orders":orders})))
-}
-
-fn handle_cancel_order_paper(
-    cfg: &RootConfig,
-    workspace_root: &Path,
-    obj: &serde_json::Map<String, Value>,
-) -> Result<(String, Value), String> {
-    let order_id = obj
-        .get("order_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| tr("crypto.err.order_id_required"))?;
-    let state = paper_order_states(cfg, workspace_root)?
-        .into_iter()
-        .find(|v| v.order_id == order_id)
-        .ok_or_else(|| tr_with("crypto.err.order_not_found", &[("order_id", order_id)]))?;
-    if state.status != "NEW" {
-        return Err(tr_with(
-            "crypto.err.order_cannot_cancel_from_status",
-            &[("status", &state.status)],
-        ));
-    }
-    let cancel_event = OrderEvent {
-        event: "cancel".to_string(),
-        order_id: state.order_id.clone(),
-        ts: now_ts(),
-        exchange: state.exchange.clone(),
-        symbol: state.symbol.clone(),
-        side: state.side.clone(),
-        order_type: state.order_type.clone(),
-        qty: state.qty,
-        price: state.price,
-        notional_usd: state.notional_usd,
-        status: "CANCELED".to_string(),
-        client_order_id: None,
-        reason: Some("user_cancel".to_string()),
-    };
-    append_paper_event(cfg, workspace_root, &cancel_event)?;
-    Ok((
-        format!("order_cancelled {}", state.order_id),
-        json!({"action":"cancel_order","order":cancel_event}),
-    ))
-}
-
-fn handle_positions_paper(
-    cfg: &RootConfig,
-    workspace_root: &Path,
-    obj: &serde_json::Map<String, Value>,
-) -> Result<(String, Value), String> {
-    let exchange_filter = obj
-        .get("exchange")
-        .and_then(|v| v.as_str())
-        .map(|v| v.to_ascii_lowercase());
-    let mut net: HashMap<String, f64> = HashMap::new();
-    for o in paper_order_states(cfg, workspace_root)? {
-        if o.status != "FILLED" {
-            continue;
-        }
-        if let Some(ex) = &exchange_filter {
-            if o.exchange.to_ascii_lowercase() != *ex {
-                continue;
-            }
-        }
-        let e = net.entry(o.symbol).or_insert(0.0);
-        if o.side.eq_ignore_ascii_case("buy") {
-            *e += o.qty;
-        } else {
-            *e -= o.qty;
-        }
-    }
-    let mut positions = Vec::new();
-    let mut lines = Vec::new();
-    for (symbol, qty) in net {
-        lines.push(format!("{symbol} net_qty={qty:.8}"));
-        positions.push(json!({"symbol":symbol,"net_qty":qty}));
-    }
-    if lines.is_empty() {
-        lines.push(tr("crypto.msg.no_filled_positions"));
-    }
-    Ok((
-        lines.join("\n"),
-        json!({"action":"positions","positions":positions}),
-    ))
 }
 
 fn handle_order_status_binance(
@@ -1581,15 +1448,29 @@ fn handle_order_status_binance(
     cfg: &RootConfig,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<(String, Value), String> {
-    let symbol = obj
-        .get("symbol")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| tr("crypto.err.symbol_required_for_binance_order_status"))?;
     let order_id = obj.get("order_id").and_then(|v| v.as_str());
     let client_order_id = obj.get("client_order_id").and_then(|v| v.as_str());
     if order_id.is_none() && client_order_id.is_none() {
         return Err(tr("crypto.err.order_or_client_order_id_required"));
     }
+    let Some(symbol) = obj.get("symbol").and_then(|v| v.as_str()) else {
+        let id_text = order_id.or(client_order_id).unwrap_or("unknown");
+        let text = format!(
+            "order_status skipped {}: missing symbol (binance requires symbol for query)",
+            id_text
+        );
+        return Ok((
+            text,
+            json!({
+                "action":"order_status",
+                "exchange":"binance",
+                "skipped": true,
+                "reason": "symbol_required",
+                "order_id": order_id,
+                "client_order_id": client_order_id
+            }),
+        ));
+    };
     let mut params = vec![("symbol", normalize_symbol(symbol))];
     if let Some(v) = order_id {
         params.push(("orderId", v.to_string()));
@@ -1675,15 +1556,29 @@ fn handle_order_status_okx(
     cfg: &RootConfig,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<(String, Value), String> {
-    let symbol = obj
-        .get("symbol")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| tr("crypto.err.symbol_required_for_okx_order_status"))?;
     let order_id = obj.get("order_id").and_then(|v| v.as_str());
     let client_order_id = obj.get("client_order_id").and_then(|v| v.as_str());
     if order_id.is_none() && client_order_id.is_none() {
         return Err(tr("crypto.err.order_or_client_order_id_required"));
     }
+    let Some(symbol) = obj.get("symbol").and_then(|v| v.as_str()) else {
+        let id_text = order_id.or(client_order_id).unwrap_or("unknown");
+        let text = format!(
+            "order_status skipped {}: missing symbol (okx requires symbol for query)",
+            id_text
+        );
+        return Ok((
+            text,
+            json!({
+                "action":"order_status",
+                "exchange":"okx",
+                "skipped": true,
+                "reason": "symbol_required",
+                "order_id": order_id,
+                "client_order_id": client_order_id
+            }),
+        ));
+    };
     let mut q_parts = vec![format!("instId={}", encode(&to_okx_inst_id(symbol)))];
     if let Some(v) = order_id {
         q_parts.push(format!("ordId={}", encode(v)));
@@ -1843,6 +1738,17 @@ fn risk_checks(client: &Client, cfg: &RootConfig, trade: &TradeInput, for_submit
     if cfg.crypto.require_explicit_send.unwrap_or(true) && for_submit && !trade.confirm {
         return Err(tr("crypto.err.trade_submit_requires_confirm"));
     }
+    match trade.exchange.as_str() {
+        "binance" => {
+            ensure_binance_config(cfg)?;
+            checks.push(json!({"check":"exchange_api_config","ok":true,"exchange":"binance"}));
+        }
+        "okx" => {
+            ensure_okx_config(cfg)?;
+            checks.push(json!({"check":"exchange_api_config","ok":true,"exchange":"okx"}));
+        }
+        _ => {}
+    }
     if !cfg.crypto.allowed_exchanges.is_empty()
         && !cfg
             .crypto
@@ -1908,39 +1814,6 @@ fn resolve_base_qty(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Re
         return Err("invalid price for quote_qty_usd conversion".to_string());
     }
     Ok((quote / price).max(0.0))
-}
-
-fn submit_paper_order(
-    client: &Client,
-    cfg: &RootConfig,
-    workspace_root: &Path,
-    trade: &TradeInput,
-) -> Result<OrderEvent, String> {
-    let notional = estimate_notional_usd(client, cfg, trade)?;
-    let base_qty = resolve_base_qty(client, cfg, trade)?;
-    let order_id = format!("paper-{}", now_ts_ms());
-    let status = if trade.order_type == "market" {
-        "FILLED"
-    } else {
-        "NEW"
-    };
-    let event = OrderEvent {
-        event: "submit".to_string(),
-        order_id,
-        ts: now_ts(),
-        exchange: trade.exchange.clone(),
-        symbol: trade.symbol.clone(),
-        side: trade.side.clone(),
-        order_type: trade.order_type.clone(),
-        qty: base_qty,
-        price: trade.price,
-        notional_usd: notional,
-        status: status.to_string(),
-        client_order_id: trade.client_order_id.clone(),
-        reason: None,
-    };
-    append_paper_event(cfg, workspace_root, &event)?;
-    Ok(event)
 }
 
 fn submit_binance_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Result<OrderEvent, String> {
@@ -2065,74 +1938,13 @@ fn submit_okx_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Re
     })
 }
 
-fn append_paper_event(cfg: &RootConfig, workspace_root: &Path, event: &OrderEvent) -> Result<(), String> {
-    let path = paper_state_path(cfg, workspace_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| format!("create paper dir failed: {err}"))?;
-    }
-    let line = serde_json::to_string(event).map_err(|err| format!("serialize event failed: {err}"))?;
-    let mut fp = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|err| format!("open paper state failed: {err}"))?;
-    fp.write_all(format!("{line}\n").as_bytes())
-        .map_err(|err| format!("write paper state failed: {err}"))?;
-    Ok(())
-}
-
-fn paper_order_states(cfg: &RootConfig, workspace_root: &Path) -> Result<Vec<OrderState>, String> {
-    let path = paper_state_path(cfg, workspace_root);
-    let raw = match std::fs::read_to_string(path) {
-        Ok(v) => v,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(format!("read paper state failed: {err}")),
-    };
-    let mut map: HashMap<String, OrderState> = HashMap::new();
-    for line in raw.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let evt: OrderEvent = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let entry = map.entry(evt.order_id.clone()).or_insert(OrderState {
-            order_id: evt.order_id.clone(),
-            exchange: evt.exchange.clone(),
-            symbol: evt.symbol.clone(),
-            side: evt.side.clone(),
-            order_type: evt.order_type.clone(),
-            qty: evt.qty,
-            price: evt.price,
-            notional_usd: evt.notional_usd,
-            status: evt.status.clone(),
-            updated_ts: evt.ts,
-        });
-        entry.status = evt.status.clone();
-        entry.updated_ts = evt.ts;
-    }
-    Ok(map.into_values().collect())
-}
-
-fn paper_state_path(cfg: &RootConfig, workspace_root: &Path) -> PathBuf {
-    if let Some(path) = cfg.crypto.paper_state_path.as_deref() {
-        let p = Path::new(path);
-        if p.is_absolute() {
-            return p.to_path_buf();
-        }
-        return workspace_root.join(p);
-    }
-    workspace_root.join("data/crypto-paper-orders.jsonl")
-}
-
 fn fetch_quote(client: &Client, cfg: &RootConfig, symbol_input: &str, exchange_input: &str) -> Result<Quote, String> {
     let exchange = exchange_input.trim().to_ascii_lowercase();
     let symbol = normalize_symbol(symbol_input);
     match exchange.as_str() {
         "coingecko" => fetch_quote_from_coingecko(client, cfg, &symbol),
         "okx" => fetch_quote_from_okx(client, cfg, &symbol),
-        "binance" | "cextest" | "paper" => fetch_quote_from_binance(client, cfg, &symbol),
+        "binance" => fetch_quote_from_binance(client, cfg, &symbol),
         _ => fetch_quote_from_binance(client, cfg, &symbol)
             .or_else(|_| fetch_quote_from_okx(client, cfg, &symbol))
             .or_else(|_| fetch_quote_from_coingecko(client, cfg, &symbol)),
@@ -2997,13 +2809,10 @@ fn resolve_exchange(input: Option<&str>, cfg: &RootConfig) -> String {
     let raw = input
         .or(cfg.crypto.execution_mode.as_deref())
         .or(cfg.crypto.default_exchange.as_deref())
-        .unwrap_or("cextest")
+        .unwrap_or("binance")
         .trim()
         .to_ascii_lowercase();
-    match raw.as_str() {
-        "paper" => "cextest".to_string(),
-        _ => raw,
-    }
+    raw
 }
 
 fn symbol_to_coingecko_id(symbol: &str) -> Option<&'static str> {

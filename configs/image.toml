@@ -1,0 +1,73 @@
+# Image edit (in-place image modification) / 图像编辑（原图修改）
+# Supported vendors (current): openai, google, anthropic, grok, qwen, custom / 当前支持厂商：openai、google、anthropic、grok、qwen、custom
+# Native adapters: openai, google / 原生适配：openai、google
+# OpenAI-compatible required: anthropic, grok, qwen, custom / anthropic、grok、qwen、custom 需提供 OpenAI 兼容图像编辑接口
+# Compatibility switch: image_edit.allow_compat_adapters (default false) / 兼容开关：image_edit.allow_compat_adapters（默认 false）
+[image_edit]
+default_model = "gpt-image-1"
+# model priority: request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+openai_models = ["gpt-image-1"]
+google_models = ["gemini-2.5-flash-image-preview"]
+# anthropic/grok here are for OpenAI-compatible image endpoints only (not native adapters)
+# anthropic/grok 这里仅用于 OpenAI 兼容图像接口（非原生适配）
+anthropic_models = []
+grok_models = []
+# qwen via OpenAI-compatible image endpoint (replace with your actually enabled models)
+# qwen 通过 OpenAI 兼容图像接口调用（请替换为你账号实际开通的模型）
+# first = preferred default / 第一个为优先默认
+qwen_models = ["qwen-image-edit", "wanx2.1-imageedit"]
+models = ["gpt-image-1"]
+default_output_dir = "image/download"
+default_vendor = "openai"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+allow_compat_adapters = false
+
+# Image generation (text to image) / 图像生成（文生图）
+# Supported vendors (current): openai, google, anthropic, grok, qwen, custom / 当前支持厂商：openai、google、anthropic、grok、qwen、custom
+# Native adapters: openai, google / 原生适配：openai、google
+# OpenAI-compatible required: anthropic, grok, qwen, custom / anthropic、grok、qwen、custom 需提供 OpenAI 兼容文生图接口
+# Compatibility switch: image_generation.allow_compat_adapters (default false) / 兼容开关：image_generation.allow_compat_adapters（默认 false）
+[image_generation]
+default_model = "gpt-image-1"
+# model priority: request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+openai_models = ["gpt-image-1"]
+google_models = ["gemini-2.5-flash-image-preview"]
+# anthropic/grok here are for OpenAI-compatible image endpoints only (not native adapters)
+# anthropic/grok 这里仅用于 OpenAI 兼容图像接口（非原生适配）
+anthropic_models = []
+grok_models = []
+# qwen via OpenAI-compatible image endpoint (replace with your actually enabled models)
+# qwen 通过 OpenAI 兼容图像接口调用（请替换为你账号实际开通的模型）
+# first = preferred default / 第一个为优先默认
+qwen_models = ["qwen-image", "wanx2.1-t2i-turbo"]
+models = ["gpt-image-1"]
+default_output_dir = "image/download"
+default_vendor = "openai"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+allow_compat_adapters = false
+
+# Image vision (image understanding) / 图像理解（视觉分析）
+# Supported vendors (current): openai, google, anthropic, qwen / 当前支持厂商：openai、google、anthropic、qwen
+# This skill has a unified input/output contract, but internally uses vendor-native adapters. / 该技能对外参数与返回是统一的，但内部走各厂商原生适配器。
+# Selection priority: request.vendor > image_vision.default_vendor > llm.selected_vendor / 厂商选择优先级：请求 vendor > image_vision.default_vendor > llm.selected_vendor
+# Model priority: request.model > image_vision.default_model > image_vision.<vendor>_models[0] > image_vision.models[0] > llm.<vendor>.model / 模型优先级：请求 model > image_vision.default_model > image_vision.<vendor>_models[0] > image_vision.models[0] > llm.<vendor>.model
+[image_vision]
+default_model = "gpt-4o-mini"
+openai_models = ["gpt-4o-mini", "gpt-4o"]
+google_models = ["gemini-2.5-flash", "gemini-2.5-pro"]
+anthropic_models = ["claude-sonnet-4-6"]
+# qwen vision models (first = preferred default) / qwen 视觉模型（第一个为优先默认）
+qwen_models = ["qwen-vl-max-latest", "qwen-vl-plus-latest"]
+models = ["gpt-4o-mini", "gpt-4o"]
+default_output_dir = "image/upload"
+default_vendor = "openai"
+max_concurrency = 1
+max_images = 6
+max_input_bytes = 10485760
+timeout_seconds = 90

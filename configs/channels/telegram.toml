@@ -9,7 +9,6 @@ bot_token = "REDACTED_BOT"
 i18n_path = "configs/i18n/telegramd.zh-CN.toml"
 language = "zh-CN"
 max_audio_input_bytes = 26214400
-quick_result_wait_seconds = 10
 voice_mode_nl_intent_enabled = false
 voice_reply_mode = "voice"
 
@@ -31,4 +30,3 @@ admins = []
 allowlist = []
 language = "zh-CN"
 i18n_path = "configs/i18n/telegramd.zh-CN.toml"
-quick_result_wait_seconds = 3

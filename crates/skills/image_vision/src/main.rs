@@ -41,6 +41,8 @@ struct LlmConfig {
     google: Option<VendorConfig>,
     #[serde(default)]
     anthropic: Option<VendorConfig>,
+    #[serde(default)]
+    qwen: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -59,6 +61,16 @@ struct ImageSkillConfig {
     #[serde(default)]
     default_model: Option<String>,
     #[serde(default)]
+    models: Option<Vec<String>>,
+    #[serde(default)]
+    openai_models: Option<Vec<String>>,
+    #[serde(default)]
+    google_models: Option<Vec<String>>,
+    #[serde(default)]
+    anthropic_models: Option<Vec<String>>,
+    #[serde(default)]
+    qwen_models: Option<Vec<String>>,
+    #[serde(default)]
     timeout_seconds: Option<u64>,
     #[serde(default)]
     max_images: Option<usize>,
@@ -71,6 +83,7 @@ enum VendorKind {
     OpenAI,
     Google,
     Anthropic,
+    Qwen,
 }
 
 #[derive(Debug, Clone)]
@@ -177,10 +190,15 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
 
     let mut last_err = String::new();
     for vendor in vendors {
+        let config_default_model = first_model_candidate(
+            cfg.image_vision.default_model.as_deref(),
+            vendor_models(&cfg.image_vision, vendor),
+            cfg.image_vision.models.as_ref(),
+        );
         match call_vendor_vision(
             vendor,
             cfg,
-            requested_model.or(cfg.image_vision.default_model.as_deref()),
+            requested_model.or(config_default_model),
             timeout_seconds,
             &prompt,
             &images,
@@ -200,6 +218,30 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     }
 
     Err(format!("all providers failed: {last_err}"))
+}
+
+fn first_model_candidate<'a>(
+    default_model: Option<&'a str>,
+    vendor_models: Option<&'a Vec<String>>,
+    models: Option<&'a Vec<String>>,
+) -> Option<&'a str> {
+    if let Some(v) = default_model.map(str::trim).filter(|v| !v.is_empty()) {
+        return Some(v);
+    }
+    if let Some(v) = vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty())) {
+        return Some(v);
+    }
+    models
+        .and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+}
+
+fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'a Vec<String>> {
+    match vendor {
+        VendorKind::OpenAI => cfg.openai_models.as_ref(),
+        VendorKind::Google => cfg.google_models.as_ref(),
+        VendorKind::Anthropic => cfg.anthropic_models.as_ref(),
+        VendorKind::Qwen => cfg.qwen_models.as_ref(),
+    }
 }
 
 fn parse_action(obj: &Map<String, Value>) -> Result<String, String> {
@@ -440,6 +482,21 @@ fn call_vendor_vision(
                 .build()
                 .map_err(|err| format!("build anthropic client failed: {err}"))?;
             let text = anthropic_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            Ok((text, model))
+        }
+        VendorKind::Qwen => {
+            let vcfg = cfg
+                .llm
+                .qwen
+                .as_ref()
+                .ok_or_else(|| "qwen config missing".to_string())?;
+            check_api_key("qwen", &vcfg.api_key)?;
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .build()
+                .map_err(|err| format!("build qwen client failed: {err}"))?;
+            let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
             Ok((text, model))
         }
     }
@@ -684,6 +741,7 @@ fn vendor_order(
         Some("openai"),
         Some("google"),
         Some("anthropic"),
+        Some("qwen"),
     ]
     .into_iter()
     .flatten()
@@ -702,6 +760,7 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "openai" => Some(VendorKind::OpenAI),
         "google" | "gemini" => Some(VendorKind::Google),
         "anthropic" | "claude" => Some(VendorKind::Anthropic),
+        "qwen" => Some(VendorKind::Qwen),
         _ => None,
     }
 }
@@ -711,6 +770,7 @@ fn vendor_name(v: VendorKind) -> &'static str {
         VendorKind::OpenAI => "openai",
         VendorKind::Google => "google",
         VendorKind::Anthropic => "anthropic",
+        VendorKind::Qwen => "qwen",
     }
 }
 
@@ -784,6 +844,7 @@ mod tests {
         assert_eq!(parse_vendor("openai"), Some(VendorKind::OpenAI));
         assert_eq!(parse_vendor("gemini"), Some(VendorKind::Google));
         assert_eq!(parse_vendor("claude"), Some(VendorKind::Anthropic));
+        assert_eq!(parse_vendor("qwen"), Some(VendorKind::Qwen));
     }
 
     #[test]

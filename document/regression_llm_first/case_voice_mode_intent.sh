@@ -21,26 +21,60 @@ if not raw:
     print("")
     raise SystemExit(0)
 
-def parse_label(text: str):
-    text = text.strip().lower()
-    if not text:
-        return None
+CONF_THRESHOLD = 0.55
+
+def parse_mode_token(text: str):
+    if text in {"voice", "text", "both", "reset", "show", "none"}:
+        return text
+    return None
+
+def parse_json_mode_and_confidence(text: str):
+    def from_obj(obj):
+        if not isinstance(obj, dict):
+            return None
+        mode = obj.get("mode")
+        if not isinstance(mode, str):
+            return None
+        mode = parse_mode_token(mode.strip().lower())
+        if not mode:
+            return None
+        conf = obj.get("confidence")
+        if isinstance(conf, (int, float)):
+            conf = max(0.0, min(1.0, float(conf)))
+        else:
+            conf = None
+        return mode, conf
+
     try:
         v = json.loads(text)
-        if isinstance(v, dict) and isinstance(v.get("mode"), str):
-            return parse_label(v["mode"])
+        out = from_obj(v)
+        if out:
+            return out
     except Exception:
         pass
+
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:
         part = text[start:end + 1]
         try:
             v = json.loads(part)
-            if isinstance(v, dict) and isinstance(v.get("mode"), str):
-                return parse_label(v["mode"])
+            out = from_obj(v)
+            if out:
+                return out
         except Exception:
             pass
+    return None
+
+def parse_label(text: str):
+    text = text.strip().lower()
+    if not text:
+        return None
+    strict = parse_json_mode_and_confidence(text)
+    if strict:
+        mode, confidence = strict
+        if confidence is not None and confidence >= CONF_THRESHOLD:
+            return mode
     allowed = {"voice", "text", "both", "reset", "show", "none"}
     if text in allowed:
         return text

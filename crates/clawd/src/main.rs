@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::{OpenOptions, create_dir_all};
 use std::io::Write as IoWrite;
 use std::hash::{Hash, Hasher};
@@ -13,10 +13,6 @@ use axum::{Json, Router};
 use claw_core::config::{
     AppConfig, CommandIntentConfig, LlmProviderConfig, MaintenanceConfig, MemoryConfig, PersonaConfig,
     RoutingConfig, ScheduleConfig, ToolsConfig,
-};
-use claw_core::hard_rules::trade::{
-    CompiledTradeRules, is_no_confirmation, is_yes_confirmation, load_compiled_trade_rules,
-    parse_trade_preview_submit_args,
 };
 use claw_core::types::{
     ApiResponse, ChannelKind, HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse,
@@ -56,8 +52,6 @@ const MAX_READ_FILE_BYTES: usize = 64 * 1024;
 const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
 const MODEL_IO_LOG_MAX_CHARS: usize = 16000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
-const CRYPTO_CONFIRM_TTL_SECONDS: u64 = 600;
-const TRADE_RULES_PATH: &str = "configs/command_intent/trade_rules.toml";
 const LOG_CALL_WRAP: &str = "########################################################";
 const PRICE_ALERT_TRIGGERED_TAG: &str = "[PRICE_ALERT_TRIGGERED]";
 const PRICE_ALERT_NOT_TRIGGERED_TAG: &str = "[PRICE_ALERT_NOT_TRIGGERED]";
@@ -65,8 +59,6 @@ pub(crate) const AGENT_RUNTIME_PROMPT_TEMPLATE: &str = include_str!("../../../pr
 const CHAT_RESPONSE_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/chat_response_prompt.md");
 pub(crate) const COMMAND_FAILURE_SUGGEST_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/command_failure_suggest_prompt.md");
-const RESUME_INTENT_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/resume_intent_prompt.md");
 const RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/resume_continue_execute_prompt.md");
 const IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE: &str =
@@ -116,14 +108,6 @@ struct AppState {
     whatsapp_web_bridge_base_url: String,
     future_adapters_enabled: Arc<Vec<String>>,
     http_client: Client,
-    pending_crypto_confirms: Arc<Mutex<HashMap<String, PendingCryptoConfirm>>>,
-    trade_rules: Arc<CompiledTradeRules>,
-}
-
-#[derive(Debug, Clone)]
-struct PendingCryptoConfirm {
-    submit_args: Value,
-    created_ts: u64,
 }
 
 #[derive(Clone)]
@@ -958,7 +942,6 @@ async fn main() -> anyhow::Result<()> {
     let memory_runtime = load_memory_runtime_config(&workspace_root, &config.memory);
     let command_intent = load_command_intent_runtime(&workspace_root, &config.command_intent);
     let schedule = load_schedule_runtime(&workspace_root, &config.schedule);
-    let trade_rules = load_compiled_trade_rules(TRADE_RULES_PATH);
     let routing = config.routing.clone();
     let persona_prompt = load_persona_prompt(&workspace_root, &config.persona);
     let mut preferred_runner = workspace_root.join("target/release/skill-runner");
@@ -1072,8 +1055,6 @@ async fn main() -> anyhow::Result<()> {
                 .collect(),
         ),
         http_client: Client::new(),
-        pending_crypto_confirms: Arc::new(Mutex::new(HashMap::new())),
-        trade_rules: Arc::new(trade_rules),
     };
 
     spawn_worker(
@@ -1483,8 +1464,9 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     );
                     info!("{}", LOG_CALL_WRAP);
                     info!(
-                        "task_call_end task_id={} kind=ask status=success path=schedule_direct",
-                        task.task_id
+                        "task_call_end task_id={} kind=ask status=success path=schedule_direct result={}",
+                        task.task_id,
+                        truncate_for_log(&schedule_reply)
                     );
                     info!("{}", LOG_CALL_WRAP);
                     return Ok(());
@@ -1497,88 +1479,6 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 task.chat_id,
                 truncate_for_log(&runtime_prompt)
             );
-            if source != "resume_continue_execute" {
-                if let Some(hard_route_result) =
-                    try_handle_crypto_trade_hard_route(state, &task, &runtime_prompt).await
-                {
-                    match hard_route_result {
-                        Ok(answer) => {
-                            let answer_text = answer.text;
-                            let mut result = json!({ "text": answer_text.clone() });
-                            if has_pending_crypto_confirm(state, task.user_id, task.chat_id) {
-                                result["requires_confirmation"] =
-                                    Value::String("crypto_trade".to_string());
-                            }
-                            repo::update_task_success(state, &task.task_id, &result.to_string())?;
-                            maybe_notify_schedule_result(state, &task, &payload, true, &answer_text).await;
-                            let _ = memory::service::insert_memory(
-                                state,
-                                task.user_id,
-                                task.chat_id,
-                                "user",
-                                prompt,
-                                state.memory.item_max_chars.max(256),
-                            );
-                            let _ = memory::service::insert_memory(
-                                state,
-                                task.user_id,
-                                task.chat_id,
-                                "assistant",
-                                &answer_text,
-                                state.memory.item_max_chars.max(256),
-                            );
-                            info!("{}", LOG_CALL_WRAP);
-                            info!(
-                                "task_call_end task_id={} kind=ask status=success path=crypto_hard_route",
-                                task.task_id
-                            );
-                            info!("{}", LOG_CALL_WRAP);
-                            return Ok(());
-                        }
-                        Err(err_text) => {
-                            if let Some((user_error, resume_ctx)) = parse_resume_context_error(&err_text) {
-                                let resume_payload = resume_ctx
-                                    .get("resume_context")
-                                    .cloned()
-                                    .unwrap_or(resume_ctx);
-                                let result = json!({
-                                    "text": user_error.clone(),
-                                    "resume_context": resume_payload,
-                                });
-                                repo::update_task_failure_with_result(
-                                    state,
-                                    &task.task_id,
-                                    &result.to_string(),
-                                    &user_error,
-                                )?;
-                                maybe_notify_schedule_result(state, &task, &payload, false, &user_error).await;
-                                info!("{}", LOG_CALL_WRAP);
-                                info!(
-                                    "task_call_end task_id={} kind=ask status=failed path=crypto_hard_route error={} resume_context=true",
-                                    task.task_id,
-                                    truncate_for_log(&user_error)
-                                );
-                                info!("{}", LOG_CALL_WRAP);
-                                return Ok(());
-                            }
-                            error!(
-                                "worker_once: ask hard_route task_id={} failed: {}",
-                                task.task_id, err_text
-                            );
-                            repo::update_task_failure(state, &task.task_id, &err_text)?;
-                            maybe_notify_schedule_result(state, &task, &payload, false, &err_text).await;
-                            info!("{}", LOG_CALL_WRAP);
-                            info!(
-                                "task_call_end task_id={} kind=ask status=failed path=crypto_hard_route error={}",
-                                task.task_id,
-                                truncate_for_log(&err_text)
-                            );
-                            info!("{}", LOG_CALL_WRAP);
-                            return Ok(());
-                        }
-                    }
-                }
-            }
             let context_resolution =
                 intent_router::resolve_user_request_with_context(state, &task, &runtime_prompt).await;
             let resolved_prompt = context_resolution.resolved_user_intent.clone();
@@ -1633,8 +1533,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let classifier_direct_mode = source == "voice_mode_intent_detect"
-                || source == "voice_mode_intent_detect_regression"
-                || source == "resume_intent_detect";
+                || source == "voice_mode_intent_detect_regression";
 
             let low_confidence = context_resolution.confidence.unwrap_or(0.0) < 0.6;
             let force_clarify = context_resolution.needs_clarify && low_confidence;
@@ -1642,20 +1541,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             let result = if classifier_direct_mode {
                 // Classifier-style sub-requests (like telegram voice mode intent detection)
                 // need raw label outputs, so bypass chat response wrapping.
-                let detect_prompt = if source == "resume_intent_detect" {
-                    let resume_user_text = payload
-                        .get("resume_user_text")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(prompt);
-                    let resume_context = payload
-                        .get("resume_context")
-                        .cloned()
-                        .unwrap_or_else(|| json!({}));
-                    build_resume_intent_detect_prompt(resume_user_text, &resume_context)
-                } else {
-                    resolved_prompt.clone()
-                };
-                llm_gateway::run_with_fallback(state, &task, &detect_prompt)
+                llm_gateway::run_with_fallback(state, &task, &resolved_prompt)
                     .await
                     .map(|s| AskReply::llm(s.trim().to_string()))
             } else if force_clarify {
@@ -1745,8 +1631,9 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     }
                     info!("{}", LOG_CALL_WRAP);
                     info!(
-                        "task_call_end task_id={} kind=ask status=success path=normal",
-                        task.task_id
+                        "task_call_end task_id={} kind=ask status=success path=normal result={}",
+                        task.task_id,
+                        truncate_for_log(&answer_text)
                     );
                     info!("{}", LOG_CALL_WRAP);
                 }
@@ -1851,9 +1738,10 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     );
                     info!("{}", LOG_CALL_WRAP);
                     info!(
-                        "task_call_end task_id={} kind=run_skill status=success skill={}",
+                        "task_call_end task_id={} kind=run_skill status=success skill={} result={}",
                         task.task_id,
-                        skill_name
+                        skill_name,
+                        truncate_for_log(&clean_text)
                     );
                     info!("{}", LOG_CALL_WRAP);
                 }
@@ -2943,15 +2831,6 @@ fn parse_resume_context_error(error_text: &str) -> Option<(String, Value)> {
     Some((user_error, value))
 }
 
-fn build_resume_intent_detect_prompt(user_text: &str, resume_context: &Value) -> String {
-    let ctx = serde_json::to_string_pretty(resume_context)
-        .unwrap_or_else(|_| resume_context.to_string());
-    format!(
-        "{template}\n\nUser message:\n{user_text}\n\nInterrupted task context JSON:\n{ctx}",
-        template = RESUME_INTENT_PROMPT_TEMPLATE
-    )
-}
-
 fn build_resume_continue_execute_prompt(payload: &Value, fallback_user_text: &str) -> String {
     let user_text = payload
         .get("resume_user_text")
@@ -3073,7 +2952,26 @@ pub(crate) fn append_act_plan_log(
 }
 
 pub(crate) fn agent_action_signature(action: &AgentAction) -> String {
-    serde_json::to_string(&agent_action_log_value(action)).unwrap_or_else(|_| "<action_sig_err>".to_string())
+    let normalized = stable_json_for_signature(&agent_action_log_value(action));
+    serde_json::to_string(&normalized).unwrap_or_else(|_| "<action_sig_err>".to_string())
+}
+
+fn stable_json_for_signature(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut sorted: BTreeMap<String, Value> = BTreeMap::new();
+            for (k, v) in map {
+                sorted.insert(k.clone(), stable_json_for_signature(v));
+            }
+            let mut out = serde_json::Map::new();
+            for (k, v) in sorted {
+                out.insert(k, v);
+            }
+            Value::Object(out)
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(stable_json_for_signature).collect()),
+        _ => value.clone(),
+    }
 }
 
 pub(crate) fn truncate_for_agent_trace(text: &str) -> String {
@@ -3724,127 +3622,6 @@ pub(crate) fn normalize_agent_action_value(value: Value) -> Result<Value, String
     }
 
     Ok(Value::Object(obj))
-}
-
-fn pending_crypto_confirm_key(user_id: i64, chat_id: i64) -> String {
-    format!("{user_id}:{chat_id}")
-}
-
-fn has_pending_crypto_confirm(state: &AppState, user_id: i64, chat_id: i64) -> bool {
-    let key = pending_crypto_confirm_key(user_id, chat_id);
-    state
-        .pending_crypto_confirms
-        .lock()
-        .ok()
-        .map(|m| m.contains_key(&key))
-        .unwrap_or(false)
-}
-
-fn cleanup_expired_crypto_confirms(state: &AppState, now: u64) {
-    if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
-        guard.retain(|_, v| now.saturating_sub(v.created_ts) <= CRYPTO_CONFIRM_TTL_SECONDS);
-    }
-}
-
-async fn try_handle_crypto_trade_hard_route(
-    state: &AppState,
-    task: &ClaimedTask,
-    prompt: &str,
-) -> Option<Result<AskReply, String>> {
-    let text = prompt.trim();
-    if text.is_empty() {
-        return None;
-    }
-
-    let now = now_ts_u64();
-    cleanup_expired_crypto_confirms(state, now);
-    let key = pending_crypto_confirm_key(task.user_id, task.chat_id);
-
-    let pending = state
-        .pending_crypto_confirms
-        .lock()
-        .ok()
-        .and_then(|m| m.get(&key).cloned());
-
-    if let Some(p) = pending {
-        if is_yes_confirmation(text, state.trade_rules.as_ref()) {
-            if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
-                guard.remove(&key);
-            }
-            let mut submit_args = p.submit_args;
-            if let Some(obj) = submit_args.as_object_mut() {
-                obj.insert("confirm".to_string(), Value::Bool(true));
-            }
-            let result = execution_adapters::run_skill(state, task, "crypto", submit_args).await;
-            return Some(match result {
-                Ok(out) => Ok(AskReply::non_llm(
-                    i18n_t_with_default(
-                        state,
-                        "clawd.msg.crypto_trade_confirmed",
-                        "Order confirmed and submitted.\n{out}",
-                    )
-                    .replace("{out}", &out),
-                )),
-                Err(err) => Err(format!(
-                    "{}{}",
-                    i18n_t_with_default(
-                        state,
-                        "clawd.msg.skill_exec_error_prefix",
-                        "Skill execution error: ",
-                    ),
-                    err
-                )),
-            });
-        }
-        if is_no_confirmation(text, state.trade_rules.as_ref()) {
-            if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
-                guard.remove(&key);
-            }
-            return Some(Ok(AskReply::non_llm(i18n_t_with_default(
-                state,
-                "clawd.msg.crypto_trade_canceled",
-                "This order request has been canceled and no trade will be executed.",
-            ))));
-        }
-    }
-
-    let Some((preview_args, submit_args)) =
-        parse_trade_preview_submit_args(text, state.trade_rules.as_ref())
-    else {
-        return None;
-    };
-
-    let preview_out = execution_adapters::run_skill(state, task, "crypto", preview_args).await;
-    Some(match preview_out {
-        Ok(out) => {
-            if let Ok(mut guard) = state.pending_crypto_confirms.lock() {
-                guard.insert(
-                    key,
-                    PendingCryptoConfirm {
-                        submit_args,
-                        created_ts: now,
-                    },
-                );
-            }
-            Ok(AskReply::non_llm(
-                i18n_t_with_default(
-                    state,
-                    "clawd.msg.crypto_trade_confirm_prompt",
-                    "{out}\n\nPlease confirm order placement: reply `yes`/`no`. Valid for 10 minutes.",
-                )
-                .replace("{out}", &out),
-            ))
-        }
-        Err(err) => Err(format!(
-            "{}{}",
-            i18n_t_with_default(
-                state,
-                "clawd.msg.skill_exec_error_prefix",
-                "Skill execution error: ",
-            ),
-            err
-        )),
-    })
 }
 
 pub(crate) fn canonical_skill_name(name: &str) -> &str {

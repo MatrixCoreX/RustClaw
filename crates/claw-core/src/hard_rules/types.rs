@@ -115,7 +115,7 @@ impl TradeRules {
             ],
             limit_keywords: vec!["limit".to_string(), "限价".to_string()],
             exchange_aliases,
-            default_exchange: "paper".to_string(),
+            default_exchange: "binance".to_string(),
             qty_patterns: vec![
                 r"(?i)(?:qty|数量|买入|买|卖出|卖)\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)".to_string(),
             ],

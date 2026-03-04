@@ -8,6 +8,16 @@ use tracing::{info, warn};
 
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
 
+fn matches_provider_override(name: &str, provider_type: &str, override_name: &str) -> bool {
+    let wanted = override_name.trim().to_ascii_lowercase();
+    let provider_name = name.trim().to_ascii_lowercase();
+    let provider_type = provider_type.trim().to_ascii_lowercase();
+    let vendor_name = provider_name
+        .strip_prefix("vendor-")
+        .unwrap_or(provider_name.as_str());
+    wanted == provider_name || wanted == provider_type || wanted == vendor_name
+}
+
 pub(crate) fn build_providers(config: &AppConfig) -> Vec<Arc<LlmProviderRuntime>> {
     let model_override = std::env::var("RUSTCLAW_MODEL_OVERRIDE").ok();
     let provider_override = std::env::var("RUSTCLAW_PROVIDER_OVERRIDE").ok();
@@ -28,7 +38,9 @@ pub(crate) fn build_providers(config: &AppConfig) -> Vec<Arc<LlmProviderRuntime>
         .iter()
         .filter_map(|p| {
             if let Some(name) = &provider_override {
-                if &p.name != name && &p.provider_type != name {
+                // Accept override by vendor alias (openai/google/anthropic/grok/qwen/custom),
+                // provider runtime name (vendor-xxx), or provider type.
+                if !matches_provider_override(&p.name, &p.provider_type, name) {
                     return None;
                 }
             }
@@ -157,6 +169,46 @@ fn synthesize_llm_providers(config: &AppConfig) -> Vec<LlmProviderConfig> {
         }
     }
 
+    if let Some(v) = &config.llm.qwen {
+        if selected_vendor.is_none() || selected_vendor == Some("qwen") {
+            let model = if selected_vendor == Some("qwen") {
+                selected_model.unwrap_or(&v.model)
+            } else {
+                &v.model
+            };
+            out.push(LlmProviderConfig {
+                name: "vendor-qwen".to_string(),
+                provider_type: "openai_compat".to_string(),
+                base_url: v.base_url.clone(),
+                api_key: v.api_key.clone(),
+                model: model.to_string(),
+                priority: 5,
+                timeout_seconds: v.timeout_seconds,
+                max_concurrency: v.max_concurrency,
+            });
+        }
+    }
+
+    if let Some(v) = &config.llm.custom {
+        if selected_vendor.is_none() || selected_vendor == Some("custom") {
+            let model = if selected_vendor == Some("custom") {
+                selected_model.unwrap_or(&v.model)
+            } else {
+                &v.model
+            };
+            out.push(LlmProviderConfig {
+                name: "vendor-custom".to_string(),
+                provider_type: "openai_compat".to_string(),
+                base_url: v.base_url.clone(),
+                api_key: v.api_key.clone(),
+                model: model.to_string(),
+                priority: 6,
+                timeout_seconds: v.timeout_seconds,
+                max_concurrency: v.max_concurrency,
+            });
+        }
+    }
+
     out
 }
 
@@ -174,4 +226,47 @@ pub(crate) fn selected_openai_api_key(state: &AppState) -> String {
 
 pub(crate) fn selected_openai_base_url(state: &AppState) -> String {
     super::selected_openai_base_url(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::matches_provider_override;
+
+    #[test]
+    fn provider_override_matches_vendor_alias() {
+        assert!(matches_provider_override(
+            "vendor-qwen",
+            "openai_compat",
+            "qwen"
+        ));
+        assert!(matches_provider_override(
+            "vendor-custom",
+            "openai_compat",
+            "custom"
+        ));
+        assert!(matches_provider_override(
+            "vendor-openai",
+            "openai_compat",
+            "openai"
+        ));
+    }
+
+    #[test]
+    fn provider_override_matches_runtime_name_and_type() {
+        assert!(matches_provider_override(
+            "vendor-qwen",
+            "openai_compat",
+            "vendor-qwen"
+        ));
+        assert!(matches_provider_override(
+            "vendor-openai",
+            "openai_compat",
+            "openai_compat"
+        ));
+        assert!(!matches_provider_override(
+            "vendor-qwen",
+            "openai_compat",
+            "google"
+        ));
+    }
 }

@@ -20,7 +20,7 @@ sell_keywords = ["sell", "卖出", "卖", "平仓"]
 limit_keywords = ["limit", "限价"]
 
 [exchange]
-default = "paper"
+default = "binance"
 
 [exchange.aliases]
 okx = ["okx", "欧易","okex"]

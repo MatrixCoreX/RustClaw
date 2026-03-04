@@ -12,6 +12,8 @@ Routing rules (important):
 - If user asks to execute shell/system commands (e.g. "你执行 ls -la", "please run uname -a"), choose `act`.
 - If user asks crypto market data (price/quote/涨跌/K线/指标/SMA/news/onchain/手续费), choose `act`.
 - If user asks crypto trading actions (预览下单/确认下单/查订单/撤单/持仓), choose `act`.
+- For direct trade execution wording like "帮我在币安买 1U ETH", "在 OKX 卖出 0.01 BTC", "buy 10u BTC on binance", always choose `act` (do not route to pure chat guidance).
+- For portfolio/holdings queries like "查持仓/看仓位/资产情况", always choose `act`.
 - If user asks strategy discussion only ("怎么做策略/为什么涨跌/解释概念") without direct execution intent, choose `chat`.
 - If the user says "continue/继续/接着做", first inspect RECENT_EXECUTION_CONTEXT for pending action target; if a concrete tool/skill/command target exists, choose `act`.
 - If RECENT_EXECUTION_CONTEXT contains schedule list/create/delete/pause/resume result and user says "全部删除/全部停止/全部恢复", choose `act`.
@@ -40,9 +42,10 @@ Examples:
 - "请解释这段命令输出是什么意思" -> {"mode":"chat"}
 - "现在 BTCUSDT 多少钱" -> {"mode":"act"}
 - "算下 ETHUSDT 的 SMA14" -> {"mode":"act"}
-- "确认执行：paper 模式 ETHUSDT 限价买 0.02，价格 1000" -> {"mode":"act"}
+- "确认执行：binance 模式 ETHUSDT 限价买 0.02，价格 1000" -> {"mode":"act"}
 - "只做预览，不要执行交易，BTC 买 0.01" -> {"mode":"act"}
-- "帮我 paper 买 10u BTC（先预览）" -> {"mode":"act"}
+- "帮我 binance 买 10u BTC（先预览）" -> {"mode":"act"}
+- "帮我在币安买 1U ETH" -> {"mode":"act"}
 - "买点 BTC 吧" -> {"mode":"ask_clarify","reason":"missing amount/risk intent","confidence":0.46}
 - "帮我处理一下这个问题" -> {"mode":"ask_clarify","reason":"action target unclear","confidence":0.33}
 - "为什么比特币今天涨这么多？" -> {"mode":"chat"}

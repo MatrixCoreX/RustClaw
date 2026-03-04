@@ -318,6 +318,10 @@ pub struct LlmConfig {
     pub anthropic: Option<LlmVendorConfig>,
     #[serde(default)]
     pub grok: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub qwen: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub custom: Option<LlmVendorConfig>,
     // Legacy flat provider list, kept for backward compatibility.
     #[serde(default)]
     pub providers: Vec<LlmProviderConfig>,
@@ -634,6 +638,20 @@ pub struct ImageSkillConfig {
     pub default_vendor: Option<String>,
     #[serde(default)]
     pub default_model: Option<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub openai_models: Vec<String>,
+    #[serde(default)]
+    pub google_models: Vec<String>,
+    #[serde(default)]
+    pub anthropic_models: Vec<String>,
+    #[serde(default)]
+    pub grok_models: Vec<String>,
+    #[serde(default)]
+    pub qwen_models: Vec<String>,
+    #[serde(default)]
+    pub custom_models: Vec<String>,
     #[serde(default = "default_image_timeout_seconds")]
     pub timeout_seconds: u64,
     #[serde(default = "default_image_max_concurrency")]
@@ -650,6 +668,13 @@ impl Default for ImageSkillConfig {
             default_output_dir: default_image_default_output_dir(),
             default_vendor: None,
             default_model: None,
+            models: Vec::new(),
+            openai_models: Vec::new(),
+            google_models: Vec::new(),
+            anthropic_models: Vec::new(),
+            grok_models: Vec::new(),
+            qwen_models: Vec::new(),
+            custom_models: Vec::new(),
             timeout_seconds: default_image_timeout_seconds(),
             max_concurrency: default_image_max_concurrency(),
             max_images: default_image_max_images(),
@@ -1198,6 +1223,10 @@ impl AppConfig {
         let base_dir = base_path.parent().unwrap_or_else(|| Path::new("."));
         let cfg = config::Config::builder()
             .add_source(config::File::with_name(path))
+            // Optional split image config.
+            .add_source(config::File::from(base_dir.join("image.toml")).required(false))
+            // Optional split audio config.
+            .add_source(config::File::from(base_dir.join("audio.toml")).required(false))
             // Optional split channel configs.
             .add_source(config::File::from(base_dir.join("channels/telegram.toml")).required(false))
             .add_source(config::File::from(base_dir.join("channels/whatsapp.toml")).required(false))

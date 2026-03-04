@@ -15,8 +15,86 @@ if [[ ! -f "$SANITIZED_CONFIG" ]]; then
   exit 1
 fi
 
-echo "[1/6] Build workspace in release profile..."
-cargo build --workspace --release
+echo "[1/6] Check whether release build is required..."
+BUILD_REQUIRED="$(
+python3 - <<'PY'
+import json
+import os
+import subprocess
+from pathlib import Path
+
+root = Path(".").resolve()
+release_dir = root / "target" / "release"
+
+def latest_source_mtime(base: Path) -> float:
+    latest = 0.0
+    tracked_ext = {".rs", ".toml", ".lock"}
+    tracked_names = {"Cargo.toml", "Cargo.lock"}
+    for current, dirs, files in os.walk(base):
+        p = Path(current)
+        if any(seg in {"target", ".git", "node_modules"} for seg in p.parts):
+            continue
+        for name in files:
+            fp = p / name
+            if fp.name in tracked_names or fp.suffix in tracked_ext:
+                try:
+                    latest = max(latest, fp.stat().st_mtime)
+                except OSError:
+                    pass
+    return latest
+
+meta_raw = subprocess.check_output(
+    ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+    cwd=str(root),
+    text=True,
+)
+meta = json.loads(meta_raw)
+workspace_members = set(meta.get("workspace_members", []))
+bins = set()
+for pkg in meta.get("packages", []):
+    if pkg.get("id") not in workspace_members:
+        continue
+    for target in pkg.get("targets", []):
+        if "bin" in (target.get("kind", []) or []):
+            name = (target.get("name") or "").strip()
+            if name:
+                bins.add(name)
+
+if not bins:
+    print("1")
+    raise SystemExit(0)
+
+latest_src = latest_source_mtime(root)
+if latest_src <= 0:
+    print("1")
+    raise SystemExit(0)
+
+oldest_bin = None
+for name in sorted(bins):
+    bp = release_dir / name
+    if not bp.exists():
+        print("1")
+        raise SystemExit(0)
+    try:
+        m = bp.stat().st_mtime
+    except OSError:
+        print("1")
+        raise SystemExit(0)
+    oldest_bin = m if oldest_bin is None else min(oldest_bin, m)
+
+if oldest_bin is None or oldest_bin < latest_src:
+    print("1")
+else:
+    print("0")
+PY
+)"
+
+if [[ "$BUILD_REQUIRED" == "1" ]]; then
+  echo "Release binaries missing or outdated; building workspace..."
+  cargo build --workspace --release
+else
+  echo "Release binaries are up-to-date; skip rebuild."
+fi
 
 echo "[2/6] Discover and verify release binaries..."
 WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
@@ -160,6 +238,8 @@ copy_if_exists "migrations"
 copy_if_exists "scripts"
 copy_if_exists "services/wa-web-bridge"
 copy_if_exists "README.md"
+copy_if_exists "rustclaw"
+copy_if_exists "install-rustclaw-cmd.sh"
 copy_if_exists "start-all.sh"
 copy_if_exists "start-all-bin.sh"
 copy_if_exists "start-clawd.sh"
@@ -185,6 +265,63 @@ done
 echo "[5/6] Apply sanitized config as configs/config.toml..."
 cp -a "$SANITIZED_CONFIG" "$STAGE_PROJECT_DIR/configs/config.toml"
 rm -f "$STAGE_PROJECT_DIR/configs/config.release.sanitized.toml"
+
+echo "[5.2/6] Verify required config directories in package..."
+for required_dir in \
+  "$STAGE_PROJECT_DIR/configs/channels" \
+  "$STAGE_PROJECT_DIR/configs/i18n" \
+  "$STAGE_PROJECT_DIR/configs/command_intent"; do
+  if [[ ! -d "$required_dir" ]]; then
+    echo "Missing required config directory in package: $required_dir"
+    exit 1
+  fi
+done
+
+echo "[5.3/6] Sanitize sensitive fields in packaged configs..."
+export STAGE_PROJECT_DIR
+python3 - <<'PY'
+from pathlib import Path
+import re
+import os
+
+stage = Path(os.environ["STAGE_PROJECT_DIR"])
+
+targets = [
+    stage / "configs" / "config.toml",
+    stage / "configs" / "channels" / "telegram.toml",
+    stage / "configs" / "crypto.toml",
+]
+
+rules = [
+    # Telegram bot token
+    (re.compile(r'^(\s*bot_token\s*=\s*).*$'), r'\1"REDACTED_TELEGRAM_BOT_TOKEN"'),
+    # fields containing bot
+    (re.compile(r'^(\s*[A-Za-z0-9_.-]*bot[A-Za-z0-9_.-]*\s*=\s*).*$',
+                flags=re.IGNORECASE), r'\1"REDACTED_BOT"'),
+    # fields containing id (numeric replacement to keep type)
+    (re.compile(r'^(\s*[A-Za-z0-9_.-]*id[A-Za-z0-9_.-]*\s*=\s*).*$',
+                flags=re.IGNORECASE), r'\g<1>0'),
+    # admins list
+    (re.compile(r'^(\s*admins\s*=\s*).*$'), r'\1[]'),
+    # exchange/API secrets
+    (re.compile(r'^(\s*api_key\s*=\s*).*$'), r'\1"REDACTED_API_KEY"'),
+    (re.compile(r'^(\s*api_secret\s*=\s*).*$'), r'\1"REDACTED_API_SECRET"'),
+    (re.compile(r'^(\s*passphrase\s*=\s*).*$'), r'\1"REDACTED_PASSPHRASE"'),
+]
+
+for fp in targets:
+    if not fp.exists():
+        continue
+    lines = fp.read_text(encoding="utf-8").splitlines()
+    out = []
+    for line in lines:
+        replaced = line
+        for pat, repl in rules:
+            if pat.match(replaced):
+                replaced = pat.sub(repl, replaced)
+        out.append(replaced)
+    fp.write_text("\n".join(out) + "\n", encoding="utf-8")
+PY
 
 echo "[5.5/6] Force packaged scripts to release defaults..."
 export STAGE_PROJECT_DIR

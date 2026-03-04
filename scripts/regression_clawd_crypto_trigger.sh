@@ -299,13 +299,13 @@ run_case \
 
 run_case \
   "trade-preview-only" \
-  "只做预览不要执行：paper 模式 BTCUSDT 市价买 0.01。" \
+  "只做预览不要执行：binance 模式 BTCUSDT 市价买 0.01。" \
   "trade_preview|预览|风险" \
   "trade_submitted"
 
 run_case \
   "trade-submit-confirmed" \
-  "确认执行：paper 模式 ETHUSDT 限价买 0.02，价格 1000，立即提交。" \
+  "确认执行：binance 模式 ETHUSDT 限价买 0.02，价格 1000，立即提交。" \
   "trade_submitted|order_id|订单ID|提交"
 
 run_case \

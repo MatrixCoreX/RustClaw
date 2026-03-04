@@ -402,5 +402,5 @@ README（安装、运行、升级、排错、资源配置建议）。
 统一约束：  
 - 入参支持 vendor/model/timeout_seconds 覆盖。  
 - 统一返回 status/text/extra（provider/model/outputs）。  
-- 默认输出目录来自 config.toml 中 image_* 段。  
+- 默认输出目录来自 `configs/image.toml` 中 `image_*` 配置段。  
 - 具备能力检测与降级（不支持动作时明确报错或 fallback）。  

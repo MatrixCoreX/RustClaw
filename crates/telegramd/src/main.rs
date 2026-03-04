@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::collections::HashMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -8,7 +9,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, anyhow};
 use claw_core::config::AppConfig;
 use claw_core::hard_rules::types::VoiceModeIntentAliases;
-use claw_core::hard_rules::voice_mode::{load_voice_mode_intent_aliases, parse_voice_mode_intent_label};
+use claw_core::hard_rules::voice_mode::{
+    load_voice_mode_intent_aliases, parse_voice_mode_intent_decision,
+};
 use claw_core::types::{
     ApiResponse, ChannelKind, HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
@@ -16,7 +19,7 @@ use claw_core::types::{
 use reqwest::Client;
 use serde_json::{Value as JsonValue, json};
 use teloxide::prelude::*;
-use teloxide::types::{ChatAction, InputFile, KeyboardButton, KeyboardMarkup};
+use teloxide::types::{CallbackQuery, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, InputFile};
 use tokio::sync::oneshot;
 use toml::Value as TomlValue;
 use tracing::{debug, info, warn};
@@ -32,7 +35,6 @@ struct BotState {
     poll_interval_ms: u64,
     task_wait_seconds: u64,
     queue_limit: usize,
-    quick_result_wait_seconds: u64,
     auto_vision_on_image_only: bool,
     pending_image_by_chat: Arc<Mutex<HashMap<i64, String>>>,
     bot_token: String,
@@ -55,18 +57,8 @@ struct BotState {
 
 #[derive(Debug, Clone)]
 struct PendingResumeContext {
-    task_id: String,
     user_id: i64,
     created_at_secs: u64,
-    resume_context: JsonValue,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ResumeIntentDecision {
-    should_resume: bool,
-    resume_instruction: String,
-    resume_steps: Vec<String>,
-    reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -141,51 +133,23 @@ async fn detect_voice_mode_intent_with_llm(
             return None;
         }
     };
-    parse_voice_mode_intent_label(&out, state.voice_mode_intent_aliases.as_ref())
-}
-
-fn extract_first_json_object(raw: &str) -> Option<JsonValue> {
-    let trimmed = raw.trim();
-    if let Ok(v) = serde_json::from_str::<JsonValue>(trimmed) {
-        return Some(v);
+    let decision = parse_voice_mode_intent_decision(&out, state.voice_mode_intent_aliases.as_ref());
+    if let Some(d) = decision {
+        debug!(
+            "voice mode llm detect parsed: chat_id={} user_id={} mode={} confidence={} parser_path={}",
+            chat_id,
+            user_id,
+            d.mode,
+            d.confidence.unwrap_or(-1.0),
+            d.parser_path
+        );
+    } else {
+        debug!(
+            "voice mode llm detect parsed none: chat_id={} user_id={}",
+            chat_id, user_id
+        );
     }
-    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
-        if start < end {
-            return serde_json::from_str::<JsonValue>(&trimmed[start..=end]).ok();
-        }
-    }
-    None
-}
-
-fn parse_resume_intent_decision(raw: &str) -> Option<ResumeIntentDecision> {
-    let v = extract_first_json_object(raw)?;
-    Some(ResumeIntentDecision {
-        should_resume: v.get("should_resume").and_then(|x| x.as_bool()).unwrap_or(false),
-        resume_instruction: v
-            .get("resume_instruction")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string(),
-        resume_steps: v
-            .get("resume_steps")
-            .and_then(|x| x.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|x| x.as_str())
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default(),
-        reason: v
-            .get("reason")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string(),
-    })
+    decision.map(|d| d.mode)
 }
 
 fn pending_resume_valid_for(
@@ -199,50 +163,12 @@ fn pending_resume_valid_for(
     now_secs.saturating_sub(pending.created_at_secs) <= RESUME_CONTEXT_TTL_SECONDS
 }
 
-async fn detect_resume_intent_with_llm(
-    state: &BotState,
-    user_id: i64,
-    chat_id: i64,
-    user_text: &str,
-    resume_context: &JsonValue,
-) -> Option<ResumeIntentDecision> {
-    let task_id = match submit_task_only(
-        state,
-        user_id,
-        chat_id,
-        TaskKind::Ask,
-        json!({
-            "text": user_text,
-            "agent_mode": false,
-            "source": "resume_intent_detect",
-            "resume_user_text": user_text,
-            "resume_context": resume_context,
-        }),
-    )
-    .await
-    {
-        Ok(id) => id,
-        Err(err) => {
-            warn!("resume llm detect submit failed: {err}");
-            return None;
-        }
-    };
-    let out = match poll_task_result(state, &task_id, Some(12)).await {
-        Ok(v) => v.into_iter().next().unwrap_or_default(),
-        Err(err) => {
-            warn!("resume llm detect poll failed: {err}");
-            return None;
-        }
-    };
-    parse_resume_intent_decision(&out)
-}
-
 async fn maybe_handle_resume_continuation(
-    bot: &Bot,
+    _bot: &Bot,
     msg: &Message,
     state: &BotState,
     user_id: i64,
-    prompt: &str,
+    _prompt: &str,
 ) -> anyhow::Result<bool> {
     let chat_id = msg.chat.id.0;
     let now_secs = SystemTime::now()
@@ -263,120 +189,10 @@ async fn maybe_handle_resume_continuation(
         if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
             guard.remove(&chat_id);
         }
-        return Ok(false);
     }
-    let Some(decision) =
-        detect_resume_intent_with_llm(state, user_id, chat_id, prompt, &pending.resume_context).await
-    else {
-        return Ok(false);
-    };
-    if !decision.should_resume {
-        return Ok(false);
-    }
-
-    if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
-        guard.remove(&chat_id);
-    }
-    let queue_len = match fetch_queue_length(state).await {
-        Ok(v) => v,
-        Err(_) => 0,
-    };
-    if queue_len >= state.queue_limit {
-        bot.send_message(
-            msg.chat.id,
-            state.i18n.t_with(
-                "telegram.msg.queue_full",
-                &[
-                    ("queued", &queue_len.to_string()),
-                    ("limit", &state.queue_limit.to_string()),
-                ],
-            ),
-        )
-        .await
-        .context("send queue full for resume failed")?;
-        return Ok(true);
-    }
-    let agent_enabled = state
-        .agent_off_chats
-        .lock()
-        .map(|set| !set.contains(&chat_id))
-        .unwrap_or(true);
-    let resume_steps = if decision.resume_steps.is_empty() {
-        pending
-            .resume_context
-            .get("remaining_steps")
-            .cloned()
-            .unwrap_or_else(|| json!([]))
-    } else {
-        json!(decision.resume_steps)
-    };
-    let resume_context = pending.resume_context.clone();
-    let resume_context_id = resume_context
-        .get("resume_context_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let payload = json!({
-        "text": prompt,
-        "agent_mode": agent_enabled,
-        "source": "resume_continue_execute",
-        "resume_user_text": prompt,
-        "resume_context": resume_context,
-        "resume_instruction": decision.resume_instruction,
-        "resume_steps": resume_steps,
-        "resume_context_id": resume_context_id,
-        "resume_from_task_id": pending.task_id,
-    });
-    bot.send_message(
-        msg.chat.id,
-        if decision.reason.is_empty() {
-            state.i18n.t("telegram.msg.resume_ack")
-        } else {
-            state.i18n.t_with(
-                "telegram.msg.resume_ack_with_reason",
-                &[("reason", &decision.reason)],
-            )
-        },
-    )
-    .await
-    .context("send resume ack failed")?;
-    match submit_task_only(state, user_id, chat_id, TaskKind::Ask, payload).await {
-        Ok(task_id) => {
-            let delivered = try_deliver_quick_result(
-                bot,
-                state,
-                msg.chat.id,
-                user_id,
-                &task_id,
-                Some(state.quick_result_wait_seconds),
-                &state.i18n.t("telegram.msg.process_failed"),
-            )
-            .await
-            .context("try quick delivery for resume ask failed")?;
-            if !delivered {
-                spawn_task_result_delivery(
-                    bot.clone(),
-                    state.clone(),
-                    msg.chat.id,
-                    user_id,
-                    task_id,
-                    None,
-                    state.i18n.t("telegram.msg.process_failed"),
-                );
-            }
-        }
-        Err(err) => {
-            bot.send_message(
-                msg.chat.id,
-                state
-                    .i18n
-                    .t_with("telegram.msg.process_failed_with_error", &[("error", &err.to_string())]),
-            )
-            .await
-            .context("send resume submit error failed")?;
-        }
-    }
-    Ok(true)
+    // Do not route by reply text in telegram transport layer.
+    // Resume/continue decisions must be handled upstream (or by explicit button callbacks).
+    Ok(false)
 }
 
 fn effective_voice_reply_mode_for_chat(state: &BotState, chat_id: i64) -> String {
@@ -506,7 +322,6 @@ async fn main() -> anyhow::Result<()> {
         poll_interval_ms: config.worker.poll_interval_ms,
         task_wait_seconds: config.worker.task_timeout_seconds,
         queue_limit: config.worker.queue_limit,
-        quick_result_wait_seconds: config.telegram.quick_result_wait_seconds.max(1),
         auto_vision_on_image_only: config.telegram.auto_vision_on_image_only,
         pending_image_by_chat: Arc::new(Mutex::new(HashMap::new())),
         pending_resume_by_chat: Arc::new(Mutex::new(HashMap::new())),
@@ -546,10 +361,6 @@ async fn main() -> anyhow::Result<()> {
                 ("admins", &format!("{admins_list:?}")),
                 ("allowlist", &format!("{allowlist_list:?}")),
                 ("skills", &state.skills_list.join(",")),
-                (
-                    "quick_result_wait_seconds",
-                    &state.quick_result_wait_seconds.to_string(),
-                ),
             ],
         )
     );
@@ -561,7 +372,9 @@ async fn main() -> anyhow::Result<()> {
         )
     );
 
-    let handler = Update::filter_message().endpoint(handle_message);
+    let handler = dptree::entry()
+        .branch(Update::filter_message().endpoint(handle_message))
+        .branch(Update::filter_callback_query().endpoint(handle_callback_query));
 
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![state])
@@ -765,6 +578,9 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         let raw = text.strip_prefix("/cryptoapi").unwrap_or_default().trim();
         match handle_cryptoapi_command(&state, raw) {
             Ok(reply) => {
+                if raw.to_ascii_lowercase().starts_with("set ") {
+                    clear_pending_resume_for_chat(&state, msg.chat.id.0);
+                }
                 bot.send_message(msg.chat.id, reply)
                     .await
                     .context("send /cryptoapi reply failed")?;
@@ -951,6 +767,34 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
 
     if text.starts_with("/crypto") {
         let raw = text.strip_prefix("/crypto").unwrap_or_default().trim();
+        if raw.to_ascii_lowercase().starts_with("add ") {
+            let is_admin = state.admins.contains(&user_id);
+            if !is_admin {
+                bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.cryptoapi_admin_only"))
+                    .await
+                    .context("send /crypto add unauthorized failed")?;
+                return Ok(());
+            }
+            match handle_cryptoapi_command(&state, raw) {
+                Ok(reply) => {
+                    bot.send_message(msg.chat.id, reply)
+                        .await
+                        .context("send /crypto add reply failed")?;
+                }
+                Err(err) => {
+                    bot.send_message(
+                        msg.chat.id,
+                        state.i18n.t_with(
+                            "telegram.msg.cryptoapi_config_failed",
+                            &[("error", &err.to_string())],
+                        ),
+                    )
+                    .await
+                    .context("send /crypto add error failed")?;
+                }
+            }
+            return Ok(());
+        }
         let payload = match build_crypto_skill_payload(raw) {
             Ok(Some(v)) => v,
             Ok(None) => {
@@ -1002,28 +846,15 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
 
         match submit_task_only(&state, user_id, msg.chat.id.0, TaskKind::RunSkill, payload).await {
             Ok(task_id) => {
-                let delivered = try_deliver_quick_result(
-                    &bot,
-                    &state,
+                spawn_task_result_delivery(
+                    bot.clone(),
+                    state.clone(),
                     msg.chat.id,
                     user_id,
-                    &task_id,
-                    Some(state.quick_result_wait_seconds),
-                    &state.i18n.t("telegram.msg.skill_exec_failed"),
-                )
-                .await
-                .context("try quick delivery for /crypto failed")?;
-                if !delivered {
-                    spawn_task_result_delivery(
-                        bot.clone(),
-                        state.clone(),
-                        msg.chat.id,
-                        user_id,
-                        task_id,
-                        None,
-                        state.i18n.t("telegram.msg.skill_exec_failed"),
-                    );
-                }
+                    task_id,
+                    None,
+                    state.i18n.t("telegram.msg.skill_exec_failed"),
+                );
             }
             Err(err) => {
                 bot.send_message(
@@ -1089,19 +920,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
 
         match submit_task_only(&state, user_id, msg.chat.id.0, TaskKind::RunSkill, payload).await {
             Ok(task_id) => {
-                let delivered = try_deliver_quick_result(
-                    &bot,
-                    &state,
-                    msg.chat.id,
-                    user_id,
-                    &task_id,
-                    Some(state.quick_result_wait_seconds),
-                    &state.i18n.t("telegram.msg.skill_exec_failed"),
-                )
-                .await
-                .context("try quick delivery for /run failed")?;
-                if !delivered {
-                    spawn_task_result_delivery(
+                spawn_task_result_delivery(
                     bot.clone(),
                     state.clone(),
                     msg.chat.id,
@@ -1109,8 +928,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                     task_id,
                     None,
                     state.i18n.t("telegram.msg.skill_exec_failed"),
-                    );
-                }
+                );
             }
             Err(err) => {
                 bot.send_message(
@@ -1264,28 +1082,15 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                     if let Ok(mut m) = state.pending_image_by_chat.lock() {
                         m.remove(&msg.chat.id.0);
                     }
-                    let delivered = try_deliver_quick_result(
-                        &bot,
-                        &state,
+                    spawn_task_result_delivery(
+                        bot.clone(),
+                        state.clone(),
                         msg.chat.id,
                         user_id,
-                        &task_id,
-                        Some(state.quick_result_wait_seconds),
-                        &state.i18n.t("telegram.msg.skill_exec_failed"),
-                    )
-                    .await
-                    .context("try quick delivery for pending image edit failed")?;
-                    if !delivered {
-                        spawn_task_result_delivery(
-                            bot.clone(),
-                            state.clone(),
-                            msg.chat.id,
-                            user_id,
-                            task_id,
-                            None,
-                            state.i18n.t("telegram.msg.skill_exec_failed"),
-                        );
-                    }
+                        task_id,
+                        None,
+                        state.i18n.t("telegram.msg.skill_exec_failed"),
+                    );
                 }
                 Err(err) => {
                     bot.send_message(
@@ -1345,28 +1150,15 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                 "telegramd: submitted ask task_id={} user_id={} chat_id={} agent_mode={}",
                 task_id, user_id, msg.chat.id.0, agent_enabled
             );
-            let delivered = try_deliver_quick_result(
-                &bot,
-                &state,
+            spawn_task_result_delivery(
+                bot.clone(),
+                state.clone(),
                 msg.chat.id,
                 user_id,
-                &task_id,
-                Some(state.quick_result_wait_seconds),
-                &state.i18n.t("telegram.msg.process_failed"),
-            )
-            .await
-            .context("try quick delivery for ask failed")?;
-            if !delivered {
-                spawn_task_result_delivery(
-                    bot.clone(),
-                    state.clone(),
-                    msg.chat.id,
-                    user_id,
-                    task_id,
-                    None,
-                    state.i18n.t("telegram.msg.process_failed"),
-                );
-            }
+                task_id,
+                None,
+                state.i18n.t("telegram.msg.process_failed"),
+            );
         }
         Err(err) => {
             bot.send_message(
@@ -1380,6 +1172,110 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         }
     }
 
+    Ok(())
+}
+
+async fn handle_callback_query(bot: Bot, q: CallbackQuery, state: BotState) -> anyhow::Result<()> {
+    let Some(data) = q.data.as_deref() else {
+        return Ok(());
+    };
+    debug!(
+        "phase=callback callback_id={} from_user_id={} data={}",
+        q.id,
+        q.from.id.0,
+        data
+    );
+    if data == "crypto_confirm_done_noop" {
+        if let Err(err) = bot
+            .answer_callback_query(q.id.clone())
+            .text(state.i18n.t("telegram.msg.crypto_confirm_callback_done_ack"))
+            .await
+        {
+            warn!("answer done callback query failed: {}", err);
+        }
+        return Ok(());
+    }
+    if data != "crypto_confirm_yes" && data != "crypto_confirm_no" {
+        return Ok(());
+    }
+
+    if let Err(err) = bot
+        .answer_callback_query(q.id.clone())
+        .text(if data == "crypto_confirm_yes" {
+            state.i18n.t("telegram.msg.crypto_confirm_callback_yes_ack")
+        } else {
+            state.i18n.t("telegram.msg.crypto_confirm_callback_no_ack")
+        })
+        .await
+    {
+        warn!("answer callback query failed: {}", err);
+    }
+
+    let Some(message) = q.message.as_ref() else {
+        return Ok(());
+    };
+    let chat_id = message.chat().id;
+    let message_id = message.id();
+    debug!(
+        "phase=callback_ack chat_id={} message_id={} data={}",
+        chat_id.0,
+        message_id.0,
+        data
+    );
+    let done_keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        state.i18n.t("telegram.msg.crypto_confirm_button_done"),
+        "crypto_confirm_done_noop",
+    )]]);
+    if let Err(err) = bot
+        .edit_message_reply_markup(chat_id, message_id)
+        .reply_markup(done_keyboard)
+        .await
+    {
+        warn!("edit callback message markup failed: {}", err);
+    }
+    let user_id = match i64::try_from(q.from.id.0) {
+        Ok(v) => v,
+        Err(_) => {
+            warn!("callback user id out of range: {}", q.from.id.0);
+            return Ok(());
+        }
+    };
+
+    // Use stable semantic tokens for downstream confirmation parsing.
+    let prompt = if data == "crypto_confirm_yes" { "yes" } else { "no" };
+    let agent_enabled = state
+        .agent_off_chats
+        .lock()
+        .map(|set| !set.contains(&chat_id.0))
+        .unwrap_or(true);
+    let payload = json!({
+        "text": prompt,
+        "agent_mode": agent_enabled
+    });
+
+    match submit_task_only(&state, user_id, chat_id.0, TaskKind::Ask, payload).await {
+        Ok(task_id) => {
+            spawn_task_result_delivery(
+                bot.clone(),
+                state.clone(),
+                chat_id,
+                user_id,
+                task_id,
+                None,
+                state.i18n.t("telegram.msg.process_failed"),
+            );
+        }
+        Err(err) => {
+            bot.send_message(
+                chat_id,
+                state
+                    .i18n
+                    .t_with("telegram.msg.process_failed", &[("error", &err.to_string())]),
+            )
+            .await
+            .context("send callback submit error failed")?;
+        }
+    }
     Ok(())
 }
 
@@ -1439,28 +1335,15 @@ async fn handle_image_only_message(
 
     match submit_task_only(state, user_id, msg.chat.id.0, TaskKind::RunSkill, payload).await {
         Ok(task_id) => {
-            let delivered = try_deliver_quick_result(
-                bot,
-                state,
+            spawn_task_result_delivery(
+                bot.clone(),
+                state.clone(),
                 msg.chat.id,
                 user_id,
-                &task_id,
-                Some(state.quick_result_wait_seconds),
-                &state.i18n.t("telegram.msg.skill_exec_failed"),
-            )
-            .await
-            .context("try quick delivery for image vision failed")?;
-            if !delivered {
-                spawn_task_result_delivery(
-                    bot.clone(),
-                    state.clone(),
-                    msg.chat.id,
-                    user_id,
-                    task_id,
-                    None,
-                    state.i18n.t("telegram.msg.skill_exec_failed"),
-                );
-            }
+                task_id,
+                None,
+                state.i18n.t("telegram.msg.skill_exec_failed"),
+            );
         }
         Err(err) => {
             bot.send_message(
@@ -1816,71 +1699,6 @@ impl Drop for TypingHeartbeatGuard {
     }
 }
 
-async fn try_deliver_quick_result(
-    bot: &Bot,
-    state: &BotState,
-    chat_id: ChatId,
-    user_id: i64,
-    task_id: &str,
-    wait_override_seconds: Option<u64>,
-    fail_prefix: &str,
-) -> anyhow::Result<bool> {
-    let _typing_guard = TypingHeartbeatGuard::start(bot.clone(), chat_id);
-    match poll_task_result(state, task_id, wait_override_seconds).await {
-        Ok(answers) => {
-            let requires_confirmation = query_task_status(state, task_id)
-                .await
-                .map(|task| task_requires_crypto_confirmation(&task))
-                .unwrap_or(false);
-            for answer in answers {
-                send_text_or_image(bot, state, chat_id, &answer, requires_confirmation).await?;
-            }
-            Ok(true)
-        }
-        Err(err) => {
-            let msg = err.to_string();
-            if msg == "task_result_wait_timeout" {
-                return Ok(false);
-            }
-            if let Ok(task) = query_task_status(state, task_id).await {
-                if let Some(resume_context) = task
-                    .result_json
-                    .as_ref()
-                    .and_then(|v| v.get("resume_context"))
-                    .cloned()
-                {
-                    let pending = PendingResumeContext {
-                        task_id: task_id.to_string(),
-                        user_id,
-                        created_at_secs: SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                        resume_context,
-                    };
-                    if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
-                        guard.insert(chat_id.0, pending);
-                    }
-                    bot.send_message(
-                        chat_id,
-                        state.i18n.t_with(
-                            "telegram.msg.resume_interrupted_hint",
-                            &[("prefix", &fail_prefix), ("detail", &msg)],
-                        ),
-                    )
-                    .await
-                    .context("send quick error with resume message failed")?;
-                    return Ok(true);
-                }
-            }
-            bot.send_message(chat_id, format!("{fail_prefix}：{msg}"))
-                .await
-                .context("send quick error message failed")?;
-            Ok(true)
-        }
-    }
-}
-
 fn is_image_saved_preface(text: &str) -> bool {
     let t = text.trim().to_ascii_lowercase();
     t.starts_with("image saved")
@@ -1913,6 +1731,15 @@ async fn send_text_or_image(
     image_paths.retain(|p| !file_set.contains(p));
 
     if !image_paths.is_empty() || !file_paths.is_empty() || !voice_paths.is_empty() {
+        debug!(
+            "phase=deliver_media chat_id={} answer_fp={} image_count={} file_count={} voice_count={} preface_preview={}",
+            chat_id.0,
+            text_fingerprint_hex(answer),
+            image_paths.len(),
+            file_paths.len(),
+            voice_paths.len(),
+            text_preview_for_log(answer, 120)
+        );
         let ephemeral_image_saved_hint = answer
             .lines()
             .any(|line| line.trim().eq_ignore_ascii_case(EPHEMERAL_IMAGE_SAVED_TOKEN));
@@ -1925,6 +1752,13 @@ async fn send_text_or_image(
                 .send_message(chat_id, &text_without_tokens)
                 .await
                 .context("send file preface text failed")?;
+            debug!(
+                "phase=deliver_media_preface chat_id={} answer_fp={} telegram_msg_id={} text_preview={}",
+                chat_id.0,
+                text_fingerprint_hex(&text_without_tokens),
+                sent.id.0,
+                text_preview_for_log(&text_without_tokens, 120)
+            );
             if state.ephemeral_image_saved_seconds > 0
                 && (ephemeral_image_saved_hint || is_image_saved_preface(&text_without_tokens))
             {
@@ -1963,20 +1797,38 @@ async fn send_text_or_image(
     }
 
     if is_crypto_trade_confirm_prompt(answer, requires_confirmation) {
-        let keyboard = KeyboardMarkup::new(vec![vec![
-            KeyboardButton::new("yes"),
-            KeyboardButton::new("no"),
-        ]])
-        .resize_keyboard()
-        .one_time_keyboard();
-        bot.send_message(chat_id, answer.to_string())
+        let keyboard = InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(
+                state.i18n.t("telegram.msg.crypto_confirm_button_yes"),
+                "crypto_confirm_yes",
+            ),
+            InlineKeyboardButton::callback(
+                state.i18n.t("telegram.msg.crypto_confirm_button_no"),
+                "crypto_confirm_no",
+            ),
+        ]]);
+        let sent = bot.send_message(chat_id, answer.to_string())
             .reply_markup(keyboard)
             .await
             .context("send text message with confirm keyboard failed")?;
+        debug!(
+            "phase=deliver_text_confirm chat_id={} answer_fp={} telegram_msg_id={} answer_preview={}",
+            chat_id.0,
+            text_fingerprint_hex(answer),
+            sent.id.0,
+            text_preview_for_log(answer, 120)
+        );
     } else {
-        bot.send_message(chat_id, answer.to_string())
+        let sent = bot.send_message(chat_id, answer.to_string())
             .await
             .context("send text message failed")?;
+        debug!(
+            "phase=deliver_text chat_id={} answer_fp={} telegram_msg_id={} answer_preview={}",
+            chat_id.0,
+            text_fingerprint_hex(answer),
+            sent.id.0,
+            text_preview_for_log(answer, 120)
+        );
     }
     Ok(())
 }
@@ -1986,9 +1838,21 @@ fn is_crypto_trade_confirm_prompt(text: &str, structured_hint: bool) -> bool {
         return true;
     }
     let t = text.to_ascii_lowercase();
-    (t.contains("confirm") || t.contains("trade_preview"))
+    let decision = if t.contains("trade_preview") {
+        true
+    } else {
+        (t.contains("confirm") || t.contains("trade_preview"))
         && t.contains("yes")
-        && t.contains("no")
+            && t.contains("no")
+    };
+    debug!(
+        "phase=confirm_detect structured_hint={} decision={} text_fp={} text_preview={}",
+        structured_hint,
+        decision,
+        text_fingerprint_hex(text),
+        text_preview_for_log(text, 120)
+    );
+    decision
 }
 
 fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
@@ -2014,6 +1878,25 @@ fn dedupe_preserve_order(items: Vec<String>) -> Vec<String> {
         }
     }
     out
+}
+
+fn text_fingerprint_hex(text: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn text_preview_for_log(text: &str, max_chars: usize) -> String {
+    let normalized = text
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.chars().count() <= max_chars {
+        return normalized;
+    }
+    normalized.chars().take(max_chars).collect::<String>() + "...(truncated)"
 }
 
 fn strip_prefixed_tokens(answer: &str, prefixes: &[&str]) -> String {
@@ -2120,9 +2003,36 @@ fn spawn_task_result_delivery(
                 Ok(task) => match task.status {
                     TaskStatus::Queued | TaskStatus::Running => {
                         let progress_messages = task_progress_messages(&task);
+                        debug!(
+                            "phase=poll task_id={} chat_id={} status={:?} elapsed_ms={} sent_progress_count={} progress_len={}",
+                            task_id,
+                            chat_id.0,
+                            task.status,
+                            started_at.elapsed().as_millis(),
+                            sent_progress_count,
+                            progress_messages.len()
+                        );
                         if sent_progress_count < progress_messages.len() {
                             for answer in progress_messages.iter().skip(sent_progress_count) {
-                                let _ = send_text_or_image(&bot, &state, chat_id, answer, false).await;
+                                let requires_confirmation =
+                                    is_crypto_trade_confirm_prompt(answer, false);
+                                debug!(
+                                    "phase=deliver_progress task_id={} chat_id={} msg_fp={} msg_len={} requires_confirmation={} msg_preview={}",
+                                    task_id,
+                                    chat_id.0,
+                                    text_fingerprint_hex(answer),
+                                    answer.len(),
+                                    requires_confirmation,
+                                    text_preview_for_log(answer, 160)
+                                );
+                                let _ = send_text_or_image(
+                                    &bot,
+                                    &state,
+                                    chat_id,
+                                    answer,
+                                    requires_confirmation,
+                                )
+                                .await;
                             }
                             sent_progress_count = progress_messages.len();
                         }
@@ -2164,7 +2074,24 @@ fn spawn_task_result_delivery(
                     TaskStatus::Succeeded => {
                         let answers = task_success_messages_from_offset(&state, &task, sent_progress_count);
                         let requires_confirmation = task_requires_crypto_confirmation(&task);
+                        debug!(
+                            "phase=deliver_success task_id={} chat_id={} sent_progress_count={} success_count={} requires_confirmation={}",
+                            task_id,
+                            chat_id.0,
+                            sent_progress_count,
+                            answers.len(),
+                            requires_confirmation
+                        );
                         for answer in answers {
+                            debug!(
+                                "phase=deliver_success_item task_id={} chat_id={} msg_fp={} msg_len={} requires_confirmation={} msg_preview={}",
+                                task_id,
+                                chat_id.0,
+                                text_fingerprint_hex(&answer),
+                                answer.len(),
+                                requires_confirmation,
+                                text_preview_for_log(&answer, 160)
+                            );
                             let _ = send_text_or_image(
                                 &bot,
                                 &state,
@@ -2178,20 +2105,18 @@ fn spawn_task_result_delivery(
                     }
                     TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
                         let detail = task_terminal_error_text(&state, &task);
-                        if let Some(resume_context) = task
+                        if let Some(_resume_context) = task
                             .result_json
                             .as_ref()
                             .and_then(|v| v.get("resume_context"))
                             .cloned()
                         {
                             let pending = PendingResumeContext {
-                                task_id: task_id.clone(),
                                 user_id,
                                 created_at_secs: SystemTime::now()
                                     .duration_since(UNIX_EPOCH)
                                     .unwrap_or_default()
                                     .as_secs(),
-                                resume_context,
                             };
                             if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
                                 guard.insert(chat_id.0, pending);
@@ -2232,6 +2157,7 @@ fn task_success_messages_from_offset(
     task: &TaskQueryResponse,
     offset: usize,
 ) -> Vec<String> {
+    let task_id = &task.task_id;
     if let Some(messages) = task
         .result_json
         .as_ref()
@@ -2247,6 +2173,12 @@ fn task_success_messages_from_offset(
             .collect::<Vec<_>>();
         let out = dedupe_preserve_order(out);
         if !out.is_empty() {
+            debug!(
+                "phase=success_source task_id={} source=messages offset={} messages_len={}",
+                task_id,
+                offset,
+                out.len()
+            );
             if offset >= out.len() {
                 let text = task
                     .result_json
@@ -2257,6 +2189,13 @@ fn task_success_messages_from_offset(
                     .filter(|s| !s.is_empty())
                     .map(str::to_string);
                 if let Some(text) = text {
+                    debug!(
+                        "phase=success_source task_id={} source=text_fallback offset={} text_fp={} text_len={}",
+                        task_id,
+                        offset,
+                        text_fingerprint_hex(&text),
+                        text.len()
+                    );
                     return vec![text];
                 }
                 return Vec::new();
@@ -2264,13 +2203,21 @@ fn task_success_messages_from_offset(
             return out.into_iter().skip(offset).collect();
         }
     }
-    vec![task
+    let text = task
         .result_json
         .as_ref()
         .and_then(|v| v.get("text"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| state.i18n.t("telegram.msg.task_done_no_text"))]
+        .unwrap_or_else(|| state.i18n.t("telegram.msg.task_done_no_text"));
+    debug!(
+        "phase=success_source task_id={} source=text_only offset={} text_fp={} text_len={}",
+        task_id,
+        offset,
+        text_fingerprint_hex(&text),
+        text.len()
+    );
+    vec![text]
 }
 
 fn task_progress_messages(task: &TaskQueryResponse) -> Vec<String> {
@@ -2372,13 +2319,25 @@ async fn submit_task_only(
     kind: TaskKind,
     payload: serde_json::Value,
 ) -> anyhow::Result<String> {
+    let payload_compact = payload.to_string();
+    let payload_fp = text_fingerprint_hex(&payload_compact);
+    let payload_preview = text_preview_for_log(&payload_compact, 180);
+    debug!(
+        "phase=submit user_id={} chat_id={} kind={:?} payload_fp={} payload_len={} payload_preview={}",
+        user_id,
+        chat_id,
+        kind,
+        payload_fp,
+        payload_compact.len(),
+        payload_preview
+    );
     let submit_req = SubmitTaskRequest {
         user_id,
         chat_id,
         channel: Some(ChannelKind::Telegram),
         external_user_id: Some(user_id.to_string()),
         external_chat_id: Some(chat_id.to_string()),
-        kind,
+        kind: kind.clone(),
         payload,
     };
 
@@ -2432,6 +2391,14 @@ async fn submit_task_only(
         .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.submit_task_missing_task_id")))?
         .task_id;
 
+    debug!(
+        "phase=submit_done user_id={} chat_id={} kind={:?} task_id={} payload_fp={}",
+        user_id,
+        chat_id,
+        kind,
+        task_id,
+        payload_fp
+    );
     Ok(task_id.to_string())
 }
 
@@ -2767,6 +2734,23 @@ fn parse_symbols_csv(raw: &str) -> Vec<String> {
         .collect()
 }
 
+fn normalize_trade_symbol_for_config(raw: &str) -> Option<String> {
+    let upper = raw
+        .trim()
+        .to_ascii_uppercase()
+        .replace(['-', '/', ' '], "");
+    if upper.is_empty() {
+        return None;
+    }
+    let ok = upper
+        .chars()
+        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+    if !ok || upper.len() < 5 || upper.len() > 20 {
+        return None;
+    }
+    Some(upper)
+}
+
 fn maybe_exchange_token(raw: &str) -> bool {
     matches!(
         raw.trim().to_ascii_lowercase().as_str(),
@@ -2780,8 +2764,6 @@ fn maybe_exchange_token(raw: &str) -> bool {
             | "coinbase"
             | "kraken"
             | "coingecko"
-            | "cextest"
-            | "paper"
     )
 }
 
@@ -2867,6 +2849,12 @@ fn mask_secret(input: &str) -> String {
     format!("{}***{}", &s[..4], &s[s.len() - 4..])
 }
 
+fn clear_pending_resume_for_chat(state: &BotState, chat_id: i64) {
+    if let Ok(mut guard) = state.pending_resume_by_chat.lock() {
+        guard.remove(&chat_id);
+    }
+}
+
 fn handle_cryptoapi_command(state: &BotState, raw: &str) -> anyhow::Result<String> {
     let cmd = raw.trim();
     if cmd.is_empty() {
@@ -2876,6 +2864,27 @@ fn handle_cryptoapi_command(state: &BotState, raw: &str) -> anyhow::Result<Strin
     let action = parts.next().unwrap_or_default().to_ascii_lowercase();
     match action.as_str() {
         "show" => show_cryptoapi_status(state),
+        "add" => {
+            let target = parts.next().unwrap_or_default().to_ascii_lowercase();
+            match target.as_str() {
+                "allowed_symbols" | "allowedsymbols" | "symbols" => {
+                    let symbols_raw = parts.collect::<Vec<_>>().join(" ");
+                    let parsed = parse_symbols_csv(&symbols_raw)
+                        .into_iter()
+                        .filter_map(|s| normalize_trade_symbol_for_config(&s))
+                        .collect::<Vec<_>>();
+                    if parsed.is_empty() {
+                        return Ok(state.i18n.t("telegram.msg.cryptoapi_add_allowed_symbols_invalid"));
+                    }
+                    let updated = persist_crypto_allowed_symbols_add(&parsed)?;
+                    Ok(state.i18n.t_with(
+                        "telegram.msg.cryptoapi_add_allowed_symbols_ok",
+                        &[("symbols", &updated.join(", "))],
+                    ))
+                }
+                _ => Ok(cryptoapi_usage_text(state)),
+            }
+        }
         "set" => {
             let exchange = parts.next().unwrap_or_default().to_ascii_lowercase();
             match exchange.as_str() {
@@ -2929,6 +2938,7 @@ fn show_cryptoapi_status(state: &BotState) -> anyhow::Result<String> {
     let value: TomlValue = toml::from_str(&raw).context("failed to parse configs/crypto.toml")?;
     let bin = value.get("binance").and_then(|v| v.as_table());
     let okx = value.get("okx").and_then(|v| v.as_table());
+    let crypto = value.get("crypto").and_then(|v| v.as_table());
     let bin_enabled = bin
         .and_then(|t| t.get("enabled"))
         .and_then(|v| v.as_bool())
@@ -2945,8 +2955,24 @@ fn show_cryptoapi_status(state: &BotState) -> anyhow::Result<String> {
         .and_then(|t| t.get("api_key"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let allowed_symbols = crypto
+        .and_then(|t| t.get("allowed_symbols"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let binance_key_masked = mask_secret(bin_key);
     let okx_key_masked = mask_secret(okx_key);
+    let allowed_symbols_text = if allowed_symbols.is_empty() {
+        "-".to_string()
+    } else {
+        allowed_symbols.join(", ")
+    };
     let binance_enabled_text = bin_enabled.to_string();
     let okx_enabled_text = okx_enabled.to_string();
     Ok(state.i18n.t_with(
@@ -2956,6 +2982,7 @@ fn show_cryptoapi_status(state: &BotState) -> anyhow::Result<String> {
             ("binance_key", &binance_key_masked),
             ("okx_enabled", &okx_enabled_text),
             ("okx_key", &okx_key_masked),
+            ("allowed_symbols", &allowed_symbols_text),
         ],
     ))
 }
@@ -3009,6 +3036,53 @@ fn persist_crypto_api_config_okx(api_key: &str, api_secret: &str, passphrase: &s
     Ok(())
 }
 
+fn persist_crypto_allowed_symbols_add(symbols: &[String]) -> anyhow::Result<Vec<String>> {
+    let path = "configs/crypto.toml";
+    let raw = fs::read_to_string(path).context("failed to read configs/crypto.toml")?;
+    let mut value: TomlValue = toml::from_str(&raw).context("failed to parse configs/crypto.toml")?;
+    let root = value
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("crypto config root is not a table"))?;
+
+    let crypto_entry = root
+        .entry("crypto")
+        .or_insert(TomlValue::Table(toml::map::Map::new()));
+    if !crypto_entry.is_table() {
+        *crypto_entry = TomlValue::Table(toml::map::Map::new());
+    }
+    let crypto_table = crypto_entry
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("crypto node is not a table"))?;
+
+    let existing = crypto_table
+        .get("allowed_symbols")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .filter_map(normalize_trade_symbol_for_config)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let mut merged = existing;
+    for s in symbols {
+        if !merged.iter().any(|x| x == s) {
+            merged.push(s.clone());
+        }
+    }
+    if merged.is_empty() {
+        merged.push("BTCUSDT".to_string());
+    }
+    crypto_table.insert(
+        "allowed_symbols".to_string(),
+        TomlValue::Array(merged.iter().map(|s| TomlValue::String(s.clone())).collect()),
+    );
+    let output = toml::to_string_pretty(&value).context("failed to serialize configs/crypto.toml")?;
+    fs::write(path, output).context("failed to write configs/crypto.toml")?;
+    Ok(merged)
+}
+
 fn openclaw_usage_text(state: &BotState) -> String {
     state.i18n.t("telegram.msg.openclaw_usage")
 }
@@ -3036,7 +3110,7 @@ fn show_model_config(state: &BotState) -> anyhow::Result<String> {
         .and_then(|v| v.as_str())
         .unwrap_or("-");
 
-    let vendors = ["openai", "google", "anthropic", "grok"];
+    let vendors = ["openai", "google", "anthropic", "grok", "qwen", "custom"];
     let mut lines = vec![
         state.i18n.t_with(
             "telegram.msg.openclaw_current_selection",
@@ -3073,8 +3147,109 @@ fn show_model_config(state: &BotState) -> anyhow::Result<String> {
     Ok(lines.join("\n"))
 }
 
+fn is_supported_model_vendor(vendor: &str) -> bool {
+    matches!(
+        vendor,
+        "openai" | "google" | "anthropic" | "grok" | "qwen" | "custom"
+    )
+}
+
+fn default_base_url_for_vendor(vendor: &str) -> &'static str {
+    match vendor {
+        "openai" => "https://api.openai.com/v1",
+        "google" => "https://generativelanguage.googleapis.com/v1beta",
+        "anthropic" => "https://api.anthropic.com/v1",
+        "grok" => "https://api.x.ai/v1",
+        "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "custom" => "https://api.example.com/v1",
+        _ => "https://api.example.com/v1",
+    }
+}
+
+fn apply_model_config_value(value: &mut TomlValue, vendor: &str, model: &str) -> anyhow::Result<()> {
+    if !is_supported_model_vendor(vendor) {
+        return Err(anyhow!("unsupported vendor: {vendor}"));
+    }
+
+    let root = value
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("config root is not a table"))?;
+    let llm = root
+        .entry("llm")
+        .or_insert(TomlValue::Table(toml::map::Map::new()));
+    if !llm.is_table() {
+        *llm = TomlValue::Table(toml::map::Map::new());
+    }
+
+    let llm_tbl = llm
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("llm is not a table"))?;
+    llm_tbl.insert("selected_vendor".to_string(), TomlValue::String(vendor.to_string()));
+    llm_tbl.insert("selected_model".to_string(), TomlValue::String(model.to_string()));
+
+    let vendor_value = llm_tbl
+        .entry(vendor.to_string())
+        .or_insert(TomlValue::Table(toml::map::Map::new()));
+    if !vendor_value.is_table() {
+        *vendor_value = TomlValue::Table(toml::map::Map::new());
+    }
+    let vendor_tbl = vendor_value
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("vendor section is not a table"))?;
+    if !vendor_tbl.contains_key("base_url") {
+        vendor_tbl.insert(
+            "base_url".to_string(),
+            TomlValue::String(default_base_url_for_vendor(vendor).to_string()),
+        );
+    }
+    if !vendor_tbl.contains_key("api_key") {
+        vendor_tbl.insert(
+            "api_key".to_string(),
+            TomlValue::String(format!("REPLACE_ME_{}_API_KEY", vendor.to_ascii_uppercase())),
+        );
+    }
+    if !vendor_tbl.contains_key("max_concurrency") {
+        vendor_tbl.insert("max_concurrency".to_string(), TomlValue::Integer(1));
+    }
+    if !vendor_tbl.contains_key("timeout_seconds") {
+        vendor_tbl.insert("timeout_seconds".to_string(), TomlValue::Integer(60));
+    }
+    vendor_tbl.insert("model".to_string(), TomlValue::String(model.to_string()));
+
+    let models_value = vendor_tbl
+        .entry("models".to_string())
+        .or_insert(TomlValue::Array(vec![]));
+    if !models_value.is_array() {
+        *models_value = TomlValue::Array(vec![]);
+    }
+    let models = models_value
+        .as_array_mut()
+        .ok_or_else(|| anyhow!("models is not an array"))?;
+    let exists = models.iter().any(|v| v.as_str() == Some(model));
+    if !exists {
+        models.push(TomlValue::String(model.to_string()));
+    }
+
+    // Keep voice skills aligned with the selected primary vendor/model.
+    for section in ["audio_synthesize", "audio_transcribe"] {
+        let section_value = root
+            .entry(section.to_string())
+            .or_insert(TomlValue::Table(toml::map::Map::new()));
+        if !section_value.is_table() {
+            *section_value = TomlValue::Table(toml::map::Map::new());
+        }
+        let section_tbl = section_value
+            .as_table_mut()
+            .ok_or_else(|| anyhow!("{section} is not a table"))?;
+        section_tbl.insert("default_vendor".to_string(), TomlValue::String(vendor.to_string()));
+        section_tbl.insert("default_model".to_string(), TomlValue::String(model.to_string()));
+    }
+
+    Ok(())
+}
+
 fn set_model_config(state: &BotState, vendor: &str, model: &str) -> anyhow::Result<String> {
-    if !matches!(vendor, "openai" | "google" | "anthropic" | "grok") {
+    if !is_supported_model_vendor(vendor) {
         return Err(anyhow!(
             "{}",
             state
@@ -3087,47 +3262,8 @@ fn set_model_config(state: &BotState, vendor: &str, model: &str) -> anyhow::Resu
         .context(state.i18n.t("telegram.error.read_config_failed"))?;
     let mut value: TomlValue =
         toml::from_str(&raw).context(state.i18n.t("telegram.error.parse_config_failed"))?;
-
-    let llm = value
-        .as_table_mut()
-        .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.config_not_table")))?
-        .entry("llm")
-        .or_insert(TomlValue::Table(toml::map::Map::new()));
-
-    if !llm.is_table() {
-        *llm = TomlValue::Table(toml::map::Map::new());
-    }
-
-    let llm_tbl = llm
-        .as_table_mut()
-        .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.llm_struct_invalid")))?;
-    llm_tbl.insert("selected_vendor".to_string(), TomlValue::String(vendor.to_string()));
-    llm_tbl.insert("selected_model".to_string(), TomlValue::String(model.to_string()));
-
-    let vendor_value = llm_tbl
-        .entry(vendor.to_string())
-        .or_insert(TomlValue::Table(toml::map::Map::new()));
-    if !vendor_value.is_table() {
-        *vendor_value = TomlValue::Table(toml::map::Map::new());
-    }
-    let vendor_tbl = vendor_value
-        .as_table_mut()
-        .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.vendor_struct_invalid")))?;
-    vendor_tbl.insert("model".to_string(), TomlValue::String(model.to_string()));
-
-    let models_value = vendor_tbl
-        .entry("models".to_string())
-        .or_insert(TomlValue::Array(vec![]));
-    if !models_value.is_array() {
-        *models_value = TomlValue::Array(vec![]);
-    }
-    let models = models_value
-        .as_array_mut()
-        .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.models_struct_invalid")))?;
-    let exists = models.iter().any(|v| v.as_str() == Some(model));
-    if !exists {
-        models.push(TomlValue::String(model.to_string()));
-    }
+    apply_model_config_value(&mut value, vendor, model)
+        .context(state.i18n.t("telegram.error.config_not_table"))?;
 
     let output =
         toml::to_string_pretty(&value).context(state.i18n.t("telegram.error.serialize_config_failed"))?;
@@ -3137,4 +3273,85 @@ fn set_model_config(state: &BotState, vendor: &str, model: &str) -> anyhow::Resu
         "telegram.msg.openclaw_set_ok",
         &[("vendor", vendor), ("model", model)],
     ))
+}
+
+#[cfg(test)]
+mod model_config_tests {
+    use super::*;
+
+    #[test]
+    fn apply_model_config_populates_custom_vendor_and_voice_defaults() {
+        let mut v: TomlValue = toml::from_str(
+            r#"
+[llm]
+selected_vendor = "openai"
+selected_model = "gpt-4o-mini"
+"#,
+        )
+        .expect("parse");
+        apply_model_config_value(&mut v, "custom", "my-custom-model").expect("apply");
+
+        let llm = v.get("llm").and_then(|x| x.as_table()).expect("llm");
+        assert_eq!(
+            llm.get("selected_vendor").and_then(|x| x.as_str()),
+            Some("custom")
+        );
+        assert_eq!(
+            llm.get("selected_model").and_then(|x| x.as_str()),
+            Some("my-custom-model")
+        );
+        let custom = llm.get("custom").and_then(|x| x.as_table()).expect("custom");
+        assert_eq!(
+            custom.get("base_url").and_then(|x| x.as_str()),
+            Some("https://api.example.com/v1")
+        );
+        assert_eq!(
+            custom.get("api_key").and_then(|x| x.as_str()),
+            Some("REPLACE_ME_CUSTOM_API_KEY")
+        );
+        assert_eq!(
+            custom.get("model").and_then(|x| x.as_str()),
+            Some("my-custom-model")
+        );
+
+        let synth = v
+            .get("audio_synthesize")
+            .and_then(|x| x.as_table())
+            .expect("audio_synthesize");
+        assert_eq!(
+            synth.get("default_vendor").and_then(|x| x.as_str()),
+            Some("custom")
+        );
+        assert_eq!(
+            synth.get("default_model").and_then(|x| x.as_str()),
+            Some("my-custom-model")
+        );
+        let trans = v
+            .get("audio_transcribe")
+            .and_then(|x| x.as_table())
+            .expect("audio_transcribe");
+        assert_eq!(
+            trans.get("default_vendor").and_then(|x| x.as_str()),
+            Some("custom")
+        );
+        assert_eq!(
+            trans.get("default_model").and_then(|x| x.as_str()),
+            Some("my-custom-model")
+        );
+    }
+
+    #[test]
+    fn apply_model_config_qwen_uses_expected_default_base_url() {
+        let mut v: TomlValue = toml::from_str("[llm]\n").expect("parse");
+        apply_model_config_value(&mut v, "qwen", "qwen-max-latest").expect("apply");
+        let qwen = v
+            .get("llm")
+            .and_then(|x| x.get("qwen"))
+            .and_then(|x| x.as_table())
+            .expect("qwen");
+        assert_eq!(
+            qwen.get("base_url").and_then(|x| x.as_str()),
+            Some("https://dashscope.aliyuncs.com/compatible-mode/v1")
+        );
+    }
 }
