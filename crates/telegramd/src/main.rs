@@ -19,7 +19,10 @@ use claw_core::types::{
 use reqwest::Client;
 use serde_json::{Value as JsonValue, json};
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, InputFile};
+use teloxide::types::{
+    CallbackQuery, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, MediaKind,
+    MessageKind,
+};
 use tokio::sync::oneshot;
 use toml::Value as TomlValue;
 use tracing::{debug, info, warn};
@@ -1528,47 +1531,59 @@ async fn handle_audio_message(
 }
 
 fn extract_image_attachment(msg: &Message) -> Option<(String, String)> {
-    if let Some(photos) = msg.photo() {
-        if let Some(photo) = photos.last() {
-            return Some((photo.file.id.to_string(), "jpg".to_string()));
-        }
-    }
-    if let Some(doc) = msg.document() {
-        let file_name_ext = doc
-            .file_name
-            .as_deref()
-            .and_then(extension_from_filename)
-            .unwrap_or_default();
-        let mime_is_image = doc
-            .mime_type
-            .as_ref()
-            .map(|m| m.type_().as_str() == "image")
-            .unwrap_or(false);
-        if mime_is_image || is_image_ext(&file_name_ext) {
-            let ext = if file_name_ext.is_empty() {
-                "png".to_string()
+    let MessageKind::Common(common) = &msg.kind else {
+        return None;
+    };
+    match &common.media_kind {
+        MediaKind::Photo(media) => media
+            .photo
+            .last()
+            .map(|photo| (photo.file.id.to_string(), "jpg".to_string())),
+        MediaKind::Document(media) => {
+            let file_name_ext = media
+                .document
+                .file_name
+                .as_deref()
+                .and_then(extension_from_filename)
+                .unwrap_or_default();
+            let mime_is_image = media
+                .document
+                .mime_type
+                .as_ref()
+                .map(|m| m.type_().as_str() == "image")
+                .unwrap_or(false);
+            if mime_is_image || is_image_ext(&file_name_ext) {
+                let ext = if file_name_ext.is_empty() {
+                    "png".to_string()
+                } else {
+                    file_name_ext
+                };
+                Some((media.document.file.id.to_string(), ext))
             } else {
-                file_name_ext
-            };
-            return Some((doc.file.id.to_string(), ext));
+                None
+            }
         }
+        _ => None,
     }
-    None
 }
 
 fn extract_audio_attachment(msg: &Message) -> Option<(String, String)> {
-    if let Some(voice) = msg.voice() {
-        return Some((voice.file.id.to_string(), "ogg".to_string()));
+    let MessageKind::Common(common) = &msg.kind else {
+        return None;
+    };
+    match &common.media_kind {
+        MediaKind::Voice(media) => Some((media.voice.file.id.to_string(), "ogg".to_string())),
+        MediaKind::Audio(media) => {
+            let ext = media
+                .audio
+                .file_name
+                .as_deref()
+                .and_then(extension_from_filename)
+                .unwrap_or_else(|| "mp3".to_string());
+            Some((media.audio.file.id.to_string(), ext))
+        }
+        _ => None,
     }
-    if let Some(audio) = msg.audio() {
-        let ext = audio
-            .file_name
-            .as_deref()
-            .and_then(extension_from_filename)
-            .unwrap_or_else(|| "mp3".to_string());
-        return Some((audio.file.id.to_string(), ext));
-    }
-    None
 }
 
 async fn download_telegram_file(

@@ -102,7 +102,18 @@ fn build_rss_skill_prompt_with_categories(state: &AppState) -> String {
 fn build_skill_playbooks_text(state: &AppState) -> String {
     let mut sections = Vec::new();
     for (skill, body) in SKILL_PLAYBOOKS {
-        let content = if *skill == "rss_fetch" {
+        let is_enabled = state.skills_list.contains(crate::canonical_skill_name(skill));
+        let content = if !is_enabled {
+            let disabled_text = crate::i18n_t_with_default(
+                state,
+                "clawd.msg.skill_disabled",
+                "Skill is not enabled: {skill}. Please enable it in config and try again.",
+            )
+            .replace("{skill}", skill);
+            format!(
+                "Status: disabled.\n\nIf user intent requires this skill, do NOT call this skill.\nReturn `{{\"type\":\"respond\",\"content\":\"{disabled_text}\"}}`."
+            )
+        } else if *skill == "rss_fetch" {
             build_rss_skill_prompt_with_categories(state)
         } else {
             body.to_string()

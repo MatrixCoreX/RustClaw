@@ -48,6 +48,8 @@ function loadConfig() {
 
 const cfg = loadConfig();
 let sock = null;
+const inboundDedup = new Map();
+const DEDUP_WINDOW_MS = 10 * 60 * 1000;
 const waLoginState = {
   connected: false,
   qrRaw: null,
@@ -55,6 +57,36 @@ const waLoginState = {
   lastUpdateTs: Date.now(),
   lastError: null,
 };
+
+function cleanupDedup(now = Date.now()) {
+  for (const [k, ts] of inboundDedup.entries()) {
+    if (now - ts > DEDUP_WINDOW_MS) {
+      inboundDedup.delete(k);
+    }
+  }
+}
+
+function dedupInboundKey(msg) {
+  const id = String(msg?.key?.id || "").trim();
+  if (id) return `wa_web_msg:${id}`;
+  const jid = normalizeJid(msg?.key?.remoteJid);
+  const text = extractTextContent(msg?.message || {});
+  const type = Object.keys(msg?.message || {}).sort().join(",");
+  return `wa_web_fallback:${jid}:${type}:${text}`;
+}
+
+function shouldProcessInbound(msg) {
+  const key = dedupInboundKey(msg);
+  if (!key) return true;
+  const now = Date.now();
+  cleanupDedup(now);
+  const last = inboundDedup.get(key);
+  if (typeof last === "number" && now - last <= DEDUP_WINDOW_MS) {
+    return false;
+  }
+  inboundDedup.set(key, now);
+  return true;
+}
 
 function stableUserId(input) {
   const digest = crypto.createHash("sha256").update(input).digest();
@@ -284,6 +316,10 @@ async function saveInboundMedia(message, jid, userId) {
 
 async function handleInboundMessage(msg) {
   if (!msg?.key || msg.key.fromMe) return;
+  if (!shouldProcessInbound(msg)) {
+    log.info({ id: msg?.key?.id, jid: msg?.key?.remoteJid }, "skip duplicated inbound message");
+    return;
+  }
   const jid = normalizeJid(msg.key.remoteJid);
   if (!jid) return;
   if (!isAllowed(jid)) {

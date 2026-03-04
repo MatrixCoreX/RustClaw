@@ -1013,6 +1013,28 @@ async fn main() -> anyhow::Result<()> {
         config.whatsapp_cloud.phone_number_id.clone()
     };
 
+    let mut enabled_skills: HashSet<String> = config
+        .skills
+        .skills_list
+        .iter()
+        .map(|skill| canonical_skill_name(skill).to_string())
+        .collect();
+    for (skill, is_enabled) in &config.skills.skill_switches {
+        let canonical = canonical_skill_name(skill);
+        if *is_enabled {
+            enabled_skills.insert(canonical.to_string());
+        } else {
+            enabled_skills.remove(canonical);
+        }
+    }
+    let mut enabled_skills_for_log: Vec<String> = enabled_skills.iter().cloned().collect();
+    enabled_skills_for_log.sort();
+    info!(
+        "enabled skills resolved count={} skills={}",
+        enabled_skills_for_log.len(),
+        enabled_skills_for_log.join(", ")
+    );
+
     let state = AppState {
         started_at: Instant::now(),
         queue_limit: config.worker.queue_limit,
@@ -1020,7 +1042,7 @@ async fn main() -> anyhow::Result<()> {
         llm_providers,
         skill_timeout_seconds: config.skills.skill_timeout_seconds,
         skill_runner_path: effective_skill_runner_path,
-        skills_list: Arc::new(config.skills.skills_list.iter().cloned().collect()),
+        skills_list: Arc::new(enabled_skills),
         skill_semaphore: Arc::new(Semaphore::new(config.skills.skill_max_concurrency.max(1))),
         rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
             config.limits.global_rpm,
@@ -2099,10 +2121,15 @@ async fn run_skill_with_runner(
     if !state.skills_list.contains(skill_name) {
         let mut allowed: Vec<String> = state.skills_list.iter().cloned().collect();
         allowed.sort();
-        return Err(format!(
-            "skill not allowed: {skill_name}; allowed skills: {}",
-            allowed.join(", ")
-        ));
+        let enabled = allowed.join(", ");
+        let err_text = i18n_t_with_default(
+            state,
+            "clawd.msg.skill_disabled_with_enabled_list",
+            "Skill is not enabled: {skill}. Please enable it in config and try again. (Currently enabled: {enabled_skills})",
+        )
+        .replace("{skill}", skill_name)
+        .replace("{enabled_skills}", &enabled);
+        return Err(err_text);
     }
 
     let _permit = state

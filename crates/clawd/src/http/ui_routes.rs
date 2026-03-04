@@ -3,7 +3,9 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use rusqlite::OptionalExtension;
+use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Seek, SeekFrom};
 use tokio::process::Command;
 
@@ -23,6 +25,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .route("/skills", get(list_skills))
+        .route("/skills/config", get(get_skills_config).post(update_skills_config))
         .route("/logs/latest", get(logs_latest))
         .route("/whatsapp-web/login-status", get(whatsapp_web_login_status))
         .route("/whatsapp-web/logout", post(whatsapp_web_logout))
@@ -490,6 +493,235 @@ async fn list_skills(State(state): State<AppState>) -> Json<ApiResponse<Value>> 
         })),
         error: None,
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateSkillsConfigRequest {
+    #[serde(default)]
+    skill_switches: HashMap<String, bool>,
+}
+
+fn read_skill_config_file(state: &AppState) -> anyhow::Result<(String, toml::Value)> {
+    let path = state.workspace_root.join("configs/config.toml");
+    let raw = std::fs::read_to_string(&path)?;
+    let parsed = toml::from_str::<toml::Value>(&raw)?;
+    Ok((raw, parsed))
+}
+
+fn collect_skills_baseline(value: &toml::Value) -> Vec<String> {
+    value
+        .get("skills")
+        .and_then(|v| v.get("skills_list"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| super::super::canonical_skill_name(s).to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn collect_skill_switches(value: &toml::Value) -> BTreeMap<String, bool> {
+    let mut out = BTreeMap::new();
+    let Some(tbl) = value
+        .get("skills")
+        .and_then(|v| v.get("skill_switches"))
+        .and_then(|v| v.as_table())
+    else {
+        return out;
+    };
+    for (k, v) in tbl {
+        if let Some(b) = v.as_bool() {
+            out.insert(super::super::canonical_skill_name(k).to_string(), b);
+        }
+    }
+    out
+}
+
+fn compute_effective_enabled(
+    baseline: &[String],
+    switches: &BTreeMap<String, bool>,
+) -> Vec<String> {
+    let mut set: BTreeMap<String, bool> = baseline
+        .iter()
+        .map(|s| (super::super::canonical_skill_name(s).to_string(), true))
+        .collect();
+    for (k, v) in switches {
+        if *v {
+            set.insert(super::super::canonical_skill_name(k).to_string(), true);
+        } else {
+            set.remove(super::super::canonical_skill_name(k));
+        }
+    }
+    set.into_keys().collect()
+}
+
+fn render_switches_inline_table(switches: &BTreeMap<String, bool>) -> String {
+    if switches.is_empty() {
+        return "skill_switches = {}".to_string();
+    }
+    let pairs = switches
+        .iter()
+        .map(|(k, v)| format!("{k} = {v}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("skill_switches = {{ {pairs} }}")
+}
+
+fn upsert_skill_switches_line(raw: &str, rendered_line: &str) -> String {
+    let mut lines: Vec<String> = raw.lines().map(|s| s.to_string()).collect();
+    let mut in_skills = false;
+    let mut inserted_or_replaced = false;
+    let mut skills_section_seen = false;
+    let mut insert_index_in_skills: Option<usize> = None;
+    let mut skills_section_end: Option<usize> = None;
+
+    for idx in 0..lines.len() {
+        let trimmed = lines[idx].trim();
+        if trimmed == "[skills]" {
+            in_skills = true;
+            skills_section_seen = true;
+            insert_index_in_skills = Some(idx + 1);
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed != "[skills]" {
+            if in_skills {
+                skills_section_end = Some(idx);
+                break;
+            }
+            continue;
+        }
+        if in_skills && trimmed.starts_with("skill_switches") && trimmed.contains('=') {
+            lines[idx] = rendered_line.to_string();
+            inserted_or_replaced = true;
+            break;
+        }
+        if in_skills && insert_index_in_skills.is_none() && !trimmed.is_empty() {
+            insert_index_in_skills = Some(idx);
+        }
+        if in_skills && trimmed.starts_with("skills_list") && insert_index_in_skills.is_none() {
+            insert_index_in_skills = Some(idx);
+        }
+    }
+
+    if !inserted_or_replaced && skills_section_seen {
+        let idx = insert_index_in_skills
+            .or(skills_section_end)
+            .unwrap_or(lines.len());
+        lines.insert(idx, rendered_line.to_string());
+    }
+
+    let mut out = lines.join("\n");
+    if raw.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+async fn get_skills_config(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let parsed = match read_skill_config_file(&state) {
+        Ok((_, v)) => v,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read skills config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let baseline = collect_skills_baseline(&parsed);
+    let switches = collect_skill_switches(&parsed);
+    let managed = {
+        let mut set: BTreeMap<String, bool> = BTreeMap::new();
+        for s in &baseline {
+            set.insert(s.clone(), true);
+        }
+        for s in switches.keys() {
+            set.insert(s.clone(), true);
+        }
+        for s in state.skills_list.iter() {
+            set.insert(s.clone(), true);
+        }
+        set.into_keys().collect::<Vec<_>>()
+    };
+    let effective = compute_effective_enabled(&baseline, &switches);
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "config_path": "configs/config.toml",
+                "skills_list": baseline,
+                "skill_switches": switches,
+                "managed_skills": managed,
+                "effective_enabled_skills_preview": effective,
+                "runtime_enabled_skills": state.skills_list.iter().cloned().collect::<Vec<_>>(),
+                "restart_required": true
+            })),
+            error: None,
+        }),
+    )
+}
+
+async fn update_skills_config(
+    State(state): State<AppState>,
+    Json(req): Json<UpdateSkillsConfigRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let (raw, parsed) = match read_skill_config_file(&state) {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read skills config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let baseline = collect_skills_baseline(&parsed);
+    let mut switches = BTreeMap::new();
+    for (k, v) in req.skill_switches {
+        let skill = super::super::canonical_skill_name(k.trim()).to_string();
+        if skill.is_empty() {
+            continue;
+        }
+        switches.insert(skill, v);
+    }
+    let rendered = render_switches_inline_table(&switches);
+    let updated = upsert_skill_switches_line(&raw, &rendered);
+    let path = state.workspace_root.join("configs/config.toml");
+    if let Err(err) = std::fs::write(&path, updated) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("write skills config failed: {err}")),
+            }),
+        );
+    }
+    let effective = compute_effective_enabled(&baseline, &switches);
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "config_path": "configs/config.toml",
+                "skill_switches": switches,
+                "effective_enabled_skills_preview": effective,
+                "restart_required": true
+            })),
+            error: None,
+        }),
+    )
 }
 
 async fn whatsapp_web_login_status(State(state): State<AppState>) -> Json<ApiResponse<Value>> {

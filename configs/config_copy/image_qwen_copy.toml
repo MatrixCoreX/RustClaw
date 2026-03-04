@@ -1,0 +1,53 @@
+# Qwen copy profile for image skills / 图片技能 Qwen 备份配置
+
+[image_edit]
+default_vendor = "qwen"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+qwen_native_function = "description_edit"
+default_model = "wanx2.1-imageedit"
+openai_models = ["gpt-image-1"]
+google_models = ["gemini-2.5-flash-image-preview"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["wanx2.1-imageedit"]
+models = ["wanx2.1-imageedit"]
+default_output_dir = "image/download"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+
+[image_generation]
+default_vendor = "qwen"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+default_model = "wanx2.1-t2i-turbo"
+openai_models = ["gpt-image-1"]
+google_models = ["gemini-2.5-flash-image-preview"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["wanx2.1-t2i-turbo"]
+models = ["wanx2.1-t2i-turbo"]
+default_output_dir = "image/download"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+
+[image_vision]
+default_vendor = "qwen"
+adapter_mode = "compat"
+default_model = "qwen-vl-max-latest"
+openai_models = ["gpt-4o-mini", "gpt-4o"]
+google_models = ["gemini-2.5-flash", "gemini-2.5-pro"]
+anthropic_models = ["claude-sonnet-4-6"]
+qwen_models = ["qwen-vl-max-latest", "qwen-vl-plus-latest"]
+models = ["qwen-vl-max-latest", "qwen-vl-plus-latest"]
+default_output_dir = "image/upload"
+max_concurrency = 1
+max_images = 6
+max_input_bytes = 10485760
+timeout_seconds = 90

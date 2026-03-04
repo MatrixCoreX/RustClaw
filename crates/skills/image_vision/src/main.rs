@@ -76,6 +76,8 @@ struct ImageSkillConfig {
     max_images: Option<usize>,
     #[serde(default)]
     max_input_bytes: Option<usize>,
+    #[serde(default)]
+    adapter_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,6 +86,13 @@ enum VendorKind {
     Google,
     Anthropic,
     Qwen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdapterMode {
+    Auto,
+    Native,
+    Compat,
 }
 
 #[derive(Debug, Clone)]
@@ -438,6 +447,7 @@ fn call_vendor_vision(
     images: &[ImageSource],
     max_input_bytes: usize,
 ) -> Result<(String, String), String> {
+    let mode = resolve_adapter_mode(&cfg.image_vision);
     match vendor {
         VendorKind::OpenAI => {
             let vcfg = cfg
@@ -496,9 +506,30 @@ fn call_vendor_vision(
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
                 .build()
                 .map_err(|err| format!("build qwen client failed: {err}"))?;
+            if mode == AdapterMode::Native {
+                return Err(
+                    "qwen native vision adapter is not implemented; use image_vision.adapter_mode=compat"
+                        .to_string(),
+                );
+            }
             let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
             Ok((text, model))
         }
+    }
+}
+
+fn resolve_adapter_mode(cfg: &ImageSkillConfig) -> AdapterMode {
+    match cfg
+        .adapter_mode
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("auto")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "native" => AdapterMode::Native,
+        "compat" | "compatible" => AdapterMode::Compat,
+        _ => AdapterMode::Auto,
     }
 }
 
@@ -709,12 +740,45 @@ fn anthropic_vision(
 
 fn load_root_config() -> RootConfig {
     let root = workspace_root();
-    let cfg_path = root.join("configs/config.toml");
-    let raw = match std::fs::read_to_string(cfg_path) {
-        Ok(v) => v,
-        Err(_) => return RootConfig::default(),
+    let mut merged = match std::fs::read_to_string(root.join("configs/config.toml"))
+        .ok()
+        .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
+    {
+        Some(v) => v,
+        None => toml::Value::Table(toml::map::Map::new()),
     };
-    toml::from_str::<RootConfig>(&raw).unwrap_or_default()
+    if let Some(image_cfg) = std::fs::read_to_string(root.join("configs/image.toml"))
+        .ok()
+        .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
+    {
+        merge_missing_toml(&mut merged, image_cfg);
+    }
+
+    let mut cfg = RootConfig::default();
+    if let Some(v) = merged.get("llm").cloned() {
+        if let Ok(parsed) = v.try_into::<LlmConfig>() {
+            cfg.llm = parsed;
+        }
+    }
+    if let Some(v) = merged.get("image_vision").cloned() {
+        if let Ok(parsed) = v.try_into::<ImageSkillConfig>() {
+            cfg.image_vision = parsed;
+        }
+    }
+    cfg
+}
+
+fn merge_missing_toml(dst: &mut toml::Value, src: toml::Value) {
+    if let (toml::Value::Table(dst_map), toml::Value::Table(src_map)) = (dst, src) {
+        for (key, src_val) in src_map {
+            match dst_map.get_mut(&key) {
+                Some(dst_val) => merge_missing_toml(dst_val, src_val),
+                None => {
+                    dst_map.insert(key, src_val);
+                }
+            }
+        }
+    }
 }
 
 fn workspace_root() -> PathBuf {

@@ -70,6 +70,16 @@ interface SkillsResponse {
   skill_runner_path?: string;
 }
 
+interface SkillsConfigResponse {
+  config_path: string;
+  skills_list: string[];
+  skill_switches: Record<string, boolean>;
+  managed_skills: string[];
+  effective_enabled_skills_preview: string[];
+  runtime_enabled_skills: string[];
+  restart_required: boolean;
+}
+
 interface LogLatestResponse {
   file: string;
   lines: number;
@@ -210,6 +220,12 @@ export default function App() {
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillsError, setSkillsError] = useState<string | null>(null);
   const [skillsData, setSkillsData] = useState<SkillsResponse | null>(null);
+  const [skillsConfigLoading, setSkillsConfigLoading] = useState(false);
+  const [skillsConfigError, setSkillsConfigError] = useState<string | null>(null);
+  const [skillsConfigData, setSkillsConfigData] = useState<SkillsConfigResponse | null>(null);
+  const [skillSwitchDraft, setSkillSwitchDraft] = useState<Record<string, boolean>>({});
+  const [skillSwitchSaving, setSkillSwitchSaving] = useState(false);
+  const [skillSwitchSaveMessage, setSkillSwitchSaveMessage] = useState<string | null>(null);
 
   const [taskId, setTaskId] = useState("");
   const [taskLoading, setTaskLoading] = useState(false);
@@ -419,6 +435,57 @@ export default function App() {
       setSkillsError(message);
     } finally {
       setSkillsLoading(false);
+    }
+  };
+
+  const fetchSkillsConfig = async () => {
+    setSkillsConfigLoading(true);
+    setSkillsConfigError(null);
+    try {
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/skills/config`);
+      const body = (await res.json()) as ApiResponse<SkillsConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `技能配置获取失败 (${res.status})`);
+      }
+      setSkillsConfigData(body.data);
+      setSkillSwitchDraft(body.data.skill_switches || {});
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setSkillsConfigError(message);
+    } finally {
+      setSkillsConfigLoading(false);
+    }
+  };
+
+  const saveSkillSwitches = async () => {
+    setSkillSwitchSaving(true);
+    setSkillSwitchSaveMessage(null);
+    setSkillsConfigError(null);
+    try {
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/skills/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skill_switches: skillSwitchDraft }),
+      });
+      const body = (await res.json()) as ApiResponse<{
+        restart_required?: boolean;
+      }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `技能配置保存失败 (${res.status})`);
+      }
+      setSkillSwitchSaveMessage(
+        t(
+          "技能开关已保存到 config.toml（需重启 clawd 生效）",
+          "Skill switches saved to config.toml (restart clawd to apply)",
+        ),
+      );
+      await fetchSkillsConfig();
+      await fetchSkills();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setSkillsConfigError(message);
+    } finally {
+      setSkillSwitchSaving(false);
     }
   };
 
@@ -654,6 +721,7 @@ export default function App() {
   useEffect(() => {
     void fetchHealth();
     void fetchSkills();
+    void fetchSkillsConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -689,6 +757,7 @@ export default function App() {
 
   useEffect(() => {
     void fetchSkills();
+    void fetchSkillsConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseUrl]);
@@ -777,6 +846,11 @@ export default function App() {
     ];
     return rows;
   }, [health]);
+  const managedSkills = useMemo(() => {
+    const set = new Set<string>(skillsConfigData?.managed_skills ?? []);
+    Object.keys(skillSwitchDraft).forEach((k) => set.add(k));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [skillsConfigData, skillSwitchDraft]);
 
   return (
     <div className="min-h-screen bg-[#0f1116] text-white selection:bg-[#f74c00]/30">
@@ -1374,14 +1448,24 @@ export default function App() {
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">{tSlash("当前技能列表 / Active Skills")}</h2>
-            <button
-              onClick={() => void fetchSkills()}
-              disabled={skillsLoading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {skillsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              {tSlash("刷新 / Refresh")}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void fetchSkills()}
+                disabled={skillsLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {skillsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {tSlash("刷新运行态 / Refresh Runtime")}
+              </button>
+              <button
+                onClick={() => void fetchSkillsConfig()}
+                disabled={skillsConfigLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {skillsConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {tSlash("刷新配置 / Refresh Config")}
+              </button>
+            </div>
           </div>
           <p className="text-xs text-white/50">
             {tSlash("技能数量 / Skill Count")}: {skillsData?.skills?.length ?? 0}
@@ -1402,6 +1486,85 @@ export default function App() {
             ) : (
               <span className="text-xs text-white/50">{skillsLoading ? tSlash("加载中... / Loading...") : "--"}</span>
             )}
+          </div>
+
+          <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold">{tSlash("技能开关（写入 config.toml）/ Skill Switches (config.toml)")}</h3>
+              <button
+                onClick={() => void saveSkillSwitches()}
+                disabled={skillSwitchSaving || skillsConfigLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#f74c00] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {skillSwitchSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {tSlash("保存开关 / Save Switches")}
+              </button>
+            </div>
+            <p className="text-xs text-white/50">
+              {t("说明：这里只改 skill_switches；运行时生效需要重启 clawd。", "Note: this updates skill_switches only; restart clawd to apply at runtime.")}
+            </p>
+            {skillsConfigError ? (
+              <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                {tSlash("配置读取/保存失败 / Config read/save failed")}: {skillsConfigError}
+              </p>
+            ) : null}
+            {skillSwitchSaveMessage ? (
+              <p className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                {skillSwitchSaveMessage}
+              </p>
+            ) : null}
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {managedSkills.map((name) => {
+                const runtimeEnabled = (skillsData?.skills ?? []).includes(name);
+                const switchValue = skillSwitchDraft[name];
+                const switchLabel =
+                  typeof switchValue === "boolean"
+                    ? switchValue
+                      ? "true"
+                      : "false"
+                    : t("未设置", "unset");
+                return (
+                  <label
+                    key={name}
+                    className="flex items-center justify-between rounded-lg border border-white/10 bg-[#12151f] px-3 py-2 text-xs"
+                  >
+                    <span className="text-white/85">{name}</span>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={
+                          runtimeEnabled
+                            ? "rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-200"
+                            : "rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-200"
+                        }
+                      >
+                        {runtimeEnabled ? t("运行中开启", "runtime on") : t("运行中关闭", "runtime off")}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSkillSwitchDraft((prev) => {
+                            const next = { ...prev };
+                            const current = next[name];
+                            if (current === true) next[name] = false;
+                            else if (current === false) delete next[name];
+                            else next[name] = true;
+                            return next;
+                          })
+                        }
+                        className="rounded border border-white/20 bg-white/5 px-2 py-1 text-[10px] text-white/80 hover:bg-white/10"
+                        title={t("点击在 true/false/未设置 之间切换", "Click to cycle true/false/unset")}
+                      >
+                        switch={switchLabel}
+                      </button>
+                    </span>
+                  </label>
+                );
+              })}
+              {managedSkills.length === 0 ? (
+                <span className="text-xs text-white/50">{skillsConfigLoading ? tSlash("加载中... / Loading...") : "--"}</span>
+              ) : null}
+            </div>
           </div>
         </section>
 

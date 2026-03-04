@@ -1,0 +1,36 @@
+# OpenAI copy profile for audio skills / 语音技能 OpenAI 备份配置
+
+[audio_synthesize]
+default_vendor = "openai"
+adapter_mode = "compat"
+allow_compat_adapters = true
+default_model = "gpt-4o-mini-tts"
+default_voice = "nova"
+default_format = "opus"
+default_output_dir = "audio/download"
+openai_models = ["gpt-4o-mini-tts", "gpt-4o-realtime-preview"]
+google_models = ["gemini-2.5-flash-preview-tts"]
+anthropic_models = []
+grok_models = []
+qwen_models = []
+custom_models = []
+models = ["gpt-4o-mini-tts", "gpt-4o-realtime-preview"]
+max_concurrency = 1
+max_input_chars = 4000
+timeout_seconds = 60
+
+[audio_transcribe]
+default_vendor = "openai"
+adapter_mode = "compat"
+allow_compat_adapters = true
+default_model = "whisper-1"
+openai_models = ["whisper-1", "gpt-4o-mini-transcribe"]
+google_models = ["gemini-2.5-flash"]
+anthropic_models = []
+grok_models = []
+qwen_models = []
+custom_models = []
+models = ["whisper-1", "gpt-4o-mini-transcribe"]
+max_concurrency = 1
+max_input_bytes = 26214400
+timeout_seconds = 90

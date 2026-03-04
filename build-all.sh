@@ -8,6 +8,9 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
+echo "Syncing skill docs (INTERFACE.md + prompts/skills/*.md)..." # zh: 同步技能文档（INTERFACE.md + prompts/skills/*.md）...
+python3 "$SCRIPT_DIR/scripts/sync_skill_docs.py"
+
 PROFILE="${1:-all}"
 DO_CLEAN="${2:-0}"
 

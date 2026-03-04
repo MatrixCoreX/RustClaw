@@ -380,15 +380,15 @@ fn default_crypto_catalog(lang: &str) -> TextCatalog {
     current.insert("crypto.msg.no_balances".to_string(), "no balances".to_string());
     current.insert(
         "crypto.msg.market_quote_line_gateio".to_string(),
-        "- GATEIO ${price} [source: GateIO]".to_string(),
+        "- GATEIO ${price}".to_string(),
     );
     current.insert(
         "crypto.msg.market_quote_line_coinbase".to_string(),
-        "- COINBASE ${price} [source: Coinbase]".to_string(),
+        "- COINBASE ${price}".to_string(),
     );
     current.insert(
         "crypto.msg.market_quote_line_kraken".to_string(),
-        "- KRAKEN ${price} [source: Kraken]".to_string(),
+        "- KRAKEN ${price}".to_string(),
     );
     current.insert(
         "crypto.msg.price_alert_triggered".to_string(),

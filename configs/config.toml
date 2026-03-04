@@ -19,8 +19,8 @@ global_rpm = 60
 user_rpm = 20
 
 [llm]
-selected_model = "gpt-5.2"
-selected_vendor = "openai"
+selected_model = "qwen-plus-latest"
+selected_vendor = "qwen"
 
 [llm.anthropic]
 api_key = "REDACTED_API_KEY"
@@ -97,6 +97,18 @@ models = [
 ]
 timeout_seconds = 60
 
+[image_generation]
+default_vendor = "qwen"
+default_model = "wanx2.1-t2i-turbo"
+qwen_models = ["wanx2.1-t2i-turbo"]
+models = ["wanx2.1-t2i-turbo"]
+allow_compat_adapters = true
+timeout_seconds = 120
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+default_output_dir = "image/download"
+
 [llm.openai]
 api_key = "REDACTED_API_KEY"
 base_url = "https://api.openai.com/v1"
@@ -147,6 +159,13 @@ request_timeout_seconds = 30
 [skills]
 skill_max_concurrency = 1
 skill_timeout_seconds = 30
+# 可选开关覆盖（优先级高于 skills_list）:
+# - 设为 false: 强制关闭该技能（不会进入二层路由提示词，也不可执行）
+# - 设为 true : 强制开启该技能（会进入二层路由提示词，且可执行）
+# 建议用 skill_switches 控制开关，尽量不要直接改 skills_list，避免启用基线被误改。
+# Recommended: use skill_switches to toggle skills, and avoid editing skills_list directly to prevent accidental baseline changes.
+# 例子:
+# skill_switches = { image_generate = false, rss_fetch = true }
 skills_list = [
     "x",
     "system_basic",

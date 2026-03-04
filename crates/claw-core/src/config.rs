@@ -361,6 +361,8 @@ pub struct SkillsConfig {
     pub skill_max_concurrency: usize,
     #[serde(default = "default_skills_list")]
     pub skills_list: Vec<String>,
+    #[serde(default)]
+    pub skill_switches: HashMap<String, bool>,
 }
 
 impl Default for SkillsConfig {
@@ -369,6 +371,7 @@ impl Default for SkillsConfig {
             skill_timeout_seconds: default_skill_timeout_seconds(),
             skill_max_concurrency: default_skill_max_concurrency(),
             skills_list: default_skills_list(),
+            skill_switches: HashMap::new(),
         }
     }
 }

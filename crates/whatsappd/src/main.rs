@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, anyhow};
@@ -42,6 +42,7 @@ struct AppState {
     quick_result_wait_seconds: u64,
     image_inbox_dir: String,
     audio_inbox_dir: String,
+    inbound_dedup: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,7 +83,7 @@ struct WaMessage {
     #[serde(default)]
     from: String,
     #[serde(rename = "id", default)]
-    _id: String,
+    id: String,
     #[serde(rename = "type", default)]
     message_type: String,
     #[serde(default)]
@@ -147,6 +148,7 @@ async fn main() -> anyhow::Result<()> {
         quick_result_wait_seconds: config.whatsapp.quick_result_wait_seconds.max(1),
         image_inbox_dir: config.whatsapp.image_inbox_dir.clone(),
         audio_inbox_dir: config.whatsapp.audio_inbox_dir.clone(),
+        inbound_dedup: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let webhook_path = normalize_webhook_path(&config.whatsapp.webhook_path);
@@ -247,6 +249,46 @@ fn is_allowed(state: &AppState, wa_id: &str) -> bool {
     state.allowlist.contains(wa_id) || state.admins.contains(wa_id)
 }
 
+fn now_ts() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn dedup_message_key(msg: &WaMessage) -> String {
+    if !msg.id.trim().is_empty() {
+        return format!("wa_msg:{}", msg.id.trim());
+    }
+    let text = msg
+        .text
+        .as_ref()
+        .map(|t| t.body.trim())
+        .unwrap_or("");
+    format!("wa_fallback:{}:{}:{}", msg.from.trim(), msg.message_type.trim(), text)
+}
+
+fn should_process_inbound(state: &AppState, msg: &WaMessage) -> bool {
+    const DEDUP_WINDOW_SECONDS: u64 = 10 * 60;
+    let key = dedup_message_key(msg);
+    if key.trim().is_empty() {
+        return true;
+    }
+    let now = now_ts();
+    let mut guard = match state.inbound_dedup.lock() {
+        Ok(g) => g,
+        Err(_) => return true,
+    };
+    guard.retain(|_, ts| now.saturating_sub(*ts) <= DEDUP_WINDOW_SECONDS);
+    if let Some(last_ts) = guard.get(&key) {
+        if now.saturating_sub(*last_ts) <= DEDUP_WINDOW_SECONDS {
+            return false;
+        }
+    }
+    guard.insert(key, now);
+    true
+}
+
 fn stable_i64_from_str(input: &str) -> i64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     input.hash(&mut h);
@@ -255,6 +297,15 @@ fn stable_i64_from_str(input: &str) -> i64 {
 }
 
 async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Result<()> {
+    if !should_process_inbound(state, &msg) {
+        info!(
+            "skip duplicated inbound message: wa_id={} msg_id={} type={}",
+            msg.from,
+            msg.id,
+            msg.message_type
+        );
+        return Ok(());
+    }
     if msg.from.trim().is_empty() {
         return Ok(());
     }

@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::blocking::{multipart, Client};
@@ -91,6 +92,12 @@ struct ImageSkillConfig {
     #[serde(default)]
     allow_compat_adapters: bool,
     #[serde(default)]
+    adapter_mode: Option<String>,
+    #[serde(default)]
+    qwen_native_base_url: Option<String>,
+    #[serde(default)]
+    qwen_native_function: Option<String>,
+    #[serde(default)]
     language: Option<String>,
     #[serde(default)]
     i18n_path: Option<String>,
@@ -142,6 +149,13 @@ enum VendorKind {
     Anthropic,
     Grok,
     Qwen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdapterMode {
+    Auto,
+    Native,
+    Compat,
 }
 
 #[derive(Debug, Clone)]
@@ -417,6 +431,7 @@ fn call_edit(
     max_input_bytes: usize,
     output_path: &Path,
 ) -> Result<String, String> {
+    let mode = resolve_adapter_mode(&cfg.image_edit);
     match vendor {
         VendorKind::OpenAI => {
             let vcfg = cfg
@@ -474,7 +489,10 @@ fn call_edit(
             Ok(model)
         }
         VendorKind::Anthropic => {
-            if !cfg.image_edit.allow_compat_adapters {
+            if mode == AdapterMode::Native {
+                return Err("anthropic native image edit adapter is not available".to_string());
+            }
+            if !cfg.image_edit.allow_compat_adapters && mode != AdapterMode::Compat {
                 return Err(
                     "anthropic native image edit adapter is not available; set image_edit.allow_compat_adapters=true to use compatible endpoint"
                         .to_string(),
@@ -508,7 +526,10 @@ fn call_edit(
             Ok(model)
         }
         VendorKind::Grok => {
-            if !cfg.image_edit.allow_compat_adapters {
+            if mode == AdapterMode::Native {
+                return Err("grok native image edit adapter is not available".to_string());
+            }
+            if !cfg.image_edit.allow_compat_adapters && mode != AdapterMode::Compat {
                 return Err(
                     "grok native image edit adapter is not available; set image_edit.allow_compat_adapters=true to use compatible endpoint"
                         .to_string(),
@@ -542,12 +563,6 @@ fn call_edit(
             Ok(model)
         }
         VendorKind::Qwen => {
-            if !cfg.image_edit.allow_compat_adapters {
-                return Err(
-                    "qwen native image edit adapter is not available; set image_edit.allow_compat_adapters=true to use compatible endpoint"
-                        .to_string(),
-                );
-            }
             let vcfg = cfg
                 .llm
                 .qwen
@@ -559,22 +574,225 @@ fn call_edit(
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
                 .build()
                 .map_err(|err| format!("build qwen client failed: {err}"))?;
-            openai_compatible_edit(
-                &client,
-                "qwen",
-                vcfg,
-                &model,
-                instruction,
-                image,
-                mask,
-                size,
-                quality,
-                n,
-                max_input_bytes,
-                output_path,
-            )?;
+            if should_use_qwen_native_edit(&model, mode, cfg.image_edit.allow_compat_adapters) {
+                qwen_native_edit(
+                    &client,
+                    cfg.image_edit.qwen_native_base_url.as_deref(),
+                    cfg.image_edit.qwen_native_function.as_deref(),
+                    &vcfg.api_key,
+                    &model,
+                    instruction,
+                    image,
+                    mask,
+                    size,
+                    n,
+                    timeout_seconds,
+                    output_path,
+                )?;
+            } else {
+                if !cfg.image_edit.allow_compat_adapters {
+                    return Err(
+                        "qwen native image edit adapter is not available; set image_edit.allow_compat_adapters=true to use compatible endpoint"
+                            .to_string(),
+                    );
+                }
+                openai_compatible_edit(
+                    &client,
+                    "qwen",
+                    vcfg,
+                    &model,
+                    instruction,
+                    image,
+                    mask,
+                    size,
+                    quality,
+                    n,
+                    max_input_bytes,
+                    output_path,
+                )?;
+            }
             Ok(model)
         }
+    }
+}
+
+fn resolve_adapter_mode(cfg: &ImageSkillConfig) -> AdapterMode {
+    match cfg
+        .adapter_mode
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("auto")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "native" => AdapterMode::Native,
+        "compat" | "compatible" => AdapterMode::Compat,
+        _ => AdapterMode::Auto,
+    }
+}
+
+fn qwen_uses_native_edit_api(model: &str) -> bool {
+    let m = model.trim().to_ascii_lowercase();
+    m.starts_with("wanx") || m.starts_with("qwen-image-edit")
+}
+
+fn should_use_qwen_native_edit(model: &str, mode: AdapterMode, allow_compat: bool) -> bool {
+    match mode {
+        AdapterMode::Native => true,
+        AdapterMode::Compat => false,
+        AdapterMode::Auto => {
+            if qwen_uses_native_edit_api(model) {
+                true
+            } else {
+                !allow_compat
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn qwen_native_edit(
+    client: &Client,
+    native_base_url: Option<&str>,
+    native_function: Option<&str>,
+    api_key: &str,
+    model: &str,
+    instruction: &str,
+    image: &ImageSource,
+    mask: Option<&ImageSource>,
+    size: &str,
+    n: u64,
+    timeout_seconds: u64,
+    output_path: &Path,
+) -> Result<(), String> {
+    let base = native_base_url
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("https://dashscope.aliyuncs.com/api/v1");
+    let url = format!(
+        "{}/services/aigc/image2image/image-synthesis",
+        trim_trailing_slash(base)
+    );
+    let base_image_url = match image {
+        ImageSource::Url(u) => u.clone(),
+        _ => {
+            return Err(
+                "qwen native image edit currently requires image.url (http/https); local/base64 inputs use adapter_mode=compat"
+                    .to_string(),
+            )
+        }
+    };
+    let normalized_size = size.trim().replace('x', "*").replace('X', "*");
+    let function = native_function
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("description_edit");
+    let mut input = json!({
+        "prompt": instruction,
+        "function": function,
+        "base_image_url": base_image_url
+    });
+    if let Some(ImageSource::Url(mask_url)) = mask {
+        input["mask_image_url"] = Value::String(mask_url.clone());
+    }
+    let body = json!({
+        "model": model,
+        "input": input,
+        "parameters": {
+            "size": normalized_size,
+            "n": n,
+            "watermark": false
+        }
+    });
+
+    let create_resp = client
+        .post(url)
+        .bearer_auth(api_key)
+        .header("X-DashScope-Async", "enable")
+        .json(&body)
+        .send()
+        .map_err(|err| format!("qwen native edit request failed: {err}"))?;
+    let create_status = create_resp.status().as_u16();
+    let create_v: Value = create_resp
+        .json()
+        .map_err(|err| format!("parse qwen native edit create response failed: {err}"))?;
+    if create_status >= 300 {
+        return Err(format!(
+            "qwen native edit create error status={create_status}: {}",
+            truncate(&create_v.to_string(), 400)
+        ));
+    }
+
+    let task_id = create_v
+        .get("output")
+        .and_then(|o| o.get("task_id"))
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "qwen native edit response missing task_id: {}",
+                truncate(&create_v.to_string(), 400)
+            )
+        })?;
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_seconds.max(10));
+    let task_url = format!("{}/tasks/{task_id}", trim_trailing_slash(base));
+    loop {
+        if Instant::now() > deadline {
+            return Err(format!("qwen native edit task timeout: task_id={task_id}"));
+        }
+        let task_resp = client
+            .get(&task_url)
+            .bearer_auth(api_key)
+            .send()
+            .map_err(|err| format!("qwen native edit poll failed: {err}"))?;
+        let task_status = task_resp.status().as_u16();
+        let task_v: Value = task_resp
+            .json()
+            .map_err(|err| format!("parse qwen native edit task response failed: {err}"))?;
+        if task_status >= 300 {
+            return Err(format!(
+                "qwen native edit poll error status={task_status}: {}",
+                truncate(&task_v.to_string(), 400)
+            ));
+        }
+        let status = task_v
+            .get("output")
+            .and_then(|o| o.get("task_status"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        if status == "SUCCEEDED" {
+            let url = task_v
+                .get("output")
+                .and_then(|o| o.get("results"))
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|item| item.get("url"))
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    format!(
+                        "qwen native edit success response missing image url: {}",
+                        truncate(&task_v.to_string(), 400)
+                    )
+                })?;
+            let bytes = client
+                .get(url)
+                .send()
+                .map_err(|err| format!("download edited image failed: {err}"))?
+                .bytes()
+                .map_err(|err| format!("read edited image bytes failed: {err}"))?;
+            ensure_parent_dir(output_path)?;
+            std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+            return Ok(());
+        }
+        if status == "FAILED" || status == "CANCELED" || status == "CANCELLED" {
+            return Err(format!(
+                "qwen native edit task failed: {}",
+                truncate(&task_v.to_string(), 400)
+            ));
+        }
+        thread::sleep(Duration::from_millis(1200));
     }
 }
 
@@ -887,12 +1105,50 @@ fn ensure_parent_dir(path: &Path) -> Result<(), String> {
 
 fn load_root_config() -> RootConfig {
     let root = workspace_root();
-    let cfg_path = root.join("configs/config.toml");
-    let raw = match std::fs::read_to_string(cfg_path) {
-        Ok(v) => v,
-        Err(_) => return RootConfig::default(),
+    let mut merged = match std::fs::read_to_string(root.join("configs/config.toml"))
+        .ok()
+        .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
+    {
+        Some(v) => v,
+        None => toml::Value::Table(toml::map::Map::new()),
     };
-    toml::from_str::<RootConfig>(&raw).unwrap_or_default()
+    if let Some(image_cfg) = std::fs::read_to_string(root.join("configs/image.toml"))
+        .ok()
+        .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
+    {
+        // Keep config.toml higher priority if same key exists, and use image.toml as defaults.
+        merge_missing_toml(&mut merged, image_cfg);
+    }
+    let mut cfg = RootConfig::default();
+    if let Some(v) = merged.get("llm").cloned() {
+        if let Ok(parsed) = v.try_into::<LlmConfig>() {
+            cfg.llm = parsed;
+        }
+    }
+    if let Some(v) = merged.get("image_edit").cloned() {
+        if let Ok(parsed) = v.try_into::<ImageSkillConfig>() {
+            cfg.image_edit = parsed;
+        }
+    }
+    if let Some(v) = merged.get("command_intent").cloned() {
+        if let Ok(parsed) = v.try_into::<CommandIntentConfig>() {
+            cfg.command_intent = parsed;
+        }
+    }
+    cfg
+}
+
+fn merge_missing_toml(dst: &mut toml::Value, src: toml::Value) {
+    if let (toml::Value::Table(dst_map), toml::Value::Table(src_map)) = (dst, src) {
+        for (key, src_val) in src_map {
+            match dst_map.get_mut(&key) {
+                Some(dst_val) => merge_missing_toml(dst_val, src_val),
+                None => {
+                    dst_map.insert(key, src_val);
+                }
+            }
+        }
+    }
 }
 
 fn workspace_root() -> PathBuf {

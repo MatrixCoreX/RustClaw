@@ -313,10 +313,19 @@ if model_options:
     print(f"Select model for {selected_vendor}:")
     for i, m in enumerate(model_options, start=1):
         print(f"  {i}) {m}")
+    print("  0) custom input")
     choice = ask("> ").strip()
-    while not (choice.isdigit() and 1 <= int(choice) <= len(model_options)):
-        choice = ask("Invalid input, enter option number: ").strip()
-    selected_model = model_options[int(choice) - 1]
+    while True:
+        c = choice.strip().lower()
+        if c in ("0", "m", "manual", "custom"):
+            selected_model = ask(f"Enter model name for {selected_vendor}: ").strip()
+            while not selected_model:
+                selected_model = ask("Model name cannot be empty, enter again: ").strip()
+            break
+        if c.isdigit() and 1 <= int(c) <= len(model_options):
+            selected_model = model_options[int(c) - 1]
+            break
+        choice = ask("Invalid input, enter option number (or 0 for custom): ").strip()
 else:
     selected_model = ask(f"Enter model name for {selected_vendor}: ").strip()
     while not selected_model:
@@ -365,6 +374,8 @@ PY
     echo "python3 not found."
     exit 1
   fi
+  echo "Syncing skill docs (INTERFACE.md + prompts/skills/*.md)..."
+  python3 "$SCRIPT_DIR/scripts/sync_skill_docs.py"
 
   CONFIG_META="$(
 python3 - <<'PY'

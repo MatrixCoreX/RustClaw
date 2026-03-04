@@ -90,6 +90,10 @@ struct AudioSynthesizeConfig {
     max_input_chars: Option<usize>,
     #[serde(default)]
     allow_compat_adapters: bool,
+    #[serde(default)]
+    adapter_mode: Option<String>,
+    #[serde(default)]
+    qwen_native_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -100,6 +104,13 @@ enum VendorKind {
     Grok,
     Qwen,
     Custom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdapterMode {
+    Auto,
+    Native,
+    Compat,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -213,6 +224,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
     synthesize_by_vendor(
         &client,
+        &cfg.audio_synthesize,
         provider_cfg,
         vendor,
         cfg.audio_synthesize.allow_compat_adapters,
@@ -239,6 +251,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
 #[allow(clippy::too_many_arguments)]
 fn synthesize_by_vendor(
     client: &Client,
+    audio_cfg: &AudioSynthesizeConfig,
     cfg: &VendorConfig,
     vendor: VendorKind,
     allow_compat_adapters: bool,
@@ -249,6 +262,7 @@ fn synthesize_by_vendor(
     input: &str,
     output_path: &Path,
 ) -> Result<(), String> {
+    let mode = resolve_adapter_mode(audio_cfg, vendor);
     match vendor {
         VendorKind::Google => google_native_synthesize(
             client,
@@ -269,8 +283,11 @@ fn synthesize_by_vendor(
             input,
             output_path,
         ),
-        VendorKind::Anthropic | VendorKind::Grok | VendorKind::Qwen | VendorKind::Custom => {
-            if !allow_compat_adapters {
+        VendorKind::Anthropic | VendorKind::Grok | VendorKind::Custom => {
+            if mode == AdapterMode::Native {
+                return Err(format!("{vendor_name} native tts adapter is not available"));
+            }
+            if !allow_compat_adapters && mode != AdapterMode::Compat {
                 return Err(format!(
                     "{vendor_name} native tts adapter is not available; set audio_synthesize.allow_compat_adapters=true to use compatible endpoint"
                 ));
@@ -286,7 +303,135 @@ fn synthesize_by_vendor(
                 output_path,
             )
         }
+        VendorKind::Qwen => {
+            if should_use_qwen_native_tts(model, mode, allow_compat_adapters) {
+                qwen_native_synthesize(
+                    client,
+                    audio_cfg.qwen_native_base_url.as_deref(),
+                    &cfg.api_key,
+                    model,
+                    voice,
+                    input,
+                    output_path,
+                )
+            } else {
+                if !allow_compat_adapters {
+                    return Err(
+                        "qwen native tts adapter is not available; set audio_synthesize.allow_compat_adapters=true to use compatible endpoint"
+                            .to_string(),
+                    );
+                }
+                openai_compatible_synthesize(
+                    client,
+                    cfg,
+                    vendor_name,
+                    model,
+                    voice,
+                    response_format,
+                    input,
+                    output_path,
+                )
+            }
+        }
     }
+}
+
+fn resolve_adapter_mode(cfg: &AudioSynthesizeConfig, vendor: VendorKind) -> AdapterMode {
+    if matches!(vendor, VendorKind::OpenAI | VendorKind::Google) {
+        return AdapterMode::Compat;
+    }
+    parse_adapter_mode(cfg.adapter_mode.as_deref())
+}
+
+fn parse_adapter_mode(raw: Option<&str>) -> AdapterMode {
+    match raw
+        .map(str::trim)
+        .unwrap_or("auto")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "native" => AdapterMode::Native,
+        "compat" | "compatible" => AdapterMode::Compat,
+        _ => AdapterMode::Auto,
+    }
+}
+
+fn should_use_qwen_native_tts(model: &str, mode: AdapterMode, allow_compat: bool) -> bool {
+    match mode {
+        AdapterMode::Native => true,
+        AdapterMode::Compat => false,
+        AdapterMode::Auto => {
+            let m = model.trim().to_ascii_lowercase();
+            if m.starts_with("qwen3-tts") || m.starts_with("qwen-tts") {
+                true
+            } else {
+                !allow_compat
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn qwen_native_synthesize(
+    client: &Client,
+    native_base_url: Option<&str>,
+    api_key: &str,
+    model: &str,
+    voice: &str,
+    input: &str,
+    output_path: &Path,
+) -> Result<(), String> {
+    let base = native_base_url
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("https://dashscope.aliyuncs.com/api/v1");
+    let url = format!(
+        "{}/services/aigc/multimodal-generation/generation",
+        trim_trailing_slash(base)
+    );
+    let body = json!({
+        "model": model,
+        "input": {
+            "text": input,
+            "voice": voice
+        }
+    });
+    let resp = client
+        .post(url)
+        .bearer_auth(api_key)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("qwen native tts request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let v: Value = resp
+        .json()
+        .map_err(|err| format!("parse qwen native tts response failed: {err}"))?;
+    if status >= 300 {
+        return Err(format!(
+            "qwen native tts failed status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
+    }
+    let audio_url = v
+        .get("output")
+        .and_then(|o| o.get("audio"))
+        .and_then(|a| a.get("url"))
+        .and_then(|u| u.as_str())
+        .ok_or_else(|| {
+            format!(
+                "qwen native tts response missing output.audio.url: {}",
+                truncate(&v.to_string(), 400)
+            )
+        })?;
+    let bytes = client
+        .get(audio_url)
+        .send()
+        .map_err(|err| format!("download qwen native tts audio failed: {err}"))?
+        .bytes()
+        .map_err(|err| format!("read qwen native tts audio failed: {err}"))?;
+    ensure_parent_dir(output_path)?;
+    std::fs::write(output_path, &bytes).map_err(|err| format!("write audio output failed: {err}"))?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -482,7 +627,18 @@ fn load_root_config() -> RootConfig {
         // Keep config.toml higher priority if same key exists, and use audio.toml as defaults.
         merge_missing_toml(&mut merged, audio_cfg);
     }
-    toml::from_str::<RootConfig>(&merged.to_string()).unwrap_or_default()
+    let mut cfg = RootConfig::default();
+    if let Some(v) = merged.get("llm").cloned() {
+        if let Ok(parsed) = v.try_into::<LlmConfig>() {
+            cfg.llm = parsed;
+        }
+    }
+    if let Some(v) = merged.get("audio_synthesize").cloned() {
+        if let Ok(parsed) = v.try_into::<AudioSynthesizeConfig>() {
+            cfg.audio_synthesize = parsed;
+        }
+    }
+    cfg
 }
 
 fn first_model_candidate<'a>(

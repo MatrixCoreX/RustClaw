@@ -1,42 +1,90 @@
-# Audio synthesize (TTS) / 语音合成（TTS）
-# Supported vendors: openai, google, anthropic, grok, qwen, custom / 支持厂商：openai、google、anthropic、grok、qwen、custom
-# Native adapters: google / 原生适配：google
-# OpenAI-compatible adapters: openai, anthropic, grok, qwen, custom / 兼容接口：openai、anthropic、grok、qwen、custom
+# =========================
+# Audio Synthesize / 语音合成（TTS）
+# =========================
+# Vendor routing / 厂商路由：
+# - google/qwen: support native + compat dual channels / 支持 native + compat 双通道
+# - openai/anthropic/grok/custom: compat channel / 走 compat 通道
+#
+# adapter_mode:
+# - auto: auto select (qwen3-tts prefers native) / 自动选择（qwen3-tts 系列优先 native）
+# - native: force native / 强制原生
+# - compat: force compatible / 强制兼容
+#
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [audio_synthesize]
-default_vendor = "openai"
-default_model = "gpt-4o-mini-tts"
-# model priority: request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+# Routing & mode / 路由与模式
+default_vendor = "qwen"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+
+# Default model & output / 默认模型与输出
+default_model = "qwen3-tts-flash"
+default_voice = "nova"
+default_format = "opus"
+default_output_dir = "audio/download"
+
+# Vendor models / 按厂商模型
 openai_models = ["gpt-4o-mini-tts", "gpt-4o-realtime-preview"]
 google_models = ["gemini-2.5-flash-preview-tts"]
 anthropic_models = []
 grok_models = []
-qwen_models = ["qwen-tts-latest"]
+qwen_models = ["qwen3-tts-flash", "qwen3-tts-instruct-flash"]
 custom_models = []
-models = ["gpt-4o-mini-tts"]
-default_voice = "nova"
-default_format = "opus"
-default_output_dir = "audio/download"
+models = ["qwen3-tts-flash", "qwen3-tts-instruct-flash"]
+
+# Runtime limits / 运行限制
 max_concurrency = 1
 max_input_chars = 4000
 timeout_seconds = 60
-allow_compat_adapters = false
 
-# Audio transcribe (STT) / 语音转写（STT）
-# Supported vendors: openai, google, anthropic, grok, qwen, custom / 支持厂商：openai、google、anthropic、grok、qwen、custom
-# Native adapters: google / 原生适配：google
-# OpenAI-compatible adapters: openai, anthropic, grok, qwen, custom / 兼容接口：openai、anthropic、grok、qwen、custom
+# =========================
+# Audio Transcribe / 语音转写（STT）
+# =========================
+# Vendor routing / 厂商路由：
+# - qwen (fun-asr): prefer native async flow (file_urls + tasks) / 建议 native 异步链路（file_urls + tasks）
+# - google: native / 原生
+# - openai/anthropic/grok/custom: compat / compat
+#
+# adapter_mode:
+# - auto: auto select (fun-asr / qwen3-asr prefers native) / 自动选择（fun-asr / qwen3-asr 系列优先 native）
+# - native: force native / 强制原生
+# - compat: force compatible / 强制兼容
+#
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [audio_transcribe]
-default_vendor = "openai"
-default_model = "whisper-1"
-# model priority: request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+# Routing & mode / 路由与模式
+default_vendor = "qwen"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+
+# Default model / 默认模型
+default_model = "fun-asr"
+
+# Vendor models / 按厂商模型
 openai_models = ["whisper-1", "gpt-4o-mini-transcribe"]
 google_models = ["gemini-2.5-flash"]
 anthropic_models = []
 grok_models = []
-qwen_models = ["qwen-audio-asr-latest"]
+qwen_models = ["fun-asr", "fun-asr-mtl"]
 custom_models = []
-models = ["whisper-1"]
+models = ["fun-asr", "fun-asr-mtl"]
+
+# Runtime limits / 运行限制
 max_concurrency = 1
 max_input_bytes = 26214400
 timeout_seconds = 90
-allow_compat_adapters = false
+
+# Local file auto-upload (optional) / 本地文件自动上传（可选）
+# - off: native mode requires audio_url / 关闭时：native 模式要求传 audio_url
+# - on: local path uploads to OSS first, then uses signed URL / 开启时：传本地 path 会先上传 OSS，再自动生成签名 URL
+local_auto_upload_enabled = true
+oss_access_key_id = ""
+oss_access_key_secret = ""
+oss_bucket = "rustclaw"
+oss_endpoint = "oss-cn-beijing.aliyuncs.com"
+oss_object_prefix = "rustclaw/audio"
+oss_url_ttl_seconds = 3600
