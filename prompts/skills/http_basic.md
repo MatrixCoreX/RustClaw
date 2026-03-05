@@ -8,28 +8,36 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- TODO: one-paragraph summary for `http_basic`.
+- `http_basic` performs simple HTTP requests for fetch and JSON post use cases.
+- It is intended for lightweight API calls with explicit URL and optional headers/body.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- `get`
+- `post_json`
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| all | `action` | yes | string | - | Must be `get` or `post_json`. |
+| all | `url` | yes | string | - | Must start with `http://` or `https://`. |
+| all | `headers` | no | object | `{}` | Optional request headers map. |
+| all | `timeout_seconds` | no | number | impl default | Request timeout override. |
+| `post_json` | `body` | no | object/array/scalar | - | JSON payload for POST request. |
 
 ## Error Contract (from interface)
-- TODO: list error cases and corresponding `error_text` conventions.
+- Missing/invalid URL or unsupported action.
+- Network/timeouts/HTTP errors should return readable error text.
+- Invalid JSON body serialization errors should be surfaced explicitly.
 
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"action":"get","url":"https://example.com/api/ping"}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"ok\":true}","error_text":null}
 ```
 
 ## Output Contract

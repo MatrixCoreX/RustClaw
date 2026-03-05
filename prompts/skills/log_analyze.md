@@ -8,28 +8,34 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- TODO: one-paragraph summary for `log_analyze`.
+- `log_analyze` scans logs for notable errors/events and summarizes key findings.
+- It can target a specific path and narrow results with keyword filters.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- No action field is required for baseline analysis.
+- Optional behavior is controlled by filter parameters.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| analyze | `path` | no | string(path) | impl default | Log file or directory path. |
+| analyze | `keywords` | no | array/string | - | Keyword filters for matching lines. |
+| analyze | `max_matches` | no | number | impl default | Cap for returned evidence rows. |
 
 ## Error Contract (from interface)
-- TODO: list error cases and corresponding `error_text` conventions.
+- Invalid/missing log path when path is provided.
+- Read/parse errors should return clear filesystem/runtime details.
+- Oversized/unbounded scans should be summarized safely.
 
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"path":"logs/app.log","keywords":["error","timeout"],"max_matches":50}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"Top findings: ...","error_text":null}
 ```
 
 ## Output Contract

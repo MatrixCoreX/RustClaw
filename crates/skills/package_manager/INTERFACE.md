@@ -1,29 +1,39 @@
 # package_manager Interface Spec
 
 > This file is managed by `scripts/sync_skill_docs.py`.
-> Fill in the details before using this skill in production.
+> Keep this spec aligned with the package_manager implementation.
 
 ## Capability Summary
-- TODO: one-paragraph summary for `package_manager`.
+- `package_manager` detects available package managers and installs packages with optional dry-run/sudo controls.
+- It supports direct manager-specific install and smart auto-detection install.
 
 ## Actions
-- TODO: list supported `action` values.
+- `detect`
+- `install`
+- `smart_install`
 
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| all | `action` | yes | string | - | Must be one of `detect|install|smart_install`. |
+| `detect` | none | no | - | - | Detect package manager and environment support. |
+| `install`/`smart_install` | `packages` or `package` | yes | array/string | - | Non-empty package list. |
+| `install` | `manager` | no | string | auto | Explicit package manager override. |
+| `install`/`smart_install` | `dry_run` | no | boolean | impl default | Preview install without changes. |
+| `install`/`smart_install` | `use_sudo` | no | boolean | impl default | Use elevated install when needed. |
 
 ## Error Contract
-- TODO: list error cases and corresponding `error_text` conventions.
+- Missing or empty package list.
+- Unsupported manager/action values.
+- Install command failures return readable stderr/system errors.
 
 ## Request/Response Examples
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"action":"smart_install","packages":["jq"],"dry_run":true}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"dry-run install plan: ...","error_text":null}
 ```

@@ -8,28 +8,36 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- TODO: one-paragraph summary for `image_vision`.
+- `image_vision` analyzes one or more images for description, extraction, comparison, and screenshot summaries.
+- It returns textual understanding without mutating source images.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- `describe`
+- `extract`
+- `compare`
+- `screenshot_summary`
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| all | `action` | yes | string | - | Must be one of supported actions. |
+| all | `images` | yes | array | - | Image inputs as `{path|url|base64}` items. |
+| optional | language/format hints | no | string | impl default | Optional output shaping hints. |
 
 ## Error Contract (from interface)
-- TODO: list error cases and corresponding `error_text` conventions.
+- Missing/empty `images` input array.
+- Unsupported action.
+- Invalid image source/path/URL/base64 decode failures.
 
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"action":"describe","images":[{"path":"assets/screen.png"}]}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"The screenshot shows ...","error_text":null}
 ```
 
 ## Output Contract

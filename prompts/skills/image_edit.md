@@ -8,28 +8,39 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- TODO: one-paragraph summary for `image_edit`.
+- `image_edit` modifies existing images using natural language instructions.
+- It supports generic edit/outpaint/restyle/add-remove operations.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- `edit`
+- `outpaint`
+- `restyle`
+- `add_remove`
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| all | `action` | yes | string | - | Must be one of supported edit actions. |
+| all | `instruction` | yes | string | - | Edit instruction text. |
+| all | `image` | no | string/object | - | Input image path/url/base64 payload. |
+| all | `mask` | no | string/object | - | Optional mask for local edits. |
+| all | `output_path` | no | string(path) | auto | Output location for edited asset. |
 
 ## Error Contract (from interface)
-- TODO: list error cases and corresponding `error_text` conventions.
+- Missing `instruction`.
+- Unsupported action.
+- Missing/invalid source image when operation requires one.
+- Provider/runtime edit failures should return clear error text.
 
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"action":"restyle","instruction":"pixel-art style","image":{"path":"assets/logo.png"}}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"image edited: ...","error_text":null}
 ```
 
 ## Output Contract

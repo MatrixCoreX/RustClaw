@@ -1,0 +1,19 @@
+[confirm]
+# 用途/Purpose: 交易确认“同意”关键词集合（主流程确认识别）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 词表过宽会误确认；过窄会漏确认（用户点击确认却不生效）.
+yes = ["yes", "y", "ok", "确认", "是", "好的", "同意"]
+# 用途/Purpose: 交易确认“拒绝/取消”关键词集合.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 词表过宽会误取消；过窄会漏取消.
+no = ["no", "n", "取消", "否", "不用了", "不"]
+
+[exchange]
+# 用途/Purpose: 默认交易所（文本未指定交易所时使用）.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 会影响所有未显式指定交易所的交易请求路由.
+default = "binance"
+# 用途/Purpose: 交易所别名映射（自然语言 -> 规范交易所名）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 别名错误会导致归一化失败或路由到错误交易所.
+aliases = { okx = ["okx", "欧易"], binance = ["binance", "币安"] }

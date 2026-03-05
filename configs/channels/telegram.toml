@@ -2,6 +2,8 @@
 admins = []
 # 图片保存类回复（如 "Image saved: ..."/"Generated successfully and saved: ..."/"图片生成成功并已保存：..."）在 N 秒后自动删除，0 表示不删除
 ephemeral_image_saved_seconds = 15
+# 交易确认按钮过期秒数；过期后按钮会变为“已过期”
+crypto_confirm_ttl_seconds = 15
 allowlist = []
 audio_inbox_dir = "audio/upload"
 auto_vision_on_image_only = false

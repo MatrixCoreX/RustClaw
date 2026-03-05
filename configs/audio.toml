@@ -21,7 +21,7 @@ qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
 
 # Default model & output / 默认模型与输出
 default_model = "qwen3-tts-flash"
-default_voice = "nova"
+default_voice = "Cherry"
 default_format = "opus"
 default_output_dir = "audio/download"
 

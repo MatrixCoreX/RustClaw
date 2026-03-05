@@ -175,6 +175,7 @@ skills_list = [
     "service_control",
     "config_guard",
     "crypto",
+    "chat",
 ]
 
 [adapters.slack]

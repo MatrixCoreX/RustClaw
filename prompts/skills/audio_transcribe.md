@@ -8,28 +8,35 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- TODO: one-paragraph summary for `audio_transcribe`.
+- `audio_transcribe` converts audio input into text transcription.
+- It supports optional hints and backend model/vendor selection.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- No explicit action is required.
+- Behavior is driven by audio source and optional tuning parameters.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| transcribe | `audio.path` or `path` | yes | string(path) | - | Input audio source path (`audio.path` preferred). |
+| transcribe | `transcribe_hint` | no | string | - | Prompt/hint to improve recognition quality. |
+| transcribe | `vendor` | no | string | impl default | Backend vendor selector. |
+| transcribe | `model` | no | string | impl default | Backend model selector. |
 
 ## Error Contract (from interface)
-- TODO: list error cases and corresponding `error_text` conventions.
+- Missing audio path.
+- Invalid/unreadable audio source.
+- Provider/runtime transcription failures should return clear error text.
 
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"audio":{"path":"recordings/meeting.wav"},"transcribe_hint":"English technical discussion"}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"Transcription: ...","error_text":null}
 ```
 
 ## Output Contract

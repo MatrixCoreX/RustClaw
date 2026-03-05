@@ -8,28 +8,35 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- TODO: one-paragraph summary for `install_module`.
+- `install_module` installs development/runtime modules in common ecosystems.
+- It accepts single or multiple module names and optional ecosystem/version hints.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- No explicit `action` is required.
+- Install behavior is determined by provided module fields and optional ecosystem hints.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| install | `modules` or `module` | yes | array/string | - | At least one valid module name. |
+| install | `ecosystem` | no | string | auto | One of `python|node|rust|go` when known. |
+| install | `version` | no | string | latest | Optional version pin/range hint. |
 
 ## Error Contract (from interface)
-- TODO: list error cases and corresponding `error_text` conventions.
+- Empty module list/name.
+- Invalid/unsafe module tokens.
+- Unsupported ecosystem value.
+- Installation failures return readable command/tool errors.
 
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"modules":["requests"],"ecosystem":"python"}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"installed modules: requests","error_text":null}
 ```
 
 ## Output Contract

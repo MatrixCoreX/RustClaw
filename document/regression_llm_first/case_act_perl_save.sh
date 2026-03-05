@@ -11,7 +11,7 @@ run_case_expect \
   "act_perl_save" \
   "帮我写一个perl的代码例子，保存在 ./perl 目录下，文件名 perl_example.pl" \
   "succeeded" \
-  "Saved successfully:" \
+  "file written:" \
   "text" \
   "agent tool call limit exceeded" \
   "either"

@@ -4,6 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Enable colored log tags on interactive terminals unless overridden.
+if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
+  export RUSTCLAW_LOG_COLOR=1
+fi
+
 if ! command -v node >/dev/null 2>&1; then
   echo "node not found. Please install Node.js 18+." # zh: 未找到 node，请先安装 Node.js 18+
   exit 1

@@ -29,6 +29,7 @@ members = [
   "crates/skills/service_control",
   "crates/skills/config_guard",
   "crates/skills/crypto",
+  "crates/skills/chat",
 ]
 
 [workspace.package]

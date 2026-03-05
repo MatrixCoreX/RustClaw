@@ -1,21 +1,24 @@
 # health_check Interface Spec
 
 > This file is managed by `scripts/sync_skill_docs.py`.
-> Fill in the details before using this skill in production.
+> Keep this spec aligned with the health_check implementation.
 
 ## Capability Summary
-- TODO: one-paragraph summary for `health_check`.
+- `health_check` runs baseline diagnostics and status checks for environment/runtime health.
+- It is read-only and should not perform mutating operations.
 
 ## Actions
-- TODO: list supported `action` values.
+- No explicit action is required for baseline diagnostics.
 
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| check | none | no | - | - | Execute default health diagnostics. |
+| check | `log_dir` | no | string(path) | impl default | Optional log source path override. |
 
 ## Error Contract
-- TODO: list error cases and corresponding `error_text` conventions.
+- Invalid log path should return clear filesystem errors.
+- Diagnostic execution/runtime failures should return explicit error text.
 
 ## Request/Response Examples
 ### Example 1
@@ -25,5 +28,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"health diagnostics: ...","error_text":null}
 ```

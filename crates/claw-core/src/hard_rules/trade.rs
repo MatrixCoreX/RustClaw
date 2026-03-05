@@ -284,9 +284,10 @@ pub fn extract_trade_price(text: &str, rules: &CompiledTradeRules) -> Option<f64
     None
 }
 
-pub fn is_yes_confirmation(text: &str, rules: &CompiledTradeRules) -> bool {
+pub fn is_yes_confirmation(text: &str, _rules: &CompiledTradeRules) -> bool {
     let t = text.trim().to_ascii_lowercase();
-    rules.rules.confirm_yes.iter().any(|w| w == &t)
+    // Hardcoded confirmation policy: only Y / YES is accepted.
+    matches!(t.as_str(), "y" | "yes")
 }
 
 pub fn is_no_confirmation(text: &str, rules: &CompiledTradeRules) -> bool {

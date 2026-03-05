@@ -142,3 +142,85 @@ impl TradeRules {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct MainFlowRules {
+    pub whatsapp_web_adapters: Vec<String>,
+    pub whatsapp_cloud_adapters: Vec<String>,
+    pub trade_preview_line_prefix: String,
+    pub trade_preview_default_order_type: String,
+    pub recent_trade_preview_window_secs: i64,
+    pub recent_trade_preview_scan_limit: usize,
+    pub duplicate_affirmation_window_secs: i64,
+    pub duplicate_affirmation_scan_limit: usize,
+    pub duplicate_affirmation_statuses: Vec<String>,
+    pub crypto_price_alert_primary_action: String,
+    pub crypto_price_alert_actions: Vec<String>,
+    pub crypto_price_alert_fallback_actions: Vec<String>,
+    pub crypto_unsupported_error_keywords: Vec<String>,
+    pub crypto_price_alert_triggered_tag: String,
+    pub crypto_price_alert_not_triggered_tag: String,
+    pub runtime_whatsapp_channel_aliases: Vec<String>,
+    pub classifier_direct_sources: Vec<String>,
+    pub resume_continue_sources: Vec<String>,
+    pub task_status_queued: String,
+    pub task_status_running: String,
+    pub task_status_succeeded: String,
+    pub task_status_failed: String,
+    pub task_status_canceled: String,
+    pub task_status_timeout: String,
+    pub context_low_confidence_threshold: f64,
+}
+
+impl MainFlowRules {
+    pub fn defaults() -> Self {
+        Self {
+            whatsapp_web_adapters: vec!["whatsapp_web".to_string(), "wa_web".to_string()],
+            whatsapp_cloud_adapters: vec!["whatsapp_cloud".to_string(), "wa_cloud".to_string()],
+            trade_preview_line_prefix: "trade_preview ".to_string(),
+            trade_preview_default_order_type: "market".to_string(),
+            recent_trade_preview_window_secs: 600,
+            recent_trade_preview_scan_limit: 24,
+            duplicate_affirmation_window_secs: 120,
+            duplicate_affirmation_scan_limit: 30,
+            duplicate_affirmation_statuses: vec![
+                "queued".to_string(),
+                "running".to_string(),
+                "succeeded".to_string(),
+            ],
+            crypto_price_alert_primary_action: "price_alert_check".to_string(),
+            crypto_price_alert_actions: vec![
+                "price_alert_check".to_string(),
+                "price_monitor".to_string(),
+                "monitor_price".to_string(),
+                "price_alert".to_string(),
+                "volatility_alert".to_string(),
+            ],
+            crypto_price_alert_fallback_actions: vec![
+                "price_monitor".to_string(),
+                "monitor_price".to_string(),
+                "price_alert".to_string(),
+                "volatility_alert".to_string(),
+            ],
+            crypto_unsupported_error_keywords: vec![
+                "unsupported action".to_string(),
+                "不支持".to_string(),
+            ],
+            crypto_price_alert_triggered_tag: "[PRICE_ALERT_TRIGGERED]".to_string(),
+            crypto_price_alert_not_triggered_tag: "[PRICE_ALERT_NOT_TRIGGERED]".to_string(),
+            runtime_whatsapp_channel_aliases: vec!["whatsapp".to_string()],
+            classifier_direct_sources: vec![
+                "voice_mode_intent_detect".to_string(),
+                "voice_mode_intent_detect_regression".to_string(),
+            ],
+            resume_continue_sources: vec!["resume_continue_execute".to_string()],
+            task_status_queued: "queued".to_string(),
+            task_status_running: "running".to_string(),
+            task_status_succeeded: "succeeded".to_string(),
+            task_status_failed: "failed".to_string(),
+            task_status_canceled: "canceled".to_string(),
+            task_status_timeout: "timeout".to_string(),
+            context_low_confidence_threshold: 0.6,
+        }
+    }
+}

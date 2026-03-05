@@ -62,7 +62,7 @@ fn execute(args: Value) -> Result<String, String> {
         .get("path")
         .and_then(|v| v.as_str())
         .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("configs/config.toml"));
+        .unwrap_or_else(|| discover_default_config_path(&root));
 
     let raw =
         std::fs::read_to_string(&config_path).map_err(|err| format!("read config failed: {err}"))?;
@@ -129,4 +129,27 @@ fn workspace_root() -> PathBuf {
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+fn discover_default_config_path(root: &PathBuf) -> PathBuf {
+    let mut candidates = Vec::new();
+    candidates.push(root.join("configs/config.toml"));
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("configs/config.toml"));
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        let mut parent = exe.parent().map(PathBuf::from);
+        for _ in 0..8 {
+            let Some(dir) = parent.clone() else { break };
+            candidates.push(dir.join("configs/config.toml"));
+            parent = dir.parent().map(PathBuf::from);
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| root.join("configs/config.toml"))
 }

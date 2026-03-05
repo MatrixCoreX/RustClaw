@@ -12,9 +12,13 @@ pub(crate) fn prepare_prompt_with_memory(
     task: &ClaimedTask,
     prompt: &str,
 ) -> PromptMemoryContext {
-    let long_term_summary = crate::recall_long_term_summary(state, task.user_id, task.chat_id)
-        .unwrap_or(None)
-        .map(|s| crate::truncate_text(&s, state.memory.long_term_recall_max_chars.max(256)));
+    let long_term_summary = if state.memory.long_term_enabled {
+        crate::recall_long_term_summary(state, task.user_id, task.chat_id)
+            .unwrap_or(None)
+            .map(|s| crate::truncate_text(&s, state.memory.long_term_recall_max_chars.max(256)))
+    } else {
+        None
+    };
     let recalled = crate::recall_recent_memories(
         state,
         task.user_id,

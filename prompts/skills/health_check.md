@@ -8,18 +8,21 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- TODO: one-paragraph summary for `health_check`.
+- `health_check` runs baseline diagnostics and status checks for environment/runtime health.
+- It is read-only and should not perform mutating operations.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- No explicit action is required for baseline diagnostics.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| check | none | no | - | - | Execute default health diagnostics. |
+| check | `log_dir` | no | string(path) | impl default | Optional log source path override. |
 
 ## Error Contract (from interface)
-- TODO: list error cases and corresponding `error_text` conventions.
+- Invalid log path should return clear filesystem errors.
+- Diagnostic execution/runtime failures should return explicit error text.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -29,7 +32,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"health diagnostics: ...","error_text":null}
 ```
 
 ## Output Contract

@@ -12,12 +12,14 @@ Routing rules (important):
 - If user asks to execute shell/system commands (e.g. "你执行 ls -la", "please run uname -a"), choose `act`.
 - If user asks crypto market data (price/quote/涨跌/K线/指标/SMA/news/onchain/手续费), choose `act`.
 - If user asks crypto trading actions (预览下单/确认下单/查订单/撤单/持仓), choose `act`.
+- For single-symbol price requests, route to `act` and prefer one direct market query flow (avoid multi-step re-query loops).
 - For direct trade execution wording like "帮我在币安买 1U ETH", "在 OKX 卖出 0.01 BTC", "buy 10u BTC on binance", always choose `act` (do not route to pure chat guidance).
 - For portfolio/holdings queries like "查持仓/看仓位/资产情况", always choose `act`.
 - If user asks strategy discussion only ("怎么做策略/为什么涨跌/解释概念") without direct execution intent, choose `chat`.
 - If the user says "continue/继续/接着做", first inspect RECENT_EXECUTION_CONTEXT for pending action target; if a concrete tool/skill/command target exists, choose `act`.
 - If RECENT_EXECUTION_CONTEXT contains schedule list/create/delete/pause/resume result and user says "全部删除/全部停止/全部恢复", choose `act`.
 - If user asks only to interpret/explain previous output without new action, choose `chat`.
+- If user asks to send/deliver a file to them (e.g. "把文件发给我", "发给我", "发一下文件", "send me the file", "发过来"), choose `act` (or `chat_act` if they also ask for explanation). Resolve "which file" from RECENT_EXECUTION_CONTEXT when available.
 - If follow-up target is unclear from recent context, choose `ask_clarify`.
 - If user request contains both action and conversational request, choose `chat_act`.
 - Never choose `chat_act` only because of uncertainty. Use it only when both signals are present.
@@ -53,3 +55,4 @@ Examples:
 - "继续" + recent#1 shows `run_cmd: echo ROUTE_MEMORY_OK` -> {"mode":"act","reason":"follow-up to recent command intent","confidence":0.82,"evidence_refs":["recent#1"]}
 - "全部删除" + recent#1 shows schedule list with multiple jobs -> {"mode":"act","reason":"bulk schedule delete from recent list","confidence":0.84,"evidence_refs":["recent#1"]}
 - "继续" + no resolvable recent target -> {"mode":"ask_clarify","reason":"missing action target","confidence":0.41,"evidence_refs":["recent#1"]}
+- "把文件发给我" / "发给我" / "send me the file" (after a file was produced) -> {"mode":"act","reason":"deliver file to user","confidence":0.85}

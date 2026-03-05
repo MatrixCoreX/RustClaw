@@ -1,29 +1,40 @@
 # git_basic Interface Spec
 
 > This file is managed by `scripts/sync_skill_docs.py`.
-> Fill in the details before using this skill in production.
+> Keep this spec aligned with the git_basic implementation.
 
 ## Capability Summary
-- TODO: one-paragraph summary for `git_basic`.
+- `git_basic` exposes read-oriented Git repository inspection commands.
+- It is designed for status/history/diff visibility without destructive history changes.
 
 ## Actions
-- TODO: list supported `action` values.
+- `status`
+- `log`
+- `diff`
+- `branch`
+- `show`
+- `rev_parse`
 
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| all | `action` | yes | string | - | Must be one of supported actions. |
+| `show` | `target` | no | string | `HEAD` | Commit/object target to show. |
+| `log` | `n` | no | number | impl default | Number of history entries. |
+| others | none | no | - | - | Use defaults for repository-root view. |
 
 ## Error Contract
-- TODO: list error cases and corresponding `error_text` conventions.
+- Unsupported action names.
+- Invalid target/revision arguments.
+- Git command failures should return readable stderr.
 
 ## Request/Response Examples
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"action":"status"}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"On branch ...","error_text":null}
 ```

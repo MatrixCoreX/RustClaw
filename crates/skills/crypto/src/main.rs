@@ -63,6 +63,8 @@ struct CryptoConfig {
     #[serde(default)]
     max_notional_usd: Option<f64>,
     #[serde(default)]
+    min_notional_usd: Option<f64>,
+    #[serde(default)]
     allowed_exchanges: Vec<String>,
     #[serde(default)]
     allowed_symbols: Vec<String>,
@@ -203,8 +205,11 @@ struct TradeInput {
     side: String,
     order_type: String,
     qty: f64,
+    qty_all: bool,
     quote_qty_usd: Option<f64>,
     price: Option<f64>,
+    stop_price: Option<f64>,
+    time_in_force: Option<String>,
     client_order_id: Option<String>,
     confirm: bool,
 }
@@ -224,6 +229,12 @@ struct OrderEvent {
     status: String,
     client_order_id: Option<String>,
     reason: Option<String>,
+    /// Actual filled base-asset qty (from exchange response)
+    executed_qty: Option<f64>,
+    /// Actual filled quote-asset qty, e.g. USDT spent/received
+    executed_quote_qty: Option<f64>,
+    /// Average fill price (executed_quote / executed_qty)
+    avg_fill_price: Option<f64>,
 }
 
 fn tr(key: &str) -> String {
@@ -398,6 +409,10 @@ fn default_crypto_catalog(lang: &str) -> TextCatalog {
         "crypto.msg.price_alert_not_triggered".to_string(),
         "{symbol} monitor: {window_minutes}m change {change_pct}% has not reached threshold {threshold_pct}% (start={start_price}, now={current_price}, direction={direction})".to_string(),
     );
+    current.insert(
+        "crypto.msg.trade_preview_confirm_hint".to_string(),
+        "Please confirm execution: click confirm, or reply Y/YES to execute; any other input cancels.".to_string(),
+    );
     TextCatalog { current }
 }
 
@@ -547,6 +562,9 @@ fn execute(cfg: &RootConfig, args: Value) -> Result<(String, Value), String> {
         "trade_submit" => handle_trade_submit(&client, cfg, obj),
         "order_status" => handle_order_status(&client, cfg, obj),
         "cancel_order" => handle_cancel_order(&client, cfg, obj),
+        "cancel_all_orders" | "cancel_open_orders" => handle_cancel_all_orders(&client, cfg, obj),
+        "open_orders" | "get_open_orders" | "pending_orders" => handle_open_orders(&client, cfg, obj),
+        "trade_history" | "my_trades" | "recent_trades" => handle_trade_history(&client, cfg, obj),
         "positions" => handle_positions(&client, cfg, obj),
         _ => Err(tr("crypto.err.unsupported_action")),
     }
@@ -951,14 +969,15 @@ fn handle_candles(
         .unwrap_or(30)
         .clamp(1, 500);
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
-    let closes = if exchange == "okx" {
-        fetch_candles_okx(client, cfg, &symbol, interval, limit)?
+    let candles = if exchange == "okx" {
+        fetch_candles_ohlcv_okx(client, cfg, &symbol, interval, limit)?
     } else {
-        fetch_candles_binance(client, cfg, &symbol, interval, limit)?
+        fetch_candles_ohlcv_binance(client, cfg, &symbol, interval, limit)?
     };
-    if closes.is_empty() {
+    if candles.is_empty() {
         return Err(tr("crypto.err.no_candles"));
     }
+    let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
     let last = closes.last().copied().unwrap_or(0.0);
     let first = closes.first().copied().unwrap_or(last);
     let delta = if first > 0.0 {
@@ -966,19 +985,91 @@ fn handle_candles(
     } else {
         0.0
     };
+    let high = candles.iter().map(|c| c.high).fold(f64::NEG_INFINITY, f64::max);
+    let low = candles.iter().map(|c| c.low).fold(f64::INFINITY, f64::min);
+    let total_volume: f64 = candles.iter().map(|c| c.volume).sum();
+    let ohlcv_arr: Vec<Value> = candles
+        .iter()
+        .map(|c| {
+            json!({
+                "open": c.open,
+                "high": c.high,
+                "low": c.low,
+                "close": c.close,
+                "volume": c.volume,
+                "quote_volume": c.quote_volume
+            })
+        })
+        .collect();
     Ok((
         format!(
-            "{} {} close={} change={:+.2}% candles={}",
-            symbol, interval, last, delta, closes.len()
+            "{} {} close={} change={:+.2}% high={} low={} vol={:.4} candles={}",
+            symbol, interval, last, delta, high, low, total_volume, candles.len()
         ),
         json!({
             "action":"candles",
             "symbol":symbol,
             "timeframe":interval,
             "exchange":exchange,
-            "close_prices": closes
+            "close_prices": closes,
+            "candles": ohlcv_arr,
+            "high": high,
+            "low": low,
+            "volume": total_volume
         }),
     ))
+}
+
+fn calc_sma(values: &[f64], period: usize) -> Option<f64> {
+    if values.len() < period {
+        return None;
+    }
+    let tail = &values[values.len() - period..];
+    Some(tail.iter().sum::<f64>() / period as f64)
+}
+
+fn calc_ema(values: &[f64], period: usize) -> Option<f64> {
+    if values.len() < period {
+        return None;
+    }
+    let k = 2.0 / (period as f64 + 1.0);
+    // seed with SMA of first `period` values
+    let mut ema: f64 = values[..period].iter().sum::<f64>() / period as f64;
+    for &price in &values[period..] {
+        ema = price * k + ema * (1.0 - k);
+    }
+    Some(ema)
+}
+
+fn calc_rsi(values: &[f64], period: usize) -> Option<f64> {
+    if values.len() <= period {
+        return None;
+    }
+    let mut gains = 0.0_f64;
+    let mut losses = 0.0_f64;
+    for i in 1..=period {
+        let diff = values[i] - values[i - 1];
+        if diff > 0.0 {
+            gains += diff;
+        } else {
+            losses += -diff;
+        }
+    }
+    let mut avg_gain = gains / period as f64;
+    let mut avg_loss = losses / period as f64;
+    // Wilder smoothing
+    for i in (period + 1)..values.len() {
+        let diff = values[i] - values[i - 1];
+        let gain = if diff > 0.0 { diff } else { 0.0 };
+        let loss = if diff < 0.0 { -diff } else { 0.0 };
+        avg_gain = (avg_gain * (period as f64 - 1.0) + gain) / period as f64;
+        avg_loss = (avg_loss * (period as f64 - 1.0) + loss) / period as f64;
+    }
+    if avg_loss == 0.0 {
+        return Some(100.0);
+    }
+    let rs = avg_gain / avg_loss;
+    Some(100.0 - 100.0 / (1.0 + rs))
 }
 
 fn handle_indicator(
@@ -986,48 +1077,110 @@ fn handle_indicator(
     cfg: &RootConfig,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<(String, Value), String> {
+    let indicator_type = obj
+        .get("indicator")
+        .and_then(|v| v.as_str())
+        .unwrap_or("sma")
+        .trim()
+        .to_ascii_lowercase();
     let mut args = obj.clone();
     args.entry("action".to_string())
         .or_insert(Value::String("candles".to_string()));
+    // For RSI/EMA we need more candles: at least period*3 for accuracy
+    let period = obj
+        .get("period")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(14)
+        .clamp(2, 200) as usize;
+    let min_needed = match indicator_type.as_str() {
+        "rsi" => (period * 3 + 1) as u64,
+        "ema" => (period * 3) as u64,
+        _ => period as u64,
+    };
+    let limit_from_args = obj.get("limit").and_then(|v| v.as_u64()).unwrap_or(0);
+    if limit_from_args < min_needed {
+        args.insert("limit".to_string(), Value::from(min_needed.max(100)));
+    }
     let (_, extra) = handle_candles(client, cfg, &args)?;
     let closes = extra
         .get("close_prices")
         .and_then(|v| v.as_array())
         .ok_or_else(|| tr("crypto.err.indicator_requires_close_prices"))?;
     let values: Vec<f64> = closes.iter().filter_map(|v| v.as_f64()).collect();
-    let period = obj
-        .get("period")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(14)
-        .clamp(2, 200) as usize;
-    if values.len() < period {
-        return Err(format!(
-            "not enough candles for period={}, got={}",
-            period,
-            values.len()
-        ));
-    }
-    let tail = &values[values.len() - period..];
-    let sma = tail.iter().sum::<f64>() / period as f64;
-    let last = values.last().copied().unwrap_or(0.0);
-    let signal = if last >= sma { "above_sma" } else { "below_sma" };
     let symbol = obj
         .get("symbol")
         .and_then(|v| v.as_str())
         .map(normalize_symbol)
         .unwrap_or_else(|| "UNKNOWN".to_string());
-    Ok((
-        format!("{symbol} SMA{period}={sma:.6} last={last:.6} signal={signal}"),
-        json!({
-            "action":"indicator",
-            "indicator":"sma",
-            "period":period,
-            "symbol":symbol,
-            "sma":sma,
-            "last":last,
-            "signal":signal
-        }),
-    ))
+    let last = values.last().copied().unwrap_or(0.0);
+    match indicator_type.as_str() {
+        "rsi" => {
+            let rsi = calc_rsi(&values, period).ok_or_else(|| {
+                format!("not enough candles for RSI{}: got={}", period, values.len())
+            })?;
+            let signal = if rsi >= 70.0 {
+                "overbought"
+            } else if rsi <= 30.0 {
+                "oversold"
+            } else {
+                "neutral"
+            };
+            Ok((
+                format!("{symbol} RSI{period}={rsi:.2} last={last:.6} signal={signal}"),
+                json!({
+                    "action":"indicator",
+                    "indicator":"rsi",
+                    "period":period,
+                    "symbol":symbol,
+                    "rsi":rsi,
+                    "last":last,
+                    "signal":signal
+                }),
+            ))
+        }
+        "ema" => {
+            let ema = calc_ema(&values, period).ok_or_else(|| {
+                format!("not enough candles for EMA{}: got={}", period, values.len())
+            })?;
+            let signal = if last >= ema { "above_ema" } else { "below_ema" };
+            Ok((
+                format!("{symbol} EMA{period}={ema:.6} last={last:.6} signal={signal}"),
+                json!({
+                    "action":"indicator",
+                    "indicator":"ema",
+                    "period":period,
+                    "symbol":symbol,
+                    "ema":ema,
+                    "last":last,
+                    "signal":signal
+                }),
+            ))
+        }
+        _ => {
+            // Default: SMA
+            if values.len() < period {
+                return Err(format!(
+                    "not enough candles for SMA{}: got={}",
+                    period,
+                    values.len()
+                ));
+            }
+            let sma = calc_sma(&values, period).unwrap_or(0.0);
+            let signal = if last >= sma { "above_sma" } else { "below_sma" };
+            Ok((
+                format!("{symbol} SMA{period}={sma:.6} last={last:.6} signal={signal}"),
+                json!({
+                    "action":"indicator",
+                    "indicator":"sma",
+                    "period":period,
+                    "symbol":symbol,
+                    "sma":sma,
+                    "last":last,
+                    "signal":signal
+                }),
+            ))
+        }
+    }
 }
 
 fn handle_binance_symbol_check(
@@ -1089,8 +1242,16 @@ fn handle_price_alert_check(
         "down" | "drop" | "dump" => "down",
         _ => "both",
     };
-    ensure_symbol_supported_on_binance(client, cfg, &symbol)?;
-    let closes = fetch_candles_binance(client, cfg, &symbol, "1m", window_minutes.saturating_add(1))?;
+    let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
+    // Always validate symbol availability; OKX falls back to Binance check if okx not configured
+    if exchange != "okx" {
+        ensure_symbol_supported_on_binance(client, cfg, &symbol)?;
+    }
+    let closes = if exchange == "okx" {
+        fetch_candles_okx(client, cfg, &symbol, "1m", window_minutes.saturating_add(1))?
+    } else {
+        fetch_candles_binance(client, cfg, &symbol, "1m", window_minutes.saturating_add(1))?
+    };
     if closes.len() < 2 {
         return Err(tr("crypto.err.no_candles"));
     }
@@ -1154,7 +1315,7 @@ fn handle_price_alert_check(
         json!({
             "action":"price_alert_check",
             "symbol":symbol,
-            "exchange":"binance",
+            "exchange":exchange,
             "window_minutes":window_minutes,
             "threshold_pct":threshold_pct,
             "direction":direction,
@@ -1355,21 +1516,66 @@ fn handle_trade_preview(
 ) -> Result<(String, Value), String> {
     let trade = parse_trade_input(obj, cfg)?;
     let checks = risk_checks(client, cfg, &trade, false)?;
-    let notional = estimate_notional_usd(client, cfg, &trade)?;
+    let preview_qty = effective_order_qty_for_preview(client, cfg, &trade)?;
+    let notional = estimate_notional_usd(client, cfg, &TradeInput {
+        qty: preview_qty,
+        ..trade.clone()
+    })?;
+    // When user specified a USDT spend amount, Binance uses quoteOrderQty and fills
+    // the actual coin qty at market; the displayed qty is only an estimate.
+    let (qty_label, quote_part) = if let Some(q) = trade.quote_qty_usd {
+        ("est_qty", format!(" quote_usd={:.4}", q))
+    } else {
+        ("qty", String::new())
+    };
+    // Include order_type and price so the confirm-route can reconstruct the exact order.
+    // For market orders we omit order_type (defaults to market in parse).
+    let order_type_part = if trade.order_type != "market" {
+        format!(" order_type={}", trade.order_type)
+    } else {
+        String::new()
+    };
+    let price_part = if let Some(p) = trade.price {
+        format!(" price={}", fmt_num(p))
+    } else {
+        String::new()
+    };
+    let stop_price_part = if let Some(sp) = trade.stop_price {
+        format!(" stop_price={}", fmt_num(sp))
+    } else {
+        String::new()
+    };
+    let tif_part = if let Some(tif) = &trade.time_in_force {
+        if tif != "GTC" {
+            format!(" tif={tif}")
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
     let text = format!(
-        "trade_preview {} {} {} qty={} notional_usd={:.4} checks={}",
+        "trade_preview {} {} {} {}={:.6}{}{}{}{}{} notional_usd={:.4} checks={}\n{}",
         trade.exchange,
         trade.symbol,
         trade.side,
-        trade.qty,
+        qty_label,
+        preview_qty,
+        quote_part,
+        order_type_part,
+        price_part,
+        stop_price_part,
+        tif_part,
         notional,
-        checks.len()
+        checks.len(),
+        tr("crypto.msg.trade_preview_confirm_hint")
     );
     Ok((
         text,
         json!({
             "action":"trade_preview",
             "order": trade_to_json(&trade),
+            "effective_qty": preview_qty,
             "notional_usd": notional,
             "risk_checks": checks,
             "decision":"preview_only"
@@ -1389,10 +1595,10 @@ fn handle_trade_submit(
         "okx" => submit_okx_order(client, cfg, &trade)?,
         other => return Err(tr_with("crypto.err.unsupported_execution_exchange", &[("exchange", other)])),
     };
-    let text = format!(
-        "trade_submitted order_id={} status={} notional_usd={:.4}",
-        event.order_id, event.status, event.notional_usd
-    );
+
+    // Build a human-friendly result text based on order status
+    let text = build_trade_submitted_text(&event);
+
     Ok((
         text,
         json!({
@@ -1402,6 +1608,90 @@ fn handle_trade_submit(
             "decision":"submitted"
         }),
     ))
+}
+
+fn build_trade_submitted_text(event: &OrderEvent) -> String {
+    let status_upper = event.status.to_ascii_uppercase();
+    match status_upper.as_str() {
+        "FILLED" => {
+            // Fully executed: show actual fill amounts
+            let qty_filled = if let Some(eq) = event.executed_qty {
+                format!("{}", fmt_num(eq))
+            } else {
+                format!("{}", fmt_num(event.qty))
+            };
+            let quote_spent = if let Some(qv) = event.executed_quote_qty {
+                format!("{:.4}", qv)
+            } else {
+                format!("{:.4}", event.notional_usd)
+            };
+            let price_part = event.avg_fill_price
+                .map(|p| format!(" avg_price={}", fmt_num(p)))
+                .unwrap_or_default();
+            format!(
+                "trade_submitted order_id={} status=FILLED {} {} side={} qty_filled={}{} quote_spent={} USDT",
+                event.order_id,
+                event.exchange,
+                event.symbol,
+                event.side,
+                qty_filled,
+                price_part,
+                quote_spent,
+            )
+        }
+        "NEW" | "LIVE" => {
+            // Pending (limit/stop order placed, not yet filled)
+            let price_str = event.price
+                .map(|p| format!(" price={}", fmt_num(p)))
+                .unwrap_or_default();
+            let stop_str = event.reason
+                .as_deref()
+                .filter(|r| !r.is_empty())
+                .map(|r| format!(" info={r}"))
+                .unwrap_or_default();
+            format!(
+                "trade_submitted order_id={} status=PENDING {} {} {} {} qty={:.6}{}{} notional_usd={:.4} (已挂单，等待成交)",
+                event.order_id,
+                event.exchange,
+                event.symbol,
+                event.side,
+                event.order_type,
+                event.qty,
+                price_str,
+                stop_str,
+                event.notional_usd,
+            )
+        }
+        "PARTIALLY_FILLED" => {
+            let filled_str = event.executed_qty
+                .map(|q| format!("{:.6}", q))
+                .unwrap_or_else(|| "?".to_string());
+            let total_str = format!("{:.6}", event.qty);
+            format!(
+                "trade_submitted order_id={} status=PARTIAL {} {} {} filled={}/{} notional_usd={:.4}",
+                event.order_id,
+                event.exchange,
+                event.symbol,
+                event.side,
+                filled_str,
+                total_str,
+                event.notional_usd,
+            )
+        }
+        _ => {
+            // Fallback for any other status
+            format!(
+                "trade_submitted order_id={} status={} {} {} {} qty={:.6} notional_usd={:.4}",
+                event.order_id,
+                event.status,
+                event.exchange,
+                event.symbol,
+                event.side,
+                event.qty,
+                event.notional_usd,
+            )
+        }
+    }
 }
 
 fn handle_order_status(
@@ -1440,6 +1730,224 @@ fn handle_positions(
         "binance" => handle_positions_binance(client, cfg),
         "okx" => handle_positions_okx(client, cfg),
         _ => Err(tr_with("crypto.err.unsupported_exchange_for_positions", &[("exchange", &exchange)])),
+    }
+}
+
+fn handle_open_orders(
+    client: &Client,
+    cfg: &RootConfig,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(String, Value), String> {
+    let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
+    match exchange.as_str() {
+        "binance" => {
+            ensure_binance_config(cfg)?;
+            let symbol = obj
+                .get("symbol")
+                .and_then(|v| v.as_str())
+                .map(normalize_symbol);
+            let mut params = Vec::<(&str, String)>::new();
+            if let Some(s) = &symbol {
+                params.push(("symbol", s.clone()));
+            }
+            let v = binance_signed_request(client, cfg, Method::GET, "/api/v3/openOrders", &mut params)?;
+            let arr = v.as_array().cloned().unwrap_or_default();
+            let mut lines = Vec::new();
+            for order in &arr {
+                let sym = order.get("symbol").and_then(|x| x.as_str()).unwrap_or("");
+                let oid = order.get("orderId").map(|x| x.to_string()).unwrap_or_default();
+                let side = order.get("side").and_then(|x| x.as_str()).unwrap_or("");
+                let otype = order.get("type").and_then(|x| x.as_str()).unwrap_or("");
+                let price = order.get("price").and_then(|x| x.as_str()).unwrap_or("0");
+                let orig_qty = order.get("origQty").and_then(|x| x.as_str()).unwrap_or("0");
+                let exec_qty = order.get("executedQty").and_then(|x| x.as_str()).unwrap_or("0");
+                let status = order.get("status").and_then(|x| x.as_str()).unwrap_or("");
+                lines.push(format!(
+                    "{sym} {side} {otype} qty={orig_qty} filled={exec_qty} price={price} status={status} id={oid}"
+                ));
+            }
+            let summary = if lines.is_empty() {
+                format!("open_orders binance{}: none", symbol.map(|s| format!(" {s}")).unwrap_or_default())
+            } else {
+                format!("open_orders binance count={}\n{}", arr.len(), lines.join("\n"))
+            };
+            Ok((summary, json!({"action":"open_orders","exchange":"binance","orders":arr})))
+        }
+        "okx" => {
+            ensure_okx_config(cfg)?;
+            let symbol = obj
+                .get("symbol")
+                .and_then(|v| v.as_str())
+                .map(normalize_symbol);
+            let mut q_parts = Vec::new();
+            if let Some(s) = &symbol {
+                q_parts.push(format!("instId={}", encode(&to_okx_inst_id(s))));
+            }
+            q_parts.push("instType=SPOT".to_string());
+            let q = q_parts.join("&");
+            let v = okx_request(client, cfg, Method::GET, "/api/v5/trade/orders-pending", Some(&q), None)?;
+            let arr = v.get("data").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            let mut lines = Vec::new();
+            for order in &arr {
+                let inst = order.get("instId").and_then(|x| x.as_str()).unwrap_or("");
+                let oid = order.get("ordId").and_then(|x| x.as_str()).unwrap_or("");
+                let side = order.get("side").and_then(|x| x.as_str()).unwrap_or("");
+                let otype = order.get("ordType").and_then(|x| x.as_str()).unwrap_or("");
+                let sz = order.get("sz").and_then(|x| x.as_str()).unwrap_or("0");
+                let px = order.get("px").and_then(|x| x.as_str()).unwrap_or("0");
+                let state = order.get("state").and_then(|x| x.as_str()).unwrap_or("");
+                lines.push(format!(
+                    "{inst} {side} {otype} sz={sz} price={px} state={state} id={oid}"
+                ));
+            }
+            let summary = if lines.is_empty() {
+                format!("open_orders okx{}: none", symbol.map(|s| format!(" {s}")).unwrap_or_default())
+            } else {
+                format!("open_orders okx count={}\n{}", arr.len(), lines.join("\n"))
+            };
+            Ok((summary, json!({"action":"open_orders","exchange":"okx","orders":arr})))
+        }
+        _ => Err(format!("open_orders: unsupported exchange={exchange}")),
+    }
+}
+
+fn handle_cancel_all_orders(
+    client: &Client,
+    cfg: &RootConfig,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(String, Value), String> {
+    let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
+    match exchange.as_str() {
+        "binance" => {
+            ensure_binance_config(cfg)?;
+            let symbol = obj
+                .get("symbol")
+                .and_then(|v| v.as_str())
+                .ok_or("cancel_all_orders on binance requires symbol")?;
+            let sym = normalize_symbol(symbol);
+            let mut params = vec![("symbol", sym.clone())];
+            let v = binance_signed_request(client, cfg, Method::DELETE, "/api/v3/openOrders", &mut params)?;
+            let arr = v.as_array().cloned().unwrap_or_default();
+            let text = format!("cancel_all_orders binance {sym} cancelled={}", arr.len());
+            Ok((text, json!({"action":"cancel_all_orders","exchange":"binance","symbol":sym,"cancelled":arr})))
+        }
+        "okx" => {
+            ensure_okx_config(cfg)?;
+            let symbol = obj.get("symbol").and_then(|v| v.as_str()).map(normalize_symbol);
+            // First fetch open orders, then cancel them in batch
+            let mut q_parts = vec!["instType=SPOT".to_string()];
+            if let Some(s) = &symbol {
+                q_parts.push(format!("instId={}", encode(&to_okx_inst_id(s))));
+            }
+            let q = q_parts.join("&");
+            let pending = okx_request(client, cfg, Method::GET, "/api/v5/trade/orders-pending", Some(&q), None)?;
+            let arr = pending.get("data").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            if arr.is_empty() {
+                let sym_info = symbol.as_deref().unwrap_or("all");
+                return Ok((
+                    format!("cancel_all_orders okx {sym_info}: no open orders"),
+                    json!({"action":"cancel_all_orders","exchange":"okx","cancelled":[]}),
+                ));
+            }
+            let cancel_list: Vec<Value> = arr
+                .iter()
+                .filter_map(|o| {
+                    let inst = o.get("instId").and_then(|x| x.as_str())?;
+                    let oid = o.get("ordId").and_then(|x| x.as_str())?;
+                    Some(json!({"instId": inst, "ordId": oid}))
+                })
+                .collect();
+            let body = Value::Array(cancel_list);
+            let v = okx_request(client, cfg, Method::POST, "/api/v5/trade/cancel-batch-orders", None, Some(body))?;
+            let cancelled = v.get("data").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            let sym_info = symbol.as_deref().unwrap_or("all");
+            let text = format!("cancel_all_orders okx {sym_info} cancelled={}", cancelled.len());
+            Ok((text, json!({"action":"cancel_all_orders","exchange":"okx","cancelled":cancelled})))
+        }
+        _ => Err(format!("cancel_all_orders: unsupported exchange={exchange}")),
+    }
+}
+
+fn handle_trade_history(
+    client: &Client,
+    cfg: &RootConfig,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(String, Value), String> {
+    let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
+    let limit = obj
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(20)
+        .clamp(1, 500);
+    match exchange.as_str() {
+        "binance" => {
+            ensure_binance_config(cfg)?;
+            let symbol = obj
+                .get("symbol")
+                .and_then(|v| v.as_str())
+                .ok_or("trade_history on binance requires symbol")?;
+            let sym = normalize_symbol(symbol);
+            let mut params = vec![
+                ("symbol", sym.clone()),
+                ("limit", limit.to_string()),
+            ];
+            let v = binance_signed_request(client, cfg, Method::GET, "/api/v3/myTrades", &mut params)?;
+            let arr = v.as_array().cloned().unwrap_or_default();
+            let mut lines = Vec::new();
+            for trade in &arr {
+                let side = if trade.get("isBuyer").and_then(|x| x.as_bool()).unwrap_or(false) { "buy" } else { "sell" };
+                let price = trade.get("price").and_then(|x| x.as_str()).unwrap_or("0");
+                let qty = trade.get("qty").and_then(|x| x.as_str()).unwrap_or("0");
+                let quote_qty = trade.get("quoteQty").and_then(|x| x.as_str()).unwrap_or("0");
+                let commission = trade.get("commission").and_then(|x| x.as_str()).unwrap_or("0");
+                let comm_asset = trade.get("commissionAsset").and_then(|x| x.as_str()).unwrap_or("");
+                let tid = trade.get("id").map(|x| x.to_string()).unwrap_or_default();
+                lines.push(format!(
+                    "{sym} {side} qty={qty} quoteQty={quote_qty} price={price} fee={commission}{comm_asset} id={tid}"
+                ));
+            }
+            let summary = if lines.is_empty() {
+                format!("trade_history binance {sym}: none")
+            } else {
+                format!("trade_history binance {sym} count={}\n{}", arr.len(), lines.join("\n"))
+            };
+            Ok((summary, json!({"action":"trade_history","exchange":"binance","symbol":sym,"trades":arr})))
+        }
+        "okx" => {
+            ensure_okx_config(cfg)?;
+            let symbol = obj.get("symbol").and_then(|v| v.as_str()).map(normalize_symbol);
+            let mut q_parts = vec![
+                "instType=SPOT".to_string(),
+                format!("limit={limit}"),
+            ];
+            if let Some(s) = &symbol {
+                q_parts.push(format!("instId={}", encode(&to_okx_inst_id(s))));
+            }
+            let q = q_parts.join("&");
+            let v = okx_request(client, cfg, Method::GET, "/api/v5/trade/fills", Some(&q), None)?;
+            let arr = v.get("data").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            let mut lines = Vec::new();
+            for fill in &arr {
+                let inst = fill.get("instId").and_then(|x| x.as_str()).unwrap_or("");
+                let side = fill.get("side").and_then(|x| x.as_str()).unwrap_or("");
+                let px = fill.get("fillPx").and_then(|x| x.as_str()).unwrap_or("0");
+                let sz = fill.get("fillSz").and_then(|x| x.as_str()).unwrap_or("0");
+                let fee = fill.get("fee").and_then(|x| x.as_str()).unwrap_or("0");
+                let fee_ccy = fill.get("feeCcy").and_then(|x| x.as_str()).unwrap_or("");
+                let tid = fill.get("tradeId").and_then(|x| x.as_str()).unwrap_or("");
+                lines.push(format!(
+                    "{inst} {side} sz={sz} price={px} fee={fee}{fee_ccy} id={tid}"
+                ));
+            }
+            let sym_info = symbol.as_deref().unwrap_or("all");
+            let summary = if lines.is_empty() {
+                format!("trade_history okx {sym_info}: none")
+            } else {
+                format!("trade_history okx {sym_info} count={}\n{}", arr.len(), lines.join("\n"))
+            };
+            Ok((summary, json!({"action":"trade_history","exchange":"okx","trades":arr})))
+        }
+        _ => Err(format!("trade_history: unsupported exchange={exchange}")),
     }
 }
 
@@ -1695,7 +2203,10 @@ fn parse_trade_input(obj: &serde_json::Map<String, Value>, cfg: &RootConfig) -> 
         .unwrap_or("market")
         .trim()
         .to_ascii_lowercase();
-    if !matches!(order_type.as_str(), "market" | "limit") {
+    if !matches!(
+        order_type.as_str(),
+        "market" | "limit" | "stop_loss_limit" | "take_profit_limit" | "limit_maker"
+    ) {
         return Err(tr("crypto.err.order_type_invalid"));
     }
     let quote_qty_usd = obj
@@ -1704,18 +2215,47 @@ fn parse_trade_input(obj: &serde_json::Map<String, Value>, cfg: &RootConfig) -> 
         .or_else(|| obj.get("quote_qty").and_then(value_to_f64))
         .or_else(|| obj.get("amount_usd").and_then(value_to_f64))
         .or_else(|| obj.get("notional_usd").and_then(value_to_f64));
+    let qty_all = obj
+        .get("qty")
+        .and_then(|v| v.as_str())
+        .map(|s| {
+            let n = s.trim().to_ascii_lowercase();
+            matches!(n.as_str(), "all" | "max" | "全部" | "全仓")
+        })
+        .unwrap_or(false);
     let mut qty = obj.get("qty").and_then(value_to_f64).unwrap_or(0.0);
     if let Some(v) = quote_qty_usd {
         if v <= 0.0 {
             return Err(tr("crypto.err.qty_must_gt_zero"));
         }
         qty = 0.0;
+    } else if qty_all {
+        if side != "sell" {
+            return Err("qty=all is only supported for sell side".to_string());
+        }
+        qty = 0.0;
     } else if qty <= 0.0 {
         return Err(tr("crypto.err.qty_required_number"));
     }
     let price = obj.get("price").and_then(|v| v.as_f64());
-    if order_type == "limit" && price.unwrap_or(0.0) <= 0.0 {
+    let stop_price = obj
+        .get("stop_price")
+        .and_then(value_to_f64)
+        .or_else(|| obj.get("stopPrice").and_then(value_to_f64));
+    let time_in_force = obj
+        .get("time_in_force")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_ascii_uppercase());
+    if matches!(order_type.as_str(), "limit" | "limit_maker") && price.unwrap_or(0.0) <= 0.0 {
         return Err(tr("crypto.err.price_required_for_limit"));
+    }
+    if matches!(order_type.as_str(), "stop_loss_limit" | "take_profit_limit") {
+        if price.unwrap_or(0.0) <= 0.0 {
+            return Err("stop_loss_limit/take_profit_limit requires price (limit price)".to_string());
+        }
+        if stop_price.unwrap_or(0.0) <= 0.0 {
+            return Err("stop_loss_limit/take_profit_limit requires stop_price (trigger price)".to_string());
+        }
     }
     Ok(TradeInput {
         exchange,
@@ -1723,8 +2263,11 @@ fn parse_trade_input(obj: &serde_json::Map<String, Value>, cfg: &RootConfig) -> 
         side,
         order_type,
         qty,
+        qty_all,
         quote_qty_usd,
         price,
+        stop_price,
+        time_in_force,
         client_order_id: obj
             .get("client_order_id")
             .and_then(|v| v.as_str())
@@ -1775,7 +2318,17 @@ fn risk_checks(client: &Client, cfg: &RootConfig, trade: &TradeInput, for_submit
         ));
     }
     checks.push(json!({"check":"allowed_symbols","ok":true}));
-    let notional = estimate_notional_usd(client, cfg, trade)?;
+    let notional_input = if trade.qty_all {
+        let resolved_qty = resolve_base_qty(client, cfg, trade)?;
+        TradeInput {
+            qty: resolved_qty,
+            qty_all: false,
+            ..trade.clone()
+        }
+    } else {
+        trade.clone()
+    };
+    let notional = estimate_notional_usd(client, cfg, &notional_input)?;
     let max_notional = cfg.crypto.max_notional_usd.unwrap_or(0.0);
     if max_notional > 0.0 && notional > max_notional {
         return Err(format!(
@@ -1783,6 +2336,18 @@ fn risk_checks(client: &Client, cfg: &RootConfig, trade: &TradeInput, for_submit
         ));
     }
     checks.push(json!({"check":"max_notional_usd","ok":true,"actual":notional,"limit":max_notional}));
+    // Binance spot minimum notional is typically 5~10 USDT; warn if below 1 USDT
+    let min_notional = cfg.crypto.min_notional_usd.unwrap_or(1.0);
+    if trade.exchange == "binance" && notional < min_notional && notional > 0.0 {
+        return Err(format!(
+            "notional too small: {notional:.4} < min_notional_usd={min_notional:.2} (Binance spot requires at least ~10 USDT)"
+        ));
+    }
+    if min_notional > 0.0 && notional > 0.0 && notional < min_notional {
+        checks.push(json!({"check":"min_notional_usd","ok":false,"actual":notional,"limit":min_notional}));
+    } else {
+        checks.push(json!({"check":"min_notional_usd","ok":true,"actual":notional,"limit":min_notional}));
+    }
     Ok(checks)
 }
 
@@ -1799,6 +2364,9 @@ fn estimate_notional_usd(client: &Client, cfg: &RootConfig, trade: &TradeInput) 
 }
 
 fn resolve_base_qty(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Result<f64, String> {
+    if trade.qty_all {
+        return resolve_all_sell_qty(client, cfg, trade);
+    }
     if trade.qty > 0.0 {
         return Ok(trade.qty);
     }
@@ -1816,30 +2384,220 @@ fn resolve_base_qty(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Re
     Ok((quote / price).max(0.0))
 }
 
+fn resolve_all_sell_qty(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Result<f64, String> {
+    if trade.side != "sell" {
+        return Err("qty=all requires sell side".to_string());
+    }
+    let (base_asset, _) = split_symbol_base_quote(&trade.symbol);
+    if base_asset.is_empty() {
+        return Err("cannot resolve base asset for qty=all".to_string());
+    }
+    match trade.exchange.as_str() {
+        "binance" => {
+            let mut params = Vec::<(&str, String)>::new();
+            let v = binance_signed_request(client, cfg, Method::GET, "/api/v3/account", &mut params)?;
+            let free = v
+                .get("balances")
+                .and_then(|x| x.as_array())
+                .and_then(|arr| {
+                    arr.iter().find_map(|bal| {
+                        let asset = bal.get("asset").and_then(|x| x.as_str()).unwrap_or("");
+                        if asset.eq_ignore_ascii_case(&base_asset) {
+                            bal.get("free")
+                                .and_then(|x| x.as_str())
+                                .and_then(|x| x.parse::<f64>().ok())
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or(0.0);
+            if free <= 0.0 {
+                return Err(format!("no available balance for {} on binance", base_asset));
+            }
+            Ok(free)
+        }
+        "okx" => {
+            let v = okx_request(client, cfg, Method::GET, "/api/v5/account/balance", None, None)?;
+            let avail = v
+                .get("data")
+                .and_then(|x| x.as_array())
+                .and_then(|x| x.first())
+                .and_then(|x| x.get("details"))
+                .and_then(|x| x.as_array())
+                .and_then(|arr| {
+                    arr.iter().find_map(|it| {
+                        let ccy = it.get("ccy").and_then(|x| x.as_str()).unwrap_or("");
+                        if ccy.eq_ignore_ascii_case(&base_asset) {
+                            it.get("availBal")
+                                .and_then(|x| x.as_str())
+                                .and_then(|x| x.parse::<f64>().ok())
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or(0.0);
+            if avail <= 0.0 {
+                return Err(format!("no available balance for {} on okx", base_asset));
+            }
+            Ok(avail)
+        }
+        _ => Err(format!("qty=all is unsupported exchange: {}", trade.exchange)),
+    }
+}
+
+fn adjust_qty_to_step_floor(qty: f64, step: f64) -> f64 {
+    if qty <= 0.0 || step <= 0.0 {
+        return qty.max(0.0);
+    }
+    let units = (qty / step).floor();
+    (units * step).max(0.0)
+}
+
+fn fetch_binance_lot_size_filter(
+    client: &Client,
+    cfg: &RootConfig,
+    symbol: &str,
+) -> Result<(f64, f64, f64), String> {
+    let base = cfg.binance.base_url.trim_end_matches('/');
+    let normalized_symbol = normalize_symbol(symbol);
+    let url = format!("{base}/api/v3/exchangeInfo?symbol={}", encode(&normalized_symbol));
+    let v: Value = client
+        .get(url)
+        .send()
+        .map_err(|err| format!("binance exchangeInfo request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("binance exchangeInfo parse failed: {err}"))?;
+    if let Some(code) = v.get("code").and_then(|x| x.as_i64()) {
+        if code != 0 {
+            let msg = v.get("msg").and_then(|x| x.as_str()).unwrap_or("unknown");
+            return Err(format!("binance exchangeInfo api error code={code}: {msg}"));
+        }
+    }
+    let symbol_obj = v
+        .get("symbols")
+        .and_then(|x| x.as_array())
+        .and_then(|arr| arr.first())
+        .ok_or_else(|| "binance exchangeInfo missing symbols".to_string())?;
+    let lot_filter = symbol_obj
+        .get("filters")
+        .and_then(|x| x.as_array())
+        .and_then(|arr| {
+            arr.iter().find(|f| {
+                f.get("filterType")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.eq_ignore_ascii_case("LOT_SIZE"))
+                    .unwrap_or(false)
+            })
+        })
+        .ok_or_else(|| "binance exchangeInfo missing LOT_SIZE filter".to_string())?;
+    let min_qty = lot_filter
+        .get("minQty")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "binance LOT_SIZE minQty missing".to_string())?;
+    let max_qty = lot_filter
+        .get("maxQty")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "binance LOT_SIZE maxQty missing".to_string())?;
+    let step_size = lot_filter
+        .get("stepSize")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "binance LOT_SIZE stepSize missing".to_string())?;
+    Ok((min_qty, max_qty, step_size))
+}
+
+fn normalize_binance_order_qty(client: &Client, cfg: &RootConfig, symbol: &str, raw_qty: f64) -> Result<f64, String> {
+    let (min_qty, max_qty, step_size) = fetch_binance_lot_size_filter(client, cfg, symbol)?;
+    let adjusted = adjust_qty_to_step_floor(raw_qty, step_size);
+    if adjusted <= 0.0 {
+        return Err(format!(
+            "binance LOT_SIZE invalid adjusted quantity: raw={} adjusted={} stepSize={}",
+            raw_qty, adjusted, step_size
+        ));
+    }
+    if adjusted + 1e-12 < min_qty {
+        return Err(format!(
+            "binance LOT_SIZE quantity below minQty: raw={} adjusted={} minQty={} stepSize={}",
+            raw_qty, adjusted, min_qty, step_size
+        ));
+    }
+    if max_qty > 0.0 && adjusted - 1e-12 > max_qty {
+        return Err(format!(
+            "binance LOT_SIZE quantity above maxQty: raw={} adjusted={} maxQty={} stepSize={}",
+            raw_qty, adjusted, max_qty, step_size
+        ));
+    }
+    Ok(adjusted)
+}
+
+fn effective_order_qty_for_preview(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Result<f64, String> {
+    let base_qty = resolve_base_qty(client, cfg, trade)?;
+    if trade.exchange == "binance" {
+        let use_quote_order_qty = trade.order_type == "market" && trade.quote_qty_usd.is_some();
+        if !use_quote_order_qty {
+            return normalize_binance_order_qty(client, cfg, &trade.symbol, base_qty);
+        }
+    }
+    Ok(base_qty)
+}
+
 fn submit_binance_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Result<OrderEvent, String> {
     ensure_binance_config(cfg)?;
+    // Map internal order_type names to Binance API type strings
+    let binance_type = match trade.order_type.as_str() {
+        "market" => "MARKET",
+        "limit" => "LIMIT",
+        "stop_loss_limit" => "STOP_LOSS_LIMIT",
+        "take_profit_limit" => "TAKE_PROFIT_LIMIT",
+        "limit_maker" => "LIMIT_MAKER",
+        other => other,
+    };
     let mut params = vec![
         ("symbol", trade.symbol.clone()),
         ("side", trade.side.to_ascii_uppercase()),
-        ("type", trade.order_type.to_ascii_uppercase()),
+        ("type", binance_type.to_string()),
         ("newOrderRespType", "RESULT".to_string()),
     ];
     let base_qty = resolve_base_qty(client, cfg, trade)?;
-    if trade.order_type == "market" && trade.side == "buy" {
+    // Binance supports quoteOrderQty for MARKET orders on both BUY and SELL sides:
+    // BUY:  spend exactly quote_qty_usd worth of quote asset
+    // SELL: sell enough base to receive exactly quote_qty_usd of quote asset
+    let use_quote_order_qty = trade.order_type == "market" && trade.quote_qty_usd.is_some();
+    let final_qty = if use_quote_order_qty {
+        base_qty
+    } else {
+        normalize_binance_order_qty(client, cfg, &trade.symbol, base_qty)?
+    };
+    if use_quote_order_qty {
         if let Some(quote_qty) = trade.quote_qty_usd {
             params.push(("quoteOrderQty", fmt_num(quote_qty)));
         } else {
-            params.push(("quantity", fmt_num(base_qty)));
+            params.push(("quantity", fmt_num(final_qty)));
         }
     } else {
-        params.push(("quantity", fmt_num(base_qty)));
+        params.push(("quantity", fmt_num(final_qty)));
     }
-    if trade.order_type == "limit" {
-        params.push(("timeInForce", "GTC".to_string()));
+    if matches!(trade.order_type.as_str(), "limit" | "stop_loss_limit" | "take_profit_limit") {
+        let tif = trade
+            .time_in_force
+            .as_deref()
+            .filter(|s| matches!(*s, "GTC" | "IOC" | "FOK"))
+            .unwrap_or("GTC");
+        params.push(("timeInForce", tif.to_string()));
         let limit_price = trade
             .price
             .ok_or_else(|| tr("crypto.err.price_required_for_limit"))?;
         params.push(("price", fmt_num(limit_price)));
+    }
+    if trade.order_type == "limit_maker" {
+        let limit_price = trade
+            .price
+            .ok_or_else(|| tr("crypto.err.price_required_for_limit"))?;
+        params.push(("price", fmt_num(limit_price)));
+    }
+    if let Some(sp) = trade.stop_price {
+        params.push(("stopPrice", fmt_num(sp)));
     }
     if let Some(cid) = &trade.client_order_id {
         params.push(("newClientOrderId", cid.clone()));
@@ -1856,7 +2614,23 @@ fn submit_binance_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -
         .and_then(|x| x.as_str())
         .unwrap_or("NEW")
         .to_string();
-    let notional = estimate_notional_usd(client, cfg, trade)?;
+    // Extract actual fill amounts from RESULT-type response
+    let executed_qty = v
+        .get("executedQty")
+        .and_then(|x| x.as_str())
+        .and_then(|x| x.parse::<f64>().ok())
+        .filter(|&q| q > 0.0);
+    let executed_quote_qty = v
+        .get("cummulativeQuoteQty")
+        .and_then(|x| x.as_str())
+        .and_then(|x| x.parse::<f64>().ok())
+        .filter(|&q| q > 0.0);
+    let avg_fill_price = match (executed_qty, executed_quote_qty) {
+        (Some(base), Some(quote)) if base > 0.0 => Some(quote / base),
+        _ => None,
+    };
+    let notional = executed_quote_qty
+        .unwrap_or_else(|| estimate_notional_usd(client, cfg, trade).unwrap_or(0.0));
     Ok(OrderEvent {
         event: "submit".to_string(),
         order_id,
@@ -1865,12 +2639,15 @@ fn submit_binance_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -
         symbol: trade.symbol.clone(),
         side: trade.side.clone(),
         order_type: trade.order_type.clone(),
-        qty: base_qty,
+        qty: final_qty,
         price: trade.price,
         notional_usd: notional,
         status,
         client_order_id: trade.client_order_id.clone(),
         reason: None,
+        executed_qty,
+        executed_quote_qty,
+        avg_fill_price,
     })
 }
 
@@ -1890,7 +2667,15 @@ fn submit_okx_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Re
             .ok_or_else(|| tr("crypto.err.price_required_for_limit"))?;
         body["px"] = Value::String(fmt_num(limit_price));
     } else if trade.order_type == "market" {
-        body["tgtCcy"] = Value::String("base_ccy".to_string());
+        // For OKX market orders:
+        // - BUY with quote_qty_usd: use quote_ccy so sz represents quote asset (e.g. USDT amount)
+        // - BUY with base qty or SELL: use base_ccy so sz represents base asset
+        if trade.side == "buy" && trade.quote_qty_usd.is_some() {
+            body["sz"] = Value::String(fmt_num(trade.quote_qty_usd.unwrap_or(base_qty)));
+            body["tgtCcy"] = Value::String("quote_ccy".to_string());
+        } else {
+            body["tgtCcy"] = Value::String("base_ccy".to_string());
+        }
     }
     if let Some(cid) = &trade.client_order_id {
         body["clOrdId"] = Value::String(cid.clone());
@@ -1915,6 +2700,7 @@ fn submit_okx_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Re
             data.get("sMsg").and_then(|x| x.as_str()).unwrap_or("unknown")
         ));
     }
+    // OKX POST /api/v5/trade/order only returns ordId+sCode; fill details require separate query
     let status = "live".to_string();
     let notional = estimate_notional_usd(client, cfg, trade)?;
     Ok(OrderEvent {
@@ -1935,6 +2721,9 @@ fn submit_okx_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -> Re
             .and_then(|x| x.as_str())
             .filter(|v| !v.is_empty())
             .map(str::to_string),
+        executed_qty: None,
+        executed_quote_qty: None,
+        avg_fill_price: None,
     })
 }
 
@@ -2588,6 +3377,17 @@ fn fetch_book_ticker_from_kraken(client: &Client, cfg: &RootConfig, symbol: &str
     })
 }
 
+/// Candle OHLCV data: (open, high, low, close, volume_base, volume_quote)
+#[derive(Debug, Clone)]
+struct CandleOhlcv {
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
+    volume: f64,
+    quote_volume: f64,
+}
+
 fn fetch_candles_binance(
     client: &Client,
     cfg: &RootConfig,
@@ -2595,6 +3395,19 @@ fn fetch_candles_binance(
     interval: &str,
     limit: u64,
 ) -> Result<Vec<f64>, String> {
+    Ok(fetch_candles_ohlcv_binance(client, cfg, symbol, interval, limit)?
+        .into_iter()
+        .map(|c| c.close)
+        .collect())
+}
+
+fn fetch_candles_ohlcv_binance(
+    client: &Client,
+    cfg: &RootConfig,
+    symbol: &str,
+    interval: &str,
+    limit: u64,
+) -> Result<Vec<CandleOhlcv>, String> {
     let base = cfg.binance.base_url.trim_end_matches('/');
     let url = format!(
         "{base}/api/v3/klines?symbol={}&interval={}&limit={}",
@@ -2611,19 +3424,27 @@ fn fetch_candles_binance(
     let arr = v
         .as_array()
         .ok_or_else(|| "binance candles response is invalid".to_string())?;
-    let mut closes = Vec::new();
+    // Binance kline format: [open_time, open, high, low, close, volume, close_time, quote_volume, ...]
+    let mut candles = Vec::new();
     for item in arr {
         if let Some(k) = item.as_array() {
-            if let Some(close) = k
-                .get(4)
-                .and_then(|x| x.as_str())
-                .and_then(|x| x.parse::<f64>().ok())
-            {
-                closes.push(close);
-            }
+            let parse_str = |idx: usize| -> f64 {
+                k.get(idx)
+                    .and_then(|x| x.as_str())
+                    .and_then(|x| x.parse::<f64>().ok())
+                    .unwrap_or(0.0)
+            };
+            candles.push(CandleOhlcv {
+                open: parse_str(1),
+                high: parse_str(2),
+                low: parse_str(3),
+                close: parse_str(4),
+                volume: parse_str(5),
+                quote_volume: parse_str(7),
+            });
         }
     }
-    Ok(closes)
+    Ok(candles)
 }
 
 fn fetch_candles_okx(
@@ -2633,6 +3454,19 @@ fn fetch_candles_okx(
     interval: &str,
     limit: u64,
 ) -> Result<Vec<f64>, String> {
+    Ok(fetch_candles_ohlcv_okx(client, cfg, symbol, interval, limit)?
+        .into_iter()
+        .map(|c| c.close)
+        .collect())
+}
+
+fn fetch_candles_ohlcv_okx(
+    client: &Client,
+    cfg: &RootConfig,
+    symbol: &str,
+    interval: &str,
+    limit: u64,
+) -> Result<Vec<CandleOhlcv>, String> {
     let base = cfg.okx.base_url.trim_end_matches('/');
     let inst_id = to_okx_inst_id(symbol);
     let bar = map_interval_okx(interval);
@@ -2658,20 +3492,29 @@ fn fetch_candles_okx(
         .get("data")
         .and_then(|x| x.as_array())
         .ok_or_else(|| "okx candles response is invalid".to_string())?;
-    let mut closes = Vec::new();
-    for item in arr {
-        if let Some(k) = item.as_array() {
-            if let Some(close) = k
-                .get(4)
-                .and_then(|x| x.as_str())
-                .and_then(|x| x.parse::<f64>().ok())
-            {
-                closes.push(close);
-            }
-        }
-    }
-    closes.reverse();
-    Ok(closes)
+    // OKX candle format: [ts, open, high, low, close, vol_base, vol_ccy, vol_ccy_quote, confirmed]
+    let mut candles: Vec<CandleOhlcv> = arr
+        .iter()
+        .filter_map(|item| {
+            let k = item.as_array()?;
+            let parse_str = |idx: usize| -> f64 {
+                k.get(idx)
+                    .and_then(|x| x.as_str())
+                    .and_then(|x| x.parse::<f64>().ok())
+                    .unwrap_or(0.0)
+            };
+            Some(CandleOhlcv {
+                open: parse_str(1),
+                high: parse_str(2),
+                low: parse_str(3),
+                close: parse_str(4),
+                volume: parse_str(5),
+                quote_volume: parse_str(6),
+            })
+        })
+        .collect();
+    candles.reverse(); // OKX returns newest first
+    Ok(candles)
 }
 
 fn binance_signed_request(
@@ -2906,12 +3749,20 @@ fn to_kraken_pair(symbol: &str) -> String {
 fn map_interval_binance(input: &str) -> &'static str {
     match input.trim().to_ascii_lowercase().as_str() {
         "1m" => "1m",
+        "3m" => "3m",
         "5m" => "5m",
         "15m" => "15m",
         "30m" => "30m",
         "1h" => "1h",
+        "2h" => "2h",
         "4h" => "4h",
-        "1d" | "24h" => "1d",
+        "6h" => "6h",
+        "8h" => "8h",
+        "12h" => "12h",
+        "1d" | "24h" | "daily" => "1d",
+        "3d" => "3d",
+        "1w" | "7d" | "weekly" => "1w",
+        "1M" | "1mo" | "monthly" => "1M",
         _ => "1h",
     }
 }
@@ -2919,12 +3770,19 @@ fn map_interval_binance(input: &str) -> &'static str {
 fn map_interval_okx(input: &str) -> &'static str {
     match input.trim().to_ascii_lowercase().as_str() {
         "1m" => "1m",
+        "3m" => "3m",
         "5m" => "5m",
         "15m" => "15m",
         "30m" => "30m",
         "1h" => "1H",
+        "2h" => "2H",
         "4h" => "4H",
-        "1d" | "24h" => "1D",
+        "6h" => "6H",
+        "12h" => "12H",
+        "1d" | "24h" | "daily" => "1D",
+        "3d" => "3D",
+        "1w" | "7d" | "weekly" => "1W",
+        "1M" | "1mo" | "monthly" => "1M",
         _ => "1H",
     }
 }
@@ -2936,8 +3794,11 @@ fn trade_to_json(t: &TradeInput) -> Value {
         "side": t.side,
         "order_type": t.order_type,
         "qty": t.qty,
+        "qty_all": t.qty_all,
         "quote_qty_usd": t.quote_qty_usd,
         "price": t.price,
+        "stop_price": t.stop_price,
+        "time_in_force": t.time_in_force,
         "client_order_id": t.client_order_id,
         "confirm": t.confirm
     })

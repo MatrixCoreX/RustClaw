@@ -37,8 +37,24 @@ pub(crate) async fn parse_schedule_intent(
         .replace("__RULES__", &state.schedule.intent_rules_template)
         .replace("__MEMORY_CONTEXT__", &memory_context)
         .replace("__REQUEST__", request);
+    debug!(
+        "prompt_invocation task_id={} prompt_name=schedule_intent_prompt prompt_file={}",
+        task.task_id,
+        "prompts/schedule_intent_prompt.md"
+    );
+    debug!(
+        "prompt_debug task_id={} prompt_name=schedule_intent_prompt prompt_file=prompts/schedule_intent_prompt.md prompt_dynamic=true note=dynamic_built_prompt",
+        task.task_id
+    );
 
-    let llm_out = match llm_gateway::run_with_fallback(state, task, &prompt).await {
+    let llm_out = match llm_gateway::run_with_fallback_with_prompt_file(
+        state,
+        task,
+        &prompt,
+        "prompts/schedule_intent_prompt.md",
+    )
+    .await
+    {
         Ok(v) => v,
         Err(err) => {
             warn!("parse_schedule_intent llm failed: task_id={} err={err}", task.task_id);

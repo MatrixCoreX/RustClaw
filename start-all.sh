@@ -8,6 +8,11 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
+# Enable colored log tags on interactive terminals unless overridden.
+if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
+  export RUSTCLAW_LOG_COLOR=1
+fi
+
 print_rustclaw_banner() {
   cat <<'EOF'
 ######################################################################################
@@ -36,6 +41,11 @@ print_rustclaw_banner
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_DIR="$SCRIPT_DIR/.pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
+
+# Stop any already running RustClaw processes before starting.
+if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
+  "$SCRIPT_DIR/stop-rustclaw.sh" || true
+fi
 
 # Optional args:
 #   ./start-all.sh <vendor(openai|google|anthropic|grok|qwen|custom)> [model_override] [release|debug] [channels]

@@ -151,6 +151,7 @@ fn skill_binary_path(skill_name: &str) -> Result<String, String> {
         "service_control" => "service-control-skill",
         "config_guard" => "config-guard-skill",
         "crypto" => "crypto-skill",
+        "chat" => "chat-skill",
         _ => return Err(format!("unknown skill: {skill_name}")),
     };
 

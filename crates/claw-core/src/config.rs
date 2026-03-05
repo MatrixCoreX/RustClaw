@@ -79,6 +79,8 @@ pub struct TelegramConfig {
     pub max_audio_input_bytes: usize,
     #[serde(default = "default_telegram_ephemeral_image_saved_seconds")]
     pub ephemeral_image_saved_seconds: u64,
+    #[serde(default = "default_telegram_crypto_confirm_ttl_seconds")]
+    pub crypto_confirm_ttl_seconds: u64,
     #[serde(default)]
     pub sendfile: SendfileConfig,
 }
@@ -791,6 +793,7 @@ fn default_skills_list() -> Vec<String> {
         "log_analyze".to_string(),
         "service_control".to_string(),
         "config_guard".to_string(),
+        "chat".to_string(),
     ]
 }
 
@@ -1129,6 +1132,10 @@ fn default_telegram_max_audio_input_bytes() -> usize {
 }
 
 fn default_telegram_ephemeral_image_saved_seconds() -> u64 {
+    15
+}
+
+fn default_telegram_crypto_confirm_ttl_seconds() -> u64 {
     15
 }
 

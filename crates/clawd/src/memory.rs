@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use claw_core::config::MemoryConfig;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::{AppState, extract_delivery_file_tokens, now_ts, utf8_safe_prefix};
+use super::{AppState, extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix};
 
 pub(crate) const LLM_SHORT_TERM_MEMORY_PREFIX: &str = "[LLM_REPLY] ";
 
@@ -47,16 +47,18 @@ pub(crate) fn insert_memory(
     let memory_type = infer_memory_type(role, is_instructional, &safety_flag);
     let salience = estimate_memory_salience(&trimmed, is_instructional, &safety_flag, &state.memory);
 
+    let now_text = now_ts();
+    let now_ts_i64 = now_ts_u64() as i64;
     let db = state
         .db
         .lock()
         .map_err(|_| anyhow!("db lock poisoned"))?;
     for (pref_key, pref_value, confidence, source) in extracted_prefs {
         db.execute(
-            "INSERT INTO user_preferences (user_id, chat_id, pref_key, pref_value, confidence, source, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO user_preferences (user_id, chat_id, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(user_id, chat_id, pref_key)
-             DO UPDATE SET pref_value=excluded.pref_value, confidence=excluded.confidence, source=excluded.source, updated_at=excluded.updated_at",
+             DO UPDATE SET pref_value=excluded.pref_value, confidence=excluded.confidence, source=excluded.source, updated_at=excluded.updated_at, updated_at_ts=excluded.updated_at_ts",
             params![
                 user_id,
                 chat_id,
@@ -64,7 +66,8 @@ pub(crate) fn insert_memory(
                 pref_value,
                 confidence,
                 source,
-                now_ts()
+                now_text,
+                now_ts_i64
             ],
         )?;
     }
@@ -76,14 +79,15 @@ pub(crate) fn insert_memory(
     }
 
     db.execute(
-        "INSERT INTO memories (user_id, chat_id, role, content, created_at, memory_type, salience, is_instructional, safety_flag)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO memories (user_id, chat_id, role, content, created_at, created_at_ts, memory_type, salience, is_instructional, safety_flag)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             user_id,
             chat_id,
             role,
             trimmed,
-            now_ts(),
+            now_text,
+            now_ts_i64,
             memory_type,
             salience,
             if is_instructional { 1 } else { 0 },
@@ -124,7 +128,7 @@ pub(crate) fn recall_recent_memories(
         "SELECT role, content, safety_flag
          FROM memories
          WHERE user_id = ?1 AND chat_id = ?2
-         ORDER BY CAST(created_at AS INTEGER) DESC
+         ORDER BY id DESC
          LIMIT ?3",
     )?;
     let rows = stmt.query_map(params![user_id, chat_id, limit as i64], |row| {
@@ -221,7 +225,7 @@ pub(crate) fn recall_user_preferences(
         "SELECT pref_key, pref_value
          FROM user_preferences
          WHERE user_id = ?1 AND chat_id = ?2
-         ORDER BY CAST(updated_at AS INTEGER) DESC
+         ORDER BY COALESCE(updated_at_ts, CAST(updated_at AS INTEGER)) DESC
          LIMIT ?3",
     )?;
     let rows = stmt.query_map(params![user_id, chat_id, limit as i64], |row| {
@@ -323,12 +327,13 @@ pub(crate) fn upsert_long_term_summary(
         .lock()
         .map_err(|_| anyhow!("db lock poisoned"))?;
     let now = now_ts();
+    let now_ts_i64 = now_ts_u64() as i64;
     db.execute(
-        "INSERT INTO long_term_memories (user_id, chat_id, summary, source_memory_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+        "INSERT INTO long_term_memories (user_id, chat_id, summary, source_memory_id, created_at, updated_at, created_at_ts, updated_at_ts)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?6)
          ON CONFLICT(user_id, chat_id)
-         DO UPDATE SET summary = excluded.summary, source_memory_id = excluded.source_memory_id, updated_at = excluded.updated_at",
-        params![user_id, chat_id, summary, source_memory_id, now],
+         DO UPDATE SET summary = excluded.summary, source_memory_id = excluded.source_memory_id, updated_at = excluded.updated_at, updated_at_ts = excluded.updated_at_ts",
+        params![user_id, chat_id, summary, source_memory_id, now, now_ts_i64],
     )?;
     Ok(())
 }

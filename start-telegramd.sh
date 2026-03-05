@@ -8,6 +8,11 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
+# Enable colored log tags on interactive terminals unless overridden.
+if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
+  export RUSTCLAW_LOG_COLOR=1
+fi
+
 PROFILE="${1:-${RUSTCLAW_START_PROFILE:-debug}}"
 case "$PROFILE" in
   release|debug)

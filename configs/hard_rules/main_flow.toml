@@ -1,0 +1,123 @@
+[whatsapp]
+# 用途/Purpose: WhatsApp 适配器别名，用于主流程投递路由判断.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 别名不匹配会导致消息走错通道（web/cloud）或回退默认路由.
+web_adapters = ["whatsapp_web", "wa_web"]
+# 用途/Purpose: WhatsApp Cloud 适配器别名.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 误配会让 cloud 消息路由失效或回退到错误通道.
+cloud_adapters = ["whatsapp_cloud", "wa_cloud"]
+
+[trade_preview]
+# 用途/Purpose: 从任务文本解析 trade_preview 行时使用的前缀.
+# 建议修改/Recommended change: 不建议修改 / Usually keep default.
+# 风险/Risk: 前缀改错会导致无法提取预览上下文，确认链路可能断裂.
+line_prefix = "trade_preview "
+# 用途/Purpose: 预览文本未携带 order_type 时的默认值.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 与实际技能输出不一致会导致提交参数偏差.
+default_order_type = "market"
+# 用途/Purpose: 查找最近成功预览上下文的时间窗口（秒）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 太小可能找不到上下文；太大可能命中过旧上下文.
+recent_window_secs = 600
+# 用途/Purpose: 扫描最近任务条数上限（预览上下文）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 太小漏匹配；太大增加 DB 扫描与误命中概率.
+recent_scan_limit = 24
+
+[duplicate_affirmation]
+# 用途/Purpose: 重复确认文本去重窗口（秒）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 太小去重失效；太大可能误去重用户真实二次确认.
+window_secs = 120
+# 用途/Purpose: 重复确认去重时的最近任务扫描上限.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 太小漏判；太大增加耗时并可能误判.
+scan_limit = 30
+# 用途/Purpose: 参与“重复确认去重”的任务状态白名单.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 缺少关键状态会降低去重效果；加入过多状态会误去重.
+statuses = ["queued", "running", "succeeded"]
+
+[crypto_price_alert]
+# 用途/Purpose: 运行时首选的价格提醒 action 名.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 与技能实现不一致会导致首发调用失败.
+primary_action = "price_alert_check"
+# 用途/Purpose: 被识别为“价格提醒类”的 action 别名集合.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 漏项会识别失败；误加会把非提醒 action 误判为提醒.
+actions = [
+  "price_alert_check",
+  "price_monitor",
+  "monitor_price",
+  "price_alert",
+  "volatility_alert",
+]
+# 用途/Purpose: 主 action 不支持时的回退顺序.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 顺序不当会增加重试次数或命中兼容性更差的 action.
+fallback_actions = ["price_monitor", "monitor_price", "price_alert", "volatility_alert"]
+# 用途/Purpose: 从技能错误文本中识别“action 不支持”的关键词.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 关键词过宽会误触发回退；过窄会漏触发回退.
+unsupported_error_keywords = ["unsupported action", "不支持"]
+# 用途/Purpose: 触发态标签（用于清洗输出和调度判定）.
+# 建议修改/Recommended change: 不建议修改 / Usually keep default.
+# 风险/Risk: 与技能输出标签不一致会导致文本清洗与触发判定失真.
+triggered_tag = "[PRICE_ALERT_TRIGGERED]"
+# 用途/Purpose: 未触发态标签（用于抑制无效推送和清洗输出）.
+# 建议修改/Recommended change: 不建议修改 / Usually keep default.
+# 风险/Risk: 不一致会导致“未触发”仍推送，或清洗失败.
+not_triggered_tag = "[PRICE_ALERT_NOT_TRIGGERED]"
+
+[runtime_channel]
+# 用途/Purpose: 被视为 WhatsApp 的 channel 别名.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 别名不完整会路由失败；别名过宽会误路由到 WhatsApp.
+whatsapp_aliases = ["whatsapp"]
+
+[classifier]
+# 用途/Purpose: 这些 source 会绕过 chat 包装，直接返回分类标签.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 误加会让普通对话返回“原始标签”；误删会破坏分类链路.
+direct_sources = ["voice_mode_intent_detect", "voice_mode_intent_detect_regression"]
+
+[resume]
+# 用途/Purpose: 被视为“继续执行（resume）”语义的 source.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 误配会导致上下文恢复逻辑不触发或误触发.
+continue_sources = ["resume_continue_execute"]
+
+[task_status]
+# 用途/Purpose: 任务状态规范映射（主流程映射/统计使用）.
+# 建议修改/Recommended change: 不建议修改 / Keep aligned with DB enum.
+# 风险/Risk: 与数据库状态值不一致会导致状态识别错误、统计偏差.
+queued = "queued"
+# 用途/Purpose: running 状态字面量.
+# 建议修改/Recommended change: 不建议修改 / Keep default.
+# 风险/Risk: 影响任务执行中识别.
+running = "running"
+# 用途/Purpose: succeeded 状态字面量.
+# 建议修改/Recommended change: 不建议修改 / Keep default.
+# 风险/Risk: 影响成功结果识别.
+succeeded = "succeeded"
+# 用途/Purpose: failed 状态字面量.
+# 建议修改/Recommended change: 不建议修改 / Keep default.
+# 风险/Risk: 影响失败状态映射.
+failed = "failed"
+# 用途/Purpose: canceled 状态字面量.
+# 建议修改/Recommended change: 不建议修改 / Keep default.
+# 风险/Risk: 影响取消状态映射.
+canceled = "canceled"
+# 用途/Purpose: timeout 状态字面量.
+# 建议修改/Recommended change: 不建议修改 / Keep default.
+# 风险/Risk: 影响超时状态映射.
+timeout = "timeout"
+
+[context]
+# 用途/Purpose: 上下文解析低置信阈值（0~1）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 过高会频繁澄清；过低会减少澄清但可能误解用户意图.
+low_confidence_threshold = 0.6

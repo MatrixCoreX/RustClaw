@@ -8,28 +8,40 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- TODO: one-paragraph summary for `process_basic`.
+- `process_basic` provides process inspection and targeted process control operations.
+- It supports listing processes/ports, killing a PID, and tailing logs.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- `ps`
+- `port_list`
+- `kill`
+- `tail_log`
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| all | `action` | yes | string | - | Must be one of supported actions. |
+| `ps` | `limit` | no | number | impl default | Max number of process rows. |
+| `port_list` | none | no | - | - | List listening/used ports. |
+| `kill` | `pid` | yes | number | - | Target process id. |
+| `kill` | `signal` | no | string | `TERM` | Signal name/number for termination. |
+| `tail_log` | `path` | yes | string(path) | - | Log file path to tail. |
+| `tail_log` | `n` | no | number | impl default | Number of trailing lines. |
 
 ## Error Contract (from interface)
-- TODO: list error cases and corresponding `error_text` conventions.
+- Missing required `pid`/`path` for action-specific operations.
+- Invalid PID/signal/path values.
+- OS command failures are returned with readable error text.
 
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"action":"ps","limit":20}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"PID ...","error_text":null}
 ```
 
 ## Output Contract

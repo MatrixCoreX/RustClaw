@@ -10,8 +10,6 @@ const CONTEXT_RESOLVER_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/context_resolver_prompt.md");
 const CLARIFY_QUESTION_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/clarify_question_prompt.md");
-const IMAGE_TAIL_ROUTING_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/image_tail_routing_prompt.md");
 
 #[derive(Debug)]
 struct RouteDecision {
@@ -86,59 +84,29 @@ pub(crate) async fn resolve_user_request_with_context(
     } else {
         "<none>".to_string()
     };
-    let (log_long_term, log_prefs, log_recalled) = if state.memory.route_memory_enabled {
-        let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
-            state,
-            task.user_id,
-            task.chat_id,
-            user_request,
-            state.memory.prompt_recall_limit.max(1),
-            true,
-            true,
-        );
-        let lt = long_term_summary
-            .as_deref()
-            .map(crate::truncate_for_log)
-            .unwrap_or_else(|| "<none>".to_string());
-        let pref = if preferences.is_empty() {
-            "<none>".to_string()
-        } else {
-            crate::truncate_for_log(
-                &preferences
-                    .iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect::<Vec<_>>()
-                    .join(" | "),
-            )
-        };
-        let rec = if recalled.is_empty() {
-            "<none>".to_string()
-        } else {
-            crate::truncate_for_log(
-                &recalled
-                    .iter()
-                    .map(|(role, content)| format!("{role}:{content}"))
-                    .collect::<Vec<_>>()
-                    .join(" | "),
-            )
-        };
-        (lt, pref, rec)
-    } else {
-        ("<none>".to_string(), "<none>".to_string(), "<none>".to_string())
-    };
     let prompt = CONTEXT_RESOLVER_PROMPT_TEMPLATE
         .replace("__PERSONA_PROMPT__", &state.persona_prompt)
         .replace("__RECENT_EXECUTION_CONTEXT__", &recent_execution_context)
         .replace("__MEMORY_CONTEXT__", &memory_context)
         .replace("__REQUEST__", req);
     info!(
-        "prompt_invocation task_id={} prompt_name=context_resolver_prompt memory.long_term_summary={} memory.preferences={} memory.recalled_recent={}",
-        task.task_id,
-        log_long_term,
-        log_prefs,
-        log_recalled
+        "{} prompt_invocation task_id={} prompt_name=context_resolver_prompt prompt_file=prompts/context_resolver_prompt.md",
+        crate::highlight_tag("routing"),
+        task.task_id
     );
-    let llm_out = match llm_gateway::run_with_fallback(state, task, &prompt).await {
+    info!(
+        "{} prompt_debug task_id={} prompt_name=context_resolver_prompt prompt_file=prompts/context_resolver_prompt.md prompt_dynamic=true note=dynamic_built_prompt",
+        crate::highlight_tag("routing"),
+        task.task_id
+    );
+    let llm_out = match llm_gateway::run_with_fallback_with_prompt_file(
+        state,
+        task,
+        &prompt,
+        "prompts/context_resolver_prompt.md",
+    )
+    .await
+    {
         Ok(v) => v,
         Err(err) => {
             warn!(
@@ -160,7 +128,8 @@ pub(crate) async fn resolve_user_request_with_context(
         let resolved = out.resolved_user_intent.trim();
         let confidence = out.confidence.unwrap_or(-1.0);
         info!(
-            "resolve_user_request_with_context task_id={} needs_clarify={} confidence={} reason={} resolved={}",
+            "{} resolve_user_request_with_context task_id={} needs_clarify={} confidence={} reason={} resolved={}",
+            crate::highlight_tag("routing"),
             task.task_id,
             out.needs_clarify,
             confidence,
@@ -209,10 +178,23 @@ pub(crate) async fn generate_clarify_question(
         .replace("__REQUEST__", user_request.trim())
         .replace("__RESOLVER_REASON__", resolver_reason.trim());
     info!(
-        "prompt_invocation task_id={} prompt_name=clarify_question_prompt memory.long_term_summary=<none> memory.preferences=<none> memory.recalled_recent=<none>",
+        "{} prompt_invocation task_id={} prompt_name=clarify_question_prompt prompt_file=prompts/clarify_question_prompt.md",
+        crate::highlight_tag("routing"),
         task.task_id
     );
-    match llm_gateway::run_with_fallback(state, task, &prompt).await {
+    info!(
+        "{} prompt_debug task_id={} prompt_name=clarify_question_prompt prompt_file=prompts/clarify_question_prompt.md prompt_dynamic=true note=dynamic_built_prompt",
+        crate::highlight_tag("routing"),
+        task.task_id
+    );
+    match llm_gateway::run_with_fallback_with_prompt_file(
+        state,
+        task,
+        &prompt,
+        "prompts/clarify_question_prompt.md",
+    )
+    .await
+    {
         Ok(v) => {
             let out = v.trim();
             if out.is_empty() {
@@ -245,65 +227,58 @@ pub(crate) async fn route_request_mode(
     user_request: &str,
 ) -> RoutedMode {
     let recent_execution_context = routing_context::build_recent_execution_context(state, task, 5);
-    let memory_context = if state.memory.route_memory_enabled {
-        let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
-            state,
-            task.user_id,
-            task.chat_id,
-            user_request,
-            state.memory.prompt_recall_limit.max(1),
-            true,
-            true,
-        );
-        memory::service::memory_context_block(
-            long_term_summary.as_deref(),
-            &preferences,
-            &recalled,
-            state.memory.route_memory_max_chars.max(384),
-        )
-    } else {
-        "<none>".to_string()
-    };
-    let (log_long_term, log_prefs, log_recalled) = if state.memory.route_memory_enabled {
-        let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
-            state,
-            task.user_id,
-            task.chat_id,
-            user_request,
-            state.memory.prompt_recall_limit.max(1),
-            true,
-            true,
-        );
-        let lt = long_term_summary
-            .as_deref()
-            .map(crate::truncate_for_log)
-            .unwrap_or_else(|| "<none>".to_string());
-        let pref = if preferences.is_empty() {
-            "<none>".to_string()
+    let (memory_context, _log_long_term, _log_prefs, _log_recalled) =
+        if state.memory.route_memory_enabled {
+            let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
+                state,
+                task.user_id,
+                task.chat_id,
+                user_request,
+                state.memory.prompt_recall_limit.max(1),
+                true,
+                true,
+            );
+            let memory_context = memory::service::memory_context_block(
+                long_term_summary.as_deref(),
+                &preferences,
+                &recalled,
+                state.memory.route_memory_max_chars.max(384),
+            );
+            let lt = long_term_summary
+                .as_deref()
+                .map(crate::truncate_for_log)
+                .unwrap_or_else(|| "<none>".to_string());
+            let pref = if preferences.is_empty() {
+                "<none>".to_string()
+            } else {
+                crate::truncate_for_log(
+                    &preferences
+                        .iter()
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                )
+            };
+            let rec = if recalled.is_empty() {
+                "<none>".to_string()
+            } else {
+                crate::truncate_for_log(
+                    &recalled
+                        .iter()
+                        .map(|(role, content)| format!("{role}:{content}"))
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                )
+            };
+            (memory_context, lt, pref, rec)
         } else {
-            crate::truncate_for_log(
-                &preferences
-                    .iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect::<Vec<_>>()
-                    .join(" | "),
+            (
+                "<none>".to_string(),
+                "<none>".to_string(),
+                "<none>".to_string(),
+                "<none>".to_string(),
             )
         };
-        let rec = if recalled.is_empty() {
-            "<none>".to_string()
-        } else {
-            crate::truncate_for_log(
-                &recalled
-                    .iter()
-                    .map(|(role, content)| format!("{role}:{content}"))
-                    .collect::<Vec<_>>()
-                    .join(" | "),
-            )
-        };
-        (lt, pref, rec)
-    } else {
-        ("<none>".to_string(), "<none>".to_string(), "<none>".to_string())
-    };
     let prompt = INTENT_ROUTER_PROMPT_TEMPLATE
         .replace("__PERSONA_PROMPT__", &state.persona_prompt)
         .replace("__ROUTING_RULES__", INTENT_ROUTER_RULES_TEMPLATE)
@@ -311,20 +286,23 @@ pub(crate) async fn route_request_mode(
         .replace("__MEMORY_CONTEXT__", &memory_context)
         .replace("__REQUEST__", user_request.trim());
     info!(
-        "prompt_invocation task_id={} prompt_name=intent_router_prompt memory.long_term_summary={} memory.preferences={} memory.recalled_recent={}",
-        task.task_id,
-        log_long_term,
-        log_prefs,
-        log_recalled
+        "{} prompt_invocation task_id={} prompt_name=intent_router_prompt prompt_file=prompts/intent_router_prompt.md",
+        crate::highlight_tag("routing"),
+        task.task_id
     );
-    if state.routing.debug_log_prompt {
-        info!(
-            "route_request_mode prompt task_id={} prompt={}",
-            task.task_id,
-            crate::truncate_for_log(&prompt)
-        );
-    }
-    let llm_out = match llm_gateway::run_with_fallback(state, task, &prompt).await {
+    info!(
+        "{} prompt_debug task_id={} prompt_name=intent_router_prompt prompt_file=prompts/intent_router_prompt.md prompt_dynamic=true note=dynamic_built_prompt",
+        crate::highlight_tag("routing"),
+        task.task_id
+    );
+    let llm_out = match llm_gateway::run_with_fallback_with_prompt_file(
+        state,
+        task,
+        &prompt,
+        "prompts/intent_router_prompt.md",
+    )
+    .await
+    {
         Ok(v) => v,
         Err(err) => {
             warn!(
@@ -337,7 +315,8 @@ pub(crate) async fn route_request_mode(
 
     if let Some(decision) = parse_route_decision(&llm_out) {
         info!(
-            "route_request_mode llm task_id={} mode={:?} confidence={} reason={} evidence_refs={:?} llm_out={}",
+            "{} route_request_mode llm task_id={} mode={:?} confidence={} reason={} evidence_refs={:?} llm_out={}",
+            crate::highlight_tag("routing"),
             task.task_id,
             decision.mode,
             decision.confidence.unwrap_or(-1.0),
@@ -401,37 +380,6 @@ fn parse_mode_text(raw: &str) -> Option<RoutedMode> {
         return Some(RoutedMode::Chat);
     }
     None
-}
-
-pub(crate) async fn should_apply_image_tail_handling_with_llm(
-    state: &AppState,
-    task: &ClaimedTask,
-    request: &str,
-) -> bool {
-    let req = request.trim();
-    if req.is_empty() {
-        return false;
-    }
-    let prompt = IMAGE_TAIL_ROUTING_PROMPT_TEMPLATE.replace("__REQUEST__", req);
-    info!(
-        "prompt_invocation task_id={} prompt_name=image_tail_routing_prompt memory.long_term_summary=<none> memory.preferences=<none> memory.recalled_recent=<none>",
-        task.task_id
-    );
-    let out = match llm_gateway::run_with_fallback(state, task, &prompt).await {
-        Ok(v) => v,
-        Err(err) => {
-            warn!(
-                "image tail routing llm failed: task_id={} err={}",
-                task.task_id, err
-            );
-            return false;
-        }
-    };
-    serde_json::from_str::<Value>(out.trim())
-        .ok()
-        .or_else(|| crate::extract_first_json_object_any(&out).and_then(|s| serde_json::from_str::<Value>(&s).ok()))
-        .and_then(|v| v.get("image_goal").and_then(|x| x.as_bool()))
-        .unwrap_or(false)
 }
 
 pub(crate) async fn try_handle_schedule_request(

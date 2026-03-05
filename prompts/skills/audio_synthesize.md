@@ -8,28 +8,37 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- TODO: one-paragraph summary for `audio_synthesize`.
+- `audio_synthesize` generates speech audio from text input.
+- It supports voice/format/output path tuning plus optional vendor/model routing.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- No explicit action is required.
+- Behavior is controlled by text input and synthesis options.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| synthesize | `text` (or `input`) | yes | string | - | Source text to speak. |
+| synthesize | `voice` | no | string | impl default | Voice preset. |
+| synthesize | `response_format` or `format` | no | string | impl default | Audio output format (e.g., mp3/wav). |
+| synthesize | `output_path` | no | string(path) | auto | Output audio file path. |
+| synthesize | `vendor` | no | string | impl default | Backend vendor selector. |
+| synthesize | `model` | no | string | impl default | Backend model selector. |
 
 ## Error Contract (from interface)
-- TODO: list error cases and corresponding `error_text` conventions.
+- Missing/empty text input.
+- Invalid option values or unsupported format/voice/model.
+- Provider/runtime synthesis failures should return clear error text.
 
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{}}
+{"request_id":"demo-1","args":{"text":"Hello from RustClaw","voice":"alloy","format":"mp3","output_path":"tmp/hello.mp3"}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"audio synthesized: tmp/hello.mp3","error_text":null}
 ```
 
 ## Output Contract

@@ -1,6 +1,6 @@
 You can ONLY execute capabilities listed below. Never invent tools, skills, actions, or args.
 
-Return exactly one action JSON per turn.
+In planner mode, output a JSON object with `steps` array where each step is one action JSON.
 
 ## Tools
 - `read_file(path)` -> required: `path`
@@ -29,16 +29,17 @@ Return exactly one action JSON per turn.
 
 ### crypto
 - action:
-  - market/info: `quote|get_price|multi_quote|get_multi_price|get_book_ticker|normalize_symbol|healthcheck|candles|indicator|price_alert_check|onchain|positions`
-  - trade/order: `trade_preview|trade_submit|order_status|cancel_order`
+  - market/info: `quote|get_price|multi_quote|get_multi_price|get_book_ticker|binance_symbol_check|normalize_symbol|healthcheck|candles|indicator|price_alert_check|onchain`
+  - trade/order: `trade_preview|trade_submit|order_status|cancel_order|cancel_all_orders|open_orders|trade_history|positions`
 - common optional args: `exchange`, `symbol`, `symbols`
 - trade args:
   - required: `action`, `side`, `order_type`, (`quote_qty_usd` OR `qty`)
-  - optional: `price`, `confirm`
+  - optional: `price` (limit/stop orders), `stop_price` (stop_loss_limit/take_profit_limit), `time_in_force` (GTC/IOC/FOK), `confirm`
+  - supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker`
   - `trade_submit` requires explicit confirmation (`confirm=true`) when user has clearly confirmed
 - risk rule:
-  - For trading intents, prefer `trade_preview` first
-  - Use `trade_submit` only after explicit user confirmation
+  - For trading intents, ALWAYS call `trade_preview` first and stop. Never call `trade_submit` in the same agent turn as `trade_preview`.
+  - `trade_submit` is system-gated: the runtime will execute it only after the user explicitly clicks confirm or replies Y/YES. The agent must NOT call `trade_submit` — doing so will be blocked by the runtime.
 
 #### crypto JSON-schema style contract (strict)
 - Base shape:
@@ -47,38 +48,73 @@ Return exactly one action JSON per turn.
 
 - `trade_preview`:
   - required: `action="trade_preview"`, `symbol`, `side`, `order_type`
-  - quantity rule: exactly one of `quote_qty_usd` or `qty`
-  - optional: `exchange`, `price`
+  - quantity rule: exactly one of `quote_qty_usd` (USDT amount) or `qty` (base qty). Use `qty="all"` for full-position sell.
+  - limit/stop orders: also require `price`; stop orders also require `stop_price`
+  - optional: `exchange`, `price`, `stop_price`, `time_in_force`, `client_order_id`
   - forbid: `confirm=true` (preview phase should not submit)
 
 - `trade_submit`:
+  - **AGENT MUST NOT CALL THIS ACTION.** The runtime handles submission automatically when the user confirms via button or Y/YES reply.
   - required: `action="trade_submit"`, `symbol`, `side`, `order_type`, `confirm=true`
   - quantity rule: exactly one of `quote_qty_usd` or `qty`
-  - optional: `exchange`, `price`
-  - only use when user explicitly confirms execution
+  - optional: `exchange`, `price`, `stop_price`, `time_in_force`
 
 - `order_status`:
   - required: `action="order_status"`
-  - at least one identifier: `order_id` OR `client_order_id` OR (`symbol` + recent context)
+  - at least one identifier: `order_id` OR `client_order_id`; `symbol` required by Binance/OKX
   - optional: `exchange`, `symbol`
 
 - `cancel_order`:
-  - required: `action="cancel_order"`, and one identifier (`order_id` OR `client_order_id`)
-  - optional: `exchange`, `symbol`
+  - required: `action="cancel_order"`, one identifier (`order_id` OR `client_order_id`), `symbol`
+  - optional: `exchange`
   - if identifier is missing, ask one concise clarification
+
+- `cancel_all_orders`:
+  - required: `action="cancel_all_orders"`, `symbol` (Binance; optional for OKX)
+  - optional: `exchange`
+  - use when user wants to cancel all open orders for a symbol
+
+- `open_orders`:
+  - required: `action="open_orders"`
+  - optional: `exchange`, `symbol` (filter by symbol; all orders if omitted)
+
+- `trade_history`:
+  - required: `action="trade_history"`, `symbol` (Binance; optional for OKX)
+  - optional: `exchange`, `limit` (default 20, max 500)
 
 - `positions`:
   - required: `action="positions"`
-  - optional: `exchange`, `symbol`
+  - optional: `exchange`
+
+- `indicator`:
+  - required: `action="indicator"`, `symbol`
+  - optional: `indicator` (sma/ema/rsi, default sma), `period` (default 14), `timeframe`, `exchange`
+  - RSI signals: overbought (≥70), oversold (≤30), neutral
+
+- `candles`:
+  - required: `action="candles"`, `symbol`
+  - optional: `timeframe` (1m/5m/15m/30m/1h/2h/4h/6h/8h/12h/1d/3d/1w/1M), `limit` (max 500), `exchange`
+  - returns: `close_prices` array + `candles` OHLCV array, `high`, `low`, `volume`
 
 - normalization rules:
   - `exchange` should use canonical values when known (e.g. `binance`, `okx`).
   - `symbol` should use canonical spot pair form when inferred (e.g. `ETHUSDT`).
+  - for one-symbol price query, prefer `action="quote"` with `symbol`.
+  - use `multi_quote` only when user explicitly requests multiple symbols/comparison.
+  - do not add `exchanges`/extra scope fields unless user explicitly asks to constrain/re-scope sources.
+  - after one successful crypto market query in the same task, do not call another market query; return `respond`.
 
 ### rss_fetch
 - action: `fetch|latest|news`
 - required: `action`
 - optional: `url`, `feed_url`, `feed_urls`, `category`, `source_layer`, `limit`, `timeout_seconds`
+
+### chat
+- required: `text`
+- optional: `style` (`chat|joke`), `system_prompt`, `max_tokens`, `temperature`
+- default behavior:
+  - for joke/chitchat intents, prefer `{"type":"call_skill","skill":"chat","args":{"text":"<user_request>","style":"joke|chat"}}`
+  - do not route text joke/chitchat to `audio_synthesize` unless user explicitly asks for voice/audio output
 
 #### rss_fetch JSON-schema style contract (strict)
 - Base shape:

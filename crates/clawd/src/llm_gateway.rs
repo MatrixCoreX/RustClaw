@@ -212,12 +212,13 @@ fn synthesize_llm_providers(config: &AppConfig) -> Vec<LlmProviderConfig> {
     out
 }
 
-pub(crate) async fn run_with_fallback(
+pub(crate) async fn run_with_fallback_with_prompt_file(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
+    prompt_file: &str,
 ) -> Result<String, String> {
-    super::run_llm_with_fallback(state, task, prompt).await
+    super::run_llm_with_fallback_with_prompt_file(state, task, prompt, prompt_file).await
 }
 
 pub(crate) fn selected_openai_api_key(state: &AppState) -> String {

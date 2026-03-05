@@ -44,6 +44,7 @@ case "$phase" in
   all)
     run_case_script "case_chat.sh"
     run_case_script "case_act.sh"
+    run_case_script "case_act_save_cmd_output.sh"
     run_case_script "case_act_perl_save.sh"
     run_case_script "case_act_delete_dir.sh"
     run_case_script "case_schedule.sh"

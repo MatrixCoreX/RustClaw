@@ -23,6 +23,21 @@ case "$PROFILE" in
     ;;
 esac
 
+if [[ -d "$SCRIPT_DIR/UI" ]]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required for UI build. Please install Node.js/npm first." # zh: UI 构建依赖 npm，请先安装 Node.js/npm。
+    exit 1
+  fi
+  if [[ ! -d "$SCRIPT_DIR/UI/node_modules" ]]; then
+    echo "Installing UI dependencies..." # zh: 正在安装 UI 依赖...
+    (cd "$SCRIPT_DIR/UI" && npm install)
+  fi
+  echo "Building UI assets..." # zh: 正在构建 UI 资源...
+  (cd "$SCRIPT_DIR/UI" && npm run build)
+else
+  echo "UI directory not found, skip UI build." # zh: 未找到 UI 目录，跳过 UI 构建。
+fi
+
 if [[ "$DO_CLEAN" == "clean" ]]; then
   echo "Cleaning previous build artifacts..." # zh: 正在清理历史构建产物...
   cargo clean

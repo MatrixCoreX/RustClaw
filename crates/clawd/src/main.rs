@@ -1,15 +1,19 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::IsTerminal;
 use std::fs::{OpenOptions, create_dir_all};
 use std::io::Write as IoWrite;
-use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::routing::{get, get_service, post};
 use axum::{Json, Router};
+use claw_core::hard_rules::main_flow::load_main_flow_rules;
+use claw_core::hard_rules::trade as hard_trade;
+use claw_core::hard_rules::trade::CompiledTradeRules;
+use claw_core::hard_rules::types::MainFlowRules;
 use claw_core::config::{
     AppConfig, CommandIntentConfig, LlmProviderConfig, MaintenanceConfig, MemoryConfig, PersonaConfig,
     RoutingConfig, ScheduleConfig, ToolsConfig,
@@ -45,20 +49,13 @@ const MEMORY_UPGRADE_SQL: &str = include_str!("../../../migrations/002_memory_up
 const CHANNEL_UPGRADE_SQL: &str = include_str!("../../../migrations/003_channels_upgrade.sql");
 const LLM_RETRY_TIMES: usize = 2;
 pub(crate) const AGENT_MAX_STEPS: usize = 32;
-pub(crate) const AGENT_MAX_TOOL_CALLS: usize = 12;
-pub(crate) const AGENT_REPEAT_SAME_ACTION_LIMIT: usize = 4;
 pub(crate) const RESUME_CONTEXT_ERROR_PREFIX: &str = "__RESUME_CTX__";
 const MAX_READ_FILE_BYTES: usize = 64 * 1024;
 const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
 const MODEL_IO_LOG_MAX_CHARS: usize = 16000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
-const LOG_CALL_WRAP: &str = "########################################################";
-const PRICE_ALERT_TRIGGERED_TAG: &str = "[PRICE_ALERT_TRIGGERED]";
-const PRICE_ALERT_NOT_TRIGGERED_TAG: &str = "[PRICE_ALERT_NOT_TRIGGERED]";
-pub(crate) const AGENT_RUNTIME_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/agent_runtime_prompt.md");
+const LOG_CALL_WRAP: &str = "---- task-call ----";
 const CHAT_RESPONSE_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/chat_response_prompt.md");
-pub(crate) const COMMAND_FAILURE_SUGGEST_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/command_failure_suggest_prompt.md");
 const RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/resume_continue_execute_prompt.md");
 const IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE: &str =
@@ -100,6 +97,7 @@ struct AppState {
     command_intent: CommandIntentRuntime,
     schedule: ScheduleRuntime,
     telegram_bot_token: String,
+    telegram_crypto_confirm_ttl_seconds: i64,
     whatsapp_cloud_enabled: bool,
     whatsapp_api_base: String,
     whatsapp_access_token: String,
@@ -191,7 +189,7 @@ struct ProviderScopedPolicy {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum AgentAction {
-    Think { content: String },
+    Think { #[allow(dead_code)] content: String },
     CallTool { tool: String, args: Value },
     CallSkill { skill: String, args: Value },
     Respond { content: String },
@@ -895,6 +893,7 @@ async fn main() -> anyhow::Result<()> {
         // 默认用 info 级别，若设置 RUST_LOG 则以环境变量为准。
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))
         .with_target(false)
+        .with_ansi(log_color_enabled())
         .compact()
         .init();
 
@@ -1027,6 +1026,8 @@ async fn main() -> anyhow::Result<()> {
             enabled_skills.remove(canonical);
         }
     }
+    // `chat` is a built-in mandatory skill and cannot be disabled.
+    enabled_skills.insert("chat".to_string());
     let mut enabled_skills_for_log: Vec<String> = enabled_skills.iter().cloned().collect();
     enabled_skills_for_log.sort();
     info!(
@@ -1063,6 +1064,7 @@ async fn main() -> anyhow::Result<()> {
         command_intent,
         schedule,
         telegram_bot_token: config.telegram.bot_token.clone(),
+        telegram_crypto_confirm_ttl_seconds: (config.telegram.crypto_confirm_ttl_seconds.max(1)) as i64,
         whatsapp_cloud_enabled,
         whatsapp_api_base,
         whatsapp_access_token,
@@ -1382,7 +1384,8 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
 
     let memory_cutoff = now - (state.memory.retention_days as i64 * 86400);
     db.execute(
-        "DELETE FROM memories WHERE CAST(created_at AS INTEGER) < ?1",
+        "DELETE FROM memories
+         WHERE COALESCE(created_at_ts, CAST(created_at AS INTEGER)) < ?1",
         params![memory_cutoff],
     )?;
 
@@ -1397,7 +1400,8 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
 
     let long_term_cutoff = now - (state.memory.long_term_retention_days as i64 * 86400);
     db.execute(
-        "DELETE FROM long_term_memories WHERE CAST(updated_at AS INTEGER) < ?1",
+        "DELETE FROM long_term_memories
+         WHERE COALESCE(updated_at_ts, CAST(updated_at AS INTEGER)) < ?1",
         params![long_term_cutoff],
     )?;
 
@@ -1457,12 +1461,14 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .get("source")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let runtime_prompt = if source == "resume_continue_execute" {
+            let main_rules = main_flow_rules(state);
+            let is_resume_continue = is_resume_continue_source(main_rules, source);
+            let runtime_prompt = if is_resume_continue {
                 build_resume_continue_execute_prompt(&payload, prompt)
             } else {
                 prompt.to_string()
             };
-            if source != "resume_continue_execute" {
+            if !is_resume_continue {
                 if let Ok(Some(schedule_reply)) =
                     intent_router::try_handle_schedule_request(state, &task, prompt).await
                 {
@@ -1501,11 +1507,179 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 task.chat_id,
                 truncate_for_log(&runtime_prompt)
             );
+            let agent_mode = payload
+                .get("agent_mode")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let trimmed_request = runtime_prompt.trim();
+            let is_yes = is_affirmation_click_text(state, trimmed_request);
+            let is_no = is_negative_confirmation_click_text(state, trimmed_request);
+            let mut auto_cancel_notice: Option<String> = None;
+            if !is_resume_continue && agent_mode {
+                // Use hard_rules-driven windows to avoid hardcoded timing behavior
+                // in the main confirmation routing flow.
+                let hard_rules = main_flow_rules(state);
+                let effective_window_secs = effective_trade_confirm_window_secs(state, &task.channel);
+                let effective_preview_ctx = find_recent_trade_preview_context(
+                    state,
+                    task.user_id,
+                    task.chat_id,
+                    effective_window_secs,
+                );
+                let stale_preview_ctx = if effective_window_secs < hard_rules.recent_trade_preview_window_secs
+                    && (is_yes || is_no)
+                {
+                    find_recent_trade_preview_context(
+                        state,
+                        task.user_id,
+                        task.chat_id,
+                        hard_rules.recent_trade_preview_window_secs,
+                    )
+                } else {
+                    None
+                };
+                if let Some(preview_ctx) = effective_preview_ctx {
+                    info!(
+                        "worker_once: ask task_id={} hard_trade_confirm_route input={} exchange={} symbol={} side={} qty={}",
+                        task.task_id,
+                        truncate_for_log(trimmed_request),
+                        preview_ctx.exchange,
+                        preview_ctx.symbol,
+                        preview_ctx.side,
+                        preview_ctx.qty
+                    );
+                    if is_yes || is_no {
+                        let hard_text = if is_no {
+                            build_trade_confirm_cancelled_text(state, &preview_ctx)
+                        } else {
+                            let mut submit_args = if let Some(quote_usd) = preview_ctx.quote_qty_usd {
+                                json!({
+                                    "action": "trade_submit",
+                                    "exchange": preview_ctx.exchange,
+                                    "symbol": preview_ctx.symbol,
+                                    "side": preview_ctx.side,
+                                    "order_type": preview_ctx.order_type,
+                                    "quote_qty_usd": quote_usd,
+                                    "confirm": true
+                                })
+                            } else {
+                                json!({
+                                    "action": "trade_submit",
+                                    "exchange": preview_ctx.exchange,
+                                    "symbol": preview_ctx.symbol,
+                                    "side": preview_ctx.side,
+                                    "order_type": preview_ctx.order_type,
+                                    "qty": preview_ctx.qty,
+                                    "confirm": true
+                                })
+                            };
+                            // Restore limit/stop order parameters from preview context
+                            if let Some(p) = preview_ctx.price {
+                                submit_args["price"] = serde_json::Value::from(p);
+                            }
+                            if let Some(sp) = preview_ctx.stop_price {
+                                submit_args["stop_price"] = serde_json::Value::from(sp);
+                            }
+                            if let Some(tif) = &preview_ctx.time_in_force {
+                                submit_args["time_in_force"] = serde_json::Value::from(tif.as_str());
+                            }
+                            match run_skill_with_runner(state, &task, "crypto", submit_args).await {
+                                Ok(text) => text,
+                                Err(err) => {
+                                    error!(
+                                        "hard_trade_confirm: trade_submit skill failed task_id={} err={}",
+                                        task.task_id, err
+                                    );
+                                    repo::update_task_failure(state, &task.task_id, &err)?;
+                                    maybe_notify_schedule_result(state, &task, &payload, false, &err).await;
+                                    info!("{}", LOG_CALL_WRAP);
+                                    info!(
+                                        "task_call_end task_id={} kind=ask status=failed path=hard_trade_confirm_submit error={}",
+                                        task.task_id,
+                                        truncate_for_log(&err)
+                                    );
+                                    info!("{}", LOG_CALL_WRAP);
+                                    return Ok(());
+                                }
+                            }
+                        };
+                        let result = json!({ "text": hard_text.clone() });
+                        repo::update_task_success(state, &task.task_id, &result.to_string())?;
+                        let _ = memory::service::insert_memory(
+                            state,
+                            task.user_id,
+                            task.chat_id,
+                            "user",
+                            prompt,
+                            state.memory.item_max_chars.max(256),
+                        );
+                        let _ = memory::service::insert_memory(
+                            state,
+                            task.user_id,
+                            task.chat_id,
+                            "assistant",
+                            &hard_text,
+                            state.memory.item_max_chars.max(256),
+                        );
+                        if let Err(err) = memory::service::maybe_refresh_long_term_summary(state, &task).await {
+                            warn!("refresh long-term memory summary failed: {err}");
+                        }
+                        info!("{}", LOG_CALL_WRAP);
+                        info!(
+                            "task_call_end task_id={} kind=ask status=success path=hard_trade_confirm result={}",
+                            task.task_id,
+                            truncate_for_log(&hard_text)
+                        );
+                        info!("{}", LOG_CALL_WRAP);
+                        return Ok(());
+                    }
+                    // Any non-confirm command while a preview is pending should
+                    // cancel that preview and continue executing the new command.
+                    auto_cancel_notice = Some(build_trade_confirm_cancelled_text(state, &preview_ctx));
+                    info!(
+                        "worker_once: ask task_id={} hard_trade_auto_cancel_then_continue input={}",
+                        task.task_id,
+                        truncate_for_log(trimmed_request)
+                    );
+                } else if let Some(stale_ctx) = stale_preview_ctx {
+                    let hard_text = build_trade_confirm_cancelled_text(state, &stale_ctx);
+                    let result = json!({ "text": hard_text.clone() });
+                    repo::update_task_success(state, &task.task_id, &result.to_string())?;
+                    let _ = memory::service::insert_memory(
+                        state,
+                        task.user_id,
+                        task.chat_id,
+                        "user",
+                        prompt,
+                        state.memory.item_max_chars.max(256),
+                    );
+                    let _ = memory::service::insert_memory(
+                        state,
+                        task.user_id,
+                        task.chat_id,
+                        "assistant",
+                        &hard_text,
+                        state.memory.item_max_chars.max(256),
+                    );
+                    if let Err(err) = memory::service::maybe_refresh_long_term_summary(state, &task).await {
+                        warn!("refresh long-term memory summary failed: {err}");
+                    }
+                    info!("{}", LOG_CALL_WRAP);
+                    info!(
+                        "task_call_end task_id={} kind=ask status=success path=hard_trade_confirm_expired result={}",
+                        task.task_id,
+                        truncate_for_log(&hard_text)
+                    );
+                    info!("{}", LOG_CALL_WRAP);
+                    return Ok(());
+                }
+            }
             let context_resolution =
                 intent_router::resolve_user_request_with_context(state, &task, &runtime_prompt).await;
             let resolved_prompt = context_resolution.resolved_user_intent.clone();
             info!(
-                "worker_once: ask resolved_message task_id={} needs_clarify={} confidence={} reason={} resolved_text={}",
+                "{} worker_once: ask resolved_message task_id={} needs_clarify={} confidence={} reason={} resolved_text={}",
+                highlight_tag("routing"),
                 task.task_id,
                 context_resolution.needs_clarify,
                 context_resolution.confidence.unwrap_or(-1.0),
@@ -1550,20 +1724,25 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 recalled_log,
             );
 
-            let agent_mode = payload
-                .get("agent_mode")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let classifier_direct_mode = source == "voice_mode_intent_detect"
-                || source == "voice_mode_intent_detect_regression";
+            // Source-id based classifier bypass list is hard_rules-driven.
+            let classifier_direct_mode = main_flow_rules(state)
+                .classifier_direct_sources
+                .iter()
+                .any(|s| s == &source.to_ascii_lowercase());
 
-            let low_confidence = context_resolution.confidence.unwrap_or(0.0) < 0.6;
+            let low_confidence = context_resolution.confidence.unwrap_or(0.0)
+                < main_flow_rules(state).context_low_confidence_threshold;
             let force_clarify = context_resolution.needs_clarify && low_confidence;
 
             let result = if classifier_direct_mode {
                 // Classifier-style sub-requests (like telegram voice mode intent detection)
                 // need raw label outputs, so bypass chat response wrapping.
-                llm_gateway::run_with_fallback(state, &task, &resolved_prompt)
+                llm_gateway::run_with_fallback_with_prompt_file(
+                    state,
+                    &task,
+                    &resolved_prompt,
+                    "prompts/classifier_direct.md",
+                )
                     .await
                     .map(|s| AskReply::llm(s.trim().to_string()))
             } else if force_clarify {
@@ -1582,21 +1761,31 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     RoutedMode::Chat
                 };
                 info!(
-                    "worker_once: ask task_id={} routed_mode={:?} agent_mode={}",
+                "{} worker_once: ask task_id={} routed_mode={:?} agent_mode={}",
+                highlight_tag("routing"),
                     task.task_id, routed_mode, agent_mode
                 );
 
                 match routed_mode {
                     RoutedMode::Chat => {
                         info!(
-                            "worker_once: ask prompt_name=chat_response_prompt task_id={}",
+                            "prompt_invocation task_id={} prompt_name=chat_response_prompt prompt_file=prompts/chat_response_prompt.md",
                             task.task_id
                         );
                         let chat_prompt = CHAT_RESPONSE_PROMPT_TEMPLATE
                             .replace("__PERSONA_PROMPT__", &state.persona_prompt)
                             .replace("__CONTEXT__", &prompt_with_memory)
                             .replace("__REQUEST__", &resolved_prompt);
-                        llm_gateway::run_with_fallback(state, &task, &chat_prompt)
+                        info!(
+                            "prompt_debug task_id={} prompt_name=chat_response_prompt prompt_file=prompts/chat_response_prompt.md prompt_dynamic=true note=dynamic_built_prompt",
+                            task.task_id
+                        );
+                        llm_gateway::run_with_fallback_with_prompt_file(
+                            state,
+                            &task,
+                            &chat_prompt,
+                            "prompts/chat_response_prompt.md",
+                        )
                             .await
                             .map(AskReply::llm)
                     }
@@ -1615,7 +1804,21 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             };
 
             match result {
-                Ok(answer) => {
+                Ok(mut answer) => {
+                    if let Some(cancel_notice) = auto_cancel_notice.take() {
+                        let prefixed_text = if answer.text.trim().is_empty() {
+                            cancel_notice.clone()
+                        } else {
+                            format!("{cancel_notice}\n{}", answer.text)
+                        };
+                        answer.text = prefixed_text;
+                        if !answer.messages.is_empty() {
+                            let mut merged_messages = Vec::with_capacity(answer.messages.len() + 1);
+                            merged_messages.push(cancel_notice);
+                            merged_messages.extend(answer.messages);
+                            answer.messages = merged_messages;
+                        }
+                    }
                     let answer_text = answer.text;
                     let answer_messages = answer.messages;
                     let result = if answer_messages.is_empty() {
@@ -1707,7 +1910,14 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
             let args = payload.get("args").cloned().unwrap_or_else(|| json!(""));
-            let is_price_alert_action = is_crypto_price_alert_action(skill_name, &args);
+            let action = args
+                .as_object()
+                .and_then(|m| m.get("action"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase();
+            let is_price_alert_action = is_crypto_price_alert_action(state, skill_name, &args);
             let schedule_triggered = payload
                 .get("schedule_triggered")
                 .and_then(|v| v.as_bool())
@@ -1722,11 +1932,37 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 truncate_for_log(&args.to_string())
             );
 
+            if canonical_skill_name(skill_name) == "crypto" && action == "trade_submit" {
+                let err_text = i18n_t_with_default(
+                    state,
+                    "clawd.msg.crypto_trade_submit_requires_user_confirmation",
+                    "Blocked direct trade submit. Please run trade_preview first, then click confirm or reply `yes` to place the order.",
+                );
+                error!(
+                    "worker_once: run_skill task_id={} blocked unsafe crypto submit without ask-confirm flow",
+                    task.task_id
+                );
+                repo::update_task_failure(state, &task.task_id, &err_text)?;
+                maybe_notify_schedule_result(state, &task, &payload, false, &err_text).await;
+                info!("{}", LOG_CALL_WRAP);
+                info!(
+                    "task_call_end task_id={} kind=run_skill status=failed skill={} error={}",
+                    task.task_id,
+                    skill_name,
+                    truncate_for_log(&err_text)
+                );
+                info!("{}", LOG_CALL_WRAP);
+                return Ok(());
+            }
+
             match execution_adapters::run_skill(state, &task, skill_name, args).await {
                 Ok(text) => {
-                    let no_trigger = text.trim_start().starts_with(PRICE_ALERT_NOT_TRIGGERED_TAG);
+                    let price_alert_rules = main_flow_rules(state);
+                    let no_trigger = text
+                        .trim_start()
+                        .starts_with(&price_alert_rules.crypto_price_alert_not_triggered_tag);
                     let clean_text = if is_price_alert_action {
-                        strip_price_alert_tag(&text)
+                        strip_price_alert_tag(&text, price_alert_rules)
                     } else {
                         text.clone()
                     };
@@ -1901,10 +2137,42 @@ async fn maybe_notify_schedule_result(
     }
 }
 
-fn runtime_channel_from_payload(payload: &Value) -> RuntimeChannel {
+fn runtime_channel_from_payload(state: &AppState, payload: &Value) -> RuntimeChannel {
     match payload.get("channel").and_then(|v| v.as_str()) {
-        Some(v) if v.eq_ignore_ascii_case("whatsapp") => RuntimeChannel::Whatsapp,
+        Some(v) if is_whatsapp_channel_value(main_flow_rules(state), v) => RuntimeChannel::Whatsapp,
         _ => RuntimeChannel::Telegram,
+    }
+}
+
+fn is_whatsapp_channel_value(rules: &MainFlowRules, raw: &str) -> bool {
+    let channel = raw.trim().to_ascii_lowercase();
+    rules
+        .runtime_whatsapp_channel_aliases
+        .iter()
+        .any(|v| v == &channel)
+}
+
+fn is_resume_continue_source(rules: &MainFlowRules, raw: &str) -> bool {
+    let source = raw.trim().to_ascii_lowercase();
+    rules.resume_continue_sources.iter().any(|v| v == &source)
+}
+
+fn parse_task_status_with_rules(rules: &MainFlowRules, raw: &str) -> TaskStatus {
+    let s = raw.trim().to_ascii_lowercase();
+    if s == rules.task_status_queued {
+        TaskStatus::Queued
+    } else if s == rules.task_status_running {
+        TaskStatus::Running
+    } else if s == rules.task_status_succeeded {
+        TaskStatus::Succeeded
+    } else if s == rules.task_status_failed {
+        TaskStatus::Failed
+    } else if s == rules.task_status_canceled {
+        TaskStatus::Canceled
+    } else if s == rules.task_status_timeout {
+        TaskStatus::Timeout
+    } else {
+        TaskStatus::Failed
     }
 }
 
@@ -1912,38 +2180,37 @@ fn task_payload_value(task: &ClaimedTask) -> Option<Value> {
     serde_json::from_str::<Value>(&task.payload_json).ok()
 }
 
-fn is_crypto_price_alert_action(skill_name: &str, args: &Value) -> bool {
+fn is_crypto_price_alert_action(state: &AppState, skill_name: &str, args: &Value) -> bool {
+    // Route crypto alert-action aliases via hard_rules instead of inline literals.
     if canonical_skill_name(skill_name) != "crypto" {
         return false;
     }
+    let rules = main_flow_rules(state);
     let action = args
         .get("action")
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
-    matches!(
-        action.as_str(),
-        "price_alert_check" | "price_monitor" | "monitor_price" | "price_alert" | "volatility_alert"
-    )
+    rules.crypto_price_alert_actions.iter().any(|a| a == &action)
 }
 
-fn strip_price_alert_tag(text: &str) -> String {
+fn strip_price_alert_tag(text: &str, rules: &MainFlowRules) -> String {
     text.trim()
-        .trim_start_matches(PRICE_ALERT_TRIGGERED_TAG)
-        .trim_start_matches(PRICE_ALERT_NOT_TRIGGERED_TAG)
+        .trim_start_matches(&rules.crypto_price_alert_triggered_tag)
+        .trim_start_matches(&rules.crypto_price_alert_not_triggered_tag)
         .trim()
         .to_string()
 }
 
-fn task_runtime_channel(task: &ClaimedTask) -> RuntimeChannel {
-    if task.channel.eq_ignore_ascii_case("whatsapp") {
+fn task_runtime_channel(state: &AppState, task: &ClaimedTask) -> RuntimeChannel {
+    if is_whatsapp_channel_value(main_flow_rules(state), &task.channel) {
         return RuntimeChannel::Whatsapp;
     }
     let Some(payload) = task_payload_value(task) else {
         return RuntimeChannel::Telegram;
     };
-    runtime_channel_from_payload(&payload)
+    runtime_channel_from_payload(state, &payload)
 }
 
 fn task_external_chat_id(task: &ClaimedTask) -> Option<String> {
@@ -1969,7 +2236,7 @@ async fn send_task_channel_message(
     payload: &Value,
     text: &str,
 ) -> Result<(), String> {
-    match runtime_channel_from_payload(payload) {
+    match runtime_channel_from_payload(state, payload) {
         RuntimeChannel::Telegram => send_telegram_message(state, task.chat_id, text).await,
         RuntimeChannel::Whatsapp => {
             let to = task_external_chat_id(task).or_else(|| {
@@ -1989,15 +2256,18 @@ async fn send_task_channel_message(
 }
 
 fn resolve_whatsapp_delivery_route(state: &AppState, payload: &Value) -> WhatsappDeliveryRoute {
+    // Keep adapter alias mapping in hard_rules (configurable) instead of
+    // scattering literal adapter names in main request routing flow.
+    let rules = main_flow_rules(state);
     let adapter = payload
         .get("adapter")
         .and_then(|v| v.as_str())
         .map(|v| v.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    if adapter == "whatsapp_web" || adapter == "wa_web" {
+    if rules.whatsapp_web_adapters.iter().any(|a| a == &adapter) {
         return WhatsappDeliveryRoute::WebBridge;
     }
-    if adapter == "whatsapp_cloud" || adapter == "wa_cloud" {
+    if rules.whatsapp_cloud_adapters.iter().any(|a| a == &adapter) {
         return WhatsappDeliveryRoute::Cloud;
     }
     if state.whatsapp_web_enabled && !state.whatsapp_cloud_enabled {
@@ -2142,7 +2412,7 @@ async fn run_skill_with_runner(
     let args = enrich_skill_args_with_memory(state, task, skill_name, args).await;
     let args = inject_skill_memory_context(state, task, skill_name, args);
     let args = ensure_default_output_dir_for_skill_args(&state.workspace_root, skill_name, args);
-    let source = match task_runtime_channel(task) {
+    let source = match task_runtime_channel(state, task) {
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
     };
@@ -2154,6 +2424,7 @@ async fn run_skill_with_runner(
         .to_string();
 
     if status != "ok" && canonical_skill_name(skill_name) == "crypto" {
+        let main_rules = main_flow_rules(state);
         let action = args
             .as_object()
             .and_then(|m| m.get("action"))
@@ -2166,13 +2437,15 @@ async fn run_skill_with_runner(
             .and_then(|v| v.as_str())
             .unwrap_or("skill execution failed")
             .to_ascii_lowercase();
-        let unsupported = err_text.contains("unsupported action") || err_text.contains("不支持");
-        if action == "price_alert_check" && unsupported {
-            let legacy_actions = ["price_monitor", "monitor_price", "price_alert", "volatility_alert"];
-            for legacy_action in legacy_actions {
+        let unsupported = main_rules
+            .crypto_unsupported_error_keywords
+            .iter()
+            .any(|k| err_text.contains(k));
+        if action == main_rules.crypto_price_alert_primary_action.as_str() && unsupported {
+            for legacy_action in &main_rules.crypto_price_alert_fallback_actions {
                 let mut retry_args = args.clone();
                 if let Some(map) = retry_args.as_object_mut() {
-                    map.insert("action".to_string(), Value::String(legacy_action.to_string()));
+                    map.insert("action".to_string(), Value::String(legacy_action.clone()));
                 } else {
                     break;
                 }
@@ -2185,8 +2458,8 @@ async fn run_skill_with_runner(
                     .unwrap_or("error");
                 if retry_status == "ok" {
                     info!(
-                        "run_skill_with_runner: fallback action used for crypto task_id={} from=price_alert_check to={}",
-                        task.task_id, legacy_action
+                        "run_skill_with_runner: fallback action used for crypto task_id={} from={} to={}",
+                        task.task_id, main_rules.crypto_price_alert_primary_action, legacy_action
                     );
                     value = retry_value;
                     status = "ok".to_string();
@@ -2202,6 +2475,30 @@ async fn run_skill_with_runner(
             .and_then(|v| v.as_str())
             .unwrap_or("skill execution failed")
             .to_string());
+    }
+
+    if let Some(llm_meta) = value
+        .get("extra")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get("llm"))
+        .and_then(|v| v.as_object())
+    {
+        let prompt_name = llm_meta
+            .get("prompt_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let model = llm_meta
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        info!(
+            "{} skill_llm_call task_id={} skill={} prompt={} model={}",
+            highlight_tag("skill_llm"),
+            task.task_id,
+            skill_name,
+            prompt_name,
+            model
+        );
     }
 
     let mut text = value
@@ -2351,7 +2648,21 @@ async fn rewrite_image_vision_output_language(
     let prompt = IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE
         .replace("__TARGET_LANGUAGE__", target_language)
         .replace("__ORIGINAL_OUTPUT__", original_text);
-    let out = run_llm_with_fallback(state, task, &prompt).await?;
+    info!(
+        "prompt_invocation task_id={} prompt_name=image_output_rewrite_prompt prompt_file=prompts/image_output_rewrite_prompt.md",
+        task.task_id
+    );
+    info!(
+        "prompt_debug task_id={} prompt_name=image_output_rewrite_prompt prompt_file=prompts/image_output_rewrite_prompt.md prompt_dynamic=true note=dynamic_built_prompt",
+        task.task_id
+    );
+    let out = run_llm_with_fallback_with_prompt_file(
+        state,
+        task,
+        &prompt,
+        "prompts/image_output_rewrite_prompt.md",
+    )
+    .await?;
     let trimmed = out.trim();
     if trimmed.is_empty() {
         return Err("empty rewrite output".to_string());
@@ -2375,7 +2686,7 @@ fn inject_skill_memory_context(
     if obj.contains_key("_memory") {
         return Value::Object(obj);
     }
-    let anchor = format!("skill={skill_name}");
+    let anchor = skill_memory_anchor(skill_name, &obj);
     let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
         state,
         task.user_id,
@@ -2406,6 +2717,28 @@ fn inject_skill_memory_context(
         }),
     );
     Value::Object(obj)
+}
+
+fn skill_memory_anchor(skill_name: &str, args_obj: &serde_json::Map<String, Value>) -> String {
+    let mut parts = vec![format!("skill={skill_name}")];
+    for key in [
+        "text",
+        "query",
+        "instruction",
+        "goal",
+        "prompt",
+        "message",
+        "content",
+        "action",
+    ] {
+        if let Some(val) = args_obj.get(key).and_then(|v| v.as_str()) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+        }
+    }
+    parts.join(" | ")
 }
 
 async fn enrich_skill_args_with_memory(
@@ -2499,14 +2832,21 @@ async fn infer_language_preference_from_memory_llm(
     }
     let prompt = LANGUAGE_INFER_PROMPT_TEMPLATE.replace("__MEMORY_SNIPPETS__", &memory_context);
     info!(
-        "infer_language_preference_from_memory_llm prompt: task_id={} user_id={} chat_id={} memory_items={} prompt={}",
-        task.task_id,
-        task.user_id,
-        task.chat_id,
-        recalled.len(),
-        truncate_for_log(&prompt)
+        "prompt_invocation task_id={} prompt_name=language_infer_prompt prompt_file=prompts/language_infer_prompt.md",
+        task.task_id
     );
-    let out = match run_llm_with_fallback(state, task, &prompt).await {
+    info!(
+        "prompt_debug task_id={} prompt_name=language_infer_prompt prompt_file=prompts/language_infer_prompt.md prompt_dynamic=true note=dynamic_built_prompt",
+        task.task_id
+    );
+    let out = match run_llm_with_fallback_with_prompt_file(
+        state,
+        task,
+        &prompt,
+        "prompts/language_infer_prompt.md",
+    )
+    .await
+    {
         Ok(v) => v,
         Err(err) => {
             warn!(
@@ -2601,36 +2941,50 @@ fn selected_openai_base_url(state: &AppState) -> String {
     "https://api.openai.com/v1".to_string()
 }
 
-async fn run_llm_with_fallback(
+fn prompt_file_label(prompt_file: &str) -> String {
+    Path::new(prompt_file)
+        .file_name()
+        .and_then(|v| v.to_str())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| prompt_file.to_string())
+}
+
+async fn run_llm_with_fallback_with_prompt_file(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
+    prompt_file: &str,
 ) -> Result<String, String> {
+    let _prompt_debug_enabled = state.routing.debug_log_prompt;
     if state.llm_providers.is_empty() {
         return Err("No available LLM provider configured".to_string());
     }
 
     let mut last_error = "unknown llm error".to_string();
+    let prompt_file_name = prompt_file_label(prompt_file);
 
     for provider in &state.llm_providers {
         let provider_name = format!("{}:{}", provider.config.name, provider.config.model);
         info!(
-            "[LLM_CALL] stage=request task_id={} user_id={} chat_id={} provider={} prompt={}",
+            "{} [LLM_CALL] stage=request task_id={} user_id={} chat_id={} provider={} prompt_file={}",
+            highlight_tag("llm"),
             task.task_id,
             task.user_id,
             task.chat_id,
             provider_name,
-            truncate_for_log(prompt)
+            &prompt_file_name
         );
 
         match call_provider_with_retry(provider.clone(), prompt).await {
             Ok(text) => {
                 info!(
-                    "[LLM_CALL] stage=response task_id={} user_id={} chat_id={} provider={} response={}",
+                    "{} [LLM_CALL] stage=response task_id={} user_id={} chat_id={} provider={} prompt_file={} response={}",
+                    highlight_tag("llm"),
                     task.task_id,
                     task.user_id,
                     task.chat_id,
                     provider_name,
+                    &prompt_file_name,
                     truncate_for_log(&text)
                 );
                 append_model_io_log(
@@ -2663,13 +3017,14 @@ async fn run_llm_with_fallback(
             Err(err) => {
                 last_error = format!("provider={provider_name} failed: {err}");
                 warn!(
-                    "[LLM_CALL] stage=error task_id={} user_id={} chat_id={} provider={} error={} prompt={}",
+                    "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} provider={} prompt_file={} error={}",
+                    highlight_tag("llm"),
                     task.task_id,
                     task.user_id,
                     task.chat_id,
                     provider_name,
-                    truncate_for_log(&last_error),
-                    truncate_for_log(prompt)
+                    &prompt_file_name,
+                    truncate_for_log(&last_error)
                 );
                 append_model_io_log(
                     state,
@@ -2757,69 +3112,39 @@ pub(crate) fn truncate_for_log(text: &str) -> String {
     out
 }
 
-pub(crate) fn append_routing_log(
-    state: &AppState,
-    task: &ClaimedTask,
-    goal: &str,
-    original_action: &AgentAction,
-    rewritten_action: &AgentAction,
-    reason: &str,
-) {
-    let logs_dir = state.workspace_root.join("logs");
-    if let Err(err) = create_dir_all(&logs_dir) {
-        warn!("create routing logs dir failed: {err}");
-        return;
-    }
-    let file_path = logs_dir.join("routing.log");
-    let mut file = match OpenOptions::new().create(true).append(true).open(&file_path) {
-        Ok(f) => f,
-        Err(err) => {
-            warn!("open routing log file failed: {err}");
-            return;
+fn log_color_enabled() -> bool {
+    if let Ok(v) = std::env::var("RUSTCLAW_LOG_COLOR") {
+        let s = v.trim().to_ascii_lowercase();
+        if matches!(s.as_str(), "1" | "true" | "yes" | "on") {
+            return true;
         }
+        if matches!(s.as_str(), "0" | "false" | "no" | "off") {
+            return false;
+        }
+    }
+    if std::env::var("NO_COLOR").is_ok() {
+        return false;
+    }
+    std::io::stdout().is_terminal() || std::io::stderr().is_terminal()
+}
+
+pub(crate) fn highlight_tag(kind: &str) -> String {
+    let upper = kind.to_ascii_uppercase();
+    if !log_color_enabled() {
+        return format!("[{upper}]");
+    }
+    let code = match kind {
+        "prompt" => "38;5;214", // orange
+        "skill" => "38;5;45",   // cyan
+        "tool" => "38;5;39",    // blue
+        "loop" => "38;5;141",   // purple
+        "llm" => "38;5;226",    // yellow
+        "skill_llm" => "38;5;49", // green
+        "routing" => "38;5;208", // amber
+        _ => "1",
     };
-
-    let line = json!({
-        "ts": now_ts_u64(),
-        "call_id": task.task_id,
-        "task_id": task.task_id,
-        "user_id": task.user_id,
-        "chat_id": task.chat_id,
-        "goal": truncate_for_log(goal),
-        "reason": reason,
-        "original_action": agent_action_log_value(original_action),
-        "rewritten_action": agent_action_log_value(rewritten_action),
-    })
-    .to_string();
-
-    if let Err(err) = writeln!(file, "{line}") {
-        warn!("write routing log failed: {err}");
-    }
+    format!("\x1b[{code}m[{upper}]\x1b[0m")
 }
-
-pub(crate) fn agent_action_log_value(action: &AgentAction) -> Value {
-    match action {
-        AgentAction::Think { content } => json!({
-            "type": "think",
-            "content": truncate_for_log(content),
-        }),
-        AgentAction::Respond { content } => json!({
-            "type": "respond",
-            "content": truncate_for_log(content),
-        }),
-        AgentAction::CallTool { tool, args } => json!({
-            "type": "call_tool",
-            "tool": tool,
-            "args": args,
-        }),
-        AgentAction::CallSkill { skill, args } => json!({
-            "type": "call_skill",
-            "skill": skill,
-            "args": args,
-        }),
-    }
-}
-
 
 pub(crate) fn append_subtask_result(
     subtask_results: &mut Vec<String>,
@@ -2902,42 +3227,6 @@ pub(crate) fn i18n_t_with_default(state: &AppState, key: &str, default_text: &st
         .unwrap_or_else(|| default_text.to_string())
 }
 
-pub(crate) fn append_agent_trace_log(
-    state: &AppState,
-    task: &ClaimedTask,
-    step: usize,
-    phase: &str,
-    detail: &Value,
-) {
-    let logs_dir = state.workspace_root.join("logs");
-    if let Err(err) = create_dir_all(&logs_dir) {
-        warn!("create agent trace logs dir failed: {err}");
-        return;
-    }
-    let file_path = logs_dir.join("agent_trace.log");
-    let mut file = match OpenOptions::new().create(true).append(true).open(&file_path) {
-        Ok(f) => f,
-        Err(err) => {
-            warn!("open agent trace log file failed: {err}");
-            return;
-        }
-    };
-    let line = json!({
-        "ts": now_ts_u64(),
-        "call_id": task.task_id,
-        "task_id": task.task_id,
-        "user_id": task.user_id,
-        "chat_id": task.chat_id,
-        "step": step,
-        "phase": phase,
-        "detail": detail,
-    })
-    .to_string();
-    if let Err(err) = writeln!(file, "{line}") {
-        warn!("write agent trace log failed: {err}");
-    }
-}
-
 pub(crate) fn append_act_plan_log(
     state: &AppState,
     task: &ClaimedTask,
@@ -2978,29 +3267,6 @@ pub(crate) fn append_act_plan_log(
     }
 }
 
-pub(crate) fn agent_action_signature(action: &AgentAction) -> String {
-    let normalized = stable_json_for_signature(&agent_action_log_value(action));
-    serde_json::to_string(&normalized).unwrap_or_else(|_| "<action_sig_err>".to_string())
-}
-
-fn stable_json_for_signature(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            let mut sorted: BTreeMap<String, Value> = BTreeMap::new();
-            for (k, v) in map {
-                sorted.insert(k.clone(), stable_json_for_signature(v));
-            }
-            let mut out = serde_json::Map::new();
-            for (k, v) in sorted {
-                out.insert(k, v);
-            }
-            Value::Object(out)
-        }
-        Value::Array(arr) => Value::Array(arr.iter().map(stable_json_for_signature).collect()),
-        _ => value.clone(),
-    }
-}
-
 pub(crate) fn truncate_for_agent_trace(text: &str) -> String {
     if text.len() <= AGENT_TRACE_LOG_MAX_CHARS {
         return text.to_string();
@@ -3008,11 +3274,6 @@ pub(crate) fn truncate_for_agent_trace(text: &str) -> String {
     let mut out = utf8_safe_prefix(text, AGENT_TRACE_LOG_MAX_CHARS).to_string();
     out.push_str("...(truncated)");
     out
-}
-
-pub(crate) fn rewrite_agent_action_for_safety(action: AgentAction, _goal: &str) -> (AgentAction, Option<String>) {
-    // LLM-first mode: do not hard-rewrite semantic actions.
-    (action, None)
 }
 
 fn normalize_image_edit_args(args: Value, fallback_instruction: &str, image_path: &str) -> Value {
@@ -3060,13 +3321,6 @@ fn image_edit_args_has_image(obj: &serde_json::Map<String, Value>) -> bool {
         })
         .unwrap_or(false);
     image_obj_has_path || image_str || images_array_has_path
-}
-
-pub(crate) fn contains_delivery_file_token(text: &str) -> bool {
-    text.lines().any(|line| {
-        let trimmed = line.trim_start();
-        trimmed.starts_with("FILE:") || trimmed.starts_with("IMAGE_FILE:")
-    })
 }
 
 pub(crate) fn extract_delivery_file_tokens(text: &str) -> Vec<String> {
@@ -3148,14 +3402,21 @@ async fn resolve_image_for_edit_from_context_llm(
         .replace("__GOAL__", goal)
         .replace("__CANDIDATES__", &candidate_lines);
     info!(
-        "resolve_image_for_edit_from_context_llm prompt: task_id={} user_id={} chat_id={} candidate_count={} prompt={}",
-        task.task_id,
-        task.user_id,
-        task.chat_id,
-        candidates.len(),
-        truncate_for_log(&prompt)
+        "prompt_invocation task_id={} prompt_name=image_reference_resolver_prompt prompt_file=prompts/image_reference_resolver_prompt.md",
+        task.task_id
     );
-    let llm_out = run_llm_with_fallback(state, task, &prompt).await.ok()?;
+    info!(
+        "prompt_debug task_id={} prompt_name=image_reference_resolver_prompt prompt_file=prompts/image_reference_resolver_prompt.md prompt_dynamic=true note=dynamic_built_prompt",
+        task.task_id
+    );
+    let llm_out = run_llm_with_fallback_with_prompt_file(
+        state,
+        task,
+        &prompt,
+        "prompts/image_reference_resolver_prompt.md",
+    )
+    .await
+    .ok()?;
     let idx = parse_image_reference_index_from_llm_output(&llm_out)?;
     if idx < 0 {
         return None;
@@ -3305,61 +3566,6 @@ fn collect_image_paths_from_task_payload(
     }
 }
 
-pub(crate) fn normalize_delivery_tokens_to_file(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            let trimmed = line.trim_start();
-            if let Some(rest) = trimmed.strip_prefix("IMAGE_FILE:") {
-                let prefix_spaces = &line[..line.len() - trimmed.len()];
-                format!("{prefix_spaces}FILE:{}", rest.trim())
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub(crate) fn build_hardcoded_image_saved_reply(file_tokens: &[String]) -> String {
-    let paths = file_tokens
-        .iter()
-        .filter_map(|t| extract_file_path_from_delivery_token(t))
-        .collect::<Vec<_>>();
-    let mut out = if paths.len() <= 1 {
-        let path = paths
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "<unknown>".to_string());
-        format!("Image saved: {path}")
-    } else {
-        format!("Images saved: {}", paths.join(", "))
-    };
-    out.push('\n');
-    out.push_str(&file_tokens.join("\n"));
-    out
-}
-
-pub(crate) fn repeat_state_fingerprint(
-    folder_create_satisfied: bool,
-    file_save_satisfied: bool,
-    action_steps_executed: usize,
-    last_output: Option<&str>,
-) -> u64 {
-    let mut s = String::new();
-    s.push_str(if folder_create_satisfied { "1" } else { "0" });
-    s.push_str(if file_save_satisfied { "1" } else { "0" });
-    s.push('|');
-    let _ = action_steps_executed;
-    s.push_str(last_output.unwrap_or(""));
-    stable_hash_u64(&s)
-}
-
-fn stable_hash_u64(text: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
-}
-
 pub(crate) fn extract_json_object(text: &str) -> Option<String> {
     extract_agent_action_objects(text).into_iter().next()
 }
@@ -3483,174 +3689,6 @@ fn repair_invalid_json_escapes(raw: &str) -> String {
     out
 }
 
-pub(crate) fn normalize_agent_action_value(value: Value) -> Result<Value, String> {
-    let mut obj = value
-        .as_object()
-        .cloned()
-        .ok_or_else(|| "agent action must be json object".to_string())?;
-
-    if !obj.contains_key("type") {
-        if let Some(action) = obj.get("action").cloned() {
-            obj.insert("type".to_string(), action);
-        }
-    }
-
-    let action_type = obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "missing action type".to_string())?
-        .to_string();
-
-    // Compatibility with OpenClaw-style direct tool actions, e.g.
-    // {"type":"list_dir","args":{"path":"."}}.
-    // Convert them into RustClaw's canonical call_tool format.
-    let direct_tool_actions = ["read_file", "write_file", "list_dir", "run_cmd"];
-    if direct_tool_actions.contains(&action_type.as_str()) {
-        obj.insert("type".to_string(), Value::String("call_tool".to_string()));
-        obj.insert("tool".to_string(), Value::String(action_type.clone()));
-    }
-
-    if obj.get("type").and_then(|v| v.as_str()) == Some("call_tool") {
-        if !obj.contains_key("tool") {
-            if let Some(name) = obj
-                .get("tool_name")
-                .or_else(|| obj.get("name"))
-                .and_then(|v| v.as_str())
-            {
-                obj.insert("tool".to_string(), Value::String(name.to_string()));
-            }
-        }
-    }
-
-    if obj.get("type").and_then(|v| v.as_str()) == Some("call_skill") {
-        if !obj.contains_key("skill") {
-            if let Some(name) = obj
-                .get("skill_name")
-                .or_else(|| obj.get("name"))
-                .and_then(|v| v.as_str())
-            {
-                obj.insert("skill".to_string(), Value::String(name.to_string()));
-            }
-        }
-        if let Some(skill_name) = obj.get("skill").and_then(|v| v.as_str()) {
-            let normalized = canonical_skill_name(skill_name);
-            if normalized != skill_name {
-                obj.insert("skill".to_string(), Value::String(normalized.to_string()));
-            }
-        }
-    }
-
-    if obj.get("type").and_then(|v| v.as_str()) == Some("call_tool") && !obj.contains_key("args") {
-        let reserved = ["type", "action", "tool"];
-        let mut args = serde_json::Map::new();
-        for (k, v) in &obj {
-            if !reserved.contains(&k.as_str()) {
-                args.insert(k.clone(), v.clone());
-            }
-        }
-        obj.insert("args".to_string(), Value::Object(args));
-    }
-
-    if obj.get("type").and_then(|v| v.as_str()) == Some("call_tool") {
-        if let Some(input) = obj.get("input").cloned() {
-            if obj.get("args").is_none() && input.is_object() {
-                obj.insert("args".to_string(), input);
-            }
-        }
-
-        // If args is provided as plain string for run_cmd, treat it as command.
-        if let (Some(tool), Some(args)) = (
-            obj.get("tool").and_then(|v| v.as_str()),
-            obj.get("args").cloned(),
-        ) {
-            if tool == "run_cmd" {
-                if let Some(cmd) = args.as_str() {
-                    obj.insert("args".to_string(), json!({ "command": cmd }));
-                }
-            }
-        }
-
-        // Normalize common alias keys produced by different models/tool conventions.
-        let tool_name = obj
-            .get("tool")
-            .and_then(|v| v.as_str())
-            .map(|v| v.to_string());
-        if let (Some(tool), Some(args_obj)) = (
-            tool_name.as_deref(),
-            obj.get_mut("args").and_then(|v| v.as_object_mut()),
-        ) {
-            match tool {
-                "run_cmd" => {
-                    if !args_obj.contains_key("command") {
-                        if let Some(v) = args_obj
-                            .get("cmd")
-                            .or_else(|| args_obj.get("shell"))
-                            .or_else(|| args_obj.get("script"))
-                            .cloned()
-                        {
-                            args_obj.insert("command".to_string(), v);
-                        }
-                    }
-                }
-                "list_dir" => {
-                    if !args_obj.contains_key("path") {
-                        if let Some(v) = args_obj.get("dir").cloned() {
-                            args_obj.insert("path".to_string(), v);
-                        }
-                    }
-                }
-                "read_file" => {
-                    if !args_obj.contains_key("path") {
-                        if let Some(v) = args_obj.get("file").cloned() {
-                            args_obj.insert("path".to_string(), v);
-                        }
-                    }
-                }
-                "write_file" => {
-                    if !args_obj.contains_key("path") {
-                        if let Some(v) = args_obj.get("file").cloned() {
-                            args_obj.insert("path".to_string(), v);
-                        }
-                    }
-                    if !args_obj.contains_key("content") {
-                        if let Some(v) = args_obj
-                            .get("text")
-                            .or_else(|| args_obj.get("data"))
-                            .cloned()
-                        {
-                            args_obj.insert("content".to_string(), v);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    if obj.get("type").and_then(|v| v.as_str()) == Some("call_tool")
-        && !obj.get("args").is_some_and(|v| v.is_object())
-    {
-        if !obj.contains_key("args") {
-            obj.insert("args".to_string(), Value::Object(serde_json::Map::new()));
-        } else {
-            return Err("tool args must be json object".to_string());
-        }
-    }
-
-    if obj.get("type").and_then(|v| v.as_str()) == Some("call_skill") && !obj.contains_key("args") {
-        let reserved = ["type", "action", "skill"];
-        let mut args = serde_json::Map::new();
-        for (k, v) in &obj {
-            if !reserved.contains(&k.as_str()) {
-                args.insert(k.clone(), v.clone());
-            }
-        }
-        obj.insert("args".to_string(), Value::Object(args));
-    }
-
-    Ok(Value::Object(obj))
-}
-
 pub(crate) fn canonical_skill_name(name: &str) -> &str {
     match name {
         // file search
@@ -3671,6 +3709,7 @@ pub(crate) fn canonical_skill_name(name: &str) -> &str {
         "image_generation" | "generate_image" | "draw_image" | "text_to_image" => "image_generate",
         "image_modify" | "image_editor" | "edit_image" | "image_outpaint" => "image_edit",
         "coin" | "coins" | "crypto_trade" | "market_data" | "crypto_market" => "crypto",
+        "talk" | "smalltalk" | "joke" | "chitchat" => "chat",
         "git" => "git_basic",
         "http" => "http_basic",
         "system" => "system_basic",
@@ -4603,8 +4642,22 @@ async fn maybe_refresh_long_term_summary(state: &AppState, task: &ClaimedTask) -
     let summary_prompt = LONG_TERM_SUMMARY_PROMPT_TEMPLATE
         .replace("__PREVIOUS_SUMMARY__", &previous_summary)
         .replace("__NEW_CONVERSATION_CHUNK__", &convo_lines.join("\n"));
+    info!(
+        "prompt_invocation task_id={} prompt_name=long_term_summary_prompt prompt_file=prompts/long_term_summary_prompt.md",
+        task.task_id
+    );
+    info!(
+        "prompt_debug task_id={} prompt_name=long_term_summary_prompt prompt_file=prompts/long_term_summary_prompt.md prompt_dynamic=true note=dynamic_built_prompt",
+        task.task_id
+    );
 
-    let summary = run_llm_with_fallback(state, task, &summary_prompt).await?;
+    let summary = run_llm_with_fallback_with_prompt_file(
+        state,
+        task,
+        &summary_prompt,
+        "prompts/long_term_summary_prompt.md",
+    )
+    .await?;
     let trimmed = truncate_text(
         &summary,
         state.memory.long_term_summary_max_chars.max(512),
@@ -4681,7 +4734,7 @@ fn recall_memory_context_parts(
     include_long_term: bool,
     include_preferences: bool,
 ) -> (Option<String>, Vec<(String, String)>, Vec<(String, String)>) {
-    let long_term_summary = if include_long_term {
+    let long_term_summary = if include_long_term && state.memory.long_term_enabled {
         recall_long_term_summary(state, user_id, chat_id)
             .unwrap_or(None)
             .map(|s| truncate_text(&s, state.memory.long_term_recall_max_chars.max(256)))
@@ -4780,6 +4833,10 @@ fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
 
 fn ensure_memory_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(MEMORY_UPGRADE_SQL)?;
+    db.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_memories_user_chat_role_id
+         ON memories(user_id, chat_id, role, id DESC);",
+    )?;
     ensure_column_exists(
         db,
         "memories",
@@ -4791,6 +4848,62 @@ fn ensure_memory_schema(db: &Connection) -> anyhow::Result<()> {
         "memories",
         "salience",
         "ALTER TABLE memories ADD COLUMN salience REAL NOT NULL DEFAULT 0.5",
+    )?;
+    ensure_column_exists(
+        db,
+        "memories",
+        "created_at_ts",
+        "ALTER TABLE memories ADD COLUMN created_at_ts INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column_exists(
+        db,
+        "user_preferences",
+        "updated_at_ts",
+        "ALTER TABLE user_preferences ADD COLUMN updated_at_ts INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column_exists(
+        db,
+        "long_term_memories",
+        "created_at_ts",
+        "ALTER TABLE long_term_memories ADD COLUMN created_at_ts INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column_exists(
+        db,
+        "long_term_memories",
+        "updated_at_ts",
+        "ALTER TABLE long_term_memories ADD COLUMN updated_at_ts INTEGER NOT NULL DEFAULT 0",
+    )?;
+    db.execute(
+        "UPDATE memories
+         SET created_at_ts = CAST(created_at AS INTEGER)
+         WHERE created_at_ts = 0 AND created_at GLOB '[0-9]*'",
+        [],
+    )?;
+    db.execute(
+        "UPDATE user_preferences
+         SET updated_at_ts = CAST(updated_at AS INTEGER)
+         WHERE updated_at_ts = 0 AND updated_at GLOB '[0-9]*'",
+        [],
+    )?;
+    db.execute(
+        "UPDATE long_term_memories
+         SET created_at_ts = CAST(created_at AS INTEGER)
+         WHERE created_at_ts = 0 AND created_at GLOB '[0-9]*'",
+        [],
+    )?;
+    db.execute(
+        "UPDATE long_term_memories
+         SET updated_at_ts = CAST(updated_at AS INTEGER)
+         WHERE updated_at_ts = 0 AND updated_at GLOB '[0-9]*'",
+        [],
+    )?;
+    db.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_memories_user_chat_created_at_ts
+         ON memories(user_id, chat_id, created_at_ts);
+         CREATE INDEX IF NOT EXISTS idx_user_preferences_user_chat_updated_ts
+         ON user_preferences(user_id, chat_id, updated_at_ts);
+         CREATE INDEX IF NOT EXISTS idx_long_term_memories_updated_at_ts
+         ON long_term_memories(updated_at_ts);",
     )?;
     ensure_column_exists(
         db,
@@ -4994,6 +5107,248 @@ fn oldest_running_task_age_seconds(state: &AppState) -> anyhow::Result<u64> {
     }
 }
 
+fn confirmation_rules(state: &AppState) -> &'static CompiledTradeRules {
+    static RULES: OnceLock<CompiledTradeRules> = OnceLock::new();
+    RULES.get_or_init(|| {
+        let path = state.workspace_root.join("configs/hard_rules/trade.toml");
+        let path_str = path.to_string_lossy().to_string();
+        hard_trade::load_compiled_trade_rules(&path_str)
+    })
+}
+
+fn main_flow_rules(state: &AppState) -> &'static MainFlowRules {
+    static RULES: OnceLock<MainFlowRules> = OnceLock::new();
+    RULES.get_or_init(|| {
+        let path = state.workspace_root.join("configs/hard_rules/main_flow.toml");
+        let path_str = path.to_string_lossy().to_string();
+        load_main_flow_rules(&path_str)
+    })
+}
+
+fn normalize_affirmation_text(text: &str) -> String {
+    text.trim().to_ascii_lowercase()
+}
+
+fn is_affirmation_click_text(state: &AppState, text: &str) -> bool {
+    hard_trade::is_yes_confirmation(text, confirmation_rules(state))
+}
+
+fn is_negative_confirmation_click_text(state: &AppState, text: &str) -> bool {
+    hard_trade::is_no_confirmation(text, confirmation_rules(state))
+}
+
+fn effective_trade_confirm_window_secs(state: &AppState, channel: &str) -> i64 {
+    let base_window = main_flow_rules(state).recent_trade_preview_window_secs.max(1);
+    if is_whatsapp_channel_value(main_flow_rules(state), channel) {
+        return base_window;
+    }
+    base_window
+        .min(state.telegram_crypto_confirm_ttl_seconds.max(1))
+        .max(1)
+}
+
+#[derive(Debug, Clone)]
+struct TradePreviewContext {
+    exchange: String,
+    symbol: String,
+    side: String,
+    order_type: String,
+    qty: f64,
+    quote_qty_usd: Option<f64>,
+    price: Option<f64>,
+    stop_price: Option<f64>,
+    time_in_force: Option<String>,
+}
+
+fn build_trade_confirm_cancelled_text(state: &AppState, preview_ctx: &TradePreviewContext) -> String {
+    i18n_t_with_default(
+        state,
+        "clawd.msg.trade_confirm_cancelled",
+        "Trade confirmation cancelled: {exchange} {symbol} {side} qty={qty}",
+    )
+    .replace("{exchange}", &preview_ctx.exchange)
+    .replace("{symbol}", &preview_ctx.symbol)
+    .replace("{side}", &preview_ctx.side)
+    .replace("{qty}", &preview_ctx.qty.to_string())
+}
+
+fn parse_trade_preview_line(line: &str, rules: &MainFlowRules) -> Option<TradePreviewContext> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with(&rules.trade_preview_line_prefix) {
+        return None;
+    }
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    if parts.len() < 5 {
+        return None;
+    }
+    let qty = parts
+        .iter()
+        .find_map(|p| {
+            p.strip_prefix("qty=")
+                .or_else(|| p.strip_prefix("est_qty="))
+                .and_then(|v| v.parse::<f64>().ok())
+        })?;
+    let quote_qty_usd = parts
+        .iter()
+        .find_map(|p| p.strip_prefix("quote_usd=").and_then(|v| v.parse::<f64>().ok()));
+    let order_type = parts
+        .iter()
+        .find_map(|p| p.strip_prefix("order_type=").map(|v| v.to_ascii_lowercase()))
+        .unwrap_or_else(|| rules.trade_preview_default_order_type.clone());
+    let price = parts
+        .iter()
+        .find_map(|p| p.strip_prefix("price=").and_then(|v| v.parse::<f64>().ok()));
+    let stop_price = parts
+        .iter()
+        .find_map(|p| p.strip_prefix("stop_price=").and_then(|v| v.parse::<f64>().ok()));
+    let time_in_force = parts
+        .iter()
+        .find_map(|p| p.strip_prefix("tif=").map(|v| v.to_ascii_uppercase()));
+    Some(TradePreviewContext {
+        exchange: parts[1].trim().to_ascii_lowercase(),
+        symbol: parts[2].trim().to_ascii_uppercase(),
+        side: parts[3].trim().to_ascii_lowercase(),
+        order_type,
+        qty,
+        quote_qty_usd,
+        price,
+        stop_price,
+        time_in_force,
+    })
+}
+
+fn extract_trade_preview_context_from_result_json(
+    result_json: &str,
+    rules: &MainFlowRules,
+) -> Option<TradePreviewContext> {
+    let v: Value = serde_json::from_str(result_json).ok()?;
+    let mut candidates = Vec::new();
+    if let Some(text) = v.get("text").and_then(|x| x.as_str()) {
+        candidates.push(text.to_string());
+    }
+    if let Some(messages) = v.get("messages").and_then(|x| x.as_array()) {
+        for msg in messages {
+            if let Some(s) = msg.as_str() {
+                candidates.push(s.to_string());
+            }
+        }
+    }
+    for text in candidates.into_iter().rev() {
+        for line in text.lines().rev() {
+            if let Some(ctx) = parse_trade_preview_line(line, rules) {
+                return Some(ctx);
+            }
+        }
+    }
+    None
+}
+
+fn find_recent_trade_preview_context(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    window_secs: i64,
+) -> Option<TradePreviewContext> {
+    let rules = main_flow_rules(state);
+    let now = now_ts_u64() as i64;
+    let db = state.db.lock().ok()?;
+    let mut stmt = db
+        .prepare(
+            "SELECT result_json, CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) AS ts
+             FROM tasks
+             WHERE user_id = ?1 AND chat_id = ?2 AND kind = 'ask' AND status = 'succeeded'
+             ORDER BY ts DESC
+             LIMIT ?3",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map(params![user_id, chat_id, rules.recent_trade_preview_scan_limit as i64], |row| {
+            Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?))
+        })
+        .ok()?;
+    for row in rows.flatten() {
+        let (result_json_opt, ts) = row;
+        if now.saturating_sub(ts) > window_secs {
+            continue;
+        }
+        let Some(result_json) = result_json_opt else {
+            // A newer successful ask exists but does not carry preview text,
+            // so treat previous preview as no longer pending.
+            return None;
+        };
+        if let Some(ctx) = extract_trade_preview_context_from_result_json(&result_json, rules) {
+            return Some(ctx);
+        }
+        // The latest successful ask is not a trade preview; pending confirmation
+        // should be considered cleared by subsequent conversation turns.
+        return None;
+    }
+    None
+}
+
+fn find_recent_duplicate_affirmation_task(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    ask_text: &str,
+    window_secs: i64,
+) -> Option<Uuid> {
+    let rules = main_flow_rules(state);
+    if !is_affirmation_click_text(state, ask_text) {
+        return None;
+    }
+    let normalized = normalize_affirmation_text(ask_text);
+    let now = now_ts_u64() as i64;
+    let db = state.db.lock().ok()?;
+    let mut stmt = db
+        .prepare(
+            "SELECT task_id, payload_json, status, CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) AS ts
+             FROM tasks
+             WHERE user_id = ?1 AND chat_id = ?2 AND kind = 'ask'
+             ORDER BY ts DESC
+             LIMIT ?3",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map(params![user_id, chat_id, rules.duplicate_affirmation_scan_limit as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })
+        .ok()?;
+    for row in rows.flatten() {
+        let (task_id, payload_json, status, ts) = row;
+        let status_lc = status.to_ascii_lowercase();
+        if !rules
+            .duplicate_affirmation_statuses
+            .iter()
+            .any(|s| s == &status_lc)
+        {
+            continue;
+        }
+        if now.saturating_sub(ts) > window_secs {
+            continue;
+        }
+        let Ok(payload) = serde_json::from_str::<Value>(&payload_json) else {
+            continue;
+        };
+        let text = payload
+            .get("text")
+            .and_then(|v| v.as_str())
+            .map(normalize_affirmation_text)
+            .unwrap_or_default();
+        if text == normalized {
+            if let Ok(id) = Uuid::parse_str(&task_id) {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
 async fn submit_task(
     State(state): State<AppState>,
     Json(req): Json<SubmitTaskRequest>,
@@ -5053,7 +5408,7 @@ async fn submit_task(
         );
     }
 
-    let queued_count = match task_count_by_status(&state, "queued") {
+    let queued_count = match task_count_by_status(&state, &main_flow_rules(&state).task_status_queued) {
         Ok(v) => v,
         Err(err) => {
             error!("Count queued tasks failed: {}", err);
@@ -5085,6 +5440,36 @@ async fn submit_task(
                 error: Some(queue_full),
             }),
         );
+    }
+
+    if matches!(req.kind, claw_core::types::TaskKind::Ask) {
+        if let Some(text) = req.payload.get("text").and_then(|v| v.as_str()) {
+            if let Some(existing_id) = find_recent_duplicate_affirmation_task(
+                &state,
+                req.user_id,
+                req.chat_id,
+                text,
+                main_flow_rules(&state).duplicate_affirmation_window_secs,
+            ) {
+                info!(
+                    "task_submit dedup: reused recent affirmative task_id={} user_id={} chat_id={} text={}",
+                    existing_id,
+                    req.user_id,
+                    req.chat_id,
+                    truncate_for_log(text)
+                );
+                return (
+                    StatusCode::OK,
+                    Json(ApiResponse {
+                        ok: true,
+                        data: Some(SubmitTaskResponse {
+                            task_id: existing_id,
+                        }),
+                        error: None,
+                    }),
+                );
+            }
+        }
     }
 
     let task_id = Uuid::new_v4();
@@ -5209,15 +5594,7 @@ async fn get_task(
                 let result_json_str: Option<String> = row.get(1)?;
                 let error_text: Option<String> = row.get(2)?;
 
-                let status = match status_str.as_str() {
-                    "queued" => TaskStatus::Queued,
-                    "running" => TaskStatus::Running,
-                    "succeeded" => TaskStatus::Succeeded,
-                    "failed" => TaskStatus::Failed,
-                    "canceled" => TaskStatus::Canceled,
-                    "timeout" => TaskStatus::Timeout,
-                    _ => TaskStatus::Failed,
-                };
+                let status = parse_task_status_with_rules(main_flow_rules(&state), &status_str);
 
                 let result_json = result_json_str
                     .as_deref()

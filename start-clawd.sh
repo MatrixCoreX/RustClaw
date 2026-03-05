@@ -16,7 +16,11 @@ mkdir -p "$LOG_DIR"
 # For non-interactive callers (e.g. start-all.sh with nohup redirection),
 # keep caller-managed redirection to avoid duplicate log lines.
 if [[ -t 1 ]]; then
-  exec > >(tee -a "$LOG_FILE") 2>&1
+  if [[ -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
+    export RUSTCLAW_LOG_COLOR=1
+  fi
+  # Terminal side keeps ANSI colors; log file side strips them via sed.
+  exec > >(tee >(sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
   echo "Logging to: $LOG_FILE" # zh: 日志输出到：$LOG_FILE
 fi
 

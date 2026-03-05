@@ -1,7 +1,14 @@
 [agent.loop_guard.crypto]
-# Action names are normalized to lowercase at runtime.
-# If any list is missing/empty/invalid, code falls back to built-in defaults.
+# 说明/Description: 以下 action 列表在运行时会统一转小写；缺失/空值/非法值会回退代码默认.
+# 建议/Recommendation: 可按技能能力扩展，但需与 crypto skill 实际 action 保持一致.
+# 风险/Risk: 配置与技能不一致会导致 guard 误判，出现漏拦截或过拦截.
+# 用途/Purpose: 识别“新闻查询类”action（用于 loop guard 分类）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 漏项会导致新闻查询不受预期 guard 约束.
 news_actions = ["news"]
+# 用途/Purpose: 识别“行情/查询类”action（用于 query guard）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 误加会把非查询 action 当查询处理；漏加会降低去重/收敛效果.
 market_query_actions = [
   "quote",
   "get_price",
@@ -11,4 +18,199 @@ market_query_actions = [
   "get_book_ticker",
   "positions",
 ]
+# 用途/Purpose: 识别 trade_preview action（用于一次性预览 guard）.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 配错会导致重复预览拦截失效或误拦截.
 trade_preview_actions = ["trade_preview"]
+# 用途/Purpose: 识别 trade_submit action（用于一次性提交 guard）.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 配错会影响重复下单防护.
+trade_submit_actions = ["trade_submit"]
+
+[agent.loop_guard.fs_search]
+# 用途/Purpose: 将 fs_search 的这些 action 归类为 query 行为.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 归类错误会影响 dedup/收敛策略.
+query_actions = ["find_name", "find_ext", "grep_text", "find_images"]
+
+[agent.loop_guard.media]
+# 用途/Purpose: 识别“图片生成技能名”集合.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 误配会导致图片循环保护失效或误触发.
+image_generate_skills = ["image_generate"]
+# 用途/Purpose: 识别“图片编辑技能名”集合.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 误配会影响媒体输出发布策略（progress/final）.
+image_edit_skills = ["image_edit"]
+
+[agent.loop_guard]
+# 用途/Purpose: 单任务最大 agent 步数上限.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 过低会截断任务；过高可能增加循环成本.
+max_steps = 32
+# 用途/Purpose: 单任务最多规划执行轮次（受控多轮）.
+# 建议修改/Recommended change: 建议 1~3.
+# 风险/Risk: 过高会增加循环与成本，过低可能影响复杂任务完成度.
+max_rounds = 2
+# 用途/Purpose: 是否启用受控多轮协调器.
+# 建议修改/Recommended change: true 开启，false 降级单轮.
+# 风险/Risk: 关闭会回到单轮模式，复杂任务可能需要用户再次触发.
+multi_round_enabled = true
+# 用途/Purpose: 同一动作重复阈值（跨轮累计）.
+# 建议修改/Recommended change: 建议 3~6.
+# 风险/Risk: 过低易误杀，过高会放大重复调用.
+repeat_action_limit = 4
+# 用途/Purpose: 连续“无新增进展”轮次阈值.
+# 建议修改/Recommended change: 建议 1~2.
+# 风险/Risk: 过低可能提前结束，过高会导致空转.
+no_progress_limit = 1
+# 用途/Purpose: 单任务最大工具/技能调用次数.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 过低会提前失败；过高会增加资源消耗.
+max_tool_calls = 12
+# 用途/Purpose: 同一动作签名重复多少次后中止.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 过低易误杀；过高会放大循环.
+repeat_same_action_limit = 4
+
+[agent.loop_guard.dedup]
+# 用途/Purpose: 是否启用 run_cmd 单步成功后提前收敛.
+# 建议修改/Recommended change: 当前你已在代码关闭主 dedup，改这个通常无效（保留兼容）.
+# 风险/Risk: 未来若恢复 dedup，此项会直接影响 run_cmd 返回策略.
+run_cmd_single_shot = true
+# 用途/Purpose: query 类动作 dedup 开关（兼容字段）.
+# 建议修改/Recommended change: 一般不改（取决于代码是否启用 dedup）.
+# 风险/Risk: 启用时可能过早短路；关闭时可能重复调用.
+query_actions = true
+# 用途/Purpose: mutation 类动作 dedup 开关（兼容字段）.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 关闭可能导致重复写入/重复提交.
+mutation_actions = true
+# 用途/Purpose: 只读动作 dedup 开关（兼容字段）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 启用可能减少重复读；关闭会增加读取次数.
+idempotent_read_actions = false
+# 用途/Purpose: 提前收敛时 run_cmd 是否返回原始输出.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 改为 false 会返回摘要文本，可能影响上游解析.
+run_cmd_return_raw_output = true
+
+[agent.dynamic_rules]
+# 说明/Description: 这些文案会注入到运行时动态规则（提示词的一部分）.
+# 建议/Recommendation: 可改文案语气，但尽量不要改语义约束.
+# 风险/Risk: 文案弱化会降低收敛能力；文案过强可能误抑制正常动作.
+# 用途/Purpose: 成功后禁止重复同参调用.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 改坏会导致重复调用增多或过度抑制.
+no_repeat_after_success = "Never repeat an identical call_skill/call_tool with the same args after it already succeeded in this task. If repeated, output type=respond to finish."
+# 用途/Purpose: Act 任务起始禁止“纯确认回复”.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 改坏会导致空转聊天或过早工具调用.
+no_pure_ack_at_start = "At the beginning of an Act task, do not output pure acknowledgement/progress respond (e.g. 'received/processing/planning'). Output one executable call_tool/call_skill next action unless clarification is strictly required."
+# 用途/Purpose: crypto 查询一次后收敛.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 过强会压制多次查询需求；过弱会重复查询.
+crypto_query_once = "A crypto market/positions query already succeeded in this task. Do not call crypto query actions again in this task; output type=respond."
+# 用途/Purpose: 有 progress 时 final 仅输出“新增内容”.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 改坏会重复刷屏历史结果.
+progress_new_content_only = "Some tool/skill outputs were already delivered to user as progress messages. In final respond, return only NEW conversational content (e.g. joke/brief conclusion). Do not restate raw quote/positions/trade lines that were already delivered."
+# 用途/Purpose: trade_submit 仅允许一次.
+# 建议修改/Recommended change: 不建议弱化 / Keep strict.
+# 风险/Risk: 弱化会提高重复下单风险.
+trade_submit_once = "A trade_submit already succeeded in this task. Do NOT call trade_submit again in this task. Output type=respond to end."
+# 用途/Purpose: trade_preview 成功后禁止重复预览.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 弱化会导致重复预览刷屏.
+trade_preview_once = "A trade_preview already succeeded in this task. Do NOT call trade_preview again in this task (even with changed params such as adding exchange). Output type=respond."
+# 用途/Purpose: 等待用户确认阶段禁止继续调用工具.
+# 建议修改/Recommended change: 不建议改语义 / Keep strict.
+# 风险/Risk: 改坏会在等待确认时继续执行危险动作.
+waiting_trade_confirmation = "A trade preview is already delivered and now waiting for user confirmation. Do not call more skills/tools. Output type=respond with empty content."
+
+[agent.messages]
+# 说明/Description: 运行时/用户可见错误文案（配置可覆盖，代码有默认回退）.
+# 建议/Recommendation: 可改为中文，但保留关键信息占位符.
+# 风险/Risk: 文案丢失关键信息会增加排障成本.
+# 用途/Purpose: 工具调用上限超限文案.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 仅文案风险，语义建议保持“超限”.
+tool_call_limit_exceeded = "agent tool call limit exceeded"
+# 用途/Purpose: 重复 trade_preview 被阻断时提示文案.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 仅文案风险.
+trade_preview_repeated_blocked = "Trade preview already executed once in this task; repeated preview was blocked."
+# 用途/Purpose: 重复 trade_submit 被阻断时提示文案.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 仅文案风险，但不应淡化风险提示.
+trade_submit_repeated_blocked = "Trade submit already executed once in this task; repeated submit was blocked."
+# 用途/Purpose: 步数上限超限文案，支持 '{}' 占位符注入 max_steps.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 去掉 '{}' 不会崩，但会丢失具体上限信息.
+step_limit_exceeded = "Task exceeded step limit. Executed only the first {} step(s); remaining steps were discarded."
+# 用途/Purpose: 重复动作过多导致中止的文案，支持两个 '{}'（count, action）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 缺失占位符会降低排障可读性.
+repeat_action_too_many = "agent repeated same action too many times: count={}, action={}"
+
+[agent.trace_messages]
+# 说明/Description: 仅用于 trace/audit 的 reason/policy 文案，不直接给用户.
+# 建议/Recommendation: 可本地化，但保持语义稳定，便于日志检索.
+# 风险/Risk: 改动会影响日志关键字检索与历史对比.
+reason_dedup_hit = "action signature already succeeded in this task"
+# 用途/Purpose: fs_search 去重命中原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志检索关键词.
+reason_fs_search_dedup = "fs_search query with identical args already succeeded in this task"
+# 用途/Purpose: crypto news 循环复用原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志可读性.
+reason_crypto_news_loop_reuse = "reuse previous crypto news output to avoid repeated call_skill loop"
+# 用途/Purpose: crypto market 循环复用原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志可读性.
+reason_crypto_market_loop_reuse = "reuse previous crypto market output to avoid repeated call_skill loop"
+# 用途/Purpose: 已有 market 成功后的收敛原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志可读性.
+reason_crypto_market_post_success = "market-query already succeeded in this task; stop repeated query"
+# 用途/Purpose: trade_preview 循环复用原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志可读性.
+reason_crypto_trade_preview_loop_reuse = "reuse previous crypto trade_preview output to avoid repeated call_skill loop"
+# 用途/Purpose: trade_preview 阻断原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志检索一致性.
+reason_trade_preview_blocked = "blocked repeated trade_preview in the same task"
+# 用途/Purpose: trade_preview 阻断策略名.
+# 建议修改/Recommended change: 不建议改 / Keep stable key phrase.
+# 风险/Risk: 影响策略统计或检索聚合.
+policy_trade_preview_once = "one_trade_preview_per_task"
+# 用途/Purpose: preview 已成功后再次尝试的原因文案.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志可读性.
+reason_trade_preview_post_success = "trade_preview already succeeded in this task; avoid repeated preview with changed args"
+# 用途/Purpose: trade_submit 阻断原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志可读性.
+reason_trade_submit_blocked = "blocked repeated trade_submit in the same task"
+# 用途/Purpose: trade_submit 阻断策略名.
+# 建议修改/Recommended change: 不建议改 / Keep stable key phrase.
+# 风险/Risk: 影响策略统计或检索聚合.
+policy_trade_submit_once = "one_trade_submit_per_task"
+# 用途/Purpose: image_generate 重复跳过原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志可读性.
+reason_image_generate_skip_repeated = "skip repeated image_generate after successful result"
+# 用途/Purpose: run_cmd 单步收敛原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志可读性.
+reason_early_converged_run_cmd = "single-step run_cmd succeeded; stop before next llm turn"
+# 用途/Purpose: 过早 respond 被拦截的原因.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响日志可读性.
+reason_premature_respond_blocked = "respond without any executed action/tool_call in act flow"
+# 用途/Purpose: 写入 history 的 guard 说明文本.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 影响调试上下文的可读性与检索.
+history_guard_premature_respond_blocked = "guard: blocked premature respond before any executable action; continue planning"

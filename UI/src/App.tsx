@@ -117,6 +117,8 @@ interface AdapterHealthRow {
   memoryRssBytes: number | null | undefined;
 }
 
+const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
+
 const STORAGE_KEYS = {
   baseUrl: "rustclaw.monitor.baseUrl",
   polling: "rustclaw.monitor.pollingSeconds",
@@ -849,8 +851,53 @@ export default function App() {
   const managedSkills = useMemo(() => {
     const set = new Set<string>(skillsConfigData?.managed_skills ?? []);
     Object.keys(skillSwitchDraft).forEach((k) => set.add(k));
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    return Array.from(set)
+      .filter((name) => !UI_HIDDEN_SKILLS.has(name))
+      .sort((a, b) => a.localeCompare(b));
   }, [skillsConfigData, skillSwitchDraft]);
+  const baseEnabledSkills = useMemo(() => {
+    return new Set<string>((skillsConfigData?.skills_list ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
+  }, [skillsConfigData]);
+  const configuredEnabledSkills = useMemo(() => {
+    const set = new Set<string>((skillsConfigData?.skills_list ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
+    Object.entries(skillSwitchDraft).forEach(([name, value]) => {
+      if (UI_HIDDEN_SKILLS.has(name)) return;
+      if (value) set.add(name);
+      else set.delete(name);
+    });
+    return set;
+  }, [skillsConfigData, skillSwitchDraft]);
+  const hasUnsavedSkillSwitchChanges = useMemo(() => {
+    const persisted = skillsConfigData?.skill_switches ?? {};
+    const keys = new Set<string>([
+      ...Object.keys(persisted).filter((name) => !UI_HIDDEN_SKILLS.has(name)),
+      ...Object.keys(skillSwitchDraft).filter((name) => !UI_HIDDEN_SKILLS.has(name)),
+    ]);
+    for (const key of keys) {
+      if (persisted[key] !== skillSwitchDraft[key]) {
+        return true;
+      }
+    }
+    return false;
+  }, [skillsConfigData, skillSwitchDraft]);
+
+  const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
+    if (UI_HIDDEN_SKILLS.has(name)) return;
+    setSkillSwitchDraft((prev) => {
+      const next = { ...prev };
+      const baseEnabled = baseEnabledSkills.has(name);
+      if (nextEnabled === baseEnabled) {
+        delete next[name];
+      } else {
+        next[name] = nextEnabled;
+      }
+      return next;
+    });
+  };
+  const visibleRuntimeSkills = useMemo(
+    () => (skillsData?.skills ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)),
+    [skillsData],
+  );
 
   return (
     <div className="min-h-screen bg-[#0f1116] text-white selection:bg-[#f74c00]/30">
@@ -1468,7 +1515,7 @@ export default function App() {
             </div>
           </div>
           <p className="text-xs text-white/50">
-            {tSlash("技能数量 / Skill Count")}: {skillsData?.skills?.length ?? 0}
+            {tSlash("技能数量 / Skill Count")}: {visibleRuntimeSkills.length}
             {skillsData?.skill_runner_path ? ` | skill-runner: ${skillsData.skill_runner_path}` : ""}
           </p>
           {skillsError ? (
@@ -1477,8 +1524,8 @@ export default function App() {
             </p>
           ) : null}
           <div className="mt-3 flex flex-wrap gap-2">
-            {(skillsData?.skills?.length ?? 0) > 0 ? (
-              skillsData?.skills?.map((name) => (
+            {visibleRuntimeSkills.length > 0 ? (
+              visibleRuntimeSkills.map((name) => (
                 <span key={name} className="rounded-md border border-sky-400/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-200">
                   {name}
                 </span>
@@ -1493,7 +1540,7 @@ export default function App() {
               <h3 className="text-sm font-semibold">{tSlash("技能开关（写入 config.toml）/ Skill Switches (config.toml)")}</h3>
               <button
                 onClick={() => void saveSkillSwitches()}
-                disabled={skillSwitchSaving || skillsConfigLoading}
+                disabled={skillSwitchSaving || skillsConfigLoading || !hasUnsavedSkillSwitchChanges}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#f74c00] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {skillSwitchSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -1503,6 +1550,15 @@ export default function App() {
             <p className="text-xs text-white/50">
               {t("说明：这里只改 skill_switches；运行时生效需要重启 clawd。", "Note: this updates skill_switches only; restart clawd to apply at runtime.")}
             </p>
+            {hasUnsavedSkillSwitchChanges ? (
+              <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                {t("你有未保存的技能开关变更，请点击“保存开关”。", "You have unsaved skill switch changes. Click \"Save Switches\".")}
+              </p>
+            ) : (
+              <p className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/60">
+                {t("当前开关变更已保存。", "All skill switch changes are saved.")}
+              </p>
+            )}
             {skillsConfigError ? (
               <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                 {tSlash("配置读取/保存失败 / Config read/save failed")}: {skillsConfigError}
@@ -1516,14 +1572,9 @@ export default function App() {
 
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {managedSkills.map((name) => {
-                const runtimeEnabled = (skillsData?.skills ?? []).includes(name);
-                const switchValue = skillSwitchDraft[name];
-                const switchLabel =
-                  typeof switchValue === "boolean"
-                    ? switchValue
-                      ? "true"
-                      : "false"
-                    : t("未设置", "unset");
+                const runtimeEnabled = visibleRuntimeSkills.includes(name);
+                const configuredEnabled = configuredEnabledSkills.has(name);
+                const pendingApply = runtimeEnabled !== configuredEnabled;
                 return (
                   <label
                     key={name}
@@ -1533,29 +1584,25 @@ export default function App() {
                     <span className="flex items-center gap-2">
                       <span
                         className={
-                          runtimeEnabled
+                          configuredEnabled
                             ? "rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-200"
                             : "rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-200"
                         }
                       >
-                        {runtimeEnabled ? t("运行中开启", "runtime on") : t("运行中关闭", "runtime off")}
+                        {configuredEnabled ? t("已开启", "enabled") : t("已关闭", "disabled")}
                       </span>
+                      {pendingApply ? (
+                        <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-200">
+                          {t("待重启生效", "pending restart")}
+                        </span>
+                      ) : null}
                       <button
                         type="button"
-                        onClick={() =>
-                          setSkillSwitchDraft((prev) => {
-                            const next = { ...prev };
-                            const current = next[name];
-                            if (current === true) next[name] = false;
-                            else if (current === false) delete next[name];
-                            else next[name] = true;
-                            return next;
-                          })
-                        }
+                        onClick={() => toggleSkillEnabled(name, !configuredEnabled)}
                         className="rounded border border-white/20 bg-white/5 px-2 py-1 text-[10px] text-white/80 hover:bg-white/10"
-                        title={t("点击在 true/false/未设置 之间切换", "Click to cycle true/false/unset")}
+                        title={configuredEnabled ? t("点击关闭技能", "Click to disable skill") : t("点击开启技能", "Click to enable skill")}
                       >
-                        switch={switchLabel}
+                        {configuredEnabled ? t("关闭", "Disable") : t("开启", "Enable")}
                       </button>
                     </span>
                   </label>

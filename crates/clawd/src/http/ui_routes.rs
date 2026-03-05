@@ -15,6 +15,13 @@ use super::super::{
     wa_webd_process_stats, whatsappd_process_stats,
 };
 
+const UI_HIDDEN_SKILLS: &[&str] = &["chat"];
+
+fn hide_skill_in_ui(name: &str) -> bool {
+    let canonical = super::super::canonical_skill_name(name);
+    UI_HIDDEN_SKILLS.iter().any(|s| *s == canonical)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ServiceAction {
     Start,
@@ -484,6 +491,7 @@ async fn health(State(state): State<AppState>) -> Json<ApiResponse<HealthRespons
 
 async fn list_skills(State(state): State<AppState>) -> Json<ApiResponse<Value>> {
     let mut skills: Vec<String> = state.skills_list.iter().cloned().collect();
+    skills.retain(|s| !hide_skill_in_ui(s));
     skills.sort_unstable();
     Json(ApiResponse {
         ok: true,
@@ -534,8 +542,12 @@ fn collect_skill_switches(value: &toml::Value) -> BTreeMap<String, bool> {
         return out;
     };
     for (k, v) in tbl {
+        let canonical = super::super::canonical_skill_name(k).to_string();
+        if hide_skill_in_ui(&canonical) {
+            continue;
+        }
         if let Some(b) = v.as_bool() {
-            out.insert(super::super::canonical_skill_name(k).to_string(), b);
+            out.insert(canonical, b);
         }
     }
     out
@@ -637,31 +649,45 @@ async fn get_skills_config(State(state): State<AppState>) -> (StatusCode, Json<A
     };
     let baseline = collect_skills_baseline(&parsed);
     let switches = collect_skill_switches(&parsed);
+    let mut baseline_visible = baseline
+        .iter()
+        .filter(|s| !hide_skill_in_ui(s))
+        .cloned()
+        .collect::<Vec<_>>();
+    baseline_visible.sort_unstable();
+    let mut runtime_visible = state
+        .skills_list
+        .iter()
+        .filter(|s| !hide_skill_in_ui(s))
+        .cloned()
+        .collect::<Vec<_>>();
+    runtime_visible.sort_unstable();
     let managed = {
         let mut set: BTreeMap<String, bool> = BTreeMap::new();
-        for s in &baseline {
+        for s in &baseline_visible {
             set.insert(s.clone(), true);
         }
         for s in switches.keys() {
             set.insert(s.clone(), true);
         }
-        for s in state.skills_list.iter() {
+        for s in runtime_visible.iter() {
             set.insert(s.clone(), true);
         }
         set.into_keys().collect::<Vec<_>>()
     };
-    let effective = compute_effective_enabled(&baseline, &switches);
+    let mut effective = compute_effective_enabled(&baseline, &switches);
+    effective.retain(|s| !hide_skill_in_ui(s));
     (
         StatusCode::OK,
         Json(ApiResponse {
             ok: true,
             data: Some(json!({
                 "config_path": "configs/config.toml",
-                "skills_list": baseline,
+                "skills_list": baseline_visible,
                 "skill_switches": switches,
                 "managed_skills": managed,
                 "effective_enabled_skills_preview": effective,
-                "runtime_enabled_skills": state.skills_list.iter().cloned().collect::<Vec<_>>(),
+                "runtime_enabled_skills": runtime_visible,
                 "restart_required": true
             })),
             error: None,
@@ -690,7 +716,7 @@ async fn update_skills_config(
     let mut switches = BTreeMap::new();
     for (k, v) in req.skill_switches {
         let skill = super::super::canonical_skill_name(k.trim()).to_string();
-        if skill.is_empty() {
+        if skill.is_empty() || hide_skill_in_ui(&skill) {
             continue;
         }
         switches.insert(skill, v);
