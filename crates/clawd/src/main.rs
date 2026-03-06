@@ -3114,19 +3114,20 @@ pub(crate) fn truncate_for_log(text: &str) -> String {
 }
 
 fn log_color_enabled() -> bool {
+    let is_tty = std::io::stdout().is_terminal() || std::io::stderr().is_terminal();
     if let Ok(v) = std::env::var("RUSTCLAW_LOG_COLOR") {
         let s = v.trim().to_ascii_lowercase();
-        if matches!(s.as_str(), "1" | "true" | "yes" | "on") {
-            return true;
-        }
         if matches!(s.as_str(), "0" | "false" | "no" | "off") {
             return false;
+        }
+        if matches!(s.as_str(), "1" | "true" | "yes" | "on") {
+            return is_tty;
         }
     }
     if std::env::var("NO_COLOR").is_ok() {
         return false;
     }
-    std::io::stdout().is_terminal() || std::io::stderr().is_terminal()
+    is_tty
 }
 
 /// Returns [TAG] with optional ANSI color when logging to a TTY (see log_color_enabled).
