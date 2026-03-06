@@ -36,7 +36,9 @@ print_rustclaw_banner() {
 EOF
 }
 
-print_rustclaw_banner
+if [[ -z "${RUSTCLAW_SKIP_BANNER:-}" ]]; then
+  print_rustclaw_banner
+fi
 
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_DIR="$SCRIPT_DIR/.pids"
@@ -176,13 +178,13 @@ def to_int_or_none(v):
         return None
 
 telegram_enabled = str(os.environ.get("RUSTCLAW_ENABLE_TG", "0")).strip() == "1"
+# 仅使用 [telegram].bot_token 作为唯一 token 配置，与 clawd/telegramd 一致
 telegram_token = str(get_nested(telegram_cfg, "telegram", "bot_token", default="") or get_nested(cfg, "telegram", "bot_token", default="") or "")
-telegram_bot_token = str(get_nested(telegram_cfg, "telegram_bot", "bot_token", default="") or get_nested(cfg, "telegram_bot", "bot_token", default="") or "")
 admins = get_nested(telegram_cfg, "telegram", "admins", default=get_nested(cfg, "telegram", "admins", default=[]))
 selected_vendor = ""
 selected_model = ""
 
-if force or is_empty_or_placeholder(telegram_token) or (telegram_enabled and is_empty_or_placeholder(telegram_bot_token) and is_empty_or_placeholder(telegram_token)):
+if force or is_empty_or_placeholder(telegram_token) or (telegram_enabled and is_empty_or_placeholder(telegram_token)):
     token_prompt = "Enter Telegram bot_token: " if telegram_enabled else "Enter Telegram bot_token (empty to skip): "
     token = ask(token_prompt).strip()
     if token:
@@ -193,7 +195,6 @@ if force or is_empty_or_placeholder(telegram_token) or (telegram_enabled and is_
                 break
         if token:
             telegram_text = set_key_in_section(telegram_text, "telegram", "bot_token", quote_toml_string(token))
-            telegram_text = set_key_in_section(telegram_text, "telegram_bot", "bot_token", quote_toml_string(token))
             telegram_changed = True
     elif telegram_enabled:
         # telegram is enabled; token is required
@@ -201,13 +202,8 @@ if force or is_empty_or_placeholder(telegram_token) or (telegram_enabled and is_
             token = ask("Telegram enabled: bot_token is required, please enter: ").strip()
             if token and not is_empty_or_placeholder(token):
                 telegram_text = set_key_in_section(telegram_text, "telegram", "bot_token", quote_toml_string(token))
-                telegram_text = set_key_in_section(telegram_text, "telegram_bot", "bot_token", quote_toml_string(token))
                 telegram_changed = True
                 break
-
-if telegram_enabled and not is_empty_or_placeholder(telegram_token) and is_empty_or_placeholder(telegram_bot_token):
-    telegram_text = set_key_in_section(telegram_text, "telegram_bot", "bot_token", quote_toml_string(telegram_token))
-    telegram_changed = True
 
 if force or (not isinstance(admins, list) or len(admins) == 0):
     admin_raw = ask("Enter admin Telegram user_id (empty to skip): ").strip()

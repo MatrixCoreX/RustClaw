@@ -19,8 +19,8 @@ if [[ -t 1 ]]; then
   if [[ -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
     export RUSTCLAW_LOG_COLOR=1
   fi
-  # Terminal side keeps ANSI colors; log file side strips them via sed.
-  exec > >(tee >(sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
+  # Terminal side keeps ANSI colors; log file side strips them via sed (use $'...' so \x1b is ESC).
+  exec > >(tee >(sed $'s/\x1b\\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
   echo "Logging to: $LOG_FILE" # zh: 日志输出到：$LOG_FILE
 fi
 

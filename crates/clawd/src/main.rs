@@ -1026,8 +1026,9 @@ async fn main() -> anyhow::Result<()> {
             enabled_skills.remove(canonical);
         }
     }
-    // `chat` is a built-in mandatory skill and cannot be disabled.
-    enabled_skills.insert("chat".to_string());
+    for s in claw_core::config::core_skills_always_enabled() {
+        enabled_skills.insert(canonical_skill_name(s).to_string());
+    }
     let mut enabled_skills_for_log: Vec<String> = enabled_skills.iter().cloned().collect();
     enabled_skills_for_log.sort();
     info!(
@@ -3128,19 +3129,21 @@ fn log_color_enabled() -> bool {
     std::io::stdout().is_terminal() || std::io::stderr().is_terminal()
 }
 
+/// Returns [TAG] with optional ANSI color when logging to a TTY (see log_color_enabled).
+/// When not a TTY or RUSTCLAW_LOG_COLOR=0, returns plain text so log files stay clean.
 pub(crate) fn highlight_tag(kind: &str) -> String {
     let upper = kind.to_ascii_uppercase();
     if !log_color_enabled() {
         return format!("[{upper}]");
     }
     let code = match kind {
-        "prompt" => "38;5;214", // orange
-        "skill" => "38;5;45",   // cyan
-        "tool" => "38;5;39",    // blue
-        "loop" => "38;5;141",   // purple
-        "llm" => "38;5;226",    // yellow
+        "prompt" => "38;5;214",   // orange
+        "skill" => "38;5;45",     // cyan
+        "tool" => "38;5;39",      // blue
+        "loop" => "38;5;141",     // purple
+        "llm" => "38;5;226",      // yellow
         "skill_llm" => "38;5;49", // green
-        "routing" => "38;5;208", // amber
+        "routing" => "38;5;208",  // amber
         _ => "1",
     };
     format!("\x1b[{code}m[{upper}]\x1b[0m")

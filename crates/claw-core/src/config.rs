@@ -771,6 +771,11 @@ fn default_skill_max_concurrency() -> usize {
     1
 }
 
+/// 基础技能：即使用户在 skill_switches 中关闭，运行时仍视为启用，不可被关闭。
+pub fn core_skills_always_enabled() -> &'static [&'static str] {
+    &["chat", "system_basic", "process_basic", "config_guard", "archive_basic"]
+}
+
 fn default_skills_list() -> Vec<String> {
     vec![
         "install_module".to_string(),

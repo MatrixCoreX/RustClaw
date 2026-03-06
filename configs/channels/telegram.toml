@@ -25,9 +25,9 @@ full_access = true
 [telegram.voice_reply_mode_by_chat]
 1985996990 = "text"
 
+# 与 [telegram] 共用同一份配置；bot_token 仅填 [telegram].bot_token 即可，此处不再重复。
 [telegram_bot]
 enabled = true
-bot_token = "REDACTED_BOT"
 admins = []
 allowlist = []
 language = "zh-CN"

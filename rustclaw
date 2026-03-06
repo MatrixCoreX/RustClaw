@@ -79,6 +79,7 @@ Parameters:
 
 Examples:
   rustclaw -start
+  rustclaw -start release all --quick --skip-setup   # 免配置直接启动（无交互）
   rustclaw -start release all --with-ui
   rustclaw -start release all
   rustclaw -restart debug telegram
@@ -202,6 +203,7 @@ cmd_start() {
   if [[ "$skip_setup" == "1" ]]; then
     export RUSTCLAW_SKIP_SETUP=1
   fi
+  export RUSTCLAW_SKIP_BANNER=1
   export RUSTCLAW_ENABLE_UI="$with_ui"
   export RUSTCLAW_UI_FORCE_REBUILD="$ui_force_rebuild"
   "$START_SCRIPT" "$vendor" "$model" "$profile" "$channels" "$quick_arg"

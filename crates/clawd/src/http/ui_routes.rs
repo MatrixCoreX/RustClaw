@@ -713,13 +713,15 @@ async fn update_skills_config(
         }
     };
     let baseline = collect_skills_baseline(&parsed);
+    let core_skills = claw_core::config::core_skills_always_enabled();
     let mut switches = BTreeMap::new();
     for (k, v) in req.skill_switches {
         let skill = super::super::canonical_skill_name(k.trim()).to_string();
         if skill.is_empty() || hide_skill_in_ui(&skill) {
             continue;
         }
-        switches.insert(skill, v);
+        let is_core = core_skills.iter().any(|s| *s == skill);
+        switches.insert(skill, if is_core { true } else { v });
     }
     let rendered = render_switches_inline_table(&switches);
     let updated = upsert_skill_switches_line(&raw, &rendered);

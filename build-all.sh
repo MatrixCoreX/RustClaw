@@ -4,9 +4,54 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# ----- 确保 Cargo (Rust) 已安装 -----
+ensure_cargo() {
+  if command -v cargo >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "cargo not found. Installing Rust toolchain (rustup)..."
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  if [[ -f "$HOME/.cargo/env" ]]; then
+    . "$HOME/.cargo/env"
+  fi
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "Rust install failed or cargo not in PATH. Please run: source \"\$HOME/.cargo/env\""
+    exit 1
+  fi
+  echo "Rust toolchain installed."
+}
+
 if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
+ensure_cargo
+
+# ----- 确保 npm 已安装（仅在有 UI 目录时需要） -----
+ensure_npm() {
+  if command -v npm >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "npm not found. Attempting to install Node.js/npm..."
+  if [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+    . "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+    nvm install --lts
+    nvm use --lts
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq && sudo apt-get install -y nodejs npm
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y nodejs npm
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y nodejs npm
+  else
+    echo "Please install Node.js and npm first: https://nodejs.org or: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+    exit 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm still not found after install attempt."
+    exit 1
+  fi
+  echo "Node.js/npm ready."
+}
 
 echo "Syncing skill docs (INTERFACE.md + prompts/skills/*.md)..." # zh: 同步技能文档（INTERFACE.md + prompts/skills/*.md）...
 python3 "$SCRIPT_DIR/scripts/sync_skill_docs.py"
@@ -24,10 +69,7 @@ case "$PROFILE" in
 esac
 
 if [[ -d "$SCRIPT_DIR/UI" ]]; then
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "npm is required for UI build. Please install Node.js/npm first." # zh: UI 构建依赖 npm，请先安装 Node.js/npm。
-    exit 1
-  fi
+  ensure_npm
   if [[ ! -d "$SCRIPT_DIR/UI/node_modules" ]]; then
     echo "Installing UI dependencies..." # zh: 正在安装 UI 依赖...
     (cd "$SCRIPT_DIR/UI" && npm install)

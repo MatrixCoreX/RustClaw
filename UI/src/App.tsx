@@ -203,8 +203,20 @@ export default function App() {
     return saved === "en" ? "en" : "zh";
   });
   const [baseUrl, setBaseUrl] = useState(() => {
-    return window.localStorage.getItem(STORAGE_KEYS.baseUrl) || "http://127.0.0.1:8787";
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const saved = window.localStorage.getItem(STORAGE_KEYS.baseUrl);
+    if (saved != null && saved.trim() !== "") {
+      const s = saved.trim();
+      const isSavedLoopback8787 = /^https?:\/\/(127\.0\.0\.1|localhost):8787(\/|$)/i.test(s);
+      const isCurrentLoopback8787 = Boolean(origin && /^https?:\/\/(127\.0\.0\.1|localhost):8787(\/|$)/i.test(origin));
+      if (isSavedLoopback8787 && !isCurrentLoopback8787) {
+        return "";
+      }
+      return s;
+    }
+    return origin || "http://127.0.0.1:8787";
   });
+  const apiBase = baseUrl || (typeof window !== "undefined" ? window.location.origin : "") || "http://127.0.0.1:8787";
   const [pollingSeconds, setPollingSeconds] = useState(() => {
     return readNumber(STORAGE_KEYS.polling, 5);
   });
@@ -296,7 +308,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/health`);
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/health`);
       const body = (await res.json()) as ApiResponse<HealthResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `health 请求失败 (${res.status})`);
@@ -330,7 +342,7 @@ export default function App() {
     setServiceActionMessage(null);
     setServiceActionLoading((prev) => ({ ...prev, [serviceName]: true }));
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/services/${serviceName}/${action}`, {
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/services/${serviceName}/${action}`, {
         method: "POST",
       });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
@@ -359,7 +371,7 @@ export default function App() {
       setWaLoginError(null);
     }
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/whatsapp-web/login-status`);
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/whatsapp-web/login-status`);
       const body = (await res.json()) as ApiResponse<WhatsappWebLoginStatus>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `获取 WhatsApp 登录状态失败 (${res.status})`);
@@ -384,7 +396,7 @@ export default function App() {
     setWaLogoutLoading(true);
     setWaLoginError(null);
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/whatsapp-web/logout`, {
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/whatsapp-web/logout`, {
         method: "POST",
       });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
@@ -406,7 +418,7 @@ export default function App() {
     setLocalContextLoading(true);
     setLocalContextError(null);
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/local/interaction-context`);
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/local/interaction-context`);
       const body = (await res.json()) as ApiResponse<LocalInteractionContextResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `本地上下文获取失败 (${res.status})`);
@@ -426,7 +438,7 @@ export default function App() {
     setSkillsLoading(true);
     setSkillsError(null);
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/skills`);
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/skills`);
       const body = (await res.json()) as ApiResponse<SkillsResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `技能列表获取失败 (${res.status})`);
@@ -444,7 +456,7 @@ export default function App() {
     setSkillsConfigLoading(true);
     setSkillsConfigError(null);
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/skills/config`);
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/skills/config`);
       const body = (await res.json()) as ApiResponse<SkillsConfigResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `技能配置获取失败 (${res.status})`);
@@ -464,7 +476,7 @@ export default function App() {
     setSkillSwitchSaveMessage(null);
     setSkillsConfigError(null);
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/skills/config`, {
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/skills/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ skill_switches: skillSwitchDraft }),
@@ -499,7 +511,7 @@ export default function App() {
         file: selectedLogFile,
         lines: String(logTailLines),
       });
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/logs/latest?${params.toString()}`);
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/logs/latest?${params.toString()}`);
       const body = (await res.json()) as ApiResponse<LogLatestResponse>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `日志读取失败 (${res.status})`);
@@ -515,7 +527,7 @@ export default function App() {
   };
 
   const fetchTaskById = async (id: string): Promise<TaskQueryResponse> => {
-    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/tasks/${id.trim()}`);
+    const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/tasks/${id.trim()}`);
     const body = (await res.json()) as ApiResponse<TaskQueryResponse>;
     if (!res.ok || !body.ok || !body.data) {
       throw new Error(body.error || `任务查询失败 (${res.status})`);
@@ -601,7 +613,7 @@ export default function App() {
         body.external_chat_id = externalChatId;
       }
 
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/tasks`, {
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -660,7 +672,7 @@ export default function App() {
         kind: "ask" as const,
         payload: chatPayload,
       };
-      const submitRes = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/tasks`, {
+      const submitRes = await fetch(`${apiBase.replace(/\/$/, "")}/v1/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(submitBody),
@@ -735,7 +747,7 @@ export default function App() {
     }, pollingSeconds * 1000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl, pollingSeconds]);
+  }, [apiBase, pollingSeconds]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.baseUrl, baseUrl);
@@ -762,7 +774,7 @@ export default function App() {
     void fetchSkillsConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl]);
+  }, [apiBase]);
 
   useEffect(() => {
     if (!trackingTaskId) return;
@@ -775,7 +787,7 @@ export default function App() {
     }, 2000);
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackingTaskId, baseUrl]);
+  }, [trackingTaskId, apiBase]);
 
   useEffect(() => {
     if (viewMode !== "logs") return;
@@ -785,7 +797,7 @@ export default function App() {
     }, Math.max(2, pollingSeconds) * 1000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, baseUrl, selectedLogFile, logTailLines, pollingSeconds]);
+  }, [viewMode, apiBase, selectedLogFile, logTailLines, pollingSeconds]);
 
   useEffect(() => {
     if (!logFollowTail) return;
@@ -802,7 +814,7 @@ export default function App() {
     }, 2000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waLoginDialogOpen, baseUrl]);
+  }, [waLoginDialogOpen, apiBase]);
 
   useEffect(() => {
     // Keep whatsapp web login status fresh for row actions.
@@ -812,7 +824,7 @@ export default function App() {
     }, 5000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl]);
+  }, [apiBase]);
 
   const timeline = useMemo(() => snapshots.slice().reverse(), [snapshots]);
   const memoryMax = useMemo(() => {
@@ -1163,7 +1175,7 @@ export default function App() {
                 className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="http://127.0.0.1:8787"
+                placeholder="留空=当前页同源(反代可用)；或填 http://127.0.0.1:8787"
               />
             </label>
 

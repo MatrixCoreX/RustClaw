@@ -1,0 +1,60 @@
+# Nginx 反向代理：通过主机 IP 访问 RustClaw UI（clawd 默认 127.0.0.1:8787）
+# UI 默认使用“当前页同源”发 API 请求，反代后无需在页面里再填 API 地址。
+#
+# --- 虚拟机 NAT 端口转发（主机 8888 -> 虚拟机）---
+# 外面（主机）访问地址：http://127.0.0.1:8888/ 或 http://本机IP:8888/
+# 方式 A：主机 8888 -> 虚拟机 80（推荐，用本 nginx）
+#   在虚拟机的 NAT/端口转发里设：主机 8888 -> 虚拟机 80。本配置用 listen 80，
+#   主机浏览器打开 http://127.0.0.1:8888/ 即可，接口会走同源。
+# 方式 B：主机 8888 -> 虚拟机 8787（不用 nginx）
+#   端口转发设：主机 8888 -> 虚拟机 8787。把 config.toml 里 [server] listen 改为
+#   listen = "0.0.0.0:8787"，然后访问 http://主机IP:8888（无需 nginx）。
+#
+# 用法（方式 A 时）：
+#   1. 复制到 nginx 配置目录，例如：
+#      sudo cp configs/nginx-rustclaw-ui.conf.example /etc/nginx/sites-available/rustclaw-ui
+#      sudo ln -s /etc/nginx/sites-available/rustclaw-ui /etc/nginx/sites-enabled/
+#   2. 将下面 server_name 改成你的主机 IP 或域名（或用 _ 表示默认）
+#   3. sudo nginx -t && sudo systemctl reload nginx
+#   4. 在虚拟机/主机上做 NAT：主机 8888 -> 虚拟机 80
+
+server {
+    listen 80;
+    # 接受任意 Host（用 IP 访问时必须），或改为你的域名。若与现有 default_server 冲突，去掉上面 listen 80 后的 default_server（本示例已不写 default_server）
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
+
+# 若仍不显示接口：在主机浏览器直接打开 http://127.0.0.1:8888/v1/health 应返回 JSON；
+# 若 404 说明 nginx 未把 /v1 转到 8787；若超时说明 clawd 未监听 127.0.0.1:8787 或 NAT 未转发 8888->80。
+#
+# ========== 若出现 conflicting server name "_" 且本 server 被 ignored ==========
+# 说明 80 上已有别的 default/server_name _，本 server 不生效。改用下面方式：
+#   1. 禁用本独立站点： sudo rm /etc/nginx/sites-enabled/rustclaw-ui
+#   2. 在「已有 default 站点」的 server 里加入下面这段 location /（若已有 location /，可把其内容改成 proxy_pass，或改用别的 path 如 /rustclaw/）
+#   3. sudo nginx -t && sudo systemctl reload nginx
+#
+# --- 粘贴到现有 default server 内部 ---
+#     location / {
+#         proxy_pass http://127.0.0.1:8787;
+#         proxy_http_version 1.1;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_connect_timeout 60s;
+#         proxy_send_timeout 60s;
+#         proxy_read_timeout 60s;
+#     }
+# --- 结束 ---

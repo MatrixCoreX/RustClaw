@@ -59,20 +59,67 @@ done
 
 LINK_PATH="$INSTALL_DIR/rustclaw"
 
-ensure_build() {
-  local force="$1"
+# ----- 确保 Cargo (Rust) 已安装 -----
+ensure_cargo() {
+  if command -v cargo >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "cargo not found. Installing Rust toolchain (rustup)..."
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  if [[ -f "$HOME/.cargo/env" ]]; then
+    . "$HOME/.cargo/env"
+  fi
   if ! command -v cargo >/dev/null 2>&1; then
-    echo "cargo not found. Please install Rust toolchain first."
+    echo "Rust install failed or cargo not in PATH. Please run: source \"\$HOME/.cargo/env\""
     exit 1
+  fi
+  echo "Rust toolchain installed."
+}
+
+# ----- 确保 npm 已安装（存在 UI 目录时） -----
+ensure_npm() {
+  if [[ ! -d "$SCRIPT_DIR/UI" ]]; then
+    return 0
+  fi
+  if command -v npm >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "npm not found. Attempting to install Node.js/npm..."
+  if [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+    . "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+    nvm install --lts
+    nvm use --lts
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq && sudo apt-get install -y nodejs npm
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y nodejs npm
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y nodejs npm
+  else
+    echo "Please install Node.js and npm first: https://nodejs.org or: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+    exit 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm still not found after install attempt."
+    exit 1
+  fi
+  echo "Node.js/npm ready."
+}
+
+# 判断是否需要构建 release（源码更新或二进制缺失/过期）
+need_release_build() {
+  local force="$1"
+  [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "1"
+    return
   fi
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "python3 not found."
-    exit 1
+    echo "1"
+    return
   fi
-
-  local need_build
-  need_build="$(
-python3 - "$SCRIPT_DIR" "$force" <<'PY'
+  local need
+  need="$(python3 - "$SCRIPT_DIR" "$force" <<'PY'
 import json
 import os
 import subprocess
@@ -89,7 +136,6 @@ def latest_source_mtime(base: Path) -> float:
     tracked_names = {"Cargo.toml", "Cargo.lock"}
     for current, dirs, files in os.walk(base):
         p = Path(current)
-        # Skip heavy/non-build folders.
         if any(seg in {"target", ".git", "node_modules"} for seg in p.parts):
             continue
         for name in files:
@@ -105,11 +151,16 @@ if mode == "--force-build":
     print("1")
     raise SystemExit(0)
 
-metadata_raw = subprocess.check_output(
-    ["cargo", "metadata", "--no-deps", "--format-version", "1"],
-    cwd=str(root),
-    text=True,
-)
+try:
+    metadata_raw = subprocess.check_output(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        cwd=str(root),
+        text=True,
+    )
+except (subprocess.CalledProcessError, FileNotFoundError):
+    print("1")
+    raise SystemExit(0)
+
 meta = json.loads(metadata_raw)
 workspace_members = set(meta.get("workspace_members", []))
 bins = set()
@@ -150,10 +201,44 @@ else:
     print("0")
 PY
   )"
+  echo "$need"
+}
 
-  if [[ "$need_build" == "1" ]]; then
+# 仅构建 release：UI（若有）+ cargo build --workspace --release，不调用其他脚本
+do_release_build() {
+  [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
+  ensure_cargo
+  if [[ -d "$SCRIPT_DIR/UI" ]]; then
+    ensure_npm
+    if [[ ! -d "$SCRIPT_DIR/UI/node_modules" ]]; then
+      echo "Installing UI dependencies..."
+      (cd "$SCRIPT_DIR/UI" && npm install)
+    fi
+    echo "Building UI assets..."
+    (cd "$SCRIPT_DIR/UI" && npm run build)
+  fi
+  echo "Building workspace (release)..."
+  (cd "$SCRIPT_DIR" && cargo build --workspace --release)
+  if [[ ! -x "$SCRIPT_DIR/target/release/clawd" ]]; then
+    echo "Build finished but target/release/clawd missing."
+    exit 1
+  fi
+  echo "Release build completed."
+}
+
+ensure_build() {
+  local force="$1"
+  ensure_cargo
+  ensure_npm
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 not found."
+    exit 1
+  fi
+  local need
+  need="$(need_release_build "$force")"
+  if [[ "$need" == "1" ]]; then
     echo "Release binaries are missing or outdated. Building release..."
-    "$SCRIPT_DIR/build-all.sh" release
+    do_release_build
   else
     echo "Release binaries are up-to-date. Skip build."
   fi
@@ -216,8 +301,11 @@ if [[ "$LINK_PATH" == "$USER_INSTALL_DIR/rustclaw" ]]; then
 fi
 echo "Try:"
 echo "  rustclaw -status"
+echo "  rustclaw -start release all --quick --skip-setup   # 免配置直接启动"
 echo "  rustclaw -start release"
 echo "  rustclaw -stop"
 echo
 echo "Tip:"
 echo "  bash install-rustclaw-cmd.sh --force-build"
+echo "Uninstall (removes command only, does not touch configs):"
+echo "  bash uninstall-rustclaw-cmd.sh [--user|--dir <path>]"
