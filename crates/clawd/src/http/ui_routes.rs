@@ -26,6 +26,7 @@ fn hide_skill_in_ui(name: &str) -> bool {
 enum ServiceAction {
     Start,
     Stop,
+    Restart,
 }
 
 pub(crate) fn build_ui_router() -> Router<AppState> {
@@ -129,6 +130,7 @@ fn parse_service_action(raw: &str) -> Option<ServiceAction> {
     match raw {
         "start" => Some(ServiceAction::Start),
         "stop" => Some(ServiceAction::Stop),
+        "restart" => Some(ServiceAction::Restart),
         _ => None,
     }
 }
@@ -228,7 +230,7 @@ async fn control_service(
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some("action must be start or stop".to_string()),
+                    error: Some("action must be start, stop, or restart".to_string()),
                 }),
             );
         }
@@ -431,6 +433,117 @@ async fn control_service(
                         "service": service,
                         "action": "stop",
                         "status": "stopped"
+                    })),
+                    error: None,
+                }),
+            )
+        }
+        ServiceAction::Restart => {
+            let Some(process_name) = service_process_name(service.as_str()) else {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some("unsupported service".to_string()),
+                    }),
+                );
+            };
+            if let Some(pids) = daemon_process_pids(process_name) {
+                for pid in pids {
+                    let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
+                    let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+                }
+            }
+            for extra_name in service_extra_process_names_on_stop(service.as_str()) {
+                if let Some(pids) = daemon_process_pids(extra_name) {
+                    for pid in pids {
+                        let cmd = format!("kill -TERM {} >/dev/null 2>&1 || true", pid);
+                        let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+                    }
+                }
+            }
+            if let Some(pid_file) = service_pid_file(service.as_str()) {
+                let workspace = state.workspace_root.to_string_lossy();
+                let cmd = format!(
+                    "cd {} && rm -f .pids/{}",
+                    shell_escape_arg(workspace.as_ref()),
+                    shell_escape_arg(pid_file)
+                );
+                let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let profile = std::env::var("RUSTCLAW_START_PROFILE")
+                .ok()
+                .filter(|v| matches!(v.as_str(), "debug" | "release"))
+                .unwrap_or_else(|| runtime_profile_default().to_string());
+            let Some(script_name) = service_start_script(service.as_str()) else {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some("unsupported service".to_string()),
+                    }),
+                );
+            };
+            let workspace = state.workspace_root.to_string_lossy();
+            let log_file = format!("logs/{}.log", service);
+            let cmd = format!(
+                "cd {} && mkdir -p logs .pids && nohup ./{} {} > {} 2>&1 &",
+                shell_escape_arg(workspace.as_ref()),
+                script_name,
+                shell_escape_arg(profile.as_str()),
+                shell_escape_arg(log_file.as_str())
+            );
+            let output = match Command::new("bash").arg("-lc").arg(cmd).output().await {
+                Ok(v) => v,
+                Err(err) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiResponse {
+                            ok: false,
+                            data: None,
+                            error: Some(format!("failed to start service process: {err}")),
+                        }),
+                    );
+                }
+            };
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let detail = if !stderr.is_empty() { stderr } else { stdout };
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!("service restart start command failed: {detail}")),
+                    }),
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            if !service_is_running(service.as_str()) {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!(
+                            "service did not enter running state after restart: {service}. check logs/{service}.log"
+                        )),
+                    }),
+                );
+            }
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(json!({
+                        "service": service,
+                        "action": "restart",
+                        "status": "restarted",
+                        "profile": profile
                     })),
                     error: None,
                 }),

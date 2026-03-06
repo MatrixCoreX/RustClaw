@@ -118,6 +118,8 @@ interface AdapterHealthRow {
 }
 
 const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
+const IMAGE_SKILLS = new Set<string>(["image_vision", "image_generate", "image_edit"]);
+const AUDIO_SKILLS = new Set<string>(["audio_transcribe", "audio_synthesize"]);
 
 const STORAGE_KEYS = {
   baseUrl: "rustclaw.monitor.baseUrl",
@@ -189,10 +191,10 @@ function StatCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-      <p className="text-xs uppercase tracking-widest text-white/50">{title}</p>
-      <p className="mt-2 text-2xl font-bold text-white">{value}</p>
-      {hint ? <p className="mt-1 text-xs text-white/50">{hint}</p> : null}
+    <div className="rounded-xl border border-white/10 bg-white/5 p-3 sm:rounded-2xl sm:p-5">
+      <p className="text-[10px] uppercase tracking-widest text-white/50 sm:text-xs">{title}</p>
+      <p className="mt-1 text-lg font-bold text-white sm:mt-2 sm:text-2xl">{value}</p>
+      {hint ? <p className="mt-0.5 text-[10px] text-white/50 sm:mt-1 sm:text-xs">{hint}</p> : null}
     </div>
   );
 }
@@ -285,7 +287,7 @@ export default function App() {
   const [waLoginStatus, setWaLoginStatus] = useState<WhatsappWebLoginStatus | null>(null);
   const [waLogoutLoading, setWaLogoutLoading] = useState(false);
   const [viewMode, setViewMode] = useState<"dashboard" | "logs">("dashboard");
-  const [selectedLogFile, setSelectedLogFile] = useState("agent_trace.log");
+  const [selectedLogFile, setSelectedLogFile] = useState("clawd.log");
   const [logTailLines, setLogTailLines] = useState(200);
   const [logLoading, setLogLoading] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
@@ -867,6 +869,12 @@ export default function App() {
       .filter((name) => !UI_HIDDEN_SKILLS.has(name))
       .sort((a, b) => a.localeCompare(b));
   }, [skillsConfigData, skillSwitchDraft]);
+  const imageSkillsList = useMemo(() => managedSkills.filter((n) => IMAGE_SKILLS.has(n)), [managedSkills]);
+  const audioSkillsList = useMemo(() => managedSkills.filter((n) => AUDIO_SKILLS.has(n)), [managedSkills]);
+  const otherSkillsList = useMemo(
+    () => managedSkills.filter((n) => !IMAGE_SKILLS.has(n) && !AUDIO_SKILLS.has(n)),
+    [managedSkills],
+  );
   const baseEnabledSkills = useMemo(() => {
     return new Set<string>((skillsConfigData?.skills_list ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
   }, [skillsConfigData]);
@@ -913,34 +921,34 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0f1116] text-white selection:bg-[#f74c00]/30">
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0f1116]/90 backdrop-blur px-6 py-4">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <span className="text-2xl leading-none">🦞</span>
-              <span>{t("RustClaw 后台", "RustClaw Console")}</span>
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0f1116]/90 backdrop-blur px-3 py-2 sm:px-6 sm:py-4">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 sm:gap-4">
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold tracking-tight flex items-center gap-1.5 sm:text-2xl sm:gap-2">
+              <span className="text-lg leading-none sm:text-2xl">🦞</span>
+              <span className="truncate">{t("RustClaw 后台", "RustClaw Console")}</span>
             </h1>
-            <p className="mt-1 text-sm text-white/60">
+            <p className="mt-0.5 text-xs text-white/60 sm:mt-1 sm:text-sm">
               {t("实时查看 clawd 健康状态、任务队列与服务运行信息", "Monitor clawd health, queue and runtime in real time")}
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+            <div className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-1 sm:gap-3 sm:rounded-xl sm:px-4 sm:py-2">
               {isOnline ? (
-                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 sm:h-4 sm:w-4" />
               ) : (
-                <AlertCircle className="h-4 w-4 text-red-400" />
+                <AlertCircle className="h-3.5 w-3.5 text-red-400 sm:h-4 sm:w-4" />
               )}
-              <span className="text-sm">{isOnline ? t("在线", "Online") : t("离线异常", "Offline")}</span>
+              <span className="text-xs sm:text-sm">{isOnline ? t("在线", "Online") : t("离线异常", "Offline")}</span>
               {lastUpdated ? (
-                <span className="text-xs text-white/50">{lang === "zh" ? `更新于 ${toLocalTime(lastUpdated)}` : `Updated ${toLocalTime(lastUpdated)}`}</span>
+                <span className="hidden text-[10px] text-white/50 sm:inline sm:text-xs">{lang === "zh" ? `更新于 ${toLocalTime(lastUpdated)}` : `Updated ${toLocalTime(lastUpdated)}`}</span>
               ) : null}
             </div>
 
             <button
               onClick={() => setLang((v) => (v === "zh" ? "en" : "zh"))}
-              className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
+              className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[10px] hover:bg-white/10 sm:rounded-xl sm:px-3 sm:py-2 sm:text-xs"
               title={t("切换语言", "Switch Language")}
             >
               {lang === "zh" ? "中文" : "EN"}
@@ -948,31 +956,31 @@ export default function App() {
 
             <button
               onClick={() => setViewMode((v) => (v === "dashboard" ? "logs" : "dashboard"))}
-              className="relative inline-flex items-center gap-2 rounded-xl border border-sky-400/30 bg-sky-500/15 px-3 py-2 text-sm text-white hover:bg-sky-500/25 transition"
+              className="relative inline-flex items-center gap-1 rounded-lg border border-sky-400/30 bg-sky-500/15 px-2 py-1 text-xs text-white hover:bg-sky-500/25 transition sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
               title={t("查看日志页面", "Open Logs Page")}
             >
-              <FileText className="h-4 w-4" />
+              <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               <span className="hidden sm:inline">{viewMode === "logs" ? t("控制台", "Console") : t("日志", "Logs")}</span>
             </button>
 
             <button
               onClick={() => setChatDialogOpen((v) => !v)}
-              className="relative inline-flex items-center gap-2 rounded-xl border border-[#f74c00]/30 bg-[#f74c00]/15 px-3 py-2 text-sm text-white hover:bg-[#f74c00]/25 transition"
+              className="relative inline-flex items-center gap-1 rounded-lg border border-[#f74c00]/30 bg-[#f74c00]/15 px-2 py-1 text-xs text-white hover:bg-[#f74c00]/25 transition sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
               title={t("小龙虾聊天", "Lobster Chat")}
             >
-              <span className="text-base leading-none">🦞</span>
+              <span className="text-sm leading-none sm:text-base">🦞</span>
               <span className="hidden sm:inline">{t("聊天", "Chat")}</span>
-              <MessageCircle className="h-4 w-4" />
+              <MessageCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-6 p-6">
+      <main className="mx-auto max-w-7xl space-y-3 p-3 sm:space-y-6 sm:p-6">
         {viewMode === "logs" ? (
-          <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">{t("最新日志", "Latest Logs")}</h2>
+          <section className="rounded-xl border border-white/10 bg-white/5 p-3 sm:rounded-2xl sm:p-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 sm:mb-4 sm:gap-3">
+              <h2 className="text-base font-semibold sm:text-lg">{t("最新日志", "Latest Logs")}</h2>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => void fetchLatestLog()}
@@ -985,11 +993,11 @@ export default function App() {
               </div>
             </div>
 
-            <div className="mb-4 grid gap-3 md:grid-cols-4">
-              <label className="space-y-2">
-                <span className="text-xs uppercase tracking-widest text-white/50">{t("日志文件", "Log File")}</span>
+            <div className="mb-3 grid gap-2 sm:gap-3 md:grid-cols-4">
+              <label className="space-y-1 sm:space-y-2">
+                <span className="text-[10px] uppercase tracking-widest text-white/50 sm:text-xs">{t("日志文件", "Log File")}</span>
                 <select
-                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
+                  className="w-full rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 text-xs outline-none ring-[#f74c00] focus:ring-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
                   value={selectedLogFile}
                   onChange={(e) => setSelectedLogFile(e.target.value)}
                 >
@@ -1004,10 +1012,10 @@ export default function App() {
                 </select>
               </label>
 
-              <label className="space-y-2">
-                <span className="text-xs uppercase tracking-widest text-white/50">{t("尾部行数", "Tail Lines")}</span>
+              <label className="space-y-1 sm:space-y-2">
+                <span className="text-[10px] uppercase tracking-widest text-white/50 sm:text-xs">{t("尾部行数", "Tail Lines")}</span>
                 <select
-                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
+                  className="w-full rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 text-xs outline-none ring-[#f74c00] focus:ring-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
                   value={logTailLines}
                   onChange={(e) => setLogTailLines(Number(e.target.value))}
                 >
@@ -1044,7 +1052,7 @@ export default function App() {
 
             <pre
               ref={logContainerRef}
-              className="h-[70vh] overflow-auto rounded-xl border border-white/10 bg-[#12151f] p-3 text-xs text-white/85"
+              className="h-[60vh] overflow-auto rounded-lg border border-white/10 bg-[#12151f] p-2 text-[10px] text-white/85 sm:h-[70vh] sm:rounded-xl sm:p-3 sm:text-xs"
             >
               {logText || t("日志为空", "Log is empty")}
             </pre>
@@ -1145,10 +1153,10 @@ export default function App() {
         )}
 
         {(queuePressureHigh || runningTooOld || !isOnline) && (
-          <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
-            <div className="flex items-start gap-3">
-              <BellRing className="mt-0.5 h-5 w-5 text-amber-300" />
-              <div className="space-y-1 text-sm">
+          <section className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 sm:rounded-2xl sm:p-4">
+            <div className="flex items-start gap-2 sm:gap-3">
+              <BellRing className="mt-0.5 h-4 w-4 shrink-0 text-amber-300 sm:h-5 sm:w-5" />
+              <div className="min-w-0 space-y-0.5 text-xs sm:space-y-1 sm:text-sm">
                 <p className="font-semibold text-amber-200">{t("监控告警", "Alerts")}</p>
                 {!isOnline ? <p className="text-amber-100">- 无法访问 clawd 健康接口，请检查服务或地址。/ Health endpoint unreachable.</p> : null}
                 {queuePressureHigh ? (
@@ -1167,22 +1175,22 @@ export default function App() {
           </section>
         )}
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto]">
-            <label className="space-y-2">
-              <span className="text-xs uppercase tracking-widest text-white/50">{t("clawd API 地址", "clawd API URL")}</span>
+        <section className="rounded-xl border border-white/10 bg-white/5 p-3 sm:rounded-2xl sm:p-5">
+          <div className="grid gap-2 sm:gap-4 md:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto]">
+            <label className="space-y-1 sm:space-y-2">
+              <span className="text-[10px] uppercase tracking-widest text-white/50 sm:text-xs">{t("clawd API 地址", "clawd API URL")}</span>
               <input
-                className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 text-xs outline-none ring-[#f74c00] focus:ring-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
                 placeholder="留空=当前页同源(反代可用)；或填 http://127.0.0.1:8787"
               />
             </label>
 
-            <label className="space-y-2">
-              <span className="text-xs uppercase tracking-widest text-white/50">{t("自动刷新", "Auto Refresh")}</span>
+            <label className="space-y-1 sm:space-y-2">
+              <span className="text-[10px] uppercase tracking-widest text-white/50 sm:text-xs">{t("自动刷新", "Auto Refresh")}</span>
               <select
-                className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 text-xs outline-none ring-[#f74c00] focus:ring-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
                 value={pollingSeconds}
                 onChange={(e) => setPollingSeconds(Number(e.target.value))}
               >
@@ -1193,23 +1201,23 @@ export default function App() {
               </select>
             </label>
 
-            <label className="space-y-2">
-              <span className="text-xs uppercase tracking-widest text-white/50">{t("队列告警阈值", "Queue Alert")}</span>
+            <label className="space-y-1 sm:space-y-2">
+              <span className="text-[10px] uppercase tracking-widest text-white/50 sm:text-xs">{t("队列告警阈值", "Queue Alert")}</span>
               <input
                 type="number"
                 min={1}
-                className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 text-xs outline-none ring-[#f74c00] focus:ring-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
                 value={queueWarn}
                 onChange={(e) => setQueueWarn(Math.max(1, Number(e.target.value) || 1))}
               />
             </label>
 
-            <label className="space-y-2">
-              <span className="text-xs uppercase tracking-widest text-white/50">{t("运行时长告警(秒)", "Runtime Alert(s)")}</span>
+            <label className="space-y-1 sm:space-y-2">
+              <span className="text-[10px] uppercase tracking-widest text-white/50 sm:text-xs">{t("运行时长告警(秒)", "Runtime Alert(s)")}</span>
               <input
                 type="number"
                 min={10}
-                className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 text-xs outline-none ring-[#f74c00] focus:ring-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
                 value={ageWarnSeconds}
                 onChange={(e) => setAgeWarnSeconds(Math.max(10, Number(e.target.value) || 10))}
               />
@@ -1219,14 +1227,14 @@ export default function App() {
               <button
                 onClick={() => void fetchHealth()}
                 disabled={loading}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#f74c00] px-4 py-2 font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#f74c00] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60 sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2 sm:text-sm"
               >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin sm:h-4 sm:w-4" /> : <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
                 {t("立即刷新", "Refresh")}
               </button>
             </div>
 
-            <div className="flex items-end text-xs text-white/50">
+            <div className="flex items-end text-[10px] text-white/50 sm:text-xs">
               {pollingSeconds > 0 ? t(`每 ${pollingSeconds}s 自动轮询`, `Poll every ${pollingSeconds}s`) : t("自动轮询已关闭", "Polling off")}
             </div>
           </div>
@@ -1237,7 +1245,7 @@ export default function App() {
           ) : null}
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-2 sm:gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard title={tSlash("服务版本 / Version")} value={health?.version || "--"} />
           <StatCard title={tSlash("运行时长 / Uptime")} value={formatDuration(health?.uptime_seconds)} />
           <StatCard title={tSlash("队列任务数 / Queue")} value={health?.queue_length ?? "--"} hint="status=queued" />
@@ -1248,38 +1256,38 @@ export default function App() {
           <StatCard title="Worker 状态" value={health?.worker_state || "--"} />
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-              <Server className="h-5 w-5 text-[#f74c00]" />
+        <section className="grid gap-3 sm:gap-6 lg:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-white/5 p-3 sm:rounded-2xl sm:p-5">
+            <h2 className="mb-2 flex items-center gap-1.5 text-base font-semibold sm:mb-4 sm:gap-2 sm:text-lg">
+              <Server className="h-4 w-4 text-[#f74c00] sm:h-5 sm:w-5" />
               {tSlash("服务健康 / Service Health")}
             </h2>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <Database className="h-4 w-4 text-white/70" />
-                  <span>clawd /v1/health</span>
+            <div className="space-y-2 sm:space-y-3">
+              <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 px-2 py-2 sm:rounded-xl sm:px-4 sm:py-3">
+                <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+                  <Database className="h-3.5 w-3.5 shrink-0 text-white/70 sm:h-4 sm:w-4" />
+                  <span className="truncate text-xs sm:text-sm">clawd /v1/health</span>
                 </div>
-                <span className={isOnline ? "text-emerald-300" : "text-red-300"}>
+                <span className={`shrink-0 text-xs sm:text-sm ${isOnline ? "text-emerald-300" : "text-red-300"}`}>
                   {isOnline ? "正常" : "不可达"}
                 </span>
               </div>
 
               {adapterHealthRows.map((row) => (
-                <div key={row.key} className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-2">
-                      <Server className="h-4 w-4 text-white/70" />
-                      <span>{row.label}</span>
+                <div key={row.key} className="rounded-lg border border-white/10 bg-black/20 px-2 py-2 sm:rounded-xl sm:px-4 sm:py-3">
+                  <div className="flex items-center justify-between gap-2 sm:gap-4">
+                    <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+                      <Server className="h-3.5 w-3.5 shrink-0 text-white/70 sm:h-4 sm:w-4" />
+                      <span className="truncate text-xs sm:text-sm">{row.label}</span>
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 text-right">
                       <span
                         className={
                           row.healthy === true
-                            ? "text-emerald-300"
+                            ? "block text-xs text-emerald-300 sm:text-sm"
                             : row.healthy === false
-                              ? "text-amber-300"
-                              : "text-white/50"
+                              ? "block text-xs text-amber-300 sm:text-sm"
+                              : "block text-xs text-white/50 sm:text-sm"
                         }
                       >
                         {row.healthy === true
@@ -1291,24 +1299,24 @@ export default function App() {
                       <p className="text-[11px] text-white/40 mt-0.5">
                         {tSlash("进程 / Proc")}: {row.processCount == null ? "--" : row.processCount} | RSS {formatBytes(row.memoryRssBytes ?? null)}
                       </p>
-                      <div className="mt-2 flex justify-end gap-2">
+                      <div className="mt-1.5 flex flex-wrap justify-end gap-1 sm:mt-2 sm:gap-2">
                         {row.key === "whatsapp_web" && waLoginStatus?.connected !== true ? (
                           <button
                             onClick={() => setWaLoginDialogOpen(true)}
-                            className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-200 hover:bg-sky-500/20"
+                            className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-200 hover:bg-sky-500/20 sm:rounded-lg sm:px-2 sm:py-1 sm:text-xs"
                           >
                             {tSlash("扫码登录 / QR Login")}
                           </button>
                         ) : null}
                         {row.key === "whatsapp_web" && waLoginStatus?.connected === true ? (
-                          <div className="flex items-center gap-2">
-                            <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200">
+                          <div className="flex items-center gap-1 sm:gap-2">
+                            <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-200 sm:rounded-lg sm:px-2 sm:py-1 sm:text-xs">
                               {tSlash("已登录 / Connected")}
                             </span>
                             <button
                               onClick={() => void logoutWhatsappWeb()}
                               disabled={waLogoutLoading}
-                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+                              className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-200 hover:bg-red-500/20 disabled:opacity-50 sm:rounded-lg sm:px-2 sm:py-1 sm:text-xs"
                             >
                               {waLogoutLoading ? tSlash("处理中 / Working") : tSlash("退出登录 / Logout")}
                             </button>
@@ -1317,16 +1325,24 @@ export default function App() {
                         <button
                           onClick={() => void controlService(row.serviceName, "start")}
                           disabled={Boolean(serviceActionLoading[row.serviceName]) || row.healthy === true}
-                          className="rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50 sm:rounded-lg sm:px-2 sm:py-1 sm:text-xs"
                         >
                           {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("启动 / Start")}
                         </button>
                         <button
                           onClick={() => void controlService(row.serviceName, "stop")}
                           disabled={Boolean(serviceActionLoading[row.serviceName]) || row.healthy !== true}
-                          className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-200 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50 sm:rounded-lg sm:px-2 sm:py-1 sm:text-xs"
                         >
                           {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("停止 / Stop")}
+                        </button>
+                        <button
+                          onClick={() => void controlService(row.serviceName, "restart")}
+                          disabled={Boolean(serviceActionLoading[row.serviceName])}
+                          className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50 sm:rounded-lg sm:px-2 sm:py-1 sm:text-xs"
+                          title={tSlash("先停止再启动 / Stop then start")}
+                        >
+                          {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("重启 / Restart")}
                         </button>
                       </div>
                     </div>
@@ -1393,15 +1409,15 @@ export default function App() {
                 <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">{serviceActionMessage}</p>
               ) : null}
 
-              <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <Timer className="h-4 w-4 text-white/70" />
-                  <span>{tSlash("预留适配器 / Future Adapters")}</span>
+              <div className="rounded-lg border border-white/10 bg-black/20 px-2 py-2 sm:rounded-xl sm:px-4 sm:py-3">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <Timer className="h-3.5 w-3.5 text-white/70 sm:h-4 sm:w-4" />
+                  <span className="text-xs sm:text-sm">{tSlash("预留适配器 / Future Adapters")}</span>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-1.5 flex flex-wrap gap-1 sm:mt-2 sm:gap-2">
                   {(health?.future_adapters_enabled?.length ?? 0) > 0 ? (
                     health?.future_adapters_enabled?.map((name) => (
-                      <span key={name} className="rounded-md border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-200">
+                      <span key={name} className="rounded border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-200 sm:rounded-md sm:px-2 sm:text-xs">
                         {name}
                       </span>
                     ))
@@ -1413,14 +1429,14 @@ export default function App() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-              <Clock3 className="h-5 w-5 text-[#f74c00]" />
-              最近采样（最多 24 条，本地趋势）/ Recent Samples (24 max)
+          <div className="rounded-xl border border-white/10 bg-white/5 p-3 sm:rounded-2xl sm:p-5">
+            <h2 className="mb-2 flex items-center gap-1.5 text-base font-semibold sm:mb-4 sm:gap-2 sm:text-lg">
+              <Clock3 className="h-4 w-4 text-[#f74c00] sm:h-5 sm:w-5" />
+              <span className="text-xs sm:text-base">最近采样（最多 24 条，本地趋势）/ Recent Samples (24 max)</span>
             </h2>
-            <div className="mb-4 grid grid-cols-3 gap-3">
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <p className="text-xs text-white/50">{tSlash("队列趋势 / Queue")}</p>
+            <div className="mb-3 grid grid-cols-3 gap-2 sm:mb-4 sm:gap-3">
+              <div className="rounded-lg border border-white/10 bg-black/20 p-2 sm:rounded-xl sm:p-3">
+                <p className="text-[10px] text-white/50 sm:text-xs">{tSlash("队列趋势 / Queue")}</p>
                 <div className="mt-2 flex h-10 items-end gap-1">
                   {snapshots.slice(-16).map((s) => (
                     <div
@@ -1432,8 +1448,8 @@ export default function App() {
                   ))}
                 </div>
               </div>
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <p className="text-xs text-white/50">{tSlash("运行中趋势 / Running")}</p>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-2 sm:rounded-xl sm:p-3">
+                <p className="text-[10px] text-white/50 sm:text-xs">{tSlash("运行中趋势 / Running")}</p>
                 <div className="mt-2 flex h-10 items-end gap-1">
                   {snapshots.slice(-16).map((s) => (
                     <div
@@ -1445,8 +1461,8 @@ export default function App() {
                   ))}
                 </div>
               </div>
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <p className="text-xs text-white/50">{tSlash("内存趋势 / Memory")}</p>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-2 sm:rounded-xl sm:p-3">
+                <p className="text-[10px] text-white/50 sm:text-xs">{tSlash("内存趋势 / Memory")}</p>
                 <div className="mt-2 flex h-10 items-end gap-1">
                   {snapshots.slice(-16).map((s) => (
                     <div
@@ -1464,30 +1480,30 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="max-h-[280px] overflow-auto rounded-xl border border-white/10 bg-black/20">
-              <table className="w-full text-sm">
+            <div className="max-h-[200px] overflow-auto rounded-lg border border-white/10 bg-black/20 sm:max-h-[280px] sm:rounded-xl">
+              <table className="w-full text-[10px] sm:text-sm">
                 <thead className="sticky top-0 bg-[#151923] text-left text-white/60">
                   <tr>
-                    <th className="px-3 py-2">{tSlash("时间 / Time")}</th>
-                    <th className="px-3 py-2">{tSlash("队列 / Queue")}</th>
-                    <th className="px-3 py-2">{tSlash("运行中 / Running")}</th>
-                    <th className="px-3 py-2">{tSlash("内存 / Memory")}</th>
+                    <th className="px-2 py-1 sm:px-3 sm:py-2">{tSlash("时间 / Time")}</th>
+                    <th className="px-2 py-1 sm:px-3 sm:py-2">{tSlash("队列 / Queue")}</th>
+                    <th className="px-2 py-1 sm:px-3 sm:py-2">{tSlash("运行中 / Running")}</th>
+                    <th className="px-2 py-1 sm:px-3 sm:py-2">{tSlash("内存 / Memory")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {timeline.length === 0 ? (
                     <tr>
-                      <td className="px-3 py-4 text-white/40" colSpan={4}>
+                      <td className="px-2 py-2 text-white/40 sm:px-3 sm:py-4" colSpan={4}>
                         {tSlash("暂无采样数据 / No samples")}
                       </td>
                     </tr>
                   ) : (
                     timeline.map((item) => (
                       <tr key={item.ts} className="border-t border-white/5">
-                        <td className="px-3 py-2 font-mono text-white/70">{toLocalTime(item.ts)}</td>
-                        <td className="px-3 py-2 text-white/80">{item.queue}</td>
-                        <td className="px-3 py-2 text-white/80">{item.running}</td>
-                        <td className="px-3 py-2 text-white/80">{formatBytes(item.memory)}</td>
+                        <td className="px-2 py-1 font-mono text-white/70 sm:px-3 sm:py-2">{toLocalTime(item.ts)}</td>
+                        <td className="px-2 py-1 text-white/80 sm:px-3 sm:py-2">{item.queue}</td>
+                        <td className="px-2 py-1 text-white/80 sm:px-3 sm:py-2">{item.running}</td>
+                        <td className="px-2 py-1 text-white/80 sm:px-3 sm:py-2">{formatBytes(item.memory)}</td>
                       </tr>
                     ))
                   )}
@@ -1497,36 +1513,36 @@ export default function App() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <h2 className="mb-4 text-lg font-semibold">原始数据（本地调试）/ Raw Data (Debug)</h2>
-          <pre className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[#12151f] p-3 text-xs text-white/80">
+        <section className="rounded-xl border border-white/10 bg-white/5 p-3 sm:rounded-2xl sm:p-5">
+          <h2 className="mb-2 text-base font-semibold sm:mb-4 sm:text-lg">原始数据（本地调试）/ Raw Data (Debug)</h2>
+          <pre className="max-h-48 overflow-auto rounded-lg border border-white/10 bg-[#12151f] p-2 text-[10px] text-white/80 sm:max-h-72 sm:p-3 sm:text-xs">
             {JSON.stringify(health, null, 2)}
           </pre>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">{tSlash("当前技能列表 / Active Skills")}</h2>
-            <div className="flex items-center gap-2">
+        <section className="rounded-xl border border-white/10 bg-white/5 p-3 sm:rounded-2xl sm:p-5">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 sm:mb-3 sm:gap-3">
+            <h2 className="text-base font-semibold sm:text-lg">{tSlash("当前技能列表 / Active Skills")}</h2>
+            <div className="flex items-center gap-1 sm:gap-2">
               <button
                 onClick={() => void fetchSkills()}
                 disabled={skillsLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/10 px-2 py-1 text-[10px] font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50 sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs"
               >
-                {skillsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {skillsLoading ? <Loader2 className="h-3 w-3 animate-spin sm:h-3.5 sm:w-3.5" /> : <RefreshCw className="h-3 w-3 sm:h-3.5 sm:w-3.5" />}
                 {tSlash("刷新运行态 / Refresh Runtime")}
               </button>
               <button
                 onClick={() => void fetchSkillsConfig()}
                 disabled={skillsConfigLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/10 px-2 py-1 text-[10px] font-medium transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50 sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs"
               >
-                {skillsConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {skillsConfigLoading ? <Loader2 className="h-3 w-3 animate-spin sm:h-3.5 sm:w-3.5" /> : <RefreshCw className="h-3 w-3 sm:h-3.5 sm:w-3.5" />}
                 {tSlash("刷新配置 / Refresh Config")}
               </button>
             </div>
           </div>
-          <p className="text-xs text-white/50">
+          <p className="text-[10px] text-white/50 sm:text-xs">
             {tSlash("技能数量 / Skill Count")}: {visibleRuntimeSkills.length}
             {skillsData?.skill_runner_path ? ` | skill-runner: ${skillsData.skill_runner_path}` : ""}
           </p>
@@ -1535,10 +1551,10 @@ export default function App() {
               {tSlash("技能读取失败 / Skills fetch failed")}: {skillsError}
             </p>
           ) : null}
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-2 flex flex-wrap gap-1 sm:mt-3 sm:gap-2">
             {visibleRuntimeSkills.length > 0 ? (
               visibleRuntimeSkills.map((name) => (
-                <span key={name} className="rounded-md border border-sky-400/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-200">
+                <span key={name} className="rounded border border-sky-400/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-200 sm:rounded-md sm:px-2 sm:py-1 sm:text-xs">
                   {name}
                 </span>
               ))
@@ -1547,13 +1563,13 @@ export default function App() {
             )}
           </div>
 
-          <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold">{tSlash("技能开关（写入 config.toml）/ Skill Switches (config.toml)")}</h3>
+          <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-2 sm:mt-5 sm:rounded-xl sm:p-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 sm:mb-3 sm:gap-3">
+              <h3 className="text-xs font-semibold sm:text-sm">{tSlash("技能开关（写入 config.toml）/ Skill Switches (config.toml)")}</h3>
               <button
                 onClick={() => void saveSkillSwitches()}
                 disabled={skillSwitchSaving || skillsConfigLoading || !hasUnsavedSkillSwitchChanges}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#f74c00] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#f74c00] px-2 py-1 text-[10px] font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60 sm:gap-2 sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs"
               >
                 {skillSwitchSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                 {tSlash("保存开关 / Save Switches")}
@@ -1582,36 +1598,36 @@ export default function App() {
               </p>
             ) : null}
 
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {managedSkills.map((name) => {
+            {(() => {
+              const renderSkillRow = (name: string) => {
                 const runtimeEnabled = visibleRuntimeSkills.includes(name);
                 const configuredEnabled = configuredEnabledSkills.has(name);
                 const pendingApply = runtimeEnabled !== configuredEnabled;
                 return (
                   <label
                     key={name}
-                    className="flex items-center justify-between rounded-lg border border-white/10 bg-[#12151f] px-3 py-2 text-xs"
+                    className="flex items-center justify-between gap-1 rounded border border-white/10 bg-[#12151f] px-2 py-1.5 text-[10px] sm:gap-2 sm:rounded-lg sm:px-3 sm:py-2 sm:text-xs"
                   >
-                    <span className="text-white/85">{name}</span>
-                    <span className="flex items-center gap-2">
+                    <span className="min-w-0 truncate text-white/85">{name}</span>
+                    <span className="flex shrink-0 items-center gap-1 sm:gap-2">
                       <span
                         className={
                           configuredEnabled
-                            ? "rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-200"
-                            : "rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-200"
+                            ? "rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] text-emerald-200 sm:px-1.5 sm:text-[10px]"
+                            : "rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] text-amber-200 sm:px-1.5 sm:text-[10px]"
                         }
                       >
                         {configuredEnabled ? t("已开启", "enabled") : t("已关闭", "disabled")}
                       </span>
                       {pendingApply ? (
-                        <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-200">
+                        <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1 py-0.5 text-[9px] text-sky-200 sm:px-1.5 sm:text-[10px]">
                           {t("待重启生效", "pending restart")}
                         </span>
                       ) : null}
                       <button
                         type="button"
                         onClick={() => toggleSkillEnabled(name, !configuredEnabled)}
-                        className="rounded border border-white/20 bg-white/5 px-2 py-1 text-[10px] text-white/80 hover:bg-white/10"
+                        className="rounded border border-white/20 bg-white/5 px-1.5 py-0.5 text-[9px] text-white/80 hover:bg-white/10 sm:px-2 sm:py-1 sm:text-[10px]"
                         title={configuredEnabled ? t("点击关闭技能", "Click to disable skill") : t("点击开启技能", "Click to enable skill")}
                       >
                         {configuredEnabled ? t("关闭", "Disable") : t("开启", "Enable")}
@@ -1619,11 +1635,45 @@ export default function App() {
                     </span>
                   </label>
                 );
-              })}
-              {managedSkills.length === 0 ? (
-                <span className="text-xs text-white/50">{skillsConfigLoading ? tSlash("加载中... / Loading...") : "--"}</span>
-              ) : null}
-            </div>
+              };
+              return (
+                <div className="mt-3 space-y-4">
+                  {imageSkillsList.length > 0 ? (
+                    <div>
+                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
+                        {tSlash("图像技能 / Image")}
+                      </h4>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {imageSkillsList.map(renderSkillRow)}
+                      </div>
+                    </div>
+                  ) : null}
+                  {audioSkillsList.length > 0 ? (
+                    <div>
+                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
+                        {tSlash("语音技能 / Audio")}
+                      </h4>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {audioSkillsList.map(renderSkillRow)}
+                      </div>
+                    </div>
+                  ) : null}
+                  {otherSkillsList.length > 0 ? (
+                    <div>
+                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
+                        {tSlash("其他技能 / Other")}
+                      </h4>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {otherSkillsList.map(renderSkillRow)}
+                      </div>
+                    </div>
+                  ) : null}
+                  {managedSkills.length === 0 ? (
+                    <span className="text-xs text-white/50">{skillsConfigLoading ? tSlash("加载中... / Loading...") : "--"}</span>
+                  ) : null}
+                </div>
+              );
+            })()}
           </div>
         </section>
 
