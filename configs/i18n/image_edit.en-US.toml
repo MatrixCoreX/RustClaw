@@ -1,0 +1,4 @@
+locale = "en-US"
+
+[dict]
+"image_edit.msg.saved" = "Edited successfully and saved: {path}"

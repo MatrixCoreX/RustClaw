@@ -1,0 +1,3 @@
+# 交叉编译 aarch64 时使用系统安装的交叉工具链链接器，否则会用 host 的 gcc-ld 导致 elf64-x86-64 不兼容
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"

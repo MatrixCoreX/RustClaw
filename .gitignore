@@ -1,0 +1,12 @@
+target/
+logs/
+.pids/
+
+# Runtime sqlite artifacts
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Common local files
+.DS_Store
+.vscode/

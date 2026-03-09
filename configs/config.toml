@@ -1,0 +1,342 @@
+# 用途/Purpose: 命令意图识别与规则目录配置.
+# 建议修改/Recommended change: 可按部署语言与规则目录调整.
+# 风险/Risk: locale 或 rules_dir 配错会导致意图识别退化.
+[command_intent]
+# 默认语言 / Default locale for intent parsing.
+default_locale = "zh-CN"
+# 当主链路失败时是否启用 LLM 回退 / Enable LLM fallback when rule match fails.
+llm_fallback_enabled = true
+# 规则目录 / Rule files directory.
+rules_dir = "configs/command_intent"
+
+# 用途/Purpose: 数据库连接基础参数.
+# 建议修改/Recommended change: 可改（尤其是路径）.
+# 风险/Risk: 超时太短会频繁 busy；路径错误会导致服务无法启动/读写.
+[database]
+# SQLite busy 超时（毫秒） / SQLite busy timeout in milliseconds.
+busy_timeout_ms = 2000
+# SQLite 文件路径 / SQLite file path.
+sqlite_path = "data/rustclaw.db"
+
+# 用途/Purpose: 文档/文件生成默认输出目录.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: 目录不可写会导致文件生成失败.
+[file_generation]
+default_output_dir = "document"
+
+# Image skill config moved to configs/image.toml (supports default_model + <vendor>_models fallback) / 图片技能配置已拆分到 configs/image.toml（支持 default_model + 按厂商备选模型）
+
+# Audio skill config moved to configs/audio.toml (supports default_model + <vendor>_models fallback) / 语音技能配置已拆分到 configs/audio.toml（支持 default_model + 按厂商备选模型）
+
+# 用途/Purpose: 全局与单用户限流.
+# 建议修改/Recommended change: 可改，建议结合流量观测渐进调整.
+# 风险/Risk: 太低会限流过严；太高可能触发上游配额或成本飙升.
+[limits]
+# 全局每分钟请求数 / Global requests per minute.
+global_rpm = 60
+# 单用户每分钟请求数 / Per-user requests per minute.
+user_rpm = 20
+
+# 用途/Purpose: LLM 路由默认选择（厂商与模型）.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: vendor/model 不匹配会导致调用失败.
+[llm]
+# 默认模型名 / Default selected model.
+selected_model = "qwen-plus-latest"
+# 默认厂商标识 / Default selected vendor.
+selected_vendor = "qwen"
+
+# 用途/Purpose: Anthropic 提供商连接与模型池.
+# 建议修改/Recommended change: 可改，需保证 key/base_url/model 对齐.
+# 风险/Risk: key 无效或 URL 错误会直接失败；并发过高可能触发限流.
+[llm.anthropic]
+api_key = "REDACTED_API_KEY"
+base_url = "https://api.anthropic.com/v1"
+# 该提供商最大并发 / Max concurrency for this provider.
+max_concurrency = 1
+# 默认模型 / Default model for this provider.
+model = "claude-sonnet-4-6"
+# 可选模型池 / Allowed model candidates.
+models = [
+    # 4.6 (latest / 最新)
+    "claude-opus-4-6",           # Top intelligence, agent/coding 最强智能 $5/$25
+    "claude-sonnet-4-6",         # Balanced speed/intelligence 均衡推荐 $3/$15
+    # 4.5
+    "claude-haiku-4-5-20251001", # Fastest, high-throughput 最快低延迟 $1/$5
+    # Legacy / 旧版
+    "claude-3-7-sonnet-latest",
+    "claude-3-5-haiku-latest",
+]
+# 单次请求超时（秒） / Request timeout in seconds.
+timeout_seconds = 60
+
+# 用途/Purpose: Google 提供商连接与模型池.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: 预览模型可能变更快，需关注兼容性与稳定性.
+[llm.google]
+api_key = "REDACTED_API_KEY"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+max_concurrency = 1
+model = "gemini-2.5-pro"
+models = [
+    # 3.x (latest preview / 最新预览)
+    "gemini-3.1-pro-preview",  # Flagship reasoning+agent 旗舰推理 preview
+    "gemini-3-flash-preview",  # Frontier low-cost 前沿低成本 preview
+    # 2.5 (stable / 稳定版)
+    "gemini-2.5-pro",          # Advanced reasoning w/ thinking 高级推理
+    "gemini-2.5-flash",        # Fast & cost-effective 高性价比低延迟
+    "gemini-2.5-flash-lite",   # Cheapest & fastest 最快最便宜
+]
+timeout_seconds = 90
+
+# 用途/Purpose: Grok 提供商连接与模型池.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: 模型上下线较快，建议保留至少一个稳定回退模型.
+[llm.grok]
+api_key = "REDACTED_API_KEY"
+base_url = "https://api.x.ai/v1"
+max_concurrency = 1
+model = "grok-3"
+models = [
+    # Grok 4
+    "grok-4-0709",                 # Flagship reasoning 旗舰推理 256k $3/$15
+    "grok-4-1-fast-reasoning",     # Fast reasoning 快速推理 2M ctx $0.2/$0.5
+    "grok-4-1-fast-non-reasoning", # Fast non-reasoning 快速非推理 2M ctx $0.2/$0.5
+    # Grok 3
+    "grok-3",                      # General purpose 通用 131k $3/$15
+    "grok-3-mini",                 # Lightweight 轻量高性价比 131k $0.3/$0.5
+    # Specialized / 专用
+    "grok-code-fast-1",            # Code-dedicated 代码专用 256k
+    # Legacy / 旧版
+    "grok-2-vision-1212",          # Vision model 视觉 32k
+]
+timeout_seconds = 60
+
+# 用途/Purpose: Qwen 提供商连接与模型池.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: base_url 或鉴权不匹配会导致 401/404.
+[llm.qwen]
+api_key = "REDACTED_API_KEY"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+max_concurrency = 1
+model = "qwen-max-latest"
+models = [
+    "qwen-max-latest",
+    "qwen-plus-latest",
+    "qwen-turbo-latest",
+]
+timeout_seconds = 60
+
+# 用途/Purpose: 自定义 OpenAI-compatible 提供商.
+# 建议修改/Recommended change: 可改，适合接入私有网关.
+# 风险/Risk: 协议不兼容会出现模型列表可见但调用失败.
+[llm.custom]
+api_key = "REDACTED_API_KEY"
+base_url = "https://api.example.com/v1"
+max_concurrency = 1
+model = "custom-model"
+models = [
+    "custom-model",
+]
+timeout_seconds = 60
+
+# 用途/Purpose: 图片生成全局参数（vendor/model/并发/输出路径）.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: 并发和 max_images 过高会放大成本与超时概率.
+[image_generation]
+default_vendor = "qwen"
+default_model = "wanx2.1-t2i-turbo"
+qwen_models = ["wanx2.1-t2i-turbo"]
+models = ["wanx2.1-t2i-turbo"]
+# 允许兼容适配层 / Allow compatibility adapters.
+allow_compat_adapters = true
+# 图片任务超时（秒） / Image generation timeout in seconds.
+timeout_seconds = 120
+max_concurrency = 1
+# 单请求最大出图数 / Maximum images per request.
+max_images = 4
+# 输入大小上限（字节） / Max input payload size in bytes.
+max_input_bytes = 10485760
+# 输出目录 / Output directory.
+default_output_dir = "image/download"
+
+# 用途/Purpose: OpenAI 提供商连接与模型池.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: 模型名下线会报错；并发与超时需与上游配额匹配.
+[llm.openai]
+api_key = "REDACTED_API_KEY"
+base_url = "https://api.openai.com/v1"
+max_concurrency = 1
+model = "gpt-4o-mini"
+models = [
+    "gpt-5.2",
+    "gpt-5.2-chat-latest",
+    "gpt-5.1-chat-latest",
+    "gpt-5.1",
+    "gpt-5-chat-latest",
+    "gpt-5",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+]
+timeout_seconds = 60
+
+# 用途/Purpose: 清理/审计保留策略.
+# 建议修改/Recommended change: 可改，建议与磁盘容量和审计需求匹配.
+# 风险/Risk: 保留太短会丢排障证据；太长会膨胀存储.
+[maintenance]
+# 审计表保留最大行数 / Max rows retained for audit logs.
+audit_max_rows = 10000
+# 审计保留天数 / Audit retention days.
+audit_retention_days = 14
+# 清理任务执行周期（秒） / Cleanup interval in seconds.
+cleanup_interval_seconds = 300
+# 任务表保留最大行数 / Max rows retained for tasks table.
+tasks_max_rows = 2000
+# 任务保留天数 / Task retention days.
+tasks_retention_days = 7
+
+# 用途/Purpose: 记忆模块独立配置入口.
+# 建议修改/Recommended change: 一般不改，除非你迁移了路径.
+# 风险/Risk: 路径错误会导致记忆模块配置加载失败.
+[memory]
+config_path = "configs/memory.toml"
+
+# 用途/Purpose: 人设模板目录与默认 profile.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: profile 不存在会回退或导致提示词装配失败.
+[persona]
+dir = "prompts/personas"
+profile = "executor"
+
+# 用途/Purpose: 路由调试开关.
+# 建议修改/Recommended change: 线上建议 false，排障时临时开启.
+# 风险/Risk: 开启会增加日志噪音，可能暴露更多 prompt 细节.
+[routing]
+debug_log_prompt = false
+
+# 用途/Purpose: 日程相关 i18n 与意图提示词配置.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: 路径不一致会导致 schedule 意图识别/回复异常.
+[schedule]
+i18n_dir = "configs/i18n"
+intent_prompt_path = "prompts/schedule_intent_prompt.md"
+intent_rules_path = "prompts/schedule_intent_rules.md"
+locale = "zh-CN"
+timezone = "Asia/Shanghai"
+
+# 用途/Purpose: HTTP 服务监听与请求超时.
+# 建议修改/Recommended change: 可改.
+# 风险/Risk: 监听地址改为 0.0.0.0 会暴露外网；超时过低会误中断.
+# listen 填 0.0.0.0:8787 可公网访问；同机 telegramd/whatsappd 会连 127.0.0.1:8787。
+# clawd_base_url（可选）：telegramd/whatsappd 连 clawd 的地址；未设则用 http://{listen}。
+#clawd_base_url = "http://127.0.0.1:8787"
+[server]
+listen = "0.0.0.0:8787"
+request_timeout_seconds = 30
+# 用途/Purpose: 技能执行并发/超时与启用基线.
+# 建议修改/Recommended change: 可改，但建议优先用 skill_switches 管理开关.
+# 风险/Risk: 并发过高可能争用资源；超时过低会误判失败.
+[skills]
+skill_switches = {}
+skill_max_concurrency = 1
+skill_timeout_seconds = 30
+# 可选开关覆盖（优先级高于 skills_list）/ Optional switch overrides (higher priority than skills_list):
+# - 设为 false: 强制关闭该技能（不会进入二层路由提示词，也不可执行）/ Set false: force disable this skill.
+# - 设为 true : 强制开启该技能（会进入二层路由提示词，且可执行）/ Set true: force enable this skill.
+# 建议用 skill_switches 控制开关，尽量不要直接改 skills_list，避免启用基线被误改。/ Prefer skill_switches for toggles; avoid editing baseline list directly.
+# 例子/Example:
+# skill_switches = { image_generate = false, rss_fetch = true }
+# 技能基线列表（建议少改）/ Baseline enabled skills (avoid frequent edits).
+skills_list = [
+    "x",
+    "system_basic",
+    "http_basic",
+    "git_basic",
+    "install_module",
+    "process_basic",
+    "package_manager",
+    "archive_basic",
+    "db_basic",
+    "docker_basic",
+    "fs_search",
+    "rss_fetch",
+    "image_vision",
+    "image_generate",
+    "image_edit",
+    "audio_transcribe",
+    "audio_synthesize",
+    "health_check",
+    "log_analyze",
+    "service_control",
+    "config_guard",
+    "crypto",
+    "chat",
+]
+
+# 渠道配置已拆分到以下文件 / Channel configs are split into:
+# - configs/channels/telegram.toml（Telegram）/ Telegram channel settings
+# - configs/channels/whatsapp-cloud.toml（WhatsApp Cloud / webhook）/ WhatsApp Cloud settings
+# - configs/channels/whatsapp-web.toml（WhatsApp Web / QR login）/ WhatsApp Web settings
+# - configs/channels/whatsapp.toml 仅作为旧混合配置兼容入口，建议不要再写实际配置
+
+# 用途/Purpose: 预留 Slack 适配器配置（当前占位）.
+# 建议修改/Recommended change: 未接入前可保持默认.
+# 风险/Risk: 提前启用但 endpoint 无效会导致投递失败.
+[adapters.slack]
+enabled = false
+endpoint = ""
+note = "placeholder"
+
+# 用途/Purpose: 预留 Discord 适配器配置（当前占位）.
+# 建议修改/Recommended change: 未接入前可保持默认.
+# 风险/Risk: 提前启用但 endpoint 无效会导致投递失败.
+[adapters.discord]
+enabled = false
+endpoint = ""
+note = "placeholder"
+
+# 用途/Purpose: 工具执行白名单/黑名单与权限配置.
+# 建议修改/Recommended change: 生产环境建议收紧 allow/deny 与 sudo.
+# 风险/Risk: 当前 `allow=*` + `allow_sudo=true` 权限非常高，误调用风险显著.
+[tools]
+allow = ["*"]
+allow_path_outside_workspace = 0
+allow_sudo = true
+cmd_timeout_seconds = 60
+deny = []
+max_cmd_length = 2400
+profile = "full"
+
+# 用途/Purpose: 按模型提供商细化工具 allow/deny 覆盖.
+# 建议修改/Recommended change: 可改，建议用于高风险提供商最小权限化.
+# 风险/Risk: 配置冲突会导致行为与预期不一致（被拒/过放开）.
+[tools.by_provider.anthropic]
+allow = []
+deny = []
+
+[tools.by_provider.google]
+allow = []
+deny = []
+
+[tools.by_provider.grok]
+allow = []
+deny = []
+
+[tools.by_provider.openai]
+allow = []
+deny = []
+
+# 用途/Purpose: worker 拉取队列并发与超时.
+# 建议修改/Recommended change: 可改，需结合机器资源与任务负载.
+# 风险/Risk: 并发太高会争用 CPU/IO；队列太小会丢积压能力.
+[worker]
+# worker 并发数 / Number of concurrent workers.
+concurrency = 3
+# 轮询间隔（毫秒） / Queue polling interval in milliseconds.
+poll_interval_ms = 500
+# 队列上限 / Max queued tasks in memory.
+queue_limit = 128
+# 单任务硬超时（秒） / Hard timeout per task in seconds.
+task_timeout_seconds = 600

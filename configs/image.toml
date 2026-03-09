@@ -1,0 +1,111 @@
+# =========================
+# Image Edit / 图像编辑
+# =========================
+# Vendor routing / 厂商路由规则：
+# - openai/google: prefer native adapters / 优先原生适配
+# - anthropic/grok/custom: compat only (OpenAI-compatible) / 仅兼容通道（OpenAI-compatible）
+# - qwen: native + compat dual channels / 支持 native + compat 双通道
+#
+# adapter_mode:
+# - auto: auto select (qwen/wanx prefers native, others compat) / 自动选择（qwen/wanx 优先 native，其它走 compat）
+# - native: force native channel / 强制原生通道
+# - compat: force compatible channel / 强制兼容通道
+#
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+[image_edit]
+# Routing & mode / 路由与模式
+default_vendor = "qwen"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+qwen_native_function = "description_edit"
+
+# Default model / 默认模型
+default_model = "wanx2.1-imageedit"
+
+# Vendor models / 按厂商模型
+openai_models = ["gpt-image-1"]
+google_models = ["gemini-2.5-flash-image-preview"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["wanx2.1-imageedit"]
+models = ["wanx2.1-imageedit"]
+
+# Runtime limits / 运行限制
+default_output_dir = "image/download"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+
+# =========================
+# Image Generate / 文生图
+# =========================
+# Vendor routing / 厂商路由规则：
+# - openai/google: prefer native adapters / 优先原生适配
+# - anthropic/grok/custom: compat only (OpenAI-compatible) / 仅兼容通道（OpenAI-compatible）
+# - qwen: native + compat dual channels / 支持 native + compat 双通道
+#
+# adapter_mode:
+# - auto: auto select (qwen/wanx prefers native, others compat) / 自动选择（qwen/wanx 优先 native，其它走 compat）
+# - native: force native channel / 强制原生通道
+# - compat: force compatible channel / 强制兼容通道
+#
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+[image_generation]
+# Routing & mode / 路由与模式
+default_vendor = "qwen"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+
+# Default model / 默认模型
+default_model = "wanx2.1-t2i-turbo"
+
+# Vendor models / 按厂商模型
+openai_models = ["gpt-image-1"]
+google_models = ["gemini-2.5-flash-image-preview"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["wanx2.1-t2i-turbo"]
+models = ["wanx2.1-t2i-turbo"]
+
+# Runtime limits / 运行限制
+default_output_dir = "image/download"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+
+# =========================
+# Image Vision / 图像理解
+# =========================
+# This skill currently uses compatible I/O contract and routes internally by vendor adapters.
+# 该技能当前统一走兼容式输入输出，内部按厂商适配。
+# Vendor selection priority / 厂商选择优先级：
+# request.vendor > default_vendor > llm.selected_vendor
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+[image_vision]
+# Routing & mode / 路由与模式
+default_vendor = "qwen"
+adapter_mode = "compat" # Vision currently recommended to stay in compat / vision 当前建议保持 compat
+
+# Default model / 默认模型
+default_model = "qwen-vl-max-latest"
+
+# Vendor models / 按厂商模型
+openai_models = ["gpt-4o-mini", "gpt-4o"]
+google_models = ["gemini-2.5-flash", "gemini-2.5-pro"]
+anthropic_models = ["claude-sonnet-4-6"]
+qwen_models = ["qwen-vl-max-latest", "qwen-vl-plus-latest"]
+models = ["qwen-vl-max-latest", "qwen-vl-plus-latest"]
+
+# Runtime limits / 运行限制
+default_output_dir = "image/upload"
+max_concurrency = 1
+max_images = 6
+max_input_bytes = 10485760
+timeout_seconds = 90

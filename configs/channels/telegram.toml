@@ -1,0 +1,69 @@
+# Telegram channel config.
+# Current primary identity flow is key-based:
+# - Telegram user/chat id is only the external transport identity
+# - Real auth/role/memory identity comes from bound user_key
+# - bindings can be used for static pre-bind seeding
+#
+# [telegram] is the main Telegram Bot config.
+# [telegram_bot] is kept as a compatibility/extension section.
+
+[telegram]
+# Legacy bootstrap admin IDs (integer).
+# Kept for compatibility/old users table seeding; runtime auth now depends on key binding.
+admins = []
+# 图片保存类回复（如 "Image saved: ..."/"Generated successfully and saved: ..."/"图片生成成功并已保存：..."）在 N 秒后自动删除，0 表示不删除
+ephemeral_image_saved_seconds = 15
+# 交易确认按钮过期秒数；过期后按钮会变为“已过期”
+crypto_confirm_ttl_seconds = 15
+# Legacy allowlist user IDs (integer).
+# Kept for compatibility; runtime access now depends on key binding.
+allowlist = []
+# 音频落盘目录
+audio_inbox_dir = "audio/upload"
+# 仅当收到纯图片消息时自动触发视觉能力
+auto_vision_on_image_only = false
+# Telegram Bot Token
+bot_token = "REDACTED_BOT"
+# Optional static bindings loaded into channel_bindings on clawd startup.
+# Use this only if you want to pre-bind a Telegram account to a key.
+# Example:
+# bindings = [{ external_user_id = "1985996990", external_chat_id = "1985996990", user_key = "rk-REPLACE_ME" }]
+bindings = []
+# i18n 文案路径
+i18n_path = "configs/i18n/telegramd.zh-CN.toml"
+# 默认语言
+language = "zh-CN"
+# 最大音频输入字节数
+max_audio_input_bytes = 26214400
+# 是否启用“自然语言切换语音模式”
+voice_mode_nl_intent_enabled = false
+# 默认语音回复模式：voice / text
+voice_reply_mode = "voice"
+
+[telegram.sendfile]
+# 是否仅管理员可用 /sendfile
+admin_only = false
+# /sendfile 允许访问的目录列表
+allowed_dirs = [
+    "image/download",
+    "document",
+]
+# 是否允许完整文件系统访问
+full_access = true
+
+[telegram.voice_reply_mode_by_chat]
+# 按 chat_id 覆盖语音回复模式，例如 text / voice
+1985996990 = "text"
+
+# Shares the same runtime with [telegram]; bot_token usually only needs to be set in [telegram].
+[telegram_bot]
+# 是否启用 telegram_bot 兼容入口
+enabled = true
+# 兼容入口管理员列表（通常留空，沿用 [telegram]）
+admins = []
+# 兼容入口允许列表（通常留空，沿用 [telegram]）
+allowlist = []
+# 兼容入口语言
+language = "zh-CN"
+# 兼容入口 i18n 路径
+i18n_path = "configs/i18n/telegramd.zh-CN.toml"

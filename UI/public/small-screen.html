@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=480, height=320, initial-scale=1, user-scalable=no" />
+  <title>RustClaw 小屏</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 480px; height: 320px;
+      font-family: sans-serif;
+      font-size: 14px;
+      background: #1a1a2e;
+      color: #eee;
+      padding: 8px;
+      overflow: hidden;
+    }
+    h1 { font-size: 16px; margin-bottom: 6px; color: #a0a0ff; }
+    .status { font-size: 18px; font-weight: bold; margin-bottom: 8px; }
+    .status.ok { color: #6f6; }
+    .status.err { color: #f66; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+    .row { display: flex; justify-content: space-between; gap: 8px; }
+    .label { color: #888; }
+    .val { color: #fff; }
+    .services { margin-top: 6px; font-size: 12px; color: #aaa; }
+    .foot { margin-top: 6px; font-size: 11px; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>RustClaw</h1>
+  <div id="status" class="status">加载中…</div>
+  <div id="body" class="grid" style="display:none;">
+    <div class="row"><span class="label">版本</span><span id="ver" class="val">--</span></div>
+    <div class="row"><span class="label">运行时长</span><span id="uptime" class="val">--</span></div>
+    <div class="row"><span class="label">队列</span><span id="queue" class="val">--</span></div>
+    <div class="row"><span class="label">执行中</span><span id="running" class="val">--</span></div>
+    <div class="row"><span class="label">Worker</span><span id="worker" class="val">--</span></div>
+    <div class="row"><span class="label">内存 RSS</span><span id="rss" class="val">--</span></div>
+    <div id="services" class="services" style="grid-column: 1 / -1;"></div>
+  </div>
+  <div class="foot" id="foot">请求 /v1/health，仅显示</div>
+
+  <script>
+    const API_BASE = typeof window !== 'undefined' ? (window.location.origin || 'http://127.0.0.1:8787') : 'http://127.0.0.1:8787';
+    const REFRESH_MS = 15000;
+
+    function fmtDuration(sec) {
+      if (sec == null || sec < 0) return '--';
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+      if (h > 0) return h + 'h' + m + 'm';
+      if (m > 0) return m + 'm' + s + 's';
+      return s + 's';
+    }
+    function fmtBytes(n) {
+      if (n == null || n < 0) return '--';
+      if (n < 1024) return n + ' B';
+      if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+      return (n/(1024*1024)).toFixed(1) + ' MB';
+    }
+
+    function render(h) {
+      document.getElementById('ver').textContent = h.version || '--';
+      document.getElementById('uptime').textContent = fmtDuration(h.uptime_seconds);
+      document.getElementById('queue').textContent = String(h.queue_length ?? '--');
+      document.getElementById('running').textContent = String(h.running_length ?? '--');
+      document.getElementById('worker').textContent = h.worker_state || '--';
+      document.getElementById('rss').textContent = fmtBytes(h.memory_rss_bytes ?? null);
+      const parts = [];
+      const tg = h.telegram_bot_healthy ?? h.telegramd_healthy;
+      if (tg != null) parts.push('TG: ' + (tg ? '✓' : '✗'));
+      const wa = h.whatsapp_web_healthy ?? h.whatsappd_healthy;
+      if (wa != null) parts.push('WA: ' + (wa ? '✓' : '✗'));
+      document.getElementById('services').textContent = parts.length ? parts.join('  ') : '';
+    }
+
+    async function fetchHealth() {
+      const url = API_BASE.replace(/\/$/, '') + '/v1/health';
+      try {
+        const res = await fetch(url);
+        const body = await res.json();
+        const data = body.data ?? body;
+        if (!res.ok || (body.ok === false && !data)) {
+          document.getElementById('status').className = 'status err';
+          document.getElementById('status').textContent = '错误: ' + (body.error || res.status);
+          document.getElementById('body').style.display = 'none';
+          return;
+        }
+        document.getElementById('status').className = 'status ok';
+        document.getElementById('status').textContent = '在线';
+        document.getElementById('body').style.display = 'grid';
+        render(data);
+        document.getElementById('foot').textContent = '更新: ' + new Date().toLocaleTimeString() + ' (每' + (REFRESH_MS/1000) + 's)';
+      } catch (e) {
+        document.getElementById('status').className = 'status err';
+        document.getElementById('status').textContent = '请求失败';
+        document.getElementById('body').style.display = 'none';
+        document.getElementById('foot').textContent = String(e.message || e);
+      }
+    }
+
+    fetchHealth();
+    setInterval(fetchHealth, REFRESH_MS);
+  </script>
+</body>
+</html>
