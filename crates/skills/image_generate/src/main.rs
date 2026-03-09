@@ -86,6 +86,8 @@ struct ImageSkillConfig {
     #[serde(default)]
     qwen_models: Option<Vec<String>>,
     #[serde(default)]
+    native_models: Option<Vec<String>>,
+    #[serde(default)]
     qwen_native_base_url: Option<String>,
     #[serde(default)]
     adapter_mode: Option<String>,
@@ -515,7 +517,12 @@ fn call_generate(
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
                 .build()
                 .map_err(|err| format!("build qwen client failed: {err}"))?;
-            if should_use_qwen_native(&model, mode, cfg.image_generation.allow_compat_adapters) {
+            if should_use_qwen_native(
+                &cfg.image_generation,
+                &model,
+                mode,
+                cfg.image_generation.allow_compat_adapters,
+            ) {
                 qwen_native_generate(
                     &client,
                     cfg.image_generation.qwen_native_base_url.as_deref(),
@@ -543,9 +550,16 @@ fn call_generate(
     }
 }
 
-fn qwen_uses_native_image_api(model: &str) -> bool {
-    let m = model.trim().to_ascii_lowercase();
-    m.starts_with("qwen-image") || m.starts_with("wanx")
+fn qwen_uses_native_image_api(cfg: &ImageSkillConfig, model: &str) -> bool {
+    let requested = model.trim();
+    cfg.native_models
+        .as_ref()
+        .and_then(|list| {
+            list.iter()
+                .map(|s| s.trim())
+                .find(|candidate| !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested))
+        })
+        .is_some()
 }
 
 fn resolve_adapter_mode(cfg: &ImageSkillConfig) -> AdapterMode {
@@ -563,12 +577,17 @@ fn resolve_adapter_mode(cfg: &ImageSkillConfig) -> AdapterMode {
     }
 }
 
-fn should_use_qwen_native(model: &str, mode: AdapterMode, allow_compat: bool) -> bool {
+fn should_use_qwen_native(
+    cfg: &ImageSkillConfig,
+    model: &str,
+    mode: AdapterMode,
+    allow_compat: bool,
+) -> bool {
     match mode {
         AdapterMode::Native => true,
         AdapterMode::Compat => false,
         AdapterMode::Auto => {
-            if qwen_uses_native_image_api(model) {
+            if qwen_uses_native_image_api(cfg, model) {
                 true
             } else {
                 !allow_compat
@@ -589,6 +608,19 @@ fn qwen_native_generate(
     timeout_seconds: u64,
     output_path: &Path,
 ) -> Result<(), String> {
+    if is_qwen_wan26_image(model) {
+        return qwen_wan26_generate(
+            client,
+            native_base_url,
+            api_key,
+            model,
+            prompt,
+            size,
+            n,
+            timeout_seconds,
+            output_path,
+        );
+    }
     let base = native_base_url
         .map(str::trim)
         .filter(|v| !v.is_empty())
@@ -627,14 +659,7 @@ fn qwen_native_generate(
         ));
     }
 
-    if let Some(url) = create_v
-        .get("output")
-        .and_then(|o| o.get("results"))
-        .and_then(|v| v.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|item| item.get("url"))
-        .and_then(|v| v.as_str())
-    {
+    if let Some(url) = extract_qwen_output_image_url(&create_v) {
         let bytes = client
             .get(url)
             .send()
@@ -687,19 +712,12 @@ fn qwen_native_generate(
             .unwrap_or("")
             .to_ascii_uppercase();
         if status == "SUCCEEDED" {
-            let url = task_v
-                .get("output")
-                .and_then(|o| o.get("results"))
-                .and_then(|v| v.as_array())
-                .and_then(|arr| arr.first())
-                .and_then(|item| item.get("url"))
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| {
-                    format!(
-                        "qwen native success response missing image url: {}",
-                        truncate(&task_v.to_string(), 400)
-                    )
-                })?;
+            let url = extract_qwen_output_image_url(&task_v).ok_or_else(|| {
+                format!(
+                    "qwen native success response missing image url: {}",
+                    truncate(&task_v.to_string(), 400)
+                )
+            })?;
             let bytes = client
                 .get(url)
                 .send()
@@ -717,6 +735,137 @@ fn qwen_native_generate(
             ));
         }
 
+        thread::sleep(Duration::from_millis(1200));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn qwen_wan26_generate(
+    client: &Client,
+    native_base_url: Option<&str>,
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+    size: &str,
+    n: u64,
+    timeout_seconds: u64,
+    output_path: &Path,
+) -> Result<(), String> {
+    let base = native_base_url
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("https://dashscope.aliyuncs.com/api/v1");
+    let url = format!(
+        "{}/services/aigc/image-generation/generation",
+        trim_trailing_slash(base)
+    );
+    let body = json!({
+        "model": model,
+        "input": {
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "text": prompt
+                }]
+            }]
+        },
+        "parameters": {
+            "size": normalize_wan26_size(size),
+            "n": n,
+            "prompt_extend": true,
+            "watermark": false,
+            "enable_interleave": true
+        }
+    });
+    let create_resp = client
+        .post(url)
+        .bearer_auth(api_key)
+        .header("X-DashScope-Async", "enable")
+        .json(&body)
+        .send()
+        .map_err(|err| format!("qwen native request failed: {err}"))?;
+    let create_status = create_resp.status().as_u16();
+    let create_v: Value = create_resp
+        .json()
+        .map_err(|err| format!("parse qwen native create response failed: {err}"))?;
+    if create_status >= 300 {
+        return Err(format!(
+            "qwen native create error status={create_status}: {}",
+            truncate(&create_v.to_string(), 400)
+        ));
+    }
+    if let Some(url) = extract_qwen_output_image_url(&create_v) {
+        let bytes = client
+            .get(url)
+            .send()
+            .map_err(|err| format!("download generated image failed: {err}"))?
+            .bytes()
+            .map_err(|err| format!("read generated image bytes failed: {err}"))?;
+        ensure_parent_dir(output_path)?;
+        std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+        return Ok(());
+    }
+    let task_id = create_v
+        .get("output")
+        .and_then(|o| o.get("task_id"))
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "qwen native response missing task_id/image: {}",
+                truncate(&create_v.to_string(), 400)
+            )
+        })?;
+    let deadline = Instant::now() + Duration::from_secs(timeout_seconds.max(10));
+    let task_url = format!("{}/tasks/{task_id}", trim_trailing_slash(base));
+    loop {
+        if Instant::now() > deadline {
+            return Err(format!("qwen native task timeout: task_id={task_id}"));
+        }
+        let task_resp = client
+            .get(&task_url)
+            .bearer_auth(api_key)
+            .send()
+            .map_err(|err| format!("qwen native poll failed: {err}"))?;
+        let task_status = task_resp.status().as_u16();
+        let task_v: Value = task_resp
+            .json()
+            .map_err(|err| format!("parse qwen native task response failed: {err}"))?;
+        if task_status >= 300 {
+            return Err(format!(
+                "qwen native poll error status={task_status}: {}",
+                truncate(&task_v.to_string(), 400)
+            ));
+        }
+        let status = task_v
+            .get("output")
+            .and_then(|o| o.get("task_status"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        if status == "SUCCEEDED" {
+            let url = extract_qwen_output_image_url(&task_v).ok_or_else(|| {
+                format!(
+                    "qwen native success response missing image url: {}",
+                    truncate(&task_v.to_string(), 400)
+                )
+            })?;
+            let bytes = client
+                .get(url)
+                .send()
+                .map_err(|err| format!("download generated image failed: {err}"))?
+                .bytes()
+                .map_err(|err| format!("read generated image bytes failed: {err}"))?;
+            ensure_parent_dir(output_path)?;
+            std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+            return Ok(());
+        }
+        if status == "FAILED" || status == "CANCELED" || status == "CANCELLED" {
+            return Err(format!(
+                "qwen native task failed: {}",
+                truncate(&task_v.to_string(), 400)
+            ));
+        }
         thread::sleep(Duration::from_millis(1200));
     }
 }
@@ -967,23 +1116,25 @@ fn vendor_order(
     }
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    for name in [
-        requested,
-        section_default,
-        selected_vendor,
-        Some("openai"),
-        Some("google"),
-        Some("anthropic"),
-        Some("grok"),
-        Some("qwen"),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    for name in [section_default, selected_vendor].into_iter().flatten() {
         if let Some(v) = parse_vendor(name) {
             if seen.insert(v) {
                 out.push(v);
             }
+        }
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    for v in [
+        VendorKind::OpenAI,
+        VendorKind::Google,
+        VendorKind::Anthropic,
+        VendorKind::Grok,
+        VendorKind::Qwen,
+    ] {
+        if seen.insert(v) {
+            out.push(v);
         }
     }
     out
@@ -1022,6 +1173,43 @@ fn trim_trailing_slash(v: &str) -> String {
     v.trim_end_matches('/').to_string()
 }
 
+fn is_qwen_wan26_image(model: &str) -> bool {
+    model.trim().eq_ignore_ascii_case("wan2.6-image")
+}
+
+fn normalize_wan26_size(size: &str) -> String {
+    let trimmed = size.trim();
+    if trimmed.eq_ignore_ascii_case("1k") || trimmed.eq_ignore_ascii_case("2k") {
+        return trimmed.to_ascii_uppercase();
+    }
+    trimmed.replace('x', "*").replace('X', "*")
+}
+
+fn extract_qwen_output_image_url<'a>(v: &'a Value) -> Option<&'a str> {
+    v.get("output")
+        .and_then(|o| o.get("results"))
+        .and_then(|items| items.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|item| item.get("url"))
+        .and_then(|url| url.as_str())
+        .or_else(|| {
+            v.get("output")
+                .and_then(|o| o.get("choices"))
+                .and_then(|choices| choices.as_array())
+                .and_then(|choices| choices.first())
+                .and_then(|choice| choice.get("message"))
+                .and_then(|msg| msg.get("content"))
+                .and_then(|content| content.as_array())
+                .and_then(|content| {
+                    content.iter().find_map(|item| {
+                        item.get("image")
+                            .or_else(|| item.get("url"))
+                            .and_then(|url| url.as_str())
+                    })
+                })
+        })
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
@@ -1047,5 +1235,22 @@ mod tests {
         assert_eq!(parse_vendor("claude"), Some(VendorKind::Anthropic));
         assert_eq!(parse_vendor("xai"), Some(VendorKind::Grok));
         assert_eq!(parse_vendor("qwen"), Some(VendorKind::Qwen));
+    }
+
+    #[test]
+    fn extract_qwen_choice_image_url() {
+        let v = json!({
+            "output": {
+                "choices": [{
+                    "message": {
+                        "content": [{
+                            "type": "image",
+                            "image": "https://example.com/demo.png"
+                        }]
+                    }
+                }]
+            }
+        });
+        assert_eq!(extract_qwen_output_image_url(&v), Some("https://example.com/demo.png"));
     }
 }

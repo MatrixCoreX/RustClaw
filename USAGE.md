@@ -107,9 +107,19 @@ cargo clippy --all-targets --all-features
   - `configs/image.toml`：图片技能配置 / image skill config
   - `configs/audio.toml`：语音技能配置 / audio skill config
   - `configs/crypto.toml`：交易技能配置 / crypto skill config
+- 原生适配模型路由：  
+  Native adapter model routing:
+  - `configs/image.toml` / `configs/audio.toml` 中的 `native_models` 用来控制哪些 Qwen 模型在 `auto` 模式下优先走原生适配。  
+    `native_models` in `configs/image.toml` / `configs/audio.toml` controls which Qwen models prefer native adapters in `auto` mode.
+  - 如果模型不在 `native_models` 中，且允许 compat，则优先走 compat 适配。  
+    If a model is not listed in `native_models` and compat is allowed, RustClaw prefers compat adapters.
 - 模型选择优先级（image/audio）：  
   Model priority for image/audio:
   - `request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model`
+- 通道选择说明（image/audio）：  
+  Channel selection note for image/audio:
+  - 原生/兼容通道选择独立于模型优先级，由 `native_models` 和 `adapter_mode` 决定。  
+    Native/compat channel selection is independent from model priority and is driven by `native_models` plus `adapter_mode`.
 - 提交前检查配置差异，避免泄露本地环境信息。  
   Review config diffs before commit to avoid leaking local environment data.
 

@@ -798,22 +798,24 @@ fn vendor_order(
     }
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    for name in [
-        requested,
-        section_default,
-        selected_vendor,
-        Some("openai"),
-        Some("google"),
-        Some("anthropic"),
-        Some("qwen"),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    for name in [section_default, selected_vendor].into_iter().flatten() {
         if let Some(v) = parse_vendor(name) {
             if seen.insert(v) {
                 out.push(v);
             }
+        }
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    for v in [
+        VendorKind::OpenAI,
+        VendorKind::Google,
+        VendorKind::Anthropic,
+        VendorKind::Qwen,
+    ] {
+        if seen.insert(v) {
+            out.push(v);
         }
     }
     out

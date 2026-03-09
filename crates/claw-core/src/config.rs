@@ -679,6 +679,8 @@ pub struct ImageSkillConfig {
     #[serde(default)]
     pub qwen_models: Vec<String>,
     #[serde(default)]
+    pub native_models: Vec<String>,
+    #[serde(default)]
     pub custom_models: Vec<String>,
     #[serde(default = "default_image_timeout_seconds")]
     pub timeout_seconds: u64,
@@ -688,6 +690,20 @@ pub struct ImageSkillConfig {
     pub max_images: usize,
     #[serde(default = "default_image_max_input_bytes")]
     pub max_input_bytes: usize,
+    #[serde(default)]
+    pub local_auto_upload_enabled: bool,
+    #[serde(default)]
+    pub oss_access_key_id: Option<String>,
+    #[serde(default)]
+    pub oss_access_key_secret: Option<String>,
+    #[serde(default)]
+    pub oss_bucket: Option<String>,
+    #[serde(default)]
+    pub oss_endpoint: Option<String>,
+    #[serde(default)]
+    pub oss_object_prefix: Option<String>,
+    #[serde(default)]
+    pub oss_url_ttl_seconds: Option<u64>,
 }
 
 impl Default for ImageSkillConfig {
@@ -702,11 +718,19 @@ impl Default for ImageSkillConfig {
             anthropic_models: Vec::new(),
             grok_models: Vec::new(),
             qwen_models: Vec::new(),
+            native_models: Vec::new(),
             custom_models: Vec::new(),
             timeout_seconds: default_image_timeout_seconds(),
             max_concurrency: default_image_max_concurrency(),
             max_images: default_image_max_images(),
             max_input_bytes: default_image_max_input_bytes(),
+            local_auto_upload_enabled: false,
+            oss_access_key_id: None,
+            oss_access_key_secret: None,
+            oss_bucket: None,
+            oss_endpoint: None,
+            oss_object_prefix: None,
+            oss_url_ttl_seconds: None,
         }
     }
 }

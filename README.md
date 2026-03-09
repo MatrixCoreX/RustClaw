@@ -195,6 +195,9 @@ rustclaw -stop
   - `configs/image.toml`: image skill settings (`image_edit` / `image_generation` / `image_vision`)
   - `configs/audio.toml`: audio skill settings (`audio_synthesize` / `audio_transcribe`)
   - Runtime precedence (same key): `config.toml` explicit value overrides split-file defaults.
+- Native adapter model routing:
+  - `native_models` in `configs/image.toml` / `configs/audio.toml` controls which Qwen models prefer native adapters in `auto` mode.
+  - If a model is not listed in `native_models`, RustClaw prefers compat adapters when compat is allowed.
 - Chat-skill prompt source:
   - `chat-skill` now loads its default system prompts from prompt files at runtime.
   - Default files:
@@ -203,6 +206,7 @@ rustclaw -stop
   - If a caller explicitly passes `system_prompt`, that inline prompt overrides the file-backed default.
 - Image/audio model priority:
   - `request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model`
+  - Native/compat channel selection is independent from model priority and is driven by `native_models` plus `adapter_mode`.
 - Crypto safety defaults:
   - `trade_submit` requires `confirm=true` when `crypto.require_explicit_send=true`.
   - Main risk fields: `max_notional_usd`, `allowed_symbols`, `allowed_exchanges`, `blocked_actions`.

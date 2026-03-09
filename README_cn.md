@@ -165,8 +165,12 @@ rustclaw -stop
   - `configs/image.toml`：图片技能配置（`image_edit` / `image_generation` / `image_vision`）
   - `configs/audio.toml`：语音技能配置（`audio_synthesize` / `audio_transcribe`）
   - 运行时同名键优先级：`config.toml` 显式值优先，拆分文件作为默认补充。
+- 原生适配模型路由：
+  - `configs/image.toml` / `configs/audio.toml` 中的 `native_models` 用来控制哪些 Qwen 模型在 `auto` 模式下优先走原生适配。
+  - 如果模型不在 `native_models` 中，且允许 compat，则 RustClaw 会优先走 compat 适配。
 - 图片/语音模型选择优先级：
   - `request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model`
+  - 原生/兼容通道选择独立于模型优先级，由 `native_models` 和 `adapter_mode` 决定。
 - Crypto 安全默认策略：
   - 当 `crypto.require_explicit_send=true` 时，`trade_submit` 需要包含 `confirm=true`。
   - 主要风控字段：`max_notional_usd`、`allowed_symbols`、`allowed_exchanges`、`blocked_actions`。

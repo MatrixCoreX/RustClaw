@@ -79,6 +79,8 @@ struct AudioSynthesizeConfig {
     #[serde(default)]
     qwen_models: Option<Vec<String>>,
     #[serde(default)]
+    native_models: Option<Vec<String>>,
+    #[serde(default)]
     custom_models: Option<Vec<String>>,
     #[serde(default)]
     default_voice: Option<String>,
@@ -304,7 +306,7 @@ fn synthesize_by_vendor(
             )
         }
         VendorKind::Qwen => {
-            if should_use_qwen_native_tts(model, mode, allow_compat_adapters) {
+            if should_use_qwen_native_tts(audio_cfg, model, mode, allow_compat_adapters) {
                 qwen_native_synthesize(
                     client,
                     audio_cfg.qwen_native_base_url.as_deref(),
@@ -356,13 +358,29 @@ fn parse_adapter_mode(raw: Option<&str>) -> AdapterMode {
     }
 }
 
-fn should_use_qwen_native_tts(model: &str, mode: AdapterMode, allow_compat: bool) -> bool {
+fn qwen_uses_native_tts_model(cfg: &AudioSynthesizeConfig, model: &str) -> bool {
+    let requested = model.trim();
+    cfg.native_models
+        .as_ref()
+        .and_then(|list| {
+            list.iter()
+                .map(|s| s.trim())
+                .find(|candidate| !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested))
+        })
+        .is_some()
+}
+
+fn should_use_qwen_native_tts(
+    cfg: &AudioSynthesizeConfig,
+    model: &str,
+    mode: AdapterMode,
+    allow_compat: bool,
+) -> bool {
     match mode {
         AdapterMode::Native => true,
         AdapterMode::Compat => false,
         AdapterMode::Auto => {
-            let m = model.trim().to_ascii_lowercase();
-            if m.starts_with("qwen3-tts") || m.starts_with("qwen-tts") {
+            if qwen_uses_native_tts_model(cfg, model) {
                 true
             } else {
                 !allow_compat

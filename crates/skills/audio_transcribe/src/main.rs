@@ -79,6 +79,8 @@ struct AudioTranscribeConfig {
     #[serde(default)]
     qwen_models: Option<Vec<String>>,
     #[serde(default)]
+    native_models: Option<Vec<String>>,
+    #[serde(default)]
     custom_models: Option<Vec<String>>,
     #[serde(default)]
     timeout_seconds: Option<u64>,
@@ -284,7 +286,7 @@ fn transcribe_by_vendor(
             openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)
         }
         VendorKind::Qwen => {
-            if should_use_qwen_native_asr(model, mode, allow_compat_adapters) {
+            if should_use_qwen_native_asr(audio_cfg, model, mode, allow_compat_adapters) {
                 qwen_native_transcribe(
                     client,
                     audio_cfg,
@@ -365,16 +367,29 @@ fn parse_adapter_mode(raw: Option<&str>) -> AdapterMode {
     }
 }
 
-fn should_use_qwen_native_asr(model: &str, mode: AdapterMode, allow_compat: bool) -> bool {
+fn qwen_uses_native_asr_model(cfg: &AudioTranscribeConfig, model: &str) -> bool {
+    let requested = model.trim();
+    cfg.native_models
+        .as_ref()
+        .and_then(|list| {
+            list.iter()
+                .map(|s| s.trim())
+                .find(|candidate| !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested))
+        })
+        .is_some()
+}
+
+fn should_use_qwen_native_asr(
+    cfg: &AudioTranscribeConfig,
+    model: &str,
+    mode: AdapterMode,
+    allow_compat: bool,
+) -> bool {
     match mode {
         AdapterMode::Native => true,
         AdapterMode::Compat => false,
         AdapterMode::Auto => {
-            let m = model.trim().to_ascii_lowercase();
-            if m.starts_with("qwen3-asr")
-                || m.starts_with("qwen-audio-asr")
-                || m.starts_with("fun-asr")
-            {
+            if qwen_uses_native_asr_model(cfg, model) {
                 true
             } else {
                 !allow_compat

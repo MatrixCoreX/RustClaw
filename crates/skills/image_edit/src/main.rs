@@ -5,9 +5,11 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use hmac::{Hmac, Mac};
 use reqwest::blocking::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha1::Sha1;
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -86,6 +88,8 @@ struct ImageSkillConfig {
     #[serde(default)]
     qwen_models: Option<Vec<String>>,
     #[serde(default)]
+    native_models: Option<Vec<String>>,
+    #[serde(default)]
     timeout_seconds: Option<u64>,
     #[serde(default)]
     max_input_bytes: Option<usize>,
@@ -97,6 +101,20 @@ struct ImageSkillConfig {
     qwen_native_base_url: Option<String>,
     #[serde(default)]
     qwen_native_function: Option<String>,
+    #[serde(default)]
+    local_auto_upload_enabled: bool,
+    #[serde(default)]
+    oss_access_key_id: Option<String>,
+    #[serde(default)]
+    oss_access_key_secret: Option<String>,
+    #[serde(default)]
+    oss_bucket: Option<String>,
+    #[serde(default)]
+    oss_endpoint: Option<String>,
+    #[serde(default)]
+    oss_object_prefix: Option<String>,
+    #[serde(default)]
+    oss_url_ttl_seconds: Option<u64>,
     #[serde(default)]
     language: Option<String>,
     #[serde(default)]
@@ -574,9 +592,18 @@ fn call_edit(
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
                 .build()
                 .map_err(|err| format!("build qwen client failed: {err}"))?;
-            if should_use_qwen_native_edit(&model, mode, cfg.image_edit.allow_compat_adapters) {
+            let can_use_native_inputs =
+                qwen_native_edit_inputs_supported(&cfg.image_edit, &model, image, mask);
+            if should_use_qwen_native_edit(
+                &cfg.image_edit,
+                &model,
+                mode,
+                cfg.image_edit.allow_compat_adapters,
+                can_use_native_inputs,
+            ) {
                 qwen_native_edit(
                     &client,
+                    &cfg.image_edit,
                     cfg.image_edit.qwen_native_base_url.as_deref(),
                     cfg.image_edit.qwen_native_function.as_deref(),
                     &vcfg.api_key,
@@ -587,6 +614,7 @@ fn call_edit(
                     size,
                     n,
                     timeout_seconds,
+                    max_input_bytes,
                     output_path,
                 )?;
             } else {
@@ -631,17 +659,50 @@ fn resolve_adapter_mode(cfg: &ImageSkillConfig) -> AdapterMode {
     }
 }
 
-fn qwen_uses_native_edit_api(model: &str) -> bool {
-    let m = model.trim().to_ascii_lowercase();
-    m.starts_with("wanx") || m.starts_with("qwen-image-edit")
+fn qwen_uses_native_edit_api(cfg: &ImageSkillConfig, model: &str) -> bool {
+    let requested = model.trim();
+    cfg.native_models
+        .as_ref()
+        .and_then(|list| {
+            list.iter()
+                .map(|s| s.trim())
+                .find(|candidate| !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested))
+        })
+        .is_some()
 }
 
-fn should_use_qwen_native_edit(model: &str, mode: AdapterMode, allow_compat: bool) -> bool {
+fn qwen_native_edit_inputs_supported(
+    cfg: &ImageSkillConfig,
+    model: &str,
+    image: &ImageSource,
+    mask: Option<&ImageSource>,
+) -> bool {
+    if is_qwen_multimodal_edit_model(model) {
+        return true;
+    }
+    qwen_native_edit_source_supported(cfg, image)
+        && mask
+            .map(|source| qwen_native_edit_source_supported(cfg, source))
+            .unwrap_or(true)
+}
+
+fn qwen_native_edit_source_supported(cfg: &ImageSkillConfig, source: &ImageSource) -> bool {
+    matches!(source, ImageSource::Url(_))
+        || (cfg.local_auto_upload_enabled && matches!(source, ImageSource::Path(_) | ImageSource::Base64(_)))
+}
+
+fn should_use_qwen_native_edit(
+    cfg: &ImageSkillConfig,
+    model: &str,
+    mode: AdapterMode,
+    allow_compat: bool,
+    can_use_native_inputs: bool,
+) -> bool {
     match mode {
-        AdapterMode::Native => true,
+        AdapterMode::Native => can_use_native_inputs,
         AdapterMode::Compat => false,
         AdapterMode::Auto => {
-            if qwen_uses_native_edit_api(model) {
+            if qwen_uses_native_edit_api(cfg, model) && can_use_native_inputs {
                 true
             } else {
                 !allow_compat
@@ -653,6 +714,7 @@ fn should_use_qwen_native_edit(model: &str, mode: AdapterMode, allow_compat: boo
 #[allow(clippy::too_many_arguments)]
 fn qwen_native_edit(
     client: &Client,
+    image_cfg: &ImageSkillConfig,
     native_base_url: Option<&str>,
     native_function: Option<&str>,
     api_key: &str,
@@ -663,8 +725,24 @@ fn qwen_native_edit(
     size: &str,
     n: u64,
     timeout_seconds: u64,
+    max_input_bytes: usize,
     output_path: &Path,
 ) -> Result<(), String> {
+    if is_qwen_multimodal_edit_model(model) {
+        return qwen_wan26_edit(
+            client,
+            api_key,
+            model,
+            instruction,
+            image,
+            mask,
+            size,
+            n,
+            timeout_seconds,
+            max_input_bytes,
+            output_path,
+        );
+    }
     let base = native_base_url
         .map(str::trim)
         .filter(|v| !v.is_empty())
@@ -673,15 +751,8 @@ fn qwen_native_edit(
         "{}/services/aigc/image2image/image-synthesis",
         trim_trailing_slash(base)
     );
-    let base_image_url = match image {
-        ImageSource::Url(u) => u.clone(),
-        _ => {
-            return Err(
-                "qwen native image edit currently requires image.url (http/https); local/base64 inputs use adapter_mode=compat"
-                    .to_string(),
-            )
-        }
-    };
+    let base_image_url =
+        resolve_qwen_native_image_url(client, image_cfg, image, max_input_bytes, "image.png", "image")?;
     let normalized_size = size.trim().replace('x', "*").replace('X', "*");
     let function = native_function
         .map(str::trim)
@@ -692,8 +763,16 @@ fn qwen_native_edit(
         "function": function,
         "base_image_url": base_image_url
     });
-    if let Some(ImageSource::Url(mask_url)) = mask {
-        input["mask_image_url"] = Value::String(mask_url.clone());
+    if let Some(mask_source) = mask {
+        let mask_url = resolve_qwen_native_image_url(
+            client,
+            image_cfg,
+            mask_source,
+            max_input_bytes,
+            "mask.png",
+            "mask",
+        )?;
+        input["mask_image_url"] = Value::String(mask_url);
     }
     let body = json!({
         "model": model,
@@ -776,6 +855,139 @@ fn qwen_native_edit(
                         truncate(&task_v.to_string(), 400)
                     )
                 })?;
+            let bytes = client
+                .get(url)
+                .send()
+                .map_err(|err| format!("download edited image failed: {err}"))?
+                .bytes()
+                .map_err(|err| format!("read edited image bytes failed: {err}"))?;
+            ensure_parent_dir(output_path)?;
+            std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+            return Ok(());
+        }
+        if status == "FAILED" || status == "CANCELED" || status == "CANCELLED" {
+            return Err(format!(
+                "qwen native edit task failed: {}",
+                truncate(&task_v.to_string(), 400)
+            ));
+        }
+        thread::sleep(Duration::from_millis(1200));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn qwen_wan26_edit(
+    client: &Client,
+    api_key: &str,
+    model: &str,
+    instruction: &str,
+    image: &ImageSource,
+    mask: Option<&ImageSource>,
+    size: &str,
+    n: u64,
+    timeout_seconds: u64,
+    max_input_bytes: usize,
+    output_path: &Path,
+) -> Result<(), String> {
+    let url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation";
+    let mut content = vec![json!({ "text": instruction })];
+    content.push(json!({
+        "image": image_source_to_wan26_input(client, image, max_input_bytes, "image.png")?
+    }));
+    if let Some(mask_source) = mask {
+        content.push(json!({
+            "image": image_source_to_wan26_input(client, mask_source, max_input_bytes, "mask.png")?
+        }));
+    }
+    let body = json!({
+        "model": model,
+        "input": {
+            "messages": [{
+                "role": "user",
+                "content": content
+            }]
+        },
+        "parameters": {
+            "size": normalize_wan26_size(size),
+            "n": n,
+            "prompt_extend": true,
+            "watermark": false,
+            "enable_interleave": false
+        }
+    });
+    let create_resp = client
+        .post(url)
+        .bearer_auth(api_key)
+        .header("X-DashScope-Async", "enable")
+        .json(&body)
+        .send()
+        .map_err(|err| format!("qwen native edit request failed: {err}"))?;
+    let create_status = create_resp.status().as_u16();
+    let create_v: Value = create_resp
+        .json()
+        .map_err(|err| format!("parse qwen native edit create response failed: {err}"))?;
+    if create_status >= 300 {
+        return Err(format!(
+            "qwen native edit create error status={create_status}: {}",
+            truncate(&create_v.to_string(), 400)
+        ));
+    }
+    if let Some(url) = extract_qwen_output_image_url(&create_v) {
+        let bytes = client
+            .get(url)
+            .send()
+            .map_err(|err| format!("download edited image failed: {err}"))?
+            .bytes()
+            .map_err(|err| format!("read edited image bytes failed: {err}"))?;
+        ensure_parent_dir(output_path)?;
+        std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+        return Ok(());
+    }
+    let task_id = create_v
+        .get("output")
+        .and_then(|o| o.get("task_id"))
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "qwen native edit response missing task_id/image: {}",
+                truncate(&create_v.to_string(), 400)
+            )
+        })?;
+    let deadline = Instant::now() + Duration::from_secs(timeout_seconds.max(10));
+    let task_url = format!("https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}");
+    loop {
+        if Instant::now() > deadline {
+            return Err(format!("qwen native edit task timeout: task_id={task_id}"));
+        }
+        let task_resp = client
+            .get(&task_url)
+            .bearer_auth(api_key)
+            .send()
+            .map_err(|err| format!("qwen native edit poll failed: {err}"))?;
+        let task_status = task_resp.status().as_u16();
+        let task_v: Value = task_resp
+            .json()
+            .map_err(|err| format!("parse qwen native edit task response failed: {err}"))?;
+        if task_status >= 300 {
+            return Err(format!(
+                "qwen native edit poll error status={task_status}: {}",
+                truncate(&task_v.to_string(), 400)
+            ));
+        }
+        let status = task_v
+            .get("output")
+            .and_then(|o| o.get("task_status"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        if status == "SUCCEEDED" {
+            let url = extract_qwen_output_image_url(&task_v).ok_or_else(|| {
+                format!(
+                    "qwen native edit success response missing image url: {}",
+                    truncate(&task_v.to_string(), 400)
+                )
+            })?;
             let bytes = client
                 .get(url)
                 .send()
@@ -1020,6 +1232,175 @@ fn load_image_bytes(
     }
 }
 
+fn image_source_to_wan26_input(
+    client: &Client,
+    source: &ImageSource,
+    max_input_bytes: usize,
+    fallback_name: &str,
+) -> Result<String, String> {
+    match source {
+        ImageSource::Url(url) => Ok(url.trim().to_string()),
+        ImageSource::Base64(raw) => {
+            let (mime, data) = split_image_data(raw);
+            let bytes = STANDARD
+                .decode(&data)
+                .map_err(|err| format!("decode base64 image failed: {err}"))?;
+            if bytes.len() > max_input_bytes {
+                return Err(format!("image too large: {} bytes", bytes.len()));
+            }
+            Ok(format!("data:{mime};base64,{data}"))
+        }
+        ImageSource::Path(path) => {
+            let (bytes, mime) = load_image_bytes(client, source, max_input_bytes)?;
+            let data = STANDARD.encode(bytes);
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty())
+                .unwrap_or(fallback_name);
+            let _ = file_name;
+            Ok(format!("data:{mime};base64,{data}"))
+        }
+    }
+}
+
+fn resolve_qwen_native_image_url(
+    client: &Client,
+    cfg: &ImageSkillConfig,
+    source: &ImageSource,
+    max_input_bytes: usize,
+    fallback_name: &str,
+    field_name: &str,
+) -> Result<String, String> {
+    match source {
+        ImageSource::Url(url) => Ok(url.trim().to_string()),
+        ImageSource::Path(_) | ImageSource::Base64(_) => {
+            if !cfg.local_auto_upload_enabled {
+                return Err(format!(
+                    "qwen native image edit requires args.{field_name}.url (public URL), or enable image_edit.local_auto_upload_enabled with OSS settings"
+                ));
+            }
+            upload_image_to_oss_and_sign_url(client, cfg, source, max_input_bytes, fallback_name)
+        }
+    }
+}
+
+fn upload_image_to_oss_and_sign_url(
+    client: &Client,
+    cfg: &ImageSkillConfig,
+    source: &ImageSource,
+    max_input_bytes: usize,
+    fallback_name: &str,
+) -> Result<String, String> {
+    let access_key_id = cfg
+        .oss_access_key_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "image_edit.oss_access_key_id is required".to_string())?;
+    let access_key_secret = cfg
+        .oss_access_key_secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "image_edit.oss_access_key_secret is required".to_string())?;
+    let bucket = cfg
+        .oss_bucket
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "image_edit.oss_bucket is required".to_string())?;
+    let endpoint = cfg
+        .oss_endpoint
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("oss-cn-beijing.aliyuncs.com");
+    let prefix = cfg
+        .oss_object_prefix
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("rustclaw/image");
+    let ttl_seconds = cfg.oss_url_ttl_seconds.unwrap_or(3600).clamp(60, 24 * 3600);
+
+    let (bytes, content_type, file_name) =
+        load_image_for_oss_upload(source, max_input_bytes, fallback_name)?;
+    let ts = unix_ts();
+    let object_key = format!("{}/{}-{}", prefix.trim_matches('/'), ts, file_name);
+    let put_url = format!("https://{}.{}{}", bucket, endpoint, object_path(&object_key));
+    let date = httpdate::fmt_http_date(SystemTime::now());
+    let canonical_resource = format!("/{}/{}", bucket, object_key);
+    let string_to_sign = format!("PUT\n\n{}\n{}\n{}", content_type, date, canonical_resource);
+    let put_signature = hmac_sha1_base64(access_key_secret, &string_to_sign)?;
+    let authorization = format!("OSS {}:{}", access_key_id, put_signature);
+    let put_resp = client
+        .put(&put_url)
+        .header("Date", date)
+        .header("Content-Type", &content_type)
+        .header("Authorization", authorization)
+        .body(bytes)
+        .send()
+        .map_err(|err| format!("upload image to OSS failed: {err}"))?;
+    let status = put_resp.status().as_u16();
+    let body = put_resp.text().unwrap_or_default();
+    if status >= 300 {
+        return Err(format!(
+            "upload image to OSS failed status={status}: {}",
+            truncate(&body, 400)
+        ));
+    }
+
+    let expires = unix_ts() + ttl_seconds;
+    let get_string_to_sign = format!("GET\n\n\n{}\n{}", expires, canonical_resource);
+    let get_signature = hmac_sha1_base64(access_key_secret, &get_string_to_sign)?;
+    Ok(format!(
+        "{}?OSSAccessKeyId={}&Expires={}&Signature={}",
+        put_url,
+        urlencoding::encode(access_key_id),
+        expires,
+        urlencoding::encode(&get_signature)
+    ))
+}
+
+fn load_image_for_oss_upload(
+    source: &ImageSource,
+    max_input_bytes: usize,
+    fallback_name: &str,
+) -> Result<(Vec<u8>, String, String), String> {
+    match source {
+        ImageSource::Path(path) => {
+            if !path.exists() || !path.is_file() {
+                return Err("image file does not exist".to_string());
+            }
+            let bytes = std::fs::read(path).map_err(|err| format!("read image failed: {err}"))?;
+            if bytes.len() > max_input_bytes {
+                return Err(format!("image too large: {} bytes", bytes.len()));
+            }
+            let mime = guess_mime_from_path(path).to_string();
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(sanitize_oss_filename)
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| sanitize_oss_filename(fallback_name));
+            Ok((bytes, mime, file_name))
+        }
+        ImageSource::Base64(raw) => {
+            let (mime, data) = split_image_data(raw);
+            let bytes = STANDARD
+                .decode(data)
+                .map_err(|err| format!("decode base64 image failed: {err}"))?;
+            if bytes.len() > max_input_bytes {
+                return Err(format!("image too large: {} bytes", bytes.len()));
+            }
+            let fallback = image_filename_for_mime(fallback_name, &mime);
+            Ok((bytes, mime, sanitize_oss_filename(&fallback)))
+        }
+        ImageSource::Url(_) => Err("image source already has URL".to_string()),
+    }
+}
+
 fn parse_image(v: &Value, workspace_root: &Path) -> Result<ImageSource, String> {
     if let Some(s) = v.as_str() {
         return parse_image_str(s, workspace_root);
@@ -1168,23 +1549,25 @@ fn vendor_order(
     }
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    for name in [
-        requested,
-        section_default,
-        selected_vendor,
-        Some("openai"),
-        Some("google"),
-        Some("anthropic"),
-        Some("grok"),
-        Some("qwen"),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    for name in [section_default, selected_vendor].into_iter().flatten() {
         if let Some(v) = parse_vendor(name) {
             if seen.insert(v) {
                 out.push(v);
             }
+        }
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    for v in [
+        VendorKind::OpenAI,
+        VendorKind::Google,
+        VendorKind::Anthropic,
+        VendorKind::Grok,
+        VendorKind::Qwen,
+    ] {
+        if seen.insert(v) {
+            out.push(v);
         }
     }
     out
@@ -1252,6 +1635,61 @@ fn split_image_data(raw: &str) -> (String, String) {
     ("image/png".to_string(), t.to_string())
 }
 
+fn image_filename_for_mime(fallback_name: &str, mime: &str) -> String {
+    let sanitized = sanitize_oss_filename(fallback_name);
+    if Path::new(&sanitized).extension().is_some() {
+        return sanitized;
+    }
+    format!("{sanitized}.{}", image_extension_from_mime(mime))
+}
+
+fn is_qwen_multimodal_edit_model(model: &str) -> bool {
+    let model = model.trim();
+    model.eq_ignore_ascii_case("wan2.6-image") || model.eq_ignore_ascii_case("qwen-image-edit-max")
+}
+
+fn normalize_wan26_size(size: &str) -> String {
+    let trimmed = size.trim();
+    if trimmed.eq_ignore_ascii_case("1k") || trimmed.eq_ignore_ascii_case("2k") {
+        return trimmed.to_ascii_uppercase();
+    }
+    trimmed.replace('x', "*").replace('X', "*")
+}
+
+fn extract_qwen_output_image_url<'a>(v: &'a Value) -> Option<&'a str> {
+    v.get("output")
+        .and_then(|o| o.get("results"))
+        .and_then(|items| items.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|item| item.get("url"))
+        .and_then(|url| url.as_str())
+        .or_else(|| {
+            v.get("output")
+                .and_then(|o| o.get("choices"))
+                .and_then(|choices| choices.as_array())
+                .and_then(|choices| choices.first())
+                .and_then(|choice| choice.get("message"))
+                .and_then(|msg| msg.get("content"))
+                .and_then(|content| content.as_array())
+                .and_then(|content| {
+                    content.iter().find_map(|item| {
+                        item.get("image")
+                            .or_else(|| item.get("url"))
+                            .and_then(|url| url.as_str())
+                    })
+                })
+        })
+}
+
+fn image_extension_from_mime(mime: &str) -> &'static str {
+    match mime.trim().to_ascii_lowercase().as_str() {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        _ => "png",
+    }
+}
+
 fn trim_trailing_slash(v: &str) -> String {
     v.trim_end_matches('/').to_string()
 }
@@ -1268,6 +1706,37 @@ fn unix_ts() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+fn hmac_sha1_base64(secret: &str, message: &str) -> Result<String, String> {
+    type HmacSha1 = Hmac<Sha1>;
+    let mut mac =
+        HmacSha1::new_from_slice(secret.as_bytes()).map_err(|err| format!("invalid HMAC key: {err}"))?;
+    mac.update(message.as_bytes());
+    Ok(STANDARD.encode(mac.finalize().into_bytes()))
+}
+
+fn object_path(key: &str) -> String {
+    let mut out = String::with_capacity(key.len() + 1);
+    out.push('/');
+    out.push_str(key.trim_matches('/'));
+    out
+}
+
+fn sanitize_oss_filename(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "image.png".to_string()
+    } else {
+        out
+    }
 }
 
 #[cfg(test)]
@@ -1294,5 +1763,58 @@ mod tests {
         let (mime, data) = split_image_data("data:image/png;base64,abc");
         assert_eq!(mime, "image/png");
         assert_eq!(data, "abc");
+    }
+
+    #[test]
+    fn native_edit_supports_local_upload_when_enabled() {
+        let cfg = ImageSkillConfig {
+            local_auto_upload_enabled: true,
+            ..Default::default()
+        };
+        assert!(qwen_native_edit_inputs_supported(
+            &cfg,
+            "wanx2.1-imageedit",
+            &ImageSource::Path(PathBuf::from("/tmp/demo.png")),
+            Some(&ImageSource::Base64("data:image/png;base64,abc".to_string()))
+        ));
+    }
+
+    #[test]
+    fn sanitize_oss_name_keeps_safe_chars() {
+        assert_eq!(sanitize_oss_filename("a b/c?.png"), "a_b_c_.png");
+    }
+
+    #[test]
+    fn multimodal_native_edit_supports_local_without_oss() {
+        let cfg = ImageSkillConfig::default();
+        assert!(qwen_native_edit_inputs_supported(
+            &cfg,
+            "wan2.6-image",
+            &ImageSource::Path(PathBuf::from("/tmp/demo.png")),
+            None
+        ));
+        assert!(qwen_native_edit_inputs_supported(
+            &cfg,
+            "qwen-image-edit-max",
+            &ImageSource::Path(PathBuf::from("/tmp/demo.png")),
+            None
+        ));
+    }
+
+    #[test]
+    fn extract_qwen_choice_image_url() {
+        let v = json!({
+            "output": {
+                "choices": [{
+                    "message": {
+                        "content": [{
+                            "type": "image",
+                            "image": "https://example.com/demo.png"
+                        }]
+                    }
+                }]
+            }
+        });
+        assert_eq!(extract_qwen_output_image_url(&v), Some("https://example.com/demo.png"));
     }
 }
