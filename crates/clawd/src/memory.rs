@@ -4,14 +4,20 @@ pub(crate) mod service;
 
 use anyhow::anyhow;
 use claw_core::config::MemoryConfig;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 
-use super::{AppState, extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix};
+use super::{extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix, AppState};
 
 pub(crate) const LLM_SHORT_TERM_MEMORY_PREFIX: &str = "[LLM_REPLY] ";
 
 fn normalized_user_key_opt(user_key: Option<&str>) -> Option<&str> {
     user_key.map(str::trim).filter(|v| !v.is_empty())
+}
+
+fn effective_user_key(user_key: Option<&str>, user_id: i64, chat_id: i64) -> String {
+    normalized_user_key_opt(user_key)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("anon:{user_id}:{chat_id}"))
 }
 
 fn legacy_principal_chat_id(user_key: &str, chat_id: i64) -> Option<i64> {
@@ -91,13 +97,16 @@ fn query_memories_since_id_for_chat(
          ORDER BY id ASC
          LIMIT ?5",
     )?;
-    let rows = stmt.query_map(params![user_id, chat_id, user_key, source_memory_id, limit as i64], |row| {
-        let id: i64 = row.get(0)?;
-        let role: String = row.get(1)?;
-        let content: String = row.get(2)?;
-        let safety_flag: String = row.get(3)?;
-        Ok((id, role, content, safety_flag))
-    })?;
+    let rows = stmt.query_map(
+        params![user_id, chat_id, user_key, source_memory_id, limit as i64],
+        |row| {
+            let id: i64 = row.get(0)?;
+            let role: String = row.get(1)?;
+            let content: String = row.get(2)?;
+            let safety_flag: String = row.get(3)?;
+            Ok((id, role, content, safety_flag))
+        },
+    )?;
     let mut out = Vec::new();
     for row in rows {
         out.push(row?);
@@ -116,9 +125,7 @@ pub(crate) fn insert_memory(
     content: &str,
     max_chars: usize,
 ) -> anyhow::Result<()> {
-    let Some(user_key) = normalized_user_key_opt(user_key) else {
-        return Ok(());
-    };
+    let user_key = effective_user_key(user_key, user_id, chat_id);
     if content.trim().is_empty() {
         return Ok(());
     }
@@ -138,7 +145,12 @@ pub(crate) fn insert_memory(
         Vec::new()
     };
     let should_skip = state.memory.write_filter_enabled
-        && should_skip_memory_write(&trimmed, role, state.memory.write_min_chars.max(1), &state.memory);
+        && should_skip_memory_write(
+            &trimmed,
+            role,
+            state.memory.write_min_chars.max(1),
+            &state.memory,
+        );
     if should_skip && extracted_prefs.is_empty() {
         return Ok(());
     }
@@ -146,14 +158,12 @@ pub(crate) fn insert_memory(
     let safety_flag = classify_memory_safety_flag(&trimmed, &state.memory);
     let is_instructional = detect_instructional_text(&trimmed, &state.memory);
     let memory_type = infer_memory_type(role, is_instructional, &safety_flag);
-    let salience = estimate_memory_salience(&trimmed, is_instructional, &safety_flag, &state.memory);
+    let salience =
+        estimate_memory_salience(&trimmed, is_instructional, &safety_flag, &state.memory);
 
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
     for (pref_key, pref_value, confidence, source) in extracted_prefs {
         db.execute(
             "INSERT INTO user_preferences (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
@@ -163,7 +173,7 @@ pub(crate) fn insert_memory(
             params![
                 user_id,
                 chat_id,
-                user_key,
+                &user_key,
                 pref_key,
                 pref_value,
                 confidence,
@@ -176,7 +186,7 @@ pub(crate) fn insert_memory(
     if should_skip {
         return Ok(());
     }
-    if is_duplicate_recent_memory(&db, user_id, chat_id, user_key, role, &trimmed)? {
+    if is_duplicate_recent_memory(&db, user_id, chat_id, &user_key, role, &trimmed)? {
         return Ok(());
     }
 
@@ -208,13 +218,8 @@ pub(crate) fn count_chat_memory_rounds(
     user_id: i64,
     chat_id: i64,
 ) -> anyhow::Result<usize> {
-    let Some(user_key) = normalized_user_key_opt(user_key) else {
-        return Ok(0);
-    };
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| anyhow!("db lock poisoned"))?;
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
     let current_cnt: i64 = db.query_row(
         "SELECT COUNT(*) FROM memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3 AND role = 'user'",
         params![user_id, chat_id, user_key],
@@ -223,7 +228,7 @@ pub(crate) fn count_chat_memory_rounds(
     if current_cnt > 0 {
         return Ok(current_cnt.max(0) as usize);
     }
-    let Some(legacy_chat_id) = legacy_principal_chat_id(user_key, chat_id) else {
+    let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) else {
         return Ok(0);
     };
     let legacy_cnt: i64 = db.query_row(
@@ -241,14 +246,9 @@ pub(crate) fn recall_recent_memories(
     chat_id: i64,
     limit: usize,
 ) -> anyhow::Result<Vec<(String, String)>> {
-    let Some(user_key) = normalized_user_key_opt(user_key) else {
-        return Ok(Vec::new());
-    };
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| anyhow!("db lock poisoned"))?;
-    let rows = query_recent_memories_for_chat(&db, user_id, chat_id, user_key, limit)?;
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let rows = query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, limit)?;
     let mut out = Vec::new();
     for (role, content, safety_flag) in rows {
         if state.memory.safety_filter_enabled && safety_flag == "injection_like" {
@@ -258,8 +258,9 @@ pub(crate) fn recall_recent_memories(
         out.push((role, content));
     }
     if out.is_empty() {
-        if let Some(legacy_chat_id) = legacy_principal_chat_id(user_key, chat_id) {
-            let rows = query_recent_memories_for_chat(&db, user_id, legacy_chat_id, user_key, limit)?;
+        if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
+            let rows =
+                query_recent_memories_for_chat(&db, user_id, legacy_chat_id, &user_key, limit)?;
             for (role, content, safety_flag) in rows {
                 if state.memory.safety_filter_enabled && safety_flag == "injection_like" {
                     out.push((role, "[safety_signal content omitted]".to_string()));
@@ -340,14 +341,9 @@ pub(crate) fn recall_user_preferences(
     chat_id: i64,
     limit: usize,
 ) -> anyhow::Result<Vec<(String, String)>> {
-    let Some(user_key) = normalized_user_key_opt(user_key) else {
-        return Ok(Vec::new());
-    };
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| anyhow!("db lock poisoned"))?;
-    let rows = query_preferences_for_chat(&db, user_id, chat_id, user_key, limit)?;
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let rows = query_preferences_for_chat(&db, user_id, chat_id, &user_key, limit)?;
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for (key, value) in rows {
@@ -356,8 +352,8 @@ pub(crate) fn recall_user_preferences(
         }
     }
     if out.is_empty() {
-        if let Some(legacy_chat_id) = legacy_principal_chat_id(user_key, chat_id) {
-            let rows = query_preferences_for_chat(&db, user_id, legacy_chat_id, user_key, limit)?;
+        if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
+            let rows = query_preferences_for_chat(&db, user_id, legacy_chat_id, &user_key, limit)?;
             for (key, value) in rows {
                 if seen.insert(key.clone()) {
                     out.push((key, value));
@@ -375,13 +371,8 @@ pub(crate) fn recall_long_term_summary(
     user_id: i64,
     chat_id: i64,
 ) -> anyhow::Result<Option<String>> {
-    let Some(user_key) = normalized_user_key_opt(user_key) else {
-        return Ok(None);
-    };
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| anyhow!("db lock poisoned"))?;
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
     let summary = db
         .query_row(
             "SELECT summary FROM long_term_memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3",
@@ -392,7 +383,7 @@ pub(crate) fn recall_long_term_summary(
     if summary.is_some() {
         return Ok(summary);
     }
-    let Some(legacy_chat_id) = legacy_principal_chat_id(user_key, chat_id) else {
+    let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) else {
         return Ok(None);
     };
     let legacy_summary = db
@@ -413,21 +404,23 @@ pub(crate) fn recall_memories_since_id(
     source_memory_id: i64,
     limit: usize,
 ) -> anyhow::Result<Vec<(i64, String, String, String)>> {
-    let Some(user_key) = normalized_user_key_opt(user_key) else {
-        return Ok(Vec::new());
-    };
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| anyhow!("db lock poisoned"))?;
-    let mut out = query_memories_since_id_for_chat(&db, user_id, chat_id, user_key, source_memory_id, limit)?;
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let mut out = query_memories_since_id_for_chat(
+        &db,
+        user_id,
+        chat_id,
+        &user_key,
+        source_memory_id,
+        limit,
+    )?;
     if out.is_empty() {
-        if let Some(legacy_chat_id) = legacy_principal_chat_id(user_key, chat_id) {
+        if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
             out = query_memories_since_id_for_chat(
                 &db,
                 user_id,
                 legacy_chat_id,
-                user_key,
+                &user_key,
                 source_memory_id,
                 limit,
             )?;
@@ -442,13 +435,8 @@ pub(crate) fn read_long_term_source_memory_id(
     user_id: i64,
     chat_id: i64,
 ) -> anyhow::Result<i64> {
-    let Some(user_key) = normalized_user_key_opt(user_key) else {
-        return Ok(0);
-    };
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| anyhow!("db lock poisoned"))?;
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
     let source = db
         .query_row(
             "SELECT source_memory_id FROM long_term_memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3",
@@ -459,7 +447,7 @@ pub(crate) fn read_long_term_source_memory_id(
     if let Some(source) = source {
         return Ok(source);
     }
-    let Some(legacy_chat_id) = legacy_principal_chat_id(user_key, chat_id) else {
+    let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) else {
         return Ok(0);
     };
     let legacy_source = db
@@ -480,13 +468,8 @@ pub(crate) fn upsert_long_term_summary(
     summary: &str,
     source_memory_id: i64,
 ) -> anyhow::Result<()> {
-    let Some(user_key) = normalized_user_key_opt(user_key) else {
-        return Ok(());
-    };
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| anyhow!("db lock poisoned"))?;
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
     let now = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
     db.execute(
@@ -652,7 +635,12 @@ fn contains_any_marker(norm_text: &str, markers: &[String]) -> bool {
     })
 }
 
-fn should_skip_memory_write(content: &str, role: &str, min_chars: usize, cfg: &MemoryConfig) -> bool {
+fn should_skip_memory_write(
+    content: &str,
+    role: &str,
+    min_chars: usize,
+    cfg: &MemoryConfig,
+) -> bool {
     let text = content.trim();
     if text.is_empty() {
         return true;
@@ -661,7 +649,12 @@ fn should_skip_memory_write(content: &str, role: &str, min_chars: usize, cfg: &M
         return true;
     }
     let tiny = text.to_ascii_lowercase();
-    if role == "assistant" && cfg.rules.assistant_ack_skip.iter().any(|m| tiny == m.trim().to_ascii_lowercase())
+    if role == "assistant"
+        && cfg
+            .rules
+            .assistant_ack_skip
+            .iter()
+            .any(|m| tiny == m.trim().to_ascii_lowercase())
     {
         return true;
     }
@@ -723,7 +716,10 @@ fn estimate_memory_salience(
     cfg: &MemoryConfig,
 ) -> f32 {
     let mut score: f32 = if is_instructional { 0.72 } else { 0.48 };
-    if contains_any_marker(&text.to_ascii_lowercase(), &cfg.rules.salience_boost_markers) {
+    if contains_any_marker(
+        &text.to_ascii_lowercase(),
+        &cfg.rules.salience_boost_markers,
+    ) {
         score += 0.16;
     }
     if safety_flag == "injection_like" {
@@ -815,7 +811,10 @@ fn extract_agent_display_name(
         let start = pos + marker.len();
         let tail = &text[start..];
         let candidate = tail
-            .split(['\n', '\r', '，', ',', '。', '.', '！', '!', '？', '?', '；', ';', '（', '）', '(', ')'])
+            .split([
+                '\n', '\r', '，', ',', '。', '.', '！', '!', '？', '?', '；', ';', '（', '）', '(',
+                ')',
+            ])
             .next()
             .unwrap_or("")
             .trim()
@@ -824,10 +823,7 @@ fn extract_agent_display_name(
         if candidate.is_empty() {
             continue;
         }
-        let candidate = candidate
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let candidate = candidate.split_whitespace().collect::<Vec<_>>().join(" ");
         if rules
             .assistant_name_invalid_values
             .iter()

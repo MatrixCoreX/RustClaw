@@ -1,6 +1,6 @@
 # Telegram 投递链路日志解读指南
 
-本文用于排查 Telegram 侧重复消息、重复确认按钮、以及任务投递时序问题。
+本文用于排查 Telegram 侧重复消息、以及任务投递时序问题。注：交易确认按钮已移除，`requires_confirmation` 对 trade_preview 恒为 false。
 
 ## 建议日志级别
 
@@ -27,13 +27,13 @@
     - `source=text_fallback`
     - `source=text_only`
 - `phase=confirm_detect`
-  - 是否命中确认按钮判定（结构化 hint + 文本特征）。
+  - 原为确认按钮判定；现已不再对 trade_preview 挂按钮，decision 恒为 false。
 - `phase=deliver_text_confirm` / `phase=deliver_text`
   - 实际发送文本成功后日志，包含 Telegram `message_id`。
 - `phase=deliver_media` / `phase=deliver_media_preface`
   - 文件/图片/语音类消息发送日志。
 - `phase=callback` / `phase=callback_ack`
-  - 用户点击确认按钮后的回调链路日志。
+  - 原为确认按钮回调；交易确认按钮已移除，此 phase 仅在其他场景下出现。
 
 ## 关键字段说明
 
@@ -44,7 +44,7 @@
 - `msg_preview`
   - 截断后的文本预览，辅助人工核对。
 - `requires_confirmation`
-  - 当前发送是否会挂确认按钮。
+  - 当前发送是否会挂确认按钮（交易确认按钮已移除，此项现恒为 false）。
 - `telegram_msg_id`
   - Telegram 实际投递消息 ID，可用于确认是否真实发送了多条。
 
@@ -56,24 +56,14 @@
 3. 看 `phase=success_source`：
    - 若出现 `text_fallback`，常见于 `messages` 偏移后回退到 `text`。
 4. 看 `phase=deliver_text_confirm`：
-   - 若同 `msg_fp` 出现两次且 `telegram_msg_id` 不同，说明按钮文本重复发出。
-
-## 排查重复按钮的推荐顺序
-
-1. 先定位重复文本是否本身重复（`msg_fp`）。
-2. 再看 `phase=confirm_detect`：
-   - `decision=true` 且文本重复 -> 按钮也会重复。
-3. 对照 `phase=callback`：
-   - 用户是否在重复按钮上都触发过回调。
+   - 若同 `msg_fp` 出现两次且 `telegram_msg_id` 不同，说明同一条文本重复发出。
 
 ## 实战示例（买币链路）
 
 当用户发送“帮我买1u eth”时，关注以下顺序：
 
 1. `submit` / `submit_done`
-2. `poll(status=Running)` + `deliver_progress(trade_preview)`
-3. `confirm_detect(decision=true)`
-4. `deliver_text_confirm`
-5. `poll(status=Succeeded)` + `success_source(...)` + `deliver_success_item(...)`
-6. 若再次出现相同 `msg_fp` 的 `deliver_text_confirm`，即可确认重复来源。
+2. `poll(status=Running)` + `deliver_progress(trade_preview)`（不再挂确认按钮）
+3. `poll(status=Succeeded)` + `success_source(...)` + `deliver_success_item(...)`
+4. 若再次出现相同 `msg_fp` 的 `deliver_text_confirm`，即可确认重复来源。
 

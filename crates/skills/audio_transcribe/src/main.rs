@@ -46,7 +46,11 @@ struct LlmConfig {
     #[serde(default)]
     grok: Option<VendorConfig>,
     #[serde(default)]
+    deepseek: Option<VendorConfig>,
+    #[serde(default)]
     qwen: Option<VendorConfig>,
+    #[serde(default)]
+    minimax: Option<VendorConfig>,
     #[serde(default)]
     custom: Option<VendorConfig>,
 }
@@ -77,7 +81,11 @@ struct AudioTranscribeConfig {
     #[serde(default)]
     grok_models: Option<Vec<String>>,
     #[serde(default)]
+    deepseek_models: Option<Vec<String>>,
+    #[serde(default)]
     qwen_models: Option<Vec<String>>,
+    #[serde(default)]
+    minimax_models: Option<Vec<String>>,
     #[serde(default)]
     native_models: Option<Vec<String>>,
     #[serde(default)]
@@ -106,15 +114,39 @@ struct AudioTranscribeConfig {
     oss_object_prefix: Option<String>,
     #[serde(default)]
     oss_url_ttl_seconds: Option<u64>,
+    #[serde(default)]
+    providers: AudioProviderOverrides,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Deserialize, Default)]
+struct AudioProviderOverrides {
+    #[serde(default)]
+    openai: Option<VendorConfig>,
+    #[serde(default)]
+    google: Option<VendorConfig>,
+    #[serde(default)]
+    anthropic: Option<VendorConfig>,
+    #[serde(default)]
+    grok: Option<VendorConfig>,
+    #[serde(default)]
+    deepseek: Option<VendorConfig>,
+    #[serde(default)]
+    qwen: Option<VendorConfig>,
+    #[serde(default)]
+    minimax: Option<VendorConfig>,
+    #[serde(default)]
+    custom: Option<VendorConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VendorKind {
     OpenAI,
     Google,
     Anthropic,
     Grok,
+    DeepSeek,
     Qwen,
+    MiniMax,
     Custom,
 }
 
@@ -132,7 +164,8 @@ enum AudioInput {
 }
 
 const DEFAULT_AUDIO_TRANSCRIBE_PROMPT_TEMPLATE: &str =
-    include_str!("../../../../prompts/audio_transcribe_prompt.md");
+    include_str!("../../../../prompts/vendors/default/audio_transcribe_prompt.md");
+const AUDIO_TRANSCRIBE_PROMPT_PATH: &str = "prompts/audio_transcribe_prompt.md";
 
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
@@ -174,12 +207,19 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(String, Value), String> {
+fn execute(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    args: Value,
+) -> Result<(String, Value), String> {
     let audio_input = parse_audio_input(&args, workspace_root)?;
-    let max_input_bytes = cfg.audio_transcribe.max_input_bytes.unwrap_or(25 * 1024 * 1024);
+    let max_input_bytes = cfg
+        .audio_transcribe
+        .max_input_bytes
+        .unwrap_or(25 * 1024 * 1024);
     if let AudioInput::LocalPath(audio_path) = &audio_input {
-        let metadata =
-            std::fs::metadata(audio_path).map_err(|err| format!("read audio metadata failed: {err}"))?;
+        let metadata = std::fs::metadata(audio_path)
+            .map_err(|err| format!("read audio metadata failed: {err}"))?;
         if metadata.len() as usize > max_input_bytes {
             return Err(format!(
                 "audio file too large: {} bytes, max={max_input_bytes}",
@@ -193,12 +233,6 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .and_then(|v| v.get("transcribe_hint"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let transcribe_prompt_template = load_prompt_template(
-        workspace_root,
-        "prompts/audio_transcribe_prompt.md",
-        DEFAULT_AUDIO_TRANSCRIBE_PROMPT_TEMPLATE,
-    );
-    let transcribe_prompt = render_transcribe_prompt(&transcribe_prompt_template, transcribe_hint);
     let requested_vendor = args_obj
         .and_then(|v| v.get("vendor"))
         .and_then(|v| v.as_str());
@@ -207,9 +241,18 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         cfg.audio_transcribe.default_vendor.as_deref(),
         cfg.llm.selected_vendor.as_deref(),
     );
+    let transcribe_prompt_template = load_prompt_template_for_vendor(
+        workspace_root,
+        prompt_vendor_name_for_vendor(vendor),
+        AUDIO_TRANSCRIBE_PROMPT_PATH,
+        DEFAULT_AUDIO_TRANSCRIBE_PROMPT_TEMPLATE,
+    );
+    let transcribe_prompt = render_transcribe_prompt(&transcribe_prompt_template, transcribe_hint);
     let (vendor_name, provider_cfg) = resolve_vendor_config(cfg, vendor)?;
     check_api_key(vendor_name, &provider_cfg.api_key)?;
-    let requested_model = args_obj.and_then(|v| v.get("model")).and_then(|v| v.as_str());
+    let requested_model = args_obj
+        .and_then(|v| v.get("model"))
+        .and_then(|v| v.as_str());
     let model = requested_model
         .or(first_model_candidate(
             cfg.audio_transcribe.default_model.as_deref(),
@@ -227,7 +270,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .timeout(Duration::from_secs(timeout_seconds))
         .build()
         .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
-    let text = transcribe_by_vendor(
+    let (text, model_kind) = transcribe_by_vendor(
         &client,
         &cfg.audio_transcribe,
         provider_cfg,
@@ -245,6 +288,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     let extra = json!({
         "provider": vendor_name,
         "model": model,
+        "model_kind": model_kind,
         "audio_path": audio_source,
         "outputs": [{"type":"text","preview": truncate(&text, 800)}],
         "latency_ms": 0
@@ -262,18 +306,22 @@ fn transcribe_by_vendor(
     model: &str,
     audio_input: &AudioInput,
     prompt: &str,
-) -> Result<String, String> {
+) -> Result<(String, &'static str), String> {
     let mode = resolve_adapter_mode(audio_cfg, vendor);
     match vendor {
         VendorKind::Google => {
             let audio_path = require_local_audio(audio_input)?;
-            google_native_transcribe(client, cfg, model, audio_path, prompt)
+            Ok((google_native_transcribe(client, cfg, model, audio_path, prompt)?, "native"))
         }
         VendorKind::OpenAI => {
             let audio_path = require_local_audio(audio_input)?;
-            openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)
+            Ok((openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?, "compat"))
         }
-        VendorKind::Anthropic | VendorKind::Grok | VendorKind::Custom => {
+        VendorKind::Anthropic
+        | VendorKind::Grok
+        | VendorKind::DeepSeek
+        | VendorKind::MiniMax
+        | VendorKind::Custom => {
             if mode == AdapterMode::Native {
                 return Err(format!("{vendor_name} native stt adapter is not available"));
             }
@@ -283,11 +331,11 @@ fn transcribe_by_vendor(
                 ));
             }
             let audio_path = require_local_audio(audio_input)?;
-            openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)
+            Ok((openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?, "compat"))
         }
         VendorKind::Qwen => {
             if should_use_qwen_native_asr(audio_cfg, model, mode, allow_compat_adapters) {
-                qwen_native_transcribe(
+                Ok((qwen_native_transcribe(
                     client,
                     audio_cfg,
                     audio_cfg.qwen_native_base_url.as_deref(),
@@ -295,7 +343,7 @@ fn transcribe_by_vendor(
                     model,
                     audio_input,
                     prompt,
-                )
+                )?, "native"))
             } else {
                 if !allow_compat_adapters {
                     return Err(
@@ -304,7 +352,7 @@ fn transcribe_by_vendor(
                     );
                 }
                 let audio_path = require_local_audio(audio_input)?;
-                openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)
+                Ok((openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?, "compat"))
             }
         }
     }
@@ -331,13 +379,19 @@ fn parse_audio_input(args: &Value, workspace_root: &Path) -> Result<AudioInput, 
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
-            return Ok(AudioInput::LocalPath(to_workspace_path(workspace_root, path)?));
+            return Ok(AudioInput::LocalPath(to_workspace_path(
+                workspace_root,
+                path,
+            )?));
         }
     }
     if let Some(s) = args.as_str().map(str::trim).filter(|v| !v.is_empty()) {
         return Ok(AudioInput::LocalPath(to_workspace_path(workspace_root, s)?));
     }
-    Err("audio input is required (args.audio.path / args.path / args.audio.url / args.audio_url)".to_string())
+    Err(
+        "audio input is required (args.audio.path / args.path / args.audio.url / args.audio_url)"
+            .to_string(),
+    )
 }
 
 fn require_local_audio(audio_input: &AudioInput) -> Result<&Path, String> {
@@ -372,9 +426,9 @@ fn qwen_uses_native_asr_model(cfg: &AudioTranscribeConfig, model: &str) -> bool 
     cfg.native_models
         .as_ref()
         .and_then(|list| {
-            list.iter()
-                .map(|s| s.trim())
-                .find(|candidate| !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested))
+            list.iter().map(|s| s.trim()).find(|candidate| {
+                !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested)
+            })
         })
         .is_some()
 }
@@ -415,7 +469,10 @@ fn qwen_native_transcribe(
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .unwrap_or("https://dashscope.aliyuncs.com/api/v1");
-    let submit_url = format!("{}/services/audio/asr/transcription", trim_trailing_slash(base));
+    let submit_url = format!(
+        "{}/services/audio/asr/transcription",
+        trim_trailing_slash(base)
+    );
     let body = json!({
         "model": model,
         "input": {
@@ -568,13 +625,13 @@ fn upload_local_audio_to_oss_and_sign_url(
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "audio.wav".to_string());
     let ts = unix_ts();
-    let object_key = format!(
-        "{}/{}-{}",
-        prefix.trim_matches('/'),
-        ts,
-        file_name
+    let object_key = format!("{}/{}-{}", prefix.trim_matches('/'), ts, file_name);
+    let put_url = format!(
+        "https://{}.{}{}",
+        bucket,
+        endpoint,
+        object_path(&object_key)
     );
-    let put_url = format!("https://{}.{}{}", bucket, endpoint, object_path(&object_key));
     let date = httpdate::fmt_http_date(SystemTime::now());
     let canonical_resource = format!("/{}/{}", bucket, object_key);
     let string_to_sign = format!("PUT\n\n{}\n{}\n{}", content_type, date, canonical_resource);
@@ -612,8 +669,8 @@ fn upload_local_audio_to_oss_and_sign_url(
 
 fn hmac_sha1_base64(secret: &str, message: &str) -> Result<String, String> {
     type HmacSha1 = Hmac<Sha1>;
-    let mut mac =
-        HmacSha1::new_from_slice(secret.as_bytes()).map_err(|err| format!("invalid HMAC key: {err}"))?;
+    let mut mac = HmacSha1::new_from_slice(secret.as_bytes())
+        .map_err(|err| format!("invalid HMAC key: {err}"))?;
     mac.update(message.as_bytes());
     let result = mac.finalize().into_bytes();
     Ok(STANDARD.encode(result))
@@ -724,7 +781,10 @@ fn openai_compatible_transcribe(
     if !audio_path.exists() || !audio_path.is_file() {
         return Err("audio file does not exist".to_string());
     }
-    let url = format!("{}/audio/transcriptions", trim_trailing_slash(&cfg.base_url));
+    let url = format!(
+        "{}/audio/transcriptions",
+        trim_trailing_slash(&cfg.base_url)
+    );
     let form = multipart::Form::new()
         .text("model", model.to_string())
         .text("prompt", prompt.to_string())
@@ -836,7 +896,9 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "google" | "gemini" => Some(VendorKind::Google),
         "anthropic" | "claude" => Some(VendorKind::Anthropic),
         "grok" | "xai" => Some(VendorKind::Grok),
+        "deepseek" => Some(VendorKind::DeepSeek),
         "qwen" => Some(VendorKind::Qwen),
+        "minimax" => Some(VendorKind::MiniMax),
         "custom" => Some(VendorKind::Custom),
         _ => None,
     }
@@ -858,41 +920,54 @@ fn resolve_vendor_config<'a>(
     cfg: &'a RootConfig,
     vendor: VendorKind,
 ) -> Result<(&'static str, &'a VendorConfig), String> {
+    let section = &cfg.audio_transcribe.providers;
     match vendor {
-        VendorKind::OpenAI => cfg
-            .llm
+        VendorKind::OpenAI => section
             .openai
             .as_ref()
+            .or(cfg.llm.openai.as_ref())
             .map(|v| ("openai", v))
             .ok_or_else(|| "openai config missing".to_string()),
-        VendorKind::Google => cfg
-            .llm
+        VendorKind::Google => section
             .google
             .as_ref()
+            .or(cfg.llm.google.as_ref())
             .map(|v| ("google", v))
             .ok_or_else(|| "google config missing".to_string()),
-        VendorKind::Anthropic => cfg
-            .llm
+        VendorKind::Anthropic => section
             .anthropic
             .as_ref()
+            .or(cfg.llm.anthropic.as_ref())
             .map(|v| ("anthropic", v))
             .ok_or_else(|| "anthropic config missing".to_string()),
-        VendorKind::Grok => cfg
-            .llm
+        VendorKind::Grok => section
             .grok
             .as_ref()
+            .or(cfg.llm.grok.as_ref())
             .map(|v| ("grok", v))
             .ok_or_else(|| "grok config missing".to_string()),
-        VendorKind::Qwen => cfg
-            .llm
+        VendorKind::DeepSeek => section
+            .deepseek
+            .as_ref()
+            .or(cfg.llm.deepseek.as_ref())
+            .map(|v| ("deepseek", v))
+            .ok_or_else(|| "deepseek config missing".to_string()),
+        VendorKind::Qwen => section
             .qwen
             .as_ref()
+            .or(cfg.llm.qwen.as_ref())
             .map(|v| ("qwen", v))
             .ok_or_else(|| "qwen config missing".to_string()),
-        VendorKind::Custom => cfg
-            .llm
+        VendorKind::MiniMax => section
+            .minimax
+            .as_ref()
+            .or(cfg.llm.minimax.as_ref())
+            .map(|v| ("minimax", v))
+            .ok_or_else(|| "minimax config missing".to_string()),
+        VendorKind::Custom => section
             .custom
             .as_ref()
+            .or(cfg.llm.custom.as_ref())
             .map(|v| ("custom", v))
             .ok_or_else(|| "custom config missing".to_string()),
     }
@@ -900,27 +975,27 @@ fn resolve_vendor_config<'a>(
 
 fn load_root_config() -> RootConfig {
     let root = workspace_root();
-    let mut merged = match std::fs::read_to_string(root.join("configs/config.toml"))
+    let core_cfg = match std::fs::read_to_string(root.join("configs/config.toml"))
         .ok()
         .and_then(|s| toml::from_str::<TomlValue>(&s).ok())
     {
         Some(v) => v,
         None => TomlValue::Table(toml::map::Map::new()),
     };
-    if let Some(audio_cfg) = std::fs::read_to_string(root.join("configs/audio.toml"))
+    let audio_cfg = match std::fs::read_to_string(root.join("configs/audio.toml"))
         .ok()
         .and_then(|s| toml::from_str::<TomlValue>(&s).ok())
     {
-        // Keep config.toml higher priority if same key exists, and use audio.toml as defaults.
-        merge_missing_toml(&mut merged, audio_cfg);
-    }
+        Some(v) => v,
+        None => TomlValue::Table(toml::map::Map::new()),
+    };
     let mut cfg = RootConfig::default();
-    if let Some(v) = merged.get("llm").cloned() {
+    if let Some(v) = core_cfg.get("llm").cloned() {
         if let Ok(parsed) = v.try_into::<LlmConfig>() {
             cfg.llm = parsed;
         }
     }
-    if let Some(v) = merged.get("audio_transcribe").cloned() {
+    if let Some(v) = audio_cfg.get("audio_transcribe").cloned() {
         if let Ok(parsed) = v.try_into::<AudioTranscribeConfig>() {
             cfg.audio_transcribe = parsed;
         }
@@ -936,39 +1011,87 @@ fn first_model_candidate<'a>(
     if let Some(v) = default_model.map(str::trim).filter(|v| !v.is_empty()) {
         return Some(v);
     }
-    if let Some(v) = vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty())) {
+    if let Some(v) =
+        vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+    {
         return Some(v);
     }
     models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
 }
 
-fn vendor_models<'a>(cfg: &'a AudioTranscribeConfig, vendor: VendorKind) -> Option<&'a Vec<String>> {
+fn vendor_models<'a>(
+    cfg: &'a AudioTranscribeConfig,
+    vendor: VendorKind,
+) -> Option<&'a Vec<String>> {
     match vendor {
         VendorKind::OpenAI => cfg.openai_models.as_ref(),
         VendorKind::Google => cfg.google_models.as_ref(),
         VendorKind::Anthropic => cfg.anthropic_models.as_ref(),
         VendorKind::Grok => cfg.grok_models.as_ref(),
+        VendorKind::DeepSeek => cfg.deepseek_models.as_ref(),
         VendorKind::Qwen => cfg.qwen_models.as_ref(),
+        VendorKind::MiniMax => cfg.minimax_models.as_ref(),
         VendorKind::Custom => cfg.custom_models.as_ref(),
     }
 }
 
-fn merge_missing_toml(dst: &mut TomlValue, src: TomlValue) {
-    if let (TomlValue::Table(dst_map), TomlValue::Table(src_map)) = (dst, src) {
-        for (key, src_val) in src_map {
-            match dst_map.get_mut(&key) {
-                Some(dst_val) => merge_missing_toml(dst_val, src_val),
-                None => {
-                    dst_map.insert(key, src_val);
-                }
-            }
-        }
+fn normalize_prompt_vendor_name(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "anthropic" | "claude" => "claude".to_string(),
+        "google" | "gemini" => "google".to_string(),
+        "openai" => "openai".to_string(),
+        "grok" | "xai" => "grok".to_string(),
+        "deepseek" => "deepseek".to_string(),
+        "qwen" => "qwen".to_string(),
+        "minimax" => "minimax".to_string(),
+        "custom" => "openai".to_string(),
+        _ => "default".to_string(),
     }
 }
 
-fn load_prompt_template(workspace_root: &Path, rel_path: &str, default_template: &str) -> String {
-    let path = workspace_root.join(rel_path);
-    match std::fs::read_to_string(path) {
+fn prompt_vendor_name_for_vendor(vendor: VendorKind) -> &'static str {
+    match vendor {
+        VendorKind::OpenAI => "openai",
+        VendorKind::Google => "google",
+        VendorKind::Anthropic => "claude",
+        VendorKind::Grok => "grok",
+        VendorKind::DeepSeek => "deepseek",
+        VendorKind::Qwen => "qwen",
+        VendorKind::MiniMax => "minimax",
+        VendorKind::Custom => "openai",
+    }
+}
+
+fn resolve_prompt_rel_path_for_vendor(
+    workspace_root: &Path,
+    vendor: &str,
+    rel_path: &str,
+) -> String {
+    let trimmed = rel_path.trim();
+    if trimmed.is_empty() || !trimmed.starts_with("prompts/") {
+        return trimmed.to_string();
+    }
+    let suffix = trimmed.trim_start_matches("prompts/");
+    let vendor_name = normalize_prompt_vendor_name(vendor);
+    let vendor_candidate = format!("prompts/vendors/{vendor_name}/{suffix}");
+    if workspace_root.join(&vendor_candidate).is_file() {
+        return vendor_candidate;
+    }
+    let default_candidate = format!("prompts/vendors/default/{suffix}");
+    if vendor_name != "default" && workspace_root.join(&default_candidate).is_file() {
+        return default_candidate;
+    }
+    trimmed.to_string()
+}
+
+fn load_prompt_template_for_vendor(
+    workspace_root: &Path,
+    vendor: &str,
+    rel_path: &str,
+    default_template: &str,
+) -> String {
+    let resolved_path = resolve_prompt_rel_path_for_vendor(workspace_root, vendor, rel_path);
+    match std::fs::read_to_string(workspace_root.join(resolved_path)) {
         Ok(s) if !s.trim().is_empty() => s,
         _ => default_template.to_string(),
     }
@@ -1050,7 +1173,10 @@ mod tests {
     fn parse_vendor_aliases() {
         assert!(matches!(parse_vendor("openai"), Some(VendorKind::OpenAI)));
         assert!(matches!(parse_vendor("gemini"), Some(VendorKind::Google)));
-        assert!(matches!(parse_vendor("claude"), Some(VendorKind::Anthropic)));
+        assert!(matches!(
+            parse_vendor("claude"),
+            Some(VendorKind::Anthropic)
+        ));
         assert!(matches!(parse_vendor("xai"), Some(VendorKind::Grok)));
     }
 
@@ -1065,6 +1191,18 @@ mod tests {
     fn render_prompt_with_hint() {
         let got = render_transcribe_prompt("A __TRANSCRIBE_HINT__ B", "hint");
         assert_eq!(got, "A hint B");
+    }
+
+    #[test]
+    fn select_vendor_keeps_default_minimax() {
+        let got = select_vendor(None, Some("minimax"), Some("qwen"));
+        assert_eq!(got, VendorKind::MiniMax);
+    }
+
+    #[test]
+    fn select_vendor_keeps_explicit_minimax_request() {
+        let got = select_vendor(Some("minimax"), Some("qwen"), Some("openai"));
+        assert_eq!(got, VendorKind::MiniMax);
     }
 
     #[test]

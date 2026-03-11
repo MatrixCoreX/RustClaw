@@ -38,7 +38,7 @@ pub(crate) fn build_providers(config: &AppConfig) -> Vec<Arc<LlmProviderRuntime>
         .iter()
         .filter_map(|p| {
             if let Some(name) = &provider_override {
-                // Accept override by vendor alias (openai/google/anthropic/grok/qwen/custom),
+                // Accept override by vendor alias (openai/google/anthropic/grok/deepseek/qwen/minimax/custom),
                 // provider runtime name (vendor-xxx), or provider type.
                 if !matches_provider_override(&p.name, &p.provider_type, name) {
                     return None;
@@ -169,6 +169,26 @@ fn synthesize_llm_providers(config: &AppConfig) -> Vec<LlmProviderConfig> {
         }
     }
 
+    if let Some(v) = &config.llm.deepseek {
+        if selected_vendor.is_none() || selected_vendor == Some("deepseek") {
+            let model = if selected_vendor == Some("deepseek") {
+                selected_model.unwrap_or(&v.model)
+            } else {
+                &v.model
+            };
+            out.push(LlmProviderConfig {
+                name: "vendor-deepseek".to_string(),
+                provider_type: "openai_compat".to_string(),
+                base_url: v.base_url.clone(),
+                api_key: v.api_key.clone(),
+                model: model.to_string(),
+                priority: 5,
+                timeout_seconds: v.timeout_seconds,
+                max_concurrency: v.max_concurrency,
+            });
+        }
+    }
+
     if let Some(v) = &config.llm.qwen {
         if selected_vendor.is_none() || selected_vendor == Some("qwen") {
             let model = if selected_vendor == Some("qwen") {
@@ -182,7 +202,27 @@ fn synthesize_llm_providers(config: &AppConfig) -> Vec<LlmProviderConfig> {
                 base_url: v.base_url.clone(),
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
-                priority: 5,
+                priority: 6,
+                timeout_seconds: v.timeout_seconds,
+                max_concurrency: v.max_concurrency,
+            });
+        }
+    }
+
+    if let Some(v) = &config.llm.minimax {
+        if selected_vendor.is_none() || selected_vendor == Some("minimax") {
+            let model = if selected_vendor == Some("minimax") {
+                selected_model.unwrap_or(&v.model)
+            } else {
+                &v.model
+            };
+            out.push(LlmProviderConfig {
+                name: "vendor-minimax".to_string(),
+                provider_type: "openai_compat".to_string(),
+                base_url: v.base_url.clone(),
+                api_key: v.api_key.clone(),
+                model: model.to_string(),
+                priority: 7,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
             });
@@ -202,7 +242,7 @@ fn synthesize_llm_providers(config: &AppConfig) -> Vec<LlmProviderConfig> {
                 base_url: v.base_url.clone(),
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
-                priority: 6,
+                priority: 8,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
             });
@@ -229,6 +269,10 @@ pub(crate) fn selected_openai_base_url(state: &AppState) -> String {
     super::selected_openai_base_url(state)
 }
 
+pub(crate) fn selected_openai_model(state: &AppState) -> String {
+    super::selected_openai_model(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::matches_provider_override;
@@ -244,6 +288,11 @@ mod tests {
             "vendor-custom",
             "openai_compat",
             "custom"
+        ));
+        assert!(matches_provider_override(
+            "vendor-minimax",
+            "openai_compat",
+            "minimax"
         ));
         assert!(matches_provider_override(
             "vendor-openai",

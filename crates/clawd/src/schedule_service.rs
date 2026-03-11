@@ -1,7 +1,7 @@
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDateTime, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
-use rusqlite::{Connection, params};
-use serde_json::{Value, json};
+use rusqlite::{params, Connection};
+use serde_json::{json, Value};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -33,7 +33,10 @@ pub(crate) async fn parse_schedule_intent(
     let prompt = crate::render_prompt_template(
         &state.schedule.intent_prompt_template,
         &[
-            ("__NOW__", &now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string()),
+            (
+                "__NOW__",
+                &now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string(),
+            ),
             ("__TIMEZONE__", &state.schedule.timezone),
             ("__RULES__", &state.schedule.intent_rules_template),
             ("__MEMORY_CONTEXT__", &memory_context),
@@ -43,7 +46,7 @@ pub(crate) async fn parse_schedule_intent(
     crate::log_prompt_render(
         &task.task_id,
         "schedule_intent_prompt",
-        "prompts/schedule_intent_prompt.md",
+        &state.schedule.intent_prompt_file,
         None,
     );
 
@@ -51,13 +54,16 @@ pub(crate) async fn parse_schedule_intent(
         state,
         task,
         &prompt,
-        "prompts/schedule_intent_prompt.md",
+        &state.schedule.intent_prompt_file,
     )
     .await
     {
         Ok(v) => v,
         Err(err) => {
-            warn!("parse_schedule_intent llm failed: task_id={} err={err}", task.task_id);
+            warn!(
+                "parse_schedule_intent llm failed: task_id={} err={err}",
+                task.task_id
+            );
             return None;
         }
     };
@@ -74,7 +80,9 @@ pub(crate) async fn parse_schedule_intent(
 }
 
 pub(crate) fn parse_timezone(raw: &str) -> Tz {
-    raw.trim().parse::<Tz>().unwrap_or(chrono_tz::Asia::Shanghai)
+    raw.trim()
+        .parse::<Tz>()
+        .unwrap_or(chrono_tz::Asia::Shanghai)
 }
 
 pub(crate) fn parse_local_datetime(raw: &str, tz: Tz) -> Option<i64> {
@@ -230,7 +238,11 @@ fn schedule_kind_desc(
 fn humanize_next_run_at(next_run_at: i64, timezone: &str) -> String {
     let tz = parse_timezone(timezone);
     chrono::DateTime::<Utc>::from_timestamp(next_run_at, 0)
-        .map(|dt| dt.with_timezone(&tz).format("%Y-%m-%d %H:%M:%S %:z").to_string())
+        .map(|dt| {
+            dt.with_timezone(&tz)
+                .format("%Y-%m-%d %H:%M:%S %:z")
+                .to_string()
+        })
         .unwrap_or_else(|| next_run_at.to_string())
 }
 
@@ -323,7 +335,11 @@ fn extract_crypto_price_alert_profile(payload: &Value) -> Option<CryptoPriceAler
         .to_ascii_lowercase();
     if !matches!(
         action.as_str(),
-        "price_alert_check" | "price_monitor" | "monitor_price" | "price_alert" | "volatility_alert"
+        "price_alert_check"
+            | "price_monitor"
+            | "monitor_price"
+            | "price_alert"
+            | "volatility_alert"
     ) {
         return None;
     }
@@ -425,7 +441,8 @@ fn load_existing_crypto_price_alert_jobs(
             next_run_at,
             task_payload_json,
         ) = row.map_err(|e| e.to_string())?;
-        let payload = serde_json::from_str::<Value>(&task_payload_json).unwrap_or_else(|_| json!({}));
+        let payload =
+            serde_json::from_str::<Value>(&task_payload_json).unwrap_or_else(|_| json!({}));
         let Some(profile) = extract_crypto_price_alert_profile(&payload) else {
             continue;
         };
@@ -503,15 +520,17 @@ pub(crate) async fn try_handle_schedule_request(
                     next_run_at,
                     task_kind,
                     task_payload_json,
-                ) =
-                    row.map_err(|e| e.to_string())?;
-                let desc = schedule_kind_desc(state, &schedule_type, time_of_day, weekday, every_minutes);
+                ) = row.map_err(|e| e.to_string())?;
+                let desc =
+                    schedule_kind_desc(state, &schedule_type, time_of_day, weekday, every_minutes);
                 let status = if enabled == 1 {
                     schedule_t(state, "schedule.status.enabled")
                 } else {
                     schedule_t(state, "schedule.status.paused")
                 };
-                let next = next_run_at.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string());
+                let next = next_run_at
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string());
                 let payload =
                     serde_json::from_str::<Value>(&task_payload_json).unwrap_or_else(|_| json!({}));
                 let task_content = summarize_task_content(&task_kind, &payload, "-");
@@ -648,7 +667,10 @@ pub(crate) async fn try_handle_schedule_request(
             let schedule_type = clean_schedule_kind(&intent.schedule.r#type);
             let task_kind = clean_schedule_kind(&intent.task.kind);
             if !matches!(task_kind.as_str(), "ask" | "run_skill") {
-                return Ok(Some(schedule_t(state, "schedule.msg.create_fail_task_kind")));
+                return Ok(Some(schedule_t(
+                    state,
+                    "schedule.msg.create_fail_task_kind",
+                )));
             }
             if schedule_type == "cron" {
                 if intent.schedule.cron.trim().is_empty() {
@@ -750,7 +772,8 @@ pub(crate) async fn try_handle_schedule_request(
                         .db
                         .lock()
                         .map_err(|_| "db lock poisoned".to_string())?;
-                    let existing_jobs = load_existing_crypto_price_alert_jobs(&db, task.user_id, task.chat_id)?;
+                    let existing_jobs =
+                        load_existing_crypto_price_alert_jobs(&db, task.user_id, task.chat_id)?;
 
                     if let Some(existing) = existing_jobs.iter().find(|v| {
                         v.profile == profile
@@ -780,7 +803,10 @@ pub(crate) async fn try_handle_schedule_request(
                         )));
                     }
 
-                    if let Some(existing) = existing_jobs.iter().find(|v| v.profile.symbol == profile.symbol) {
+                    if let Some(existing) = existing_jobs
+                        .iter()
+                        .find(|v| v.profile.symbol == profile.symbol)
+                    {
                         let updated_at = crate::now_ts();
                         db.execute(
                             "UPDATE scheduled_jobs

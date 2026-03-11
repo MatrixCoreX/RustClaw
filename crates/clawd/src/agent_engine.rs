@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Component, Path};
 use toml::Value as TomlValue;
@@ -7,59 +7,184 @@ use tracing::{info, warn};
 
 use crate::{execution_adapters, llm_gateway, repo, AgentAction, AppState, AskReply, ClaimedTask};
 
-const SKILL_PROMPT_ARCHIVE_BASIC: &str = include_str!("../../../prompts/skills/archive_basic.md");
-const SKILL_PROMPT_AUDIO_SYNTHESIZE: &str = include_str!("../../../prompts/skills/audio_synthesize.md");
-const SKILL_PROMPT_AUDIO_TRANSCRIBE: &str = include_str!("../../../prompts/skills/audio_transcribe.md");
-const SKILL_PROMPT_CONFIG_GUARD: &str = include_str!("../../../prompts/skills/config_guard.md");
-const SKILL_PROMPT_CRYPTO: &str = include_str!("../../../prompts/skills/crypto.md");
-const SKILL_PROMPT_CHAT: &str = include_str!("../../../prompts/skills/chat.md");
-const SKILL_PROMPT_DB_BASIC: &str = include_str!("../../../prompts/skills/db_basic.md");
-const SKILL_PROMPT_DOCKER_BASIC: &str = include_str!("../../../prompts/skills/docker_basic.md");
-const SKILL_PROMPT_FS_SEARCH: &str = include_str!("../../../prompts/skills/fs_search.md");
-const SKILL_PROMPT_GIT_BASIC: &str = include_str!("../../../prompts/skills/git_basic.md");
-const SKILL_PROMPT_HEALTH_CHECK: &str = include_str!("../../../prompts/skills/health_check.md");
-const SKILL_PROMPT_HTTP_BASIC: &str = include_str!("../../../prompts/skills/http_basic.md");
-const SKILL_PROMPT_IMAGE_EDIT: &str = include_str!("../../../prompts/skills/image_edit.md");
-const SKILL_PROMPT_IMAGE_GENERATE: &str = include_str!("../../../prompts/skills/image_generate.md");
-const SKILL_PROMPT_IMAGE_VISION: &str = include_str!("../../../prompts/skills/image_vision.md");
-const SKILL_PROMPT_INSTALL_MODULE: &str = include_str!("../../../prompts/skills/install_module.md");
-const SKILL_PROMPT_LOG_ANALYZE: &str = include_str!("../../../prompts/skills/log_analyze.md");
-const SKILL_PROMPT_PACKAGE_MANAGER: &str = include_str!("../../../prompts/skills/package_manager.md");
-const SKILL_PROMPT_PROCESS_BASIC: &str = include_str!("../../../prompts/skills/process_basic.md");
-const SKILL_PROMPT_RSS_FETCH: &str = include_str!("../../../prompts/skills/rss_fetch.md");
-const SKILL_PROMPT_SERVICE_CONTROL: &str = include_str!("../../../prompts/skills/service_control.md");
-const SKILL_PROMPT_SYSTEM_BASIC: &str = include_str!("../../../prompts/skills/system_basic.md");
-const SKILL_PROMPT_X: &str = include_str!("../../../prompts/skills/x.md");
-const AGENT_TOOL_SPEC_TEMPLATE: &str = include_str!("../../../prompts/agent_tool_spec.md");
+const SKILL_PROMPT_ARCHIVE_BASIC: &str =
+    include_str!("../../../prompts/vendors/default/skills/archive_basic.md");
+const SKILL_PROMPT_AUDIO_SYNTHESIZE: &str =
+    include_str!("../../../prompts/vendors/default/skills/audio_synthesize.md");
+const SKILL_PROMPT_AUDIO_TRANSCRIBE: &str =
+    include_str!("../../../prompts/vendors/default/skills/audio_transcribe.md");
+const SKILL_PROMPT_CONFIG_GUARD: &str =
+    include_str!("../../../prompts/vendors/default/skills/config_guard.md");
+const SKILL_PROMPT_CRYPTO: &str = include_str!("../../../prompts/vendors/default/skills/crypto.md");
+const SKILL_PROMPT_CHAT: &str = include_str!("../../../prompts/vendors/default/skills/chat.md");
+const SKILL_PROMPT_DB_BASIC: &str =
+    include_str!("../../../prompts/vendors/default/skills/db_basic.md");
+const SKILL_PROMPT_DOCKER_BASIC: &str =
+    include_str!("../../../prompts/vendors/default/skills/docker_basic.md");
+const SKILL_PROMPT_FS_SEARCH: &str =
+    include_str!("../../../prompts/vendors/default/skills/fs_search.md");
+const SKILL_PROMPT_GIT_BASIC: &str =
+    include_str!("../../../prompts/vendors/default/skills/git_basic.md");
+const SKILL_PROMPT_HEALTH_CHECK: &str =
+    include_str!("../../../prompts/vendors/default/skills/health_check.md");
+const SKILL_PROMPT_HTTP_BASIC: &str =
+    include_str!("../../../prompts/vendors/default/skills/http_basic.md");
+const SKILL_PROMPT_IMAGE_EDIT: &str =
+    include_str!("../../../prompts/vendors/default/skills/image_edit.md");
+const SKILL_PROMPT_IMAGE_GENERATE: &str =
+    include_str!("../../../prompts/vendors/default/skills/image_generate.md");
+const SKILL_PROMPT_IMAGE_VISION: &str =
+    include_str!("../../../prompts/vendors/default/skills/image_vision.md");
+const SKILL_PROMPT_INSTALL_MODULE: &str =
+    include_str!("../../../prompts/vendors/default/skills/install_module.md");
+const SKILL_PROMPT_LOG_ANALYZE: &str =
+    include_str!("../../../prompts/vendors/default/skills/log_analyze.md");
+const SKILL_PROMPT_PACKAGE_MANAGER: &str =
+    include_str!("../../../prompts/vendors/default/skills/package_manager.md");
+const SKILL_PROMPT_PROCESS_BASIC: &str =
+    include_str!("../../../prompts/vendors/default/skills/process_basic.md");
+const SKILL_PROMPT_RSS_FETCH: &str =
+    include_str!("../../../prompts/vendors/default/skills/rss_fetch.md");
+const SKILL_PROMPT_SERVICE_CONTROL: &str =
+    include_str!("../../../prompts/vendors/default/skills/service_control.md");
+const SKILL_PROMPT_SYSTEM_BASIC: &str =
+    include_str!("../../../prompts/vendors/default/skills/system_basic.md");
+const SKILL_PROMPT_X: &str = include_str!("../../../prompts/vendors/default/skills/x.md");
+// Standalone base skills (A scheme: independent from system_basic)
+const SKILL_PROMPT_RUN_CMD: &str =
+    include_str!("../../../prompts/vendors/default/skills/run_cmd.md");
+const SKILL_PROMPT_READ_FILE: &str =
+    include_str!("../../../prompts/vendors/default/skills/read_file.md");
+const SKILL_PROMPT_WRITE_FILE: &str =
+    include_str!("../../../prompts/vendors/default/skills/write_file.md");
+const SKILL_PROMPT_LIST_DIR: &str =
+    include_str!("../../../prompts/vendors/default/skills/list_dir.md");
+const SKILL_PROMPT_MAKE_DIR: &str =
+    include_str!("../../../prompts/vendors/default/skills/make_dir.md");
+const SKILL_PROMPT_REMOVE_FILE: &str =
+    include_str!("../../../prompts/vendors/default/skills/remove_file.md");
+const AGENT_TOOL_SPEC_TEMPLATE: &str =
+    include_str!("../../../prompts/vendors/default/agent_tool_spec.md");
+const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
 const SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/single_plan_execution_prompt.md");
+    include_str!("../../../prompts/vendors/default/single_plan_execution_prompt.md");
+const SINGLE_PLAN_EXECUTION_PROMPT_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/loop_incremental_plan_prompt.md");
+    include_str!("../../../prompts/vendors/default/loop_incremental_plan_prompt.md");
+const LOOP_INCREMENTAL_PLAN_PROMPT_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
 
-const SKILL_PLAYBOOKS: &[(&str, &str)] = &[
-    ("archive_basic", SKILL_PROMPT_ARCHIVE_BASIC),
-    ("audio_synthesize", SKILL_PROMPT_AUDIO_SYNTHESIZE),
-    ("audio_transcribe", SKILL_PROMPT_AUDIO_TRANSCRIBE),
-    ("config_guard", SKILL_PROMPT_CONFIG_GUARD),
-    ("crypto", SKILL_PROMPT_CRYPTO),
-    ("chat", SKILL_PROMPT_CHAT),
-    ("db_basic", SKILL_PROMPT_DB_BASIC),
-    ("docker_basic", SKILL_PROMPT_DOCKER_BASIC),
-    ("fs_search", SKILL_PROMPT_FS_SEARCH),
-    ("git_basic", SKILL_PROMPT_GIT_BASIC),
-    ("health_check", SKILL_PROMPT_HEALTH_CHECK),
-    ("http_basic", SKILL_PROMPT_HTTP_BASIC),
-    ("image_edit", SKILL_PROMPT_IMAGE_EDIT),
-    ("image_generate", SKILL_PROMPT_IMAGE_GENERATE),
-    ("image_vision", SKILL_PROMPT_IMAGE_VISION),
-    ("install_module", SKILL_PROMPT_INSTALL_MODULE),
-    ("log_analyze", SKILL_PROMPT_LOG_ANALYZE),
-    ("package_manager", SKILL_PROMPT_PACKAGE_MANAGER),
-    ("process_basic", SKILL_PROMPT_PROCESS_BASIC),
-    ("rss_fetch", SKILL_PROMPT_RSS_FETCH),
-    ("service_control", SKILL_PROMPT_SERVICE_CONTROL),
-    ("system_basic", SKILL_PROMPT_SYSTEM_BASIC),
-    ("x", SKILL_PROMPT_X),
+type SkillPlaybookDef = (&'static str, &'static str, &'static str);
+
+const SKILL_PLAYBOOKS: &[SkillPlaybookDef] = &[
+    ("run_cmd", "prompts/skills/run_cmd.md", SKILL_PROMPT_RUN_CMD),
+    ("read_file", "prompts/skills/read_file.md", SKILL_PROMPT_READ_FILE),
+    ("write_file", "prompts/skills/write_file.md", SKILL_PROMPT_WRITE_FILE),
+    ("list_dir", "prompts/skills/list_dir.md", SKILL_PROMPT_LIST_DIR),
+    ("make_dir", "prompts/skills/make_dir.md", SKILL_PROMPT_MAKE_DIR),
+    ("remove_file", "prompts/skills/remove_file.md", SKILL_PROMPT_REMOVE_FILE),
+    (
+        "archive_basic",
+        "prompts/skills/archive_basic.md",
+        SKILL_PROMPT_ARCHIVE_BASIC,
+    ),
+    (
+        "audio_synthesize",
+        "prompts/skills/audio_synthesize.md",
+        SKILL_PROMPT_AUDIO_SYNTHESIZE,
+    ),
+    (
+        "audio_transcribe",
+        "prompts/skills/audio_transcribe.md",
+        SKILL_PROMPT_AUDIO_TRANSCRIBE,
+    ),
+    (
+        "config_guard",
+        "prompts/skills/config_guard.md",
+        SKILL_PROMPT_CONFIG_GUARD,
+    ),
+    ("crypto", "prompts/skills/crypto.md", SKILL_PROMPT_CRYPTO),
+    ("chat", "prompts/skills/chat.md", SKILL_PROMPT_CHAT),
+    (
+        "db_basic",
+        "prompts/skills/db_basic.md",
+        SKILL_PROMPT_DB_BASIC,
+    ),
+    (
+        "docker_basic",
+        "prompts/skills/docker_basic.md",
+        SKILL_PROMPT_DOCKER_BASIC,
+    ),
+    (
+        "fs_search",
+        "prompts/skills/fs_search.md",
+        SKILL_PROMPT_FS_SEARCH,
+    ),
+    (
+        "git_basic",
+        "prompts/skills/git_basic.md",
+        SKILL_PROMPT_GIT_BASIC,
+    ),
+    (
+        "health_check",
+        "prompts/skills/health_check.md",
+        SKILL_PROMPT_HEALTH_CHECK,
+    ),
+    (
+        "http_basic",
+        "prompts/skills/http_basic.md",
+        SKILL_PROMPT_HTTP_BASIC,
+    ),
+    (
+        "image_edit",
+        "prompts/skills/image_edit.md",
+        SKILL_PROMPT_IMAGE_EDIT,
+    ),
+    (
+        "image_generate",
+        "prompts/skills/image_generate.md",
+        SKILL_PROMPT_IMAGE_GENERATE,
+    ),
+    (
+        "image_vision",
+        "prompts/skills/image_vision.md",
+        SKILL_PROMPT_IMAGE_VISION,
+    ),
+    (
+        "install_module",
+        "prompts/skills/install_module.md",
+        SKILL_PROMPT_INSTALL_MODULE,
+    ),
+    (
+        "log_analyze",
+        "prompts/skills/log_analyze.md",
+        SKILL_PROMPT_LOG_ANALYZE,
+    ),
+    (
+        "package_manager",
+        "prompts/skills/package_manager.md",
+        SKILL_PROMPT_PACKAGE_MANAGER,
+    ),
+    (
+        "process_basic",
+        "prompts/skills/process_basic.md",
+        SKILL_PROMPT_PROCESS_BASIC,
+    ),
+    (
+        "rss_fetch",
+        "prompts/skills/rss_fetch.md",
+        SKILL_PROMPT_RSS_FETCH,
+    ),
+    (
+        "service_control",
+        "prompts/skills/service_control.md",
+        SKILL_PROMPT_SERVICE_CONTROL,
+    ),
+    (
+        "system_basic",
+        "prompts/skills/system_basic.md",
+        SKILL_PROMPT_SYSTEM_BASIC,
+    ),
+    ("x", "prompts/skills/x.md", SKILL_PROMPT_X),
 ];
 
 fn load_rss_categories_for_prompt(state: &AppState) -> Vec<String> {
@@ -80,8 +205,8 @@ fn load_rss_categories_for_prompt(state: &AppState) -> Vec<String> {
     out
 }
 
-fn build_rss_skill_prompt_with_categories(state: &AppState) -> String {
-    let base = SKILL_PROMPT_RSS_FETCH.trim();
+fn build_rss_skill_prompt_with_categories(state: &AppState, base_prompt: &str) -> String {
+    let base = base_prompt.trim();
     let categories = load_rss_categories_for_prompt(state);
     if categories.is_empty() {
         return base.to_string();
@@ -94,8 +219,11 @@ fn build_rss_skill_prompt_with_categories(state: &AppState) -> String {
 
 fn build_skill_playbooks_text(state: &AppState) -> String {
     let mut sections = Vec::new();
-    for (skill, body) in SKILL_PLAYBOOKS {
-        let is_enabled = state.skills_list.contains(crate::canonical_skill_name(skill));
+    for (skill, prompt_path, body) in SKILL_PLAYBOOKS {
+        let is_enabled = state
+            .skills_list
+            .contains(crate::canonical_skill_name(skill));
+        let prompt_body = crate::load_prompt_template_for_state(state, prompt_path, body).0;
         let content = if !is_enabled {
             let disabled_text = crate::i18n_t_with_default(
                 state,
@@ -107,9 +235,9 @@ fn build_skill_playbooks_text(state: &AppState) -> String {
                 "Status: disabled.\n\nIf user intent requires this skill, do NOT call this skill.\nReturn `{{\"type\":\"respond\",\"content\":\"{disabled_text}\"}}`."
             )
         } else if *skill == "rss_fetch" {
-            build_rss_skill_prompt_with_categories(state)
+            build_rss_skill_prompt_with_categories(state, &prompt_body)
         } else {
-            body.to_string()
+            prompt_body
         };
         let trimmed = content.trim();
         if trimmed.is_empty() {
@@ -197,7 +325,8 @@ fn publish_progress_messages(state: &AppState, task: &ClaimedTask, delivery_mess
     let payload = json!({
         "progress_messages": delivery_messages,
     });
-    if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string()) {
+    if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
+    {
         warn!(
             "run_agent_with_tools: task_id={} publish progress failed: {}",
             task.task_id, err
@@ -222,13 +351,14 @@ struct SinglePlanEnvelope {
 }
 
 fn build_single_plan_prompt(
+    prompt_template: &str,
     user_request: &str,
     goal: &str,
     tool_spec: &str,
     skill_playbooks: &str,
 ) -> String {
     crate::render_prompt_template(
-        SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE,
+        prompt_template,
         &[
             ("__USER_REQUEST__", user_request),
             ("__GOAL__", goal),
@@ -239,6 +369,7 @@ fn build_single_plan_prompt(
 }
 
 fn build_incremental_plan_prompt(
+    prompt_template: &str,
     user_request: &str,
     goal: &str,
     tool_spec: &str,
@@ -248,7 +379,7 @@ fn build_incremental_plan_prompt(
     last_round_output: &str,
 ) -> String {
     crate::render_prompt_template(
-        LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE,
+        prompt_template,
         &[
             ("__USER_REQUEST__", user_request),
             ("__GOAL__", goal),
@@ -261,8 +392,57 @@ fn build_incremental_plan_prompt(
     )
 }
 
+fn is_meta_respond_instruction(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let starts_with_meta = [
+        "请基于",
+        "基于",
+        "根据上述",
+        "根据上面的输出",
+        "请根据",
+        "based on the",
+        "please analyze",
+        "please explain",
+        "use the above output",
+    ]
+    .iter()
+    .any(|marker| {
+        if marker.is_ascii() {
+            lower.starts_with(marker)
+        } else {
+            trimmed.starts_with(marker)
+        }
+    });
+    let has_instruction_phrases = [
+        "请考虑以下因素",
+        "不需要询问",
+        "请查看上述",
+        "重点关注",
+        "如果需要我",
+        "判断标准",
+        "without seeing the actual output",
+        "please run the command first",
+        "please provide",
+        "do not ask",
+        "consider the following factors",
+    ]
+    .iter()
+    .any(|marker| {
+        if marker.is_ascii() {
+            lower.contains(marker)
+        } else {
+            trimmed.contains(marker)
+        }
+    });
+    starts_with_meta || has_instruction_phrases
+}
+
 fn parse_single_plan_actions(raw: &str) -> Option<Vec<AgentAction>> {
-    let value = crate::parse_llm_json_extract_then_raw::<Value>(raw)?;
+    let value = crate::parse_llm_json_raw_or_any::<Value>(raw)?;
     let env = serde_json::from_value::<SinglePlanEnvelope>(value).ok()?;
     if env.steps.is_empty() {
         return None;
@@ -274,10 +454,16 @@ fn parse_single_plan_actions(raw: &str) -> Option<Vec<AgentAction>> {
         let action = serde_json::from_value::<AgentAction>(normalized).ok()?;
         match action {
             AgentAction::Think { .. } => {}
+            AgentAction::Respond { content }
+                if !actions.is_empty() && is_meta_respond_instruction(&content) => {}
             _ => actions.push(action),
         }
     }
-    if actions.is_empty() { None } else { Some(actions) }
+    if actions.is_empty() {
+        None
+    } else {
+        Some(actions)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -320,12 +506,13 @@ struct RoundOutcome {
 
 fn action_fingerprint(action: &AgentAction) -> String {
     match action {
+        // LEGACY: CallTool normalized to skill view so capability/fingerprint is unified.
         AgentAction::CallTool { tool, args } => {
-            let tool_name = tool.trim().to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(&tool_name, args);
+            let skill_name = tool.trim().to_ascii_lowercase();
+            let normalized_args = normalize_args_for_fingerprint(&skill_name, args);
             format!(
-                "tool:{}:{}",
-                tool_name,
+                "skill:{}:{}",
+                skill_name,
                 canonical_json_string(&normalized_args)
             )
         }
@@ -510,7 +697,11 @@ fn register_step_output(
         .insert(format!("{key_prefix}.last_output"), value);
 }
 
-fn remember_written_file_alias(loop_state: &mut LoopState, original_path: &str, effective_path: &str) {
+fn remember_written_file_alias(
+    loop_state: &mut LoopState,
+    original_path: &str,
+    effective_path: &str,
+) {
     let original = original_path.trim();
     let effective = effective_path.trim();
     if original.is_empty() || effective.is_empty() || original == effective {
@@ -590,9 +781,10 @@ fn register_failed_step_output(
             .output_vars
             .insert(format!("{key_prefix}.error"), trimmed.to_string());
     }
-    loop_state
-        .output_vars
-        .insert("failed_step.action".to_string(), failed_action.trim().to_string());
+    loop_state.output_vars.insert(
+        "failed_step.action".to_string(),
+        failed_action.trim().to_string(),
+    );
     loop_state
         .output_vars
         .insert("failed_step.index".to_string(), round_step.to_string());
@@ -636,7 +828,11 @@ fn rewrite_response_with_written_aliases(text: &str, loop_state: &LoopState) -> 
     out
 }
 
-fn has_remaining_action_after(actions: &[AgentAction], current_idx: usize, max_steps: usize) -> bool {
+fn has_remaining_action_after(
+    actions: &[AgentAction],
+    current_idx: usize,
+    max_steps: usize,
+) -> bool {
     actions
         .iter()
         .take(max_steps.max(1))
@@ -692,14 +888,14 @@ fn rewrite_run_cmd_with_written_aliases(command: &str, loop_state: &LoopState) -
         })
         .collect::<Vec<_>>()
         .join(" ");
-    if changed { rewritten } else { command.to_string() }
+    if changed {
+        rewritten
+    } else {
+        command.to_string()
+    }
 }
 
-fn rewrite_tool_path_with_written_aliases(
-    tool: &str,
-    args: &mut Value,
-    loop_state: &LoopState,
-) {
+fn rewrite_tool_path_with_written_aliases(tool: &str, args: &mut Value, loop_state: &LoopState) {
     if !matches!(tool, "read_file" | "remove_file") || loop_state.written_file_aliases.is_empty() {
         return;
     }
@@ -801,7 +997,7 @@ fn single_brace_key(input: &str) -> Option<&str> {
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
     {
         Some(trimmed)
-                } else {
+    } else {
         None
     }
 }
@@ -872,11 +1068,27 @@ async fn plan_round_actions(
     loop_state: &LoopState,
 ) -> Result<Vec<AgentAction>, String> {
     let skill_playbooks = build_skill_playbooks_text(state);
+    let (tool_spec_template, _) = crate::load_prompt_template_for_state(
+        state,
+        AGENT_TOOL_SPEC_PATH,
+        AGENT_TOOL_SPEC_TEMPLATE,
+    );
     let (prompt_name, prompt_file, prompt_text) = if loop_state.round_no <= 1 {
+        let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+            state,
+            SINGLE_PLAN_EXECUTION_PROMPT_PATH,
+            SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE,
+        );
         (
             "single_plan_execution_prompt",
-            "prompts/single_plan_execution_prompt.md",
-            build_single_plan_prompt(user_text, goal, AGENT_TOOL_SPEC_TEMPLATE, &skill_playbooks),
+            prompt_file,
+            build_single_plan_prompt(
+                &prompt_template,
+                user_text,
+                goal,
+                &tool_spec_template,
+                &skill_playbooks,
+            ),
         )
     } else {
         let history_compact = build_loop_history_compact(loop_state);
@@ -885,13 +1097,19 @@ async fn plan_round_actions(
             .last()
             .cloned()
             .unwrap_or_else(|| "(none)".to_string());
+        let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+            state,
+            LOOP_INCREMENTAL_PLAN_PROMPT_PATH,
+            LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE,
+        );
         (
             "loop_incremental_plan_prompt",
-            "prompts/loop_incremental_plan_prompt.md",
+            prompt_file,
             build_incremental_plan_prompt(
+                &prompt_template,
                 user_text,
                 goal,
-                AGENT_TOOL_SPEC_TEMPLATE,
+                &tool_spec_template,
                 &skill_playbooks,
                 loop_state.round_no,
                 &history_compact,
@@ -899,7 +1117,12 @@ async fn plan_round_actions(
             ),
         )
     };
-    crate::log_prompt_render(&task.task_id, prompt_name, prompt_file, Some(loop_state.round_no));
+    crate::log_prompt_render(
+        &task.task_id,
+        prompt_name,
+        &prompt_file,
+        Some(loop_state.round_no),
+    );
     info!(
         "{} loop_round_plan task_id={} round={} max_rounds={} max_steps={} multi_round_enabled={}",
         crate::highlight_tag("loop"),
@@ -916,7 +1139,7 @@ async fn plan_round_actions(
         crate::truncate_for_log(user_text)
     );
     let plan_raw =
-        llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt_text, prompt_file)
+        llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt_text, &prompt_file)
             .await?;
     info!(
         "plan_llm_response task_id={} round={} raw={}",
@@ -934,107 +1157,6 @@ async fn plan_round_actions(
         serde_json::to_string(&labels).unwrap_or_else(|_| "[]".to_string())
     );
     Ok(plan_actions)
-}
-
-fn compact_plan_preview_text(text: &str, max_chars: usize) -> String {
-    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if compact.chars().count() <= max_chars {
-        return compact;
-    }
-    let truncated = compact
-        .chars()
-        .take(max_chars.saturating_sub(1))
-        .collect::<String>();
-    format!("{truncated}...")
-}
-
-fn first_string_arg<'a>(args: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    let obj = args.as_object()?;
-    for key in keys {
-        if let Some(value) = obj.get(*key).and_then(|v| v.as_str()) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed);
-            }
-        }
-    }
-    None
-}
-
-fn action_plan_preview_line(index: usize, action: &AgentAction) -> String {
-    let detail = match action {
-        AgentAction::CallTool { tool, args } => {
-            let lower = tool.trim().to_ascii_lowercase();
-            match lower.as_str() {
-                "run_cmd" => first_string_arg(args, &["command"])
-                    .map(|v| format!("执行命令 `{}`", compact_plan_preview_text(v, 96)))
-                    .unwrap_or_else(|| "执行命令".to_string()),
-                "read_file" => first_string_arg(args, &["path"])
-                    .map(|v| format!("读取文件 `{}`", compact_plan_preview_text(v, 96)))
-                    .unwrap_or_else(|| "读取文件".to_string()),
-                "write_file" => first_string_arg(args, &["path"])
-                    .map(|v| format!("写入文件 `{}`", compact_plan_preview_text(v, 96)))
-                    .unwrap_or_else(|| "写入文件".to_string()),
-                "list_files" | "search_files" | "glob_search" => {
-                    first_string_arg(args, &["path", "pattern", "query"])
-                        .map(|v| format!("搜索/查看 `{}`", compact_plan_preview_text(v, 96)))
-                        .unwrap_or_else(|| format!("调用工具 `{tool}`"))
-                }
-                _ => first_string_arg(args, &["path", "url", "query", "command"])
-                    .map(|v| format!("调用工具 `{tool}` 处理 `{}`", compact_plan_preview_text(v, 96)))
-                    .unwrap_or_else(|| format!("调用工具 `{tool}`")),
-            }
-        }
-        AgentAction::CallSkill { skill, args } => {
-            let action_name = first_string_arg(args, &["action"]);
-            let target = first_string_arg(args, &["path", "url", "symbol", "query", "text"]);
-            match (action_name, target) {
-                (Some(action_name), Some(target)) => format!(
-                    "调用技能 `{skill}` 执行 `{}`，目标是 `{}`",
-                    compact_plan_preview_text(action_name, 48),
-                    compact_plan_preview_text(target, 72)
-                ),
-                (Some(action_name), None) => format!(
-                    "调用技能 `{skill}` 执行 `{}`",
-                    compact_plan_preview_text(action_name, 48)
-                ),
-                (None, Some(target)) => format!(
-                    "调用技能 `{skill}` 处理 `{}`",
-                    compact_plan_preview_text(target, 72)
-                ),
-                (None, None) => format!("调用技能 `{skill}`"),
-            }
-        }
-        AgentAction::Respond { content } => {
-            let trimmed = content.trim();
-            if trimmed.is_empty() {
-                "回复结果".to_string()
-            } else {
-                format!("回复结果：{}", compact_plan_preview_text(trimmed, 96))
-            }
-        }
-        AgentAction::Think { .. } => "内部思考".to_string(),
-    };
-    format!("{index}. {detail}")
-}
-
-fn build_plan_preview_message(actions: &[AgentAction]) -> Option<String> {
-    let actionable = actions
-        .iter()
-        .filter(|action| !matches!(action, AgentAction::Think { .. }))
-        .collect::<Vec<_>>();
-    if actionable.len() < 2 {
-        return None;
-    }
-    let lines = actionable
-        .iter()
-        .enumerate()
-        .map(|(idx, action)| action_plan_preview_line(idx + 1, action))
-        .collect::<Vec<_>>();
-    Some(format!(
-        "已拆分任务，接下来按这个顺序执行：\n{}",
-        lines.join("\n")
-    ))
 }
 
 fn is_numbered_subtask_summary(text: &str) -> bool {
@@ -1056,7 +1178,10 @@ fn is_numbered_subtask_summary(text: &str) -> bool {
             format!("{no}："),
             format!("{no}:"),
         ];
-        if numbered_prefixes.iter().any(|prefix| line.starts_with(prefix)) {
+        if numbered_prefixes
+            .iter()
+            .any(|prefix| line.starts_with(prefix))
+        {
             matched += 1;
         }
     }
@@ -1186,7 +1311,9 @@ async fn execute_actions_once(
                 step_in_round,
                 format!(
                     "repeat action guard triggered: count={} limit={} action={}",
-                    *repeat_count, policy.repeat_action_limit, crate::truncate_for_log(&fingerprint)
+                    *repeat_count,
+                    policy.repeat_action_limit,
+                    crate::truncate_for_log(&fingerprint)
                 )
             );
             break;
@@ -1201,160 +1328,26 @@ async fn execute_actions_once(
             plan_step_label(action)
         );
         loop_state.last_actions_fingerprint = Some(fingerprint.clone());
+        // Main path: CallSkill (planner outputs only call_skill). CallTool is legacy fallback for parsed old input only.
         match action {
+            // LEGACY COMPATIBILITY: CallTool only from old plans/history; normalizer now outputs call_skill only. Same dispatch as CallSkill (run_skill).
             AgentAction::CallTool { tool, args } => {
                 let mut resolved_args = resolve_arg_value(args, loop_state);
-                let normalized_tool = crate::canonical_skill_name(tool).to_string();
-                let mistaken_tool_is_skill =
-                    !crate::is_builtin_tool_name(tool)
-                        && state.configured_skills.contains(&normalized_tool);
-                if mistaken_tool_is_skill {
-                    info!(
-                        "executor_step_reroute task_id={} round={} step={} from=call_tool tool={} to=call_skill skill={}",
-                        task.task_id,
-                        loop_state.round_no,
-                        step_in_round,
-                        tool,
-                        normalized_tool
+                let normalized_skill = crate::canonical_skill_name(tool).to_string();
+                if normalized_skill == "chat" {
+                    attach_recent_execution_context_to_chat_args(
+                        &mut resolved_args,
+                        loop_state,
                     );
-                    loop_state.tool_calls_total += 1;
-                    let crypto_action = if normalized_tool == "crypto" {
-                        resolved_args
-                            .get("action")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_string)
-                    } else {
-                        None
-                    };
-                    if crypto_action.as_deref() == Some("trade_submit") {
-                        info!(
-                            "executor_skill_blocked task_id={} round={} step={} skill=crypto action=trade_submit: agent cannot submit directly; awaiting user confirmation",
-                            task.task_id, loop_state.round_no, step_in_round
-                        );
-                        stop_signal = Some("trade_submit_blocked".to_string());
-                        break;
-                    }
-                    if normalized_tool == "chat" {
-                        attach_recent_execution_context_to_chat_args(&mut resolved_args, loop_state);
-                    }
-                    info!(
-                        "{} executor_step_execute task_id={} round={} step={} type=call_skill(rerouted) skill={} args={}",
-                        crate::highlight_tag("skill"),
-                        task.task_id,
-                        loop_state.round_no,
-                        step_in_round,
-                        normalized_tool,
-                        crate::truncate_for_log(&resolved_args.to_string())
-                    );
-                    match execution_adapters::run_skill(state, task, &normalized_tool, resolved_args)
-                        .await
-                    {
-                        Ok(out) => {
-                            crate::append_subtask_result(
-                                &mut loop_state.subtask_results,
-                                global_step,
-                                &format!("skill({normalized_tool})"),
-                                true,
-                                &out,
-                            );
-                            if !out.trim().is_empty() {
-                                loop_state.has_tool_or_skill_output = true;
-                                ended_with_user_visible_output = true;
-                                append_and_publish_progress_message(
-                                    state,
-                                    task,
-                                    &mut loop_state.delivery_messages,
-                                    out.clone(),
-                                );
-                            }
-                            register_step_output(
-                                loop_state,
-                                global_step,
-                                step_in_round,
-                                &format!("skill.{normalized_tool}"),
-                                &out,
-                            );
-                            *loop_state
-                                .successful_action_fingerprints
-                                .entry(fingerprint.clone())
-                                .or_insert(0) += 1;
-                            info!(
-                                "executor_result_ok task_id={} round={} step={} type=call_skill(rerouted) output={}",
-                                task.task_id,
-                                loop_state.round_no,
-                                step_in_round,
-                                crate::truncate_for_log(&out)
-                            );
-                            loop_state.history_compact.push(format!(
-                                "round={} step={} skill={} ok",
-                                loop_state.round_no, step_in_round, normalized_tool
-                            ));
-                            if crypto_action.as_deref() == Some("trade_preview") {
-                                executed_actions += 1;
-                                loop_state.total_steps_executed += 1;
-                                stop_signal =
-                                    Some("trade_preview_awaiting_confirmation".to_string());
-                                break;
-                            }
-                        }
-                        Err(err) => {
-                            crate::append_subtask_result(
-                                &mut loop_state.subtask_results,
-                                global_step,
-                                &format!("skill({normalized_tool})"),
-                                false,
-                                &err,
-                            );
-                            info!(
-                                "executor_result_error task_id={} round={} step={} type=call_skill(rerouted) error={}",
-                                task.task_id,
-                                loop_state.round_no,
-                                step_in_round,
-                                crate::truncate_for_log(&err)
-                            );
-                            if remaining_actions_are_discussion_only(
-                                actions,
-                                idx,
-                                policy.max_steps,
-                            ) {
-                                register_failed_step_output(
-                                    loop_state,
-                                    global_step,
-                                    step_in_round,
-                                    &format!("skill.{normalized_tool}"),
-                                    &format!("skill({normalized_tool})"),
-                                    &err,
-                                );
-                                loop_state.history_compact.push(format!(
-                                    "round={} step={} skill={} failed error={}",
-                                    loop_state.round_no,
-                                    step_in_round,
-                                    normalized_tool,
-                                    crate::truncate_for_agent_trace(&err)
-                                ));
-                                executed_actions += 1;
-                                loop_state.total_steps_executed += 1;
-                                stop_signal = Some("recoverable_failure_continue_round".to_string());
-                                break;
-                            }
-                            let resume_err = build_resume_context_error(
-                                actions,
-                                &round_steps,
-                                user_text,
-                                goal,
-                                &loop_state.subtask_results,
-                                &loop_state.delivery_messages,
-                                step_in_round,
-                                &format!("skill({normalized_tool})"),
-                                &err,
-                            );
-                            return Err(resume_err);
-                        }
-                    }
-                    executed_actions += 1;
-                    loop_state.total_steps_executed += 1;
-                    continue;
                 }
+                let crypto_action = if normalized_skill == "crypto" {
+                    resolved_args
+                        .get("action")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                } else {
+                    None
+                };
                 let write_file_effective_path = if tool == "write_file" {
                     resolved_args
                         .get("path")
@@ -1375,7 +1368,8 @@ async fn execute_actions_once(
                 if tool == "run_cmd" {
                     if let Some(obj) = resolved_args.as_object_mut() {
                         if let Some(command) = obj.get("command").and_then(|v| v.as_str()) {
-                            let rewritten = rewrite_run_cmd_with_written_aliases(command, loop_state);
+                            let rewritten =
+                                rewrite_run_cmd_with_written_aliases(command, loop_state);
                             if rewritten != command {
                                 obj.insert("command".to_string(), Value::String(rewritten));
                             }
@@ -1385,15 +1379,22 @@ async fn execute_actions_once(
                 rewrite_tool_path_with_written_aliases(tool, &mut resolved_args, loop_state);
                 loop_state.tool_calls_total += 1;
                 info!(
-                    "{} executor_step_execute task_id={} round={} step={} type=call_tool tool={} args={}",
-                    crate::highlight_tag("tool"),
+                    "{} executor_step_execute task_id={} round={} step={} type=call_skill(legacy_tool) skill={} args={}",
+                    crate::highlight_tag("skill"),
                     task.task_id,
                     loop_state.round_no,
                     step_in_round,
-                    tool,
+                    normalized_skill,
                     crate::truncate_for_log(&resolved_args.to_string())
                 );
-                match execution_adapters::run_tool(state, tool, &resolved_args).await {
+                match execution_adapters::run_skill(
+                    state,
+                    task,
+                    &normalized_skill,
+                    resolved_args.clone(),
+                )
+                .await
+                {
                     Ok(out) => {
                         if let Some((original_path, _effective_path, user_visible_path)) =
                             &write_file_effective_path
@@ -1407,16 +1408,18 @@ async fn execute_actions_once(
                                 loop_state,
                                 global_step,
                                 step_in_round,
-                                &format!("tool.{tool}"),
+                                &format!("skill.{normalized_skill}"),
                                 user_visible_path,
                             );
                         } else if tool == "read_file" {
-                            if let Some(path) = resolved_args.get("path").and_then(|v| v.as_str()) {
+                            if let Some(path) =
+                                resolved_args.get("path").and_then(|v| v.as_str())
+                            {
                                 register_file_path_output(
                                     loop_state,
                                     global_step,
                                     step_in_round,
-                                    &format!("tool.{tool}"),
+                                    &format!("skill.{normalized_skill}"),
                                     path,
                                 );
                             }
@@ -1424,15 +1427,16 @@ async fn execute_actions_once(
                         crate::append_subtask_result(
                             &mut loop_state.subtask_results,
                             global_step,
-                            &format!("tool({tool})"),
+                            &format!("skill({normalized_skill})"),
                             true,
                             &out,
                         );
                         if !out.trim().is_empty() {
                             loop_state.has_tool_or_skill_output = true;
+                            ended_with_user_visible_output = true;
                             append_and_publish_progress_message(
-                        state,
-                        task,
+                                state,
+                                task,
                                 &mut loop_state.delivery_messages,
                                 out.clone(),
                             );
@@ -1441,7 +1445,7 @@ async fn execute_actions_once(
                             loop_state,
                             global_step,
                             step_in_round,
-                            &format!("tool.{tool}"),
+                            &format!("skill.{normalized_skill}"),
                             &out,
                         );
                         *loop_state
@@ -1449,51 +1453,60 @@ async fn execute_actions_once(
                             .entry(fingerprint.clone())
                             .or_insert(0) += 1;
                         info!(
-                            "executor_result_ok task_id={} round={} step={} type=call_tool output={}",
+                            "executor_result_ok task_id={} round={} step={} type=call_skill(legacy_tool) output={}",
                             task.task_id,
                             loop_state.round_no,
                             step_in_round,
                             crate::truncate_for_log(&out)
                         );
                         loop_state.history_compact.push(format!(
-                            "round={} step={} tool={} ok",
-                            loop_state.round_no, step_in_round, tool
+                            "round={} step={} skill={} ok",
+                            loop_state.round_no, step_in_round, normalized_skill
                         ));
+                        if crypto_action.as_deref() == Some("trade_preview") {
+                            executed_actions += 1;
+                            loop_state.total_steps_executed += 1;
+                            stop_signal =
+                                Some("trade_preview_awaiting_confirmation".to_string());
+                            break;
+                        }
                     }
                     Err(err) => {
                         crate::append_subtask_result(
                             &mut loop_state.subtask_results,
                             global_step,
-                            &format!("tool({tool})"),
+                            &format!("skill({normalized_skill})"),
                             false,
                             &err,
                         );
                         info!(
-                            "executor_result_error task_id={} round={} step={} type=call_tool error={}",
+                            "executor_result_error task_id={} round={} step={} type=call_skill(legacy_tool) error={}",
                             task.task_id,
                             loop_state.round_no,
                             step_in_round,
                             crate::truncate_for_log(&err)
                         );
-                        if remaining_actions_are_discussion_only(actions, idx, policy.max_steps) {
+                        if remaining_actions_are_discussion_only(actions, idx, policy.max_steps)
+                        {
                             register_failed_step_output(
                                 loop_state,
                                 global_step,
                                 step_in_round,
-                                &format!("tool.{tool}"),
-                                &format!("tool({tool})"),
+                                &format!("skill.{normalized_skill}"),
+                                &format!("skill({normalized_skill})"),
                                 &err,
                             );
                             loop_state.history_compact.push(format!(
-                                "round={} step={} tool={} failed error={}",
+                                "round={} step={} skill={} failed error={}",
                                 loop_state.round_no,
                                 step_in_round,
-                                tool,
+                                normalized_skill,
                                 crate::truncate_for_agent_trace(&err)
                             ));
                             executed_actions += 1;
                             loop_state.total_steps_executed += 1;
-                            stop_signal = Some("recoverable_failure_continue_round".to_string());
+                            stop_signal =
+                                Some("recoverable_failure_continue_round".to_string());
                             break;
                         }
                         let resume_err = build_resume_context_error(
@@ -1504,7 +1517,7 @@ async fn execute_actions_once(
                             &loop_state.subtask_results,
                             &loop_state.delivery_messages,
                             step_in_round,
-                            &format!("tool({tool})"),
+                            &format!("skill({normalized_skill})"),
                             &err,
                         );
                         return Err(resume_err);
@@ -1518,24 +1531,16 @@ async fn execute_actions_once(
                 if normalized_skill == "chat" {
                     attach_recent_execution_context_to_chat_args(&mut resolved_args, loop_state);
                 }
-                // Capture action name before resolved_args is moved into run_skill.
+                // Capture action name before resolved_args is moved into run_skill (e.g. for trade_preview stop).
                 let crypto_action = if normalized_skill == "crypto" {
-                    resolved_args.get("action").and_then(|v| v.as_str()).map(str::to_string)
+                    resolved_args
+                        .get("action")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
                 } else {
                     None
                 };
-                // Hard block: crypto/trade_submit must not be executed within an agent turn.
-                // Actual order submission is gated behind the user confirmation flow
-                // (hard_trade_confirm_route) triggered by explicit button click or Y/YES reply.
-                // This mirrors the run_skill-kind guard in main.rs.
-                if crypto_action.as_deref() == Some("trade_submit") {
-                    info!(
-                        "executor_skill_blocked task_id={} round={} step={} skill=crypto action=trade_submit: agent cannot submit directly; awaiting user confirmation",
-                        task.task_id, loop_state.round_no, step_in_round
-                    );
-                    stop_signal = Some("trade_submit_blocked".to_string());
-                    break;
-                }
+                // Whether to require user confirmation before trade_submit is decided by the planner; no hard block here.
                 info!(
                     "{} executor_step_execute task_id={} round={} step={} type=call_skill skill={} args={}",
                     crate::highlight_tag("skill"),
@@ -1549,19 +1554,19 @@ async fn execute_actions_once(
                     .await
                 {
                     Ok(out) => {
-                crate::append_subtask_result(
+                        crate::append_subtask_result(
                             &mut loop_state.subtask_results,
                             global_step,
                             &format!("skill({normalized_skill})"),
-                    true,
+                            true,
                             &out,
                         );
                         if !out.trim().is_empty() {
                             loop_state.has_tool_or_skill_output = true;
                             ended_with_user_visible_output = true;
-                    append_and_publish_progress_message(
-                        state,
-                        task,
+                            append_and_publish_progress_message(
+                                state,
+                                task,
                                 &mut loop_state.delivery_messages,
                                 out.clone(),
                             );
@@ -1651,8 +1656,8 @@ async fn execute_actions_once(
                         ended_with_user_visible_output = !text.is_empty();
                     }
                     append_and_publish_progress_message(
-                    state,
-                    task,
+                        state,
+                        task,
                         &mut loop_state.delivery_messages,
                         text.clone(),
                     );
@@ -1677,14 +1682,16 @@ async fn execute_actions_once(
                     step_in_round,
                     crate::truncate_for_log(&text)
                 );
-                loop_state
-                    .history_compact
-                    .push(format!(
-                        "round={} step={} respond{}",
-                        loop_state.round_no,
-                        step_in_round,
-                        if has_remaining_actions { "_intermediate" } else { "" }
-                    ));
+                loop_state.history_compact.push(format!(
+                    "round={} step={} respond{}",
+                    loop_state.round_no,
+                    step_in_round,
+                    if has_remaining_actions {
+                        "_intermediate"
+                    } else {
+                        ""
+                    }
+                ));
                 executed_actions += 1;
                 loop_state.total_steps_executed += 1;
                 if !has_remaining_actions {
@@ -1713,6 +1720,40 @@ async fn execute_actions_once(
         next_goal_hint,
         no_progress,
     })
+}
+
+fn should_synthesize_final_response(loop_state: &LoopState) -> bool {
+    loop_state.has_tool_or_skill_output
+        && !loop_state.delivery_messages.is_empty()
+        && !loop_state
+            .history_compact
+            .last()
+            .is_some_and(|entry| entry.contains(" respond"))
+}
+
+async fn synthesize_final_response(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &LoopState,
+) -> Result<Option<String>, String> {
+    if !should_synthesize_final_response(loop_state) {
+        return Ok(None);
+    }
+    let mut args = json!({
+        "text": format!(
+            "Original user request:\n{}\n\nWrite the final user-facing answer now. Use the recent execution context above. Complete any still-pending lightweight conclusion requested by the user, but do not invent unseen files, paths, lines, or command results. Keep the reply concise and direct.",
+            user_text
+        )
+    });
+    attach_recent_execution_context_to_chat_args(&mut args, loop_state);
+    let out = execution_adapters::run_skill(state, task, "chat", args).await?;
+    let trimmed = out.trim().to_string();
+    if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed))
+    }
 }
 
 fn evaluate_round_outcome(
@@ -1802,21 +1843,19 @@ async fn run_agent_with_loop(
             loop_state.total_steps_executed,
             loop_state.tool_calls_total
         );
-        let actions = plan_round_actions(state, task, goal, user_text, &policy, &loop_state).await?;
-        if round == 1 && loop_state.delivery_messages.is_empty() {
-            if let Some(preview) = build_plan_preview_message(&actions) {
-                append_and_publish_progress_message(
-                    state,
-                    task,
-                    &mut loop_state.delivery_messages,
-                    preview,
-                );
-            }
-        }
-        let outcome =
-            execute_actions_once(state, task, goal, user_text, &actions, &mut loop_state, &policy)
-                .await?;
-    info!(
+        let actions =
+            plan_round_actions(state, task, goal, user_text, &policy, &loop_state).await?;
+        let outcome = execute_actions_once(
+            state,
+            task,
+            goal,
+            user_text,
+            &actions,
+            &mut loop_state,
+            &policy,
+        )
+        .await?;
+        info!(
             "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
             task.task_id,
             round,
@@ -1828,6 +1867,33 @@ async fn run_agent_with_loop(
         if evaluate_round_outcome(task, &mut loop_state, &policy, &outcome) {
             break;
         }
+    }
+
+    if let Some(synthesized) =
+        synthesize_final_response(state, task, user_text, &loop_state).await?
+    {
+        if loop_state
+            .delivery_messages
+            .last()
+            .is_none_or(|last| last.trim() != synthesized.trim())
+        {
+            append_and_publish_progress_message(
+                state,
+                task,
+                &mut loop_state.delivery_messages,
+                synthesized.clone(),
+            );
+        }
+        crate::append_subtask_result(
+            &mut loop_state.subtask_results,
+            loop_state.total_steps_executed + 1,
+            "respond(finalize)",
+            true,
+            &synthesized,
+        );
+        loop_state
+            .history_compact
+            .push("finalize respond".to_string());
     }
 
     let final_text = loop_state
@@ -1855,13 +1921,14 @@ async fn run_agent_with_loop(
 
 fn plan_step_label(action: &AgentAction) -> String {
     match action {
-        AgentAction::CallTool { tool, .. } => format!("tool:{tool}"),
+        // LEGACY: CallTool shown as skill for unified capability view.
+        AgentAction::CallTool { tool, .. } => format!("skill:{tool}"),
         AgentAction::CallSkill { skill, .. } => format!("skill:{skill}"),
         AgentAction::Respond { content } => {
             let trimmed = content.trim();
             if trimmed.is_empty() {
                 "respond".to_string()
-    } else {
+            } else {
                 format!("respond:{}", crate::truncate_for_agent_trace(trimmed))
             }
         }
@@ -1960,6 +2027,4 @@ pub(crate) async fn run_agent_with_tools(
         return run_agent_with_loop(state, task, goal, user_text).await;
     }
     return Ok(AskReply::non_llm(String::new()));
-
-    
 }

@@ -79,6 +79,7 @@ struct CryptoConfig {
     #[serde(default)]
     execution_mode: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)] // kept for config compatibility; confirmation is now planner-decided
     require_explicit_send: Option<bool>,
     #[serde(default)]
     max_notional_usd: Option<f64>,
@@ -428,10 +429,6 @@ fn default_crypto_catalog(lang: &str) -> TextCatalog {
     current.insert(
         "crypto.msg.price_alert_not_triggered".to_string(),
         "{symbol} monitor: {window_minutes}m change {change_pct}% has not reached threshold {threshold_pct}% (start={start_price}, now={current_price}, direction={direction})".to_string(),
-    );
-    current.insert(
-        "crypto.msg.trade_preview_confirm_hint".to_string(),
-        "Please confirm execution: click confirm, or reply Y/YES to execute; any other input cancels.".to_string(),
     );
     TextCatalog { current }
 }
@@ -1579,7 +1576,7 @@ fn handle_trade_preview(
         String::new()
     };
     let text = format!(
-        "trade_preview {} {} {} {}={:.6}{}{}{}{}{} notional_usd={:.4} checks={}\n{}",
+        "trade_preview {} {} {} {}={:.6}{}{}{}{}{} notional_usd={:.4} checks={}",
         trade.exchange,
         trade.symbol,
         trade.side,
@@ -1592,7 +1589,6 @@ fn handle_trade_preview(
         tif_part,
         notional,
         checks.len(),
-        tr("crypto.msg.trade_preview_confirm_hint")
     );
     Ok((
         text,
@@ -2300,11 +2296,9 @@ fn parse_trade_input(obj: &serde_json::Map<String, Value>, cfg: &RootConfig) -> 
     })
 }
 
-fn risk_checks(client: &Client, cfg: &RootConfig, trade: &TradeInput, for_submit: bool) -> Result<Vec<Value>, String> {
+fn risk_checks(client: &Client, cfg: &RootConfig, trade: &TradeInput, _for_submit: bool) -> Result<Vec<Value>, String> {
     let mut checks = Vec::new();
-    if cfg.crypto.require_explicit_send.unwrap_or(true) && for_submit && !trade.confirm {
-        return Err(tr("crypto.err.trade_submit_requires_confirm"));
-    }
+    // Whether to require user confirmation is left to the planner/LLM; no runtime guard.
     match trade.exchange.as_str() {
         "binance" => {
             ensure_binance_config(cfg)?;

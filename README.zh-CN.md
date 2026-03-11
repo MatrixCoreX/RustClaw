@@ -165,8 +165,8 @@ rustclaw -stop
   - `configs/image.toml` / `configs/audio.toml` 中的 `native_models` 用来控制哪些 Qwen 模型在 `auto` 模式下优先走原生适配。
   - 如果模型不在 `native_models` 中，且允许 compat，则 RustClaw 会优先走 compat 适配。
 - `chat-skill` 的默认 system prompt 现在已独立到 prompt 文件，并支持运行时读取：
-  - `prompts/chat_skill_system_prompt.md`
-  - `prompts/chat_skill_joke_system_prompt.md`
+  - `prompts/vendors/default/chat_skill_system_prompt.md`
+  - `prompts/vendors/default/chat_skill_joke_system_prompt.md`
 - 若调用方显式传入 `system_prompt`，则优先使用调用方传入值，而不是默认 prompt 文件
 - 交易所 API 凭证不再作为全局共享配置使用，而是按 `user_key` 存入 `exchange_api_credentials`
 - 模型优先级与通道路由分离：模型选择仍按 `request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model`，原生/兼容通道则由 `native_models` 和 `adapter_mode` 决定
@@ -202,8 +202,8 @@ rustclaw -stop
 - `configs/command_intent/*.toml`：意图路由规则
 - `configs/i18n/*.toml`：国际化文本
 - `prompts/`：所有 prompt 模板
-- `prompts/chat_skill_system_prompt.md`：`chat-skill` 普通聊天默认 system prompt
-- `prompts/chat_skill_joke_system_prompt.md`：`chat-skill` 笑话模式默认 system prompt
+- `prompts/vendors/default/chat_skill_system_prompt.md`：`chat-skill` 普通聊天默认 system prompt
+- `prompts/vendors/default/chat_skill_joke_system_prompt.md`：`chat-skill` 笑话模式默认 system prompt
 - `migrations/`：数据库迁移
 - `pi_app/`：桌面小程序 / 树莓派小屏监控
 - `systemd/`：服务部署模板

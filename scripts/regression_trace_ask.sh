@@ -31,6 +31,7 @@ Options:
   --base-url URL         Task API base url (default from BASE_URL or lib.sh)
   --user-id ID           User id used when submitting tasks
   --chat-id ID           Chat id used when submitting tasks
+  --user-key KEY         User key used for submit/query auth and identity
   --wait-seconds N       Max wait seconds per case (default: 180)
   --poll-seconds N       Poll interval seconds (default: 1)
   --prompt TEXT          Add one custom case (can repeat)
@@ -592,6 +593,10 @@ main() {
         CHAT_ID="${2:-}"
         shift 2
         ;;
+      --user-key)
+        USER_KEY="${2:-}"
+        shift 2
+        ;;
       --wait-seconds)
         MAX_WAIT_SECONDS="${2:-}"
         shift 2
@@ -651,7 +656,11 @@ main() {
 
   echo "== Ask trace regression =="
   echo "BASE_URL=${BASE_URL}"
-  echo "USER_ID=${USER_ID} CHAT_ID=${CHAT_ID}"
+  if [[ -n "${USER_KEY:-}" ]]; then
+    echo "USER_ID=${USER_ID} CHAT_ID=${CHAT_ID} USER_KEY_SET=yes"
+  else
+    echo "USER_ID=${USER_ID} CHAT_ID=${CHAT_ID} USER_KEY_SET=no"
+  fi
   echo "WAIT=${MAX_WAIT_SECONDS}s POLL=${POLL_INTERVAL_SECONDS}s"
   echo "CASES=${#CASE_NAMES[@]}"
 

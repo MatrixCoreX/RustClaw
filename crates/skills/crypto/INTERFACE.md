@@ -6,7 +6,7 @@
 ## Capability Summary
 - `crypto` provides market data queries, technical indicators, on-chain lookups, and full spot order lifecycle operations.
 - It supports multi-exchange routing via `exchange` (mainly `binance` and `okx`; quote sources also include Gate.io, Coinbase, Kraken, CoinGecko).
-- Trading actions are risk-gated: submit requires explicit confirmation and configured exchange credentials.
+- Trading actions require configured exchange credentials. Whether to ask user confirmation before submit is decided by the planner (e.g. use trade_preview then trade_submit when user has confirmed).
 - Supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker` (Binance); `market`, `limit` (OKX).
 
 ## Actions
@@ -52,7 +52,7 @@
 | `trade_preview`/`trade_submit` | `stop_price` | required for stop orders | number | - | Trigger price for `stop_loss_limit` / `take_profit_limit`. Alias: `stopPrice`. |
 | `trade_preview`/`trade_submit` | `time_in_force` | no | string | `GTC` | `GTC`/`IOC`/`FOK` for limit/stop orders (Binance). |
 | `trade_preview`/`trade_submit` | `client_order_id` | no | string | - | Client correlation id. |
-| `trade_submit` | `confirm` | yes (policy) | boolean | `false` | Must be `true` when explicit-send policy is enabled. |
+| `trade_submit` | `confirm` | no | boolean | `false` | Optional. Set to true when the planner has inferred user confirmation; no runtime enforcement. |
 | `order_status` | `order_id` or `client_order_id` | yes | string | - | At least one order identifier. |
 | `order_status` | `symbol` | conditional | string | - | Required by Binance/OKX query APIs. |
 | `cancel_order` | `order_id` or `client_order_id` | yes | string | - | At least one order identifier. |
@@ -67,8 +67,9 @@
 | all | `timeout_seconds` | no | number | config default | Request timeout override (3–120s). |
 
 ## Risk Rules (Important for Agents)
-- `trade_preview` must **always** be called first before any trade. Never call `trade_submit` in the same agent turn.
-- `trade_submit` is system-gated: it requires `confirm=true` and is only callable via the confirmation flow (button or Y/YES reply).
+- **Respond**: Do not summarize unless the user explicitly asks for a summary. When the user did not ask for a summary, return only the skill result or one short necessary reply; no extra recap or conclusion.
+- Prefer calling `trade_preview` before `trade_submit` when the user intent is ambiguous or high-value; the planner decides whether to ask for confirmation first.
+- `trade_submit` may be called when the planner infers the user has confirmed (e.g. after preview and user said "确认执行" / "yes"); pass `confirm=true` in that case. No runtime guard enforces this—the planner decides.
 - Binance spot orders are subject to `min_notional_usd` (default 1.0 USDT; Binance actually requires ~10 USDT) and `max_notional_usd` limits.
 - `qty=all` is only valid for `side=sell`.
 - `stop_loss_limit`/`take_profit_limit` require both `price` (limit price) and `stop_price` (trigger price).
@@ -93,7 +94,6 @@
   - `cancel_all_orders on binance requires symbol`
   - `trade_history on binance requires symbol`
 - Trading safety/policy:
-  - `trade_submit requires confirm=true`
   - `exchange is not allowed: {exchange}`
   - `symbol is not allowed: {symbol}`
   - `notional exceeds max_notional_usd: ...`
@@ -158,5 +158,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-8","status":"ok","text":"trade_preview binance DOGEUSDT buy est_qty=53.2468 quote_usd=10.0000 notional_usd=10.0000 checks=5\n请确认是否执行：...","error_text":null}
+{"request_id":"demo-8","status":"ok","text":"trade_preview binance DOGEUSDT buy est_qty=53.2468 quote_usd=10.0000 notional_usd=10.0000 checks=5","error_text":null}
 ```

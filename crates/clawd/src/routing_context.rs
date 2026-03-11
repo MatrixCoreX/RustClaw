@@ -42,7 +42,11 @@ pub(crate) fn build_recent_execution_context(
     task: &ClaimedTask,
     limit: usize,
 ) -> String {
-    let user_key = task.user_key.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let user_key = task
+        .user_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
     let legacy_chat_id = user_key
         .map(crate::stable_i64_from_key)
         .filter(|legacy| *legacy != task.chat_id);
@@ -67,7 +71,13 @@ pub(crate) fn build_recent_execution_context(
     }
     if items.is_empty() {
         if let Some(legacy_chat_id) = legacy_chat_id {
-            let rows = match query_recent_execution_rows(&db, task.user_id, legacy_chat_id, user_key, limit) {
+            let rows = match query_recent_execution_rows(
+                &db,
+                task.user_id,
+                legacy_chat_id,
+                user_key,
+                limit,
+            ) {
                 Ok(v) => v,
                 Err(_) => return "<none>".to_string(),
             };
@@ -100,7 +110,10 @@ fn task_payload_summary(kind: &str, payload_json: &str) -> String {
             .unwrap_or(payload_json)
             .to_string(),
         "run_skill" => {
-            let skill = v.get("skill_name").and_then(|x| x.as_str()).unwrap_or("unknown");
+            let skill = v
+                .get("skill_name")
+                .and_then(|x| x.as_str())
+                .unwrap_or("unknown");
             format!(
                 "run_skill:{skill} args={}",
                 v.get("args").cloned().unwrap_or(Value::Null)
@@ -114,7 +127,8 @@ fn task_result_summary(result_json: &str) -> String {
     let Ok(v) = serde_json::from_str::<Value>(result_json) else {
         return sanitize_result_summary(result_json);
     };
-    let text = v.get("text")
+    let text = v
+        .get("text")
         .and_then(|x| x.as_str())
         .or_else(|| v.as_str())
         .unwrap_or(result_json)

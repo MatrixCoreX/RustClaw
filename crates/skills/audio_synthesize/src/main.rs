@@ -44,7 +44,11 @@ struct LlmConfig {
     #[serde(default)]
     grok: Option<VendorConfig>,
     #[serde(default)]
+    deepseek: Option<VendorConfig>,
+    #[serde(default)]
     qwen: Option<VendorConfig>,
+    #[serde(default)]
+    minimax: Option<VendorConfig>,
     #[serde(default)]
     custom: Option<VendorConfig>,
 }
@@ -77,7 +81,11 @@ struct AudioSynthesizeConfig {
     #[serde(default)]
     grok_models: Option<Vec<String>>,
     #[serde(default)]
+    deepseek_models: Option<Vec<String>>,
+    #[serde(default)]
     qwen_models: Option<Vec<String>>,
+    #[serde(default)]
+    minimax_models: Option<Vec<String>>,
     #[serde(default)]
     native_models: Option<Vec<String>>,
     #[serde(default)]
@@ -96,6 +104,28 @@ struct AudioSynthesizeConfig {
     adapter_mode: Option<String>,
     #[serde(default)]
     qwen_native_base_url: Option<String>,
+    #[serde(default)]
+    providers: AudioProviderOverrides,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct AudioProviderOverrides {
+    #[serde(default)]
+    openai: Option<VendorConfig>,
+    #[serde(default)]
+    google: Option<VendorConfig>,
+    #[serde(default)]
+    anthropic: Option<VendorConfig>,
+    #[serde(default)]
+    grok: Option<VendorConfig>,
+    #[serde(default)]
+    deepseek: Option<VendorConfig>,
+    #[serde(default)]
+    qwen: Option<VendorConfig>,
+    #[serde(default)]
+    minimax: Option<VendorConfig>,
+    #[serde(default)]
+    custom: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -104,7 +134,9 @@ enum VendorKind {
     Google,
     Anthropic,
     Grok,
+    DeepSeek,
     Qwen,
+    MiniMax,
     Custom,
 }
 
@@ -174,19 +206,32 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         ));
     }
 
-    let voice = obj
+    let requested_voice = obj
         .get("voice")
         .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .or(cfg.audio_synthesize.default_voice.as_deref())
-        .unwrap_or("alloy")
-        .to_string();
+        .filter(|v| !v.trim().is_empty());
     let response_format = obj
         .get("response_format")
         .or_else(|| obj.get("format"))
         .and_then(|v| v.as_str())
         .unwrap_or_else(|| cfg.audio_synthesize.default_format.as_deref().unwrap_or("opus"));
     let normalized_format = normalize_format(response_format);
+
+    let requested_vendor = obj.get("vendor").and_then(|v| v.as_str());
+    let vendor = select_vendor(
+        requested_vendor,
+        cfg.audio_synthesize.default_vendor.as_deref(),
+        cfg.llm.selected_vendor.as_deref(),
+    );
+    let actual_format = match vendor {
+        VendorKind::MiniMax => minimax_audio_format(&normalized_format).to_string(),
+        _ => normalized_format.clone(),
+    };
+    let voice = resolve_voice_for_vendor(
+        vendor,
+        requested_voice,
+        cfg.audio_synthesize.default_voice.as_deref(),
+    );
 
     let output_path = resolve_output_path(
         workspace_root,
@@ -195,15 +240,8 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
             .as_deref()
             .unwrap_or("audio/download"),
         obj.get("output_path").and_then(|v| v.as_str()),
-        &normalized_format,
+        &actual_format,
     )?;
-
-    let requested_vendor = obj.get("vendor").and_then(|v| v.as_str());
-    let vendor = select_vendor(
-        requested_vendor,
-        cfg.audio_synthesize.default_vendor.as_deref(),
-        cfg.llm.selected_vendor.as_deref(),
-    );
     let (vendor_name, provider_cfg) = resolve_vendor_config(cfg, vendor)?;
     check_api_key(vendor_name, &provider_cfg.api_key)?;
     let requested_model = obj.get("model").and_then(|v| v.as_str());
@@ -224,7 +262,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .timeout(Duration::from_secs(timeout_seconds))
         .build()
         .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
-    synthesize_by_vendor(
+    let model_kind = synthesize_by_vendor(
         &client,
         &cfg.audio_synthesize,
         provider_cfg,
@@ -233,7 +271,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         vendor_name,
         &model,
         &voice,
-        &normalized_format,
+        &actual_format,
         input,
         &output_path,
     )?;
@@ -241,8 +279,9 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
     let extra = json!({
         "provider": vendor_name,
         "model": model,
+        "model_kind": model_kind,
         "voice": voice,
-        "response_format": normalized_format,
+        "response_format": actual_format,
         "output_path": saved_path,
         "outputs": [{"type":"audio_file","path": saved_path}],
         "latency_ms": 0
@@ -263,10 +302,11 @@ fn synthesize_by_vendor(
     response_format: &str,
     input: &str,
     output_path: &Path,
-) -> Result<(), String> {
+) -> Result<&'static str, String> {
     let mode = resolve_adapter_mode(audio_cfg, vendor);
     match vendor {
-        VendorKind::Google => google_native_synthesize(
+        VendorKind::Google => {
+            google_native_synthesize(
             client,
             cfg,
             model,
@@ -274,8 +314,11 @@ fn synthesize_by_vendor(
             response_format,
             input,
             output_path,
-        ),
-        VendorKind::OpenAI => openai_compatible_synthesize(
+            )?;
+            Ok("native")
+        },
+        VendorKind::OpenAI => {
+            openai_compatible_synthesize(
             client,
             cfg,
             vendor_name,
@@ -284,8 +327,10 @@ fn synthesize_by_vendor(
             response_format,
             input,
             output_path,
-        ),
-        VendorKind::Anthropic | VendorKind::Grok | VendorKind::Custom => {
+            )?;
+            Ok("compat")
+        }
+        VendorKind::Anthropic | VendorKind::Grok | VendorKind::DeepSeek | VendorKind::Custom => {
             if mode == AdapterMode::Native {
                 return Err(format!("{vendor_name} native tts adapter is not available"));
             }
@@ -303,7 +348,20 @@ fn synthesize_by_vendor(
                 response_format,
                 input,
                 output_path,
-            )
+            )?;
+            Ok("compat")
+        }
+        VendorKind::MiniMax => {
+            minimax_native_synthesize(
+                client,
+                cfg,
+                model,
+                voice,
+                response_format,
+                input,
+                output_path,
+            )?;
+            Ok("native")
         }
         VendorKind::Qwen => {
             if should_use_qwen_native_tts(audio_cfg, model, mode, allow_compat_adapters) {
@@ -315,7 +373,8 @@ fn synthesize_by_vendor(
                     voice,
                     input,
                     output_path,
-                )
+                )?;
+                Ok("native")
             } else {
                 if !allow_compat_adapters {
                     return Err(
@@ -332,7 +391,8 @@ fn synthesize_by_vendor(
                     response_format,
                     input,
                     output_path,
-                )
+                )?;
+                Ok("compat")
             }
         }
     }
@@ -390,6 +450,98 @@ fn should_use_qwen_native_tts(
 }
 
 #[allow(clippy::too_many_arguments)]
+const OPENAI_COMPAT_DEFAULT_VOICE: &str = "alloy";
+const GOOGLE_DEFAULT_VOICE: &str = "Kore";
+const QWEN_DEFAULT_VOICE: &str = "Cherry";
+const MINIMAX_DEFAULT_VOICE_ID: &str = "male-qn-qingse";
+
+const OPENAI_COMPAT_VOICES: &[&str] = &[
+    "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer",
+];
+
+const GOOGLE_TTS_VOICES: &[&str] = &[
+    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
+    "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi",
+    "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
+    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+];
+
+const QWEN_TTS_VOICES: &[&str] = &[
+    "Cherry", "Serena", "Ethan", "Chelsie", "Momo", "Vivian", "Moon", "Maia", "Kai", "Nofish",
+    "Bella", "Jennifer", "Ryan", "Katerina", "Aiden", "Eldric Sage", "Mia", "Mochi", "Bellona",
+    "Vincent", "Bunny", "Neil", "Elias", "Arthur", "Nini", "Ebona", "Seren", "Pip", "Stella",
+];
+
+fn minimax_audio_format(response_format: &str) -> &'static str {
+    match response_format.trim().to_ascii_lowercase().as_str() {
+        "wav" => "wav",
+        "flac" => "flac",
+        "pcm" => "pcm",
+        _ => "mp3",
+    }
+}
+
+fn canonical_voice_name<'a>(voices: &'a [&'a str], voice: &str) -> Option<&'a str> {
+    let trimmed = voice.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    voices
+        .iter()
+        .copied()
+        .find(|candidate| candidate.eq_ignore_ascii_case(trimmed))
+}
+
+fn default_voice_for_vendor(vendor: VendorKind) -> &'static str {
+    match vendor {
+        VendorKind::OpenAI | VendorKind::Anthropic | VendorKind::Grok | VendorKind::DeepSeek | VendorKind::Custom => OPENAI_COMPAT_DEFAULT_VOICE,
+        VendorKind::Google => GOOGLE_DEFAULT_VOICE,
+        VendorKind::Qwen => QWEN_DEFAULT_VOICE,
+        VendorKind::MiniMax => MINIMAX_DEFAULT_VOICE_ID,
+    }
+}
+
+fn normalize_voice_for_vendor(vendor: VendorKind, voice: &str) -> Option<String> {
+    let trimmed = voice.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match vendor {
+        VendorKind::OpenAI | VendorKind::Anthropic | VendorKind::Grok | VendorKind::DeepSeek | VendorKind::Custom => {
+            canonical_voice_name(OPENAI_COMPAT_VOICES, trimmed).map(str::to_string)
+        }
+        VendorKind::Google => canonical_voice_name(GOOGLE_TTS_VOICES, trimmed).map(str::to_string),
+        VendorKind::Qwen => canonical_voice_name(QWEN_TTS_VOICES, trimmed).map(str::to_string),
+        VendorKind::MiniMax => Some(minimax_voice_id(trimmed)),
+    }
+}
+
+fn resolve_voice_for_vendor(
+    vendor: VendorKind,
+    requested_voice: Option<&str>,
+    configured_default_voice: Option<&str>,
+) -> String {
+    requested_voice
+        .and_then(|voice| normalize_voice_for_vendor(vendor, voice))
+        .or_else(|| {
+            configured_default_voice.and_then(|voice| normalize_voice_for_vendor(vendor, voice))
+        })
+        .unwrap_or_else(|| default_voice_for_vendor(vendor).to_string())
+}
+
+fn minimax_voice_id(voice: &str) -> String {
+    let trimmed = voice.trim();
+    if trimmed.is_empty() {
+        return MINIMAX_DEFAULT_VOICE_ID.to_string();
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        // Common cross-vendor voices that frequently get copied into MiniMax config.
+        // MiniMax safe fallback: `male-qn-qingse`.
+        "alloy" | "ash" | "ballad" | "coral" | "echo" | "fable" | "nova" | "onyx" | "sage" | "shimmer" | "cherry" | "serena" | "ethan" | "kore" | "puck" | "aoede" => MINIMAX_DEFAULT_VOICE_ID.to_string(),
+        _ => trimmed.to_string(),
+    }
+}
+
 fn qwen_native_synthesize(
     client: &Client,
     native_base_url: Option<&str>,
@@ -453,6 +605,83 @@ fn qwen_native_synthesize(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn minimax_native_synthesize(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    voice: &str,
+    response_format: &str,
+    input: &str,
+    output_path: &Path,
+) -> Result<(), String> {
+    let url = format!("{}/t2a_v2", trim_trailing_slash(&cfg.base_url));
+    let actual_format = minimax_audio_format(response_format);
+    let body = json!({
+        "model": model,
+        "text": input,
+        "stream": false,
+        "language_boost": "auto",
+        "output_format": "hex",
+        "voice_setting": {
+            "voice_id": minimax_voice_id(voice),
+            "speed": 1,
+            "vol": 1,
+            "pitch": 0
+        },
+        "audio_setting": {
+            "sample_rate": 32000,
+            "bitrate": 128000,
+            "format": actual_format,
+            "channel": 1
+        }
+    });
+    let resp = client
+        .post(url)
+        .bearer_auth(&cfg.api_key)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("minimax tts request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let v: Value = resp
+        .json()
+        .map_err(|err| format!("parse minimax tts response failed: {err}"))?;
+    if status >= 300 {
+        return Err(format!(
+            "minimax tts failed status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
+    }
+    if let Some(code) = v
+        .get("base_resp")
+        .and_then(|b| b.get("status_code"))
+        .and_then(|c| c.as_i64())
+    {
+        if code != 0 {
+            let msg = v
+                .get("base_resp")
+                .and_then(|b| b.get("status_msg"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("unknown minimax tts error");
+            return Err(format!("minimax tts failed code={code}: {msg}"));
+        }
+    }
+    let audio_hex = v
+        .get("data")
+        .and_then(|d| d.get("audio"))
+        .and_then(|a| a.as_str())
+        .ok_or_else(|| {
+            format!(
+                "minimax tts response missing data.audio: {}",
+                truncate(&v.to_string(), 400)
+            )
+        })?;
+    let bytes = hex::decode(audio_hex)
+        .map_err(|err| format!("decode minimax tts audio failed: {err}"))?;
+    ensure_parent_dir(output_path)?;
+    std::fs::write(output_path, &bytes).map_err(|err| format!("write audio output failed: {err}"))?;
+    Ok(())
+}
+
 fn openai_compatible_synthesize(
     client: &Client,
     cfg: &VendorConfig,
@@ -567,7 +796,9 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "google" | "gemini" => Some(VendorKind::Google),
         "anthropic" | "claude" => Some(VendorKind::Anthropic),
         "grok" | "xai" => Some(VendorKind::Grok),
+        "deepseek" => Some(VendorKind::DeepSeek),
         "qwen" => Some(VendorKind::Qwen),
+        "minimax" => Some(VendorKind::MiniMax),
         "custom" => Some(VendorKind::Custom),
         _ => None,
     }
@@ -589,41 +820,54 @@ fn resolve_vendor_config<'a>(
     cfg: &'a RootConfig,
     vendor: VendorKind,
 ) -> Result<(&'static str, &'a VendorConfig), String> {
+    let section = &cfg.audio_synthesize.providers;
     match vendor {
-        VendorKind::OpenAI => cfg
-            .llm
+        VendorKind::OpenAI => section
             .openai
             .as_ref()
+            .or(cfg.llm.openai.as_ref())
             .map(|v| ("openai", v))
             .ok_or_else(|| "openai config missing".to_string()),
-        VendorKind::Google => cfg
-            .llm
+        VendorKind::Google => section
             .google
             .as_ref()
+            .or(cfg.llm.google.as_ref())
             .map(|v| ("google", v))
             .ok_or_else(|| "google config missing".to_string()),
-        VendorKind::Anthropic => cfg
-            .llm
+        VendorKind::Anthropic => section
             .anthropic
             .as_ref()
+            .or(cfg.llm.anthropic.as_ref())
             .map(|v| ("anthropic", v))
             .ok_or_else(|| "anthropic config missing".to_string()),
-        VendorKind::Grok => cfg
-            .llm
+        VendorKind::Grok => section
             .grok
             .as_ref()
+            .or(cfg.llm.grok.as_ref())
             .map(|v| ("grok", v))
             .ok_or_else(|| "grok config missing".to_string()),
-        VendorKind::Qwen => cfg
-            .llm
+        VendorKind::DeepSeek => section
+            .deepseek
+            .as_ref()
+            .or(cfg.llm.deepseek.as_ref())
+            .map(|v| ("deepseek", v))
+            .ok_or_else(|| "deepseek config missing".to_string()),
+        VendorKind::Qwen => section
             .qwen
             .as_ref()
+            .or(cfg.llm.qwen.as_ref())
             .map(|v| ("qwen", v))
             .ok_or_else(|| "qwen config missing".to_string()),
-        VendorKind::Custom => cfg
-            .llm
+        VendorKind::MiniMax => section
+            .minimax
+            .as_ref()
+            .or(cfg.llm.minimax.as_ref())
+            .map(|v| ("minimax", v))
+            .ok_or_else(|| "minimax config missing".to_string()),
+        VendorKind::Custom => section
             .custom
             .as_ref()
+            .or(cfg.llm.custom.as_ref())
             .map(|v| ("custom", v))
             .ok_or_else(|| "custom config missing".to_string()),
     }
@@ -631,27 +875,27 @@ fn resolve_vendor_config<'a>(
 
 fn load_root_config() -> RootConfig {
     let root = workspace_root();
-    let mut merged = match std::fs::read_to_string(root.join("configs/config.toml"))
+    let core_cfg = match std::fs::read_to_string(root.join("configs/config.toml"))
         .ok()
         .and_then(|s| toml::from_str::<TomlValue>(&s).ok())
     {
         Some(v) => v,
         None => TomlValue::Table(toml::map::Map::new()),
     };
-    if let Some(audio_cfg) = std::fs::read_to_string(root.join("configs/audio.toml"))
+    let audio_cfg = match std::fs::read_to_string(root.join("configs/audio.toml"))
         .ok()
         .and_then(|s| toml::from_str::<TomlValue>(&s).ok())
     {
-        // Keep config.toml higher priority if same key exists, and use audio.toml as defaults.
-        merge_missing_toml(&mut merged, audio_cfg);
-    }
+        Some(v) => v,
+        None => TomlValue::Table(toml::map::Map::new()),
+    };
     let mut cfg = RootConfig::default();
-    if let Some(v) = merged.get("llm").cloned() {
+    if let Some(v) = core_cfg.get("llm").cloned() {
         if let Ok(parsed) = v.try_into::<LlmConfig>() {
             cfg.llm = parsed;
         }
     }
-    if let Some(v) = merged.get("audio_synthesize").cloned() {
+    if let Some(v) = audio_cfg.get("audio_synthesize").cloned() {
         if let Ok(parsed) = v.try_into::<AudioSynthesizeConfig>() {
             cfg.audio_synthesize = parsed;
         }
@@ -679,21 +923,10 @@ fn vendor_models<'a>(cfg: &'a AudioSynthesizeConfig, vendor: VendorKind) -> Opti
         VendorKind::Google => cfg.google_models.as_ref(),
         VendorKind::Anthropic => cfg.anthropic_models.as_ref(),
         VendorKind::Grok => cfg.grok_models.as_ref(),
+        VendorKind::DeepSeek => cfg.deepseek_models.as_ref(),
         VendorKind::Qwen => cfg.qwen_models.as_ref(),
+        VendorKind::MiniMax => cfg.minimax_models.as_ref(),
         VendorKind::Custom => cfg.custom_models.as_ref(),
-    }
-}
-
-fn merge_missing_toml(dst: &mut TomlValue, src: TomlValue) {
-    if let (TomlValue::Table(dst_map), TomlValue::Table(src_map)) = (dst, src) {
-        for (key, src_val) in src_map {
-            match dst_map.get_mut(&key) {
-                Some(dst_val) => merge_missing_toml(dst_val, src_val),
-                None => {
-                    dst_map.insert(key, src_val);
-                }
-            }
-        }
     }
 }
 

@@ -14,6 +14,7 @@
 
 - `telegramd`（`crates/telegramd/src/main.rs`）
   - 接收 Telegram Update（消息/按钮）
+  - 解析已绑定身份，并在提交/轮询 clawd 时附带 X-RustClaw-Key
   - 组装 `SubmitTaskRequest` 调用 clawd HTTP API
   - 轮询任务状态并向用户发送 progress/success/failure
 - `clawd`（`crates/clawd/src/main.rs`）
@@ -72,7 +73,7 @@ flowchart TD
 
 ### 3.1 Telegram 入站与任务提交
 
-1. `handle_message()` 解析消息（`user_id/chat_id/text`）。
+1. handle_message() 解析消息（user_id/chat_id/text），并优先从 Telegram 绑定关系解析当前 user_key。
 2. 普通文本走 `submit_task_only(..., TaskKind::Ask, payload)`。
 3. payload 常见字段：
    - `text`
@@ -80,7 +81,7 @@ flowchart TD
    - 可选：`source`（如 `resume_continue_execute`）
 4. `submit_task_only()` 调 clawd：
    - `POST /v1/tasks`
-   - body 为 `SubmitTaskRequest`。
+   - body 为 SubmitTaskRequest；当已绑定身份时，请求会携带 user_key，并由 clawd 映射到实际会话归属。
 5. 提交成功后立即 `spawn_task_result_delivery(...)` 异步轮询。
 
 ### 3.2 clawd 入队与 worker 执行
@@ -108,7 +109,7 @@ flowchart TD
 
 ### 3.3 Telegram 轮询与回传
 
-`spawn_task_result_delivery()` 按状态处理：
+spawn_task_result_delivery() 按状态处理；轮询 GET /v1/tasks/{id} 时同样会带 X-RustClaw-Key，否则绑定到 user_key 的任务会被 clawd 拒绝：
 
 - `Queued/Running`：
   - 从 `result_json.progress_messages` 增量发送
@@ -198,8 +199,8 @@ flowchart TD
   - 同签名重复直接短路返回
   - 成功后允许 **一次参数变化重试**，之后继续短路
 - 交易收敛：
-  - 同任务最多一次 `trade_submit` 成功（硬限制）
-  - `trade_preview` 后进入等待确认态，抑制后续无关动作
+  - 是否先 `trade_preview` 再 `trade_submit` 由规划器决定，无强制“必须先确认”的硬护栏
+  - `trade_preview` 后可由用户文字回复（如 Y/YES）走硬确认路由发起 `trade_submit`；确认按钮 UI 已移除，由规划器决定流程
 - `respond` 可见性：
   - 先经 `respond_delivery_intent_prompt` 判定 `send_respond`
   - `send_respond=false` 时，`respond` 只作为内部收尾，不发送用户可见文本
@@ -258,10 +259,10 @@ flowchart TD
 2. 若无 messages，退回 `result_json.text`
 3. 对 messages 做 `dedupe_preserve_order`
 
-### 8.3 交易确认按钮
+### 8.3 交易确认（已简化）
 
-- 发送 progress/success 文本时会检测是否需要确认（如 `trade_preview`）
-- 由 `send_text_or_image()` 决定是否附带 inline confirmation
+- 不再根据 `trade_preview` 自动挂确认按钮；是否需用户确认由规划器决定
+- 用户仍可通过文字回复（如 Y/YES）走 clawd 的 `hard_trade_confirm_route` 完成下单
 
 ---
 

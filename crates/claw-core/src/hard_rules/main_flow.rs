@@ -82,6 +82,10 @@ struct ClassifierSection {
 struct ResumeSection {
     #[serde(default)]
     continue_sources: Vec<String>,
+    #[serde(default)]
+    exact_continue_markers: Vec<String>,
+    #[serde(default)]
+    discussion_markers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -233,6 +237,14 @@ pub fn load_main_flow_rules(path: &str) -> MainFlowRules {
     if !resume_sources.is_empty() {
         merged.resume_continue_sources = resume_sources;
     }
+    let exact_continue_markers = normalize_preserve_list(parsed.resume.exact_continue_markers);
+    if !exact_continue_markers.is_empty() {
+        merged.resume_exact_continue_markers = exact_continue_markers;
+    }
+    let discussion_markers = normalize_preserve_list(parsed.resume.discussion_markers);
+    if !discussion_markers.is_empty() {
+        merged.resume_discussion_markers = discussion_markers;
+    }
     if let Some(v) = parsed.task_status.queued {
         let s = v.trim().to_ascii_lowercase();
         if !s.is_empty() {
@@ -278,7 +290,8 @@ pub fn load_main_flow_rules(path: &str) -> MainFlowRules {
     if !assistant_name_markers.is_empty() {
         merged.assistant_name_extract_markers = assistant_name_markers;
     }
-    let assistant_name_invalid_values = normalize_preserve_list(parsed.assistant_name.invalid_values);
+    let assistant_name_invalid_values =
+        normalize_preserve_list(parsed.assistant_name.invalid_values);
     if !assistant_name_invalid_values.is_empty() {
         merged.assistant_name_invalid_values = assistant_name_invalid_values;
     }

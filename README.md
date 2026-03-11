@@ -201,14 +201,14 @@ rustclaw -stop
 - Chat-skill prompt source:
   - `chat-skill` now loads its default system prompts from prompt files at runtime.
   - Default files:
-    - `prompts/chat_skill_system_prompt.md`
-    - `prompts/chat_skill_joke_system_prompt.md`
+    - `prompts/vendors/default/chat_skill_system_prompt.md`
+    - `prompts/vendors/default/chat_skill_joke_system_prompt.md`
   - If a caller explicitly passes `system_prompt`, that inline prompt overrides the file-backed default.
 - Image/audio model priority:
   - `request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model`
   - Native/compat channel selection is independent from model priority and is driven by `native_models` plus `adapter_mode`.
 - Crypto safety defaults:
-  - `trade_submit` requires `confirm=true` when `crypto.require_explicit_send=true`.
+  - Whether to require user confirmation before `trade_submit` is decided by the planner (no runtime guard).
   - Main risk fields: `max_notional_usd`, `allowed_symbols`, `allowed_exchanges`, `blocked_actions`.
   - Default execution exchange is `binance`; live exchanges include `binance` and `okx`.
   - Exchange API credentials are stored per `user_key` in `exchange_api_credentials`, not as shared global runtime secrets.
@@ -261,8 +261,8 @@ rustclaw -stop
 - `configs/command_intent/*.toml`: intent-routing rules
 - `configs/i18n/*.toml`: i18n text resources
 - `prompts/`: prompt templates
-- `prompts/chat_skill_system_prompt.md`: default normal-chat system prompt for `chat-skill`
-- `prompts/chat_skill_joke_system_prompt.md`: default joke-mode system prompt for `chat-skill`
+- `prompts/vendors/default/chat_skill_system_prompt.md`: default normal-chat system prompt for `chat-skill`
+- `prompts/vendors/default/chat_skill_joke_system_prompt.md`: default joke-mode system prompt for `chat-skill`
 - `migrations/`: database migrations
 - `pi_app/`: desktop mini app / Raspberry Pi small-screen monitor
 - `systemd/`: service deployment templates

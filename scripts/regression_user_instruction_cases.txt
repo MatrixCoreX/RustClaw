@@ -1,0 +1,33 @@
+chat | chat_weather_joke | chat_only | 今天天气闷，讲个和程序员加班有关的冷笑话
+chat | chat_explain_repo_briefly | chat_only | 你用一句话跟我说这个项目大概是干嘛的，不要执行命令
+act | act_hidden_files | exec,no_write_file | 帮我看看当前目录有没有隐藏文件
+act | act_precise_file_count | exec,no_write_file | 数一下当前目录一级有多少个普通文件，只告诉我数字和一句解释
+act | act_pwd_only | exec,no_write_file | 执行 pwd，只回我当前路径
+act | act_list_top_dirs | exec,no_write_file | 只列出当前目录下一级目录，不要文件
+act | act_read_readme_head | exec,no_write_file | 看看 README.md 在不在，在的话把前五行给我
+chat_act | chat_act_compare_sizes | exec,no_write_file | 先执行 df -h，再用大白话告诉我哪个挂载点最该担心
+chat_act | chat_act_dependency_poem | exec,no_write_file | 先执行 pwd，然后根据这个路径写一句打工人风格短诗
+chat_act | chat_act_whoami_signature | exec,no_write_file | 先执行 whoami，再执行 pwd，把这两个结果串成一句自嘲签名
+failure | mid_fail_then_summary | exec,resume_context,no_post_fail_steps | 先执行 pwd，再执行 definitely_missing_command_rustclaw_user_ops_67890，然后总结刚才成功和失败各是什么
+failure | mid_fail_then_reason_only | exec,resume_context,no_post_fail_steps | 先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了
+file | reply_only_poem | exec,no_write_file | 先执行 pwd，再根据这个路径写一句短诗，直接回复，不要保存成文件
+file | send_named_file_readme | deliver_file | 把 README.md 发给我
+file | send_named_file_cargo | deliver_file | 把 Cargo.toml 发给我
+file | send_named_file_missing | missing_file_graceful | 把 definitely_missing_named_file_rustclaw_user_ops_24686.md 发给我
+file | generate_hello_sh_and_send | write_and_deliver | 帮我写个打印 hello world 的 sh 脚本，保存，并且发给我
+file | generate_pwd_report_and_send | write_and_deliver | 执行 pwd，把路径写到 pwd_report.txt 里，然后把文件发给我
+file | save_path_only | exec | 执行 pwd，生成一句短句写入 path_note.txt，只回复该文件的绝对路径
+crypto | crypto_quote_btc | tool_crypto,no_write_file | 现在 BTCUSDT 多少钱？请直接给我关键结果。
+crypto | crypto_indicator_eth | tool_crypto,no_write_file | 计算 ETHUSDT 1h 的 SMA14，并告诉我是均线上还是均线下。
+crypto | crypto_news | tool_crypto,no_write_file | 给我 3 条最新加密货币新闻，简要概述一下。
+crypto | crypto_fee | tool_crypto,no_write_file | 查一下比特币链上手续费情况。
+crypto | crypto_positions | tool_crypto,allow_clarify,no_write_file | 查一下我现在的持仓
+crypto | crypto_cancel_all | tool_crypto,allow_clarify,no_write_file | 撤掉所有挂单
+crypto | crypto_open_orders | tool_crypto,allow_clarify,no_write_file | 看看现在还有哪些挂单
+crypto | crypto_order_status | tool_crypto,allow_clarify,no_write_file | 帮我查查刚才那笔订单的状态
+crypto | crypto_trade_preview | tool_crypto,preview_only | 只做预览不要执行：binance 模式 BTCUSDT 市价买 0.01。
+crypto | crypto_sell_to_usdt_preview | tool_crypto,preview_only | 只做预览：把 100 DOGE 直接卖成 USDT，不要真执行
+en_chat_act_reply_only | en_reply_only | exec,no_write_file | Run pwd first, then write one short worker-style line in the reply only. Do not save any file.
+en_act_hidden_files | en_hidden_files | exec,no_write_file | Check whether there are hidden files in the current directory.
+en_file_send_readme | en_send_readme | deliver_file | Send me README.md
+en_crypto_quote | en_crypto_quote | tool_crypto,no_write_file | What is the current BTCUSDT price? Give me the key result only.

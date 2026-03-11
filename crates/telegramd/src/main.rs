@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::IsTerminal;
@@ -7,20 +7,19 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
 use claw_core::config::AppConfig;
 use claw_core::hard_rules::types::VoiceModeIntentAliases;
 use claw_core::hard_rules::voice_mode::{
     load_voice_mode_intent_aliases, parse_voice_mode_intent_decision,
 };
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, HealthResponse,
-    ExchangeCredentialStatus, ResolveChannelBindingRequest, ResolveChannelBindingResponse,
-    SubmitTaskRequest, SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus,
-    UpsertExchangeCredentialRequest,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ExchangeCredentialStatus,
+    HealthResponse, ResolveChannelBindingRequest, ResolveChannelBindingResponse, SubmitTaskRequest,
+    SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus, UpsertExchangeCredentialRequest,
 };
 use reqwest::Client;
-use serde_json::{Value as JsonValue, json};
+use serde_json::{json, Value as JsonValue};
 use teloxide::prelude::*;
 use teloxide::types::{
     CallbackQuery, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, MediaKind,
@@ -85,13 +84,14 @@ enum VoiceReplyMode {
 }
 
 const DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/voice_chat_prompt.md");
+    include_str!("../../../prompts/vendors/default/voice_chat_prompt.md");
 const DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/voice_mode_intent_prompt.md");
+    include_str!("../../../prompts/vendors/default/voice_mode_intent_prompt.md");
 const VOICE_CHAT_PROMPT_PATH: &str = "prompts/voice_chat_prompt.md";
 const VOICE_MODE_INTENT_PROMPT_PATH: &str = "prompts/voice_mode_intent_prompt.md";
 const RESUME_CONTEXT_TTL_SECONDS: u64 = 30 * 60;
-const VOICE_MODE_INTENT_ALIASES_PATH: &str = "configs/command_intent/voice_mode_intent_aliases.toml";
+const VOICE_MODE_INTENT_ALIASES_PATH: &str =
+    "configs/command_intent/voice_mode_intent_aliases.toml";
 
 fn log_color_enabled() -> bool {
     match std::env::var("RUSTCLAW_LOG_COLOR") {
@@ -344,7 +344,14 @@ async fn detect_voice_mode_intent_with_llm(
             return None;
         }
     };
-    let out = match poll_task_result(state, &task_id, bound_user_key_for_chat(state, chat_id).as_deref(), Some(12)).await {
+    let out = match poll_task_result(
+        state,
+        &task_id,
+        bound_user_key_for_chat(state, chat_id).as_deref(),
+        Some(12),
+    )
+    .await
+    {
         Ok(v) => v.into_iter().next().unwrap_or_default(),
         Err(err) => {
             warn!("voice mode llm detect poll failed: {err}");
@@ -370,11 +377,7 @@ async fn detect_voice_mode_intent_with_llm(
     decision.map(|d| d.mode)
 }
 
-fn pending_resume_valid_for(
-    pending: &PendingResumeContext,
-    user_id: i64,
-    now_secs: u64,
-) -> bool {
+fn pending_resume_valid_for(pending: &PendingResumeContext, user_id: i64, now_secs: u64) -> bool {
     if pending.user_id != user_id {
         return false;
     }
@@ -437,9 +440,10 @@ async fn maybe_handle_resume_continuation(
         Err(err) => {
             bot.send_message(
                 msg.chat.id,
-                state
-                    .i18n
-                    .t_with("telegram.msg.process_failed", &[("error", &err.to_string())]),
+                state.i18n.t_with(
+                    "telegram.msg.process_failed",
+                    &[("error", &err.to_string())],
+                ),
             )
             .await
             .context("send resume submit error failed")?;
@@ -449,9 +453,13 @@ async fn maybe_handle_resume_continuation(
 }
 
 fn effective_voice_reply_mode_for_chat(state: &BotState, chat_id: i64) -> String {
-    let fallback = normalize_voice_reply_mode(&state.voice_reply_mode).unwrap_or_else(|| "voice".to_string());
+    let fallback =
+        normalize_voice_reply_mode(&state.voice_reply_mode).unwrap_or_else(|| "voice".to_string());
     if let Ok(map) = state.voice_reply_mode_by_chat.lock() {
-        if let Some(mode) = map.get(&chat_id).and_then(|v| normalize_voice_reply_mode(v)) {
+        if let Some(mode) = map
+            .get(&chat_id)
+            .and_then(|v| normalize_voice_reply_mode(v))
+        {
             return mode;
         }
     }
@@ -526,10 +534,7 @@ async fn main() -> anyhow::Result<()> {
     let i18n = match TextCatalog::load(&i18n_path) {
         Ok(v) => Arc::new(v),
         Err(err) => {
-            warn!(
-                "load i18n file failed: path={} err={}",
-                i18n_path, err
-            );
+            warn!("load i18n file failed: path={} err={}", i18n_path, err);
             Arc::new(TextCatalog::fallback())
         }
     };
@@ -560,29 +565,32 @@ async fn main() -> anyhow::Result<()> {
     let voice_mode_intent_aliases = load_voice_mode_intent_aliases(VOICE_MODE_INTENT_ALIASES_PATH);
     let mut voice_reply_mode_by_chat = HashMap::new();
     for (chat_id_raw, mode_raw) in &config.telegram.voice_reply_mode_by_chat {
-        if let (Ok(chat_id), Some(mode)) = (chat_id_raw.parse::<i64>(), normalize_voice_reply_mode(mode_raw)) {
+        if let (Ok(chat_id), Some(mode)) = (
+            chat_id_raw.parse::<i64>(),
+            normalize_voice_reply_mode(mode_raw),
+        ) {
             voice_reply_mode_by_chat.insert(chat_id, mode);
         }
     }
+
+    let workspace_root = workspace_root();
+    let prompt_vendor =
+        prompt_vendor_name_from_selected_vendor(config.llm.selected_vendor.as_deref());
 
     let state = BotState {
         admins: Arc::new(admins),
         allowlist: Arc::new(allowlist),
         skills_list: Arc::new(config.skills.skills_list.clone()),
         agent_off_chats: Arc::new(Mutex::new(HashSet::new())),
-        clawd_base_url: config
-            .server
-            .clawd_base_url
-            .clone()
-            .unwrap_or_else(|| {
-                let listen = config.server.listen.as_str();
-                let host = if listen.starts_with("0.0.0.0:") {
-                    listen.replacen("0.0.0.0", "127.0.0.1", 1)
-                } else {
-                    listen.to_string()
-                };
-                format!("http://{}", host)
-            }),
+        clawd_base_url: config.server.clawd_base_url.clone().unwrap_or_else(|| {
+            let listen = config.server.listen.as_str();
+            let host = if listen.starts_with("0.0.0.0:") {
+                listen.replacen("0.0.0.0", "127.0.0.1", 1)
+            } else {
+                listen.to_string()
+            };
+            format!("http://{}", host)
+        }),
         client,
         poll_interval_ms: config.worker.poll_interval_ms,
         task_wait_seconds: config.worker.task_timeout_seconds,
@@ -607,10 +615,14 @@ async fn main() -> anyhow::Result<()> {
         crypto_confirm_ttl_seconds: config.telegram.crypto_confirm_ttl_seconds.max(1),
         crypto_confirm_expiry_cancels: Arc::new(Mutex::new(HashMap::new())),
         voice_chat_prompt_template: load_prompt_template(
+            &workspace_root,
+            &prompt_vendor,
             VOICE_CHAT_PROMPT_PATH,
             DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE,
         ),
         voice_mode_intent_prompt_template: load_prompt_template(
+            &workspace_root,
+            &prompt_vendor,
             VOICE_MODE_INTENT_PROMPT_PATH,
             DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE,
         ),
@@ -697,7 +709,11 @@ async fn register_telegram_commands_and_menu(
     }
     let cmd_json: JsonValue =
         serde_json::from_str(&cmd_body).unwrap_or_else(|_| json!({"ok": false}));
-    if !cmd_json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if !cmd_json
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         return Err(anyhow!("setMyCommands returned not ok: {}", cmd_body));
     }
 
@@ -718,11 +734,19 @@ async fn register_telegram_commands_and_menu(
         .await
         .context("read setChatMenuButton response failed")?;
     if !menu_status.is_success() {
-        return Err(anyhow!("setChatMenuButton http {}: {}", menu_status, menu_body));
+        return Err(anyhow!(
+            "setChatMenuButton http {}: {}",
+            menu_status,
+            menu_body
+        ));
     }
     let menu_json: JsonValue =
         serde_json::from_str(&menu_body).unwrap_or_else(|_| json!({"ok": false}));
-    if !menu_json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if !menu_json
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         return Err(anyhow!("setChatMenuButton returned not ok: {}", menu_body));
     }
 
@@ -755,7 +779,9 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         platform_chat_id, platform_user_id, text
     );
 
-    let identity = match resolve_telegram_identity(&state, platform_user_id, platform_chat_id).await? {
+    let identity = match resolve_telegram_identity(&state, platform_user_id, platform_chat_id)
+        .await?
+    {
         Some(identity) => {
             set_expect_key_reply(&state, platform_chat_id, false);
             identity
@@ -776,7 +802,8 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                 });
             if let Some(candidate) = maybe_candidate {
                 if let Some(identity) =
-                    bind_telegram_identity(&state, platform_user_id, platform_chat_id, &candidate).await?
+                    bind_telegram_identity(&state, platform_user_id, platform_chat_id, &candidate)
+                        .await?
                 {
                     set_expect_key_reply(&state, platform_chat_id, false);
                     store_bound_identity(&state, platform_chat_id, &identity);
@@ -845,18 +872,22 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
 
     if text.starts_with("/rustclaw") || text.starts_with("/openclaw") {
         if !is_admin {
-            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.openclaw_admin_only"))
-                .await
-                .context("send /rustclaw unauthorized failed")?;
+            bot.send_message(
+                msg.chat.id,
+                state.i18n.t("telegram.msg.openclaw_admin_only"),
+            )
+            .await
+            .context("send /rustclaw unauthorized failed")?;
             return Ok(());
         }
 
         let state_for_cmd = state.clone();
         let text_owned = text.to_string();
-        let openclaw_result =
-            tokio::task::spawn_blocking(move || handle_openclaw_config_command(&state_for_cmd, &text_owned))
-                .await
-                .map_err(|err| anyhow!("join rustclaw config task failed: {err}"))?;
+        let openclaw_result = tokio::task::spawn_blocking(move || {
+            handle_openclaw_config_command(&state_for_cmd, &text_owned)
+        })
+        .await
+        .map_err(|err| anyhow!("join rustclaw config task failed: {err}"))?;
 
         match openclaw_result {
             Ok(reply) => {
@@ -871,8 +902,8 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                         .i18n
                         .t_with("telegram.msg.config_failed", &[("error", &err.to_string())]),
                 )
-                    .await
-                    .context("send /rustclaw error failed")?;
+                .await
+                .context("send /rustclaw error failed")?;
             }
         }
         return Ok(());
@@ -897,8 +928,8 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                         &[("error", &err.to_string())],
                     ),
                 )
-                    .await
-                    .context("send /cryptoapi error failed")?;
+                .await
+                .context("send /cryptoapi error failed")?;
             }
         }
         return Ok(());
@@ -906,18 +937,19 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
 
     if text.starts_with("/voicemode") {
         if !can_change_voice_mode(&state, user_id) {
-            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.voicemode_admin_only"))
-                .await
-                .context("send /voicemode unauthorized failed")?;
+            bot.send_message(
+                msg.chat.id,
+                state.i18n.t("telegram.msg.voicemode_admin_only"),
+            )
+            .await
+            .context("send /voicemode unauthorized failed")?;
             return Ok(());
         }
         let mode = text.strip_prefix("/voicemode").unwrap_or_default().trim();
         let reply = handle_voicemode_command(&state, msg.chat.id.0, text)?;
         info!(
             "voice mode command: source=slash chat_id={} user_id={} command={}",
-            msg.chat.id.0,
-            user_id,
-            mode
+            msg.chat.id.0, user_id, mode
         );
         bot.send_message(msg.chat.id, reply)
             .await
@@ -926,50 +958,56 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     }
 
     if state.voice_mode_nl_intent_enabled {
-        if let Some(mode) = detect_voice_mode_intent_with_llm(&state, user_id, msg.chat.id.0, text).await {
-        if mode == "none" {
-            // no-op, fall through to normal ask flow
-        } else {
-        if !can_change_voice_mode(&state, user_id) {
-            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.voicemode_admin_only"))
-                .await
-                .context("send nl voicemode unauthorized failed")?;
-            return Ok(());
-        }
-        let reply = match mode {
-            "reset" => {
-                set_chat_voice_mode(&state, msg.chat.id.0, None)?;
-                let global_mode = normalize_voice_reply_mode(&state.voice_reply_mode)
-                    .unwrap_or_else(|| "voice".to_string());
-                state.i18n.t_with(
-                    "telegram.msg.voicemode_reset_ok",
-                    &[("global_mode", &global_mode)],
-                )
+        if let Some(mode) =
+            detect_voice_mode_intent_with_llm(&state, user_id, msg.chat.id.0, text).await
+        {
+            if mode == "none" {
+                // no-op, fall through to normal ask flow
+            } else {
+                if !can_change_voice_mode(&state, user_id) {
+                    bot.send_message(
+                        msg.chat.id,
+                        state.i18n.t("telegram.msg.voicemode_admin_only"),
+                    )
+                    .await
+                    .context("send nl voicemode unauthorized failed")?;
+                    return Ok(());
+                }
+                let reply = match mode {
+                    "reset" => {
+                        set_chat_voice_mode(&state, msg.chat.id.0, None)?;
+                        let global_mode = normalize_voice_reply_mode(&state.voice_reply_mode)
+                            .unwrap_or_else(|| "voice".to_string());
+                        state.i18n.t_with(
+                            "telegram.msg.voicemode_reset_ok",
+                            &[("global_mode", &global_mode)],
+                        )
+                    }
+                    "show" => {
+                        let chat_mode = effective_voice_reply_mode_for_chat(&state, msg.chat.id.0);
+                        let global_mode = normalize_voice_reply_mode(&state.voice_reply_mode)
+                            .unwrap_or_else(|| "voice".to_string());
+                        state.i18n.t_with(
+                            "telegram.msg.voicemode_show",
+                            &[("chat_mode", &chat_mode), ("global_mode", &global_mode)],
+                        )
+                    }
+                    _ => {
+                        set_chat_voice_mode(&state, msg.chat.id.0, Some(mode))?;
+                        state
+                            .i18n
+                            .t_with("telegram.msg.voicemode_set_ok_nl", &[("mode", mode)])
+                    }
+                };
+                info!(
+                    "voice mode command: source=nl_llm chat_id={} user_id={} mode={}",
+                    msg.chat.id.0, user_id, mode
+                );
+                bot.send_message(msg.chat.id, reply)
+                    .await
+                    .context("send nl voicemode reply failed")?;
+                return Ok(());
             }
-            "show" => {
-                let chat_mode = effective_voice_reply_mode_for_chat(&state, msg.chat.id.0);
-                let global_mode = normalize_voice_reply_mode(&state.voice_reply_mode)
-                    .unwrap_or_else(|| "voice".to_string());
-                state.i18n.t_with(
-                    "telegram.msg.voicemode_show",
-                    &[("chat_mode", &chat_mode), ("global_mode", &global_mode)],
-                )
-            }
-            _ => {
-                set_chat_voice_mode(&state, msg.chat.id.0, Some(mode))?;
-                state.i18n
-                    .t_with("telegram.msg.voicemode_set_ok_nl", &[("mode", mode)])
-            }
-        };
-        info!(
-            "voice mode command: source=nl_llm chat_id={} user_id={} mode={}",
-            msg.chat.id.0, user_id, mode
-        );
-        bot.send_message(msg.chat.id, reply)
-            .await
-            .context("send nl voicemode reply failed")?;
-        return Ok(());
-        }
         }
     }
 
@@ -1015,12 +1053,13 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             Err(err) => {
                 bot.send_message(
                     msg.chat.id,
-                    state
-                        .i18n
-                        .t_with("telegram.msg.read_status_failed", &[("error", &err.to_string())]),
+                    state.i18n.t_with(
+                        "telegram.msg.read_status_failed",
+                        &[("error", &err.to_string())],
+                    ),
                 )
-                    .await
-                    .context("send /status error failed")?;
+                .await
+                .context("send /status error failed")?;
             }
         }
         return Ok(());
@@ -1030,9 +1069,10 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         match cancel_tasks_for_chat(&state, user_id, msg.chat.id.0).await {
             Ok(canceled) => {
                 let reply = if canceled > 0 {
-                    state
-                        .i18n
-                        .t_with("telegram.msg.cancel_ok", &[("count", &canceled.to_string())])
+                    state.i18n.t_with(
+                        "telegram.msg.cancel_ok",
+                        &[("count", &canceled.to_string())],
+                    )
                 } else {
                     state.i18n.t("telegram.msg.cancel_none")
                 };
@@ -1073,9 +1113,12 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         let raw = text.strip_prefix("/crypto").unwrap_or_default().trim();
         if raw.to_ascii_lowercase().starts_with("add ") {
             if !is_admin {
-                bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.cryptoapi_admin_only"))
-                    .await
-                    .context("send /crypto add unauthorized failed")?;
+                bot.send_message(
+                    msg.chat.id,
+                    state.i18n.t("telegram.msg.cryptoapi_admin_only"),
+                )
+                .await
+                .context("send /crypto add unauthorized failed")?;
                 return Ok(());
             }
             match handle_cryptoapi_command(&state, &identity, raw).await {
@@ -1118,8 +1161,8 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                         crypto_command_usage_text(&state)
                     ),
                 )
-                    .await
-                    .context("send /crypto parse error failed")?;
+                .await
+                .context("send /crypto parse error failed")?;
                 return Ok(());
             }
         };
@@ -1162,9 +1205,10 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             Err(err) => {
                 bot.send_message(
                     msg.chat.id,
-                    state
-                        .i18n
-                        .t_with("telegram.msg.skill_exec_failed_with_error", &[("error", &err.to_string())]),
+                    state.i18n.t_with(
+                        "telegram.msg.skill_exec_failed_with_error",
+                        &[("error", &err.to_string())],
+                    ),
                 )
                 .await
                 .context("send /crypto error failed")?;
@@ -1236,12 +1280,13 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             Err(err) => {
                 bot.send_message(
                     msg.chat.id,
-                    state
-                        .i18n
-                        .t_with("telegram.msg.skill_exec_failed_with_error", &[("error", &err.to_string())]),
+                    state.i18n.t_with(
+                        "telegram.msg.skill_exec_failed_with_error",
+                        &[("error", &err.to_string())],
+                    ),
                 )
-                    .await
-                    .context("send /run error failed")?;
+                .await
+                .context("send /run error failed")?;
             }
         }
         return Ok(());
@@ -1257,9 +1302,12 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         }
 
         if state.sendfile_admin_only && !is_admin {
-            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.sendfile_admin_only"))
-                .await
-                .context("send /sendfile admin-only rejection failed")?;
+            bot.send_message(
+                msg.chat.id,
+                state.i18n.t("telegram.msg.sendfile_admin_only"),
+            )
+            .await
+            .context("send /sendfile admin-only rejection failed")?;
             return Ok(());
         }
 
@@ -1277,31 +1325,33 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                         .i18n
                         .t_with("telegram.msg.sendfile_invalid_path", &[("error", &err)]),
                 )
-                    .await
-                    .context("send /sendfile path rejection failed")?;
+                .await
+                .context("send /sendfile path rejection failed")?;
                 return Ok(());
             }
         };
         if !p.exists() {
             bot.send_message(
                 msg.chat.id,
-                state
-                    .i18n
-                    .t_with("telegram.msg.file_not_found", &[("path", &p.display().to_string())]),
+                state.i18n.t_with(
+                    "telegram.msg.file_not_found",
+                    &[("path", &p.display().to_string())],
+                ),
             )
-                .await
-                .context("send /sendfile not found failed")?;
+            .await
+            .context("send /sendfile not found failed")?;
             return Ok(());
         }
         if !p.is_file() {
             bot.send_message(
                 msg.chat.id,
-                state
-                    .i18n
-                    .t_with("telegram.msg.not_a_file", &[("path", &p.display().to_string())]),
+                state.i18n.t_with(
+                    "telegram.msg.not_a_file",
+                    &[("path", &p.display().to_string())],
+                ),
             )
-                .await
-                .context("send /sendfile not file failed")?;
+            .await
+            .context("send /sendfile not file failed")?;
             return Ok(());
         }
 
@@ -1380,7 +1430,9 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                     "instruction": prompt
                 }
             });
-            match submit_task_only(&state, user_id, msg.chat.id.0, TaskKind::RunSkill, payload).await {
+            match submit_task_only(&state, user_id, msg.chat.id.0, TaskKind::RunSkill, payload)
+                .await
+            {
                 Ok(task_id) => {
                     if let Ok(mut m) = state.pending_image_by_chat.lock() {
                         m.remove(&msg.chat.id.0);
@@ -1466,12 +1518,13 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         Err(err) => {
             bot.send_message(
                 msg.chat.id,
-                state
-                    .i18n
-                    .t_with("telegram.msg.process_failed_with_error", &[("error", &err.to_string())]),
+                state.i18n.t_with(
+                    "telegram.msg.process_failed_with_error",
+                    &[("error", &err.to_string())],
+                ),
             )
-                .await
-                .context("send ask error failed")?;
+            .await
+            .context("send ask error failed")?;
         }
     }
 
@@ -1487,14 +1540,16 @@ async fn handle_callback_query(bot: Bot, q: CallbackQuery, state: BotState) -> a
     };
     debug!(
         "phase=callback callback_id={} from_user_id={} data={}",
-        q.id,
-        q.from.id.0,
-        data
+        q.id, q.from.id.0, data
     );
     if callback_action == CryptoConfirmCallbackAction::DoneNoop {
         if let Err(err) = bot
             .answer_callback_query(q.id.clone())
-            .text(state.i18n.t("telegram.msg.crypto_confirm_callback_done_ack"))
+            .text(
+                state
+                    .i18n
+                    .t("telegram.msg.crypto_confirm_callback_done_ack"),
+            )
             .await
         {
             warn!("answer done callback query failed: {}", err);
@@ -1504,7 +1559,11 @@ async fn handle_callback_query(bot: Bot, q: CallbackQuery, state: BotState) -> a
     if callback_action == CryptoConfirmCallbackAction::ExpiredNoop {
         if let Err(err) = bot
             .answer_callback_query(q.id.clone())
-            .text(state.i18n.t("telegram.msg.crypto_confirm_callback_expired_ack"))
+            .text(
+                state
+                    .i18n
+                    .t("telegram.msg.crypto_confirm_callback_expired_ack"),
+            )
             .await
         {
             warn!("answer expired callback query failed: {}", err);
@@ -1521,9 +1580,7 @@ async fn handle_callback_query(bot: Bot, q: CallbackQuery, state: BotState) -> a
     cancel_crypto_confirm_expiry(&state, chat_id.0, message_id.0);
     debug!(
         "phase=callback_ack chat_id={} message_id={} data={}",
-        chat_id.0,
-        message_id.0,
-        data
+        chat_id.0, message_id.0, data
     );
     let now_secs = unix_ts();
     if expires_at_secs.map(|v| now_secs > v).unwrap_or(false) {
@@ -1540,14 +1597,20 @@ async fn handle_callback_query(bot: Bot, q: CallbackQuery, state: BotState) -> a
         }
         if let Err(err) = bot
             .edit_message_reply_markup(chat_id, message_id)
-            .reply_markup(InlineKeyboardMarkup::new(Vec::<Vec<InlineKeyboardButton>>::new()))
+            .reply_markup(InlineKeyboardMarkup::new(
+                Vec::<Vec<InlineKeyboardButton>>::new(),
+            ))
             .await
         {
             warn!("edit expired callback message markup failed: {}", err);
         }
         if let Err(err) = bot
             .answer_callback_query(q.id.clone())
-            .text(state.i18n.t("telegram.msg.crypto_confirm_callback_expired_ack"))
+            .text(
+                state
+                    .i18n
+                    .t("telegram.msg.crypto_confirm_callback_expired_ack"),
+            )
             .await
         {
             warn!("answer expired callback query failed: {}", err);
@@ -1568,7 +1631,9 @@ async fn handle_callback_query(bot: Bot, q: CallbackQuery, state: BotState) -> a
 
     if let Err(err) = bot
         .edit_message_reply_markup(chat_id, message_id)
-        .reply_markup(InlineKeyboardMarkup::new(Vec::<Vec<InlineKeyboardButton>>::new()))
+        .reply_markup(InlineKeyboardMarkup::new(
+            Vec::<Vec<InlineKeyboardButton>>::new(),
+        ))
         .await
     {
         warn!("edit callback message markup failed: {}", err);
@@ -1608,9 +1673,10 @@ async fn handle_callback_query(bot: Bot, q: CallbackQuery, state: BotState) -> a
         Err(err) => {
             bot.send_message(
                 chat_id,
-                state
-                    .i18n
-                    .t_with("telegram.msg.process_failed", &[("error", &err.to_string())]),
+                state.i18n.t_with(
+                    "telegram.msg.process_failed",
+                    &[("error", &err.to_string())],
+                ),
             )
             .await
             .context("send callback submit error failed")?;
@@ -1651,11 +1717,7 @@ async fn handle_image_only_message(
     let normalized_ext = normalize_image_ext(ext);
     let rel_path = format!(
         "{}/tg_{}_{}_{}.{}",
-        state.image_inbox_dir,
-        msg.chat.id.0,
-        user_id,
-        ts,
-        normalized_ext
+        state.image_inbox_dir, msg.chat.id.0, user_id, ts, normalized_ext
     );
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
@@ -1713,11 +1775,7 @@ async fn handle_image_only_save_only(
     let normalized_ext = normalize_image_ext(ext);
     let rel_path = format!(
         "{}/tg_{}_{}_{}.{}",
-        state.image_inbox_dir,
-        msg.chat.id.0,
-        user_id,
-        ts,
-        normalized_ext
+        state.image_inbox_dir, msg.chat.id.0, user_id, ts, normalized_ext
     );
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
@@ -1747,11 +1805,7 @@ async fn handle_audio_message(
     let normalized_ext = normalize_audio_ext(ext);
     let rel_path = format!(
         "{}/tg_{}_{}_{}.{}",
-        state.audio_inbox_dir,
-        msg.chat.id.0,
-        user_id,
-        ts,
-        normalized_ext
+        state.audio_inbox_dir, msg.chat.id.0, user_id, ts, normalized_ext
     );
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
@@ -1797,14 +1851,17 @@ async fn handle_audio_message(
         bound_user_key_for_chat(state, msg.chat.id.0).as_deref(),
         Some(120),
     )
-        .await
-        .context("poll audio_transcribe result failed")?;
+    .await
+    .context("poll audio_transcribe result failed")?;
     let transcript = transcript.join("\n").trim().to_string();
     let transcript = transcript.as_str();
     if transcript.is_empty() {
-        bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.audio_transcript_empty"))
-            .await
-            .context("send empty transcript message failed")?;
+        bot.send_message(
+            msg.chat.id,
+            state.i18n.t("telegram.msg.audio_transcript_empty"),
+        )
+        .await
+        .context("send empty transcript message failed")?;
         return Ok(());
     }
 
@@ -1839,8 +1896,8 @@ async fn handle_audio_message(
         bound_user_key_for_chat(state, msg.chat.id.0).as_deref(),
         Some(state.task_wait_seconds.max(300)),
     )
-        .await
-        .context("poll ask result for transcript failed")?;
+    .await
+    .context("poll ask result for transcript failed")?;
     let answer_joined = answers.join("\n\n");
     let mode = parse_voice_reply_mode(&effective_voice_reply_mode_for_chat(state, msg.chat.id.0));
     if matches!(mode, VoiceReplyMode::Text | VoiceReplyMode::Both) {
@@ -1859,17 +1916,27 @@ async fn handle_audio_message(
                     "response_format": "opus"
                 }
             });
-            match submit_task_only(state, user_id, msg.chat.id.0, TaskKind::RunSkill, tts_payload).await {
+            match submit_task_only(
+                state,
+                user_id,
+                msg.chat.id.0,
+                TaskKind::RunSkill,
+                tts_payload,
+            )
+            .await
+            {
                 Ok(tts_task_id) => match poll_task_result(
                     state,
                     &tts_task_id,
                     bound_user_key_for_chat(state, msg.chat.id.0).as_deref(),
                     Some(90),
                 )
-                .await {
+                .await
+                {
                     Ok(tts_answer) => {
                         for msg_text in tts_answer {
-                            let _ = send_text_or_image(bot, state, msg.chat.id, &msg_text, false).await;
+                            let _ =
+                                send_text_or_image(bot, state, msg.chat.id, &msg_text, false).await;
                         }
                     }
                     Err(err) => {
@@ -2000,15 +2067,72 @@ fn normalize_image_ext(ext: &str) -> String {
 
 fn normalize_audio_ext(ext: &str) -> String {
     let e = ext.trim().trim_start_matches('.').to_ascii_lowercase();
-    if matches!(e.as_str(), "ogg" | "mp3" | "wav" | "m4a" | "aac" | "flac" | "opus") {
+    if matches!(
+        e.as_str(),
+        "ogg" | "mp3" | "wav" | "m4a" | "aac" | "flac" | "opus"
+    ) {
         e
     } else {
         "ogg".to_string()
     }
 }
 
-fn load_prompt_template(path: &str, default_template: &str) -> String {
-    match fs::read_to_string(path) {
+fn normalize_prompt_vendor_name(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "anthropic" | "claude" => "claude".to_string(),
+        "google" | "gemini" => "google".to_string(),
+        "openai" => "openai".to_string(),
+        "grok" | "xai" => "grok".to_string(),
+        "deepseek" => "deepseek".to_string(),
+        "qwen" => "qwen".to_string(),
+        "minimax" => "minimax".to_string(),
+        "custom" => "openai".to_string(),
+        _ => "default".to_string(),
+    }
+}
+
+fn prompt_vendor_name_from_selected_vendor(selected_vendor: Option<&str>) -> String {
+    selected_vendor
+        .map(normalize_prompt_vendor_name)
+        .unwrap_or_else(|| "default".to_string())
+}
+
+fn workspace_root() -> PathBuf {
+    std::env::var("WORKSPACE_ROOT")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+fn resolve_prompt_rel_path_for_vendor(
+    workspace_root: &Path,
+    vendor: &str,
+    rel_path: &str,
+) -> String {
+    let trimmed = rel_path.trim();
+    if trimmed.is_empty() || !trimmed.starts_with("prompts/") {
+        return trimmed.to_string();
+    }
+    let suffix = trimmed.trim_start_matches("prompts/");
+    let vendor_candidate = format!("prompts/vendors/{vendor}/{suffix}");
+    if workspace_root.join(&vendor_candidate).is_file() {
+        return vendor_candidate;
+    }
+    let default_candidate = format!("prompts/vendors/default/{suffix}");
+    if vendor != "default" && workspace_root.join(&default_candidate).is_file() {
+        return default_candidate;
+    }
+    trimmed.to_string()
+}
+
+fn load_prompt_template(
+    workspace_root: &Path,
+    prompt_vendor: &str,
+    rel_path: &str,
+    default_template: &str,
+) -> String {
+    let resolved_path = resolve_prompt_rel_path_for_vendor(workspace_root, prompt_vendor, rel_path);
+    match fs::read_to_string(workspace_root.join(resolved_path)) {
         Ok(s) if !s.trim().is_empty() => s,
         _ => default_template.to_string(),
     }
@@ -2042,16 +2166,14 @@ struct TypingHeartbeatGuard {
 
 impl TypingHeartbeatGuard {
     fn start(bot: Bot, chat_id: ChatId) -> Self {
-        // Telegram typing status naturally expires after a few seconds.
-        // We intentionally refresh slower than that to create a "pulse"
-        // effect (shows for a while, then disappears, then shows again).
-        const TYPING_PULSE_INTERVAL_SECS: u64 = 12;
+        // Telegram 的 typing 状态约 5 秒后过期，需在过期前重新发送以保持「正在输入」持续显示直到回复。
+        const TYPING_REFRESH_INTERVAL_SECS: u64 = 4;
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
         tokio::spawn(async move {
             loop {
                 let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(TYPING_PULSE_INTERVAL_SECS)) => {}
+                    _ = tokio::time::sleep(Duration::from_secs(TYPING_REFRESH_INTERVAL_SECS)) => {}
                     _ = &mut stop_rx => break,
                 }
             }
@@ -2124,13 +2246,16 @@ async fn send_text_or_image(
             voice_paths.len(),
             text_preview_for_log(answer, 120)
         );
-        let ephemeral_image_saved_hint = answer
-            .lines()
-            .any(|line| line.trim().eq_ignore_ascii_case(EPHEMERAL_IMAGE_SAVED_TOKEN));
-        let mut text_without_tokens =
-            strip_prefixed_tokens(answer, &[PREFIX, FILE_PREFIX, VOICE_PREFIX, EPHEMERAL_PREFIX])
-                .trim()
-                .to_string();
+        let ephemeral_image_saved_hint = answer.lines().any(|line| {
+            line.trim()
+                .eq_ignore_ascii_case(EPHEMERAL_IMAGE_SAVED_TOKEN)
+        });
+        let mut text_without_tokens = strip_prefixed_tokens(
+            answer,
+            &[PREFIX, FILE_PREFIX, VOICE_PREFIX, EPHEMERAL_PREFIX],
+        )
+        .trim()
+        .to_string();
         if !inferred_write_paths.is_empty() {
             text_without_tokens = strip_written_file_confirmation_lines(&text_without_tokens)
                 .trim()
@@ -2337,11 +2462,19 @@ fn render_inline_code_html(text: &str) -> Option<String> {
         out.push('`');
     }
     out.push_str(&escape_telegram_html(&buf));
-    if saw_code { Some(out) } else { None }
+    if saw_code {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 fn code_or_command_block_body(text: &str) -> Option<String> {
-    if text.is_empty() || text.len() > 3600 || has_delivery_prefix(text) || text.starts_with("<pre>") {
+    if text.is_empty()
+        || text.len() > 3600
+        || has_delivery_prefix(text)
+        || text.starts_with("<pre>")
+    {
         return None;
     }
     if let Some((lang, unfenced)) = strip_markdown_code_fence(text) {
@@ -2426,17 +2559,103 @@ fn looks_like_shell_command_line(text: &str) -> bool {
         return false;
     }
     let command_heads = [
-        "bash", "sh", "zsh", "python", "python3", "pip", "pip3", "uv", "node", "npm", "pnpm",
-        "yarn", "cargo", "rustclaw", "openclaw", "git", "curl", "wget", "ssh", "scp", "rsync",
-        "ls", "pwd", "cd", "cat", "cp", "mv", "rm", "mkdir", "chmod", "chown", "touch", "head",
-        "tail", "grep", "rg", "sed", "awk", "find", "echo", "printf", "export", "env", "source",
-        "sudo", "systemctl", "service", "journalctl", "docker", "docker-compose", "kubectl",
-        "sqlite3", "mysql", "psql", "ps", "pgrep", "pkill", "kill", "killall", "uname", "df",
-        "du", "top", "htop", "free", "mount", "umount", "ip", "ifconfig", "ss", "netstat",
-        "lsof", "tar", "zip", "unzip", "make", "cmake", "go", "java", "javac", "perl", "ruby",
-        "php", "lua", "deno", "npx", "brew", "apt", "apt-get", "yum", "dnf", "pacman",
+        "bash",
+        "sh",
+        "zsh",
+        "python",
+        "python3",
+        "pip",
+        "pip3",
+        "uv",
+        "node",
+        "npm",
+        "pnpm",
+        "yarn",
+        "cargo",
+        "rustclaw",
+        "openclaw",
+        "git",
+        "curl",
+        "wget",
+        "ssh",
+        "scp",
+        "rsync",
+        "ls",
+        "pwd",
+        "cd",
+        "cat",
+        "cp",
+        "mv",
+        "rm",
+        "mkdir",
+        "chmod",
+        "chown",
+        "touch",
+        "head",
+        "tail",
+        "grep",
+        "rg",
+        "sed",
+        "awk",
+        "find",
+        "echo",
+        "printf",
+        "export",
+        "env",
+        "source",
+        "sudo",
+        "systemctl",
+        "service",
+        "journalctl",
+        "docker",
+        "docker-compose",
+        "kubectl",
+        "sqlite3",
+        "mysql",
+        "psql",
+        "ps",
+        "pgrep",
+        "pkill",
+        "kill",
+        "killall",
+        "uname",
+        "df",
+        "du",
+        "top",
+        "htop",
+        "free",
+        "mount",
+        "umount",
+        "ip",
+        "ifconfig",
+        "ss",
+        "netstat",
+        "lsof",
+        "tar",
+        "zip",
+        "unzip",
+        "make",
+        "cmake",
+        "go",
+        "java",
+        "javac",
+        "perl",
+        "ruby",
+        "php",
+        "lua",
+        "deno",
+        "npx",
+        "brew",
+        "apt",
+        "apt-get",
+        "yum",
+        "dnf",
+        "pacman",
     ];
-    if command_heads.iter().any(|cmd| first.eq_ignore_ascii_case(cmd)) {
+    if command_heads
+        .iter()
+        .any(|cmd| first.eq_ignore_ascii_case(cmd))
+    {
         return true;
     }
     first.starts_with("./")
@@ -2471,12 +2690,42 @@ fn looks_like_single_line_code(text: &str) -> bool {
     let trimmed = text.trim();
     let lower = trimmed.to_ascii_lowercase();
     let starters = [
-        "fn ", "pub fn ", "async fn ", "let ", "const ", "var ", "val ", "def ", "class ",
-        "import ", "from ", "export ", "#include ", "package ", "interface ", "type ", "enum ",
-        "impl ", "SELECT ", "INSERT ", "UPDATE ", "DELETE ", "CREATE ", "ALTER ", "DROP ",
-        "{", "[", "<?php", "#!/usr/bin/env ", "#!/bin/bash", "#!/bin/sh",
+        "fn ",
+        "pub fn ",
+        "async fn ",
+        "let ",
+        "const ",
+        "var ",
+        "val ",
+        "def ",
+        "class ",
+        "import ",
+        "from ",
+        "export ",
+        "#include ",
+        "package ",
+        "interface ",
+        "type ",
+        "enum ",
+        "impl ",
+        "SELECT ",
+        "INSERT ",
+        "UPDATE ",
+        "DELETE ",
+        "CREATE ",
+        "ALTER ",
+        "DROP ",
+        "{",
+        "[",
+        "<?php",
+        "#!/usr/bin/env ",
+        "#!/bin/bash",
+        "#!/bin/sh",
     ];
-    if starters.iter().any(|s| trimmed.starts_with(s) || lower.starts_with(&s.to_ascii_lowercase())) {
+    if starters
+        .iter()
+        .any(|s| trimmed.starts_with(s) || lower.starts_with(&s.to_ascii_lowercase()))
+    {
         return true;
     }
     (trimmed.contains("=>") && (trimmed.contains('{') || trimmed.contains('(')))
@@ -2545,24 +2794,16 @@ fn build_expired_trade_text(original: &str, expired_hint: &str) -> String {
     }
 }
 
-fn is_crypto_trade_confirm_prompt(text: &str, structured_hint: bool) -> bool {
+/// No longer used: confirmation UI for crypto trade_preview has been removed; planner decides flow.
+fn is_crypto_trade_confirm_prompt(_text: &str, structured_hint: bool) -> bool {
     if structured_hint {
         return true;
     }
-    let t = text.to_ascii_lowercase();
-    let decision = if t.contains("trade_preview") {
-        true
-    } else {
-        (t.contains("confirm") || t.contains("trade_preview"))
-        && t.contains("yes")
-            && t.contains("no")
-    };
+    // Do not attach confirm keyboard for trade_preview; confirmation is planner-decided.
+    let decision = false;
     debug!(
-        "phase=confirm_detect structured_hint={} decision={} text_fp={} text_preview={}",
-        structured_hint,
-        decision,
-        text_fingerprint_hex(text),
-        text_preview_for_log(text, 120)
+        "phase=confirm_detect structured_hint={} decision={} (confirm UI disabled)",
+        structured_hint, decision
     );
     decision
 }
@@ -2581,23 +2822,35 @@ fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
     out
 }
 
+fn is_written_file_confirmation_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    let Some(rest) = trimmed.strip_prefix("written ") else {
+        return false;
+    };
+    let Some((bytes_text, path_text)) = rest.split_once(" bytes to ") else {
+        return false;
+    };
+    if bytes_text.trim().parse::<u64>().is_err() {
+        return false;
+    }
+    let cleaned = normalize_path_token(path_text.trim());
+    !cleaned.is_empty() && Path::new(cleaned).is_file()
+}
+
 fn extract_written_file_paths(answer: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in answer.lines() {
-        let trimmed = line.trim();
-        let Some(rest) = trimmed.strip_prefix("written ") else {
-            continue;
-        };
-        let Some((bytes_text, path_text)) = rest.split_once(" bytes to ") else {
-            continue;
-        };
-        if bytes_text.trim().parse::<u64>().is_err() {
+        if !is_written_file_confirmation_line(line) {
             continue;
         }
+        let Some(rest) = line.trim().strip_prefix("written ") else {
+            continue;
+        };
+        let Some((_, path_text)) = rest.split_once(" bytes to ") else {
+            continue;
+        };
         let cleaned = normalize_path_token(path_text.trim());
-        if !cleaned.is_empty() && Path::new(cleaned).exists() && Path::new(cleaned).is_file() {
-            out.push(cleaned.to_string());
-        }
+        out.push(cleaned.to_string());
     }
     out
 }
@@ -2605,20 +2858,7 @@ fn extract_written_file_paths(answer: &str) -> Vec<String> {
 fn strip_written_file_confirmation_lines(answer: &str) -> String {
     answer
         .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            let Some(rest) = trimmed.strip_prefix("written ") else {
-                return true;
-            };
-            let Some((bytes_text, path_text)) = rest.split_once(" bytes to ") else {
-                return true;
-            };
-            if bytes_text.trim().parse::<u64>().is_err() {
-                return true;
-            }
-            let cleaned = normalize_path_token(path_text.trim());
-            cleaned.is_empty() || !Path::new(cleaned).is_file()
-        })
+        .filter(|line| !is_written_file_confirmation_line(line))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -2656,15 +2896,22 @@ fn text_preview_for_log(text: &str, max_chars: usize) -> String {
 fn strip_prefixed_tokens(answer: &str, prefixes: &[&str]) -> String {
     answer
         .lines()
-        .filter(|line| !prefixes.iter().any(|prefix| line.trim_start().starts_with(prefix)))
+        .filter(|line| {
+            !prefixes
+                .iter()
+                .any(|prefix| line.trim_start().starts_with(prefix))
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 fn strip_delivery_tokens_for_tts(answer: &str) -> String {
-    strip_prefixed_tokens(answer, &["IMAGE_FILE:", "FILE:", "VOICE_FILE:", "EPHEMERAL:"])
-        .trim()
-        .to_string()
+    strip_prefixed_tokens(
+        answer,
+        &["IMAGE_FILE:", "FILE:", "VOICE_FILE:", "EPHEMERAL:"],
+    )
+    .trim()
+    .to_string()
 }
 
 fn normalize_path_token(token: &str) -> &str {
@@ -2752,7 +2999,13 @@ fn spawn_task_result_delivery(
         let mut sent_progress_count = 0usize;
 
         loop {
-            match query_task_status(&state, &task_id, bound_user_key_for_chat(&state, chat_id.0).as_deref()).await {
+            match query_task_status(
+                &state,
+                &task_id,
+                bound_user_key_for_chat(&state, chat_id.0).as_deref(),
+            )
+            .await
+            {
                 Ok(task) => match task.status {
                     TaskStatus::Queued | TaskStatus::Running => {
                         let progress_messages = task_progress_messages(&task);
@@ -2827,7 +3080,8 @@ fn spawn_task_result_delivery(
                         tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
                     }
                     TaskStatus::Succeeded => {
-                        let answers = task_success_messages_from_offset(&state, &task, sent_progress_count);
+                        let answers =
+                            task_success_messages_from_offset(&state, &task, sent_progress_count);
                         let resume_followup_decision = task
                             .result_json
                             .as_ref()
@@ -2945,13 +3199,18 @@ fn task_success_messages_from_offset(
             .filter(|s| !s.is_empty())
             .map(str::to_string)
             .collect::<Vec<_>>();
-        let out = dedupe_preserve_order(out);
+        let mut out = dedupe_preserve_order(out);
         if !out.is_empty() {
+            let has_explicit_delivery = out.iter().any(|msg| has_delivery_prefix(msg));
+            if has_explicit_delivery {
+                out.retain(|msg| !is_written_file_confirmation_line(msg));
+            }
             debug!(
-                "phase=success_source task_id={} source=messages offset={} messages_len={}",
+                "phase=success_source task_id={} source=messages offset={} messages_len={} explicit_delivery={}",
                 task_id,
                 offset,
-                out.len()
+                out.len(),
+                has_explicit_delivery
             );
             if offset >= out.len() {
                 // Progress delivery already consumed all message items.
@@ -3071,7 +3330,9 @@ async fn query_task_status(
                 "telegram.error.query_task_failed",
                 &[(
                     "error",
-                    &body.error.unwrap_or_else(|| state.i18n.t("common.unknown_error"))
+                    &body
+                        .error
+                        .unwrap_or_else(|| state.i18n.t("common.unknown_error"))
                 )],
             )
         ));
@@ -3163,16 +3424,17 @@ async fn submit_task_only(
 
     let task_id = submit_body
         .data
-        .ok_or_else(|| anyhow!("{}", state.i18n.t("telegram.error.submit_task_missing_task_id")))?
+        .ok_or_else(|| {
+            anyhow!(
+                "{}",
+                state.i18n.t("telegram.error.submit_task_missing_task_id")
+            )
+        })?
         .task_id;
 
     debug!(
         "phase=submit_done user_id={} chat_id={} kind={:?} task_id={} payload_fp={}",
-        user_id,
-        chat_id,
-        kind,
-        task_id,
-        payload_fp
+        user_id, chat_id, kind, task_id, payload_fp
     );
     Ok(task_id.to_string())
 }
@@ -3184,7 +3446,9 @@ async fn poll_task_result(
     wait_override_seconds: Option<u64>,
 ) -> anyhow::Result<Vec<String>> {
     let poll_interval_ms = state.poll_interval_ms.max(1);
-    let wait_seconds = wait_override_seconds.unwrap_or(state.task_wait_seconds).max(1);
+    let wait_seconds = wait_override_seconds
+        .unwrap_or(state.task_wait_seconds)
+        .max(1);
     let max_rounds = ((wait_seconds * 1000) / poll_interval_ms).max(1);
 
     for _ in 0..max_rounds {
@@ -3226,15 +3490,11 @@ async fn cancel_tasks_for_chat(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!(
-            "cancel http {status}: {body}",
-        ));
+        return Err(anyhow!("cancel http {status}: {body}",));
     }
 
-    let body: ApiResponse<JsonValue> = resp
-        .json()
-        .await
-        .context("decode cancel response failed")?;
+    let body: ApiResponse<JsonValue> =
+        resp.json().await.context("decode cancel response failed")?;
 
     if !body.ok {
         return Err(anyhow!(
@@ -3270,10 +3530,8 @@ async fn fetch_status_text(state: &BotState) -> anyhow::Result<String> {
         ));
     }
 
-    let body: ApiResponse<HealthResponse> = resp
-        .json()
-        .await
-        .context("decode health response failed")?;
+    let body: ApiResponse<HealthResponse> =
+        resp.json().await.context("decode health response failed")?;
 
     if !body.ok {
         return Err(anyhow!(
@@ -3282,7 +3540,9 @@ async fn fetch_status_text(state: &BotState) -> anyhow::Result<String> {
                 "telegram.error.health_failed",
                 &[(
                     "error",
-                    &body.error.unwrap_or_else(|| state.i18n.t("common.unknown_error"))
+                    &body
+                        .error
+                        .unwrap_or_else(|| state.i18n.t("common.unknown_error"))
                 )],
             )
         ));
@@ -3330,10 +3590,8 @@ async fn fetch_queue_length(state: &BotState) -> anyhow::Result<usize> {
             )
         ));
     }
-    let body: ApiResponse<HealthResponse> = resp
-        .json()
-        .await
-        .context("decode health response failed")?;
+    let body: ApiResponse<HealthResponse> =
+        resp.json().await.context("decode health response failed")?;
     if !body.ok {
         return Err(anyhow!(
             "{}",
@@ -3341,7 +3599,9 @@ async fn fetch_queue_length(state: &BotState) -> anyhow::Result<usize> {
                 "telegram.error.health_failed",
                 &[(
                     "error",
-                    &body.error.unwrap_or_else(|| state.i18n.t("common.unknown_error"))
+                    &body
+                        .error
+                        .unwrap_or_else(|| state.i18n.t("common.unknown_error"))
                 )],
             )
         ));
@@ -3360,8 +3620,8 @@ fn handle_voicemode_command(state: &BotState, chat_id: i64, text: &str) -> anyho
     match rest {
         "show" => {
             let chat_mode = effective_voice_reply_mode_for_chat(state, chat_id);
-            let global_mode =
-                normalize_voice_reply_mode(&state.voice_reply_mode).unwrap_or_else(|| "voice".to_string());
+            let global_mode = normalize_voice_reply_mode(&state.voice_reply_mode)
+                .unwrap_or_else(|| "voice".to_string());
             Ok(state.i18n.t_with(
                 "telegram.msg.voicemode_show",
                 &[("chat_mode", &chat_mode), ("global_mode", &global_mode)],
@@ -3369,12 +3629,14 @@ fn handle_voicemode_command(state: &BotState, chat_id: i64, text: &str) -> anyho
         }
         "voice" | "text" | "both" => {
             set_chat_voice_mode(state, chat_id, Some(rest))?;
-            Ok(state.i18n.t_with("telegram.msg.voicemode_set_ok", &[("mode", rest)]))
+            Ok(state
+                .i18n
+                .t_with("telegram.msg.voicemode_set_ok", &[("mode", rest)]))
         }
         "reset" => {
             set_chat_voice_mode(state, chat_id, None)?;
-            let global_mode =
-                normalize_voice_reply_mode(&state.voice_reply_mode).unwrap_or_else(|| "voice".to_string());
+            let global_mode = normalize_voice_reply_mode(&state.voice_reply_mode)
+                .unwrap_or_else(|| "voice".to_string());
             Ok(state.i18n.t_with(
                 "telegram.msg.voicemode_reset_ok",
                 &[("global_mode", &global_mode)],
@@ -3424,8 +3686,8 @@ fn persist_chat_voice_mode_to_config(
     } else {
         "configs/config.toml"
     };
-    let raw = fs::read_to_string(cfg_path)
-        .context(state.i18n.t("telegram.error.read_config_failed"))?;
+    let raw =
+        fs::read_to_string(cfg_path).context(state.i18n.t("telegram.error.read_config_failed"))?;
     let mut value: TomlValue =
         toml::from_str(&raw).context(state.i18n.t("telegram.error.parse_config_failed"))?;
 
@@ -3457,8 +3719,8 @@ fn persist_chat_voice_mode_to_config(
         by_chat_tbl.remove(&key);
     }
 
-    let output =
-        toml::to_string_pretty(&value).context(state.i18n.t("telegram.error.serialize_config_failed"))?;
+    let output = toml::to_string_pretty(&value)
+        .context(state.i18n.t("telegram.error.serialize_config_failed"))?;
     fs::write(cfg_path, output).context(state.i18n.t("telegram.error.write_config_failed"))?;
     Ok(())
 }
@@ -3487,7 +3749,10 @@ fn handle_openclaw_config_command(state: &BotState, text: &str) -> anyhow::Resul
             let provider_type = parts.next().unwrap_or_default();
             let model = parts.next().unwrap_or_default();
             if provider_type.is_empty() || model.is_empty() {
-                return Err(anyhow!("{}", state.i18n.t("telegram.msg.openclaw_set_usage")));
+                return Err(anyhow!(
+                    "{}",
+                    state.i18n.t("telegram.msg.openclaw_set_usage")
+                ));
             }
             set_model_config(state, provider_type, model)
         }
@@ -3511,10 +3776,7 @@ fn parse_symbols_csv(raw: &str) -> Vec<String> {
 }
 
 fn normalize_trade_symbol_for_config(raw: &str) -> Option<String> {
-    let upper = raw
-        .trim()
-        .to_ascii_uppercase()
-        .replace(['-', '/', ' '], "");
+    let upper = raw.trim().to_ascii_uppercase().replace(['-', '/', ' '], "");
     if upper.is_empty() {
         return None;
     }
@@ -3657,7 +3919,9 @@ async fn handle_cryptoapi_command(
                         .filter_map(|s| normalize_trade_symbol_for_config(&s))
                         .collect::<Vec<_>>();
                     if parsed.is_empty() {
-                        return Ok(state.i18n.t("telegram.msg.cryptoapi_add_allowed_symbols_invalid"));
+                        return Ok(state
+                            .i18n
+                            .t("telegram.msg.cryptoapi_add_allowed_symbols_invalid"));
                     }
                     let updated = persist_crypto_allowed_symbols_add(&parsed)?;
                     Ok(state.i18n.t_with(
@@ -3677,9 +3941,13 @@ async fn handle_cryptoapi_command(
                     if api_key.is_empty() || api_secret.is_empty() {
                         return Ok(cryptoapi_usage_text(state));
                     }
-                    let status =
-                        upsert_crypto_credential(state, identity, "binance", api_key, api_secret, None).await?;
-                    let api_key_masked = status.api_key_masked.unwrap_or_else(|| mask_secret(api_key));
+                    let status = upsert_crypto_credential(
+                        state, identity, "binance", api_key, api_secret, None,
+                    )
+                    .await?;
+                    let api_key_masked = status
+                        .api_key_masked
+                        .unwrap_or_else(|| mask_secret(api_key));
                     let api_secret_masked = mask_secret(api_secret);
                     Ok(state.i18n.t_with(
                         "telegram.msg.cryptoapi_set_binance_ok",
@@ -3705,7 +3973,9 @@ async fn handle_cryptoapi_command(
                         Some(passphrase),
                     )
                     .await?;
-                    let api_key_masked = status.api_key_masked.unwrap_or_else(|| mask_secret(api_key));
+                    let api_key_masked = status
+                        .api_key_masked
+                        .unwrap_or_else(|| mask_secret(api_key));
                     let api_secret_masked = mask_secret(api_secret);
                     let passphrase_masked = mask_secret(passphrase);
                     Ok(state.i18n.t_with(
@@ -3724,7 +3994,10 @@ async fn handle_cryptoapi_command(
     }
 }
 
-async fn show_cryptoapi_status(state: &BotState, identity: &AuthIdentity) -> anyhow::Result<String> {
+async fn show_cryptoapi_status(
+    state: &BotState,
+    identity: &AuthIdentity,
+) -> anyhow::Result<String> {
     let path = "configs/crypto.toml";
     let raw = fs::read_to_string(path).context("failed to read configs/crypto.toml")?;
     let value: TomlValue = toml::from_str(&raw).context("failed to parse configs/crypto.toml")?;
@@ -3771,7 +4044,8 @@ async fn show_cryptoapi_status(state: &BotState, identity: &AuthIdentity) -> any
 fn persist_crypto_allowed_symbols_add(symbols: &[String]) -> anyhow::Result<Vec<String>> {
     let path = "configs/crypto.toml";
     let raw = fs::read_to_string(path).context("failed to read configs/crypto.toml")?;
-    let mut value: TomlValue = toml::from_str(&raw).context("failed to parse configs/crypto.toml")?;
+    let mut value: TomlValue =
+        toml::from_str(&raw).context("failed to parse configs/crypto.toml")?;
     let root = value
         .as_table_mut()
         .ok_or_else(|| anyhow!("crypto config root is not a table"))?;
@@ -3808,9 +4082,15 @@ fn persist_crypto_allowed_symbols_add(symbols: &[String]) -> anyhow::Result<Vec<
     }
     crypto_table.insert(
         "allowed_symbols".to_string(),
-        TomlValue::Array(merged.iter().map(|s| TomlValue::String(s.clone())).collect()),
+        TomlValue::Array(
+            merged
+                .iter()
+                .map(|s| TomlValue::String(s.clone()))
+                .collect(),
+        ),
     );
-    let output = toml::to_string_pretty(&value).context("failed to serialize configs/crypto.toml")?;
+    let output =
+        toml::to_string_pretty(&value).context("failed to serialize configs/crypto.toml")?;
     fs::write(path, output).context("failed to write configs/crypto.toml")?;
     Ok(merged)
 }
@@ -3842,7 +4122,15 @@ fn show_model_config(state: &BotState) -> anyhow::Result<String> {
         .and_then(|v| v.as_str())
         .unwrap_or("-");
 
-    let vendors = ["openai", "google", "anthropic", "grok", "qwen", "custom"];
+    let vendors = [
+        "openai",
+        "google",
+        "anthropic",
+        "grok",
+        "qwen",
+        "minimax",
+        "custom",
+    ];
     let mut lines = vec![
         state.i18n.t_with(
             "telegram.msg.openclaw_current_selection",
@@ -3865,12 +4153,10 @@ fn show_model_config(state: &BotState) -> anyhow::Result<String> {
                         .join(", ")
                 })
                 .unwrap_or_else(|| "-".to_string());
-            lines.push(
-                state.i18n.t_with(
-                    "telegram.msg.openclaw_vendor_line",
-                    &[("vendor", vendor), ("model", model), ("models", &models)],
-                ),
-            );
+            lines.push(state.i18n.t_with(
+                "telegram.msg.openclaw_vendor_line",
+                &[("vendor", vendor), ("model", model), ("models", &models)],
+            ));
         }
     }
 
@@ -3882,7 +4168,7 @@ fn show_model_config(state: &BotState) -> anyhow::Result<String> {
 fn is_supported_model_vendor(vendor: &str) -> bool {
     matches!(
         vendor,
-        "openai" | "google" | "anthropic" | "grok" | "qwen" | "custom"
+        "openai" | "google" | "anthropic" | "grok" | "qwen" | "minimax" | "custom"
     )
 }
 
@@ -3893,12 +4179,17 @@ fn default_base_url_for_vendor(vendor: &str) -> &'static str {
         "anthropic" => "https://api.anthropic.com/v1",
         "grok" => "https://api.x.ai/v1",
         "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "minimax" => "https://api.minimax.io/v1",
         "custom" => "https://api.example.com/v1",
         _ => "https://api.example.com/v1",
     }
 }
 
-fn apply_model_config_value(value: &mut TomlValue, vendor: &str, model: &str) -> anyhow::Result<()> {
+fn apply_model_config_value(
+    value: &mut TomlValue,
+    vendor: &str,
+    model: &str,
+) -> anyhow::Result<()> {
     if !is_supported_model_vendor(vendor) {
         return Err(anyhow!("unsupported vendor: {vendor}"));
     }
@@ -3916,8 +4207,14 @@ fn apply_model_config_value(value: &mut TomlValue, vendor: &str, model: &str) ->
     let llm_tbl = llm
         .as_table_mut()
         .ok_or_else(|| anyhow!("llm is not a table"))?;
-    llm_tbl.insert("selected_vendor".to_string(), TomlValue::String(vendor.to_string()));
-    llm_tbl.insert("selected_model".to_string(), TomlValue::String(model.to_string()));
+    llm_tbl.insert(
+        "selected_vendor".to_string(),
+        TomlValue::String(vendor.to_string()),
+    );
+    llm_tbl.insert(
+        "selected_model".to_string(),
+        TomlValue::String(model.to_string()),
+    );
 
     let vendor_value = llm_tbl
         .entry(vendor.to_string())
@@ -3937,7 +4234,10 @@ fn apply_model_config_value(value: &mut TomlValue, vendor: &str, model: &str) ->
     if !vendor_tbl.contains_key("api_key") {
         vendor_tbl.insert(
             "api_key".to_string(),
-            TomlValue::String(format!("REPLACE_ME_{}_API_KEY", vendor.to_ascii_uppercase())),
+            TomlValue::String(format!(
+                "REPLACE_ME_{}_API_KEY",
+                vendor.to_ascii_uppercase()
+            )),
         );
     }
     if !vendor_tbl.contains_key("max_concurrency") {
@@ -3962,21 +4262,6 @@ fn apply_model_config_value(value: &mut TomlValue, vendor: &str, model: &str) ->
         models.push(TomlValue::String(model.to_string()));
     }
 
-    // Keep voice skills aligned with the selected primary vendor/model.
-    for section in ["audio_synthesize", "audio_transcribe"] {
-        let section_value = root
-            .entry(section.to_string())
-            .or_insert(TomlValue::Table(toml::map::Map::new()));
-        if !section_value.is_table() {
-            *section_value = TomlValue::Table(toml::map::Map::new());
-        }
-        let section_tbl = section_value
-            .as_table_mut()
-            .ok_or_else(|| anyhow!("{section} is not a table"))?;
-        section_tbl.insert("default_vendor".to_string(), TomlValue::String(vendor.to_string()));
-        section_tbl.insert("default_model".to_string(), TomlValue::String(model.to_string()));
-    }
-
     Ok(())
 }
 
@@ -3984,9 +4269,10 @@ fn set_model_config(state: &BotState, vendor: &str, model: &str) -> anyhow::Resu
     if !is_supported_model_vendor(vendor) {
         return Err(anyhow!(
             "{}",
-            state
-                .i18n
-                .t_with("telegram.msg.openclaw_unsupported_vendor", &[("vendor", vendor)])
+            state.i18n.t_with(
+                "telegram.msg.openclaw_unsupported_vendor",
+                &[("vendor", vendor)]
+            )
         ));
     }
 
@@ -3997,9 +4283,10 @@ fn set_model_config(state: &BotState, vendor: &str, model: &str) -> anyhow::Resu
     apply_model_config_value(&mut value, vendor, model)
         .context(state.i18n.t("telegram.error.config_not_table"))?;
 
-    let output =
-        toml::to_string_pretty(&value).context(state.i18n.t("telegram.error.serialize_config_failed"))?;
-    fs::write("configs/config.toml", output).context(state.i18n.t("telegram.error.write_config_failed"))?;
+    let output = toml::to_string_pretty(&value)
+        .context(state.i18n.t("telegram.error.serialize_config_failed"))?;
+    fs::write("configs/config.toml", output)
+        .context(state.i18n.t("telegram.error.write_config_failed"))?;
 
     Ok(state.i18n.t_with(
         "telegram.msg.openclaw_set_ok",
@@ -4012,7 +4299,7 @@ mod model_config_tests {
     use super::*;
 
     #[test]
-    fn apply_model_config_populates_custom_vendor_and_voice_defaults() {
+    fn apply_model_config_populates_custom_vendor_only_in_llm_section() {
         let mut v: TomlValue = toml::from_str(
             r#"
 [llm]
@@ -4032,7 +4319,10 @@ selected_model = "gpt-4o-mini"
             llm.get("selected_model").and_then(|x| x.as_str()),
             Some("my-custom-model")
         );
-        let custom = llm.get("custom").and_then(|x| x.as_table()).expect("custom");
+        let custom = llm
+            .get("custom")
+            .and_then(|x| x.as_table())
+            .expect("custom");
         assert_eq!(
             custom.get("base_url").and_then(|x| x.as_str()),
             Some("https://api.example.com/v1")
@@ -4045,31 +4335,8 @@ selected_model = "gpt-4o-mini"
             custom.get("model").and_then(|x| x.as_str()),
             Some("my-custom-model")
         );
-
-        let synth = v
-            .get("audio_synthesize")
-            .and_then(|x| x.as_table())
-            .expect("audio_synthesize");
-        assert_eq!(
-            synth.get("default_vendor").and_then(|x| x.as_str()),
-            Some("custom")
-        );
-        assert_eq!(
-            synth.get("default_model").and_then(|x| x.as_str()),
-            Some("my-custom-model")
-        );
-        let trans = v
-            .get("audio_transcribe")
-            .and_then(|x| x.as_table())
-            .expect("audio_transcribe");
-        assert_eq!(
-            trans.get("default_vendor").and_then(|x| x.as_str()),
-            Some("custom")
-        );
-        assert_eq!(
-            trans.get("default_model").and_then(|x| x.as_str()),
-            Some("my-custom-model")
-        );
+        assert!(v.get("audio_synthesize").is_none());
+        assert!(v.get("audio_transcribe").is_none());
     }
 
     #[test]
@@ -4084,6 +4351,21 @@ selected_model = "gpt-4o-mini"
         assert_eq!(
             qwen.get("base_url").and_then(|x| x.as_str()),
             Some("https://dashscope.aliyuncs.com/compatible-mode/v1")
+        );
+    }
+
+    #[test]
+    fn apply_model_config_minimax_uses_expected_default_base_url() {
+        let mut v: TomlValue = toml::from_str("[llm]\n").expect("parse");
+        apply_model_config_value(&mut v, "minimax", "MiniMax-M2.5").expect("apply");
+        let minimax = v
+            .get("llm")
+            .and_then(|x| x.get("minimax"))
+            .and_then(|x| x.as_table())
+            .expect("minimax");
+        assert_eq!(
+            minimax.get("base_url").and_then(|x| x.as_str()),
+            Some("https://api.minimax.io/v1")
         );
     }
 }

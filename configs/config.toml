@@ -42,7 +42,7 @@ user_rpm = 20
 # 风险/Risk: vendor/model 不匹配会导致调用失败.
 [llm]
 # 默认模型名 / Default selected model.
-selected_model = "qwen-plus-latest"
+selected_model = "qwen-max-latest"
 # 默认厂商标识 / Default selected vendor.
 selected_vendor = "qwen"
 
@@ -112,6 +112,20 @@ models = [
 ]
 timeout_seconds = 60
 
+# 用途/Purpose: DeepSeek 提供商连接与模型池（OpenAI-compatible）.
+# 建议修改/Recommended change: 可改，适合补充高性价比推理/编码模型.
+# 风险/Risk: 模型名与官方上线节奏变化较快，建议保留一个稳态回退模型.
+[llm.deepseek]
+api_key = "REDACTED_API_KEY"
+base_url = "https://api.deepseek.com/v1"
+max_concurrency = 1
+model = "deepseek-chat"
+models = [
+    "deepseek-chat",
+    "deepseek-reasoner",
+]
+timeout_seconds = 60
+
 # 用途/Purpose: Qwen 提供商连接与模型池.
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: base_url 或鉴权不匹配会导致 401/404.
@@ -124,6 +138,21 @@ models = [
     "qwen-max-latest",
     "qwen-plus-latest",
     "qwen-turbo-latest",
+]
+timeout_seconds = 60
+
+# 用途/Purpose: MiniMax 提供商连接与模型池（OpenAI-compatible）.
+# 建议修改/Recommended change: 可改，建议按官方最新兼容模型名维护.
+# 风险/Risk: 音频/图片相关能力与 OpenAI 兼容接口的覆盖范围可能有限，必要时需补原生适配.
+[llm.minimax]
+api_key = "REDACTED_API_KEY"
+base_url = "https://api.minimax.io/v1"
+max_concurrency = 1
+model = "MiniMax-M2.5"
+models = [
+    "MiniMax-M2.5",
+    "MiniMax-M2.5-thinking",
+    "MiniMax-M2.5-coder",
 ]
 timeout_seconds = 60
 
@@ -249,7 +278,14 @@ skill_timeout_seconds = 30
 # 例子/Example:
 # skill_switches = { image_generate = false, rss_fetch = true }
 # 技能基线列表（建议少改）/ Baseline enabled skills (avoid frequent edits).
+# A 方案：文件系统基础 skill 独立列出（run_cmd/read_file/write_file/list_dir/make_dir/remove_file）。
 skills_list = [
+    "run_cmd",
+    "read_file",
+    "write_file",
+    "list_dir",
+    "make_dir",
+    "remove_file",
     "x",
     "system_basic",
     "http_basic",

@@ -11,7 +11,7 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = REPO_ROOT / "crates" / "skills"
 EXTERNAL_SKILLS_DIR = REPO_ROOT / "external_skills"
-PROMPTS_DIR = REPO_ROOT / "prompts" / "skills"
+PROMPTS_DIR = REPO_ROOT / "prompts" / "vendors" / "default" / "skills"
 PROMPT_MANAGED_MARKER = "<!-- AUTO-GENERATED: sync_skill_docs.py -->"
 
 
@@ -248,12 +248,12 @@ def main() -> int:
     parser.add_argument(
         "--adopt",
         default="",
-        help="Adopt one skill prompt into managed mode (overwrite prompts/skills/<skill>.md).",
+        help="Adopt one skill prompt into managed mode (overwrite prompts/vendors/default/skills/<skill>.md).",
     )
     parser.add_argument(
         "--adopt-all",
         action="store_true",
-        help="Adopt all skill prompts into managed mode (overwrite all prompts/skills/<skill>.md).",
+        help="Adopt all skill prompts into managed mode (overwrite all prompts/vendors/default/skills/<skill>.md).",
     )
     args = parser.parse_args()
 

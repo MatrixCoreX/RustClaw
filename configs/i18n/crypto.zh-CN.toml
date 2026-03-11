@@ -49,4 +49,4 @@ crypto.msg.market_quote_line_coingecko = "- CoinGecko(COINGECKO) ${price}"
 crypto.msg.market_quote_unavailable = "{symbol} | 暂无可用价格"
 crypto.msg.price_alert_triggered = "价格预警 {symbol}：{window_minutes} 分钟涨跌幅 {change_pct}% 已达到阈值 {threshold_pct}%（起始={start_price}，当前={current_price}，方向={direction}）"
 crypto.msg.price_alert_not_triggered = "{symbol} 监控：{window_minutes} 分钟涨跌幅 {change_pct}% 未达到阈值 {threshold_pct}%（起始={start_price}，当前={current_price}，方向={direction}）"
-crypto.msg.trade_preview_confirm_hint = "请确认是否执行：点击确认，或回复 Y/YES（确认执行）；其他任意输入将取消。"
+# 已移除：确认提示由规划器决定，skill 不再固定输出

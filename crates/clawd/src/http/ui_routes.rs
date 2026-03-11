@@ -3,14 +3,14 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Seek, SeekFrom};
 use tokio::process::Command;
 
 use super::super::{
-    bind_channel_identity, current_rss_bytes, oldest_running_task_age_seconds,
-    exchange_credential_status_for_user_key, mask_secret, resolve_auth_identity_by_key,
+    bind_channel_identity, current_rss_bytes, exchange_credential_status_for_user_key, mask_secret,
+    oldest_running_task_age_seconds, resolve_auth_identity_by_key,
     resolve_channel_binding_identity, task_count_by_status, telegramd_process_stats,
     upsert_exchange_credential_for_user_key, wa_webd_process_stats, whatsappd_process_stats,
     ApiResponse, AppState, HealthResponse, LocalInteractionContext,
@@ -40,10 +40,16 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/auth/me", get(auth_me))
         .route("/auth/channel/resolve", post(resolve_channel_binding))
         .route("/auth/channel/bind", post(bind_channel_key))
-        .route("/auth/crypto-credentials", get(get_crypto_credentials).post(upsert_crypto_credentials))
+        .route(
+            "/auth/crypto-credentials",
+            get(get_crypto_credentials).post(upsert_crypto_credentials),
+        )
         .route("/health", get(health))
         .route("/skills", get(list_skills))
-        .route("/skills/config", get(get_skills_config).post(update_skills_config))
+        .route(
+            "/skills/config",
+            get(get_skills_config).post(update_skills_config),
+        )
         .route("/logs/latest", get(logs_latest))
         .route("/whatsapp-web/login-status", get(whatsapp_web_login_status))
         .route("/whatsapp-web/logout", post(whatsapp_web_logout))
@@ -133,7 +139,14 @@ async fn auth_me(
                 error: None,
             }),
         ),
-        Err((status, Json(resp))) => (status, Json(ApiResponse { ok: resp.ok, data: None, error: resp.error })),
+        Err((status, Json(resp))) => (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        ),
     }
 }
 
@@ -222,7 +235,14 @@ async fn get_crypto_credentials(
     let identity = match require_ui_identity(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
-            return (status, Json(ApiResponse { ok: resp.ok, data: None, error: resp.error }));
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
         }
     };
     match exchange_credential_status_for_user_key(&state, &identity.user_key) {
@@ -258,7 +278,14 @@ async fn upsert_crypto_credentials(
     let identity = match require_ui_identity(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
-            return (status, Json(ApiResponse { ok: resp.ok, data: None, error: resp.error }));
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
         }
     };
     match upsert_exchange_credential_for_user_key(
@@ -350,11 +377,10 @@ fn auth_user_summary_counts(state: &AppState) -> anyhow::Result<(usize, usize)> 
         [],
         |row| row.get(0),
     )?;
-    let bound_channel_count: i64 = db.query_row(
-        "SELECT COUNT(*) FROM channel_bindings",
-        [],
-        |row| row.get(0),
-    )?;
+    let bound_channel_count: i64 =
+        db.query_row("SELECT COUNT(*) FROM channel_bindings", [], |row| {
+            row.get(0)
+        })?;
     Ok((
         user_count.max(0) as usize,
         bound_channel_count.max(0) as usize,
@@ -448,9 +474,15 @@ fn service_extra_process_names_on_stop(service: &str) -> &'static [&'static str]
 
 fn service_is_running(service: &str) -> bool {
     match service {
-        "telegramd" => telegramd_process_stats().map(|(count, _)| count > 0).unwrap_or(false),
-        "whatsappd" => whatsappd_process_stats().map(|(count, _)| count > 0).unwrap_or(false),
-        "whatsapp_webd" => wa_webd_process_stats().map(|(count, _)| count > 0).unwrap_or(false),
+        "telegramd" => telegramd_process_stats()
+            .map(|(count, _)| count > 0)
+            .unwrap_or(false),
+        "whatsappd" => whatsappd_process_stats()
+            .map(|(count, _)| count > 0)
+            .unwrap_or(false),
+        "whatsapp_webd" => wa_webd_process_stats()
+            .map(|(count, _)| count > 0)
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -838,7 +870,14 @@ async fn health(
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<HealthResponse>>) {
     if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
-        return (status, Json(ApiResponse { ok: resp.ok, data: None, error: resp.error }));
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
     }
     let queue_length = task_count_by_status(&state, "queued").unwrap_or_default();
     let running_length = task_count_by_status(&state, "running").unwrap_or_default();
@@ -1098,6 +1137,10 @@ async fn get_skills_config(
     };
     let mut effective = compute_effective_enabled(&baseline, &switches);
     effective.retain(|s| !hide_skill_in_ui(s));
+    let base_skill_names: Vec<String> = claw_core::config::base_skill_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -1107,6 +1150,7 @@ async fn get_skills_config(
                 "skills_list": baseline_visible,
                 "skill_switches": switches,
                 "managed_skills": managed,
+                "base_skill_names": base_skill_names,
                 "effective_enabled_skills_preview": effective,
                 "runtime_enabled_skills": runtime_visible,
                 "restart_required": true
@@ -1184,7 +1228,10 @@ async fn whatsapp_web_login_status(
     if let Err(resp) = require_ui_identity(&state, &headers) {
         return resp;
     }
-    let base = state.whatsapp_web_bridge_base_url.trim().trim_end_matches('/');
+    let base = state
+        .whatsapp_web_bridge_base_url
+        .trim()
+        .trim_end_matches('/');
     if base.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -1217,7 +1264,9 @@ async fn whatsapp_web_login_status(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("bridge login status failed: status={status} body={body}")),
+                error: Some(format!(
+                    "bridge login status failed: status={status} body={body}"
+                )),
             }),
         );
     }
@@ -1251,7 +1300,10 @@ async fn whatsapp_web_logout(
     if let Err(resp) = require_ui_identity(&state, &headers) {
         return resp;
     }
-    let base = state.whatsapp_web_bridge_base_url.trim().trim_end_matches('/');
+    let base = state
+        .whatsapp_web_bridge_base_url
+        .trim()
+        .trim_end_matches('/');
     if base.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -1315,6 +1367,13 @@ async fn local_interaction_context(
                 error: None,
             }),
         ),
-        Err((status, Json(resp))) => (status, Json(ApiResponse { ok: resp.ok, data: None, error: resp.error })),
+        Err((status, Json(resp))) => (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        ),
     }
 }

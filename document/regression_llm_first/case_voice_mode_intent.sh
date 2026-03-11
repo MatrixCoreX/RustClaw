@@ -7,11 +7,11 @@ source "${SCRIPT_DIR}/lib.sh"
 
 health_check
 
-VOICE_MODE_PROMPT_TEMPLATE="$(cat "${SCRIPT_DIR}/../../prompts/voice_mode_intent_prompt.md")"
+VOICE_MODE_PROMPT_TEMPLATE="$(cat "${SCRIPT_DIR}/../../prompts/vendors/default/voice_mode_intent_prompt.md")"
 
 parse_voice_mode_label() {
-  local raw="${1:-}"
-  python3 - "$raw" <<'PY'
+	local raw="${1:-}"
+	python3 - "$raw" <<'PY'
 import json
 import re
 import sys
@@ -143,39 +143,40 @@ PY
 }
 
 run_voice_mode_case() {
-  local case_name="$1"
-  local user_text="$2"
-  local expected="$3"
-  local prompt
-  prompt="$(python3 - "$VOICE_MODE_PROMPT_TEMPLATE" "$user_text" <<'PY'
+	local case_name="$1"
+	local user_text="$2"
+	local expected="$3"
+	local prompt
+	prompt="$(
+		python3 - "$VOICE_MODE_PROMPT_TEMPLATE" "$user_text" <<'PY'
 import sys
 tpl = sys.argv[1]
 text = sys.argv[2].strip()
 print(tpl.replace("__USER_TEXT__", text))
 PY
-)"
+	)"
 
-  echo "[CASE] ${case_name}"
-  echo "user_text: ${user_text}"
-  local submit_resp task_id row status text error parsed
-  submit_resp="$(submit_task_with_options "$prompt" "false" "voice_mode_intent_detect_regression")"
-  task_id="$(extract_submit_task_id "$submit_resp")"
-  echo "task_id: ${task_id}"
-  row="$(wait_task_until_terminal "$task_id")"
-  status="$(printf '%s' "$row" | awk -F'\t' '{print $1}')"
-  text="$(printf '%s' "$row" | awk -F'\t' '{print $2}')"
-  error="$(printf '%s' "$row" | awk -F'\t' '{print $3}')"
-  if ! is_expected_status "$status" "succeeded"; then
-    echo "FAIL: status=${status} error=${error}"
-    return 1
-  fi
-  parsed="$(parse_voice_mode_label "$text")"
-  if [ "$parsed" != "$expected" ]; then
-    echo "FAIL: expected=${expected} parsed=${parsed}"
-    echo "raw_text=${text}"
-    return 1
-  fi
-  echo "PASS: parsed=${parsed}"
+	echo "[CASE] ${case_name}"
+	echo "user_text: ${user_text}"
+	local submit_resp task_id row status text error parsed
+	submit_resp="$(submit_task_with_options "$prompt" "false" "voice_mode_intent_detect_regression")"
+	task_id="$(extract_submit_task_id "$submit_resp")"
+	echo "task_id: ${task_id}"
+	row="$(wait_task_until_terminal "$task_id")"
+	status="$(printf '%s' "$row" | awk -F'\t' '{print $1}')"
+	text="$(printf '%s' "$row" | awk -F'\t' '{print $2}')"
+	error="$(printf '%s' "$row" | awk -F'\t' '{print $3}')"
+	if ! is_expected_status "$status" "succeeded"; then
+		echo "FAIL: status=${status} error=${error}"
+		return 1
+	fi
+	parsed="$(parse_voice_mode_label "$text")"
+	if [ "$parsed" != "$expected" ]; then
+		echo "FAIL: expected=${expected} parsed=${parsed}"
+		echo "raw_text=${text}"
+		return 1
+	fi
+	echo "PASS: parsed=${parsed}"
 }
 
 run_voice_mode_case "voice_mode_text_cn" "切回文字聊天模式" "text"

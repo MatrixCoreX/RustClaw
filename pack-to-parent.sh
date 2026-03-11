@@ -26,7 +26,7 @@ else
   ARCHIVE="${PARENT}/${ROOT_NAME}.tar.gz"
 fi
 
-echo "Packing $SCRIPT_DIR -> $ARCHIVE (excluding target/)"
+echo "Packing $SCRIPT_DIR -> $ARCHIVE (excluding .git and target/)"
 cd "$PARENT"
-tar czvf "$ARCHIVE" --exclude="$ROOT_NAME/target" "$ROOT_NAME"
+tar czvf "$ARCHIVE" --exclude="$ROOT_NAME/.git" --exclude="$ROOT_NAME/target" "$ROOT_NAME"
 echo "Done: $ARCHIVE"

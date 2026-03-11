@@ -240,10 +240,7 @@ main() {
     '{"action":"trade_preview","exchange":"binance","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01}' \
     "trade_preview"
 
-  run_case_err_contains "trade_submit without confirm rejected" \
-    '{"action":"trade_submit","exchange":"binance","symbol":"BTCUSDT","side":"buy","order_type":"market","qty":0.01}' \
-    "confirm=true"
-
+  # No runtime guard: trade_submit without confirm is allowed; planner decides when to require confirmation.
   TOTAL=$((TOTAL + 1))
   submit_resp="$(run_skill_raw '{"action":"trade_submit","exchange":"binance","symbol":"ETHUSDT","side":"buy","order_type":"limit","qty":0.02,"price":1000,"confirm":true}' 2>/dev/null || true)"
   if [[ -z "${submit_resp:-}" ]]; then

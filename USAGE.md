@@ -238,7 +238,7 @@ Check `configs/crypto.toml` first (crypto skill has its own config file); defaul
 [crypto]
 default_exchange = "binance"        # 或 "okx"
 execution_mode = "binance"          # 或 "okx"
-require_explicit_send = true
+require_explicit_send = true       # 保留配置项；是否需用户确认已交由规划器判断，运行时不再强制
 max_notional_usd = 200
 allowed_exchanges = ["binance", "okx", "gateio", "coinbase", "kraken", "coingecko"]
 allowed_symbols = ["BTCUSDT", "ETHUSDT"]

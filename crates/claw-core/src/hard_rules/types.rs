@@ -82,7 +82,10 @@ pub struct TradeRules {
 impl TradeRules {
     pub fn defaults() -> Self {
         let mut exchange_aliases = HashMap::new();
-        exchange_aliases.insert("okx".to_string(), vec!["okx".to_string(), "欧易".to_string()]);
+        exchange_aliases.insert(
+            "okx".to_string(),
+            vec!["okx".to_string(), "欧易".to_string()],
+        );
         exchange_aliases.insert(
             "binance".to_string(),
             vec!["binance".to_string(), "币安".to_string()],
@@ -163,6 +166,8 @@ pub struct MainFlowRules {
     pub runtime_whatsapp_channel_aliases: Vec<String>,
     pub classifier_direct_sources: Vec<String>,
     pub resume_continue_sources: Vec<String>,
+    pub resume_exact_continue_markers: Vec<String>,
+    pub resume_discussion_markers: Vec<String>,
     pub task_status_queued: String,
     pub task_status_running: String,
     pub task_status_succeeded: String,
@@ -218,6 +223,32 @@ impl MainFlowRules {
                 "voice_mode_intent_detect_regression".to_string(),
             ],
             resume_continue_sources: vec!["resume_continue_execute".to_string()],
+            resume_exact_continue_markers: vec![
+                "继续".to_string(),
+                "接着".to_string(),
+                "接着往下跑".to_string(),
+                "从断掉的地方继续".to_string(),
+                "把没做完的那一步接着执行".to_string(),
+                "pick up from where it stopped".to_string(),
+                "continue".to_string(),
+                "go on".to_string(),
+                "keep going".to_string(),
+                "carry on".to_string(),
+                "proceed with the unfinished part".to_string(),
+                "continue from where it broke".to_string(),
+            ],
+            resume_discussion_markers: vec![
+                "失败的是哪一步".to_string(),
+                "后面还剩什么".to_string(),
+                "剩余步骤".to_string(),
+                "未完成".to_string(),
+                "哪一步失败".to_string(),
+                "what remains".to_string(),
+                "which step failed".to_string(),
+                "failed step".to_string(),
+                "remaining step".to_string(),
+                "remaining steps".to_string(),
+            ],
             task_status_queued: "queued".to_string(),
             task_status_running: "running".to_string(),
             task_status_succeeded: "succeeded".to_string(),

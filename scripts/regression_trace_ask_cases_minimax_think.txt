@@ -1,0 +1,18 @@
+# MiniMax think / hidden-reasoning regression cases
+# format: case_name|prompt
+
+minimax_chat_direct_cn|你好
+minimax_chat_direct_en|hi
+minimax_chat_name_preference_cn|如果我之后叫你派派，你只需要简短答应，不要解释过程
+minimax_chat_code_example_cn|写一个最短的 Rust hello world 示例
+minimax_act_pwd_cn|执行 pwd，只告诉我结果
+minimax_act_hidden_files_cn|帮我看看当前目录有没有隐藏文件，只给结论
+minimax_chat_act_df_cn|先执行 df -h，再用一句大白话告诉我最该担心哪个挂载点
+minimax_fail_then_summary_cn|先执行 echo THINK_BREAK_CN，再执行 definitely_missing_command_minimax_think_24690，然后总结成功和失败分别是什么
+minimax_followup_reason_cn|刚才失败的是哪一步，后面还剩什么
+minimax_followup_continue_cn|继续
+minimax_json_route_cn|先执行 whoami，再执行 pwd，然后把结果用一句自嘲签名回复我
+minimax_file_delivery_cn|执行 pwd，把一句短句写进 `minimax_pwd_line.txt`，只回复保存后的文件路径
+minimax_schedule_none_cn|你的外号不是我的
+minimax_language_infer_seed_cn|记住：以后默认用中文回复。只回复 MINIMAX_LANG_PREF_OK
+minimax_memory_query_cn|我之前让你默认用什么语言？只回复语言代号

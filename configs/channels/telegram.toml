@@ -13,7 +13,7 @@
 admins = []
 # 图片保存类回复（如 "Image saved: ..."/"Generated successfully and saved: ..."/"图片生成成功并已保存：..."）在 N 秒后自动删除，0 表示不删除
 ephemeral_image_saved_seconds = 15
-# 交易确认按钮过期秒数；过期后按钮会变为“已过期”
+# 原交易确认按钮 TTL（确认按钮已移除，保留配置兼容）
 crypto_confirm_ttl_seconds = 15
 # Legacy allowlist user IDs (integer).
 # Kept for compatibility; runtime access now depends on key binding.

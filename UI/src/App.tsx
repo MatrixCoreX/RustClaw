@@ -81,6 +81,8 @@ interface SkillsConfigResponse {
   skills_list: string[];
   skill_switches: Record<string, boolean>;
   managed_skills: string[];
+  /** 基础技能（文件系统等），UI 归类为「基础技能」，不建议关闭 */
+  base_skill_names?: string[];
   effective_enabled_skills_preview: string[];
   runtime_enabled_skills: string[];
   restart_required: boolean;
@@ -126,6 +128,8 @@ interface AdapterHealthRow {
 const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
 const IMAGE_SKILLS = new Set<string>(["image_vision", "image_generate", "image_edit"]);
 const AUDIO_SKILLS = new Set<string>(["audio_transcribe", "audio_synthesize"]);
+/** 基础技能（与后端 base_skill_names 一致），API 未返回时用此兜底 */
+const FALLBACK_BASE_SKILL_NAMES = ["run_cmd", "read_file", "write_file", "list_dir", "make_dir", "remove_file"];
 
 const STORAGE_KEYS = {
   baseUrl: "rustclaw.monitor.baseUrl",
@@ -971,11 +975,23 @@ export default function App() {
       .filter((name) => !UI_HIDDEN_SKILLS.has(name))
       .sort((a, b) => a.localeCompare(b));
   }, [skillsConfigData, skillSwitchDraft]);
+  const baseSkillNamesSet = useMemo(() => {
+    const list = skillsConfigData?.base_skill_names;
+    const useList = list && list.length > 0 ? list : FALLBACK_BASE_SKILL_NAMES;
+    return new Set<string>(useList);
+  }, [skillsConfigData?.base_skill_names]);
+  const baseSkillsList = useMemo(
+    () => managedSkills.filter((n) => baseSkillNamesSet.has(n)),
+    [managedSkills, baseSkillNamesSet],
+  );
   const imageSkillsList = useMemo(() => managedSkills.filter((n) => IMAGE_SKILLS.has(n)), [managedSkills]);
   const audioSkillsList = useMemo(() => managedSkills.filter((n) => AUDIO_SKILLS.has(n)), [managedSkills]);
   const otherSkillsList = useMemo(
-    () => managedSkills.filter((n) => !IMAGE_SKILLS.has(n) && !AUDIO_SKILLS.has(n)),
-    [managedSkills],
+    () =>
+      managedSkills.filter(
+        (n) => !baseSkillNamesSet.has(n) && !IMAGE_SKILLS.has(n) && !AUDIO_SKILLS.has(n),
+      ),
+    [managedSkills, baseSkillNamesSet],
   );
   const baseEnabledSkills = useMemo(() => {
     return new Set<string>((skillsConfigData?.skills_list ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
@@ -1849,6 +1865,19 @@ export default function App() {
               };
               return (
                 <div className="mt-3 space-y-4">
+                  {baseSkillsList.length > 0 ? (
+                    <div>
+                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
+                        {tSlash("基础技能 / Base")}
+                      </h4>
+                      <p className="mb-2 text-xs text-amber-200/90">
+                        {t("不建议关闭。关闭后读写/执行/列目录/建目录等能力将不可用。", "Not recommended to disable. File/command/dir operations will be unavailable if disabled.")}
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {baseSkillsList.map(renderSkillRow)}
+                      </div>
+                    </div>
+                  ) : null}
                   {imageSkillsList.length > 0 ? (
                     <div>
                       <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">

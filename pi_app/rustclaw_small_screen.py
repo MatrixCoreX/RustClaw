@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RustClaw 小屏监控：480×320 全屏，请求 /v1/health 每 15 秒刷新，左侧龙虾动图 + RustClaw 标题。
+# RustClaw 小屏监控：480×320 全屏，健康状态慢刷新、日志近实时刷新，左侧龙虾动图 + RustClaw 标题。
 # 需先启动 clawd（8787）。按 F11 或 Escape 退出全屏/关闭。
 
 import errno
@@ -24,7 +24,8 @@ except ModuleNotFoundError:
     tomllib = None
 
 API_BASE = "http://127.0.0.1:8787"
-REFRESH_SEC = 15
+HEALTH_REFRESH_SEC = 15
+LOGS_REFRESH_SEC = 1
 W, H = 480, 320
 ASSETS_DIR = None
 
@@ -56,6 +57,10 @@ STRINGS = {
         "bound_channels": "已绑定通信端",
         "clawd_summary": "Logs",
         "clawd_summary_empty": "暂无摘要",
+        "logs_title": "Logs",
+        "recent_messages_title": "最近消息",
+        "recent_messages_empty": "暂无用户消息",
+        "logs_empty": "暂无日志",
         "settings_title": "设置",
         "language": "语言",
         "lang_en": "EN",
@@ -96,6 +101,10 @@ STRINGS = {
         "bound_channels": "Bound channels",
         "clawd_summary": "Logs",
         "clawd_summary_empty": "No summary",
+        "logs_title": "Logs",
+        "recent_messages_title": "Recent Messages",
+        "recent_messages_empty": "No user messages",
+        "logs_empty": "No logs",
         "settings_title": "Settings",
         "language": "Language",
         "lang_en": "EN",
@@ -401,41 +410,116 @@ def _extract_log_time_label(line):
     return "--:--:--"
 
 
+def _status_tag(line):
+    lower = (line or "").lower()
+    if any(key in lower for key in (" stage=error", " status=failed", " failed status=", " failed:", " panic", " error")):
+        return "fail"
+    if any(key in lower for key in (" stage=response", " status=ok", " success", " completed", " done")):
+        return "ok"
+    if " stage=request" in lower:
+        return "req"
+    return "run"
+
+
+def _short_stage_name(stage):
+    stage = (stage or "").strip().lower()
+    mapping = {"request": "req", "response": "resp", "error": "err"}
+    return mapping.get(stage, stage[:8] or "run")
+
+
+def _shorten_model_name(model, limit=22):
+    model = (model or "").strip()
+    if len(model) <= limit:
+        return model
+    return model[: limit - 3] + "..."
+
+
+def _prompt_token(value, limit=16):
+    token = (value or "").strip()
+    if not token:
+        return ""
+    token = token.replace(chr(92), '/').rsplit('/', 1)[-1]
+    if token.endswith('.md'):
+        token = token[:-3]
+    if len(token) <= limit:
+        return token
+    return token[: limit - 3] + "..."
+
+
+def _trim_evt_detail(line, limit=56):
+    compact = re.sub(r"\s+", " ", line or "").strip()
+    compact = re.sub(
+        r"^(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)\s*",
+        "",
+        compact,
+    )
+    compact = re.sub(r"^\d{2}:\d{2}:\d{2}\s*", "", compact)
+    if len(compact) > limit:
+        compact = compact[:limit] + "..."
+    return compact
+
+
 def _extract_log_detail(line):
     line = line or ""
-    routed = re.search(
-        r"route_request_mode llm .* mode=(ChatAct|AskClarify|Chat|Act)\s+confidence=([0-9.]+)\s+reason=(.+?)\s+evidence_refs=",
+    status = _status_tag(line)
+    llm_call = re.search(
+        r"\[LLM_CALL\].*stage=([A-Za-z0-9_./:-]+).*?vendor=([A-Za-z0-9_./:-]+)\s+model=([A-Za-z0-9_./:-]+)(?:\s+model_kind=([A-Za-z0-9_./:-]+))?.*?prompt_file=([^\s]+)",
         line,
     )
+    if llm_call:
+        stage = _short_stage_name(llm_call.group(1))
+        vendor = llm_call.group(2)
+        model = _shorten_model_name(llm_call.group(3))
+        prompt = _prompt_token(llm_call.group(5))
+        prompt_part = f" p={prompt}" if prompt else ""
+        return f"{stage} {vendor}/{model}{prompt_part} {status}"
+    prompt_invocation = re.search(
+        r"prompt_invocation .* prompt_name=([^\s]+)\s+prompt_file=([^\s]+)",
+        line,
+    )
+    if prompt_invocation:
+        prompt_name = _prompt_token(prompt_invocation.group(1), limit=14)
+        prompt_file = _prompt_token(prompt_invocation.group(2), limit=14)
+        prompt = prompt_file or prompt_name
+        return f"prompt {prompt} ok"
+    skill_model = re.search(
+        r"skill_model_selected .* skill=([A-Za-z0-9_./:-]+)\s+provider=([A-Za-z0-9_./:-]+)\s+model=([A-Za-z0-9_./:-]+)(?:\s+model_kind=([A-Za-z0-9_./:-]+))?",
+        line,
+    )
+    if skill_model:
+        skill_name = skill_model.group(1)
+        provider = skill_model.group(2)
+        model = _shorten_model_name(skill_model.group(3), limit=18)
+        return f"sel {skill_name} {provider}/{model} ok"
+    skill_llm = re.search(
+        r"skill_llm_call .* skill=([A-Za-z0-9_./:-]+)\s+prompt=([A-Za-z0-9_./:-]+)\s+model=([A-Za-z0-9_./:-]+)",
+        line,
+    )
+    if skill_llm:
+        skill_name = skill_llm.group(1)
+        prompt = _prompt_token(skill_llm.group(2), limit=14)
+        model = _shorten_model_name(skill_llm.group(3), limit=18)
+        prompt_part = f" p={prompt}" if prompt else ""
+        return f"call {skill_name} {model}{prompt_part} {status}"
+    routed = re.search(r"route_request_mode llm .* mode=(ChatAct|AskClarify|Chat|Act)", line)
     if routed:
-        mode = routed.group(1)
-        confidence = routed.group(2)
-        reason = " ".join((routed.group(3) or "").split())
-        reason = re.split(r"[;。]|(?:\s+-\s+)", reason, maxsplit=1)[0].strip()
-        if mode in ("ChatAct", "AskClarify") and reason:
-            if len(reason) > 28:
-                reason = reason[:28].rstrip() + "..."
-            return f"{mode} reason={reason}"
-        return f"{mode} {confidence}"
+        return f"route {routed.group(1)} {status}"
     mode = re.search(r"routed_mode=(ChatAct|AskClarify|Chat|Act)\b", line)
     if mode:
-        return mode.group(1)
-    prompt = re.search(r"prompt_name=([A-Za-z0-9_./-]+)", line)
-    if prompt:
-        return prompt.group(1)
+        return f"route {mode.group(1)} {status}"
     tool = re.search(r"type=call_tool tool=([A-Za-z0-9_./:-]+)", line)
     if tool:
-        return tool.group(1)
+        return f"tool {tool.group(1)} {status}"
     skill = re.search(r"type=call_skill(?:\(rerouted\))? skill=([A-Za-z0-9_./:-]+)", line)
     if skill:
-        return skill.group(1)
+        return f"skill {skill.group(1)} {status}"
     task_status = re.search(r"task_call_end .* status=([A-Za-z0-9_-]+)", line)
     if task_status:
-        return task_status.group(1)
-    return ""
+        return f"task {task_status.group(1)}"
+    compact = _trim_evt_detail(line)
+    return f"evt {compact}" if compact else "evt"
 
-
-def _summarize_clawd_log_text(raw_text, lang="CN"):
+def _collect_clawd_log_items(raw_text, lang="CN", limit=8):
     items = []
     lines = (raw_text or "").splitlines()
     for raw in reversed(lines):
@@ -468,22 +552,106 @@ def _summarize_clawd_log_text(raw_text, lang="CN"):
         elif "[" in line and "]" in line:
             item = "OTHER"
         if item:
-            items.append({"time": time_label, "kind": item, "detail": _extract_log_detail(line)})
-        if len(items) >= 8:
+            items.append({
+                "time": time_label,
+                "kind": item,
+                "detail": _extract_log_detail(line),
+                "raw": line,
+            })
+        if limit and len(items) >= limit:
             break
     return items
 
 
-def fetch_clawd_log_summary(user_key="", lang="CN"):
+def _strip_message_log_suffix(text):
+    return re.split(r"\s+call_id=[^\s]+", text or "", maxsplit=1)[0].strip()
+
+
+def _collect_recent_user_messages(raw_text, limit=5):
+    items_by_key = {}
+    ordered_keys = []
+    for raw in reversed((raw_text or "").splitlines()):
+        line = _strip_ansi(raw).strip()
+        if not line:
+            continue
+        text = ""
+        priority = 0
+        if "worker_once: ask received_message" in line and " text=" in line:
+            text = _strip_message_log_suffix(line.split(" text=", 1)[1].strip())
+            priority = 3
+        elif "plan_llm_request" in line and " user_request=" in line:
+            text = _strip_message_log_suffix(line.split(" user_request=", 1)[1].strip())
+            priority = 2
+        elif "worker_once: ask resolved_message" in line and " resolved_text=" in line:
+            text = _strip_message_log_suffix(line.split(" resolved_text=", 1)[1].strip())
+            priority = 1
+        if not text:
+            continue
+        user_id = ""
+        chat_id = ""
+        task_id = ""
+        user_match = re.search(r"\buser_id=([^\s]+)", line)
+        chat_match = re.search(r"\bchat_id=([^\s]+)", line)
+        task_match = re.search(r"\btask_id=([^\s]+)", line)
+        if user_match:
+            user_id = user_match.group(1)
+        if chat_match:
+            chat_id = chat_match.group(1)
+        if task_match:
+            task_id = task_match.group(1)
+        key = task_id or f"{_extract_log_time_label(line)}|{text}"
+        item = {
+            "time": _extract_log_time_label(line),
+            "text": text,
+            "user_id": user_id,
+            "chat_id": chat_id,
+        }
+        existing = items_by_key.get(key)
+        if existing is None:
+            items_by_key[key] = (priority, item)
+            ordered_keys.append(key)
+            continue
+        if priority > existing[0]:
+            items_by_key[key] = (priority, item)
+    items = []
+    for key in ordered_keys:
+        items.append(items_by_key[key][1])
+        if limit and len(items) >= limit:
+            break
+    return items
+
+
+def fetch_clawd_logs(user_key="", lang="CN", lines=120, limit=24):
     try:
-        query = urllib.parse.urlencode({"file": "clawd.log", "lines": 80})
+        query = urllib.parse.urlencode({"file": "clawd.log", "lines": lines})
         req = _build_api_request("/v1/logs/latest?" + query, user_key)
         with urllib.request.urlopen(req, timeout=5) as r:
             body = json.loads(r.read().decode())
         data = body.get("data") or body or {}
-        return _summarize_clawd_log_text(data.get("text") or "", lang=lang), None
+        return _collect_clawd_log_items(data.get("text") or "", lang=lang, limit=limit), None
     except Exception as e:
         return None, str(e)
+
+
+def fetch_clawd_activity(user_key="", lang="CN", lines=300, log_limit=24, message_limit=5):
+    try:
+        query = urllib.parse.urlencode({"file": "clawd.log", "lines": lines})
+        req = _build_api_request("/v1/logs/latest?" + query, user_key)
+        with urllib.request.urlopen(req, timeout=5) as r:
+            body = json.loads(r.read().decode())
+        data = body.get("data") or body or {}
+        raw_text = data.get("text") or ""
+        return (
+            _collect_clawd_log_items(raw_text, lang=lang, limit=log_limit),
+            _collect_recent_user_messages(raw_text, limit=message_limit),
+            None,
+        )
+    except Exception as e:
+        return None, None, str(e)
+
+
+def fetch_clawd_log_summary(user_key="", lang="CN"):
+    return fetch_clawd_logs(user_key=user_key, lang=lang, lines=80, limit=8)
 
 
 BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
@@ -628,6 +796,12 @@ class SmallScreenApp:
         self.root.configure(bg=self._c("bg"))
         self.health = None
         self.log_summary = []
+        self.log_entries = []
+        self.user_messages = []
+        self._last_user_messages_signature = None
+        self._log_entry_limit = 24
+        self._pending_log_entries = []
+        self._log_append_job = None
         self.error = None
         self.gif_frames = []
         self.gif_delays = []
@@ -751,9 +925,10 @@ class SmallScreenApp:
         self.gallery_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.crypto_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.users_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=20, pady=18)
+        self.logs_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=10, pady=8)
         self.settings_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=24, pady=20)
-        # 顺序（左滑下一页）：首页 → 用户 → 技能 → 加密货币 → 挖矿 → 设置 → 首页；右滑=上一页
-        self._view_mode = "dashboard"  # dashboard | users | skills | crypto | gallery | settings
+        # 顺序（左滑下一页）：首页 → 用户 → 日志 → 技能 → 加密货币 → 挖矿 → 设置 → 首页；右滑=上一页
+        self._view_mode = "dashboard"  # dashboard | users | logs | skills | crypto | gallery | settings
         self._crypto_job = None
         self._gallery_images = []
         self._gallery_index = 0
@@ -809,46 +984,32 @@ class SmallScreenApp:
         a1.pack(side=tk.LEFT)
         self._i18n.append((a1, "adapters"))
         tk.Label(adapters_row, textvariable=self.adapters_var, font=adapters_font, bg=self._c("bg"), fg=self._c("adapters_value_fg")).pack(side=tk.LEFT)
-        self.foot_var = tk.StringVar(value=_t("foot_prefix"))
-        tk.Label(content, textvariable=self.foot_var, font=("", 11), bg=self._c("bg"), fg=self._c("foot_fg")).pack(anchor=tk.W)
         self.users_count_var = tk.StringVar(value="--")
         self.bound_channels_var = tk.StringVar(value="--")
+        self._dashboard_summary_row = tk.Frame(content, bg=self._c("bg"))
+        self._dashboard_summary_row.pack(fill=tk.X, pady=(0, 4))
+        self._dashboard_users_label = tk.Label(self._dashboard_summary_row, text=_t("users_count") + ": ", font=("", 10), bg=self._c("bg"), fg=self._c("fg_dim"))
+        self._dashboard_users_label.pack(side=tk.LEFT)
+        self._dashboard_users_value = tk.Label(self._dashboard_summary_row, textvariable=self.users_count_var, font=("", 12, "bold"), bg=self._c("bg"), fg=self._c("fg"))
+        self._dashboard_users_value.pack(side=tk.LEFT)
+        self._dashboard_channels_label = tk.Label(self._dashboard_summary_row, text="    " + _t("bound_channels") + ": ", font=("", 10), bg=self._c("bg"), fg=self._c("fg_dim"))
+        self._dashboard_channels_label.pack(side=tk.LEFT)
+        self._dashboard_channels_value = tk.Label(self._dashboard_summary_row, textvariable=self.bound_channels_var, font=("", 12, "bold"), bg=self._c("bg"), fg=self._c("adapters_value_fg"))
+        self._dashboard_channels_value.pack(side=tk.LEFT)
+        self.foot_var = tk.StringVar(value=_t("foot_prefix"))
+        tk.Label(content, textvariable=self.foot_var, font=("", 11), bg=self._c("bg"), fg=self._c("foot_fg")).pack(anchor=tk.W)
         self.clawd_summary_var = tk.StringVar(value=_t("clawd_summary_empty"))
         self._users_body = tk.Frame(self.users_frame, bg=self._c("bg"))
         self._users_body.pack(fill=tk.BOTH, expand=True)
-        self._users_left = tk.Frame(self._users_body, bg=self._c("bg"), width=132)
-        self._users_left.pack(side=tk.LEFT, fill=tk.Y, anchor=tk.N)
-        self._users_left.pack_propagate(False)
-        self._users_right = tk.Frame(self._users_body, bg=self._c("bg"))
-        self._users_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(12, 0))
-        self._users_title_label = tk.Label(self._users_left, text=_t("users_title"), font=("", 16, "bold"), bg=self._c("bg"), fg=self._c("fg"))
-        self._users_title_label.pack(anchor=tk.W, pady=(0, 16))
-        self._users_count_label = tk.Label(self._users_left, text=_t("users_count"), font=("", 12), bg=self._c("bg"), fg=self._c("fg_dim"))
-        self._users_count_label.pack(anchor=tk.W)
-        self._users_count_value = tk.Label(self._users_left, textvariable=self.users_count_var, font=("", 26, "bold"), bg=self._c("bg"), fg=self._c("fg"))
-        self._users_count_value.pack(anchor=tk.W, pady=(4, 14))
-        self._bound_channels_label = tk.Label(self._users_left, text=_t("bound_channels"), font=("", 12), bg=self._c("bg"), fg=self._c("fg_dim"))
-        self._bound_channels_label.pack(anchor=tk.W)
-        self._bound_channels_value = tk.Label(self._users_left, textvariable=self.bound_channels_var, font=("", 22, "bold"), bg=self._c("bg"), fg=self._c("adapters_value_fg"))
-        self._bound_channels_value.pack(anchor=tk.W, pady=(4, 0))
-        self._clawd_summary_label = tk.Label(self._users_right, text=_t("clawd_summary"), font=("", 12, "bold"), bg=self._c("bg"), fg=self._c("fg"))
-        self._clawd_summary_label.pack(anchor=tk.W, pady=(2, 8))
-        self._clawd_summary_box = tk.Frame(self._users_right, bg=self._c("box_border"), padx=2, pady=2)
-        self._clawd_summary_box.pack(fill=tk.BOTH, expand=True)
-        self._clawd_summary_inner = tk.Frame(self._clawd_summary_box, bg=self._c("box_bg"), padx=8, pady=8)
-        self._clawd_summary_inner.pack(fill=tk.BOTH, expand=True)
-        self._clawd_summary_items = tk.Frame(self._clawd_summary_inner, bg=self._c("box_bg"))
-        self._clawd_summary_items.pack(fill=tk.BOTH, expand=True, anchor=tk.NW)
-        self._clawd_summary_value = tk.Label(
-            self._clawd_summary_inner,
-            textvariable=self.clawd_summary_var,
-            justify=tk.LEFT,
-            anchor="nw",
-            font=("", 10),
-            bg=self._c("box_bg"),
-            fg=self._c("fg_dim"),
-        )
-        self._clawd_summary_value.pack(anchor=tk.NW)
+        self._users_title_label = tk.Label(self._users_body, text=_t("users_title"), font=("", 16, "bold"), bg=self._c("bg"), fg=self._c("fg"))
+        self._users_messages_title = tk.Label(self._users_body, text=_t("recent_messages_title"), font=("", 11, "bold"), bg=self._c("bg"), fg=self._c("fg"), anchor="w")
+        self._users_messages_title.pack(fill=tk.X, pady=(0, 4))
+        self._users_messages_body = tk.Frame(self._users_body, bg=self._c("bg"))
+        self._users_messages_body.pack(fill=tk.BOTH, expand=True)
+        self._logs_title_label = tk.Label(self.logs_frame, text=_t("logs_title"), font=("", 11, "bold"), bg=self._c("bg"), fg=self._c("fg"))
+        self._logs_title_label.pack(anchor=tk.W, pady=(0, 4))
+        self._logs_body = tk.Frame(self.logs_frame, bg=self._c("bg"))
+        self._logs_body.pack(fill=tk.BOTH, expand=True)
         # 翻页：左右滑屏可到仪表盘 / 技能 / 加密货币 / 图库 / 用户 / 设置
         # 设置页（内嵌在主窗口，左滑可进入）
         self._settings_title_label = tk.Label(self.settings_frame, text=_t("settings_title"), font=("", 16, "bold"), bg=self._c("bg"), fg=self._c("fg"))
@@ -892,6 +1053,11 @@ class SmallScreenApp:
                     w.config(text=self._t(k))
             except tk.TclError:
                 pass
+        try:
+            self._dashboard_users_label.config(text=self._t("users_count") + ": ")
+            self._dashboard_channels_label.config(text="    " + self._t("bound_channels") + ": ")
+        except tk.TclError:
+            pass
         self.foot_var.set(self._t("foot_prefix"))
 
     def _prepare_settings_view(self):
@@ -909,17 +1075,19 @@ class SmallScreenApp:
         self._settings_lang_var.set(self._lang)
         self._settings_theme_var.set(self._theme)
 
+    def _prepare_logs_view(self):
+        self._logs_title_label.config(text=self._t("logs_title"), bg=self._c("bg"), fg=self._c("fg"))
+        self._render_logs_view()
+
     def _prepare_users_view(self):
         self._users_title_label.config(text=self._t("users_title"), bg=self._c("bg"), fg=self._c("fg"))
-        self._users_count_label.config(text=self._t("users_count"), bg=self._c("bg"), fg=self._c("fg_dim"))
-        self._bound_channels_label.config(text=self._t("bound_channels"), bg=self._c("bg"), fg=self._c("fg_dim"))
-        self._clawd_summary_label.config(text=self._t("clawd_summary"), bg=self._c("bg"), fg=self._c("fg"))
-        self._users_count_value.config(bg=self._c("bg"), fg=self._c("fg"))
-        self._bound_channels_value.config(bg=self._c("bg"), fg=self._c("adapters_value_fg"))
-        self._clawd_summary_box.config(bg=self._c("box_border"))
-        self._clawd_summary_inner.config(bg=self._c("box_bg"))
-        self._clawd_summary_items.config(bg=self._c("box_bg"))
-        self._clawd_summary_value.config(bg=self._c("box_bg"), fg=self._c("fg_dim"))
+        self._dashboard_summary_row.config(bg=self._c("bg"))
+        self._dashboard_users_label.config(text=self._t("users_count") + ": ", bg=self._c("bg"), fg=self._c("fg_dim"))
+        self._dashboard_users_value.config(bg=self._c("bg"), fg=self._c("fg"))
+        self._dashboard_channels_label.config(text="    " + self._t("bound_channels") + ": ", bg=self._c("bg"), fg=self._c("fg_dim"))
+        self._dashboard_channels_value.config(bg=self._c("bg"), fg=self._c("adapters_value_fg"))
+        self._users_messages_title.config(text=self._t("recent_messages_title"), bg=self._c("bg"), fg=self._c("fg"))
+        self._last_user_messages_signature = None
         self._update_user_summary_view()
 
     def _update_user_summary_view(self):
@@ -928,9 +1096,93 @@ class SmallScreenApp:
         bound_channel_count = data.get("bound_channel_count")
         self.users_count_var.set(str(user_count) if user_count is not None else "--")
         self.bound_channels_var.set(str(bound_channel_count) if bound_channel_count is not None else "--")
-        self._render_clawd_summary_items()
+        if self._view_mode == "users":
+            self._render_user_messages()
 
-    def _render_clawd_summary_items(self):
+    def _user_messages_signature(self, items):
+        return tuple(
+            (
+                str(item.get("time") or "--:--:--"),
+                str(item.get("text") or ""),
+            )
+            for item in (items if isinstance(items, list) else [])
+        )
+
+    def _render_user_messages(self):
+        items = self.user_messages if isinstance(self.user_messages, list) else []
+        signature = self._user_messages_signature(items)
+        if signature == self._last_user_messages_signature:
+            return
+        self._last_user_messages_signature = signature
+        for child in self._users_messages_body.winfo_children():
+            child.destroy()
+        if not items:
+            tk.Label(
+                self._users_messages_body,
+                text=self._t("recent_messages_empty"),
+                font=("", 11),
+                bg=self._c("bg"),
+                fg=self._c("fg_dim"),
+                anchor="w",
+                justify=tk.LEFT,
+            ).pack(anchor=tk.W)
+            return
+        for item in items:
+            card_bg = self._c("box_bg") or self._c("bg")
+            card = tk.Frame(self._users_messages_body, bg=card_bg, bd=0, highlightthickness=0)
+            card.pack(fill=tk.X, pady=(0, 6))
+            meta_parts = [item.get("time") or "--:--:--"]
+            tk.Label(
+                card,
+                text="  ".join(meta_parts),
+                font=("", 9),
+                bg=card_bg,
+                fg=self._c("fg_dim"),
+                anchor="w",
+                justify=tk.LEFT,
+            ).pack(fill=tk.X, padx=8, pady=(6, 0))
+            tk.Label(
+                card,
+                text=item.get("text") or "",
+                font=("", 11),
+                bg=card_bg,
+                fg=self._c("fg"),
+                anchor="w",
+                justify=tk.LEFT,
+                wraplength=430,
+            ).pack(fill=tk.X, padx=8, pady=(2, 6))
+
+    def _render_logs_view(self):
+        for child in self._logs_body.winfo_children():
+            child.destroy()
+        items = self.log_entries if isinstance(self.log_entries, list) else []
+        if not items:
+            tk.Label(
+                self._logs_body,
+                text=self._t("logs_empty"),
+                font=("", 11),
+                bg=self._c("bg"),
+                fg=self._c("fg_dim"),
+                anchor="w",
+                justify=tk.LEFT,
+            ).pack(anchor=tk.W)
+            return
+        list_wrapper = tk.Frame(self._logs_body, bg=self._c("bg"))
+        list_wrapper.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(list_wrapper, bg=self._c("bg"), highlightthickness=0)
+        inner = tk.Frame(canvas, bg=self._c("bg"))
+        win_id = canvas.create_window((0, 0), window=inner, anchor=tk.NW)
+
+        def _on_inner_configure(_event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(win_id, width=event.width)
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        canvas.pack(fill=tk.BOTH, expand=True)
+
         color_map = {
             "LLM": self._c("summary_llm"),
             "TASK": self._c("summary_task"),
@@ -940,56 +1192,139 @@ class SmallScreenApp:
             "SKILL": self._c("summary_skill"),
             "OTHER": self._c("summary_other"),
         }
-        for child in self._clawd_summary_items.winfo_children():
-            child.destroy()
-        items = self.log_summary if isinstance(self.log_summary, list) else []
-        if not items:
-            self.clawd_summary_var.set(self._t("clawd_summary_empty"))
-            self._clawd_summary_value.pack(anchor=tk.NW)
-            return
-        self._clawd_summary_value.pack_forget()
         for item in items:
-            if isinstance(item, dict):
-                time_label = item.get("time") or "--:--:--"
-                kind = item.get("kind") or "OTHER"
-                detail = item.get("detail") or ""
+            time_label = item.get("time") or "--:--:--"
+            detail = item.get("detail") or item.get("raw") or ""
+            kind = item.get("kind") or "OTHER"
+            row = tk.Frame(inner, bg=self._c("bg"), height=18)
+            row.pack(fill=tk.X, pady=0)
+            row.pack_propagate(False)
+            tk.Label(
+                row,
+                text=f"{time_label} {detail}",
+                font=("", 9),
+                bg=self._c("bg"),
+                fg=color_map.get(kind, self._c("fg")),
+                anchor="w",
+                justify=tk.LEFT,
+            ).pack(fill=tk.X, padx=(2, 0))
+
+        def _scroll(evt):
+            if getattr(evt, "num", None) == 5 or getattr(evt, "delta", 0) == -120:
+                canvas.yview_scroll(4, "units")
             else:
-                time_label = "--:--:--"
-                kind = str(item or "OTHER")
-                detail = ""
-            row = tk.Frame(self._clawd_summary_items, bg=self._c("box_bg"))
-            row.pack(anchor=tk.W, fill=tk.X, pady=(0, 4))
-            tk.Label(
-                row,
-                text=time_label,
-                anchor="w",
-                justify=tk.LEFT,
-                width=8,
-                font=("", 10),
-                bg=self._c("box_bg"),
-                fg=self._c("fg_dim"),
-            ).pack(side=tk.LEFT, padx=(2, 8))
-            tk.Label(
-                row,
-                text=kind,
-                anchor="w",
-                justify=tk.LEFT,
-                padx=6,
-                pady=3,
-                font=("", 10, "bold"),
-                bg=self._c("box_bg"),
-                fg=color_map.get(kind, self._c("summary_other")),
-            ).pack(side=tk.LEFT, fill=tk.X)
-            if detail:
-                tk.Label(
-                    row,
-                    text=detail,
-                    anchor="w",
-                    justify=tk.LEFT,
-                    font=("", 9),
-                    bg=self._c("box_bg"),
-                    fg=self._c("fg"),
-                ).pack(side=tk.LEFT, padx=(8, 0), fill=tk.X)
+                canvas.yview_scroll(-4, "units")
+
+        def _bind_scroll(widget):
+            widget.bind("<MouseWheel>", _scroll)
+            widget.bind("<Button-4>", lambda e: canvas.yview_scroll(-4, "units"))
+            widget.bind("<Button-5>", lambda e: canvas.yview_scroll(4, "units"))
+
+        _bind_scroll(canvas)
+        _bind_scroll(inner)
+        for row in inner.winfo_children():
+            _bind_scroll(row)
+            for child in row.winfo_children():
+                _bind_scroll(child)
+        try:
+            canvas.update_idletasks()
+            canvas.yview_moveto(1.0)
+        except tk.TclError:
+            pass
+
+    def _log_entry_key(self, item):
+        if not isinstance(item, dict):
+            return str(item)
+        raw = (item.get("raw") or "").strip()
+        if raw:
+            return raw
+        return "|".join(
+            [
+                str(item.get("time") or ""),
+                str(item.get("kind") or ""),
+                str(item.get("detail") or ""),
+            ]
+        )
+
+    def _ordered_log_entries(self, logs):
+        ordered = []
+        seen = set()
+        for item in reversed(logs or []):
+            if not isinstance(item, dict):
+                continue
+            normalized = {
+                "time": item.get("time") or "--:--:--",
+                "kind": item.get("kind") or "OTHER",
+                "detail": item.get("detail") or item.get("raw") or "",
+                "raw": item.get("raw") or "",
+            }
+            key = self._log_entry_key(normalized)
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append(normalized)
+        if self._log_entry_limit and len(ordered) > self._log_entry_limit:
+            ordered = ordered[-self._log_entry_limit:]
+        return ordered
+
+    def _cancel_log_append_job(self):
+        job = getattr(self, "_log_append_job", None)
+        if job is None:
+            return
+        try:
+            self.root.after_cancel(job)
+        except tk.TclError:
+            pass
+        self._log_append_job = None
+
+    def _append_next_log_entry(self):
+        if getattr(self, "_closing", False):
+            self._cancel_log_append_job()
+            return
+        if not self._pending_log_entries:
+            self._log_append_job = None
+            if self._view_mode == "logs":
+                self._render_logs_view()
+            return
+        self.log_entries.append(self._pending_log_entries.pop(0))
+        if self._log_entry_limit and len(self.log_entries) > self._log_entry_limit:
+            self.log_entries = self.log_entries[-self._log_entry_limit:]
+        if self._view_mode == "logs":
+            self._render_logs_view()
+        self._log_append_job = self.root.after(140, self._append_next_log_entry)
+
+    def _apply_log_entries(self, logs):
+        incoming = self._ordered_log_entries(logs)
+        effective_entries = list(self.log_entries) + list(self._pending_log_entries)
+        if not effective_entries:
+            self._pending_log_entries = []
+            self.log_entries = incoming
+            if self._view_mode == "logs":
+                self._render_logs_view()
+            return
+        effective_keys = [self._log_entry_key(item) for item in effective_entries]
+        incoming_keys = [self._log_entry_key(item) for item in incoming]
+        overlap = 0
+        max_overlap = min(len(effective_keys), len(incoming_keys))
+        for size in range(max_overlap, 0, -1):
+            if effective_keys[-size:] == incoming_keys[:size]:
+                overlap = size
+                break
+        if overlap == 0:
+            self._pending_log_entries = []
+            self._cancel_log_append_job()
+            self.log_entries = incoming
+            if self._view_mode == "logs":
+                self._render_logs_view()
+            return
+        new_items = incoming[overlap:]
+        if not new_items:
+            if self._log_entry_limit and len(self.log_entries) > self._log_entry_limit:
+                self.log_entries = self.log_entries[-self._log_entry_limit:]
+            return
+        self._pending_log_entries.extend(new_items)
+        if self._log_append_job is None:
+            self._append_next_log_entry()
 
     def _rebuild_ui(self):
         """主题切换后重建界面。"""
@@ -1056,7 +1391,7 @@ class SmallScreenApp:
         self.root.after(15000, reenable)
 
     def _toggle_view(self):
-        """左滑/下一页：dashboard -> users -> skills -> crypto -> gallery -> settings -> dashboard"""
+        """左滑/下一页：dashboard -> users -> logs -> skills -> crypto -> gallery -> settings -> dashboard"""
         if self._gallery_job:
             self.root.after_cancel(self._gallery_job)
             self._gallery_job = None
@@ -1066,8 +1401,13 @@ class SmallScreenApp:
             self._prepare_users_view()
             self.users_frame.pack(fill=tk.BOTH, expand=True)
         elif self._view_mode == "users":
-            self._view_mode = "skills"
+            self._view_mode = "logs"
             self.users_frame.pack_forget()
+            self._prepare_logs_view()
+            self.logs_frame.pack(fill=tk.BOTH, expand=True)
+        elif self._view_mode == "logs":
+            self._view_mode = "skills"
+            self.logs_frame.pack_forget()
             self.skills_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._refresh_skills_view()
         elif self._view_mode == "skills":
@@ -1094,7 +1434,7 @@ class SmallScreenApp:
             self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
 
     def _go_prev_view(self):
-        """右滑/上一页：dashboard -> settings -> gallery -> crypto -> skills -> users -> dashboard（循环）。"""
+        """右滑/上一页：dashboard -> settings -> gallery -> crypto -> skills -> logs -> users -> dashboard（循环）。"""
         if self._gallery_job:
             self.root.after_cancel(self._gallery_job)
             self._gallery_job = None
@@ -1122,8 +1462,13 @@ class SmallScreenApp:
             self.skills_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._refresh_skills_view()
         elif self._view_mode == "skills":
-            self._view_mode = "users"
+            self._view_mode = "logs"
             self.skills_frame.pack_forget()
+            self._prepare_logs_view()
+            self.logs_frame.pack(fill=tk.BOTH, expand=True)
+        elif self._view_mode == "logs":
+            self._view_mode = "users"
+            self.logs_frame.pack_forget()
             self._prepare_users_view()
             self.users_frame.pack(fill=tk.BOTH, expand=True)
         else:
@@ -1432,11 +1777,11 @@ class SmallScreenApp:
     def _refresh_health_once(self):
         def _fetch():
             data, err = fetch_health(self._auth_key)
-            summary, _summary_err = fetch_clawd_log_summary(self._auth_key, self._lang)
+            logs, user_messages, _summary_err = fetch_clawd_activity(self._auth_key, self._lang)
             if getattr(self, "_closing", False):
                 return
             try:
-                self.root.after(0, lambda d=data, e=err, s=summary: self._update(d, e, s))
+                self.root.after(0, lambda d=data, e=err, logs=logs, user_messages=user_messages: self._update(d, e, logs=logs, user_messages=user_messages))
             except tk.TclError:
                 pass
         threading.Thread(target=_fetch, daemon=True).start()
@@ -1541,16 +1886,27 @@ class SmallScreenApp:
 
     def _schedule_refresh(self):
         def loop():
+            health_data = self.health
+            health_err = self.error
+            next_health_at = 0.0
             while not getattr(self, "_closing", False):
-                data, err = fetch_health(self._auth_key)
-                summary, _summary_err = fetch_clawd_log_summary(self._auth_key, self._lang)
+                now_ts = time.time()
+                if now_ts >= next_health_at:
+                    health_data, health_err = fetch_health(self._auth_key)
+                    next_health_at = now_ts + HEALTH_REFRESH_SEC
+                logs, user_messages, _summary_err = fetch_clawd_activity(self._auth_key, self._lang)
                 if getattr(self, "_closing", False):
                     break
                 try:
-                    self.root.after(0, lambda d=data, e=err, s=summary: self._update(d, e, s))
+                    self.root.after(
+                        0,
+                        lambda d=health_data, e=health_err, logs=logs, user_messages=user_messages: self._update(
+                            d, e, logs=logs, user_messages=user_messages
+                        ),
+                    )
                 except tk.TclError:
                     break
-                time.sleep(REFRESH_SEC)
+                time.sleep(LOGS_REFRESH_SEC)
         t = threading.Thread(target=loop, daemon=True)
         t.start()
 
@@ -1565,14 +1921,21 @@ class SmallScreenApp:
             return
         self._blink_job = self.root.after(500, self._blink_step)
 
-    def _update(self, data, err, summary=None):
+    def _update(self, data, err, summary=None, logs=None, user_messages=None):
         if getattr(self, "_closing", False):
             return
-        if summary is not None:
+        if logs is not None:
+            self._apply_log_entries(logs)
+            self.log_summary = logs[:8]
+        elif summary is not None:
             self.log_summary = summary
+        if user_messages is not None:
+            self.user_messages = user_messages
         if err:
             self.health = None
             self._online = False
+            self._pending_log_entries = []
+            self._cancel_log_append_job()
             if self._blink_job:
                 self.root.after_cancel(self._blink_job)
                 self._blink_job = None
@@ -1590,7 +1953,11 @@ class SmallScreenApp:
             self.adapters_rss_var.set("--")
             self.users_count_var.set("--")
             self.bound_channels_var.set("--")
-            self._render_clawd_summary_items()
+            self.user_messages = []
+            if self._view_mode == "users":
+                self._render_user_messages()
+            if self._view_mode == "logs":
+                self._render_logs_view()
             self.foot_var.set(err[:60])
             return
         self.health = data
@@ -1628,7 +1995,7 @@ class SmallScreenApp:
         self.adapters_rss_var.set(fmt_bytes(int(total)) if total else "--")
         self._update_user_summary_view()
         from datetime import datetime
-        self.foot_var.set(self._t("update_fmt").format(time=datetime.now().strftime("%H:%M:%S"), sec=REFRESH_SEC))
+        self.foot_var.set(self._t("update_fmt").format(time=datetime.now().strftime("%H:%M:%S"), sec=LOGS_REFRESH_SEC))
 
     def _on_close(self):
         self._closing = True

@@ -5,16 +5,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
-  . "$HOME/.cargo/env"
+	. "$HOME/.cargo/env"
 fi
 
 # Enable colored log tags on interactive terminals unless overridden.
 if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
-  export RUSTCLAW_LOG_COLOR=1
+	export RUSTCLAW_LOG_COLOR=1
 fi
 
 print_rustclaw_banner() {
-  cat <<'EOF'
+	cat <<'EOF'
 ######################################################################################
                 __!---===[[[  @@@@  ]]]===---!__
            _!@#￥%……&*()_/      <<<<>>>>      \_!@#￥%……&*()_
@@ -37,7 +37,7 @@ EOF
 }
 
 if [[ -z "${RUSTCLAW_SKIP_BANNER:-}" ]]; then
-  print_rustclaw_banner
+	print_rustclaw_banner
 fi
 
 LOG_DIR="$SCRIPT_DIR/logs"
@@ -46,7 +46,7 @@ mkdir -p "$LOG_DIR" "$PID_DIR"
 
 # Stop any already running RustClaw processes before starting.
 if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
-  "$SCRIPT_DIR/stop-rustclaw.sh" || true
+	"$SCRIPT_DIR/stop-rustclaw.sh" || true
 fi
 
 # Optional args:
@@ -63,47 +63,46 @@ ENABLE_UI="${RUSTCLAW_ENABLE_UI:-0}"
 UI_FORCE_REBUILD="${RUSTCLAW_UI_FORCE_REBUILD:-0}"
 QUICK_START=0
 case "$(echo "$QUICK_START_ARG" | tr '[:upper:]' '[:lower:]')" in
-  1|true|yes|y|quick|fast)
-    QUICK_START=1
-    ;;
+1 | true | yes | y | quick | fast)
+	QUICK_START=1
+	;;
 esac
 case "$PROFILE" in
-  release|debug)
-    ;;
-  *)
-    echo "Usage: ./start-all.sh <vendor> [model_override] [release|debug] [channels]" # zh: 用法：./start-all.sh <vendor> [model_override] [release|debug] [channels]
-    exit 1
-    ;;
+release | debug) ;;
+*)
+	echo "Usage: ./start-all.sh <vendor> [model_override] [release|debug] [channels]" # zh: 用法：./start-all.sh <vendor> [model_override] [release|debug] [channels]
+	exit 1
+	;;
 esac
 export RUSTCLAW_START_PROFILE="$PROFILE"
 
 if [[ -n "$PROVIDER_OVERRIDE" ]]; then
-  export RUSTCLAW_PROVIDER_OVERRIDE="$PROVIDER_OVERRIDE"
-  echo "Using preset provider: $RUSTCLAW_PROVIDER_OVERRIDE" # zh: 使用预设 provider: $RUSTCLAW_PROVIDER_OVERRIDE
+	export RUSTCLAW_PROVIDER_OVERRIDE="$PROVIDER_OVERRIDE"
+	echo "Using preset provider: $RUSTCLAW_PROVIDER_OVERRIDE" # zh: 使用预设 provider: $RUSTCLAW_PROVIDER_OVERRIDE
 fi
 if [[ -n "$MODEL_OVERRIDE" ]]; then
-  export RUSTCLAW_MODEL_OVERRIDE="$MODEL_OVERRIDE"
-  echo "Using model override: $RUSTCLAW_MODEL_OVERRIDE" # zh: 使用模型覆盖: $RUSTCLAW_MODEL_OVERRIDE
+	export RUSTCLAW_MODEL_OVERRIDE="$MODEL_OVERRIDE"
+	echo "Using model override: $RUSTCLAW_MODEL_OVERRIDE" # zh: 使用模型覆盖: $RUSTCLAW_MODEL_OVERRIDE
 fi
 
 # Batch start should be non-interactive.
 export RUSTCLAW_MODEL_SELECT=0
 
 run_embedded_setup() {
-  local do_interactive_setup=1
-  if [[ "$SKIP_SETUP" == "1" ]]; then
-    do_interactive_setup=0
-    echo "Skip interactive setup by RUSTCLAW_SKIP_SETUP=1."
-  fi
+	local do_interactive_setup=1
+	if [[ "$SKIP_SETUP" == "1" ]]; then
+		do_interactive_setup=0
+		echo "Skip interactive setup by RUSTCLAW_SKIP_SETUP=1."
+	fi
 
-  local config_path="$SCRIPT_DIR/configs/config.toml"
-  if [[ ! -f "$config_path" ]]; then
-    echo "Config file not found: $config_path"
-    exit 1
-  fi
+	local config_path="$SCRIPT_DIR/configs/config.toml"
+	if [[ ! -f "$config_path" ]]; then
+		echo "Config file not found: $config_path"
+		exit 1
+	fi
 
-  if [[ "$do_interactive_setup" == "1" && -t 0 && -t 1 ]]; then
-    python3 - <<'PY'
+	if [[ "$do_interactive_setup" == "1" && -t 0 && -t 1 ]]; then
+		python3 - <<'PY'
 import getpass
 import json
 import os
@@ -363,28 +362,28 @@ if changed:
 if telegram_changed:
     print("Configuration updated: configs/channels/telegram.toml")
 PY
-  else
-    if [[ "$do_interactive_setup" == "0" ]]; then
-      echo "Interactive setup prompts are disabled."
-    else
-      echo "Non-interactive terminal detected; skip interactive setup prompts."
-    fi
-  fi
+	else
+		if [[ "$do_interactive_setup" == "0" ]]; then
+			echo "Interactive setup prompts are disabled."
+		else
+			echo "Non-interactive terminal detected; skip interactive setup prompts."
+		fi
+	fi
 
-  echo "Checking skill/runtime dependencies..."
-  if ! command -v cargo >/dev/null 2>&1; then
-    echo "cargo not found. Please install Rust toolchain first."
-    exit 1
-  fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "python3 not found."
-    exit 1
-  fi
-  echo "Syncing skill docs (INTERFACE.md + prompts/skills/*.md)..."
-  python3 "$SCRIPT_DIR/scripts/sync_skill_docs.py"
+	echo "Checking skill/runtime dependencies..."
+	if ! command -v cargo >/dev/null 2>&1; then
+		echo "cargo not found. Please install Rust toolchain first."
+		exit 1
+	fi
+	if ! command -v python3 >/dev/null 2>&1; then
+		echo "python3 not found."
+		exit 1
+	fi
+	echo "Syncing skill docs (INTERFACE.md + prompts/vendors/default/skills/*.md)..."
+	python3 "$SCRIPT_DIR/scripts/sync_skill_docs.py"
 
-  CONFIG_META="$(
-python3 - <<'PY'
+	CONFIG_META="$(
+		python3 - <<'PY'
 import tomllib
 from pathlib import Path
 cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
@@ -407,108 +406,108 @@ print(f"SKILLS_LIST={','.join(skills_list)}")
 print(f"WA_WEB_ENABLED={'1' if wa_web_enabled else '0'}")
 print(f"XURL_BIN={xurl_bin}")
 PY
-)"
+	)"
 
-  local SKILLS_LIST=""
-  local WA_WEB_ENABLED=""
-  local XURL_BIN=""
-  while IFS='=' read -r key value; do
-    case "$key" in
-      SKILLS_LIST) SKILLS_LIST="$value" ;;
-      WA_WEB_ENABLED) WA_WEB_ENABLED="$value" ;;
-      XURL_BIN) XURL_BIN="$value" ;;
-    esac
-  done <<< "$CONFIG_META"
+	local SKILLS_LIST=""
+	local WA_WEB_ENABLED=""
+	local XURL_BIN=""
+	while IFS='=' read -r key value; do
+		case "$key" in
+		SKILLS_LIST) SKILLS_LIST="$value" ;;
+		WA_WEB_ENABLED) WA_WEB_ENABLED="$value" ;;
+		XURL_BIN) XURL_BIN="$value" ;;
+		esac
+	done <<<"$CONFIG_META"
 
-  local profile_flag=()
-  local target_dir="target/$PROFILE"
-  if [[ "$PROFILE" == "release" ]]; then
-    profile_flag=(--release)
-  fi
+	local profile_flag=()
+	local target_dir="target/$PROFILE"
+	if [[ "$PROFILE" == "release" ]]; then
+		profile_flag=(--release)
+	fi
 
-  skill_bin_name() {
-    case "$1" in
-      x) echo "x-skill" ;;
-      system_basic) echo "system-basic-skill" ;;
-      http_basic) echo "http-basic-skill" ;;
-      git_basic) echo "git-basic-skill" ;;
-      install_module) echo "install-module-skill" ;;
-      process_basic) echo "process-basic-skill" ;;
-      package_manager) echo "package-manager-skill" ;;
-      archive_basic) echo "archive-basic-skill" ;;
-      db_basic) echo "db-basic-skill" ;;
-      docker_basic) echo "docker-basic-skill" ;;
-      fs_search) echo "fs-search-skill" ;;
-      rss_fetch) echo "rss-fetch-skill" ;;
-      image_vision) echo "image-vision-skill" ;;
-      image_generate) echo "image-generate-skill" ;;
-      image_edit) echo "image-edit-skill" ;;
-      audio_transcribe) echo "audio-transcribe-skill" ;;
-      audio_synthesize) echo "audio-synthesize-skill" ;;
-      health_check) echo "health-check-skill" ;;
-      log_analyze) echo "log-analyze-skill" ;;
-      service_control) echo "service-control-skill" ;;
-      config_guard) echo "config-guard-skill" ;;
-      crypto) echo "crypto-skill" ;;
-      *) return 1 ;;
-    esac
-  }
+	skill_bin_name() {
+		case "$1" in
+		x) echo "x-skill" ;;
+		system_basic) echo "system-basic-skill" ;;
+		http_basic) echo "http-basic-skill" ;;
+		git_basic) echo "git-basic-skill" ;;
+		install_module) echo "install-module-skill" ;;
+		process_basic) echo "process-basic-skill" ;;
+		package_manager) echo "package-manager-skill" ;;
+		archive_basic) echo "archive-basic-skill" ;;
+		db_basic) echo "db-basic-skill" ;;
+		docker_basic) echo "docker-basic-skill" ;;
+		fs_search) echo "fs-search-skill" ;;
+		rss_fetch) echo "rss-fetch-skill" ;;
+		image_vision) echo "image-vision-skill" ;;
+		image_generate) echo "image-generate-skill" ;;
+		image_edit) echo "image-edit-skill" ;;
+		audio_transcribe) echo "audio-transcribe-skill" ;;
+		audio_synthesize) echo "audio-synthesize-skill" ;;
+		health_check) echo "health-check-skill" ;;
+		log_analyze) echo "log-analyze-skill" ;;
+		service_control) echo "service-control-skill" ;;
+		config_guard) echo "config-guard-skill" ;;
+		crypto) echo "crypto-skill" ;;
+		*) return 1 ;;
+		esac
+	}
 
-  if [[ -n "${SKILLS_LIST:-}" ]]; then
-    IFS=',' read -r -a SKILLS_ARR <<< "$SKILLS_LIST"
-    for skill in "${SKILLS_ARR[@]}"; do
-      skill="$(echo "$skill" | xargs)"
-      [[ -z "$skill" ]] && continue
-      if ! bin_name="$(skill_bin_name "$skill")"; then
-        echo "Skip unknown skill in skills_list: $skill"
-        continue
-      fi
-      if [[ ! -x "$SCRIPT_DIR/$target_dir/$bin_name" ]]; then
-        echo "Skill binary missing: $SCRIPT_DIR/$target_dir/$bin_name (run: cargo build -p <pkg> ${PROFILE:+--release})"
-        exit 1
-      fi
-    done
-  fi
+	if [[ -n "${SKILLS_LIST:-}" ]]; then
+		IFS=',' read -r -a SKILLS_ARR <<<"$SKILLS_LIST"
+		for skill in "${SKILLS_ARR[@]}"; do
+			skill="$(echo "$skill" | xargs)"
+			[[ -z "$skill" ]] && continue
+			if ! bin_name="$(skill_bin_name "$skill")"; then
+				echo "Skip unknown skill in skills_list: $skill"
+				continue
+			fi
+			if [[ ! -x "$SCRIPT_DIR/$target_dir/$bin_name" ]]; then
+				echo "Skill binary missing: $SCRIPT_DIR/$target_dir/$bin_name (run: cargo build -p <pkg> ${PROFILE:+--release})"
+				exit 1
+			fi
+		done
+	fi
 
-  if [[ ",${SKILLS_LIST:-}," == *",x,"* ]]; then
-    echo "Checking X skill dependency (xurl)..."
-    if ! command -v npm >/dev/null 2>&1; then
-      echo "npm not found. Please install npm first."
-      exit 1
-    fi
-    if ! command -v "${XURL_BIN:-xurl}" >/dev/null 2>&1; then
-      echo "xurl binary not found (${XURL_BIN:-xurl}), installing @xdevplatform/xurl globally..."
-      npm install -g @xdevplatform/xurl
-    fi
-  fi
+	if [[ ",${SKILLS_LIST:-}," == *",x,"* ]]; then
+		echo "Checking X skill dependency (xurl)..."
+		if ! command -v npm >/dev/null 2>&1; then
+			echo "npm not found. Please install npm first."
+			exit 1
+		fi
+		if ! command -v "${XURL_BIN:-xurl}" >/dev/null 2>&1; then
+			echo "xurl binary not found (${XURL_BIN:-xurl}), installing @xdevplatform/xurl globally..."
+			npm install -g @xdevplatform/xurl
+		fi
+	fi
 
-  if [[ "${WA_WEB_ENABLED:-0}" == "1" ]]; then
-    echo "Checking WhatsApp Web bridge dependencies..."
-    if ! command -v node >/dev/null 2>&1; then
-      echo "node not found. Please install Node.js 18+."
-      exit 1
-    fi
-    if ! command -v npm >/dev/null 2>&1; then
-      echo "npm not found. Please install npm."
-      exit 1
-    fi
-    local bridge_dir="$SCRIPT_DIR/services/wa-web-bridge"
-    if [[ -f "$bridge_dir/package.json" && ! -d "$bridge_dir/node_modules" ]]; then
-      echo "Installing wa-web-bridge npm dependencies..."
-      npm --prefix "$bridge_dir" install
-    fi
-  fi
+	if [[ "${WA_WEB_ENABLED:-0}" == "1" ]]; then
+		echo "Checking WhatsApp Web bridge dependencies..."
+		if ! command -v node >/dev/null 2>&1; then
+			echo "node not found. Please install Node.js 18+."
+			exit 1
+		fi
+		if ! command -v npm >/dev/null 2>&1; then
+			echo "npm not found. Please install npm."
+			exit 1
+		fi
+		local bridge_dir="$SCRIPT_DIR/services/wa-web-bridge"
+		if [[ -f "$bridge_dir/package.json" && ! -d "$bridge_dir/node_modules" ]]; then
+			echo "Installing wa-web-bridge npm dependencies..."
+			npm --prefix "$bridge_dir" install
+		fi
+	fi
 }
 
 apply_channel_flags() {
-  local enable_tg="$1"
-  local enable_wa_web="$2"
-  local enable_wa_cloud="$3"
-  export RUSTCLAW_ENABLE_TG="$enable_tg"
-  export RUSTCLAW_ENABLE_WA_WEB="$enable_wa_web"
-  export RUSTCLAW_ENABLE_WA_CLOUD="$enable_wa_cloud"
+	local enable_tg="$1"
+	local enable_wa_web="$2"
+	local enable_wa_cloud="$3"
+	export RUSTCLAW_ENABLE_TG="$enable_tg"
+	export RUSTCLAW_ENABLE_WA_WEB="$enable_wa_web"
+	export RUSTCLAW_ENABLE_WA_CLOUD="$enable_wa_cloud"
 
-  python3 - <<'PY'
+	python3 - <<'PY'
 import os
 from pathlib import Path
 
@@ -567,138 +566,154 @@ PY
 }
 
 choose_channel_mode() {
-  local enable_tg="0"
-  local enable_wa_web="0"
-  local enable_wa_cloud="0"
+	local enable_tg="0"
+	local enable_wa_web="0"
+	local enable_wa_cloud="0"
 
-  if [[ -n "$CHANNELS_ARG" ]]; then
-    case "$CHANNELS_ARG" in
-      telegram)
-        enable_tg="1"
-        ;;
-      whatsapp_web)
-        enable_wa_web="1"
-        ;;
-      both)
-        enable_tg="1"
-        enable_wa_web="1"
-        ;;
-      whatsapp_cloud)
-        enable_wa_cloud="1"
-        ;;
-      all)
-        enable_tg="1"
-        enable_wa_web="1"
-        enable_wa_cloud="1"
-        ;;
-      *)
-        echo "Invalid channels arg: $CHANNELS_ARG"
-        echo "Use one of: telegram | whatsapp_web | both | whatsapp_cloud | all"
-        exit 1
-        ;;
-    esac
-    apply_channel_flags "$enable_tg" "$enable_wa_web" "$enable_wa_cloud"
-    return 0
-  fi
+	if [[ -n "$CHANNELS_ARG" ]]; then
+		case "$CHANNELS_ARG" in
+		telegram)
+			enable_tg="1"
+			;;
+		whatsapp_web)
+			enable_wa_web="1"
+			;;
+		both)
+			enable_tg="1"
+			enable_wa_web="1"
+			;;
+		whatsapp_cloud)
+			enable_wa_cloud="1"
+			;;
+		all)
+			enable_tg="1"
+			enable_wa_web="1"
+			enable_wa_cloud="1"
+			;;
+		*)
+			echo "Invalid channels arg: $CHANNELS_ARG"
+			echo "Use one of: telegram | whatsapp_web | both | whatsapp_cloud | all"
+			exit 1
+			;;
+		esac
+		apply_channel_flags "$enable_tg" "$enable_wa_web" "$enable_wa_cloud"
+		return 0
+	fi
 
-  if [[ ! -t 0 || ! -t 1 ]]; then
-    echo "Non-interactive terminal detected; keep current channel enable flags." # zh: 检测到非交互终端，保持当前渠道开关配置不变。
-    return 0
-  fi
+	if [[ ! -t 0 || ! -t 1 ]]; then
+		echo "Non-interactive terminal detected; keep current channel enable flags." # zh: 检测到非交互终端，保持当前渠道开关配置不变。
+		return 0
+	fi
 
-  echo "Step 1/5: Select startup channel(s)" # zh: 第 1/5 步：选择启动渠道（可多选）
-  ask_yes_no() {
-    local prompt="$1"
-    local ans
-    while true; do
-      read -r -p "$prompt [Y/n] > " ans
-      ans="${ans:-y}"
-      ans="$(echo "$ans" | tr '[:upper:]' '[:lower:]' | xargs)"
-      case "$ans" in
-        y|yes) echo "Selected: Y"; return 0 ;;
-        n|no) echo "Selected: N"; return 1 ;;
-        *) echo "Please input y or n." ;; # zh: 请输入 y 或 n。
-      esac
-    done
-  }
+	echo "Step 1/5: Select startup channel(s)" # zh: 第 1/5 步：选择启动渠道（可多选）
+	ask_yes_no() {
+		local prompt="$1"
+		local ans
+		while true; do
+			read -r -p "$prompt [Y/n] > " ans
+			ans="${ans:-y}"
+			ans="$(echo "$ans" | tr '[:upper:]' '[:lower:]' | xargs)"
+			case "$ans" in
+			y | yes)
+				echo "Selected: Y"
+				return 0
+				;;
+			n | no)
+				echo "Selected: N"
+				return 1
+				;;
+			*) echo "Please input y or n." ;; # zh: 请输入 y 或 n。
+			esac
+		done
+	}
 
-  if ask_yes_no "Enable telegram channel?"; then
-    enable_tg="1"
-  fi
-  if ask_yes_no "Enable whatsapp_web channel?"; then
-    enable_wa_web="1"
-  fi
-  if ask_yes_no "Enable whatsapp_cloud channel?"; then
-    enable_wa_cloud="1"
-  fi
+	if ask_yes_no "Enable telegram channel?"; then
+		enable_tg="1"
+	fi
+	if ask_yes_no "Enable whatsapp_web channel?"; then
+		enable_wa_web="1"
+	fi
+	if ask_yes_no "Enable whatsapp_cloud channel?"; then
+		enable_wa_cloud="1"
+	fi
 
-  if [[ "$enable_tg" != "1" && "$enable_wa_web" != "1" && "$enable_wa_cloud" != "1" ]]; then
-    echo "No channel selected, keep current channel flags." # zh: 未选择任何渠道，保持当前渠道配置不变。
-    return 0
-  fi
+	if [[ "$enable_tg" != "1" && "$enable_wa_web" != "1" && "$enable_wa_cloud" != "1" ]]; then
+		echo "No channel selected, keep current channel flags." # zh: 未选择任何渠道，保持当前渠道配置不变。
+		return 0
+	fi
 
-  apply_channel_flags "$enable_tg" "$enable_wa_web" "$enable_wa_cloud"
+	apply_channel_flags "$enable_tg" "$enable_wa_web" "$enable_wa_cloud"
 }
 
 if [[ "$QUICK_START" == "1" ]]; then
-  echo "Step 1/5: Quick mode enabled; skip channel prompt and keep channel config." # zh: 第 1/5 步：快速模式，跳过渠道提问，使用当前配置。
-  if [[ -n "$CHANNELS_ARG" ]]; then
-    echo "Quick mode ignores channels argument and keeps existing config."
-  fi
+	echo "Step 1/5: Quick mode enabled; skip channel prompt and keep channel config." # zh: 第 1/5 步：快速模式，跳过渠道提问，使用当前配置。
+	if [[ -n "$CHANNELS_ARG" ]]; then
+		echo "Quick mode ignores channels argument and keeps existing config."
+	fi
 else
-  choose_channel_mode
+	choose_channel_mode
 fi
 
 echo "Step 2/5: Service selection skipped; startup follows enable flags." # zh: 第 2/5 步：跳过服务选择，按 enabled 配置自动启动。
 
 choose_ui_mode() {
-  if [[ "${RUSTCLAW_ENABLE_UI:-}" == "1" ]]; then
-    ENABLE_UI=1
-    return 0
-  fi
-  if [[ "${RUSTCLAW_ENABLE_UI:-}" == "0" && -n "${RUSTCLAW_ENABLE_UI:-}" ]]; then
-    ENABLE_UI=0
-    unset RUSTCLAW_UI_DIST || true
-    return 0
-  fi
-  if [[ ! -t 0 || ! -t 1 ]]; then
-    ENABLE_UI=0
-    unset RUSTCLAW_UI_DIST || true
-    return 0
-  fi
+	if [[ "${RUSTCLAW_ENABLE_UI:-}" == "1" ]]; then
+		ENABLE_UI=1
+		return 0
+	fi
+	if [[ "${RUSTCLAW_ENABLE_UI:-}" == "0" && -n "${RUSTCLAW_ENABLE_UI:-}" ]]; then
+		ENABLE_UI=0
+		unset RUSTCLAW_UI_DIST || true
+		return 0
+	fi
+	if [[ ! -t 0 || ! -t 1 ]]; then
+		ENABLE_UI=0
+		unset RUSTCLAW_UI_DIST || true
+		return 0
+	fi
 
-  local ans
-  while true; do
-    read -r -p "Enable Web UI for clawd? [Y/n] > " ans
-    ans="${ans:-y}"
-    ans="$(echo "$ans" | tr '[:upper:]' '[:lower:]' | xargs)"
-    case "$ans" in
-      y|yes) ENABLE_UI=1; echo "Selected: Y"; break ;;
-      n|no) ENABLE_UI=0; unset RUSTCLAW_UI_DIST || true; echo "Selected: N"; break ;;
-      *) echo "Please input y or n." ;;
-    esac
-  done
+	local ans
+	while true; do
+		read -r -p "Enable Web UI for clawd? [Y/n] > " ans
+		ans="${ans:-y}"
+		ans="$(echo "$ans" | tr '[:upper:]' '[:lower:]' | xargs)"
+		case "$ans" in
+		y | yes)
+			ENABLE_UI=1
+			echo "Selected: Y"
+			break
+			;;
+		n | no)
+			ENABLE_UI=0
+			unset RUSTCLAW_UI_DIST || true
+			echo "Selected: N"
+			break
+			;;
+		*) echo "Please input y or n." ;;
+		esac
+	done
 }
 
 ui_assets_need_build() {
-  if [[ "$ENABLE_UI" != "1" ]]; then
-    return 1
-  fi
-  if [[ "$UI_FORCE_REBUILD" == "1" ]]; then
-    echo "forced"
-    return 0
-  fi
-  local ui_dir="$SCRIPT_DIR/UI"
-  if [[ ! -d "$ui_dir" ]]; then
-    echo "missing_ui_dir"
-    return 0
-  fi
-  if [[ ! -f "$ui_dir/dist/index.html" ]]; then
-    echo "missing_dist"
-    return 0
-  fi
-  local reason
-  reason="$(python3 - <<'PY'
+	if [[ "$ENABLE_UI" != "1" ]]; then
+		return 1
+	fi
+	if [[ "$UI_FORCE_REBUILD" == "1" ]]; then
+		echo "forced"
+		return 0
+	fi
+	local ui_dir="$SCRIPT_DIR/UI"
+	if [[ ! -d "$ui_dir" ]]; then
+		echo "missing_ui_dir"
+		return 0
+	fi
+	if [[ ! -f "$ui_dir/dist/index.html" ]]; then
+		echo "missing_dist"
+		return 0
+	fi
+	local reason
+	reason="$(
+		python3 - <<'PY'
 import os
 from pathlib import Path
 
@@ -744,33 +759,33 @@ dist_latest = latest_mtime([dist])
 if src_latest > dist_latest:
     print("stale_dist")
 PY
-)"
-  if [[ -n "${reason// }" ]]; then
-    echo "$reason"
-    return 0
-  fi
-  return 1
+	)"
+	if [[ -n "${reason// /}" ]]; then
+		echo "$reason"
+		return 0
+	fi
+	return 1
 }
 
 build_ui_if_needed() {
-  if [[ "$ENABLE_UI" != "1" ]]; then
-    return 0
-  fi
-  local reason
-  if ! reason="$(ui_assets_need_build)"; then
-    export RUSTCLAW_UI_DIST="$SCRIPT_DIR/UI/dist"
-    echo "UI assets are up-to-date: $RUSTCLAW_UI_DIST"
-    return 0
-  fi
-  echo "UI build required: ${reason:-unknown_reason}"
-  echo "Build UI first: cd UI && npm install && npm run build  (or start without --with-ui)"
-  exit 1
+	if [[ "$ENABLE_UI" != "1" ]]; then
+		return 0
+	fi
+	local reason
+	if ! reason="$(ui_assets_need_build)"; then
+		export RUSTCLAW_UI_DIST="$SCRIPT_DIR/UI/dist"
+		echo "UI assets are up-to-date: $RUSTCLAW_UI_DIST"
+		return 0
+	fi
+	echo "UI build required: ${reason:-unknown_reason}"
+	echo "Build UI first: cd UI && npm install && npm run build  (or start without --with-ui)"
+	exit 1
 }
 
 if [[ "$QUICK_START" == "1" ]]; then
-  echo "Quick mode: skip UI prompt."
+	echo "Quick mode: skip UI prompt."
 else
-  choose_ui_mode
+	choose_ui_mode
 fi
 
 echo "Step 3/5: Setup and dependency check" # zh: 第 3/5 步：执行初始化与依赖检查
@@ -784,10 +799,10 @@ WHATSAPP_WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsapp_webd"
 
 echo "Step 4/5: Build check" # zh: 第 4/5 步：检查编译产物
 if [[ ! -x "$CLAWD_BIN" || ! -x "$TELEGRAMD_BIN" ]]; then
-  echo "Prebuilt binaries missing for profile=$PROFILE." # zh: 缺少预编译二进制
-  echo "Required: $CLAWD_BIN, $TELEGRAMD_BIN"
-  echo "Copy your built binaries to target/$PROFILE/ or run: cargo build --workspace ${PROFILE:+--release}"
-  exit 1
+	echo "Prebuilt binaries missing for profile=$PROFILE." # zh: 缺少预编译二进制
+	echo "Required: $CLAWD_BIN, $TELEGRAMD_BIN"
+	echo "Copy your built binaries to target/$PROFILE/ or run: cargo build --workspace ${PROFILE:+--release}"
+	exit 1
 fi
 echo "Detected prebuilt binaries under target/$PROFILE; starting directly in background." # zh: 已检测到预编译二进制，直接后台启动。
 
@@ -798,38 +813,38 @@ build_ui_if_needed
 # Ensure skill-runner binary exists for run_skill tasks.
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
 if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
-  ALT_PROFILE="debug"
-  if [[ "$PROFILE" == "debug" ]]; then
-    ALT_PROFILE="release"
-  fi
-  ALT_RUNNER="$SCRIPT_DIR/target/$ALT_PROFILE/skill-runner"
-  if [[ -x "$ALT_RUNNER" ]]; then
-    echo "skill-runner missing in $PROFILE, fallback to $ALT_PROFILE: $ALT_RUNNER" # zh: 当前 profile 未找到 skill-runner，回退到另一 profile。
-    SKILL_RUNNER_ABS="$ALT_RUNNER"
-  fi
+	ALT_PROFILE="debug"
+	if [[ "$PROFILE" == "debug" ]]; then
+		ALT_PROFILE="release"
+	fi
+	ALT_RUNNER="$SCRIPT_DIR/target/$ALT_PROFILE/skill-runner"
+	if [[ -x "$ALT_RUNNER" ]]; then
+		echo "skill-runner missing in $PROFILE, fallback to $ALT_PROFILE: $ALT_RUNNER" # zh: 当前 profile 未找到 skill-runner，回退到另一 profile。
+		SKILL_RUNNER_ABS="$ALT_RUNNER"
+	fi
 fi
 
 if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
-  echo "skill-runner missing: $SKILL_RUNNER_ABS" # zh: 未找到 skill-runner
-  echo "Copy your built skill-runner to target/$PROFILE/ or run: cargo build -p skill-runner ${PROFILE:+--release}"
-  exit 1
+	echo "skill-runner missing: $SKILL_RUNNER_ABS" # zh: 未找到 skill-runner
+	echo "Copy your built skill-runner to target/$PROFILE/ or run: cargo build -p skill-runner ${PROFILE:+--release}"
+	exit 1
 fi
 
 start_clawd() {
-  if pgrep -f 'target/(debug|release)/clawd|cargo run -p clawd' >/dev/null 2>&1; then
-    echo "clawd is already running, skipping startup." # zh: clawd 已在运行，跳过启动。
-    return 0
-  fi
-  nohup "$CLAWD_BIN" >"$LOG_DIR/clawd.log" 2>&1 &
-  local pid=$!
-  echo "$pid" >"$PID_DIR/clawd.pid"
-  echo "Starting clawd binary, PID=$pid, log: $LOG_DIR/clawd.log" # zh: clawd 二进制启动中，PID=$pid, 日志: $LOG_DIR/clawd.log
+	if pgrep -f 'target/(debug|release)/clawd|cargo run -p clawd' >/dev/null 2>&1; then
+		echo "clawd is already running, skipping startup." # zh: clawd 已在运行，跳过启动。
+		return 0
+	fi
+	nohup "$CLAWD_BIN" >"$LOG_DIR/clawd.log" 2>&1 &
+	local pid=$!
+	echo "$pid" >"$PID_DIR/clawd.pid"
+	echo "Starting clawd binary, PID=$pid, log: $LOG_DIR/clawd.log" # zh: clawd 二进制启动中，PID=$pid, 日志: $LOG_DIR/clawd.log
 }
 
 start_telegramd() {
-  local tg_enabled
-  tg_enabled="$(
-python3 - <<'PY'
+	local tg_enabled
+	tg_enabled="$(
+		python3 - <<'PY'
 import tomllib
 from pathlib import Path
 cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
@@ -838,25 +853,25 @@ if tg_cfg.exists():
     cfg.update(tomllib.loads(tg_cfg.read_text(encoding="utf-8")))
 print("1" if bool(cfg.get("telegram_bot", {}).get("enabled", True)) else "0")
 PY
-  )"
-  if [[ "$tg_enabled" != "1" ]]; then
-    echo "telegram_bot.enabled=false, skipping telegramd startup." # zh: telegram_bot.enabled=false，跳过 telegramd 启动。
-    return 0
-  fi
-  if pgrep -f 'target/(debug|release)/telegramd|cargo run -p telegramd' >/dev/null 2>&1; then
-    echo "telegramd is already running, skipping startup." # zh: telegramd 已在运行，跳过启动。
-    return 0
-  fi
-  nohup "$TELEGRAMD_BIN" >"$LOG_DIR/telegramd.log" 2>&1 &
-  local pid=$!
-  echo "$pid" >"$PID_DIR/telegramd.pid"
-  echo "Starting telegramd binary, PID=$pid, log: $LOG_DIR/telegramd.log" # zh: telegramd 二进制启动中，PID=$pid, 日志: $LOG_DIR/telegramd.log
+	)"
+	if [[ "$tg_enabled" != "1" ]]; then
+		echo "telegram_bot.enabled=false, skipping telegramd startup." # zh: telegram_bot.enabled=false，跳过 telegramd 启动。
+		return 0
+	fi
+	if pgrep -f 'target/(debug|release)/telegramd|cargo run -p telegramd' >/dev/null 2>&1; then
+		echo "telegramd is already running, skipping startup." # zh: telegramd 已在运行，跳过启动。
+		return 0
+	fi
+	nohup "$TELEGRAMD_BIN" >"$LOG_DIR/telegramd.log" 2>&1 &
+	local pid=$!
+	echo "$pid" >"$PID_DIR/telegramd.pid"
+	echo "Starting telegramd binary, PID=$pid, log: $LOG_DIR/telegramd.log" # zh: telegramd 二进制启动中，PID=$pid, 日志: $LOG_DIR/telegramd.log
 }
 
 start_whatsapp_webd() {
-  local wa_web_enabled
-  wa_web_enabled="$(
-python3 - <<'PY'
+	local wa_web_enabled
+	wa_web_enabled="$(
+		python3 - <<'PY'
 import tomllib
 from pathlib import Path
 cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
@@ -865,29 +880,29 @@ if wa_cfg.exists():
     cfg.update(tomllib.loads(wa_cfg.read_text(encoding="utf-8")))
 print("1" if bool(cfg.get("whatsapp_web", {}).get("enabled", False)) else "0")
 PY
-  )"
-  if [[ "$wa_web_enabled" != "1" ]]; then
-    echo "whatsapp_web.enabled=false, skipping whatsapp_webd startup." # zh: whatsapp_web.enabled=false，跳过 whatsapp_webd 启动。
-    return 0
-  fi
-  if [[ ! -x "$WHATSAPP_WEBD_BIN" ]]; then
-    echo "Binary not found or not executable: $WHATSAPP_WEBD_BIN" # zh: 二进制不存在或不可执行：$WHATSAPP_WEBD_BIN
-    return 1
-  fi
-  if pgrep -f 'target/(debug|release)/whatsapp_webd|cargo run -p whatsapp_webd' >/dev/null 2>&1; then
-    echo "whatsapp_webd is already running, skipping startup." # zh: whatsapp_webd 已在运行，跳过启动。
-    return 0
-  fi
-  nohup "$WHATSAPP_WEBD_BIN" >"$LOG_DIR/whatsapp_webd.log" 2>&1 &
-  local pid=$!
-  echo "$pid" >"$PID_DIR/whatsapp_webd.pid"
-  echo "Starting whatsapp_webd, PID=$pid, log: $LOG_DIR/whatsapp_webd.log" # zh: whatsapp_webd 启动中，PID=$pid, 日志: $LOG_DIR/whatsapp_webd.log
+	)"
+	if [[ "$wa_web_enabled" != "1" ]]; then
+		echo "whatsapp_web.enabled=false, skipping whatsapp_webd startup." # zh: whatsapp_web.enabled=false，跳过 whatsapp_webd 启动。
+		return 0
+	fi
+	if [[ ! -x "$WHATSAPP_WEBD_BIN" ]]; then
+		echo "Binary not found or not executable: $WHATSAPP_WEBD_BIN" # zh: 二进制不存在或不可执行：$WHATSAPP_WEBD_BIN
+		return 1
+	fi
+	if pgrep -f 'target/(debug|release)/whatsapp_webd|cargo run -p whatsapp_webd' >/dev/null 2>&1; then
+		echo "whatsapp_webd is already running, skipping startup." # zh: whatsapp_webd 已在运行，跳过启动。
+		return 0
+	fi
+	nohup "$WHATSAPP_WEBD_BIN" >"$LOG_DIR/whatsapp_webd.log" 2>&1 &
+	local pid=$!
+	echo "$pid" >"$PID_DIR/whatsapp_webd.pid"
+	echo "Starting whatsapp_webd, PID=$pid, log: $LOG_DIR/whatsapp_webd.log" # zh: whatsapp_webd 启动中，PID=$pid, 日志: $LOG_DIR/whatsapp_webd.log
 }
 
 start_whatsappd() {
-  local wa_enabled
-  wa_enabled="$(
-python3 - <<'PY'
+	local wa_enabled
+	wa_enabled="$(
+		python3 - <<'PY'
 import tomllib
 from pathlib import Path
 cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
@@ -896,23 +911,23 @@ if wa_cfg.exists():
     cfg.update(tomllib.loads(wa_cfg.read_text(encoding="utf-8")))
 print("1" if bool(cfg.get("whatsapp", {}).get("enabled", False)) else "0")
 PY
-  )"
-  if [[ "$wa_enabled" != "1" ]]; then
-    echo "whatsapp.enabled=false, skipping whatsappd startup." # zh: whatsapp.enabled=false，跳过 whatsappd 启动。
-    return 0
-  fi
-  if [[ ! -x "$WHATSAPPD_BIN" ]]; then
-    echo "Binary not found or not executable: $WHATSAPPD_BIN" # zh: 二进制不存在或不可执行：$WHATSAPPD_BIN
-    return 1
-  fi
-  if pgrep -f 'target/(debug|release)/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1; then
-    echo "whatsappd is already running, skipping startup." # zh: whatsappd 已在运行，跳过启动。
-    return 0
-  fi
-  nohup "$WHATSAPPD_BIN" >"$LOG_DIR/whatsappd.log" 2>&1 &
-  local pid=$!
-  echo "$pid" >"$PID_DIR/whatsappd.pid"
-  echo "Starting whatsappd binary, PID=$pid, log: $LOG_DIR/whatsappd.log" # zh: whatsappd 二进制启动中，PID=$pid, 日志: $LOG_DIR/whatsappd.log
+	)"
+	if [[ "$wa_enabled" != "1" ]]; then
+		echo "whatsapp.enabled=false, skipping whatsappd startup." # zh: whatsapp.enabled=false，跳过 whatsappd 启动。
+		return 0
+	fi
+	if [[ ! -x "$WHATSAPPD_BIN" ]]; then
+		echo "Binary not found or not executable: $WHATSAPPD_BIN" # zh: 二进制不存在或不可执行：$WHATSAPPD_BIN
+		return 1
+	fi
+	if pgrep -f 'target/(debug|release)/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1; then
+		echo "whatsappd is already running, skipping startup." # zh: whatsappd 已在运行，跳过启动。
+		return 0
+	fi
+	nohup "$WHATSAPPD_BIN" >"$LOG_DIR/whatsappd.log" 2>&1 &
+	local pid=$!
+	echo "$pid" >"$PID_DIR/whatsappd.pid"
+	echo "Starting whatsappd binary, PID=$pid, log: $LOG_DIR/whatsappd.log" # zh: whatsappd 二进制启动中，PID=$pid, 日志: $LOG_DIR/whatsappd.log
 }
 
 echo "Step 5/5: Start services" # zh: 第 5/5 步：启动服务

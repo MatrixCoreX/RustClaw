@@ -89,6 +89,38 @@ direct_sources = ["voice_mode_intent_detect", "voice_mode_intent_detect_regressi
 # 建议修改/Recommended change: 谨慎修改 / Change cautiously.
 # 风险/Risk: 误配会导致上下文恢复逻辑不触发或误触发.
 continue_sources = ["resume_continue_execute"]
+# 用途/Purpose: 精确命中这些短跟进时，直接按 resume 处理，不再依赖 LLM 摇摆.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 过宽会把新请求误判成继续；过窄会漏掉明显续跑口令.
+exact_continue_markers = [
+  "继续",
+  "接着",
+  "接着往下跑",
+  "从断掉的地方继续",
+  "把没做完的那一步接着执行",
+  "continue",
+  "go on",
+  "keep going",
+  "carry on",
+  "proceed with the unfinished part",
+  "continue from where it broke",
+  "pick up from where it stopped",
+]
+# 用途/Purpose: 命中这些“讨论中断任务”的表达时，绑定 resume_context 但不自动续跑.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 过宽会把普通新请求误绑到旧失败任务；过窄会漏掉失败原因/剩余步骤追问.
+discussion_markers = [
+  "失败的是哪一步",
+  "后面还剩什么",
+  "剩余步骤",
+  "未完成",
+  "哪一步失败",
+  "what remains",
+  "which step failed",
+  "failed step",
+  "remaining step",
+  "remaining steps",
+]
 
 [task_status]
 # 用途/Purpose: 任务状态规范映射（主流程映射/统计使用）.

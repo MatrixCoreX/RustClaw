@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::{create_dir_all, OpenOptions};
 use std::io::IsTerminal;
-use std::fs::{OpenOptions, create_dir_all};
 use std::io::Write as IoWrite;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -10,40 +10,40 @@ use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, get_service, post};
 use axum::{Json, Router};
-use claw_core::hard_rules::main_flow::load_main_flow_rules;
-use claw_core::hard_rules::trade as hard_trade;
-use claw_core::hard_rules::trade::CompiledTradeRules;
-use claw_core::hard_rules::types::MainFlowRules;
 use claw_core::config::{
     AppConfig, ChannelBindingConfig, CommandIntentConfig, LlmProviderConfig, MaintenanceConfig,
     MemoryConfig, PersonaConfig, RoutingConfig, ScheduleConfig, ToolsConfig,
 };
+use claw_core::hard_rules::main_flow::load_main_flow_rules;
+use claw_core::hard_rules::trade as hard_trade;
+use claw_core::hard_rules::trade::CompiledTradeRules;
+use claw_core::hard_rules::types::MainFlowRules;
 use claw_core::types::{
     ApiResponse, AuthIdentity, ChannelKind, ExchangeCredentialStatus, HealthResponse,
     SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse, TaskStatus,
 };
 use reqwest::Client;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::{Value, json};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 use toml::Value as TomlValue;
-use tracing::{Instrument, debug, error, info, info_span, warn};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 use uuid::Uuid;
 
-mod memory;
-mod llm_gateway;
-mod execution_adapters;
 mod agent_engine;
+mod execution_adapters;
+mod http;
 mod intent_router;
+mod llm_gateway;
+mod memory;
+mod repo;
 mod routing_context;
 mod schedule_service;
-mod repo;
-mod http;
 
 const INIT_SQL: &str = include_str!("../../../migrations/001_init.sql");
 const MEMORY_UPGRADE_SQL: &str = include_str!("../../../migrations/002_memory_upgrade.sql");
@@ -57,26 +57,27 @@ const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
 const MODEL_IO_LOG_MAX_CHARS: usize = 16000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
 const LOG_CALL_WRAP: &str = "---- task-call ----";
-const CHAT_RESPONSE_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/chat_response_prompt.md");
+
+const CHAT_RESPONSE_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/vendors/default/chat_response_prompt.md");
 const CHAT_RESPONSE_PROMPT_PATH: &str = "prompts/chat_response_prompt.md";
 const RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/resume_continue_execute_prompt.md");
+    include_str!("../../../prompts/vendors/default/resume_continue_execute_prompt.md");
 const RESUME_FOLLOWUP_DISCUSSION_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/resume_followup_discussion_prompt.md");
-const RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH: &str =
-    "prompts/resume_followup_discussion_prompt.md";
+    include_str!("../../../prompts/vendors/default/resume_followup_discussion_prompt.md");
+const RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH: &str = "prompts/resume_followup_discussion_prompt.md";
 const IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/image_output_rewrite_prompt.md");
+    include_str!("../../../prompts/vendors/default/image_output_rewrite_prompt.md");
 const LANGUAGE_INFER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/language_infer_prompt.md");
+    include_str!("../../../prompts/vendors/default/language_infer_prompt.md");
 const IMAGE_REFERENCE_RESOLVER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/image_reference_resolver_prompt.md");
+    include_str!("../../../prompts/vendors/default/image_reference_resolver_prompt.md");
 const LONG_TERM_SUMMARY_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/long_term_summary_prompt.md");
+    include_str!("../../../prompts/vendors/default/long_term_summary_prompt.md");
 const SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT: &str =
-    include_str!("../../../prompts/schedule_intent_prompt.md");
+    include_str!("../../../prompts/vendors/default/schedule_intent_prompt.md");
 const SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT: &str =
-    include_str!("../../../prompts/schedule_intent_rules.md");
+    include_str!("../../../prompts/vendors/default/schedule_intent_rules.md");
 
 #[derive(Clone)]
 struct AppState {
@@ -87,6 +88,7 @@ struct AppState {
     skill_timeout_seconds: u64,
     skill_runner_path: PathBuf,
     skills_list: Arc<HashSet<String>>,
+    #[allow(dead_code)] // reserved for future use (e.g. capability view / UI)
     configured_skills: Arc<HashSet<String>>,
     skill_semaphore: Arc<Semaphore>,
     rate_limiter: Arc<Mutex<RateLimiter>>,
@@ -203,9 +205,9 @@ pub(crate) fn parse_llm_json_extract_or_any<T: DeserializeOwned>(raw: &str) -> O
 }
 
 pub(crate) fn parse_llm_json_raw_or_any<T: DeserializeOwned>(raw: &str) -> Option<T> {
-    serde_json::from_str::<T>(raw.trim())
-        .ok()
-        .or_else(|| extract_first_json_object_any(raw).and_then(|s| serde_json::from_str::<T>(&s).ok()))
+    serde_json::from_str::<T>(raw.trim()).ok().or_else(|| {
+        extract_first_json_object_any(raw).and_then(|s| serde_json::from_str::<T>(&s).ok())
+    })
 }
 
 impl AskReply {
@@ -253,10 +255,21 @@ struct ProviderScopedPolicy {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum AgentAction {
-    Think { #[allow(dead_code)] content: String },
-    CallTool { tool: String, args: Value },
-    CallSkill { skill: String, args: Value },
-    Respond { content: String },
+    Think {
+        #[allow(dead_code)]
+        content: String,
+    },
+    CallTool {
+        tool: String,
+        args: Value,
+    },
+    CallSkill {
+        skill: String,
+        args: Value,
+    },
+    Respond {
+        content: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -278,11 +291,11 @@ struct CommandIntentRuntime {
     all_result_suffixes: Vec<String>,
 }
 
-
 #[derive(Clone)]
 struct ScheduleRuntime {
     timezone: String,
     intent_prompt_template: String,
+    intent_prompt_file: String,
     intent_rules_template: String,
     i18n_dict: HashMap<String, String>,
 }
@@ -396,29 +409,33 @@ impl RateLimiter {
 impl ToolsPolicy {
     fn from_config(cfg: &ToolsConfig) -> Result<Self, String> {
         let profile = cfg.profile.trim().to_ascii_lowercase();
-        if !matches!(profile.as_str(), "full" | "coding" | "minimal" | "messaging") {
+        if !matches!(
+            profile.as_str(),
+            "full" | "coding" | "minimal" | "messaging"
+        ) {
             return Err(format!(
                 "invalid tools.profile={}, allowed: full|coding|minimal|messaging",
                 cfg.profile
             ));
         }
+        // Normalize legacy "tool:" to "skill:" at load so we never store or expose tool: as main semantic.
         let allow: Vec<String> = cfg
             .allow
             .iter()
-            .map(|v| v.trim().to_string())
+            .map(|v| normalize_capability_pattern(v.trim()))
             .filter(|v| !v.is_empty())
             .collect();
         let deny: Vec<String> = cfg
             .deny
             .iter()
-            .map(|v| v.trim().to_string())
+            .map(|v| normalize_capability_pattern(v.trim()))
             .filter(|v| !v.is_empty())
             .collect();
 
         for p in allow.iter().chain(deny.iter()) {
-            if p != "*" && !(p.starts_with("tool:") || p.starts_with("skill:")) {
+            if p != "*" && !p.starts_with("skill:") {
                 return Err(format!(
-                    "invalid tools pattern: {p}; expected '*' or prefix 'tool:'/'skill:'"
+                    "invalid tools pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
                 ));
             }
         }
@@ -432,20 +449,20 @@ impl ToolsPolicy {
             let allow_scoped: Vec<String> = scoped
                 .allow
                 .iter()
-                .map(|v| v.trim().to_string())
+                .map(|v| normalize_capability_pattern(v.trim()))
                 .filter(|v| !v.is_empty())
                 .collect();
             let deny_scoped: Vec<String> = scoped
                 .deny
                 .iter()
-                .map(|v| v.trim().to_string())
+                .map(|v| normalize_capability_pattern(v.trim()))
                 .filter(|v| !v.is_empty())
                 .collect();
 
             for p in allow_scoped.iter().chain(deny_scoped.iter()) {
-                if p != "*" && !(p.starts_with("tool:") || p.starts_with("skill:")) {
+                if p != "*" && !p.starts_with("skill:") {
                     return Err(format!(
-                        "invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'tool:'/'skill:'"
+                        "invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
                     ));
                 }
             }
@@ -507,7 +524,7 @@ impl ToolsPolicy {
         let defaults = match self.profile.as_str() {
             "full" => vec!["*"],
             "coding" => vec![
-                "tool:*",
+                "skill:*",
                 "skill:system_basic",
                 "skill:http_basic",
                 "skill:git_basic",
@@ -525,7 +542,15 @@ impl ToolsPolicy {
                 "skill:image_edit",
                 "skill:crypto",
             ],
-            "minimal" => vec!["tool:read_file", "tool:list_dir", "skill:system_basic"],
+            "minimal" => vec![
+                "skill:run_cmd",
+                "skill:read_file",
+                "skill:write_file",
+                "skill:list_dir",
+                "skill:make_dir",
+                "skill:remove_file",
+                "skill:system_basic",
+            ],
             "messaging" => vec!["skill:system_basic"],
             _ => vec!["*"],
         };
@@ -543,6 +568,33 @@ fn provider_policy_keys(provider_type: &str) -> Vec<String> {
         _ => {}
     }
     keys
+}
+
+fn llm_vendor_name(provider: &LlmProviderRuntime) -> &str {
+    provider
+        .config
+        .name
+        .strip_prefix("vendor-")
+        .unwrap_or(provider.config.name.as_str())
+}
+
+fn llm_model_kind(provider: &LlmProviderRuntime) -> &'static str {
+    match provider.config.provider_type.as_str() {
+        "openai_compat" => "compat",
+        "google_gemini" => "gemini_native",
+        "anthropic_claude" => "claude_native",
+        _ => "unknown",
+    }
+}
+
+/// Legacy compatibility: convert "tool:*" to "skill:*" at config load. Policy/capability view is skill-only.
+fn normalize_capability_pattern(s: &str) -> String {
+    let s = s.trim();
+    if s.starts_with("tool:") {
+        format!("skill:{}", &s[5..])
+    } else {
+        s.to_string()
+    }
 }
 
 fn wildcard_match(pattern: &str, text: &str) -> bool {
@@ -596,13 +648,20 @@ fn load_command_intent_runtime(
                 Ok(rules) => {
                     for marker in &rules.result_suffixes {
                         let m = marker.trim();
-                        if !m.is_empty() && !all_result_suffixes.iter().any(|x| x.eq_ignore_ascii_case(m)) {
+                        if !m.is_empty()
+                            && !all_result_suffixes
+                                .iter()
+                                .any(|x| x.eq_ignore_ascii_case(m))
+                        {
                             all_result_suffixes.push(m.to_string());
                         }
                     }
                 }
                 Err(err) => {
-                    warn!("load command intent rules failed: path={} err={err}", path.display());
+                    warn!(
+                        "load command intent rules failed: path={} err={err}",
+                        path.display()
+                    );
                 }
             },
             Err(err) => {
@@ -614,39 +673,45 @@ fn load_command_intent_runtime(
         }
     }
 
-    CommandIntentRuntime { all_result_suffixes }
+    CommandIntentRuntime {
+        all_result_suffixes,
+    }
 }
 
-fn load_schedule_runtime(workspace_root: &Path, cfg: &ScheduleConfig) -> ScheduleRuntime {
+fn load_schedule_runtime(
+    workspace_root: &Path,
+    cfg: &ScheduleConfig,
+    selected_vendor: Option<&str>,
+) -> ScheduleRuntime {
     let timezone = if cfg.timezone.trim().is_empty() {
         "Asia/Shanghai".to_string()
     } else {
         cfg.timezone.trim().to_string()
     };
 
-    let prompt_path = workspace_root.join(cfg.intent_prompt_path.trim());
-    let intent_prompt_template = match std::fs::read_to_string(&prompt_path) {
-        Ok(raw) => raw,
-        Err(err) => {
-            warn!(
-                "read schedule intent prompt failed: path={} err={err}; fallback to built-in",
-                prompt_path.display()
-            );
-            SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT.to_string()
-        }
+    let prompt_rel = if cfg.intent_prompt_path.trim().is_empty() {
+        "prompts/schedule_intent_prompt.md"
+    } else {
+        cfg.intent_prompt_path.trim()
     };
+    let (intent_prompt_template, intent_prompt_file) = load_prompt_template_for_vendor(
+        workspace_root,
+        selected_vendor,
+        prompt_rel,
+        SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT,
+    );
 
-    let rules_path = workspace_root.join(cfg.intent_rules_path.trim());
-    let intent_rules_template = match std::fs::read_to_string(&rules_path) {
-        Ok(raw) => raw,
-        Err(err) => {
-            warn!(
-                "read schedule intent rules failed: path={} err={err}; fallback to built-in",
-                rules_path.display()
-            );
-            SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT.to_string()
-        }
+    let rules_rel = if cfg.intent_rules_path.trim().is_empty() {
+        "prompts/schedule_intent_rules.md"
+    } else {
+        cfg.intent_rules_path.trim()
     };
+    let (intent_rules_template, _intent_rules_file) = load_prompt_template_for_vendor(
+        workspace_root,
+        selected_vendor,
+        rules_rel,
+        SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT,
+    );
 
     let locale = if cfg.locale.trim().is_empty() {
         "zh-CN".to_string()
@@ -658,7 +723,9 @@ fn load_schedule_runtime(workspace_root: &Path, cfg: &ScheduleConfig) -> Schedul
     } else {
         cfg.i18n_dir.trim().to_string()
     };
-    let i18n_path = workspace_root.join(&i18n_dir).join(format!("schedule.{locale}.toml"));
+    let i18n_path = workspace_root
+        .join(&i18n_dir)
+        .join(format!("schedule.{locale}.toml"));
     let mut i18n_dict = HashMap::new();
     match std::fs::read_to_string(&i18n_path) {
         Ok(raw) => match toml::from_str::<TomlValue>(&raw) {
@@ -691,7 +758,10 @@ fn load_schedule_runtime(workspace_root: &Path, cfg: &ScheduleConfig) -> Schedul
         }
     }
     if i18n_dict.is_empty() {
-        i18n_dict.insert("schedule.desc.daily".to_string(), "daily {time}".to_string());
+        i18n_dict.insert(
+            "schedule.desc.daily".to_string(),
+            "daily {time}".to_string(),
+        );
         i18n_dict.insert(
             "schedule.desc.weekly".to_string(),
             "weekly weekday={weekday} {time}".to_string(),
@@ -761,7 +831,8 @@ fn load_schedule_runtime(workspace_root: &Path, cfg: &ScheduleConfig) -> Schedul
         );
         i18n_dict.insert(
             "schedule.msg.create_fail_invalid_run_at".to_string(),
-            "Create failed: invalid run_at for one-time job. Expected YYYY-MM-DD HH:MM[:SS].".to_string(),
+            "Create failed: invalid run_at for one-time job. Expected YYYY-MM-DD HH:MM[:SS]."
+                .to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.create_fail_run_at_must_be_future".to_string(),
@@ -769,7 +840,8 @@ fn load_schedule_runtime(workspace_root: &Path, cfg: &ScheduleConfig) -> Schedul
         );
         i18n_dict.insert(
             "schedule.msg.create_fail_cannot_compute_next_run".to_string(),
-            "Create failed: cannot compute next run time; please check the time format.".to_string(),
+            "Create failed: cannot compute next run time; please check the time format."
+                .to_string(),
         );
         i18n_dict.insert(
             "schedule.msg.create_exists_same".to_string(),
@@ -788,6 +860,7 @@ fn load_schedule_runtime(workspace_root: &Path, cfg: &ScheduleConfig) -> Schedul
     ScheduleRuntime {
         timezone,
         intent_prompt_template,
+        intent_prompt_file,
         intent_rules_template,
         i18n_dict,
     }
@@ -807,15 +880,16 @@ fn builtin_persona_prompt(profile: &str) -> &'static str {
     }
 }
 
-fn load_persona_prompt(workspace_root: &Path, cfg: &PersonaConfig) -> String {
+fn load_persona_prompt(
+    workspace_root: &Path,
+    selected_vendor: Option<&str>,
+    cfg: &PersonaConfig,
+) -> String {
     let raw_profile = cfg.profile.trim().to_ascii_lowercase();
     let profile = match raw_profile.as_str() {
         "expert" | "companion" | "executor" => raw_profile,
         other => {
-            warn!(
-                "unknown persona profile={}, fallback to executor",
-                other
-            );
+            warn!("unknown persona profile={}, fallback to executor", other);
             "executor".to_string()
         }
     };
@@ -824,27 +898,22 @@ fn load_persona_prompt(workspace_root: &Path, cfg: &PersonaConfig) -> String {
     } else {
         cfg.dir.trim().to_string()
     };
-    let path = workspace_root.join(dir).join(format!("{profile}.md"));
-    match std::fs::read_to_string(&path) {
-        Ok(raw) => {
-            let text = raw.trim();
-            if text.is_empty() {
-                warn!(
-                    "persona prompt file is empty, fallback to built-in: path={}",
-                    path.display()
-                );
-                builtin_persona_prompt(&profile).to_string()
-            } else {
-                text.to_string()
-            }
-        }
-        Err(err) => {
-            warn!(
-                "read persona prompt failed: path={} err={err}; fallback to built-in",
-                path.display()
-            );
-            builtin_persona_prompt(&profile).to_string()
-        }
+    let rel_path = format!("{dir}/{profile}.md");
+    let (template, resolved_path) = load_prompt_template_for_vendor(
+        workspace_root,
+        selected_vendor,
+        &rel_path,
+        builtin_persona_prompt(&profile),
+    );
+    let text = template.trim();
+    if text.is_empty() {
+        warn!(
+            "persona prompt file is empty, fallback to built-in: path={}",
+            resolved_path
+        );
+        builtin_persona_prompt(&profile).to_string()
+    } else {
+        text.to_string()
     }
 }
 
@@ -858,6 +927,82 @@ fn load_runtime_prompt_template(
         Ok(s) if !s.trim().is_empty() => s,
         _ => default_template.to_string(),
     }
+}
+
+fn normalize_prompt_vendor_name(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "anthropic" | "claude" => "claude".to_string(),
+        "google" | "gemini" => "google".to_string(),
+        "openai" => "openai".to_string(),
+        "grok" | "xai" => "grok".to_string(),
+        "deepseek" => "deepseek".to_string(),
+        "qwen" => "qwen".to_string(),
+        "minimax" => "minimax".to_string(),
+        "custom" => "openai".to_string(),
+        _ => "default".to_string(),
+    }
+}
+
+pub(crate) fn prompt_vendor_name_from_selected_vendor(selected_vendor: Option<&str>) -> String {
+    selected_vendor
+        .map(normalize_prompt_vendor_name)
+        .unwrap_or_else(|| "default".to_string())
+}
+
+pub(crate) fn active_prompt_vendor_name(state: &AppState) -> String {
+    if let Some(provider) = state.llm_providers.first() {
+        return normalize_prompt_vendor_name(llm_vendor_name(provider));
+    }
+    if let Some(active) = state.active_provider_type.as_deref() {
+        return normalize_prompt_vendor_name(active);
+    }
+    "default".to_string()
+}
+
+pub(crate) fn resolve_prompt_rel_path_for_vendor(
+    workspace_root: &Path,
+    vendor: &str,
+    rel_path: &str,
+) -> String {
+    let trimmed = rel_path.trim();
+    if trimmed.is_empty() || !trimmed.starts_with("prompts/") {
+        return trimmed.to_string();
+    }
+    let suffix = trimmed.trim_start_matches("prompts/");
+    let vendor_candidate = format!("prompts/vendors/{vendor}/{suffix}");
+    if workspace_root.join(&vendor_candidate).is_file() {
+        return vendor_candidate;
+    }
+    let default_candidate = format!("prompts/vendors/default/{suffix}");
+    if vendor != "default" && workspace_root.join(&default_candidate).is_file() {
+        return default_candidate;
+    }
+    trimmed.to_string()
+}
+
+pub(crate) fn load_prompt_template_for_vendor(
+    workspace_root: &Path,
+    selected_vendor: Option<&str>,
+    rel_path: &str,
+    default_template: &str,
+) -> (String, String) {
+    let vendor = prompt_vendor_name_from_selected_vendor(selected_vendor);
+    let resolved_path = resolve_prompt_rel_path_for_vendor(workspace_root, &vendor, rel_path);
+    let template = load_runtime_prompt_template(workspace_root, &resolved_path, default_template);
+    (template, resolved_path)
+}
+
+pub(crate) fn load_prompt_template_for_state(
+    state: &AppState,
+    rel_path: &str,
+    default_template: &str,
+) -> (String, String) {
+    let vendor = active_prompt_vendor_name(state);
+    let resolved_path =
+        resolve_prompt_rel_path_for_vendor(&state.workspace_root, &vendor, rel_path);
+    let template =
+        load_runtime_prompt_template(&state.workspace_root, &resolved_path, default_template);
+    (template, resolved_path)
 }
 
 fn load_memory_runtime_config(workspace_root: &Path, cfg: &MemoryConfig) -> MemoryConfig {
@@ -964,7 +1109,6 @@ fn sanitize_command_before_execute(runtime: &CommandIntentRuntime, command: &str
     strip_result_suffixes(command, &runtime.all_result_suffixes)
 }
 
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -997,10 +1141,8 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("Please save it now and use it to bind UI / Telegram / WhatsApp.");
         eprintln!("============================================================");
     }
-    let recovered_task_ids = recover_stale_running_tasks_on_startup(
-        &db,
-        config.worker.task_timeout_seconds.max(1),
-    )?;
+    let recovered_task_ids =
+        recover_stale_running_tasks_on_startup(&db, config.worker.task_timeout_seconds.max(1))?;
     if !recovered_task_ids.is_empty() {
         let recovery_detail = json!({
             "reason": "startup_stale_running_recovery",
@@ -1019,7 +1161,9 @@ async fn main() -> anyhow::Result<()> {
         }
         warn!(
             "startup stale-running recovery applied: converted {} tasks to timeout (threshold={}s)",
-            recovery_detail["recovered_count"].as_u64().unwrap_or_default(),
+            recovery_detail["recovered_count"]
+                .as_u64()
+                .unwrap_or_default(),
             config.worker.task_timeout_seconds.max(1)
         );
     } else {
@@ -1032,9 +1176,17 @@ async fn main() -> anyhow::Result<()> {
     let workspace_root = std::env::current_dir()?;
     let memory_runtime = load_memory_runtime_config(&workspace_root, &config.memory);
     let command_intent = load_command_intent_runtime(&workspace_root, &config.command_intent);
-    let schedule = load_schedule_runtime(&workspace_root, &config.schedule);
+    let schedule = load_schedule_runtime(
+        &workspace_root,
+        &config.schedule,
+        config.llm.selected_vendor.as_deref(),
+    );
     let routing = config.routing.clone();
-    let persona_prompt = load_persona_prompt(&workspace_root, &config.persona);
+    let persona_prompt = load_persona_prompt(
+        &workspace_root,
+        config.llm.selected_vendor.as_deref(),
+        &config.persona,
+    );
     let mut preferred_runner = workspace_root.join("target/release/skill-runner");
     if let Ok(exe) = std::env::current_exe() {
         let exe_lc = exe.to_string_lossy().to_ascii_lowercase();
@@ -1051,7 +1203,10 @@ async fn main() -> anyhow::Result<()> {
     } else {
         debug_fallback
     };
-    info!("skill_runner_path resolved: {}", effective_skill_runner_path.display());
+    info!(
+        "skill_runner_path resolved: {}",
+        effective_skill_runner_path.display()
+    );
 
     let llm_providers = llm_gateway::build_providers(&config);
     info!("Loaded LLM providers count={}", llm_providers.len());
@@ -1161,7 +1316,8 @@ async fn main() -> anyhow::Result<()> {
         command_intent,
         schedule,
         telegram_bot_token: config.telegram.bot_token.clone(),
-        telegram_crypto_confirm_ttl_seconds: (config.telegram.crypto_confirm_ttl_seconds.max(1)) as i64,
+        telegram_crypto_confirm_ttl_seconds: (config.telegram.crypto_confirm_ttl_seconds.max(1))
+            as i64,
         whatsapp_cloud_enabled,
         whatsapp_api_base,
         whatsapp_access_token,
@@ -1210,14 +1366,18 @@ async fn main() -> anyhow::Result<()> {
         .nest("/v1", api)
         .fallback_service(ui_service)
         .layer(
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS])
-            .allow_headers([
-                axum::http::header::CONTENT_TYPE,
-                axum::http::HeaderName::from_static("x-rustclaw-key"),
-            ]),
-    );
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::OPTIONS,
+                ])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::HeaderName::from_static("x-rustclaw-key"),
+                ]),
+        );
 
     let listener = tokio::net::TcpListener::bind(&config.server.listen).await?;
     info!("clawd listening on {}", config.server.listen);
@@ -1255,7 +1415,9 @@ fn recover_stale_running_tasks_on_startup(
                AND CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?1
              ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) ASC",
         )?;
-        let rows = stmt.query_map(params![stale_before.to_string()], |row| row.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![stale_before.to_string()], |row| {
+            row.get::<_, String>(0)
+        })?;
         for row in rows {
             task_ids.push(row?);
         }
@@ -1291,7 +1453,6 @@ fn recover_stale_running_tasks_on_startup(
 
     Ok(task_ids)
 }
-
 
 fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: usize) {
     let worker_count = concurrency.max(1);
@@ -1399,10 +1560,14 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
             now,
         );
 
-        let mut payload = serde_json::from_str::<Value>(&job.task_payload_json).unwrap_or_else(|_| json!({}));
+        let mut payload =
+            serde_json::from_str::<Value>(&job.task_payload_json).unwrap_or_else(|_| json!({}));
         if let Value::Object(map) = &mut payload {
             map.insert("schedule_triggered".to_string(), Value::Bool(true));
-            map.insert("schedule_job_id".to_string(), Value::String(job.job_id.clone()));
+            map.insert(
+                "schedule_job_id".to_string(),
+                Value::String(job.job_id.clone()),
+            );
             map.insert("channel".to_string(), Value::String(job.channel.clone()));
             if let Some(v) = job.external_user_id.as_ref() {
                 map.insert("external_user_id".to_string(), Value::String(v.clone()));
@@ -1606,8 +1771,13 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                         intent_router::classify_resume_followup_intent(
                             state,
                             &task,
-                            prompt,
+                            &prompt,
                             &resume_context,
+                            &json!({
+                                "source": "resume_continue_source",
+                                "failed_resume_context_ts": Value::Null,
+                                "has_newer_successful_ask_after_failed_task": false,
+                            }),
                         )
                         .await,
                     )
@@ -1624,9 +1794,9 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .map(|d| d.decision == "defer")
                 .unwrap_or(false);
             let runtime_prompt = if is_resume_continue && resume_should_apply_context {
-                build_resume_continue_execute_prompt(&payload, prompt)
+                build_resume_continue_execute_prompt(state, &payload, prompt)
             } else if is_resume_continue && resume_should_discuss_context {
-                build_resume_followup_discussion_prompt(&payload, prompt)
+                build_resume_followup_discussion_prompt(state, &payload, prompt)
             } else {
                 prompt.to_string()
             };
@@ -1733,6 +1903,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                                 }
                             }
                         };
+                        let hard_text = intercept_response_text_for_delivery(&hard_text);
                         let result = json!({ "text": hard_text.clone() });
                         repo::update_task_success(state, &task.task_id, &result.to_string())?;
                         let _ = memory::service::insert_memory(
@@ -1778,7 +1949,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                         truncate_for_log(trimmed_request)
                     );
                 } else if let Some(stale_ctx) = stale_preview_ctx {
-                    let hard_text = build_trade_confirm_cancelled_text(state, &stale_ctx);
+                    let hard_text = intercept_response_text_for_delivery(&build_trade_confirm_cancelled_text(state, &stale_ctx));
                     let result = json!({ "text": hard_text.clone() });
                     repo::update_task_success(state, &task.task_id, &result.to_string())?;
                     let _ = memory::service::insert_memory(
@@ -1902,17 +2073,22 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .await;
                 Ok(AskReply::non_llm(clarify))
             } else if direct_resume_discussion {
+                let resume_prompt_file = resolve_prompt_rel_path_for_vendor(
+                    &state.workspace_root,
+                    &active_prompt_vendor_name(state),
+                    RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH,
+                );
                 log_prompt_render(
                     &task.task_id,
                     "resume_followup_discussion_prompt",
-                    RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH,
+                    &resume_prompt_file,
                     None,
                 );
                 llm_gateway::run_with_fallback_with_prompt_file(
                     state,
                     &task,
                     &resolved_prompt,
-                    RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH,
+                    &resume_prompt_file,
                 )
                 .await
                 .map(|s| AskReply::llm(s.trim().to_string()))
@@ -1923,6 +2099,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 if let Ok(Some(schedule_reply)) =
                     intent_router::try_handle_schedule_request(state, &task, &resolved_prompt).await
                 {
+                    let schedule_reply = intercept_response_text_for_delivery(&schedule_reply);
                     let result = json!({ "text": schedule_reply.clone() });
                     repo::update_task_success(state, &task.task_id, &result.to_string())?;
                     let _ = memory::service::insert_memory(
@@ -1989,19 +2166,19 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
 
                     match routed_mode {
                         RoutedMode::Chat => {
-                            log_prompt_render(
-                                &task.task_id,
-                                "chat_response_prompt",
-                                "prompts/chat_response_prompt.md",
-                                None,
-                            );
-                            let chat_prompt = load_runtime_prompt_template(
-                                &state.workspace_root,
+                            let (chat_prompt_template, chat_prompt_file) = load_prompt_template_for_state(
+                                state,
                                 CHAT_RESPONSE_PROMPT_PATH,
                                 CHAT_RESPONSE_PROMPT_TEMPLATE,
                             );
+                            log_prompt_render(
+                                &task.task_id,
+                                "chat_response_prompt",
+                                &chat_prompt_file,
+                                None,
+                            );
                             let chat_prompt = render_prompt_template(
-                                &chat_prompt,
+                                &chat_prompt_template,
                                 &[
                                     ("__PERSONA_PROMPT__", &state.persona_prompt),
                                     ("__CONTEXT__", &chat_prompt_context),
@@ -2012,7 +2189,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                                 state,
                                 &task,
                                 &chat_prompt,
-                                "prompts/chat_response_prompt.md",
+                                &chat_prompt_file,
                             )
                                 .await
                                 .map(AskReply::llm)
@@ -2071,19 +2248,19 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
 
                 match routed_mode {
                     RoutedMode::Chat => {
-                        log_prompt_render(
-                            &task.task_id,
-                            "chat_response_prompt",
-                            "prompts/chat_response_prompt.md",
-                            None,
-                        );
-                        let chat_prompt = load_runtime_prompt_template(
-                            &state.workspace_root,
+                        let (chat_prompt_template, chat_prompt_file) = load_prompt_template_for_state(
+                            state,
                             CHAT_RESPONSE_PROMPT_PATH,
                             CHAT_RESPONSE_PROMPT_TEMPLATE,
                         );
+                        log_prompt_render(
+                            &task.task_id,
+                            "chat_response_prompt",
+                            &chat_prompt_file,
+                            None,
+                        );
                         let chat_prompt = render_prompt_template(
-                            &chat_prompt,
+                            &chat_prompt_template,
                             &[
                                 ("__PERSONA_PROMPT__", &state.persona_prompt),
                                 ("__CONTEXT__", &chat_prompt_context),
@@ -2094,7 +2271,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                             state,
                             &task,
                             &chat_prompt,
-                            "prompts/chat_response_prompt.md",
+                            &chat_prompt_file,
                         )
                             .await
                             .map(AskReply::llm)
@@ -2139,8 +2316,10 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                             answer.messages = merged_messages;
                         }
                     }
-                    let answer_text = answer.text;
-                    let answer_messages = answer.messages;
+                    let (answer_text, answer_messages) = intercept_response_payload_for_delivery(
+                        answer.text,
+                        answer.messages,
+                    );
                     let mut result = if answer_messages.is_empty() {
                         json!({ "text": answer_text.clone() })
                     } else {
@@ -2248,7 +2427,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
             let args = payload.get("args").cloned().unwrap_or_else(|| json!(""));
-            let action = args
+            let _action = args
                 .as_object()
                 .and_then(|m| m.get("action"))
                 .and_then(|v| v.as_str())
@@ -2270,28 +2449,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 truncate_for_log(&args.to_string())
             );
 
-            if canonical_skill_name(skill_name) == "crypto" && action == "trade_submit" {
-                let err_text = i18n_t_with_default(
-                    state,
-                    "clawd.msg.crypto_trade_submit_requires_user_confirmation",
-                    "Blocked direct trade submit. Please run trade_preview first, then click confirm or reply `yes` to place the order.",
-                );
-                error!(
-                    "worker_once: run_skill task_id={} blocked unsafe crypto submit without ask-confirm flow",
-                    task.task_id
-                );
-                repo::update_task_failure(state, &task.task_id, &err_text)?;
-                maybe_notify_schedule_result(state, &task, &payload, false, &err_text).await;
-                info!("{}", LOG_CALL_WRAP);
-                info!(
-                    "task_call_end task_id={} kind=run_skill status=failed skill={} error={}",
-                    task.task_id,
-                    skill_name,
-                    truncate_for_log(&err_text)
-                );
-                info!("{}", LOG_CALL_WRAP);
-                return Ok(());
-            }
+            // Whether to require user confirmation before crypto trade_submit is decided by the planner; no hard block here.
 
             match execution_adapters::run_skill(state, &task, skill_name, args).await {
                 Ok(text) => {
@@ -2304,6 +2462,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     } else {
                         text.clone()
                     };
+                    let clean_text = intercept_response_text_for_delivery(&clean_text);
                     let result = json!({ "text": clean_text });
                     repo::update_task_success(state, &task.task_id, &result.to_string())?;
                     if !(schedule_triggered && is_price_alert_action && no_trigger) {
@@ -2514,16 +2673,26 @@ async fn maybe_bind_recent_failed_resume_context(
     if is_resume_continue_source(main_flow_rules(state), source) {
         return None;
     }
-    let resume_context = find_recent_failed_resume_context(state, task.user_id, task.chat_id)?;
-    let decision =
-        intent_router::classify_resume_followup_intent(state, task, user_text, &resume_context)
-            .await;
-    if decision.bind_resume_context
-        && decision.decision == "defer"
-        && looks_like_standalone_executable_request(user_text)
-    {
-        return None;
-    }
+    let (resume_context, resume_context_ts) =
+        find_recent_failed_resume_context(state, task.user_id, task.chat_id)?;
+    let binding_context = json!({
+        "source": "recent_failed_resume_context",
+        "failed_resume_context_ts": resume_context_ts,
+        "has_newer_successful_ask_after_failed_task": has_newer_successful_ask_after(
+            state,
+            task.user_id,
+            task.chat_id,
+            resume_context_ts,
+        ),
+    });
+    let decision = intent_router::classify_resume_followup_intent(
+        state,
+        task,
+        user_text,
+        &resume_context,
+        &binding_context,
+    )
+    .await;
     if decision.decision != "resume" && !decision.bind_resume_context {
         return None;
     }
@@ -2540,40 +2709,6 @@ async fn maybe_bind_recent_failed_resume_context(
     );
     obj.insert("resume_context".to_string(), resume_context);
     Some(decision)
-}
-
-fn looks_like_standalone_executable_request(user_text: &str) -> bool {
-    let trimmed = user_text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    let has_action_signal = [
-        "先执行",
-        "再执行",
-        "执行 ",
-        "查看当前目录",
-        "列出当前目录",
-        "run ",
-        "then run",
-        "execute ",
-        "list the current directory",
-        "check whether",
-        "write one short line",
-        "save one short",
-    ]
-    .iter()
-    .any(|needle| {
-        if needle.is_ascii() {
-            lower.contains(&needle.to_ascii_lowercase())
-        } else {
-            trimmed.contains(needle)
-        }
-    });
-    let has_sequence_signal = ["然后", "再", "then", "and", "；", ";", "`"]
-        .iter()
-        .any(|needle| lower.contains(&needle.to_ascii_lowercase()) || trimmed.contains(needle));
-    has_action_signal && has_sequence_signal
 }
 
 fn parse_task_status_with_rules(rules: &MainFlowRules, raw: &str) -> TaskStatus {
@@ -2611,7 +2746,10 @@ fn is_crypto_price_alert_action(state: &AppState, skill_name: &str, args: &Value
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
-    rules.crypto_price_alert_actions.iter().any(|a| a == &action)
+    rules
+        .crypto_price_alert_actions
+        .iter()
+        .any(|a| a == &action)
 }
 
 fn strip_price_alert_tag(text: &str, rules: &MainFlowRules) -> String {
@@ -2658,17 +2796,22 @@ async fn send_task_channel_message(
     match runtime_channel_from_payload(state, payload) {
         RuntimeChannel::Telegram => send_telegram_message(state, task.chat_id, text).await,
         RuntimeChannel::Whatsapp => {
-            let to = task_external_chat_id(task).or_else(|| {
-                payload
-                .get("external_chat_id")
-                .and_then(|v| v.as_str())
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-            })
+            let to = task_external_chat_id(task)
+                .or_else(|| {
+                    payload
+                        .get("external_chat_id")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                })
                 .ok_or_else(|| "missing external_chat_id for whatsapp task".to_string())?;
             match resolve_whatsapp_delivery_route(state, payload) {
-                WhatsappDeliveryRoute::WebBridge => send_whatsapp_web_bridge_text_message(state, &to, text).await,
-                WhatsappDeliveryRoute::Cloud => send_whatsapp_cloud_text_message(state, &to, text).await,
+                WhatsappDeliveryRoute::WebBridge => {
+                    send_whatsapp_web_bridge_text_message(state, &to, text).await
+                }
+                WhatsappDeliveryRoute::Cloud => {
+                    send_whatsapp_cloud_text_message(state, &to, text).await
+                }
             }
         }
     }
@@ -2719,7 +2862,11 @@ async fn send_telegram_message(state: &AppState, chat_id: i64, text: &str) -> Re
     Ok(())
 }
 
-async fn send_whatsapp_cloud_text_message(state: &AppState, to: &str, text: &str) -> Result<(), String> {
+async fn send_whatsapp_cloud_text_message(
+    state: &AppState,
+    to: &str,
+    text: &str,
+) -> Result<(), String> {
     let token = state.whatsapp_access_token.trim();
     if token.is_empty() {
         return Err("whatsapp access_token is empty".to_string());
@@ -2756,8 +2903,15 @@ async fn send_whatsapp_cloud_text_message(state: &AppState, to: &str, text: &str
     Ok(())
 }
 
-async fn send_whatsapp_web_bridge_text_message(state: &AppState, to: &str, text: &str) -> Result<(), String> {
-    let base = state.whatsapp_web_bridge_base_url.trim().trim_end_matches('/');
+async fn send_whatsapp_web_bridge_text_message(
+    state: &AppState,
+    to: &str,
+    text: &str,
+) -> Result<(), String> {
+    let base = state
+        .whatsapp_web_bridge_base_url
+        .trim()
+        .trim_end_matches('/');
     if base.is_empty() {
         return Err("whatsapp_web.bridge_base_url is empty".to_string());
     }
@@ -2791,7 +2945,7 @@ async fn run_skill_with_runner(
         .tools_policy
         .is_allowed(&policy_token, state.active_provider_type.as_deref())
     {
-        return Err(format!("blocked by tools policy: {policy_token}"));
+        return Err(format!("blocked by policy: {policy_token}"));
     }
 
     let skill_timeout_secs = match skill_name {
@@ -2805,6 +2959,31 @@ async fn run_skill_with_runner(
 
     if skill_name.is_empty() {
         return Err("skill_name is empty".to_string());
+    }
+
+    const BUILTIN_SKILL_NAMES: &[&str] = &[
+        "run_cmd",
+        "read_file",
+        "write_file",
+        "list_dir",
+        "make_dir",
+        "remove_file",
+    ];
+    if BUILTIN_SKILL_NAMES.contains(&skill_name) {
+        if !state.skills_list.contains(skill_name) {
+            let mut allowed: Vec<String> = state.skills_list.iter().cloned().collect();
+            allowed.sort();
+            let enabled = allowed.join(", ");
+            let err_text = i18n_t_with_default(
+                state,
+                "clawd.msg.skill_disabled_with_enabled_list",
+                "Skill is not enabled: {skill}. Please enable it in config and try again. (Currently enabled: {enabled_skills})",
+            )
+            .replace("{skill}", skill_name)
+            .replace("{enabled_skills}", &enabled);
+            return Err(err_text);
+        }
+        return execute_builtin_skill(state, skill_name, &args).await;
     }
 
     if !state.skills_list.contains(skill_name) {
@@ -2835,7 +3014,9 @@ async fn run_skill_with_runner(
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
     };
-    let mut value = run_skill_with_runner_once(state, task, skill_name, &args, &source, skill_timeout_secs).await?;
+    let mut value =
+        run_skill_with_runner_once(state, task, skill_name, &args, &source, skill_timeout_secs)
+            .await?;
     let mut status = value
         .get("status")
         .and_then(|v| v.as_str())
@@ -2868,9 +3049,15 @@ async fn run_skill_with_runner(
                 } else {
                     break;
                 }
-                let retry_value =
-                    run_skill_with_runner_once(state, task, skill_name, &retry_args, &source, skill_timeout_secs)
-                        .await?;
+                let retry_value = run_skill_with_runner_once(
+                    state,
+                    task,
+                    skill_name,
+                    &retry_args,
+                    &source,
+                    skill_timeout_secs,
+                )
+                .await?;
                 let retry_status = retry_value
                     .get("status")
                     .and_then(|v| v.as_str())
@@ -2894,6 +3081,18 @@ async fn run_skill_with_runner(
             .and_then(|v| v.as_str())
             .unwrap_or("skill execution failed")
             .to_string());
+    }
+
+    if let Some((provider, model, model_kind)) = extract_skill_provider_model(&value) {
+        info!(
+            "{} skill_model_selected task_id={} skill={} provider={} model={} model_kind={}",
+            highlight_tag("skill_llm"),
+            task.task_id,
+            skill_name,
+            provider,
+            model,
+            model_kind
+        );
     }
 
     if let Some(llm_meta) = value
@@ -2939,7 +3138,10 @@ async fn run_skill_with_runner(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
         if let Some(lang) = target_language {
-            if matches!(action.as_str(), "describe" | "compare" | "screenshot_summary") {
+            if matches!(
+                action.as_str(),
+                "describe" | "compare" | "screenshot_summary"
+            ) {
                 match rewrite_image_vision_output_language(state, task, &text, &lang).await {
                     Ok(rewritten) => {
                         info!(
@@ -2961,6 +3163,32 @@ async fn run_skill_with_runner(
     Ok(text)
 }
 
+fn extract_skill_provider_model(value: &Value) -> Option<(String, String, String)> {
+    let extra = value.get("extra")?.as_object()?;
+    let provider = extra
+        .get("provider")
+        .or_else(|| extra.get("vendor"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?;
+    let model = extra
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?;
+    let model_kind = extra
+        .get("model_kind")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("unknown");
+    Some((
+        provider.to_string(),
+        model.to_string(),
+        model_kind.to_string(),
+    ))
+}
+
 async fn run_skill_with_runner_once(
     state: &AppState,
     task: &ClaimedTask,
@@ -2974,11 +3202,20 @@ async fn run_skill_with_runner_once(
     } else {
         json!({})
     };
+    let llm_skill = canonical_skill_name(skill_name) == "chat";
+    let user_key_for_skill = if llm_skill {
+        Value::Null
+    } else {
+        task.user_key
+            .clone()
+            .map(Value::String)
+            .unwrap_or(Value::Null)
+    };
     let req_line = json!({
         "request_id": task.task_id,
         "user_id": task.user_id,
         "chat_id": task.chat_id,
-        "user_key": task.user_key,
+        "user_key": user_key_for_skill,
         "external_user_id": task.external_user_id,
         "external_chat_id": task_external_chat_id(task),
         "skill_name": skill_name,
@@ -2986,8 +3223,8 @@ async fn run_skill_with_runner_once(
         "context": {
             "source": source,
             "kind": "run_skill",
-            "user_key": task.user_key,
-            "exchange_credentials": credential_context
+            "user_key": if llm_skill { Value::Null } else { task.user_key.clone().map(Value::String).unwrap_or(Value::Null) },
+                "exchange_credentials": credential_context
         }
     })
     .to_string();
@@ -3000,10 +3237,19 @@ async fn run_skill_with_runner_once(
         ));
     }
 
+    let selected_openai_model = llm_gateway::selected_openai_model(state);
     let mut child = Command::new(&state.skill_runner_path)
         .env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
-        .env("OPENAI_API_KEY", llm_gateway::selected_openai_api_key(state))
-        .env("OPENAI_BASE_URL", llm_gateway::selected_openai_base_url(state))
+        .env(
+            "OPENAI_API_KEY",
+            llm_gateway::selected_openai_api_key(state),
+        )
+        .env(
+            "OPENAI_BASE_URL",
+            llm_gateway::selected_openai_base_url(state),
+        )
+        .env("OPENAI_MODEL", selected_openai_model.clone())
+        .env("CHAT_SKILL_MODEL", selected_openai_model)
         .env("WORKSPACE_ROOT", state.workspace_root.display().to_string())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -3072,8 +3318,13 @@ async fn rewrite_image_vision_output_language(
     if original_text.trim().is_empty() {
         return Ok(original_text.to_string());
     }
-    let prompt = render_prompt_template(
+    let (prompt_template, prompt_file) = load_prompt_template_for_state(
+        state,
+        "prompts/image_output_rewrite_prompt.md",
         IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE,
+    );
+    let prompt = render_prompt_template(
+        &prompt_template,
         &[
             ("__TARGET_LANGUAGE__", target_language),
             ("__ORIGINAL_OUTPUT__", original_text),
@@ -3082,16 +3333,10 @@ async fn rewrite_image_vision_output_language(
     log_prompt_render(
         &task.task_id,
         "image_output_rewrite_prompt",
-        "prompts/image_output_rewrite_prompt.md",
+        &prompt_file,
         None,
     );
-    let out = run_llm_with_fallback_with_prompt_file(
-        state,
-        task,
-        &prompt,
-        "prompts/image_output_rewrite_prompt.md",
-    )
-    .await?;
+    let out = run_llm_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file).await?;
     let trimmed = out.trim();
     if trimmed.is_empty() {
         return Err("empty rewrite output".to_string());
@@ -3265,23 +3510,17 @@ async fn infer_language_preference_from_memory_llm(
     if memory_context == "<none>" {
         return None;
     }
-    let prompt = render_prompt_template(
+    let (prompt_template, prompt_file) = load_prompt_template_for_state(
+        state,
+        "prompts/language_infer_prompt.md",
         LANGUAGE_INFER_PROMPT_TEMPLATE,
+    );
+    let prompt = render_prompt_template(
+        &prompt_template,
         &[("__MEMORY_SNIPPETS__", &memory_context)],
     );
-    log_prompt_render(
-        &task.task_id,
-        "language_infer_prompt",
-        "prompts/language_infer_prompt.md",
-        None,
-    );
-    let out = match run_llm_with_fallback_with_prompt_file(
-        state,
-        task,
-        &prompt,
-        "prompts/language_infer_prompt.md",
-    )
-    .await
+    log_prompt_render(&task.task_id, "language_infer_prompt", &prompt_file, None);
+    let out = match run_llm_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file).await
     {
         Ok(v) => v,
         Err(err) => {
@@ -3307,7 +3546,11 @@ async fn infer_language_preference_from_memory_llm(
 
 fn parse_language_from_llm_output(raw: &str) -> Option<String> {
     parse_llm_json_raw_or_any::<Value>(raw)
-        .and_then(|v| v.get("language").and_then(|x| x.as_str()).map(|s| s.trim().to_string()))
+        .and_then(|v| {
+            v.get("language")
+                .and_then(|x| x.as_str())
+                .map(|s| s.trim().to_string())
+        })
         .filter(|s| !s.is_empty() && s.to_ascii_lowercase() != "unknown")
 }
 
@@ -3375,6 +3618,65 @@ fn selected_openai_base_url(state: &AppState) -> String {
     "https://api.openai.com/v1".to_string()
 }
 
+fn selected_openai_model(state: &AppState) -> String {
+    state
+        .llm_providers
+        .iter()
+        .find(|p| p.config.provider_type == "openai_compat")
+        .map(|p| p.config.model.clone())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "gpt-4o-mini".to_string())
+}
+
+fn strip_think_blocks(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    loop {
+        if let Some(start) = rest.find("<think") {
+            out.push_str(&rest[..start]);
+            let after_start = &rest[start..];
+            if let Some(close) = after_start.find("</think>") {
+                rest = &after_start[close + "</think>".len()..];
+                continue;
+            }
+            break;
+        }
+        out.push_str(rest);
+        break;
+    }
+    out
+}
+
+fn strip_markdown_json_fence(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Some(rest) = trimmed.strip_prefix("```") else {
+        return trimmed.to_string();
+    };
+    let rest = rest.strip_prefix("json").unwrap_or(rest);
+    let rest = rest.strip_prefix('\n').unwrap_or(rest);
+    let Some(body) = rest.strip_suffix("```") else {
+        return trimmed.to_string();
+    };
+    body.trim().to_string()
+}
+
+fn sanitize_llm_text_output(raw: &str) -> String {
+    let stripped = strip_think_blocks(raw);
+    let without_think_tags = stripped.replace("<think>", "").replace("</think>", "");
+    strip_markdown_json_fence(&without_think_tags)
+        .trim()
+        .to_string()
+}
+
+fn maybe_sanitize_llm_text_output(vendor: &str, raw: &str) -> (String, bool) {
+    if vendor.eq_ignore_ascii_case("minimax") {
+        let cleaned = sanitize_llm_text_output(raw);
+        let sanitized = cleaned != raw.trim();
+        return (cleaned, sanitized);
+    }
+    (raw.to_string(), false)
+}
+
 async fn run_llm_with_fallback_with_prompt_file(
     state: &AppState,
     task: &ClaimedTask,
@@ -3389,28 +3691,52 @@ async fn run_llm_with_fallback_with_prompt_file(
     let mut last_error = "unknown llm error".to_string();
 
     for provider in &state.llm_providers {
+        let vendor = llm_vendor_name(provider);
+        let model = provider.config.model.as_str();
+        let model_kind = llm_model_kind(provider);
         let provider_name = format!("{}:{}", provider.config.name, provider.config.model);
         info!(
-            "{} [LLM_CALL] stage=request task_id={} user_id={} chat_id={} provider={} prompt_file={}",
+            "{} [LLM_CALL] stage=request task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={}",
             highlight_tag("llm"),
             task.task_id,
             task.user_id,
             task.chat_id,
+            vendor,
+            model,
+            model_kind,
             provider_name,
             prompt_file
         );
 
         match call_provider_with_retry(provider.clone(), prompt).await {
             Ok(text) => {
+                let (cleaned_text, sanitized) = maybe_sanitize_llm_text_output(vendor, &text);
+                if sanitized {
+                    warn!(
+                        "{} [LLM_CALL] stage=cleanup task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} note=removed_think_block",
+                        highlight_tag("llm"),
+                        task.task_id,
+                        task.user_id,
+                        task.chat_id,
+                        vendor,
+                        model,
+                        model_kind,
+                        provider_name,
+                        prompt_file
+                    );
+                }
                 info!(
-                    "{} [LLM_CALL] stage=response task_id={} user_id={} chat_id={} provider={} prompt_file={} response={}",
+                    "{} [LLM_CALL] stage=response task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} response={}",
                     highlight_tag("llm"),
                     task.task_id,
                     task.user_id,
                     task.chat_id,
+                    vendor,
+                    model,
+                    model_kind,
                     provider_name,
                     prompt_file,
-                    truncate_for_log(&text)
+                    truncate_for_log(&cleaned_text)
                 );
                 append_model_io_log(
                     state,
@@ -3419,6 +3745,8 @@ async fn run_llm_with_fallback_with_prompt_file(
                     "ok",
                     prompt,
                     Some(&text),
+                    Some(&cleaned_text),
+                    sanitized,
                     None,
                 );
                 let _ = insert_audit_log(
@@ -3429,24 +3757,29 @@ async fn run_llm_with_fallback_with_prompt_file(
                         &json!({
                             "task_id": task.task_id,
                             "chat_id": task.chat_id,
+                            "vendor": vendor,
                             "provider": provider.config.name,
                             "model": provider.config.model,
+                            "model_kind": model_kind,
                             "status": "ok"
                         })
                         .to_string(),
                     ),
                     None,
                 );
-                return Ok(text);
+                return Ok(cleaned_text);
             }
             Err(err) => {
                 last_error = format!("provider={provider_name} failed: {err}");
                 warn!(
-                    "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} provider={} prompt_file={} error={}",
+                    "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} error={}",
                     highlight_tag("llm"),
                     task.task_id,
                     task.user_id,
                     task.chat_id,
+                    vendor,
+                    model,
+                    model_kind,
                     provider_name,
                     prompt_file,
                     truncate_for_log(&last_error)
@@ -3458,6 +3791,8 @@ async fn run_llm_with_fallback_with_prompt_file(
                     "failed",
                     prompt,
                     None,
+                    None,
+                    false,
                     Some(&last_error),
                 );
                 let _ = insert_audit_log(
@@ -3468,8 +3803,10 @@ async fn run_llm_with_fallback_with_prompt_file(
                         &json!({
                             "task_id": task.task_id,
                             "chat_id": task.chat_id,
+                            "vendor": vendor,
                             "provider": provider.config.name,
                             "model": provider.config.model,
+                            "model_kind": model_kind,
                             "status": "failed"
                         })
                         .to_string(),
@@ -3490,7 +3827,9 @@ fn append_model_io_log(
     provider: &Arc<LlmProviderRuntime>,
     status: &str,
     prompt: &str,
-    response: Option<&str>,
+    raw_response: Option<&str>,
+    clean_response: Option<&str>,
+    sanitized: bool,
     error: Option<&str>,
 ) {
     let logs_dir = state.workspace_root.join("logs");
@@ -3499,7 +3838,11 @@ fn append_model_io_log(
         return;
     }
     let file_path = logs_dir.join("model_io.log");
-    let mut file = match OpenOptions::new().create(true).append(true).open(&file_path) {
+    let mut file = match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+    {
         Ok(f) => f,
         Err(err) => {
             warn!("open model io log file failed: {err}");
@@ -3513,12 +3856,17 @@ fn append_model_io_log(
         "task_id": task.task_id,
         "user_id": task.user_id,
         "chat_id": task.chat_id,
+        "vendor": llm_vendor_name(provider),
         "provider": provider.config.name,
         "provider_type": provider.config.provider_type,
         "model": provider.config.model,
+        "model_kind": llm_model_kind(provider),
         "status": status,
         "prompt": truncate_for_log(prompt),
-        "response": response.map(truncate_for_log),
+        "response": clean_response.map(truncate_for_log),
+        "raw_response": raw_response.map(truncate_for_log),
+        "clean_response": clean_response.map(truncate_for_log),
+        "sanitized": sanitized,
         "error": error.map(truncate_for_log),
     })
     .to_string();
@@ -3611,7 +3959,11 @@ fn parse_resume_context_error(error_text: &str) -> Option<(String, Value)> {
     Some((user_error, value))
 }
 
-fn build_resume_continue_execute_prompt(payload: &Value, fallback_user_text: &str) -> String {
+fn build_resume_continue_execute_prompt(
+    state: &AppState,
+    payload: &Value,
+    fallback_user_text: &str,
+) -> String {
     let user_text = payload
         .get("resume_user_text")
         .and_then(|v| v.as_str())
@@ -3635,9 +3987,9 @@ fn build_resume_continue_execute_prompt(payload: &Value, fallback_user_text: &st
                 .filter(|v| v.as_array().map(|arr| !arr.is_empty()).unwrap_or(false))
                 .unwrap_or_else(|| {
                     resume_context
-                .get("remaining_steps")
-                .cloned()
-                .unwrap_or_else(|| json!([]))
+                        .get("remaining_steps")
+                        .cloned()
+                        .unwrap_or_else(|| json!([]))
                 })
         });
     let resume_context_json = serde_json::to_string_pretty(&resume_context)
@@ -3645,8 +3997,13 @@ fn build_resume_continue_execute_prompt(payload: &Value, fallback_user_text: &st
     let resume_steps_json =
         serde_json::to_string_pretty(&resume_steps).unwrap_or_else(|_| resume_steps.to_string());
 
-    render_prompt_template(
+    let (prompt_template, _) = load_prompt_template_for_state(
+        state,
+        "prompts/resume_continue_execute_prompt.md",
         RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE,
+    );
+    render_prompt_template(
+        &prompt_template,
         &[
             ("__USER_TEXT__", user_text),
             ("__RESUME_CONTEXT__", &resume_context_json),
@@ -3656,7 +4013,11 @@ fn build_resume_continue_execute_prompt(payload: &Value, fallback_user_text: &st
     )
 }
 
-fn build_resume_followup_discussion_prompt(payload: &Value, fallback_user_text: &str) -> String {
+fn build_resume_followup_discussion_prompt(
+    state: &AppState,
+    payload: &Value,
+    fallback_user_text: &str,
+) -> String {
     let user_text = payload
         .get("resume_user_text")
         .and_then(|v| v.as_str())
@@ -3668,8 +4029,13 @@ fn build_resume_followup_discussion_prompt(payload: &Value, fallback_user_text: 
         .unwrap_or_else(|| json!({}));
     let resume_context_json = serde_json::to_string_pretty(&resume_context)
         .unwrap_or_else(|_| resume_context.to_string());
-    render_prompt_template(
+    let (prompt_template, _) = load_prompt_template_for_state(
+        state,
+        RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH,
         RESUME_FOLLOWUP_DISCUSSION_PROMPT_TEMPLATE,
+    );
+    render_prompt_template(
+        &prompt_template,
         &[
             ("__USER_TEXT__", user_text),
             ("__RESUME_CONTEXT__", &resume_context_json),
@@ -3701,7 +4067,11 @@ pub(crate) fn append_act_plan_log(
         return;
     }
     let file_path = logs_dir.join("act_plan.log");
-    let mut file = match OpenOptions::new().create(true).append(true).open(&file_path) {
+    let mut file = match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+    {
         Ok(f) => f,
         Err(err) => {
             warn!("open act plan log file failed: {err}");
@@ -3816,6 +4186,25 @@ fn trim_path_token(token: &str) -> String {
         .to_string()
 }
 
+fn intercept_response_text_for_delivery(text: &str) -> String {
+    text.trim().to_string()
+}
+
+fn intercept_response_payload_for_delivery(
+    text: String,
+    messages: Vec<String>,
+) -> (String, Vec<String>) {
+    let mut seen = HashSet::new();
+    let normalized_messages = messages
+        .into_iter()
+        .map(|msg| intercept_response_text_for_delivery(&msg))
+        .filter(|msg| !msg.is_empty())
+        .filter(|msg| seen.insert(msg.clone()))
+        .collect::<Vec<_>>();
+    let normalized_text = intercept_response_text_for_delivery(&text);
+    (normalized_text, normalized_messages)
+}
+
 fn is_image_file_path(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     lower.ends_with(".png")
@@ -3863,8 +4252,13 @@ async fn resolve_image_for_edit_from_context_llm(
         .map(|(i, p)| format!("{i}: {p}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let prompt = render_prompt_template(
+    let (prompt_template, prompt_file) = load_prompt_template_for_state(
+        state,
+        "prompts/image_reference_resolver_prompt.md",
         IMAGE_REFERENCE_RESOLVER_PROMPT_TEMPLATE,
+    );
+    let prompt = render_prompt_template(
+        &prompt_template,
         &[
             ("__MEMORY_TEXT__", &memory_text),
             ("__GOAL__", goal),
@@ -3874,17 +4268,12 @@ async fn resolve_image_for_edit_from_context_llm(
     log_prompt_render(
         &task.task_id,
         "image_reference_resolver_prompt",
-        "prompts/image_reference_resolver_prompt.md",
+        &prompt_file,
         None,
     );
-    let llm_out = run_llm_with_fallback_with_prompt_file(
-        state,
-        task,
-        &prompt,
-        "prompts/image_reference_resolver_prompt.md",
-    )
-    .await
-    .ok()?;
+    let llm_out = run_llm_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file)
+        .await
+        .ok()?;
     let idx = parse_image_reference_index_from_llm_output(&llm_out)?;
     if idx < 0 {
         return None;
@@ -3933,7 +4322,9 @@ fn collect_recent_image_candidates(
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
-    if let Ok(rows) = mem_stmt.query_map(params![user_id, chat_id, user_key], |row| row.get::<_, String>(0)) {
+    if let Ok(rows) = mem_stmt.query_map(params![user_id, chat_id, user_key], |row| {
+        row.get::<_, String>(0)
+    }) {
         for row in rows.flatten() {
             let tokens = extract_delivery_file_tokens(&row);
             for t in tokens {
@@ -3956,9 +4347,11 @@ fn collect_recent_image_candidates(
         Ok(s) => s,
         Err(_) => return out,
     };
-    if let Ok(rows) = task_stmt.query_map(params![user_id, chat_id, user_key, limit as i64], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-    }) {
+    if let Ok(rows) = task_stmt
+        .query_map(params![user_id, chat_id, user_key, limit as i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+    {
         for row in rows.flatten() {
             let (payload_json, result_json) = row;
             if let Ok(payload) = serde_json::from_str::<Value>(&payload_json) {
@@ -4165,6 +4558,32 @@ fn normalize_agent_action_shape(value: Value) -> Value {
         return value;
     };
     let Some(raw_type) = obj.get("type").and_then(|v| v.as_str()) else {
+        if let Some(skill) = obj.get("skill").and_then(|v| v.as_str()) {
+            let normalized_skill = canonical_skill_name(skill.trim()).to_string();
+            if is_builtin_skill_name(&normalized_skill) {
+                let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
+                return json!({
+                    "type": "call_skill",
+                    "skill": normalized_skill,
+                    "args": args,
+                });
+            }
+        }
+        if let Some(tool) = obj.get("tool").and_then(|v| v.as_str()) {
+            let normalized_tool = tool.trim().to_ascii_lowercase();
+            let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
+            return json!({
+                "type": "call_skill",
+                "skill": normalized_tool,
+                "args": args,
+            });
+        }
+        if let Some(content) = obj.get("content").and_then(|v| v.as_str()) {
+            return json!({
+                "type": "respond",
+                "content": content,
+            });
+        }
         return value;
     };
     let step_type = raw_type.trim().to_ascii_lowercase();
@@ -4172,14 +4591,25 @@ fn normalize_agent_action_shape(value: Value) -> Value {
         step_type.as_str(),
         "think" | "call_tool" | "call_skill" | "respond"
     ) {
+        if step_type == "call_tool" {
+            if let Some(tool) = obj.get("tool").and_then(|v| v.as_str()) {
+                let normalized_tool = tool.trim().to_ascii_lowercase();
+                let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
+                return json!({
+                    "type": "call_skill",
+                    "skill": normalized_tool,
+                    "args": args,
+                });
+            }
+        }
         return value;
     }
 
     let args = collect_bare_action_args(obj);
-    if is_builtin_tool_name(&step_type) {
+    if is_builtin_skill_name(&step_type) {
         return json!({
-            "type": "call_tool",
-            "tool": step_type,
+            "type": "call_skill",
+            "skill": step_type,
             "args": args,
         });
     }
@@ -4239,14 +4669,12 @@ pub(crate) fn canonical_skill_name(name: &str) -> &str {
     }
 }
 
-pub(crate) fn is_builtin_tool_name(name: &str) -> bool {
-    matches!(name, "read_file" | "write_file" | "list_dir" | "run_cmd")
-}
-
+/// Unified skill registry: base (builtin) + runner skills. All capabilities are skills.
 pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
     matches!(
         name,
-        "archive_basic"
+        "run_cmd" | "read_file" | "write_file" | "list_dir" | "make_dir" | "remove_file"
+            | "archive_basic"
             | "audio_synthesize"
             | "audio_transcribe"
             | "config_guard"
@@ -4272,7 +4700,11 @@ pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
     )
 }
 
-fn ensure_default_output_dir_for_skill_args(workspace_root: &Path, skill_name: &str, args: Value) -> Value {
+fn ensure_default_output_dir_for_skill_args(
+    workspace_root: &Path,
+    skill_name: &str,
+    args: Value,
+) -> Value {
     let Some(mut obj) = args.as_object().cloned() else {
         return args;
     };
@@ -4287,7 +4719,11 @@ fn ensure_default_output_dir_for_skill_args(workspace_root: &Path, skill_name: &
             };
             let dir = resolve_output_dir_from_config(workspace_root, section);
             let ts = now_ts_u64();
-            let prefix = if skill_name == "image_edit" { "edit" } else { "gen" };
+            let prefix = if skill_name == "image_edit" {
+                "edit"
+            } else {
+                "gen"
+            };
             let suggested = format!("{dir}/{prefix}-{ts}.png");
             obj.insert("output_path".to_string(), Value::String(suggested));
             Value::Object(obj)
@@ -4338,18 +4774,23 @@ fn resolve_file_default_output_dir_from_config(workspace_root: &Path) -> String 
     resolve_output_dir_from_config(workspace_root, "file_generation")
 }
 
-async fn execute_builtin_tool(state: &AppState, tool: &str, args: &Value) -> Result<String, String> {
-    let policy_token = format!("tool:{tool}");
+/// Base (builtin) skills: run_cmd, read_file, write_file, list_dir, make_dir, remove_file; executed in-process. Policy uses skill:* token.
+async fn execute_builtin_skill(
+    state: &AppState,
+    skill_name: &str,
+    args: &Value,
+) -> Result<String, String> {
+    let policy_token = format!("skill:{skill_name}");
     if !state
         .tools_policy
         .is_allowed(&policy_token, state.active_provider_type.as_deref())
     {
-        return Err(format!("blocked by tools policy: {policy_token}"));
+        return Err(format!("blocked by policy: {policy_token}"));
     }
 
     let map = ensure_args_object(args)?;
 
-    match tool {
+    match skill_name {
         "read_file" => {
             ensure_only_keys(map, &["path"])?;
             let path = required_string(map, "path")?;
@@ -4358,7 +4799,8 @@ async fn execute_builtin_tool(state: &AppState, tool: &str, args: &Value) -> Res
                 path,
                 state.allow_path_outside_workspace,
             )?;
-            let bytes = std::fs::read(&real_path).map_err(|err| format!("read file failed: {err}"))?;
+            let bytes =
+                std::fs::read(&real_path).map_err(|err| format!("read file failed: {err}"))?;
             let clip = if bytes.len() > MAX_READ_FILE_BYTES {
                 &bytes[..MAX_READ_FILE_BYTES]
             } else {
@@ -4382,8 +4824,13 @@ async fn execute_builtin_tool(state: &AppState, tool: &str, args: &Value) -> Res
             if let Some(parent) = real_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|err| format!("mkdir failed: {err}"))?;
             }
-            std::fs::write(&real_path, content).map_err(|err| format!("write file failed: {err}"))?;
-            Ok(format!("written {} bytes to {}", content.len(), real_path.display()))
+            std::fs::write(&real_path, content)
+                .map_err(|err| format!("write file failed: {err}"))?;
+            Ok(format!(
+                "written {} bytes to {}",
+                content.len(),
+                real_path.display()
+            ))
         }
         "list_dir" => {
             ensure_only_keys(map, &["path"])?;
@@ -4394,7 +4841,9 @@ async fn execute_builtin_tool(state: &AppState, tool: &str, args: &Value) -> Res
                 state.allow_path_outside_workspace,
             )?;
             let mut items = Vec::new();
-            for entry in std::fs::read_dir(&real_path).map_err(|err| format!("read_dir failed: {err}"))? {
+            for entry in
+                std::fs::read_dir(&real_path).map_err(|err| format!("read_dir failed: {err}"))?
+            {
                 let e = entry.map_err(|err| format!("dir entry failed: {err}"))?;
                 let name = e.file_name();
                 let mut label = name.to_string_lossy().to_string();
@@ -4438,13 +4887,40 @@ async fn execute_builtin_tool(state: &AppState, tool: &str, args: &Value) -> Res
             )
             .await
         }
-        _ => Err(format!("unknown tool: {tool}")),
+        "make_dir" => {
+            ensure_only_keys(map, &["path"])?;
+            let path = required_string(map, "path")?;
+            let real_path = resolve_workspace_path(
+                &state.workspace_root,
+                path,
+                state.allow_path_outside_workspace,
+            )?;
+            std::fs::create_dir_all(&real_path)
+                .map_err(|err| format!("create_dir failed: {err}"))?;
+            Ok(format!("created directory {}", real_path.display()))
+        }
+        "remove_file" => {
+            ensure_only_keys(map, &["path"])?;
+            let path = required_string(map, "path")?;
+            let real_path = resolve_workspace_path(
+                &state.workspace_root,
+                path,
+                state.allow_path_outside_workspace,
+            )?;
+            if real_path.is_dir() {
+                return Err("remove_file only supports files; use run_cmd for directory removal".to_string());
+            }
+            std::fs::remove_file(&real_path)
+                .map_err(|err| format!("remove_file failed: {err}"))?;
+            Ok(format!("removed {}", real_path.display()))
+        }
+        _ => Err(format!("unknown skill: {skill_name}")),
     }
 }
 
 fn ensure_args_object(args: &Value) -> Result<&serde_json::Map<String, Value>, String> {
     args.as_object()
-        .ok_or_else(|| "tool args must be a JSON object".to_string())
+        .ok_or_else(|| "skill args must be a JSON object".to_string())
 }
 
 fn ensure_only_keys(map: &serde_json::Map<String, Value>, allowed: &[&str]) -> Result<(), String> {
@@ -4456,7 +4932,10 @@ fn ensure_only_keys(map: &serde_json::Map<String, Value>, allowed: &[&str]) -> R
     Ok(())
 }
 
-fn required_string<'a>(map: &'a serde_json::Map<String, Value>, key: &str) -> Result<&'a str, String> {
+fn required_string<'a>(
+    map: &'a serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<&'a str, String> {
     map.get(key)
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("{key} must be string"))
@@ -4576,11 +5055,17 @@ async fn run_safe_command(
         if detail.len() > 8000 {
             detail.truncate(8000);
         }
-        Err(format!("Command failed with exit code {}\n{}", exit_code, detail))
+        Err(format!(
+            "Command failed with exit code {}\n{}",
+            exit_code, detail
+        ))
     }
 }
 
-async fn call_provider_with_retry(provider: Arc<LlmProviderRuntime>, prompt: &str) -> Result<String, String> {
+async fn call_provider_with_retry(
+    provider: Arc<LlmProviderRuntime>,
+    prompt: &str,
+) -> Result<String, String> {
     let mut attempts = 0usize;
 
     loop {
@@ -4603,7 +5088,10 @@ enum ProviderError {
     NonRetryable(String),
 }
 
-async fn call_provider(provider: Arc<LlmProviderRuntime>, prompt: &str) -> Result<String, ProviderError> {
+async fn call_provider(
+    provider: Arc<LlmProviderRuntime>,
+    prompt: &str,
+) -> Result<String, ProviderError> {
     match provider.config.provider_type.as_str() {
         "openai_compat" => call_openai_compat(provider, prompt).await,
         "google_gemini" => call_google_gemini(provider, prompt).await,
@@ -4614,7 +5102,10 @@ async fn call_provider(provider: Arc<LlmProviderRuntime>, prompt: &str) -> Resul
     }
 }
 
-async fn call_openai_compat(provider: Arc<LlmProviderRuntime>, prompt: &str) -> Result<String, ProviderError> {
+async fn call_openai_compat(
+    provider: Arc<LlmProviderRuntime>,
+    prompt: &str,
+) -> Result<String, ProviderError> {
     let _permit = provider
         .semaphore
         .clone()
@@ -4699,12 +5190,17 @@ async fn call_openai_compat(provider: Arc<LlmProviderRuntime>, prompt: &str) -> 
         .and_then(|content| content.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| ProviderError::NonRetryable("missing choices[0].message.content".to_string()))?;
+        .ok_or_else(|| {
+            ProviderError::NonRetryable("missing choices[0].message.content".to_string())
+        })?;
 
     Ok(text)
 }
 
-async fn call_google_gemini(provider: Arc<LlmProviderRuntime>, prompt: &str) -> Result<String, ProviderError> {
+async fn call_google_gemini(
+    provider: Arc<LlmProviderRuntime>,
+    prompt: &str,
+) -> Result<String, ProviderError> {
     let _permit = provider
         .semaphore
         .clone()
@@ -4818,9 +5314,15 @@ async fn call_google_gemini(provider: Arc<LlmProviderRuntime>, prompt: &str) -> 
                     merged.push_str(t);
                 }
             }
-            if merged.is_empty() { None } else { Some(merged) }
+            if merged.is_empty() {
+                None
+            } else {
+                Some(merged)
+            }
         })
-        .ok_or_else(|| ProviderError::NonRetryable("missing candidates[0].content.parts[*].text".to_string()))?;
+        .ok_or_else(|| {
+            ProviderError::NonRetryable("missing candidates[0].content.parts[*].text".to_string())
+        })?;
 
     Ok(text)
 }
@@ -4836,7 +5338,10 @@ async fn call_anthropic_claude(
         .await
         .map_err(|err| ProviderError::NonRetryable(format!("semaphore closed: {err}")))?;
 
-    let url = format!("{}/messages", provider.config.base_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/messages",
+        provider.config.base_url.trim_end_matches('/')
+    );
     let req_body = json!({
         "model": provider.config.model,
         "max_tokens": 4096,
@@ -4907,7 +5412,11 @@ async fn call_anthropic_claude(
                     }
                 }
             }
-            if merged.is_empty() { None } else { Some(merged) }
+            if merged.is_empty() {
+                None
+            } else {
+                Some(merged)
+            }
         })
         .ok_or_else(|| ProviderError::NonRetryable("missing content[*].text".to_string()))?;
 
@@ -4980,7 +5489,11 @@ fn update_task_success(state: &AppState, task_id: &str, result_json: &str) -> an
     Ok(())
 }
 
-fn update_task_progress_result(state: &AppState, task_id: &str, result_json: &str) -> anyhow::Result<()> {
+fn update_task_progress_result(
+    state: &AppState,
+    task_id: &str,
+    result_json: &str,
+) -> anyhow::Result<()> {
     let db = state
         .db
         .lock()
@@ -5161,11 +5674,20 @@ fn upsert_long_term_summary(
     memory::upsert_long_term_summary(state, user_id, chat_id, user_key, summary, source_memory_id)
 }
 
-async fn maybe_refresh_long_term_summary(state: &AppState, task: &ClaimedTask) -> Result<(), String> {
+async fn maybe_refresh_long_term_summary(
+    state: &AppState,
+    task: &ClaimedTask,
+) -> Result<(), String> {
     if !state.memory.long_term_enabled {
         return Ok(());
     }
-    if task.user_key.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_none() {
+    if task
+        .user_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_none()
+    {
         return Ok(());
     }
     let rounds = memory::count_chat_memory_rounds(
@@ -5174,7 +5696,7 @@ async fn maybe_refresh_long_term_summary(state: &AppState, task: &ClaimedTask) -
         task.user_id,
         task.chat_id,
     )
-        .map_err(|err| format!("count memory rounds failed: {err}"))?;
+    .map_err(|err| format!("count memory rounds failed: {err}"))?;
     if rounds == 0 || rounds % state.memory.long_term_every_rounds.max(1) != 0 {
         return Ok(());
     }
@@ -5184,7 +5706,7 @@ async fn maybe_refresh_long_term_summary(state: &AppState, task: &ClaimedTask) -
         task.user_id,
         task.chat_id,
     )
-        .map_err(|err| format!("read long-term source id failed: {err}"))?;
+    .map_err(|err| format!("read long-term source id failed: {err}"))?;
     let fetch_limit = state.memory.long_term_source_rounds.max(1) * 2;
     let entries = recall_memories_since_id(
         state,
@@ -5194,7 +5716,7 @@ async fn maybe_refresh_long_term_summary(state: &AppState, task: &ClaimedTask) -
         source_id,
         fetch_limit,
     )
-        .map_err(|err| format!("read memories for summary failed: {err}"))?;
+    .map_err(|err| format!("read memories for summary failed: {err}"))?;
     let min_entries = state.memory.long_term_every_rounds.max(1) * 2;
     if entries.len() < min_entries {
         return Ok(());
@@ -5215,14 +5737,10 @@ async fn maybe_refresh_long_term_summary(state: &AppState, task: &ClaimedTask) -
         return Ok(());
     }
 
-    let previous_summary = recall_long_term_summary(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-    )
-        .map_err(|err| format!("read previous long-term summary failed: {err}"))?
-        .unwrap_or_default();
+    let previous_summary =
+        recall_long_term_summary(state, task.user_key.as_deref(), task.user_id, task.chat_id)
+            .map_err(|err| format!("read previous long-term summary failed: {err}"))?
+            .unwrap_or_default();
 
     let mut convo_lines = Vec::new();
     for (_, role, content, safety_flag) in &entries {
@@ -5235,31 +5753,35 @@ async fn maybe_refresh_long_term_summary(state: &AppState, task: &ClaimedTask) -
     if convo_lines.is_empty() {
         return Ok(());
     }
-    let summary_prompt = render_prompt_template(
+    let (summary_template, summary_prompt_file) = load_prompt_template_for_state(
+        state,
+        "prompts/long_term_summary_prompt.md",
         LONG_TERM_SUMMARY_PROMPT_TEMPLATE,
+    );
+    let summary_prompt = render_prompt_template(
+        &summary_template,
         &[
             ("__PREVIOUS_SUMMARY__", &previous_summary),
-            ("__NEW_CONVERSATION_CHUNK__", &convo_lines.join("\n")),
+            (
+                "__NEW_CONVERSATION_CHUNK__",
+                &convo_lines.join(
+                    "
+",
+                ),
+            ),
         ],
     );
     log_prompt_render(
         &task.task_id,
         "long_term_summary_prompt",
-        "prompts/long_term_summary_prompt.md",
+        &summary_prompt_file,
         None,
     );
 
-    let summary = run_llm_with_fallback_with_prompt_file(
-        state,
-        task,
-        &summary_prompt,
-        "prompts/long_term_summary_prompt.md",
-    )
-    .await?;
-    let trimmed = truncate_text(
-        &summary,
-        state.memory.long_term_summary_max_chars.max(512),
-    );
+    let summary =
+        run_llm_with_fallback_with_prompt_file(state, task, &summary_prompt, &summary_prompt_file)
+            .await?;
+    let trimmed = truncate_text(&summary, state.memory.long_term_summary_max_chars.max(512));
     upsert_long_term_summary(
         state,
         task.user_id,
@@ -5268,7 +5790,7 @@ async fn maybe_refresh_long_term_summary(state: &AppState, task: &ClaimedTask) -
         &trimmed,
         latest_id,
     )
-        .map_err(|err| format!("write long-term summary failed: {err}"))?;
+    .map_err(|err| format!("write long-term summary failed: {err}"))?;
     Ok(())
 }
 
@@ -5355,13 +5877,14 @@ fn recall_memory_context_parts(
             chat_id,
             state.memory.preference_recall_limit.max(1),
         )
-            .unwrap_or_default()
+        .unwrap_or_default()
     } else {
         Vec::new()
     };
     let recalled = recall_recent_memories(state, user_key, user_id, chat_id, recent_limit.max(1))
         .unwrap_or_default();
-    let recalled = filter_memories_for_prompt_recall(recalled, state.memory.prefer_llm_assistant_memory);
+    let recalled =
+        filter_memories_for_prompt_recall(recalled, state.memory.prefer_llm_assistant_memory);
     let recalled = if state.memory.recent_relevance_enabled {
         select_relevant_memories_for_prompt(
             recalled,
@@ -5726,14 +6249,24 @@ fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_exchange_api_credentials_user_exchange
         ON exchange_api_credentials(user_key, exchange);",
     )?;
-    ensure_column_exists(db, "tasks", "user_key", "ALTER TABLE tasks ADD COLUMN user_key TEXT")?;
+    ensure_column_exists(
+        db,
+        "tasks",
+        "user_key",
+        "ALTER TABLE tasks ADD COLUMN user_key TEXT",
+    )?;
     ensure_column_exists(
         db,
         "scheduled_jobs",
         "user_key",
         "ALTER TABLE scheduled_jobs ADD COLUMN user_key TEXT",
     )?;
-    ensure_column_exists(db, "memories", "user_key", "ALTER TABLE memories ADD COLUMN user_key TEXT")?;
+    ensure_column_exists(
+        db,
+        "memories",
+        "user_key",
+        "ALTER TABLE memories ADD COLUMN user_key TEXT",
+    )?;
     ensure_column_exists(
         db,
         "long_term_memories",
@@ -5864,7 +6397,8 @@ fn generate_user_key() -> String {
 }
 
 fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Option<String>> {
-    let existing_count: i64 = db.query_row("SELECT COUNT(*) FROM auth_keys", [], |row| row.get(0))?;
+    let existing_count: i64 =
+        db.query_row("SELECT COUNT(*) FROM auth_keys", [], |row| row.get(0))?;
     if existing_count > 0 {
         return Ok(None);
     }
@@ -6055,7 +6589,9 @@ fn confirmation_rules(state: &AppState) -> &'static CompiledTradeRules {
 pub(crate) fn main_flow_rules(state: &AppState) -> &'static MainFlowRules {
     static RULES: OnceLock<MainFlowRules> = OnceLock::new();
     RULES.get_or_init(|| {
-        let path = state.workspace_root.join("configs/hard_rules/main_flow.toml");
+        let path = state
+            .workspace_root
+            .join("configs/hard_rules/main_flow.toml");
         let path_str = path.to_string_lossy().to_string();
         load_main_flow_rules(&path_str)
     })
@@ -6074,7 +6610,9 @@ fn is_negative_confirmation_click_text(state: &AppState, text: &str) -> bool {
 }
 
 fn effective_trade_confirm_window_secs(state: &AppState, channel: &str) -> i64 {
-    let base_window = main_flow_rules(state).recent_trade_preview_window_secs.max(1);
+    let base_window = main_flow_rules(state)
+        .recent_trade_preview_window_secs
+        .max(1);
     if is_whatsapp_channel_value(main_flow_rules(state), channel) {
         return base_window;
     }
@@ -6096,7 +6634,10 @@ struct TradePreviewContext {
     time_in_force: Option<String>,
 }
 
-fn build_trade_confirm_cancelled_text(state: &AppState, preview_ctx: &TradePreviewContext) -> String {
+fn build_trade_confirm_cancelled_text(
+    state: &AppState,
+    preview_ctx: &TradePreviewContext,
+) -> String {
     i18n_t_with_default(
         state,
         "clawd.msg.trade_confirm_cancelled",
@@ -6117,26 +6658,29 @@ fn parse_trade_preview_line(line: &str, rules: &MainFlowRules) -> Option<TradePr
     if parts.len() < 5 {
         return None;
     }
-    let qty = parts
-        .iter()
-        .find_map(|p| {
-            p.strip_prefix("qty=")
-                .or_else(|| p.strip_prefix("est_qty="))
-                .and_then(|v| v.parse::<f64>().ok())
-        })?;
-    let quote_qty_usd = parts
-        .iter()
-        .find_map(|p| p.strip_prefix("quote_usd=").and_then(|v| v.parse::<f64>().ok()));
+    let qty = parts.iter().find_map(|p| {
+        p.strip_prefix("qty=")
+            .or_else(|| p.strip_prefix("est_qty="))
+            .and_then(|v| v.parse::<f64>().ok())
+    })?;
+    let quote_qty_usd = parts.iter().find_map(|p| {
+        p.strip_prefix("quote_usd=")
+            .and_then(|v| v.parse::<f64>().ok())
+    });
     let order_type = parts
         .iter()
-        .find_map(|p| p.strip_prefix("order_type=").map(|v| v.to_ascii_lowercase()))
+        .find_map(|p| {
+            p.strip_prefix("order_type=")
+                .map(|v| v.to_ascii_lowercase())
+        })
         .unwrap_or_else(|| rules.trade_preview_default_order_type.clone());
     let price = parts
         .iter()
         .find_map(|p| p.strip_prefix("price=").and_then(|v| v.parse::<f64>().ok()));
-    let stop_price = parts
-        .iter()
-        .find_map(|p| p.strip_prefix("stop_price=").and_then(|v| v.parse::<f64>().ok()));
+    let stop_price = parts.iter().find_map(|p| {
+        p.strip_prefix("stop_price=")
+            .and_then(|v| v.parse::<f64>().ok())
+    });
     let time_in_force = parts
         .iter()
         .find_map(|p| p.strip_prefix("tif=").map(|v| v.to_ascii_uppercase()));
@@ -6198,9 +6742,14 @@ fn find_recent_trade_preview_context(
         )
         .ok()?;
     let rows = stmt
-        .query_map(params![user_id, chat_id, rules.recent_trade_preview_scan_limit as i64], |row| {
-            Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?))
-        })
+        .query_map(
+            params![
+                user_id,
+                chat_id,
+                rules.recent_trade_preview_scan_limit as i64
+            ],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+        )
         .ok()?;
     for row in rows.flatten() {
         let (result_json_opt, ts) = row;
@@ -6246,14 +6795,21 @@ fn find_recent_duplicate_affirmation_task(
         )
         .ok()?;
     let rows = stmt
-        .query_map(params![user_id, chat_id, rules.duplicate_affirmation_scan_limit as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })
+        .query_map(
+            params![
+                user_id,
+                chat_id,
+                rules.duplicate_affirmation_scan_limit as i64
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
         .ok()?;
     for row in rows.flatten() {
         let (task_id, payload_json, status, ts) = row;
@@ -6285,15 +6841,45 @@ fn find_recent_duplicate_affirmation_task(
     None
 }
 
+fn has_newer_successful_ask_after(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    ts: i64,
+) -> bool {
+    let Ok(db) = state.db.lock() else {
+        return false;
+    };
+    let mut stmt = match db.prepare(
+        "SELECT 1
+         FROM tasks
+         WHERE user_id = ?1
+           AND chat_id = ?2
+           AND kind = 'ask'
+           AND status = 'succeeded'
+           AND CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) > ?3
+         LIMIT 1",
+    ) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let mut rows = match stmt.query(params![user_id, chat_id, ts]) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    matches!(rows.next(), Ok(Some(_)))
+}
+
 fn find_recent_failed_resume_context(
     state: &AppState,
     user_id: i64,
     chat_id: i64,
-) -> Option<Value> {
+) -> Option<(Value, i64)> {
     let db = state.db.lock().ok()?;
     let mut stmt = db
         .prepare(
-            "SELECT result_json
+            "SELECT result_json,
+                    CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER)
              FROM tasks
              WHERE user_id = ?1 AND chat_id = ?2 AND kind = 'ask' AND status = 'failed'
              ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC
@@ -6301,10 +6887,16 @@ fn find_recent_failed_resume_context(
         )
         .ok()?;
     let rows = stmt
-        .query_map(params![user_id, chat_id], |row| row.get::<_, Option<String>>(0))
+        .query_map(params![user_id, chat_id], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+            ))
+        })
         .ok()?;
     for row in rows.flatten() {
-        let Some(result_json) = row else {
+        let (result_json, ts) = row;
+        let Some(result_json) = result_json else {
             continue;
         };
         let Ok(result) = serde_json::from_str::<Value>(&result_json) else {
@@ -6314,7 +6906,7 @@ fn find_recent_failed_resume_context(
             continue;
         };
         if !resume_context.is_null() {
-            return Some(resume_context);
+            return Some((resume_context, ts));
         }
     }
     None
@@ -6422,20 +7014,21 @@ async fn submit_task(
         );
     }
 
-    let queued_count = match task_count_by_status(&state, &main_flow_rules(&state).task_status_queued) {
-        Ok(v) => v,
-        Err(err) => {
-            error!("Count queued tasks failed: {}", err);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("Database error".to_string()),
-                }),
-            );
-        }
-    };
+    let queued_count =
+        match task_count_by_status(&state, &main_flow_rules(&state).task_status_queued) {
+            Ok(v) => v,
+            Err(err) => {
+                error!("Count queued tasks failed: {}", err);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some("Database error".to_string()),
+                    }),
+                );
+            }
+        };
 
     if queued_count >= state.queue_limit {
         let queue_full = "Task queue is full".to_string();
@@ -6492,7 +7085,10 @@ async fn submit_task(
     let mut payload = req.payload;
     if let Some(obj) = payload.as_object_mut() {
         let channel_str = channel_kind_name(channel);
-        obj.insert("channel".to_string(), Value::String(channel_str.to_string()));
+        obj.insert(
+            "channel".to_string(),
+            Value::String(channel_str.to_string()),
+        );
         if let Some(v) = normalized_external_user_id.as_deref() {
             obj.insert("external_user_id".to_string(), Value::String(v.to_string()));
         }
@@ -6653,7 +7249,9 @@ pub(crate) fn exchange_credential_status_for_user_key(
             )
             .optional()?;
         let (configured, api_key_masked, updated_at) = match row {
-            Some((api_key, updated_at, enabled)) if enabled == 1 => (true, Some(api_key), Some(updated_at)),
+            Some((api_key, updated_at, enabled)) if enabled == 1 => {
+                (true, Some(api_key), Some(updated_at))
+            }
             _ => (false, None, None),
         };
         out.push(ExchangeCredentialStatus {
@@ -6706,7 +7304,12 @@ pub(crate) fn upsert_exchange_credential_for_user_key(
 }
 
 fn exchange_credential_context_for_task(state: &AppState, task: &ClaimedTask) -> serde_json::Value {
-    let Some(user_key) = task.user_key.as_deref().map(str::trim).filter(|v| !v.is_empty()) else {
+    let Some(user_key) = task
+        .user_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
         return json!({});
     };
     let Ok(db) = state.db.lock() else {

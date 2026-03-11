@@ -25,14 +25,14 @@
 # request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [image_edit]
 # Routing & mode / 路由与模式
-default_vendor = "qwen"
+default_vendor = "minimax"
 adapter_mode = "auto"
 allow_compat_adapters = true
 qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
 qwen_native_function = "description_edit"
 
 # Default model / 默认模型
-default_model = "qwen-image-edit-max"
+default_model = "image-01"
 
 # Vendor models / 按厂商模型
 openai_models = ["gpt-image-1"]
@@ -40,6 +40,7 @@ google_models = ["gemini-2.5-flash-image-preview"]
 anthropic_models = []
 grok_models = []
 qwen_models = ["qwen-image-edit-max", "wan2.6-image", "wanx2.1-imageedit"]
+minimax_models = ["image-01"]
 native_models = ["qwen-image-edit-max", "wan2.6-image", "wanx2.1-imageedit"]
 models = ["qwen-image-edit-max", "wan2.6-image", "wanx2.1-imageedit"]
 
@@ -64,6 +65,26 @@ oss_endpoint = "oss-cn-beijing.aliyuncs.com"
 oss_object_prefix = "rustclaw/image"
 oss_url_ttl_seconds = 3600
 
+# Optional dedicated provider override / 可选独立 provider 覆盖
+# Recommended / 推荐：
+# - image_edit: Qwen `qwen-image-edit-max` for current edit quality and native support
+#   / 图片编辑推荐 Qwen `qwen-image-edit-max`，当前编辑效果和原生支持更合适
+# [image_edit.providers.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key = "REPLACE_ME_OPENAI_API_KEY"
+# model = "gpt-image-1"
+# timeout_seconds = 120
+[image_edit.providers.minimax]
+base_url = "https://api.minimax.io/v1"
+api_key = ""
+model = "image-01"
+timeout_seconds = 120
+# [image_edit.providers.qwen]
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = "sk-0f59ace4739a4fa897b0f3fa0a7b5ff2"
+# model = "qwen-image-edit-max"
+# timeout_seconds = 120
+
 # =========================
 # Image Generate / 文生图
 # =========================
@@ -84,13 +105,13 @@ oss_url_ttl_seconds = 3600
 # request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [image_generation]
 # Routing & mode / 路由与模式
-default_vendor = "qwen"
+default_vendor = "minimax"
 adapter_mode = "auto"
 allow_compat_adapters = true
 qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
 
 # Default model / 默认模型
-default_model = "wan2.6-image"
+default_model = "image-01"
 
 # Vendor models / 按厂商模型
 openai_models = ["gpt-image-1"]
@@ -98,6 +119,7 @@ google_models = ["gemini-2.5-flash-image-preview"]
 anthropic_models = []
 grok_models = []
 qwen_models = ["wan2.6-image", "wanx2.1-t2i-turbo"]
+minimax_models = ["image-01"]
 native_models = ["wan2.6-image", "wanx2.1-t2i-turbo"]
 models = ["wan2.6-image", "wanx2.1-t2i-turbo"]
 
@@ -107,6 +129,26 @@ max_concurrency = 1
 max_images = 4
 max_input_bytes = 10485760
 timeout_seconds = 120
+
+# Optional dedicated provider override / 可选独立 provider 覆盖
+# Recommended / 推荐：
+# - image_generation: Qwen `wan2.6-image` for current default generation path
+#   / 文生图推荐 Qwen `wan2.6-image`，和当前默认生成链路最匹配
+# [image_generation.providers.qwen]
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = "REPLACE_ME_QWEN_API_KEY"
+# model = "wan2.6-image"
+# timeout_seconds = 120
+[image_generation.providers.minimax]
+base_url = "https://api.minimax.io/v1"
+api_key = "sk-api-IOdPwbp2BpNhBQiE1FINIezXrGeGLWZmjHpKYKvqEd5cZOmNS4r1JFcSDsZW4uvGhbV9-cM4E6ADQXuETabzVeIwl_CP_KkrBSmWh925tq_H5Rwt7JXqPMM"
+model = "image-01"
+timeout_seconds = 120
+# [image_generation.providers.qwen]
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = "sk-0f59ace4739a4fa897b0f3fa0a7b5ff2"
+# model = "wan2.6-image"
+# timeout_seconds = 120
 
 # =========================
 # Image Vision / 图像理解
@@ -121,17 +163,18 @@ timeout_seconds = 120
 # request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [image_vision]
 # Routing & mode / 路由与模式
-default_vendor = "qwen"
+default_vendor = "minimax"
 adapter_mode = "compat" # Vision currently recommended to stay in compat / vision 当前建议保持 compat
 
 # Default model / 默认模型
-default_model = "qwen-vl-max"
+default_model = "MiniMax-VL-01"
 
 # Vendor models / 按厂商模型
 openai_models = ["gpt-4o-mini", "gpt-4o"]
 google_models = ["gemini-2.5-flash", "gemini-2.5-pro"]
 anthropic_models = ["claude-sonnet-4-6"]
 qwen_models = ["qwen-vl-max", "qwen-vl-plus"]
+minimax_models = ["MiniMax-VL-01"]
 models = ["qwen-vl-max", "qwen-vl-plus"]
 
 # Runtime limits / 运行限制
@@ -140,3 +183,24 @@ max_concurrency = 1
 max_images = 6
 max_input_bytes = 10485760
 timeout_seconds = 90
+
+# Optional dedicated provider override / 可选独立 provider 覆盖
+# Recommended / 推荐：
+# - image_vision: OpenAI `gpt-4o-mini` for broad compatibility and steady vision output
+#   / 图片理解推荐 OpenAI `gpt-4o-mini`，兼容性更广、输出更稳
+# [image_vision.providers.google]
+# base_url = "https://generativelanguage.googleapis.com/v1beta"
+# api_key = "REPLACE_ME_GOOGLE_API_KEY"
+# model = "gemini-2.5-flash"
+# timeout_seconds = 90
+[image_vision.providers.minimax]
+base_url = "https://api.minimax.io/v1"
+api_key = "sk-api-IOdPwbp2BpNhBQiE1FINIezXrGeGLWZmjHpKYKvqEd5cZOmNS4r1JFcSDsZW4uvGhbV9-cM4E6ADQXuETabzVeIwl_CP_KkrBSmWh925tq_H5Rwt7JXqPMM"
+model = "MiniMax-VL-01"
+timeout_seconds = 90
+# [image_vision.providers.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key = "sk-proj-..."
+# model = "gpt-4o-mini"
+# timeout_seconds = 90
+

@@ -53,7 +53,11 @@ struct LlmConfig {
     #[serde(default)]
     grok: Option<VendorConfig>,
     #[serde(default)]
+    deepseek: Option<VendorConfig>,
+    #[serde(default)]
     qwen: Option<VendorConfig>,
+    #[serde(default)]
+    minimax: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -84,7 +88,11 @@ struct ImageSkillConfig {
     #[serde(default)]
     grok_models: Option<Vec<String>>,
     #[serde(default)]
+    deepseek_models: Option<Vec<String>>,
+    #[serde(default)]
     qwen_models: Option<Vec<String>>,
+    #[serde(default)]
+    minimax_models: Option<Vec<String>>,
     #[serde(default)]
     native_models: Option<Vec<String>>,
     #[serde(default)]
@@ -99,6 +107,26 @@ struct ImageSkillConfig {
     language: Option<String>,
     #[serde(default)]
     i18n_path: Option<String>,
+    #[serde(default)]
+    providers: ImageProviderOverrides,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ImageProviderOverrides {
+    #[serde(default)]
+    openai: Option<VendorConfig>,
+    #[serde(default)]
+    google: Option<VendorConfig>,
+    #[serde(default)]
+    anthropic: Option<VendorConfig>,
+    #[serde(default)]
+    grok: Option<VendorConfig>,
+    #[serde(default)]
+    deepseek: Option<VendorConfig>,
+    #[serde(default)]
+    qwen: Option<VendorConfig>,
+    #[serde(default)]
+    minimax: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,7 +174,9 @@ enum VendorKind {
     Google,
     Anthropic,
     Grok,
+    DeepSeek,
     Qwen,
+    MiniMax,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -261,7 +291,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
             n,
             &output_path,
         ) {
-            Ok(model) => {
+            Ok((model, model_kind)) => {
                 let saved_path = output_path.to_string_lossy().to_string();
                 let preface = i18n.render(
                     "image_generate.msg.saved",
@@ -272,6 +302,7 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
                 let extra = json!({
                     "provider": vendor_name(vendor),
                     "model": model,
+                    "model_kind": model_kind,
                     "latency_ms": 0,
                     "outputs": [{"type":"image_file","path": saved_path}]
                 });
@@ -310,7 +341,9 @@ fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'
         VendorKind::Google => cfg.google_models.as_ref(),
         VendorKind::Anthropic => cfg.anthropic_models.as_ref(),
         VendorKind::Grok => cfg.grok_models.as_ref(),
+        VendorKind::DeepSeek => cfg.deepseek_models.as_ref(),
         VendorKind::Qwen => cfg.qwen_models.as_ref(),
+        VendorKind::MiniMax => cfg.minimax_models.as_ref(),
     }
 }
 
@@ -398,16 +431,12 @@ fn call_generate(
     quality: Option<&str>,
     n: u64,
     output_path: &Path,
-) -> Result<String, String> {
+) -> Result<(String, &'static str), String> {
     let mode = resolve_adapter_mode(&cfg.image_generation);
+    let (vendor_name, vcfg) = resolve_vendor_config(cfg, vendor)?;
+    check_api_key(vendor_name, &vcfg.api_key)?;
     match vendor {
         VendorKind::OpenAI => {
-            let vcfg = cfg
-                .llm
-                .openai
-                .as_ref()
-                .ok_or_else(|| "openai config missing".to_string())?;
-            check_api_key("openai", &vcfg.api_key)?;
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
@@ -425,15 +454,9 @@ fn call_generate(
                 n,
                 output_path,
             )?;
-            Ok(model)
+            Ok((model, "compat"))
         }
         VendorKind::Google => {
-            let vcfg = cfg
-                .llm
-                .google
-                .as_ref()
-                .ok_or_else(|| "google config missing".to_string())?;
-            check_api_key("google", &vcfg.api_key)?;
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
@@ -442,7 +465,7 @@ fn call_generate(
             google_generate(
                 &client, vcfg, &model, prompt, size, style, quality, n, output_path,
             )?;
-            Ok(model)
+            Ok((model, "native"))
         }
         VendorKind::Anthropic => {
             if mode == AdapterMode::Native {
@@ -454,12 +477,6 @@ fn call_generate(
                         .to_string(),
                 );
             }
-            let vcfg = cfg
-                .llm
-                .anthropic
-                .as_ref()
-                .ok_or_else(|| "anthropic config missing".to_string())?;
-            check_api_key("anthropic", &vcfg.api_key)?;
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
@@ -477,41 +494,51 @@ fn call_generate(
                 n,
                 output_path,
             )?;
-            Ok(model)
+            Ok((model, "compat"))
         }
-        VendorKind::Grok => {
+        VendorKind::Grok | VendorKind::DeepSeek => {
             if mode == AdapterMode::Native {
-                return Err("grok native image generation adapter is not available".to_string());
+                return Err(format!(
+                    "{vendor_name} native image generation adapter is not available"
+                ));
             }
             if !cfg.image_generation.allow_compat_adapters && mode != AdapterMode::Compat {
                 return Err(
-                    "grok native image generation adapter is not available; set image_generation.allow_compat_adapters=true to use compatible endpoint"
-                        .to_string(),
+                    format!(
+                        "{vendor_name} native image generation adapter is not available; set image_generation.allow_compat_adapters=true to use compatible endpoint"
+                    ),
                 );
             }
-            let vcfg = cfg
-                .llm
-                .grok
-                .as_ref()
-                .ok_or_else(|| "grok config missing".to_string())?;
-            check_api_key("grok", &vcfg.api_key)?;
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
                 .build()
-                .map_err(|err| format!("build grok client failed: {err}"))?;
+                .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
             openai_compatible_generate(
-                &client, "grok", vcfg, &model, prompt, size, style, quality, n, output_path,
+                &client, vendor_name, vcfg, &model, prompt, size, style, quality, n, output_path,
             )?;
-            Ok(model)
+            Ok((model, "compat"))
+        }
+        VendorKind::MiniMax => {
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .build()
+                .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
+            minimax_generate(
+                &client,
+                vcfg,
+                &model,
+                prompt,
+                size,
+                style,
+                quality,
+                n,
+                output_path,
+            )?;
+            Ok((model, "native"))
         }
         VendorKind::Qwen => {
-            let vcfg = cfg
-                .llm
-                .qwen
-                .as_ref()
-                .ok_or_else(|| "qwen config missing".to_string())?;
-            check_api_key("qwen", &vcfg.api_key)?;
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
                 .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
@@ -534,6 +561,7 @@ fn call_generate(
                     timeout_seconds,
                     output_path,
                 )?;
+                return Ok((model, "native"));
             } else {
                 if !cfg.image_generation.allow_compat_adapters {
                     return Err(
@@ -544,8 +572,8 @@ fn call_generate(
                 openai_compatible_generate(
                     &client, "qwen", vcfg, &model, prompt, size, style, quality, n, output_path,
                 )?;
+                Ok((model, "compat"))
             }
-            Ok(model)
         }
     }
 }
@@ -953,6 +981,84 @@ fn openai_compatible_generate(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn minimax_generate(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    prompt: &str,
+    size: &str,
+    _style: Option<&str>,
+    _quality: Option<&str>,
+    n: u64,
+    output_path: &Path,
+) -> Result<(), String> {
+    let url = format!("{}/image_generation", trim_trailing_slash(&cfg.base_url));
+    let mut body = json!({
+        "model": model,
+        "prompt": prompt,
+        "response_format": "url",
+        "n": n.max(1),
+        "prompt_optimizer": true
+    });
+    body["aspect_ratio"] = Value::String(size_to_minimax_aspect_ratio(size));
+
+    let resp = client
+        .post(url)
+        .bearer_auth(&cfg.api_key)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("minimax request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let raw = resp
+        .text()
+        .map_err(|err| format!("read minimax response failed: {err}"))?;
+    let v: Value = serde_json::from_str(&raw)
+        .map_err(|err| format!("parse minimax response failed: {err}; body={}", truncate(&raw, 400)))?;
+    if status >= 300 {
+        return Err(format!(
+            "minimax error status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
+    }
+
+    if let Some(url) = v
+        .get("data")
+        .and_then(|d| d.get("image_urls"))
+        .and_then(|arr| arr.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_str())
+    {
+        let bytes = client
+            .get(url)
+            .send()
+            .map_err(|err| format!("download generated image failed: {err}"))?
+            .bytes()
+            .map_err(|err| format!("read generated image bytes failed: {err}"))?;
+        ensure_parent_dir(output_path)?;
+        std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+        return Ok(());
+    }
+    if let Some(b64) = v
+        .get("data")
+        .and_then(|d| d.get("image_base64"))
+        .and_then(|arr| arr.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_str())
+    {
+        let bytes = STANDARD
+            .decode(b64)
+            .map_err(|err| format!("decode minimax image base64 failed: {err}"))?;
+        ensure_parent_dir(output_path)?;
+        std::fs::write(output_path, bytes).map_err(|err| format!("write output failed: {err}"))?;
+        return Ok(());
+    }
+    Err(format!(
+        "minimax response contains no image payload: {}",
+        truncate(&v.to_string(), 400)
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn google_generate(
     client: &Client,
     cfg: &VendorConfig,
@@ -1053,50 +1159,37 @@ fn ensure_parent_dir(path: &Path) -> Result<(), String> {
 
 fn load_root_config() -> RootConfig {
     let root = workspace_root();
-    let mut merged = match std::fs::read_to_string(root.join("configs/config.toml"))
+    let core_cfg = match std::fs::read_to_string(root.join("configs/config.toml"))
         .ok()
         .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
     {
         Some(v) => v,
         None => toml::Value::Table(toml::map::Map::new()),
     };
-    if let Some(image_cfg) = std::fs::read_to_string(root.join("configs/image.toml"))
+    let image_cfg = match std::fs::read_to_string(root.join("configs/image.toml"))
         .ok()
         .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
     {
-        // Keep config.toml higher priority if same key exists, and use image.toml as defaults.
-        merge_missing_toml(&mut merged, image_cfg);
-    }
+        Some(v) => v,
+        None => toml::Value::Table(toml::map::Map::new()),
+    };
     let mut cfg = RootConfig::default();
-    if let Some(v) = merged.get("llm").cloned() {
+    if let Some(v) = core_cfg.get("llm").cloned() {
         if let Ok(parsed) = v.try_into::<LlmConfig>() {
             cfg.llm = parsed;
         }
     }
-    if let Some(v) = merged.get("image_generation").cloned() {
+    if let Some(v) = image_cfg.get("image_generation").cloned() {
         if let Ok(parsed) = v.try_into::<ImageSkillConfig>() {
             cfg.image_generation = parsed;
         }
     }
-    if let Some(v) = merged.get("command_intent").cloned() {
+    if let Some(v) = core_cfg.get("command_intent").cloned() {
         if let Ok(parsed) = v.try_into::<CommandIntentConfig>() {
             cfg.command_intent = parsed;
         }
     }
     cfg
-}
-
-fn merge_missing_toml(dst: &mut toml::Value, src: toml::Value) {
-    if let (toml::Value::Table(dst_map), toml::Value::Table(src_map)) = (dst, src) {
-        for (key, src_val) in src_map {
-            match dst_map.get_mut(&key) {
-                Some(dst_val) => merge_missing_toml(dst_val, src_val),
-                None => {
-                    dst_map.insert(key, src_val);
-                }
-            }
-        }
-    }
 }
 
 fn workspace_root() -> PathBuf {
@@ -1131,7 +1224,9 @@ fn vendor_order(
         VendorKind::Google,
         VendorKind::Anthropic,
         VendorKind::Grok,
+        VendorKind::DeepSeek,
         VendorKind::Qwen,
+        VendorKind::MiniMax,
     ] {
         if seen.insert(v) {
             out.push(v);
@@ -1146,7 +1241,9 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "google" | "gemini" => Some(VendorKind::Google),
         "anthropic" | "claude" => Some(VendorKind::Anthropic),
         "grok" | "xai" => Some(VendorKind::Grok),
+        "deepseek" => Some(VendorKind::DeepSeek),
         "qwen" => Some(VendorKind::Qwen),
+        "minimax" => Some(VendorKind::MiniMax),
         _ => None,
     }
 }
@@ -1157,7 +1254,60 @@ fn vendor_name(v: VendorKind) -> &'static str {
         VendorKind::Google => "google",
         VendorKind::Anthropic => "anthropic",
         VendorKind::Grok => "grok",
+        VendorKind::DeepSeek => "deepseek",
         VendorKind::Qwen => "qwen",
+        VendorKind::MiniMax => "minimax",
+    }
+}
+
+fn resolve_vendor_config<'a>(
+    cfg: &'a RootConfig,
+    vendor: VendorKind,
+) -> Result<(&'static str, &'a VendorConfig), String> {
+    let section = &cfg.image_generation.providers;
+    match vendor {
+        VendorKind::OpenAI => section
+            .openai
+            .as_ref()
+            .or(cfg.llm.openai.as_ref())
+            .map(|v| ("openai", v))
+            .ok_or_else(|| "openai config missing".to_string()),
+        VendorKind::Google => section
+            .google
+            .as_ref()
+            .or(cfg.llm.google.as_ref())
+            .map(|v| ("google", v))
+            .ok_or_else(|| "google config missing".to_string()),
+        VendorKind::Anthropic => section
+            .anthropic
+            .as_ref()
+            .or(cfg.llm.anthropic.as_ref())
+            .map(|v| ("anthropic", v))
+            .ok_or_else(|| "anthropic config missing".to_string()),
+        VendorKind::Grok => section
+            .grok
+            .as_ref()
+            .or(cfg.llm.grok.as_ref())
+            .map(|v| ("grok", v))
+            .ok_or_else(|| "grok config missing".to_string()),
+        VendorKind::DeepSeek => section
+            .deepseek
+            .as_ref()
+            .or(cfg.llm.deepseek.as_ref())
+            .map(|v| ("deepseek", v))
+            .ok_or_else(|| "deepseek config missing".to_string()),
+        VendorKind::Qwen => section
+            .qwen
+            .as_ref()
+            .or(cfg.llm.qwen.as_ref())
+            .map(|v| ("qwen", v))
+            .ok_or_else(|| "qwen config missing".to_string()),
+        VendorKind::MiniMax => section
+            .minimax
+            .as_ref()
+            .or(cfg.llm.minimax.as_ref())
+            .map(|v| ("minimax", v))
+            .ok_or_else(|| "minimax config missing".to_string()),
     }
 }
 
@@ -1171,6 +1321,29 @@ fn check_api_key(vendor: &str, key: &str) -> Result<(), String> {
 
 fn trim_trailing_slash(v: &str) -> String {
     v.trim_end_matches('/').to_string()
+}
+
+fn size_to_minimax_aspect_ratio(size: &str) -> String {
+    let normalized = size.trim().replace('X', "x");
+    let parts = normalized.split('x').collect::<Vec<_>>();
+    if parts.len() == 2 {
+        if let (Ok(w), Ok(h)) = (parts[0].trim().parse::<u64>(), parts[1].trim().parse::<u64>()) {
+            if w > 0 && h > 0 {
+                let g = gcd_u64(w, h);
+                return format!("{}:{}", w / g, h / g);
+            }
+        }
+    }
+    "1:1".to_string()
+}
+
+fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let t = a % b;
+        a = b;
+        b = t;
+    }
+    a.max(1)
 }
 
 fn is_qwen_wan26_image(model: &str) -> bool {

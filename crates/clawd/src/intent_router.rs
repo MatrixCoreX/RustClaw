@@ -2,16 +2,25 @@ use serde::Deserialize;
 use serde_json::Value;
 use tracing::{info, warn};
 
-use crate::{llm_gateway, memory, routing_context, schedule_service, AppState, ClaimedTask, RoutedMode};
+use crate::{
+    llm_gateway, memory, routing_context, schedule_service, AppState, ClaimedTask, RoutedMode,
+};
 
-const INTENT_ROUTER_PROMPT_TEMPLATE: &str = include_str!("../../../prompts/intent_router_prompt.md");
-const INTENT_ROUTER_RULES_TEMPLATE: &str = include_str!("../../../prompts/intent_router_rules.md");
+const INTENT_ROUTER_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/vendors/default/intent_router_prompt.md");
+const INTENT_ROUTER_PROMPT_PATH: &str = "prompts/intent_router_prompt.md";
+const INTENT_ROUTER_RULES_TEMPLATE: &str =
+    include_str!("../../../prompts/vendors/default/intent_router_rules.md");
+const INTENT_ROUTER_RULES_PATH: &str = "prompts/intent_router_rules.md";
 const CONTEXT_RESOLVER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/context_resolver_prompt.md");
+    include_str!("../../../prompts/vendors/default/context_resolver_prompt.md");
+const CONTEXT_RESOLVER_PROMPT_PATH: &str = "prompts/context_resolver_prompt.md";
 const CLARIFY_QUESTION_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/clarify_question_prompt.md");
+    include_str!("../../../prompts/vendors/default/clarify_question_prompt.md");
+const CLARIFY_QUESTION_PROMPT_PATH: &str = "prompts/clarify_question_prompt.md";
 const RESUME_FOLLOWUP_INTENT_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/resume_followup_intent_prompt.md");
+    include_str!("../../../prompts/vendors/default/resume_followup_intent_prompt.md");
+const RESUME_FOLLOWUP_INTENT_PROMPT_PATH: &str = "prompts/resume_followup_intent_prompt.md";
 const ROUTING_POLICY_PERSONA_PROMPT: &str =
     "Neutral routing policy classifier. Ignore style/persona preferences and optimize for correct intent resolution, clarification, and guard decisions.";
 
@@ -74,6 +83,18 @@ pub(crate) struct ContextResolution {
     pub(crate) reason: String,
 }
 
+fn should_preserve_request_verbatim(user_request: &str) -> bool {
+    let trimmed = user_request.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let explicit_english = lower.contains("in plain english")
+        || lower.contains("in english")
+        || lower.contains("reply in english");
+    explicit_english && trimmed.split_whitespace().count() >= 5
+}
+
 pub(crate) async fn resolve_user_request_with_context(
     state: &AppState,
     task: &ClaimedTask,
@@ -81,6 +102,14 @@ pub(crate) async fn resolve_user_request_with_context(
 ) -> ContextResolution {
     let req = user_request.trim();
     if req.is_empty() {
+        if should_preserve_request_verbatim(req) {
+            return ContextResolution {
+                resolved_user_intent: req.to_string(),
+                needs_clarify: false,
+                confidence: Some(0.99),
+                reason: "hard_rule_preserve_explicit_language_request".to_string(),
+            };
+        }
         return ContextResolution {
             resolved_user_intent: String::new(),
             needs_clarify: false,
@@ -90,16 +119,17 @@ pub(crate) async fn resolve_user_request_with_context(
     }
     let recent_execution_context = routing_context::build_recent_execution_context(state, task, 8);
     let memory_context = if state.memory.route_memory_enabled {
-        let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
-            state,
-            task.user_key.as_deref(),
-            task.user_id,
-            task.chat_id,
-            user_request,
-            state.memory.prompt_recall_limit.max(1),
-            true,
-            true,
-        );
+        let (long_term_summary, preferences, recalled) =
+            memory::service::recall_memory_context_parts(
+                state,
+                task.user_key.as_deref(),
+                task.user_id,
+                task.chat_id,
+                user_request,
+                state.memory.prompt_recall_limit.max(1),
+                true,
+                true,
+            );
         memory::service::memory_context_block(
             long_term_summary.as_deref(),
             &preferences,
@@ -109,8 +139,13 @@ pub(crate) async fn resolve_user_request_with_context(
     } else {
         "<none>".to_string()
     };
-    let prompt = crate::render_prompt_template(
+    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+        state,
+        CONTEXT_RESOLVER_PROMPT_PATH,
         CONTEXT_RESOLVER_PROMPT_TEMPLATE,
+    );
+    let prompt = crate::render_prompt_template(
+        &prompt_template,
         &[
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
             ("__RECENT_EXECUTION_CONTEXT__", &recent_execution_context),
@@ -118,17 +153,12 @@ pub(crate) async fn resolve_user_request_with_context(
             ("__REQUEST__", req),
         ],
     );
-    crate::log_prompt_render(
-        &task.task_id,
-        "context_resolver_prompt",
-        "prompts/context_resolver_prompt.md",
-        None,
-    );
+    crate::log_prompt_render(&task.task_id, "context_resolver_prompt", &prompt_file, None);
     let llm_out = match llm_gateway::run_with_fallback_with_prompt_file(
         state,
         task,
         &prompt,
-        "prompts/context_resolver_prompt.md",
+        &prompt_file,
     )
     .await
     {
@@ -187,45 +217,50 @@ pub(crate) async fn classify_resume_followup_intent(
     task: &ClaimedTask,
     user_request: &str,
     resume_context: &Value,
+    binding_context: &Value,
 ) -> ResumeFollowupDecision {
-    let resume_context_json = serde_json::to_string_pretty(resume_context)
-        .unwrap_or_else(|_| resume_context.to_string());
-    let prompt = crate::render_prompt_template(
+    let resume_context_json =
+        serde_json::to_string_pretty(resume_context).unwrap_or_else(|_| resume_context.to_string());
+    let binding_context_json = serde_json::to_string_pretty(binding_context)
+        .unwrap_or_else(|_| binding_context.to_string());
+    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+        state,
+        RESUME_FOLLOWUP_INTENT_PROMPT_PATH,
         RESUME_FOLLOWUP_INTENT_PROMPT_TEMPLATE,
+    );
+    let prompt = crate::render_prompt_template(
+        &prompt_template,
         &[
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
             ("__RESUME_CONTEXT__", &resume_context_json),
+            ("__BINDING_CONTEXT__", &binding_context_json),
             ("__REQUEST__", user_request.trim()),
         ],
     );
     crate::log_prompt_render(
         &task.task_id,
         "resume_followup_intent_prompt",
-        "prompts/resume_followup_intent_prompt.md",
+        &prompt_file,
         None,
     );
-    let llm_out = match llm_gateway::run_with_fallback_with_prompt_file(
-        state,
-        task,
-        &prompt,
-        "prompts/resume_followup_intent_prompt.md",
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(err) => {
-            warn!(
-                "classify_resume_followup_intent llm failed, fallback defer: task_id={} err={}",
-                task.task_id, err
-            );
-            return ResumeFollowupDecision {
-                decision: "defer".to_string(),
-                reason: "llm_failed".to_string(),
-                confidence: None,
-                bind_resume_context: false,
-            };
-        }
-    };
+    let llm_out =
+        match llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file)
+            .await
+        {
+            Ok(v) => v,
+            Err(err) => {
+                warn!(
+                    "classify_resume_followup_intent llm failed, fallback defer: task_id={} err={}",
+                    task.task_id, err
+                );
+                return ResumeFollowupDecision {
+                    decision: "defer".to_string(),
+                    reason: "llm_failed".to_string(),
+                    confidence: None,
+                    bind_resume_context: false,
+                };
+            }
+        };
     let parsed = crate::parse_llm_json_extract_then_raw::<ResumeFollowupIntentOut>(&llm_out);
     if let Some(out) = parsed {
         let decision = match out.decision.trim().to_ascii_lowercase().as_str() {
@@ -266,27 +301,21 @@ pub(crate) async fn generate_clarify_question(
     user_request: &str,
     resolver_reason: &str,
 ) -> String {
-    let prompt = crate::render_prompt_template(
+    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+        state,
+        CLARIFY_QUESTION_PROMPT_PATH,
         CLARIFY_QUESTION_PROMPT_TEMPLATE,
+    );
+    let prompt = crate::render_prompt_template(
+        &prompt_template,
         &[
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
             ("__REQUEST__", user_request.trim()),
             ("__RESOLVER_REASON__", resolver_reason.trim()),
         ],
     );
-    crate::log_prompt_render(
-        &task.task_id,
-        "clarify_question_prompt",
-        "prompts/clarify_question_prompt.md",
-        None,
-    );
-    match llm_gateway::run_with_fallback_with_prompt_file(
-        state,
-        task,
-        &prompt,
-        "prompts/clarify_question_prompt.md",
-    )
-    .await
+    crate::log_prompt_render(&task.task_id, "clarify_question_prompt", &prompt_file, None);
+    match llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file).await
     {
         Ok(v) => {
             let out = v.trim();
@@ -322,16 +351,17 @@ pub(crate) async fn route_request_mode(
     let recent_execution_context = routing_context::build_recent_execution_context(state, task, 5);
     let (memory_context, _log_long_term, _log_prefs, _log_recalled) =
         if state.memory.route_memory_enabled {
-            let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
-                state,
-                task.user_key.as_deref(),
-                task.user_id,
-                task.chat_id,
-                user_request,
-                state.memory.prompt_recall_limit.max(1),
-                true,
-                true,
-            );
+            let (long_term_summary, preferences, recalled) =
+                memory::service::recall_memory_context_parts(
+                    state,
+                    task.user_key.as_deref(),
+                    task.user_id,
+                    task.chat_id,
+                    user_request,
+                    state.memory.prompt_recall_limit.max(1),
+                    true,
+                    true,
+                );
             let memory_context = memory::service::memory_context_block(
                 long_term_summary.as_deref(),
                 &preferences,
@@ -373,39 +403,40 @@ pub(crate) async fn route_request_mode(
                 "<none>".to_string(),
             )
         };
-    let prompt = crate::render_prompt_template(
+    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+        state,
+        INTENT_ROUTER_PROMPT_PATH,
         INTENT_ROUTER_PROMPT_TEMPLATE,
+    );
+    let (rules_template, _) = crate::load_prompt_template_for_state(
+        state,
+        INTENT_ROUTER_RULES_PATH,
+        INTENT_ROUTER_RULES_TEMPLATE,
+    );
+    let prompt = crate::render_prompt_template(
+        &prompt_template,
         &[
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
-            ("__ROUTING_RULES__", INTENT_ROUTER_RULES_TEMPLATE),
+            ("__ROUTING_RULES__", &rules_template),
             ("__RECENT_EXECUTION_CONTEXT__", &recent_execution_context),
             ("__MEMORY_CONTEXT__", &memory_context),
             ("__REQUEST__", user_request.trim()),
         ],
     );
-    crate::log_prompt_render(
-        &task.task_id,
-        "intent_router_prompt",
-        "prompts/intent_router_prompt.md",
-        None,
-    );
-    let llm_out = match llm_gateway::run_with_fallback_with_prompt_file(
-        state,
-        task,
-        &prompt,
-        "prompts/intent_router_prompt.md",
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(err) => {
-            warn!(
-                "route_request_mode llm failed, fallback to ask_clarify: task_id={} err={}",
-                task.task_id, err
-            );
-            return RoutedMode::AskClarify;
-        }
-    };
+    crate::log_prompt_render(&task.task_id, "intent_router_prompt", &prompt_file, None);
+    let llm_out =
+        match llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file)
+            .await
+        {
+            Ok(v) => v,
+            Err(err) => {
+                warn!(
+                    "route_request_mode llm failed, fallback to ask_clarify: task_id={} err={}",
+                    task.task_id, err
+                );
+                return RoutedMode::AskClarify;
+            }
+        };
 
     if let Some(decision) = parse_route_decision(&llm_out) {
         info!(

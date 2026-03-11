@@ -42,7 +42,13 @@ struct LlmConfig {
     #[serde(default)]
     anthropic: Option<VendorConfig>,
     #[serde(default)]
+    grok: Option<VendorConfig>,
+    #[serde(default)]
+    deepseek: Option<VendorConfig>,
+    #[serde(default)]
     qwen: Option<VendorConfig>,
+    #[serde(default)]
+    minimax: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,7 +75,13 @@ struct ImageSkillConfig {
     #[serde(default)]
     anthropic_models: Option<Vec<String>>,
     #[serde(default)]
+    grok_models: Option<Vec<String>>,
+    #[serde(default)]
+    deepseek_models: Option<Vec<String>>,
+    #[serde(default)]
     qwen_models: Option<Vec<String>>,
+    #[serde(default)]
+    minimax_models: Option<Vec<String>>,
     #[serde(default)]
     timeout_seconds: Option<u64>,
     #[serde(default)]
@@ -78,6 +90,26 @@ struct ImageSkillConfig {
     max_input_bytes: Option<usize>,
     #[serde(default)]
     adapter_mode: Option<String>,
+    #[serde(default)]
+    providers: ImageProviderOverrides,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ImageProviderOverrides {
+    #[serde(default)]
+    openai: Option<VendorConfig>,
+    #[serde(default)]
+    google: Option<VendorConfig>,
+    #[serde(default)]
+    anthropic: Option<VendorConfig>,
+    #[serde(default)]
+    grok: Option<VendorConfig>,
+    #[serde(default)]
+    deepseek: Option<VendorConfig>,
+    #[serde(default)]
+    qwen: Option<VendorConfig>,
+    #[serde(default)]
+    minimax: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -85,7 +117,10 @@ enum VendorKind {
     OpenAI,
     Google,
     Anthropic,
+    Grok,
+    DeepSeek,
     Qwen,
+    MiniMax,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,7 +177,11 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(String, Value), String> {
+fn execute(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    args: Value,
+) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -154,7 +193,10 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         return Err("at least one image is required".to_string());
     }
     if images.len() > max_images {
-        return Err(format!("too many images: {}, max={max_images}", images.len()));
+        return Err(format!(
+            "too many images: {}, max={max_images}",
+            images.len()
+        ));
     }
     if action == "compare" && images.len() < 2 {
         return Err("compare requires at least two images".to_string());
@@ -171,13 +213,6 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
     let schema = obj.get("schema").cloned();
-    let prompt = build_prompt(
-        workspace_root,
-        &action,
-        detail_level,
-        schema.as_ref(),
-        response_language,
-    );
     let timeout_seconds = obj
         .get("timeout_seconds")
         .and_then(|v| v.as_u64())
@@ -199,6 +234,14 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
 
     let mut last_err = String::new();
     for vendor in vendors {
+        let prompt = build_prompt(
+            workspace_root,
+            prompt_vendor_name_for_vendor(vendor),
+            &action,
+            detail_level,
+            schema.as_ref(),
+            response_language,
+        );
         let config_default_model = first_model_candidate(
             cfg.image_vision.default_model.as_deref(),
             vendor_models(&cfg.image_vision, vendor),
@@ -213,10 +256,11 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
             &images,
             max_input_bytes,
         ) {
-            Ok((text, model)) => {
+            Ok((text, model, model_kind)) => {
                 let extra = json!({
                     "provider": vendor_name(vendor),
                     "model": model,
+                    "model_kind": model_kind,
                     "latency_ms": 0,
                     "outputs": [{"type":"text","preview": truncate(&text, 800)}]
                 });
@@ -237,11 +281,12 @@ fn first_model_candidate<'a>(
     if let Some(v) = default_model.map(str::trim).filter(|v| !v.is_empty()) {
         return Some(v);
     }
-    if let Some(v) = vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty())) {
+    if let Some(v) =
+        vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+    {
         return Some(v);
     }
-    models
-        .and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+    models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
 }
 
 fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'a Vec<String>> {
@@ -249,7 +294,10 @@ fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'
         VendorKind::OpenAI => cfg.openai_models.as_ref(),
         VendorKind::Google => cfg.google_models.as_ref(),
         VendorKind::Anthropic => cfg.anthropic_models.as_ref(),
+        VendorKind::Grok => cfg.grok_models.as_ref(),
+        VendorKind::DeepSeek => cfg.deepseek_models.as_ref(),
         VendorKind::Qwen => cfg.qwen_models.as_ref(),
+        VendorKind::MiniMax => cfg.minimax_models.as_ref(),
     }
 }
 
@@ -266,7 +314,10 @@ fn parse_action(obj: &Map<String, Value>) -> Result<String, String> {
     }
 }
 
-fn parse_images(obj: &Map<String, Value>, workspace_root: &Path) -> Result<Vec<ImageSource>, String> {
+fn parse_images(
+    obj: &Map<String, Value>,
+    workspace_root: &Path,
+) -> Result<Vec<ImageSource>, String> {
     let mut out = Vec::new();
     if let Some(arr) = obj.get("images").and_then(|v| v.as_array()) {
         for item in arr {
@@ -327,13 +378,15 @@ fn to_workspace_path(workspace_root: &Path, input: &str) -> Result<PathBuf, Stri
 
 fn build_prompt(
     workspace_root: &Path,
+    prompt_vendor: &str,
     action: &str,
     detail_level: &str,
     schema: Option<&Value>,
     response_language: Option<&str>,
 ) -> String {
-    let template = load_image_vision_prompt_template(workspace_root);
-    let task_instruction = action_instruction(workspace_root, action, detail_level, schema);
+    let template = load_image_vision_prompt_template(workspace_root, prompt_vendor);
+    let task_instruction =
+        action_instruction(workspace_root, prompt_vendor, action, detail_level, schema);
     let schema_hint = schema
         .map(|s| s.to_string())
         .unwrap_or_else(|| "none".to_string());
@@ -341,6 +394,7 @@ fn build_prompt(
         .map(|s| {
             load_prompt_fragment(
                 workspace_root,
+                prompt_vendor,
                 "prompts/image_vision_language_hint_with_target.md",
                 DEFAULT_IMAGE_VISION_LANGUAGE_HINT_WITH_TARGET_TEMPLATE,
             )
@@ -349,6 +403,7 @@ fn build_prompt(
         .unwrap_or_else(|| {
             load_prompt_fragment(
                 workspace_root,
+                prompt_vendor,
                 "prompts/image_vision_language_hint_default.md",
                 DEFAULT_IMAGE_VISION_LANGUAGE_HINT_DEFAULT_TEMPLATE,
             )
@@ -361,21 +416,30 @@ fn build_prompt(
         .replace("__LANGUAGE_HINT__", &language_hint)
 }
 
-fn action_instruction(workspace_root: &Path, action: &str, detail_level: &str, schema: Option<&Value>) -> String {
+fn action_instruction(
+    workspace_root: &Path,
+    prompt_vendor: &str,
+    action: &str,
+    detail_level: &str,
+    schema: Option<&Value>,
+) -> String {
     match action {
         "describe" => load_prompt_fragment(
             workspace_root,
+            prompt_vendor,
             "prompts/image_vision_action_describe.md",
             DEFAULT_IMAGE_VISION_ACTION_DESCRIBE_TEMPLATE,
         )
         .replace("__DETAIL_LEVEL__", detail_level),
         "compare" => load_prompt_fragment(
             workspace_root,
+            prompt_vendor,
             "prompts/image_vision_action_compare.md",
             DEFAULT_IMAGE_VISION_ACTION_COMPARE_TEMPLATE,
         ),
         "screenshot_summary" => load_prompt_fragment(
             workspace_root,
+            prompt_vendor,
             "prompts/image_vision_action_screenshot_summary.md",
             DEFAULT_IMAGE_VISION_ACTION_SCREENSHOT_SUMMARY_TEMPLATE,
         ),
@@ -383,6 +447,7 @@ fn action_instruction(workspace_root: &Path, action: &str, detail_level: &str, s
             if let Some(s) = schema {
                 load_prompt_fragment(
                     workspace_root,
+                    prompt_vendor,
                     "prompts/image_vision_action_extract_with_schema.md",
                     DEFAULT_IMAGE_VISION_ACTION_EXTRACT_WITH_SCHEMA_TEMPLATE,
                 )
@@ -390,6 +455,7 @@ fn action_instruction(workspace_root: &Path, action: &str, detail_level: &str, s
             } else {
                 load_prompt_fragment(
                     workspace_root,
+                    prompt_vendor,
                     "prompts/image_vision_action_extract_default.md",
                     DEFAULT_IMAGE_VISION_ACTION_EXTRACT_DEFAULT_TEMPLATE,
                 )
@@ -397,46 +463,100 @@ fn action_instruction(workspace_root: &Path, action: &str, detail_level: &str, s
         }
         _ => load_prompt_fragment(
             workspace_root,
+            prompt_vendor,
             "prompts/image_vision_action_fallback.md",
             DEFAULT_IMAGE_VISION_ACTION_FALLBACK_TEMPLATE,
         ),
     }
 }
 
-fn load_prompt_fragment(workspace_root: &Path, relative_path: &str, default_template: &str) -> String {
-    let path = workspace_root.join(relative_path);
-    match std::fs::read_to_string(path) {
+fn normalize_prompt_vendor_name(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "anthropic" | "claude" => "claude".to_string(),
+        "google" | "gemini" => "google".to_string(),
+        "openai" => "openai".to_string(),
+        "grok" | "xai" => "grok".to_string(),
+        "deepseek" => "deepseek".to_string(),
+        "qwen" => "qwen".to_string(),
+        "minimax" => "minimax".to_string(),
+        _ => "default".to_string(),
+    }
+}
+
+fn prompt_vendor_name_for_vendor(vendor: VendorKind) -> &'static str {
+    match vendor {
+        VendorKind::OpenAI => "openai",
+        VendorKind::Google => "google",
+        VendorKind::Anthropic => "claude",
+        VendorKind::Grok => "grok",
+        VendorKind::DeepSeek => "deepseek",
+        VendorKind::Qwen => "qwen",
+        VendorKind::MiniMax => "minimax",
+    }
+}
+
+fn resolve_prompt_rel_path_for_vendor(
+    workspace_root: &Path,
+    vendor: &str,
+    rel_path: &str,
+) -> String {
+    let trimmed = rel_path.trim();
+    if trimmed.is_empty() || !trimmed.starts_with("prompts/") {
+        return trimmed.to_string();
+    }
+    let suffix = trimmed.trim_start_matches("prompts/");
+    let vendor_name = normalize_prompt_vendor_name(vendor);
+    let vendor_candidate = format!("prompts/vendors/{vendor_name}/{suffix}");
+    if workspace_root.join(&vendor_candidate).is_file() {
+        return vendor_candidate;
+    }
+    let default_candidate = format!("prompts/vendors/default/{suffix}");
+    if vendor_name != "default" && workspace_root.join(&default_candidate).is_file() {
+        return default_candidate;
+    }
+    trimmed.to_string()
+}
+
+fn load_prompt_fragment(
+    workspace_root: &Path,
+    vendor: &str,
+    relative_path: &str,
+    default_template: &str,
+) -> String {
+    let resolved_path = resolve_prompt_rel_path_for_vendor(workspace_root, vendor, relative_path);
+    match std::fs::read_to_string(workspace_root.join(resolved_path)) {
         Ok(s) if !s.trim().is_empty() => s,
         _ => default_template.to_string(),
     }
 }
 
-fn load_image_vision_prompt_template(workspace_root: &Path) -> String {
-    let path = workspace_root.join("prompts/image_vision_prompt.md");
-    match std::fs::read_to_string(path) {
-        Ok(s) if !s.trim().is_empty() => s,
-        _ => DEFAULT_IMAGE_VISION_PROMPT_TEMPLATE.to_string(),
-    }
+fn load_image_vision_prompt_template(workspace_root: &Path, vendor: &str) -> String {
+    load_prompt_fragment(
+        workspace_root,
+        vendor,
+        "prompts/image_vision_prompt.md",
+        DEFAULT_IMAGE_VISION_PROMPT_TEMPLATE,
+    )
 }
 
 const DEFAULT_IMAGE_VISION_PROMPT_TEMPLATE: &str =
-    include_str!("../../../../prompts/image_vision_prompt.md");
+    include_str!("../../../../prompts/vendors/default/image_vision_prompt.md");
 const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_WITH_TARGET_TEMPLATE: &str =
-    include_str!("../../../../prompts/image_vision_language_hint_with_target.md");
+    include_str!("../../../../prompts/vendors/default/image_vision_language_hint_with_target.md");
 const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_DEFAULT_TEMPLATE: &str =
-    include_str!("../../../../prompts/image_vision_language_hint_default.md");
+    include_str!("../../../../prompts/vendors/default/image_vision_language_hint_default.md");
 const DEFAULT_IMAGE_VISION_ACTION_DESCRIBE_TEMPLATE: &str =
-    include_str!("../../../../prompts/image_vision_action_describe.md");
+    include_str!("../../../../prompts/vendors/default/image_vision_action_describe.md");
 const DEFAULT_IMAGE_VISION_ACTION_COMPARE_TEMPLATE: &str =
-    include_str!("../../../../prompts/image_vision_action_compare.md");
+    include_str!("../../../../prompts/vendors/default/image_vision_action_compare.md");
 const DEFAULT_IMAGE_VISION_ACTION_SCREENSHOT_SUMMARY_TEMPLATE: &str =
-    include_str!("../../../../prompts/image_vision_action_screenshot_summary.md");
+    include_str!("../../../../prompts/vendors/default/image_vision_action_screenshot_summary.md");
 const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_WITH_SCHEMA_TEMPLATE: &str =
-    include_str!("../../../../prompts/image_vision_action_extract_with_schema.md");
+    include_str!("../../../../prompts/vendors/default/image_vision_action_extract_with_schema.md");
 const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_DEFAULT_TEMPLATE: &str =
-    include_str!("../../../../prompts/image_vision_action_extract_default.md");
+    include_str!("../../../../prompts/vendors/default/image_vision_action_extract_default.md");
 const DEFAULT_IMAGE_VISION_ACTION_FALLBACK_TEMPLATE: &str =
-    include_str!("../../../../prompts/image_vision_action_fallback.md");
+    include_str!("../../../../prompts/vendors/default/image_vision_action_fallback.md");
 
 fn call_vendor_vision(
     vendor: VendorKind,
@@ -446,64 +566,83 @@ fn call_vendor_vision(
     prompt: &str,
     images: &[ImageSource],
     max_input_bytes: usize,
-) -> Result<(String, String), String> {
+) -> Result<(String, String, &'static str), String> {
     let mode = resolve_adapter_mode(&cfg.image_vision);
+    let (vendor_name, vcfg) = resolve_vendor_config(cfg, vendor)?;
+    check_api_key(vendor_name, &vcfg.api_key)?;
     match vendor {
         VendorKind::OpenAI => {
-            let vcfg = cfg
-                .llm
-                .openai
-                .as_ref()
-                .ok_or_else(|| "openai config missing".to_string())?;
-            check_api_key("openai", &vcfg.api_key)?;
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build openai client failed: {err}"))?;
             let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
-            Ok((text, model))
+            Ok((text, model, "native"))
         }
         VendorKind::Google => {
-            let vcfg = cfg
-                .llm
-                .google
-                .as_ref()
-                .ok_or_else(|| "google config missing".to_string())?;
-            check_api_key("google", &vcfg.api_key)?;
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build google client failed: {err}"))?;
             let text = google_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
-            Ok((text, model))
+            Ok((text, model, "native"))
         }
         VendorKind::Anthropic => {
-            let vcfg = cfg
-                .llm
-                .anthropic
-                .as_ref()
-                .ok_or_else(|| "anthropic config missing".to_string())?;
-            check_api_key("anthropic", &vcfg.api_key)?;
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build anthropic client failed: {err}"))?;
             let text = anthropic_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
-            Ok((text, model))
+            Ok((text, model, "native"))
         }
-        VendorKind::Qwen => {
-            let vcfg = cfg
-                .llm
-                .qwen
-                .as_ref()
-                .ok_or_else(|| "qwen config missing".to_string())?;
-            check_api_key("qwen", &vcfg.api_key)?;
+        VendorKind::Grok | VendorKind::DeepSeek => {
+            if mode == AdapterMode::Native {
+                return Err(format!(
+                    "{vendor_name} native vision adapter is not implemented; use image_vision.adapter_mode=compat"
+                ));
+            }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
+                .build()
+                .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
+            let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            Ok((text, model, "compat"))
+        }
+        VendorKind::MiniMax => {
+            if mode == AdapterMode::Native {
+                return Err(
+                    "minimax native vision adapter is not implemented; use image_vision.adapter_mode=compat"
+                        .to_string(),
+                );
+            }
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
+                .build()
+                .map_err(|err| format!("build minimax client failed: {err}"))?;
+            let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            Ok((text, model, "compat"))
+        }
+        VendorKind::Qwen => {
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build qwen client failed: {err}"))?;
             if mode == AdapterMode::Native {
@@ -513,7 +652,7 @@ fn call_vendor_vision(
                 );
             }
             let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
-            Ok((text, model))
+            Ok((text, model, "compat"))
         }
     }
 }
@@ -574,7 +713,10 @@ fn openai_vision(
         .json()
         .map_err(|err| format!("parse openai response failed: {err}"))?;
     if status >= 300 {
-        return Err(format!("openai error status={status}: {}", truncate(&v.to_string(), 400)));
+        return Err(format!(
+            "openai error status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
     }
     if let Some(s) = v
         .get("choices")
@@ -585,7 +727,10 @@ fn openai_vision(
     {
         return Ok(s.to_string());
     }
-    Err(format!("openai response missing text: {}", truncate(&v.to_string(), 400)))
+    Err(format!(
+        "openai response missing text: {}",
+        truncate(&v.to_string(), 400)
+    ))
 }
 
 fn google_vision(
@@ -633,7 +778,10 @@ fn google_vision(
         .json()
         .map_err(|err| format!("parse google response failed: {err}"))?;
     if status >= 300 {
-        return Err(format!("google error status={status}: {}", truncate(&v.to_string(), 400)));
+        return Err(format!(
+            "google error status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
     }
     let mut out = String::new();
     if let Some(parts) = v
@@ -740,45 +888,33 @@ fn anthropic_vision(
 
 fn load_root_config() -> RootConfig {
     let root = workspace_root();
-    let mut merged = match std::fs::read_to_string(root.join("configs/config.toml"))
+    let core_cfg = match std::fs::read_to_string(root.join("configs/config.toml"))
         .ok()
         .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
     {
         Some(v) => v,
         None => toml::Value::Table(toml::map::Map::new()),
     };
-    if let Some(image_cfg) = std::fs::read_to_string(root.join("configs/image.toml"))
+    let image_cfg = match std::fs::read_to_string(root.join("configs/image.toml"))
         .ok()
         .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
     {
-        merge_missing_toml(&mut merged, image_cfg);
-    }
+        Some(v) => v,
+        None => toml::Value::Table(toml::map::Map::new()),
+    };
 
     let mut cfg = RootConfig::default();
-    if let Some(v) = merged.get("llm").cloned() {
+    if let Some(v) = core_cfg.get("llm").cloned() {
         if let Ok(parsed) = v.try_into::<LlmConfig>() {
             cfg.llm = parsed;
         }
     }
-    if let Some(v) = merged.get("image_vision").cloned() {
+    if let Some(v) = image_cfg.get("image_vision").cloned() {
         if let Ok(parsed) = v.try_into::<ImageSkillConfig>() {
             cfg.image_vision = parsed;
         }
     }
     cfg
-}
-
-fn merge_missing_toml(dst: &mut toml::Value, src: toml::Value) {
-    if let (toml::Value::Table(dst_map), toml::Value::Table(src_map)) = (dst, src) {
-        for (key, src_val) in src_map {
-            match dst_map.get_mut(&key) {
-                Some(dst_val) => merge_missing_toml(dst_val, src_val),
-                None => {
-                    dst_map.insert(key, src_val);
-                }
-            }
-        }
-    }
 }
 
 fn workspace_root() -> PathBuf {
@@ -812,7 +948,10 @@ fn vendor_order(
         VendorKind::OpenAI,
         VendorKind::Google,
         VendorKind::Anthropic,
+        VendorKind::Grok,
+        VendorKind::DeepSeek,
         VendorKind::Qwen,
+        VendorKind::MiniMax,
     ] {
         if seen.insert(v) {
             out.push(v);
@@ -826,7 +965,10 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "openai" => Some(VendorKind::OpenAI),
         "google" | "gemini" => Some(VendorKind::Google),
         "anthropic" | "claude" => Some(VendorKind::Anthropic),
+        "grok" | "xai" => Some(VendorKind::Grok),
+        "deepseek" => Some(VendorKind::DeepSeek),
         "qwen" => Some(VendorKind::Qwen),
+        "minimax" => Some(VendorKind::MiniMax),
         _ => None,
     }
 }
@@ -836,7 +978,61 @@ fn vendor_name(v: VendorKind) -> &'static str {
         VendorKind::OpenAI => "openai",
         VendorKind::Google => "google",
         VendorKind::Anthropic => "anthropic",
+        VendorKind::Grok => "grok",
+        VendorKind::DeepSeek => "deepseek",
         VendorKind::Qwen => "qwen",
+        VendorKind::MiniMax => "minimax",
+    }
+}
+
+fn resolve_vendor_config<'a>(
+    cfg: &'a RootConfig,
+    vendor: VendorKind,
+) -> Result<(&'static str, &'a VendorConfig), String> {
+    let section = &cfg.image_vision.providers;
+    match vendor {
+        VendorKind::OpenAI => section
+            .openai
+            .as_ref()
+            .or(cfg.llm.openai.as_ref())
+            .map(|v| ("openai", v))
+            .ok_or_else(|| "openai config missing".to_string()),
+        VendorKind::Google => section
+            .google
+            .as_ref()
+            .or(cfg.llm.google.as_ref())
+            .map(|v| ("google", v))
+            .ok_or_else(|| "google config missing".to_string()),
+        VendorKind::Anthropic => section
+            .anthropic
+            .as_ref()
+            .or(cfg.llm.anthropic.as_ref())
+            .map(|v| ("anthropic", v))
+            .ok_or_else(|| "anthropic config missing".to_string()),
+        VendorKind::Grok => section
+            .grok
+            .as_ref()
+            .or(cfg.llm.grok.as_ref())
+            .map(|v| ("grok", v))
+            .ok_or_else(|| "grok config missing".to_string()),
+        VendorKind::DeepSeek => section
+            .deepseek
+            .as_ref()
+            .or(cfg.llm.deepseek.as_ref())
+            .map(|v| ("deepseek", v))
+            .ok_or_else(|| "deepseek config missing".to_string()),
+        VendorKind::Qwen => section
+            .qwen
+            .as_ref()
+            .or(cfg.llm.qwen.as_ref())
+            .map(|v| ("qwen", v))
+            .ok_or_else(|| "qwen config missing".to_string()),
+        VendorKind::MiniMax => section
+            .minimax
+            .as_ref()
+            .or(cfg.llm.minimax.as_ref())
+            .map(|v| ("minimax", v))
+            .ok_or_else(|| "minimax config missing".to_string()),
     }
 }
 

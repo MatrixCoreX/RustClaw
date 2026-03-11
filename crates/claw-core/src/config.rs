@@ -344,7 +344,11 @@ pub struct LlmConfig {
     #[serde(default)]
     pub grok: Option<LlmVendorConfig>,
     #[serde(default)]
+    pub deepseek: Option<LlmVendorConfig>,
+    #[serde(default)]
     pub qwen: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub minimax: Option<LlmVendorConfig>,
     #[serde(default)]
     pub custom: Option<LlmVendorConfig>,
     // Legacy flat provider list, kept for backward compatibility.
@@ -677,6 +681,8 @@ pub struct ImageSkillConfig {
     #[serde(default)]
     pub grok_models: Vec<String>,
     #[serde(default)]
+    pub deepseek_models: Vec<String>,
+    #[serde(default)]
     pub qwen_models: Vec<String>,
     #[serde(default)]
     pub native_models: Vec<String>,
@@ -717,6 +723,7 @@ impl Default for ImageSkillConfig {
             google_models: Vec::new(),
             anthropic_models: Vec::new(),
             grok_models: Vec::new(),
+            deepseek_models: Vec::new(),
             qwen_models: Vec::new(),
             native_models: Vec::new(),
             custom_models: Vec::new(),
@@ -798,6 +805,16 @@ pub struct ScheduleConfig {
     pub i18n_dir: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+struct SplitImageConfig {
+    #[serde(default)]
+    image_vision: ImageSkillConfig,
+    #[serde(default)]
+    image_generation: ImageSkillConfig,
+    #[serde(default)]
+    image_edit: ImageSkillConfig,
+}
+
 impl Default for ScheduleConfig {
     fn default() -> Self {
         Self {
@@ -818,13 +835,38 @@ fn default_skill_max_concurrency() -> usize {
     1
 }
 
-/// 基础技能：即使用户在 skill_switches 中关闭，运行时仍视为启用，不可被关闭。
+/// 文件系统基础技能（run_cmd/read_file/write_file/list_dir/make_dir/remove_file）。UI 中归类为「基础技能」，不建议关闭。
+pub fn base_skill_names() -> &'static [&'static str] {
+    &[
+        "run_cmd",
+        "read_file",
+        "write_file",
+        "list_dir",
+        "make_dir",
+        "remove_file",
+    ]
+}
+
+/// 即使用户在 skill_switches 中关闭，运行时仍视为启用的技能（不可被关闭）。
+/// 不含 run_cmd/read_file/write_file/list_dir/make_dir/remove_file：这六项为可关闭的 builtin skill，遵守 skills_list + skill_switches。
 pub fn core_skills_always_enabled() -> &'static [&'static str] {
-    &["chat", "system_basic", "process_basic", "config_guard", "archive_basic"]
+    &[
+        "chat",
+        "system_basic",
+        "process_basic",
+        "config_guard",
+        "archive_basic",
+    ]
 }
 
 fn default_skills_list() -> Vec<String> {
     vec![
+        "run_cmd".to_string(),
+        "read_file".to_string(),
+        "write_file".to_string(),
+        "list_dir".to_string(),
+        "make_dir".to_string(),
+        "remove_file".to_string(),
         "install_module".to_string(),
         "system_basic".to_string(),
         "http_basic".to_string(),
@@ -1285,10 +1327,6 @@ impl AppConfig {
         let base_dir = base_path.parent().unwrap_or_else(|| Path::new("."));
         let cfg = config::Config::builder()
             .add_source(config::File::with_name(path))
-            // Optional split image config.
-            .add_source(config::File::from(base_dir.join("image.toml")).required(false))
-            // Optional split audio config.
-            .add_source(config::File::from(base_dir.join("audio.toml")).required(false))
             // Optional split channel configs.
             .add_source(config::File::from(base_dir.join("channels/telegram.toml")).required(false))
             // Legacy mixed WhatsApp config (kept for backward compatibility).
@@ -1297,6 +1335,21 @@ impl AppConfig {
             .add_source(config::File::from(base_dir.join("channels/whatsapp-cloud.toml")).required(false))
             .add_source(config::File::from(base_dir.join("channels/whatsapp-web.toml")).required(false))
             .build()?;
-        cfg.try_deserialize()
+        let mut app: AppConfig = cfg.try_deserialize()?;
+
+        // Image skill config must come only from configs/image.toml, never from configs/config.toml.
+        app.image_vision = ImageSkillConfig::default();
+        app.image_generation = ImageSkillConfig::default();
+        app.image_edit = ImageSkillConfig::default();
+
+        let image_cfg: SplitImageConfig = config::Config::builder()
+            .add_source(config::File::from(base_dir.join("image.toml")).required(false))
+            .build()?
+            .try_deserialize()?;
+        app.image_vision = image_cfg.image_vision;
+        app.image_generation = image_cfg.image_generation;
+        app.image_edit = image_cfg.image_edit;
+
+        Ok(app)
     }
 }
