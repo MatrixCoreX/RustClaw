@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context};
+use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::config::AppConfig;
 use claw_core::hard_rules::types::VoiceModeIntentAliases;
 use claw_core::hard_rules::voice_mode::{
@@ -2378,6 +2379,9 @@ async fn send_text_or_image(
     Ok(())
 }
 
+/// Max characters per Telegram message (conservative; platform limit ~4096).
+const TELEGRAM_TEXT_CHUNK_CHARS: usize = 3500;
+
 fn telegram_text_payload(text: &str) -> (String, Option<ParseMode>) {
     let trimmed = text.trim();
     if let Some(code_body) = code_or_command_block_body(trimmed) {
@@ -2396,14 +2400,36 @@ fn telegram_text_payload(text: &str) -> (String, Option<ParseMode>) {
 }
 
 async fn send_telegram_text(bot: &Bot, chat_id: ChatId, text: &str) -> anyhow::Result<Message> {
-    let (body, parse_mode) = telegram_text_payload(text);
-    let req = bot.send_message(chat_id, body);
-    let req = if let Some(mode) = parse_mode {
-        req.parse_mode(mode)
-    } else {
-        req
-    };
-    Ok(req.await?)
+    let chunks = chunk_text_for_channel(text, TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    if chunks.is_empty() {
+        return Err(anyhow::anyhow!("empty text"));
+    }
+    if chunks.len() == 1 {
+        let (body, parse_mode) = telegram_text_payload(&chunks[0]);
+        let req = bot.send_message(chat_id, body);
+        let req = if let Some(mode) = parse_mode {
+            req.parse_mode(mode)
+        } else {
+            req
+        };
+        return Ok(req.await?);
+    }
+    let n = chunks.len();
+    info!(
+        "send_chunks channel=telegram chat_id={:?} original_len={} chunk_count={}",
+        chat_id,
+        text.len(),
+        n
+    );
+    // Long text: send each chunk as plain text (no HTML/code) with segment hint.
+    let mut last = None;
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        let body = format!("（{}/{}）\n{}", i + 1, n, chunk);
+        info!("send_chunk channel=telegram chat_id={:?} index={} total={}", chat_id, i + 1, n);
+        let msg = bot.send_message(chat_id, body).await?;
+        last = Some(msg);
+    }
+    Ok(last.expect("chunks non-empty"))
 }
 
 async fn send_telegram_text_with_markup(
@@ -2412,14 +2438,42 @@ async fn send_telegram_text_with_markup(
     text: &str,
     reply_markup: InlineKeyboardMarkup,
 ) -> anyhow::Result<Message> {
-    let (body, parse_mode) = telegram_text_payload(text);
-    let req = bot.send_message(chat_id, body);
-    let req = if let Some(mode) = parse_mode {
-        req.parse_mode(mode)
-    } else {
-        req
-    };
-    Ok(req.reply_markup(reply_markup).await?)
+    let chunks = chunk_text_for_channel(text, TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    if chunks.is_empty() {
+        return Err(anyhow::anyhow!("empty text"));
+    }
+    if chunks.len() == 1 {
+        let (body, parse_mode) = telegram_text_payload(&chunks[0]);
+        let req = bot.send_message(chat_id, body);
+        let req = if let Some(mode) = parse_mode {
+            req.parse_mode(mode)
+        } else {
+            req
+        };
+        return Ok(req.reply_markup(reply_markup).await?);
+    }
+    let n = chunks.len();
+    info!(
+        "send_chunks channel=telegram chat_id={:?} original_len={} chunk_count={} with_markup=true",
+        chat_id,
+        text.len(),
+        n
+    );
+    // Long text: send each chunk as plain text with segment hint; attach markup only to the last message.
+    let mut last = None;
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        let body = format!("（{}/{}）\n{}", i + 1, n, chunk);
+        info!("send_chunk channel=telegram chat_id={:?} index={} total={}", chat_id, i + 1, n);
+        let req = bot.send_message(chat_id, body);
+        let req = if i == n - 1 {
+            req.reply_markup(reply_markup.clone())
+        } else {
+            req
+        };
+        let msg = req.await?;
+        last = Some(msg);
+    }
+    Ok(last.expect("chunks non-empty"))
 }
 
 fn escape_telegram_html(text: &str) -> String {

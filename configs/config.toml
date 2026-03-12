@@ -271,8 +271,8 @@ request_timeout_seconds = 30
 skill_switches = {}
 skill_max_concurrency = 1
 skill_timeout_seconds = 30
-# 可选开关覆盖（优先级高于 skills_list）/ Optional switch overrides (higher priority than skills_list):
-# - 设为 false: 强制关闭该技能（不会进入二层路由提示词，也不可执行）/ Set false: force disable this skill.
+# 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):
+# - 设为 false: 强制关闭该技能（含 core-floor，不会进入二层路由提示词，也不可执行）/ Set false: force disable this skill (including core-floor).
 # - 设为 true : 强制开启该技能（会进入二层路由提示词，且可执行）/ Set true: force enable this skill.
 # 建议用 skill_switches 控制开关，尽量不要直接改 skills_list，避免启用基线被误改。/ Prefer skill_switches for toggles; avoid editing baseline list directly.
 # 例子/Example:

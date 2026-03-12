@@ -22,8 +22,8 @@ use claw_core::types::{
 
 const UI_HIDDEN_SKILLS: &[&str] = &["chat"];
 
-fn hide_skill_in_ui(name: &str) -> bool {
-    let canonical = super::super::canonical_skill_name(name);
+fn hide_skill_in_ui(state: &AppState, name: &str) -> bool {
+    let canonical = state.resolve_canonical_skill_name(name);
     UI_HIDDEN_SKILLS.iter().any(|s| *s == canonical)
 }
 
@@ -68,7 +68,7 @@ fn ui_auth_error(message: &str) -> (StatusCode, Json<ApiResponse<Value>>) {
     )
 }
 
-fn require_ui_identity(
+pub(crate) fn require_ui_identity(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<AuthIdentity, (StatusCode, Json<ApiResponse<Value>>)> {
@@ -941,8 +941,8 @@ async fn list_skills(
     if let Err(resp) = require_ui_identity(&state, &headers) {
         return resp;
     }
-    let mut skills: Vec<String> = state.skills_list.iter().cloned().collect();
-    skills.retain(|s| !hide_skill_in_ui(s));
+    let mut skills: Vec<String> = state.get_skills_list().iter().cloned().collect();
+    skills.retain(|s| !hide_skill_in_ui(&state, s));
     skills.sort_unstable();
     (
         StatusCode::OK,
@@ -970,7 +970,7 @@ fn read_skill_config_file(state: &AppState) -> anyhow::Result<(String, toml::Val
     Ok((raw, parsed))
 }
 
-fn collect_skills_baseline(value: &toml::Value) -> Vec<String> {
+fn collect_skills_baseline(value: &toml::Value, state: &AppState) -> Vec<String> {
     value
         .get("skills")
         .and_then(|v| v.get("skills_list"))
@@ -980,13 +980,13 @@ fn collect_skills_baseline(value: &toml::Value) -> Vec<String> {
                 .filter_map(|v| v.as_str())
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
-                .map(|s| super::super::canonical_skill_name(s).to_string())
+                .map(|s| state.resolve_canonical_skill_name(s))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
 }
 
-fn collect_skill_switches(value: &toml::Value) -> BTreeMap<String, bool> {
+fn collect_skill_switches(value: &toml::Value, state: &AppState) -> BTreeMap<String, bool> {
     let mut out = BTreeMap::new();
     let Some(tbl) = value
         .get("skills")
@@ -996,8 +996,8 @@ fn collect_skill_switches(value: &toml::Value) -> BTreeMap<String, bool> {
         return out;
     };
     for (k, v) in tbl {
-        let canonical = super::super::canonical_skill_name(k).to_string();
-        if hide_skill_in_ui(&canonical) {
+        let canonical = state.resolve_canonical_skill_name(k);
+        if hide_skill_in_ui(state, &canonical) {
             continue;
         }
         if let Some(b) = v.as_bool() {
@@ -1010,16 +1010,17 @@ fn collect_skill_switches(value: &toml::Value) -> BTreeMap<String, bool> {
 fn compute_effective_enabled(
     baseline: &[String],
     switches: &BTreeMap<String, bool>,
+    state: &AppState,
 ) -> Vec<String> {
     let mut set: BTreeMap<String, bool> = baseline
         .iter()
-        .map(|s| (super::super::canonical_skill_name(s).to_string(), true))
+        .map(|s| (state.resolve_canonical_skill_name(s), true))
         .collect();
     for (k, v) in switches {
         if *v {
-            set.insert(super::super::canonical_skill_name(k).to_string(), true);
+            set.insert(state.resolve_canonical_skill_name(k), true);
         } else {
-            set.remove(super::super::canonical_skill_name(k));
+            set.remove(&state.resolve_canonical_skill_name(k));
         }
     }
     set.into_keys().collect()
@@ -1107,18 +1108,18 @@ async fn get_skills_config(
             );
         }
     };
-    let baseline = collect_skills_baseline(&parsed);
-    let switches = collect_skill_switches(&parsed);
+    let baseline = collect_skills_baseline(&parsed, &state);
+    let switches = collect_skill_switches(&parsed, &state);
     let mut baseline_visible = baseline
         .iter()
-        .filter(|s| !hide_skill_in_ui(s))
+        .filter(|s| !hide_skill_in_ui(&state, s))
         .cloned()
         .collect::<Vec<_>>();
     baseline_visible.sort_unstable();
     let mut runtime_visible = state
-        .skills_list
+        .get_skills_list()
         .iter()
-        .filter(|s| !hide_skill_in_ui(s))
+        .filter(|s| !hide_skill_in_ui(&state, s))
         .cloned()
         .collect::<Vec<_>>();
     runtime_visible.sort_unstable();
@@ -1135,8 +1136,8 @@ async fn get_skills_config(
         }
         set.into_keys().collect::<Vec<_>>()
     };
-    let mut effective = compute_effective_enabled(&baseline, &switches);
-    effective.retain(|s| !hide_skill_in_ui(s));
+    let mut effective = compute_effective_enabled(&baseline, &switches, &state);
+    effective.retain(|s| !hide_skill_in_ui(&state, s));
     let base_skill_names: Vec<String> = claw_core::config::base_skill_names()
         .iter()
         .map(|s| s.to_string())
@@ -1181,12 +1182,12 @@ async fn update_skills_config(
             );
         }
     };
-    let baseline = collect_skills_baseline(&parsed);
+    let baseline = collect_skills_baseline(&parsed, &state);
     let core_skills = claw_core::config::core_skills_always_enabled();
     let mut switches = BTreeMap::new();
     for (k, v) in req.skill_switches {
-        let skill = super::super::canonical_skill_name(k.trim()).to_string();
-        if skill.is_empty() || hide_skill_in_ui(&skill) {
+        let skill = state.resolve_canonical_skill_name(k.trim());
+        if skill.is_empty() || hide_skill_in_ui(&state, &skill) {
             continue;
         }
         let is_core = core_skills.iter().any(|s| *s == skill);
@@ -1205,7 +1206,7 @@ async fn update_skills_config(
             }),
         );
     }
-    let effective = compute_effective_enabled(&baseline, &switches);
+    let effective = compute_effective_enabled(&baseline, &switches, &state);
     (
         StatusCode::OK,
         Json(ApiResponse {

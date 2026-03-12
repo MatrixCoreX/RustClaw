@@ -392,6 +392,9 @@ pub struct SkillsConfig {
     pub skills_list: Vec<String>,
     #[serde(default)]
     pub skill_switches: HashMap<String, bool>,
+    /// 技能注册表文件路径（相对 workspace 或绝对）。设则启用 registry 驱动发现/启用/别名/超时。
+    #[serde(default)]
+    pub registry_path: Option<String>,
 }
 
 impl Default for SkillsConfig {
@@ -401,6 +404,7 @@ impl Default for SkillsConfig {
             skill_max_concurrency: default_skill_max_concurrency(),
             skills_list: default_skills_list(),
             skill_switches: HashMap::new(),
+            registry_path: None,
         }
     }
 }
@@ -847,7 +851,7 @@ pub fn base_skill_names() -> &'static [&'static str] {
     ]
 }
 
-/// 即使用户在 skill_switches 中关闭，运行时仍视为启用的技能（不可被关闭）。
+/// 默认保底启用的技能；显式 skill_switches=false 可覆盖（与「false = 强制关闭」契约一致）。
 /// 不含 run_cmd/read_file/write_file/list_dir/make_dir/remove_file：这六项为可关闭的 builtin skill，遵守 skills_list + skill_switches。
 pub fn core_skills_always_enabled() -> &'static [&'static str] {
     &[

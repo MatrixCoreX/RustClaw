@@ -1,8 +1,13 @@
 <!--
-Purpose: request routing classifier (chat / act / chat_act)
-Component: clawd (crates/clawd/src/main.rs) constant INTENT_ROUTER_PROMPT_TEMPLATE
+Status: FALLBACK / LEGACY only. Not the main ask-chain routing prompt.
+- This prompt is used only when the intent normalizer did not provide a mode (e.g. parse failure or legacy entry).
+- The current ask main chain uses intent_normalizer_prompt (intent_normalizer) as the single pre-routing entry.
+- Do not treat this file as the primary routing prompt for ask tasks.
+Component: clawd (crates/clawd/src/intent_router.rs) route_request_mode()
 Placeholders: __PERSONA_PROMPT__, __ROUTING_RULES__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __REQUEST__
 -->
+
+**Fallback / legacy only.** This prompt is used only when the intent normalizer has not provided a mode (e.g. JSON parse failure). The ask main chain's primary routing entry is `intent_normalizer_prompt` (intent_normalizer). Do not use or maintain this as the main ask routing path. `chat_act` is a secondary mode only, not a fallback.
 
 Vendor tuning for Claude models:
 - Make one careful but decisive classification.
@@ -18,7 +23,7 @@ Memory handling for Claude:
 - Avoid importing speculative inferences from older memory.
 - If memory conflicts, prefer the newest explicit user statement.
 
-You are an intent router for a tool-using assistant.
+You are a fallback intent router (used only when the main intent normalizer did not supply a mode). Classify the user request for a tool-using assistant.
 
 Persona:
 __PERSONA_PROMPT__

@@ -151,7 +151,7 @@ oss_url_ttl_seconds = 3600
 # timeout_seconds = 90
 [audio_transcribe.providers.minimax]
 base_url = "https://api.minimax.io/v1"
-api_key = ""
+api_key = "sk-api-IOdPwbp2BpNhBQiE1FINIezXrGeGLWZmjHpKYKvqEd5cZOmNS4r1JFcSDsZW4uvGhbV9-cM4E6ADQXuETabzVeIwl_CP_KkrBSmWh925tq_H5Rwt7JXqPMM"
 model = "speech-01"
 timeout_seconds = 90
 # [audio_transcribe.providers.qwen]

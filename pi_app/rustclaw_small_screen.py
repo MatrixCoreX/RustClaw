@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import tkinter as tk
+import tkinter.font as tkfont
 import urllib.parse
 import urllib.request
 import threading
@@ -60,6 +61,9 @@ STRINGS = {
         "logs_title": "Logs",
         "recent_messages_title": "最近消息",
         "recent_messages_empty": "暂无用户消息",
+        "recent_message_more_hint": "在通信端查看",
+        "msg_replied_label": "已回复",
+        "msg_replied_hint": "已回复，在通信端查看",
         "logs_empty": "暂无日志",
         "settings_title": "设置",
         "language": "语言",
@@ -104,6 +108,9 @@ STRINGS = {
         "logs_title": "Logs",
         "recent_messages_title": "Recent Messages",
         "recent_messages_empty": "No user messages",
+        "recent_message_more_hint": "See in Adapters",
+        "msg_replied_label": "Replied",
+        "msg_replied_hint": "Replied, see in Adapters",
         "logs_empty": "No logs",
         "settings_title": "Settings",
         "language": "Language",
@@ -150,6 +157,8 @@ THEMES = {
         "summary_tool": "#7bd389",
         "summary_skill": "#39d2c0",
         "summary_other": "#bfc7d5",
+        "msg_user_fg": "#e8e6e3",
+        "msg_agent_fg": "#ffd166",
         "selectcolor": "#2a2a3a",
         "bg_rgb": (0x1a, 0x1a, 0x2e),
     },
@@ -177,6 +186,8 @@ THEMES = {
         "summary_tool": "#00ff9c",
         "summary_skill": "#39ff14",
         "summary_other": "#7dff7d",
+        "msg_user_fg": "#7dff7d",
+        "msg_agent_fg": "#00d5ff",
         "selectcolor": "#0a2a0a",
         "bg_rgb": (0, 0, 0),
     },
@@ -395,6 +406,27 @@ def _strip_ansi(text):
     return "".join(out)
 
 
+def _sanitize_display_text(text):
+    normalized = _strip_ansi(str(text or "")).replace("\r\n", "\n").replace("\r", "\n")
+    out = []
+    for ch in normalized:
+        code = ord(ch)
+        if ch in ("\n", "\t"):
+            out.append(ch)
+            continue
+        if code < 0x20 or 0x7F <= code <= 0x9F:
+            continue
+        if 0xD800 <= code <= 0xDFFF:
+            continue
+        out.append(ch)
+    return "".join(out).strip()
+
+
+def _flatten_nonempty_lines(text):
+    lines = [line.strip() for line in str(text or "").split("\n")]
+    return " ".join(line for line in lines if line)
+
+
 def _extract_log_time_label(line):
     line = line or ""
     iso = re.search(r"\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\b", line)
@@ -408,6 +440,36 @@ def _extract_log_time_label(line):
     if m:
         return m.group(1)
     return "--:--:--"
+
+
+def _line_clamp_text(text, font, wraplength, max_lines=3, ellipsis="..."):
+    content = str(text or "")
+    if max_lines <= 0:
+        return content
+    measure_font = tkfont.Font(font=font)
+    wrapped_lines = []
+    for raw_line in content.split("\n"):
+        if raw_line == "":
+            wrapped_lines.append("")
+            continue
+        current = ""
+        for ch in raw_line:
+            candidate = current + ch
+            if current and measure_font.measure(candidate) > wraplength:
+                wrapped_lines.append(current)
+                current = ch
+            else:
+                current = candidate
+        wrapped_lines.append(current)
+    if len(wrapped_lines) > max_lines:
+        wrapped_lines = wrapped_lines[:max_lines]
+        tail = wrapped_lines[-1].rstrip()
+        while tail and measure_font.measure(tail + ellipsis) > wraplength:
+            tail = tail[:-1]
+        wrapped_lines[-1] = (tail + ellipsis) if tail else ellipsis
+    if len(wrapped_lines) < max_lines:
+        wrapped_lines.extend([""] * (max_lines - len(wrapped_lines)))
+    return "\n".join(wrapped_lines)
 
 
 def _status_tag(line):
@@ -567,25 +629,59 @@ def _strip_message_log_suffix(text):
     return re.split(r"\s+call_id=[^\s]+", text or "", maxsplit=1)[0].strip()
 
 
-def _collect_recent_user_messages(raw_text, limit=5):
+def _split_message_lines_for_display(text):
+    s = _sanitize_display_text(text or "")
+    if not s:
+        return []
+    normalized = (
+        s.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+    )
+    return [line.strip() for line in normalized.split("\n") if line.strip()]
+
+
+def _message_more_suffix(lang="CN"):
+    hint = (STRINGS.get(lang, STRINGS["CN"]).get("recent_message_more_hint") or "").strip()
+    if not hint:
+        hint = STRINGS["CN"]["recent_message_more_hint"]
+    if lang == "EN":
+        return f"... ({hint})"
+    return f"...（{hint}）"
+
+
+def _extract_task_id(line):
+    if not line:
+        return ""
+    match = re.search(r'\btask_id[=:]"?([0-9A-Za-z-]+)"?', line)
+    if not match:
+        return ""
+    return (match.group(1) or "").strip().strip('",;]}')
+
+
+def _single_line_message_preview(text, lang="CN"):
+    raw = _sanitize_display_text(text or "")
+    lines = _split_message_lines_for_display(raw)
+    if not lines:
+        return ""
+    has_multiline_marker = (
+        ("\n" in raw)
+        or ("\r" in raw)
+        or ("\\n" in raw)
+        or ("\\r" in raw)
+    )
+    if len(lines) > 1 or has_multiline_marker:
+        return lines[0] + _message_more_suffix(lang)
+    return lines[0]
+
+
+def _collect_recent_user_messages(raw_text, limit=5, lang="CN"):
     items_by_key = {}
     ordered_keys = []
     for raw in reversed((raw_text or "").splitlines()):
         line = _strip_ansi(raw).strip()
         if not line:
-            continue
-        text = ""
-        priority = 0
-        if "worker_once: ask received_message" in line and " text=" in line:
-            text = _strip_message_log_suffix(line.split(" text=", 1)[1].strip())
-            priority = 3
-        elif "plan_llm_request" in line and " user_request=" in line:
-            text = _strip_message_log_suffix(line.split(" user_request=", 1)[1].strip())
-            priority = 2
-        elif "worker_once: ask resolved_message" in line and " resolved_text=" in line:
-            text = _strip_message_log_suffix(line.split(" resolved_text=", 1)[1].strip())
-            priority = 1
-        if not text:
             continue
         user_id = ""
         chat_id = ""
@@ -599,26 +695,93 @@ def _collect_recent_user_messages(raw_text, limit=5):
             chat_id = chat_match.group(1)
         if task_match:
             task_id = task_match.group(1)
-        key = task_id or f"{_extract_log_time_label(line)}|{text}"
-        item = {
-            "time": _extract_log_time_label(line),
-            "text": text,
-            "user_id": user_id,
-            "chat_id": chat_id,
-        }
-        existing = items_by_key.get(key)
-        if existing is None:
-            items_by_key[key] = (priority, item)
-            ordered_keys.append(key)
+        task_id = task_id or _extract_task_id(line)
+        if task_id:
+            task_id = task_id.strip().strip('",;]}')
+
+        text = ""
+        field = None
+        priority = 0
+        if "task_call_end" in line and " kind=ask " in line and " result=" in line:
+            result_segment = line.split(" result=", 1)[1].strip()
+            text = _strip_message_log_suffix(result_segment)
+            if "call_id=" not in result_segment and text:
+                text = text.rstrip(". ") + _message_more_suffix(lang)
+            field = "reply"
+            priority = 10
+        elif "worker_once: ask received_message" in line and " text=" in line:
+            text = _strip_message_log_suffix(line.split(" text=", 1)[1].strip())
+            field = "question"
+            priority = 3
+        elif "plan_llm_request" in line and " user_request=" in line:
+            text = _strip_message_log_suffix(line.split(" user_request=", 1)[1].strip())
+            field = "question"
+            priority = 2
+        elif "worker_once: ask resolved_message" in line and " resolved_text=" in line:
+            text = _strip_message_log_suffix(line.split(" resolved_text=", 1)[1].strip())
+            field = "question"
+            priority = 1
+        if not field or not text:
             continue
-        if priority > existing[0]:
-            items_by_key[key] = (priority, item)
+
+        key = task_id or f"{_extract_log_time_label(line)}|{text}"
+        item = items_by_key.get(key)
+        if item is None:
+            item = {
+                "time": _extract_log_time_label(line),
+                "text": "",
+                "question": "",
+                "reply": "",
+                "user_id": user_id,
+                "chat_id": chat_id,
+                "task_id": task_id,
+                "_question_priority": -1,
+                "_reply_priority": -1,
+            }
+            items_by_key[key] = item
+            ordered_keys.append(key)
+
+        if user_id and not item.get("user_id"):
+            item["user_id"] = user_id
+        if chat_id and not item.get("chat_id"):
+            item["chat_id"] = chat_id
+        if task_id and not item.get("task_id"):
+            item["task_id"] = task_id
+        if not item.get("time"):
+            item["time"] = _extract_log_time_label(line)
+
+        if field == "question":
+            if priority > item.get("_question_priority", -1):
+                item["question"] = text
+                item["text"] = text
+                item["_question_priority"] = priority
+        else:
+            if priority > item.get("_reply_priority", -1):
+                item["reply"] = text
+                item["_reply_priority"] = priority
+
     items = []
     for key in ordered_keys:
-        items.append(items_by_key[key][1])
+        item = dict(items_by_key[key])
+        item.pop("_question_priority", None)
+        item.pop("_reply_priority", None)
+        if item.get("question") or item.get("reply"):
+            items.append(item)
         if limit and len(items) >= limit:
             break
-    return items
+    # 按 task_id 强制唯一：同一 task_id 只保留第一次出现的项
+    deduped_items = []
+    seen_task_ids = set()
+    for item in items:
+        tid = str(item.get("task_id") or "").strip()
+        if tid:
+            if tid in seen_task_ids:
+                continue
+            seen_task_ids.add(tid)
+        deduped_items.append(item)
+        if limit and len(deduped_items) >= limit:
+            break
+    return deduped_items
 
 
 def fetch_clawd_logs(user_key="", lang="CN", lines=120, limit=24):
@@ -643,7 +806,7 @@ def fetch_clawd_activity(user_key="", lang="CN", lines=300, log_limit=24, messag
         raw_text = data.get("text") or ""
         return (
             _collect_clawd_log_items(raw_text, lang=lang, limit=log_limit),
-            _collect_recent_user_messages(raw_text, limit=message_limit),
+            _collect_recent_user_messages(raw_text, limit=message_limit, lang=lang),
             None,
         )
     except Exception as e:
@@ -780,9 +943,11 @@ class SmallScreenApp:
         try:
             self.root = tk.Tk()
         except tk.TclError as e:
-            if "display" in str(e).lower() or "DISPLAY" in str(e):
-                print("无法连接图形显示。请在有桌面的环境运行，或先设置：", file=sys.stderr)
-                print("  export DISPLAY=:0", file=sys.stderr)
+            if "display" in str(e).lower() or "DISPLAY" in str(e) or "no display" in str(e).lower():
+                print("无法连接图形显示（无 DISPLAY）。", file=sys.stderr)
+                print("请任选其一：", file=sys.stderr)
+                print("  1) 在树莓派本机桌面/HDMI 下运行： export DISPLAY=:0 后再启动", file=sys.stderr)
+                print("  2) 无桌面时用网页版小屏： cd pi_app && ./open-small-screen.sh", file=sys.stderr)
             else:
                 print(f"Tk 初始化失败: {e}", file=sys.stderr)
             sys.exit(1)
@@ -858,6 +1023,7 @@ class SmallScreenApp:
         self._tick_time()
         if self.gif_frames:
             self._animate_gif()
+        self.root.after(200, self._raise_window)
 
     def _build_ui(self):
         global ASSETS_DIR
@@ -898,10 +1064,23 @@ class SmallScreenApp:
         except Exception:
             self.lobster_label.configure(text="🦞", font=("", 28), fg=self._c("fg"))
         # 标题 RustClaw
+        top_text = tk.Frame(top, bg=self._c("bg"))
+        top_text.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
         tk.Label(
-            top, text="RustClaw", font=("", 20, "bold"),
-            bg=self._c("bg"), fg=self._c("accent")
-        ).pack(side=tk.LEFT, padx=(0, 12))
+            top_text, text="RustClaw", font=("", 20, "bold"),
+            bg=self._c("bg"), fg=self._c("accent"), anchor="w"
+        ).pack(anchor=tk.W)
+        self._top_recent_message_var = tk.StringVar(value="")
+        self._top_recent_message_label = tk.Label(
+            top_text,
+            textvariable=self._top_recent_message_var,
+            font=("", 10),
+            bg=self._c("bg"),
+            fg=self._c("fg_dim"),
+            anchor="w",
+            justify=tk.LEFT,
+        )
+        self._top_recent_message_label.pack(fill=tk.X, anchor=tk.W)
         # 右侧：当前时间（左） + 状态在线/离线（右）
         self.time_var = tk.StringVar(value="--:--:--")
         right_frame = tk.Frame(top, bg=self._c("bg"))
@@ -1001,13 +1180,8 @@ class SmallScreenApp:
         self.clawd_summary_var = tk.StringVar(value=_t("clawd_summary_empty"))
         self._users_body = tk.Frame(self.users_frame, bg=self._c("bg"))
         self._users_body.pack(fill=tk.BOTH, expand=True)
-        self._users_title_label = tk.Label(self._users_body, text=_t("users_title"), font=("", 16, "bold"), bg=self._c("bg"), fg=self._c("fg"))
-        self._users_messages_title = tk.Label(self._users_body, text=_t("recent_messages_title"), font=("", 11, "bold"), bg=self._c("bg"), fg=self._c("fg"), anchor="w")
-        self._users_messages_title.pack(fill=tk.X, pady=(0, 4))
         self._users_messages_body = tk.Frame(self._users_body, bg=self._c("bg"))
         self._users_messages_body.pack(fill=tk.BOTH, expand=True)
-        self._logs_title_label = tk.Label(self.logs_frame, text=_t("logs_title"), font=("", 11, "bold"), bg=self._c("bg"), fg=self._c("fg"))
-        self._logs_title_label.pack(anchor=tk.W, pady=(0, 4))
         self._logs_body = tk.Frame(self.logs_frame, bg=self._c("bg"))
         self._logs_body.pack(fill=tk.BOTH, expand=True)
         # 翻页：左右滑屏可到仪表盘 / 技能 / 加密货币 / 图库 / 用户 / 设置
@@ -1036,12 +1210,87 @@ class SmallScreenApp:
         self._settings_cancel_btn.pack(side=tk.LEFT, padx=(0, 8))
         self._settings_restart_btn = tk.Button(bf, text=_t("restart"), font=("", 11), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"), command=self._on_settings_restart)
         self._settings_restart_btn.pack(side=tk.LEFT)
+        self._refresh_topbar()
 
     def _t(self, key):
         return STRINGS.get(self._lang, STRINGS["CN"]).get(key, key)
 
+    def _is_valid_tk_color(self, value):
+        if not isinstance(value, str):
+            return False
+        color = value.strip()
+        if not color:
+            return False
+        if re.fullmatch(r"#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?", color):
+            return True
+        try:
+            self.root.winfo_rgb(color)
+            return True
+        except Exception:
+            return False
+
     def _c(self, key):
-        return THEMES.get(self._theme, THEMES["default"]).get(key, "")
+        theme = THEMES.get(self._theme) or THEMES["default"]
+        if key == "bg_rgb":
+            bg_rgb = theme.get("bg_rgb")
+            if isinstance(bg_rgb, (list, tuple)) and len(bg_rgb) >= 3:
+                try:
+                    return tuple(int(x) for x in bg_rgb[:3])
+                except Exception:
+                    pass
+            return THEMES["default"]["bg_rgb"]
+
+        value = theme.get(key)
+        if self._is_valid_tk_color(value):
+            s = (value or "").strip()
+            return s if s else "#e8e6e3"
+        fallback = THEMES["default"].get(key)
+        if self._is_valid_tk_color(fallback):
+            s = (fallback or "").strip()
+            return s if s else "#e8e6e3"
+
+        theme_fg = theme.get("fg")
+        if self._is_valid_tk_color(theme_fg):
+            s = (theme_fg or "").strip()
+            return s if s else "#e8e6e3"
+        default_fg = THEMES["default"].get("fg", "#e8e6e3")
+        if self._is_valid_tk_color(default_fg):
+            s = (default_fg or "").strip()
+            return s if s else "#e8e6e3"
+        return "#e8e6e3"
+
+    def _tk_color(self, key):
+        """与 _c 相同，但保证返回非空字符串，避免 Tk 报 unknown color name \"\"。"""
+        out = self._c(key)
+        if out is None or (isinstance(out, str) and not out.strip()):
+            return "#e8e6e3"
+        if isinstance(out, str) and self._is_valid_tk_color(out):
+            return out.strip()
+        return "#e8e6e3"
+
+    def _safe_color(self, *candidates, fallback_key="fg"):
+        """返回可用于 Tk 的颜色字符串，保证非空，避免 unknown color name \"\"。"""
+        theme = THEMES.get(self._theme) or THEMES["default"]
+        default_theme = THEMES["default"]
+        for candidate in candidates:
+            value = None
+            if isinstance(candidate, str):
+                key = candidate.strip()
+                if not key:
+                    continue
+                if key in theme or key in default_theme:
+                    value = self._c(key)
+                else:
+                    value = key
+            else:
+                value = candidate
+            if value is not None and self._is_valid_tk_color(value):
+                s = str(value).strip()
+                if s:
+                    return s
+        out = self._c(fallback_key)
+        s = (str(out).strip() if out is not None else "") or "#e8e6e3"
+        return s if s else "#e8e6e3"
 
     def _apply_lang(self):
         self.root.title(self._t("app_title"))
@@ -1059,6 +1308,22 @@ class SmallScreenApp:
         except tk.TclError:
             pass
         self.foot_var.set(self._t("foot_prefix"))
+        self._refresh_topbar()
+
+    def _refresh_topbar(self):
+        if self._view_mode == "users":
+            self._top_recent_message_var.set(self._t("recent_messages_title"))
+        elif self._view_mode == "logs":
+            self._top_recent_message_var.set("logs")
+        elif self._view_mode == "skills":
+            self._top_recent_message_var.set("skills")
+        else:
+            if self._top_recent_message_label.winfo_manager():
+                self._top_recent_message_label.pack_forget()
+            return
+        self._top_recent_message_label.config(bg=self._c("bg"), fg=self._c("fg_dim"))
+        if self._top_recent_message_label.winfo_manager() != "pack":
+            self._top_recent_message_label.pack(fill=tk.X, anchor=tk.W)
 
     def _prepare_settings_view(self):
         """进入设置页时刷新标题和按钮文案。"""
@@ -1076,17 +1341,15 @@ class SmallScreenApp:
         self._settings_theme_var.set(self._theme)
 
     def _prepare_logs_view(self):
-        self._logs_title_label.config(text=self._t("logs_title"), bg=self._c("bg"), fg=self._c("fg"))
         self._render_logs_view()
 
     def _prepare_users_view(self):
-        self._users_title_label.config(text=self._t("users_title"), bg=self._c("bg"), fg=self._c("fg"))
         self._dashboard_summary_row.config(bg=self._c("bg"))
         self._dashboard_users_label.config(text=self._t("users_count") + ": ", bg=self._c("bg"), fg=self._c("fg_dim"))
         self._dashboard_users_value.config(bg=self._c("bg"), fg=self._c("fg"))
         self._dashboard_channels_label.config(text="    " + self._t("bound_channels") + ": ", bg=self._c("bg"), fg=self._c("fg_dim"))
         self._dashboard_channels_value.config(bg=self._c("bg"), fg=self._c("adapters_value_fg"))
-        self._users_messages_title.config(text=self._t("recent_messages_title"), bg=self._c("bg"), fg=self._c("fg"))
+        self._refresh_topbar()
         self._last_user_messages_signature = None
         self._update_user_summary_view()
 
@@ -1103,10 +1366,12 @@ class SmallScreenApp:
         return tuple(
             (
                 str(item.get("time") or "--:--:--"),
-                str(item.get("text") or ""),
+                str(item.get("question") or item.get("text") or ""),
+                str(item.get("reply") or ""),
             )
             for item in (items if isinstance(items, list) else [])
         )
+
 
     def _render_user_messages(self):
         items = self.user_messages if isinstance(self.user_messages, list) else []
@@ -1128,7 +1393,9 @@ class SmallScreenApp:
             ).pack(anchor=tk.W)
             return
         for item in items:
-            card_bg = self._c("box_bg") or self._c("bg")
+            card_bg = self._safe_color("box_bg", "bg", fallback_key="bg")
+            if not (card_bg and str(card_bg).strip()):
+                card_bg = self._tk_color("bg")
             card = tk.Frame(self._users_messages_body, bg=card_bg, bd=0, highlightthickness=0)
             card.pack(fill=tk.X, pady=(0, 6))
             meta_parts = [item.get("time") or "--:--:--"]
@@ -1137,20 +1404,45 @@ class SmallScreenApp:
                 text="  ".join(meta_parts),
                 font=("", 9),
                 bg=card_bg,
-                fg=self._c("fg_dim"),
+                fg=self._safe_color("fg_dim"),
                 anchor="w",
                 justify=tk.LEFT,
             ).pack(fill=tk.X, padx=8, pady=(6, 0))
-            tk.Label(
-                card,
-                text=item.get("text") or "",
-                font=("", 11),
-                bg=card_bg,
-                fg=self._c("fg"),
-                anchor="w",
-                justify=tk.LEFT,
-                wraplength=430,
-            ).pack(fill=tk.X, padx=8, pady=(2, 6))
+            question_text = _single_line_message_preview(
+                item.get("question") or item.get("text") or "",
+                self._lang,
+            )
+            reply_text = _single_line_message_preview(item.get("reply") or "", self._lang)
+            if question_text:
+                tk.Label(
+                    card,
+                    text="U: " + question_text,
+                    font=("", 11),
+                    bg=card_bg,
+                    fg=self._safe_color("msg_user_fg", "fg"),
+                    anchor="w",
+                    justify=tk.LEFT,
+                ).pack(fill=tk.X, padx=8, pady=(2, 2))
+            if reply_text:
+                tk.Label(
+                    card,
+                    text="A: " + self._t("msg_replied_hint"),
+                    font=("", 10),
+                    bg=card_bg,
+                    fg=self._safe_color("msg_agent_fg", "summary_skill", "fg"),
+                    anchor="w",
+                    justify=tk.LEFT,
+                ).pack(fill=tk.X, padx=8, pady=(0, 6))
+            elif question_text:
+                tk.Label(
+                    card,
+                    text="A: ...",
+                    font=("", 10),
+                    bg=card_bg,
+                    fg=self._safe_color("fg_dim"),
+                    anchor="w",
+                    justify=tk.LEFT,
+                ).pack(fill=tk.X, padx=8, pady=(0, 6))
 
     def _render_logs_view(self):
         for child in self._logs_body.winfo_children():
@@ -1432,6 +1724,7 @@ class SmallScreenApp:
             self._view_mode = "dashboard"
             self.settings_frame.pack_forget()
             self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
+        self._refresh_topbar()
 
     def _go_prev_view(self):
         """右滑/上一页：dashboard -> settings -> gallery -> crypto -> skills -> logs -> users -> dashboard（循环）。"""
@@ -1475,6 +1768,7 @@ class SmallScreenApp:
             self._view_mode = "dashboard"
             self.users_frame.pack_forget()
             self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
+        self._refresh_topbar()
 
     def _show_gallery(self):
         """NNI分布式模型页：Matrix 主题下无标题无按钮、矩阵雨占满屏并自动开始；非 Matrix 为标题+加入/停止+龙虾图。"""
@@ -1759,10 +2053,6 @@ class SmallScreenApp:
     def _refresh_skills_view(self):
         for w in self.skills_frame.winfo_children():
             w.destroy()
-        tk.Label(
-            self.skills_frame, text=self._t("skills_title"), font=("DejaVu Sans", 14, "bold"),
-            bg=self._c("bg"), fg=self._c("fg")
-        ).pack(pady=(0, 6))
         self._skills_loading_label = tk.Label(
             self.skills_frame, text="Loading...", font=("", 12), bg=self._c("bg"), fg=self._c("status_off")
         )
@@ -1792,10 +2082,6 @@ class SmallScreenApp:
         all_skills, enabled_set = result if result else (None, None)
         for w in self.skills_frame.winfo_children():
             w.destroy()
-        tk.Label(
-            self.skills_frame, text=self._t("skills_title"), font=("DejaVu Sans", 14, "bold"),
-            bg=self._c("bg"), fg=self._c("fg")
-        ).pack(pady=(0, 6))
         if all_skills is None:
             tk.Label(self.skills_frame, text=self._t("skills_load_fail"), font=("", 12), bg=self._c("bg"), fg=self._c("status_off")).pack(anchor=tk.W)
             return
@@ -1931,6 +2217,7 @@ class SmallScreenApp:
             self.log_summary = summary
         if user_messages is not None:
             self.user_messages = user_messages
+            self._refresh_topbar()
         if err:
             self.health = None
             self._online = False
@@ -1954,6 +2241,7 @@ class SmallScreenApp:
             self.users_count_var.set("--")
             self.bound_channels_var.set("--")
             self.user_messages = []
+            self._refresh_topbar()
             if self._view_mode == "users":
                 self._render_user_messages()
             if self._view_mode == "logs":
@@ -1994,6 +2282,7 @@ class SmallScreenApp:
         )
         self.adapters_rss_var.set(fmt_bytes(int(total)) if total else "--")
         self._update_user_summary_view()
+        self._refresh_topbar()
         from datetime import datetime
         self.foot_var.set(self._t("update_fmt").format(time=datetime.now().strftime("%H:%M:%S"), sec=LOGS_REFRESH_SEC))
 
@@ -2023,6 +2312,23 @@ class SmallScreenApp:
         except tk.TclError:
             pass
 
+    def _raise_window(self):
+        """自启动时把窗口提到最前并获取焦点，避免被其它窗口挡住。"""
+        try:
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after(400, self._clear_topmost)
+            self.root.focus_force()
+        except tk.TclError:
+            pass
+
+    def _clear_topmost(self):
+        try:
+            if not getattr(self, "_closing", False):
+                self.root.attributes("-topmost", False)
+        except tk.TclError:
+            pass
+
     def _start_fullscreen(self):
         self.root.attributes("-fullscreen", True)
         try:
@@ -2036,6 +2342,8 @@ class SmallScreenApp:
         self.root.bind_all("<Right>", lambda e: self._on_swipe_prev())
         self.root.bind_all("<ButtonPress-1>", self._on_swipe_start)
         self.root.bind_all("<ButtonRelease-1>", self._on_swipe_end)
+        # 自启动时窗口容易被挡，启动后置前一次
+        self.root.after(300, self._raise_window)
 
     def _on_swipe_start(self, event):
         self._swipe_start_x = getattr(self, "_swipe_start_x", 0)

@@ -81,7 +81,7 @@ interface SkillsConfigResponse {
   skills_list: string[];
   skill_switches: Record<string, boolean>;
   managed_skills: string[];
-  /** 基础技能（文件系统等），UI 归类为「基础技能」，不建议关闭 */
+  /** 基本技能（由 tool 转换的系统基本能力），UI 归类为「基本技能」，不建议关闭 */
   base_skill_names?: string[];
   effective_enabled_skills_preview: string[];
   runtime_enabled_skills: string[];
@@ -128,7 +128,7 @@ interface AdapterHealthRow {
 const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
 const IMAGE_SKILLS = new Set<string>(["image_vision", "image_generate", "image_edit"]);
 const AUDIO_SKILLS = new Set<string>(["audio_transcribe", "audio_synthesize"]);
-/** 基础技能（与后端 base_skill_names 一致），API 未返回时用此兜底 */
+/** 基本技能（与后端 base_skill_names 一致，由 tool 转换），API 未返回时用此兜底 */
 const FALLBACK_BASE_SKILL_NAMES = ["run_cmd", "read_file", "write_file", "list_dir", "make_dir", "remove_file"];
 
 const STORAGE_KEYS = {
@@ -139,6 +139,19 @@ const STORAGE_KEYS = {
   ageWarn: "rustclaw.monitor.ageWarnSeconds",
   lang: "rustclaw.monitor.lang",
 } as const;
+
+/** 根据当前页面地址推断 clawd API 的默认 baseUrl；获取不到主机名时用 127.0.0.1 */
+function getDefaultClawdBaseUrl(): string {
+  if (typeof window === "undefined" || !window.location) return "http://127.0.0.1:8787";
+  const loc = window.location;
+  let hostname = (loc.hostname && loc.hostname.trim()) || "";
+  if (!hostname && loc.host) {
+    hostname = loc.host.split(":")[0]?.trim() || "";
+  }
+  const protocol = loc.protocol && loc.protocol !== "file:" ? loc.protocol : "http:";
+  if (hostname) return `${protocol}//${hostname}:8787`;
+  return "http://127.0.0.1:8787";
+}
 
 function readNumber(key: string, fallback: number): number {
   const raw = window.localStorage.getItem(key);
@@ -225,9 +238,9 @@ export default function App() {
   const [baseUrl, setBaseUrl] = useState(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.baseUrl);
     if (saved != null && saved.trim() !== "") return saved.trim();
-    return "http://127.0.0.1:8787";
+    return getDefaultClawdBaseUrl();
   });
-  const apiBase = baseUrl || "http://127.0.0.1:8787";
+  const apiBase = baseUrl || getDefaultClawdBaseUrl();
   const [uiKey, setUiKey] = useState(() => window.localStorage.getItem(STORAGE_KEYS.userKey)?.trim() ?? "");
   const [uiKeyDraft, setUiKeyDraft] = useState("");
   const [uiAuthReady, setUiAuthReady] = useState(false);
@@ -380,6 +393,17 @@ export default function App() {
     } finally {
       setUiAuthLoading(false);
     }
+  };
+
+  const logout = () => {
+    window.localStorage.removeItem(STORAGE_KEYS.userKey);
+    setUiKey("");
+    setUiKeyDraft("");
+    setUiAuthReady(false);
+    setUiAuthError(null);
+    setInteractionUserId(null);
+    setInteractionChatId(null);
+    setInteractionRole("-");
   };
 
   const fetchHealth = async () => {
@@ -1152,6 +1176,14 @@ export default function App() {
                 <span className="hidden text-[10px] text-white/50 sm:inline sm:text-xs">{lang === "zh" ? `更新于 ${toLocalTime(lastUpdated)}` : `Updated ${toLocalTime(lastUpdated)}`}</span>
               ) : null}
             </div>
+            <button
+              type="button"
+              onClick={logout}
+              className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-white/80 hover:bg-white/10 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
+              title={t("退出登录，需重新输入 key", "Log out; key required to sign in again")}
+            >
+              {t("退出", "Log out")}
+            </button>
 
             <button
               onClick={() => setLang((v) => (v === "zh" ? "en" : "zh"))}
@@ -1865,19 +1897,6 @@ export default function App() {
               };
               return (
                 <div className="mt-3 space-y-4">
-                  {baseSkillsList.length > 0 ? (
-                    <div>
-                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
-                        {tSlash("基础技能 / Base")}
-                      </h4>
-                      <p className="mb-2 text-xs text-amber-200/90">
-                        {t("不建议关闭。关闭后读写/执行/列目录/建目录等能力将不可用。", "Not recommended to disable. File/command/dir operations will be unavailable if disabled.")}
-                      </p>
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {baseSkillsList.map(renderSkillRow)}
-                      </div>
-                    </div>
-                  ) : null}
                   {imageSkillsList.length > 0 ? (
                     <div>
                       <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
@@ -1905,6 +1924,19 @@ export default function App() {
                       </h4>
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                         {otherSkillsList.map(renderSkillRow)}
+                      </div>
+                    </div>
+                  ) : null}
+                  {baseSkillsList.length > 0 ? (
+                    <div>
+                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
+                        {tSlash("基本技能 / Base")}
+                      </h4>
+                      <p className="mb-2 text-xs text-amber-200/90">
+                        {t("不建议关闭。由原 tool 转换的系统基本能力，关闭后读写/执行/列目录/建目录等将不可用。", "Not recommended to disable. Core skills (from tools); file/command/dir operations will be unavailable if disabled.")}
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {baseSkillsList.map(renderSkillRow)}
                       </div>
                     </div>
                   ) : null}

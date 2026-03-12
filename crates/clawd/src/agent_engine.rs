@@ -3,10 +3,11 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Component, Path};
 use toml::Value as TomlValue;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::{execution_adapters, llm_gateway, repo, AgentAction, AppState, AskReply, ClaimedTask};
 
+// --- Compatibility fallback only: used when registry has no prompt_file for a skill. Primary = registry. ---
 const SKILL_PROMPT_ARCHIVE_BASIC: &str =
     include_str!("../../../prompts/vendors/default/skills/archive_basic.md");
 const SKILL_PROMPT_AUDIO_SYNTHESIZE: &str =
@@ -52,17 +53,17 @@ const SKILL_PROMPT_SYSTEM_BASIC: &str =
 const SKILL_PROMPT_X: &str = include_str!("../../../prompts/vendors/default/skills/x.md");
 // Standalone base skills (A scheme: independent from system_basic)
 const SKILL_PROMPT_RUN_CMD: &str =
-    include_str!("../../../prompts/vendors/default/skills/run_cmd.md");
+    include_str!("../../../prompts/skills/run_cmd.md");
 const SKILL_PROMPT_READ_FILE: &str =
-    include_str!("../../../prompts/vendors/default/skills/read_file.md");
+    include_str!("../../../prompts/skills/read_file.md");
 const SKILL_PROMPT_WRITE_FILE: &str =
-    include_str!("../../../prompts/vendors/default/skills/write_file.md");
+    include_str!("../../../prompts/skills/write_file.md");
 const SKILL_PROMPT_LIST_DIR: &str =
-    include_str!("../../../prompts/vendors/default/skills/list_dir.md");
+    include_str!("../../../prompts/skills/list_dir.md");
 const SKILL_PROMPT_MAKE_DIR: &str =
-    include_str!("../../../prompts/vendors/default/skills/make_dir.md");
+    include_str!("../../../prompts/skills/make_dir.md");
 const SKILL_PROMPT_REMOVE_FILE: &str =
-    include_str!("../../../prompts/vendors/default/skills/remove_file.md");
+    include_str!("../../../prompts/skills/remove_file.md");
 const AGENT_TOOL_SPEC_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/agent_tool_spec.md");
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
@@ -75,7 +76,8 @@ const LOOP_INCREMENTAL_PLAN_PROMPT_PATH: &str = "prompts/loop_incremental_plan_p
 
 type SkillPlaybookDef = (&'static str, &'static str, &'static str);
 
-const SKILL_PLAYBOOKS: &[SkillPlaybookDef] = &[
+/// Compatibility fallback only. Primary path for planner is registry-driven: enabled skills + prompt_file per skill.
+const BUNDLED_SKILL_PLAYBOOKS: &[SkillPlaybookDef] = &[
     ("run_cmd", "prompts/skills/run_cmd.md", SKILL_PROMPT_RUN_CMD),
     ("read_file", "prompts/skills/read_file.md", SKILL_PROMPT_READ_FILE),
     ("write_file", "prompts/skills/write_file.md", SKILL_PROMPT_WRITE_FILE),
@@ -187,6 +189,14 @@ const SKILL_PLAYBOOKS: &[SkillPlaybookDef] = &[
     ("x", "prompts/skills/x.md", SKILL_PROMPT_X),
 ];
 
+/// Returns (path, body) for compatibility fallback when registry has no prompt_file.
+fn get_bundled_playbook(skill: &str) -> Option<(&'static str, &'static str)> {
+    BUNDLED_SKILL_PLAYBOOKS
+        .iter()
+        .find(|(name, _, _)| *name == skill)
+        .map(|(_, path, body)| (*path, *body))
+}
+
 fn load_rss_categories_for_prompt(state: &AppState) -> Vec<String> {
     let path = state.workspace_root.join("configs/rss.toml");
     let Ok(raw) = std::fs::read_to_string(path) else {
@@ -217,24 +227,58 @@ fn build_rss_skill_prompt_with_categories(state: &AppState, base_prompt: &str) -
     )
 }
 
+/// Phase 2: Primary path = registry-driven. Planner uses planner_visible_skills (registry-enabled view),
+/// not skills_list (execution floor with core_skills_always_enabled). Each skill uses prompt_file or bundled fallback.
 fn build_skill_playbooks_text(state: &AppState) -> String {
+    let enabled = &*state.get_planner_visible_skills();
+    let enabled_count = enabled.len();
+    info!(
+        "planner skill playbooks: planner_visible_skills_count={} skills=[{}]",
+        enabled_count,
+        enabled.join(", ")
+    );
+
     let mut sections = Vec::new();
-    for (skill, prompt_path, body) in SKILL_PLAYBOOKS {
-        let is_enabled = state
-            .skills_list
-            .contains(crate::canonical_skill_name(skill));
-        let prompt_body = crate::load_prompt_template_for_state(state, prompt_path, body).0;
-        let content = if !is_enabled {
-            let disabled_text = crate::i18n_t_with_default(
-                state,
-                "clawd.msg.skill_disabled",
-                "Skill is not enabled: {skill}. Please enable it in config and try again.",
-            )
-            .replace("{skill}", skill);
-            format!(
-                "Status: disabled.\n\nIf user intent requires this skill, do NOT call this skill.\nReturn `{{\"type\":\"respond\",\"content\":\"{disabled_text}\"}}`."
-            )
-        } else if *skill == "rss_fetch" {
+    let mut skipped_no_prompt: Vec<String> = Vec::new();
+
+    for skill in enabled {
+        // Primary: registry prompt_file
+        let registry_path = state.skill_prompt_file(skill);
+        // Compatibility fallback only: bundled path + body when registry has no prompt_file
+        let bundled = get_bundled_playbook(skill);
+        let fallback_body = bundled.map(|(_, b)| b).unwrap_or("");
+        let effective_path: &str = registry_path
+            .as_deref()
+            .or(bundled.map(|(p, _)| p))
+            .unwrap_or("");
+        let source = if registry_path.is_some() {
+            "registry"
+        } else {
+            "bundled_fallback"
+        };
+
+        if effective_path.is_empty() {
+            warn!(
+                "planner skill playbook: skill={} prompt_file missing in registry and no bundled fallback, skipping",
+                skill
+            );
+            skipped_no_prompt.push(skill.clone());
+            continue;
+        }
+
+        let prompt_body = crate::load_prompt_template_for_state(
+            state,
+            effective_path,
+            fallback_body,
+        )
+        .0;
+
+        debug!(
+            "planner skill playbook: skill={} prompt_file={} source={}",
+            skill, effective_path, source
+        );
+
+        let content = if skill == "rss_fetch" {
             build_rss_skill_prompt_with_categories(state, &prompt_body)
         } else {
             prompt_body
@@ -245,6 +289,23 @@ fn build_skill_playbooks_text(state: &AppState) -> String {
         }
         sections.push(format!("### {skill}\n{trimmed}"));
     }
+
+    if !skipped_no_prompt.is_empty() {
+        warn!(
+            "planner skill playbooks: skipped_no_prompt_count={} skills=[{}]",
+            skipped_no_prompt.len(),
+            skipped_no_prompt.join(", ")
+        );
+    }
+
+    let included_count = sections.len();
+    info!(
+        "planner skill playbooks: included_count={} (enabled={} skipped={})",
+        included_count,
+        enabled_count,
+        enabled_count.saturating_sub(included_count)
+    );
+
     if sections.is_empty() {
         "No skill playbooks configured.".to_string()
     } else {
@@ -318,12 +379,13 @@ fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPolicy {
     }
 }
 
-fn publish_progress_messages(state: &AppState, task: &ClaimedTask, delivery_messages: &[String]) {
-    if delivery_messages.is_empty() {
+/// Publish progress hints only. Used for "in progress" UI. Must not contain full raw tool/skill output.
+fn publish_progress(state: &AppState, task: &ClaimedTask, progress_messages: &[String]) {
+    if progress_messages.is_empty() {
         return;
     }
     let payload = json!({
-        "progress_messages": delivery_messages,
+        "progress_messages": progress_messages,
     });
     if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
     {
@@ -331,17 +393,40 @@ fn publish_progress_messages(state: &AppState, task: &ClaimedTask, delivery_mess
             "run_agent_with_tools: task_id={} publish progress failed: {}",
             task.task_id, err
         );
+    } else {
+        debug!(
+            "progress published task_id={} count={} last={}",
+            task.task_id,
+            progress_messages.len(),
+            crate::truncate_for_log(progress_messages.last().map(|s| s.as_str()).unwrap_or(""))
+        );
     }
 }
 
-fn append_and_publish_progress_message(
+/// Append a short progress hint and publish. For "processing..." display only. Do not pass full raw output.
+fn append_progress_hint(
     state: &AppState,
     task: &ClaimedTask,
+    progress_messages: &mut Vec<String>,
+    hint: String,
+) {
+    progress_messages.push(hint);
+    publish_progress(state, task, progress_messages);
+}
+
+/// Append to final delivery only. This is the only path that feeds user-visible result. No progress publish.
+fn append_delivery_message(
+    task_id: &str,
     delivery_messages: &mut Vec<String>,
     message: String,
 ) {
-    delivery_messages.push(message);
-    publish_progress_messages(state, task, delivery_messages);
+    delivery_messages.push(message.clone());
+    info!(
+        "delivery appended task_id={} len={} content={}",
+        task_id,
+        delivery_messages.len(),
+        crate::truncate_for_log(&message)
+    );
 }
 
 #[derive(Debug, Deserialize)]
@@ -441,7 +526,7 @@ fn is_meta_respond_instruction(text: &str) -> bool {
     starts_with_meta || has_instruction_phrases
 }
 
-fn parse_single_plan_actions(raw: &str) -> Option<Vec<AgentAction>> {
+fn parse_single_plan_actions(raw: &str, state: &AppState) -> Option<Vec<AgentAction>> {
     let value = crate::parse_llm_json_raw_or_any::<Value>(raw)?;
     let env = serde_json::from_value::<SinglePlanEnvelope>(value).ok()?;
     if env.steps.is_empty() {
@@ -450,7 +535,7 @@ fn parse_single_plan_actions(raw: &str) -> Option<Vec<AgentAction>> {
     let mut actions = Vec::new();
     for step in env.steps {
         let raw_step = serde_json::to_string(&step).ok()?;
-        let normalized = crate::parse_agent_action_json_with_repair(&raw_step).ok()?;
+        let normalized = crate::parse_agent_action_json_with_repair(&raw_step, state).ok()?;
         let action = serde_json::from_value::<AgentAction>(normalized).ok()?;
         match action {
             AgentAction::Think { .. } => {}
@@ -466,12 +551,18 @@ fn parse_single_plan_actions(raw: &str) -> Option<Vec<AgentAction>> {
     }
 }
 
+/// Progress: short hints only (e.g. "Step 1/3", "Skill X completed"). For "in progress" UI. Not final content.
+/// Delivery: final user-facing content only. Only respond and fallback finalizer append here. Channel consumes this.
+/// Trace: step output / subtask_results / history_compact for logs and resume; not sent as final delivery.
 #[derive(Debug, Default)]
 struct LoopState {
     round_no: usize,
     max_rounds: usize,
     tool_calls_total: usize,
     total_steps_executed: usize,
+    /// Progress hints only; published to task progress for "processing..." display. Must not contain full raw output.
+    progress_messages: Vec<String>,
+    /// Final delivery to user. Only respond and fallback finalizer write here. Sole source for AskReply.messages.
     delivery_messages: Vec<String>,
     subtask_results: Vec<String>,
     history_compact: Vec<String>,
@@ -504,20 +595,20 @@ struct RoundOutcome {
     no_progress: bool,
 }
 
-fn action_fingerprint(action: &AgentAction) -> String {
+fn action_fingerprint(state: &AppState, action: &AgentAction) -> String {
     match action {
         // LEGACY: CallTool normalized to skill view so capability/fingerprint is unified.
         AgentAction::CallTool { tool, args } => {
-            let skill_name = tool.trim().to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(&skill_name, args);
+            let normalized_skill = state.resolve_canonical_skill_name(tool.trim()).to_ascii_lowercase();
+            let normalized_args = normalize_args_for_fingerprint(&normalized_skill, args);
             format!(
                 "skill:{}:{}",
-                skill_name,
+                normalized_skill,
                 canonical_json_string(&normalized_args)
             )
         }
         AgentAction::CallSkill { skill, args } => {
-            let normalized_skill = crate::canonical_skill_name(skill).to_ascii_lowercase();
+            let normalized_skill = state.resolve_canonical_skill_name(skill).to_ascii_lowercase();
             let normalized_args = normalize_args_for_fingerprint(&normalized_skill, args);
             format!(
                 "skill:{}:{}",
@@ -670,6 +761,7 @@ fn build_loop_history_compact(loop_state: &LoopState) -> String {
     }
 }
 
+/// Trace only: updates loop_state for planner/resume. Does not write to progress or delivery.
 fn register_step_output(
     loop_state: &mut LoopState,
     global_step: usize,
@@ -681,6 +773,10 @@ fn register_step_output(
     if trimmed.is_empty() {
         return;
     }
+    debug!(
+        "trace_only step_output key={} global_step={} round_step={}",
+        key_prefix, global_step, round_step
+    );
     let value = trimmed.to_string();
     loop_state.last_output = Some(value.clone());
     loop_state
@@ -841,6 +937,7 @@ fn has_remaining_action_after(
 }
 
 fn remaining_actions_are_discussion_only(
+    state: &AppState,
     actions: &[AgentAction],
     current_idx: usize,
     max_steps: usize,
@@ -855,7 +952,7 @@ fn remaining_actions_are_discussion_only(
         && remaining.iter().all(|action| match action {
             AgentAction::Respond { .. } => true,
             AgentAction::CallSkill { skill, .. } => {
-                crate::canonical_skill_name(skill).eq_ignore_ascii_case("chat")
+                state.resolve_canonical_skill_name(skill).eq_ignore_ascii_case("chat")
             }
             AgentAction::Think { .. } => true,
             _ => false,
@@ -1147,7 +1244,7 @@ async fn plan_round_actions(
         loop_state.round_no,
         crate::truncate_for_log(&plan_raw)
     );
-    let plan_actions = parse_single_plan_actions(&plan_raw)
+    let plan_actions = parse_single_plan_actions(&plan_raw, state)
         .ok_or_else(|| "single plan parser failed: no executable steps".to_string())?;
     let labels: Vec<String> = plan_actions.iter().map(plan_step_label).collect();
     info!(
@@ -1240,6 +1337,8 @@ fn has_explicit_summary_request(state: &AppState, user_text: &str) -> bool {
         })
 }
 
+/// Decide if this respond should enter delivery. Avoid duplicate: do not publish when respond
+/// merely repeats the last delivery or the last raw step output.
 fn should_publish_respond_message(
     state: &AppState,
     loop_state: &LoopState,
@@ -1260,6 +1359,14 @@ fn should_publish_respond_message(
     {
         return false;
     }
+    if loop_state
+        .last_output
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|last| last == trimmed)
+    {
+        return false;
+    }
     !is_summary_like_response(state, trimmed) || has_explicit_summary_request(state, user_text)
 }
 
@@ -1275,13 +1382,15 @@ async fn execute_actions_once(
     let mut executed_actions = 0usize;
     let mut stop_signal: Option<String> = None;
     let actionable_count = actions.iter().take(policy.max_steps.max(1)).count();
-    let before_message_count = loop_state.delivery_messages.len();
+    let before_delivery_count = loop_state.delivery_messages.len();
+    let before_progress_count = loop_state.progress_messages.len();
+    let before_subtask_count = loop_state.subtask_results.len();
     let mut ended_with_user_visible_output = false;
     let round_steps: Vec<String> = actions.iter().map(plan_step_label).collect();
     for (idx, action) in actions.iter().take(policy.max_steps.max(1)).enumerate() {
         let step_in_round = idx + 1;
         let global_step = loop_state.total_steps_executed + 1;
-        let fingerprint = action_fingerprint(action);
+        let fingerprint = action_fingerprint(state, action);
         let repeat_count = loop_state
             .repeat_action_counts
             .entry(fingerprint.clone())
@@ -1333,7 +1442,7 @@ async fn execute_actions_once(
             // LEGACY COMPATIBILITY: CallTool only from old plans/history; normalizer now outputs call_skill only. Same dispatch as CallSkill (run_skill).
             AgentAction::CallTool { tool, args } => {
                 let mut resolved_args = resolve_arg_value(args, loop_state);
-                let normalized_skill = crate::canonical_skill_name(tool).to_string();
+                let normalized_skill = state.resolve_canonical_skill_name(tool);
                 if normalized_skill == "chat" {
                     attach_recent_execution_context_to_chat_args(
                         &mut resolved_args,
@@ -1348,7 +1457,7 @@ async fn execute_actions_once(
                 } else {
                     None
                 };
-                let write_file_effective_path = if tool == "write_file" {
+                let write_file_effective_path = if normalized_skill == "write_file" {
                     resolved_args
                         .get("path")
                         .and_then(|v| v.as_str())
@@ -1365,7 +1474,7 @@ async fn execute_actions_once(
                 } else {
                     None
                 };
-                if tool == "run_cmd" {
+                if normalized_skill == "run_cmd" {
                     if let Some(obj) = resolved_args.as_object_mut() {
                         if let Some(command) = obj.get("command").and_then(|v| v.as_str()) {
                             let rewritten =
@@ -1376,7 +1485,7 @@ async fn execute_actions_once(
                         }
                     }
                 }
-                rewrite_tool_path_with_written_aliases(tool, &mut resolved_args, loop_state);
+                rewrite_tool_path_with_written_aliases(&normalized_skill, &mut resolved_args, loop_state);
                 loop_state.tool_calls_total += 1;
                 info!(
                     "{} executor_step_execute task_id={} round={} step={} type=call_skill(legacy_tool) skill={} args={}",
@@ -1434,11 +1543,11 @@ async fn execute_actions_once(
                         if !out.trim().is_empty() {
                             loop_state.has_tool_or_skill_output = true;
                             ended_with_user_visible_output = true;
-                            append_and_publish_progress_message(
+                            append_progress_hint(
                                 state,
                                 task,
-                                &mut loop_state.delivery_messages,
-                                out.clone(),
+                                &mut loop_state.progress_messages,
+                                format!("Skill {} completed", normalized_skill),
                             );
                         }
                         register_step_output(
@@ -1453,7 +1562,7 @@ async fn execute_actions_once(
                             .entry(fingerprint.clone())
                             .or_insert(0) += 1;
                         info!(
-                            "executor_result_ok task_id={} round={} step={} type=call_skill(legacy_tool) output={}",
+                            "executor_result_ok task_id={} round={} step={} type=call_skill(legacy_tool) output={} trace_only=raw_not_delivery",
                             task.task_id,
                             loop_state.round_no,
                             step_in_round,
@@ -1486,7 +1595,7 @@ async fn execute_actions_once(
                             step_in_round,
                             crate::truncate_for_log(&err)
                         );
-                        if remaining_actions_are_discussion_only(actions, idx, policy.max_steps)
+                        if remaining_actions_are_discussion_only(state, actions, idx, policy.max_steps)
                         {
                             register_failed_step_output(
                                 loop_state,
@@ -1527,7 +1636,7 @@ async fn execute_actions_once(
             AgentAction::CallSkill { skill, args } => {
                 let mut resolved_args = resolve_arg_value(args, loop_state);
                 loop_state.tool_calls_total += 1;
-                let normalized_skill = crate::canonical_skill_name(skill).to_string();
+                let normalized_skill = state.resolve_canonical_skill_name(skill);
                 if normalized_skill == "chat" {
                     attach_recent_execution_context_to_chat_args(&mut resolved_args, loop_state);
                 }
@@ -1564,11 +1673,11 @@ async fn execute_actions_once(
                         if !out.trim().is_empty() {
                             loop_state.has_tool_or_skill_output = true;
                             ended_with_user_visible_output = true;
-                            append_and_publish_progress_message(
+                            append_progress_hint(
                                 state,
                                 task,
-                                &mut loop_state.delivery_messages,
-                                out.clone(),
+                                &mut loop_state.progress_messages,
+                                format!("Skill {} completed", normalized_skill),
                             );
                         }
                         register_step_output(
@@ -1583,7 +1692,7 @@ async fn execute_actions_once(
                             .entry(fingerprint.clone())
                             .or_insert(0) += 1;
                         info!(
-                            "executor_result_ok task_id={} round={} step={} type=call_skill output={}",
+                            "executor_result_ok task_id={} round={} step={} type=call_skill output={} trace_only=raw_not_delivery",
                             task.task_id,
                             loop_state.round_no,
                             step_in_round,
@@ -1644,27 +1753,32 @@ async fn execute_actions_once(
                     has_remaining_action_after(actions, idx, policy.max_steps);
                 let publish_respond =
                     should_publish_respond_message(state, loop_state, user_text, &text);
-                crate::append_subtask_result(
-                    &mut loop_state.subtask_results,
-                    global_step,
-                    "respond",
-                    true,
-                    &text,
-                );
                 if publish_respond {
+                    crate::append_subtask_result(
+                        &mut loop_state.subtask_results,
+                        global_step,
+                        "respond",
+                        true,
+                        &text,
+                    );
                     if !has_remaining_actions {
                         ended_with_user_visible_output = !text.is_empty();
                     }
-                    append_and_publish_progress_message(
-                        state,
-                        task,
+                    append_delivery_message(
+                        &task.task_id,
                         &mut loop_state.delivery_messages,
                         text.clone(),
                     );
+                    append_progress_hint(
+                        state,
+                        task,
+                        &mut loop_state.progress_messages,
+                        "Reply generated".to_string(),
+                    );
                 }
                 if !publish_respond && !text.is_empty() {
-                    info!(
-                        "executor_step_skip task_id={} round={} step={} type=respond reason=respond_not_publishable",
+                    debug!(
+                        "executor_step_skip task_id={} round={} step={} type=respond reason=respond_not_publishable trace_only",
                         task.task_id,
                         loop_state.round_no,
                         step_in_round
@@ -1711,7 +1825,10 @@ async fn execute_actions_once(
     {
         stop_signal = Some("plan_exhausted_user_visible".to_string());
     }
-    let no_progress = loop_state.delivery_messages.len() == before_message_count;
+    let delivery_grew = loop_state.delivery_messages.len() > before_delivery_count;
+    let progress_grew = loop_state.progress_messages.len() > before_progress_count;
+    let step_output_grew = loop_state.subtask_results.len() > before_subtask_count;
+    let no_progress = !delivery_grew && !progress_grew && !step_output_grew;
     let next_goal_hint = loop_state.delivery_messages.last().cloned();
     Ok(RoundOutcome {
         executed_actions,
@@ -1722,13 +1839,66 @@ async fn execute_actions_once(
     })
 }
 
+/// Only synthesize (chat) when we have raw output but no delivery yet. Prefer raw finalizer first.
 fn should_synthesize_final_response(loop_state: &LoopState) -> bool {
-    loop_state.has_tool_or_skill_output
-        && !loop_state.delivery_messages.is_empty()
-        && !loop_state
-            .history_compact
-            .last()
-            .is_some_and(|entry| entry.contains(" respond"))
+    loop_state.has_tool_or_skill_output && loop_state.delivery_messages.is_empty()
+}
+
+/// Minimal filter: only allow raw outputs that look like publishable user-facing content.
+/// Excludes empty, pure process hints, and obvious internal confirmation text.
+fn is_publishable_raw(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() || t.len() <= 2 {
+        return false;
+    }
+    let lower = t.to_ascii_lowercase();
+    const INTERNAL_PHRASES: &[&str] = &[
+        "ok",
+        "done",
+        "success",
+        "completed",
+        "yes",
+        "no",
+        "完成",
+        "成功",
+        "已执行",
+        "执行完成",
+        "好的",
+        "command completed",
+        "success.",
+    ];
+    if INTERNAL_PHRASES.iter().any(|p| lower == *p || (lower.starts_with(p) && t.len() <= p.len() + 2)) {
+        return false;
+    }
+    if t.chars().all(|c| c.is_ascii_digit() || c.is_ascii_punctuation() || c.is_whitespace()) {
+        return false;
+    }
+    true
+}
+
+/// Build a single final delivery string from raw subtask results (no LLM). Only include publishable raw;
+/// process/internal lines are filtered out so they are not exposed as final delivery.
+fn fallback_finalize_from_raw(subtask_results: &[String]) -> String {
+    if subtask_results.is_empty() {
+        return String::new();
+    }
+    const MAX_FALLBACK_ITEMS: usize = 5;
+    let take = subtask_results.len().min(MAX_FALLBACK_ITEMS);
+    let slice = &subtask_results[subtask_results.len().saturating_sub(take)..];
+    let filtered: Vec<String> = slice
+        .iter()
+        .filter_map(|s| {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else if is_publishable_raw(t) {
+                Some(t.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    filtered.join("\n\n")
 }
 
 async fn synthesize_final_response(
@@ -1869,31 +2039,51 @@ async fn run_agent_with_loop(
         }
     }
 
-    if let Some(synthesized) =
-        synthesize_final_response(state, task, user_text, &loop_state).await?
+    // Fallback finalizer: when no respond was published, build delivery from raw (no extra LLM first).
+    // Only append when fallback is non-empty (publishable filter may leave nothing → then synthesize).
+    if loop_state.delivery_messages.is_empty() && !loop_state.subtask_results.is_empty() {
+        let fallback = fallback_finalize_from_raw(loop_state.subtask_results.as_slice());
+        if !fallback.trim().is_empty() {
+            append_delivery_message(
+                &task.task_id,
+                &mut loop_state.delivery_messages,
+                fallback,
+            );
+            info!(
+                "delivery fallback_from_raw task_id={} subtask_count={}",
+                task.task_id,
+                loop_state.subtask_results.len()
+            );
+        }
+    }
+
+    // Last resort: synthesize via chat when still no delivery (e.g. raw was empty or finalizer skipped).
+    if loop_state.delivery_messages.is_empty()
+        && should_synthesize_final_response(&loop_state)
     {
-        if loop_state
-            .delivery_messages
-            .last()
-            .is_none_or(|last| last.trim() != synthesized.trim())
+        if let Some(synthesized) =
+            synthesize_final_response(state, task, user_text, &loop_state).await?
         {
-            append_and_publish_progress_message(
-                state,
-                task,
+            append_delivery_message(
+                &task.task_id,
                 &mut loop_state.delivery_messages,
                 synthesized.clone(),
             );
+            info!(
+                "delivery fallback_from_synthesize task_id={}",
+                task.task_id
+            );
+            crate::append_subtask_result(
+                &mut loop_state.subtask_results,
+                loop_state.total_steps_executed + 1,
+                "respond(finalize)",
+                true,
+                &synthesized,
+            );
+            loop_state
+                .history_compact
+                .push("finalize respond".to_string());
         }
-        crate::append_subtask_result(
-            &mut loop_state.subtask_results,
-            loop_state.total_steps_executed + 1,
-            "respond(finalize)",
-            true,
-            &synthesized,
-        );
-        loop_state
-            .history_compact
-            .push("finalize respond".to_string());
     }
 
     let final_text = loop_state
@@ -1947,6 +2137,11 @@ fn build_resume_context_error(
     failed_action: &str,
     err: &str,
 ) -> String {
+    let completed_messages_for_ctx: Vec<String> = if delivery_messages.is_empty() {
+        subtask_results.to_vec()
+    } else {
+        delivery_messages.to_vec()
+    };
     let completed_steps = if failed_index <= 1 {
         Vec::new()
     } else {
@@ -1980,7 +2175,7 @@ fn build_resume_context_error(
         "goal": goal,
         "plan_steps": plan_steps,
         "completed_steps": completed_steps,
-        "completed_messages": delivery_messages,
+        "completed_messages": completed_messages_for_ctx,
         "failed_step": {
             "index": failed_index,
             "action": failed_action,

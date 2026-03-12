@@ -11,6 +11,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
+use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::config::AppConfig;
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
@@ -979,29 +980,52 @@ async fn send_whatsapp_media_by_id(
     Ok(())
 }
 
+/// Max characters per WhatsApp text message (conservative; platform limit ~4096).
+const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
+
 async fn send_whatsapp_text(state: &AppState, wa_id: &str, text: &str) -> anyhow::Result<()> {
     let url = format!(
         "{}/v23.0/{}/messages",
         state.api_base,
         state.phone_number_id.trim()
     );
-    let resp = state
-        .client
-        .post(&url)
-        .bearer_auth(state.access_token.trim())
-        .json(&json!({
-            "messaging_product": "whatsapp",
-            "to": wa_id,
-            "type": "text",
-            "text": { "body": text }
-        }))
-        .send()
-        .await
-        .context("send text message failed")?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("send text message http {}: {}", status, body));
+    let chunks = chunk_text_for_channel(text, WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let n = chunks.len();
+    if n > 1 {
+        info!(
+            "send_chunks channel=whatsapp wa_id={} original_len={} chunk_count={}",
+            wa_id,
+            text.len(),
+            n
+        );
+    }
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        let body = if n > 1 {
+            format!("（{}/{}）\n{}", i + 1, n, chunk)
+        } else {
+            chunk
+        };
+        if n > 1 {
+            info!("send_chunk channel=whatsapp wa_id={} index={} total={}", wa_id, i + 1, n);
+        }
+        let resp = state
+            .client
+            .post(&url)
+            .bearer_auth(state.access_token.trim())
+            .json(&json!({
+                "messaging_product": "whatsapp",
+                "to": wa_id,
+                "type": "text",
+                "text": { "body": body }
+            }))
+            .send()
+            .await
+            .context("send text message failed")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("send text message http {}: {}", status, body));
+        }
     }
     Ok(())
 }

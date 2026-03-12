@@ -1,3 +1,13 @@
+//! Intent routing and unified normalizer for ask tasks.
+//!
+//! **Ask main path:** Only `run_intent_normalizer` is used (resolved intent, resume_behavior,
+//! schedule_kind, needs_clarify, routed_mode in one LLM call).
+//!
+//! **Fallback only (do not wire to main path):** When normalizer did not provide a mode (e.g. parse
+//! failure), `route_request_mode` runs a legacy router LLM. Assets used solely by that path:
+//! `INTENT_ROUTER_*` / `INTENT_ROUTER_RULES_*`, `ROUTING_POLICY_*`, `RouteDecision`/`RouteDecisionOut`,
+//! `parse_route_decision`, and `route_request_mode` itself.
+
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{info, warn};
@@ -6,23 +16,22 @@ use crate::{
     llm_gateway, memory, routing_context, schedule_service, AppState, ClaimedTask, RoutedMode,
 };
 
+// --- Fallback router only (not used when normalizer provides mode) ---
 const INTENT_ROUTER_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/intent_router_prompt.md");
 const INTENT_ROUTER_PROMPT_PATH: &str = "prompts/intent_router_prompt.md";
 const INTENT_ROUTER_RULES_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/intent_router_rules.md");
 const INTENT_ROUTER_RULES_PATH: &str = "prompts/intent_router_rules.md";
-const CONTEXT_RESOLVER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/context_resolver_prompt.md");
-const CONTEXT_RESOLVER_PROMPT_PATH: &str = "prompts/context_resolver_prompt.md";
 const CLARIFY_QUESTION_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/clarify_question_prompt.md");
 const CLARIFY_QUESTION_PROMPT_PATH: &str = "prompts/clarify_question_prompt.md";
-const RESUME_FOLLOWUP_INTENT_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/resume_followup_intent_prompt.md");
-const RESUME_FOLLOWUP_INTENT_PROMPT_PATH: &str = "prompts/resume_followup_intent_prompt.md";
+const INTENT_NORMALIZER_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/vendors/default/intent_normalizer_prompt.md");
+const INTENT_NORMALIZER_PROMPT_PATH: &str = "prompts/intent_normalizer_prompt.md";
 const ROUTING_POLICY_PERSONA_PROMPT: &str =
     "Neutral routing policy classifier. Ignore style/persona preferences and optimize for correct intent resolution, clarification, and guard decisions.";
+// --- End fallback-only constants ---
 
 #[derive(Debug)]
 struct RouteDecision {
@@ -43,38 +52,6 @@ struct RouteDecisionOut {
     evidence_refs: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ContextResolverOut {
-    #[serde(default)]
-    resolved_user_intent: String,
-    #[serde(default)]
-    needs_clarify: bool,
-    #[serde(default)]
-    confidence: Option<f64>,
-    #[serde(default)]
-    reason: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResumeFollowupIntentOut {
-    #[serde(default)]
-    decision: String,
-    #[serde(default)]
-    reason: String,
-    #[serde(default)]
-    confidence: Option<f64>,
-    #[serde(default)]
-    bind_resume_context: bool,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ResumeFollowupDecision {
-    pub(crate) decision: String,
-    pub(crate) reason: String,
-    pub(crate) confidence: Option<f64>,
-    pub(crate) bind_resume_context: bool,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ContextResolution {
     pub(crate) resolved_user_intent: String,
@@ -83,41 +60,93 @@ pub(crate) struct ContextResolution {
     pub(crate) reason: String,
 }
 
-fn should_preserve_request_verbatim(user_request: &str) -> bool {
-    let trimmed = user_request.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    let explicit_english = lower.contains("in plain english")
-        || lower.contains("in english")
-        || lower.contains("reply in english");
-    explicit_english && trimmed.split_whitespace().count() >= 5
+/// Output of the unified intent normalizer (replaces resume_followup_intent + context_resolver + schedule_intent + intent_router in one LLM call).
+#[derive(Debug, Clone)]
+pub(crate) struct IntentNormalizerOutput {
+    pub(crate) resolved_user_intent: String,
+    pub(crate) resume_behavior: ResumeBehavior,
+    pub(crate) schedule_kind: ScheduleKind,
+    pub(crate) needs_clarify: bool,
+    pub(crate) reason: String,
+    pub(crate) confidence: f64,
+    /// Terminal mode: chat / act / ask_clarify / chat_act. Used to skip the separate router LLM.
+    pub(crate) routed_mode: RoutedMode,
 }
 
-pub(crate) async fn resolve_user_request_with_context(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResumeBehavior {
+    None,
+    ResumeExecute,
+    ResumeDiscuss,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScheduleKind {
+    None,
+    Create,
+    Update,
+    Delete,
+    Query,
+}
+
+#[derive(Debug, Deserialize)]
+struct IntentNormalizerOut {
+    #[serde(default)]
+    resolved_user_intent: String,
+    #[serde(default)]
+    resume_behavior: String,
+    #[serde(default)]
+    schedule_kind: String,
+    #[serde(default)]
+    needs_clarify: bool,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    confidence: f64,
+    #[serde(default)]
+    mode: String,
+}
+
+fn parse_resume_behavior(s: &str) -> ResumeBehavior {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "resume_execute" | "resume" => ResumeBehavior::ResumeExecute,
+        "resume_discuss" | "defer" => ResumeBehavior::ResumeDiscuss,
+        _ => ResumeBehavior::None,
+    }
+}
+
+fn parse_schedule_kind(s: &str) -> ScheduleKind {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "create" => ScheduleKind::Create,
+        "update" | "pause" | "resume" => ScheduleKind::Update,
+        "delete" => ScheduleKind::Delete,
+        "query" | "list" => ScheduleKind::Query,
+        _ => ScheduleKind::None,
+    }
+}
+
+/// Unified intent normalizer: one LLM call for resume decision + intent completion + schedule classification + needs_clarify + routed_mode.
+pub(crate) async fn run_intent_normalizer(
     state: &AppState,
     task: &ClaimedTask,
     user_request: &str,
-) -> ContextResolution {
+    resume_context: Option<&Value>,
+    binding_context: Option<&Value>,
+    now_iso: &str,
+    timezone: &str,
+    schedule_rules: &str,
+) -> IntentNormalizerOutput {
     let req = user_request.trim();
-    if req.is_empty() {
-        if should_preserve_request_verbatim(req) {
-            return ContextResolution {
-                resolved_user_intent: req.to_string(),
-                needs_clarify: false,
-                confidence: Some(0.99),
-                reason: "hard_rule_preserve_explicit_language_request".to_string(),
-            };
-        }
-        return ContextResolution {
-            resolved_user_intent: String::new(),
-            needs_clarify: false,
-            confidence: None,
-            reason: String::new(),
-        };
-    }
-    let recent_execution_context = routing_context::build_recent_execution_context(state, task, 8);
+    let resume_context_str = resume_context
+        .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
+        .filter(|s| !s.is_empty() && s != "{}")
+        .unwrap_or_else(|| "<none>".to_string());
+    let binding_context_str = binding_context
+        .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
+        .filter(|s| !s.is_empty() && s != "{}")
+        .unwrap_or_else(|| "<none>".to_string());
+    let recent_execution_context =
+        routing_context::build_recent_execution_context(state, task, 8);
     let memory_context = if state.memory.route_memory_enabled {
         let (long_term_summary, preferences, recalled) =
             memory::service::recall_memory_context_parts(
@@ -141,19 +170,29 @@ pub(crate) async fn resolve_user_request_with_context(
     };
     let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
         state,
-        CONTEXT_RESOLVER_PROMPT_PATH,
-        CONTEXT_RESOLVER_PROMPT_TEMPLATE,
+        INTENT_NORMALIZER_PROMPT_PATH,
+        INTENT_NORMALIZER_PROMPT_TEMPLATE,
     );
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
+            ("__RESUME_CONTEXT__", &resume_context_str),
+            ("__BINDING_CONTEXT__", &binding_context_str),
             ("__RECENT_EXECUTION_CONTEXT__", &recent_execution_context),
             ("__MEMORY_CONTEXT__", &memory_context),
+            ("__NOW__", now_iso),
+            ("__TIMEZONE__", timezone),
+            ("__SCHEDULE_RULES__", schedule_rules),
             ("__REQUEST__", req),
         ],
     );
-    crate::log_prompt_render(&task.task_id, "context_resolver_prompt", &prompt_file, None);
+    crate::log_prompt_render(
+        &task.task_id,
+        "intent_normalizer_prompt",
+        &prompt_file,
+        None,
+    );
     let llm_out = match llm_gateway::run_with_fallback_with_prompt_file(
         state,
         task,
@@ -165,133 +204,81 @@ pub(crate) async fn resolve_user_request_with_context(
         Ok(v) => v,
         Err(err) => {
             warn!(
-                "resolve_user_request_with_context llm failed, fallback original: task_id={} err={}",
+                "intent_normalizer llm failed, fallback pass-through: task_id={} err={}",
                 task.task_id, err
             );
-            return ContextResolution {
+            return IntentNormalizerOutput {
                 resolved_user_intent: req.to_string(),
+                resume_behavior: ResumeBehavior::None,
+                schedule_kind: ScheduleKind::None,
                 needs_clarify: false,
-                confidence: None,
                 reason: "llm_failed".to_string(),
+                confidence: 0.0,
+                routed_mode: RoutedMode::AskClarify,
             };
         }
     };
-    let parsed = crate::parse_llm_json_extract_then_raw::<ContextResolverOut>(&llm_out);
+    let trimmed = llm_out.trim();
+    let parsed_raw = serde_json::from_str::<IntentNormalizerOut>(trimmed).ok();
+    let raw_parse_ok = parsed_raw.is_some();
+    let parsed = parsed_raw.or_else(|| {
+        crate::extract_first_json_object_any(&llm_out)
+            .and_then(|json| serde_json::from_str::<IntentNormalizerOut>(&json).ok())
+    });
+    if !raw_parse_ok && parsed.is_some() {
+        info!(
+            "{} intent_normalizer task_id={} parse_recovery=fenced_json input={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            crate::truncate_for_log(req)
+        );
+    }
     if let Some(out) = parsed {
         let resolved = out.resolved_user_intent.trim();
-        let confidence = out.confidence.unwrap_or(-1.0);
+        let resume_behavior = parse_resume_behavior(&out.resume_behavior);
+        let schedule_kind = parse_schedule_kind(&out.schedule_kind);
+        let confidence = out.confidence.clamp(0.0, 1.0);
+        let routed_mode = parse_mode_text(&out.mode).unwrap_or(RoutedMode::AskClarify);
         info!(
-            "{} resolve_user_request_with_context task_id={} needs_clarify={} confidence={} reason={} resolved={}",
+            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} mode={:?} needs_clarify={} reason={} confidence={}",
             crate::highlight_tag("routing"),
             task.task_id,
+            crate::truncate_for_log(req),
+            crate::truncate_for_log(resolved),
+            resume_behavior,
+            schedule_kind,
+            routed_mode,
             out.needs_clarify,
-            confidence,
             crate::truncate_for_log(&out.reason),
-            crate::truncate_for_log(resolved)
+            confidence
         );
-        if !resolved.is_empty() {
-            return ContextResolution {
-                resolved_user_intent: resolved.to_string(),
-                needs_clarify: out.needs_clarify,
-                confidence: out.confidence.map(|c| c.clamp(0.0, 1.0)),
-                reason: out.reason,
-            };
-        }
-    } else {
-        warn!(
-            "resolve_user_request_with_context parse failed, fallback original: task_id={} llm_out={}",
-            task.task_id,
-            crate::truncate_for_log(&llm_out)
-        );
-    }
-    ContextResolution {
-        resolved_user_intent: req.to_string(),
-        needs_clarify: false,
-        confidence: None,
-        reason: "parse_failed".to_string(),
-    }
-}
-
-pub(crate) async fn classify_resume_followup_intent(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_request: &str,
-    resume_context: &Value,
-    binding_context: &Value,
-) -> ResumeFollowupDecision {
-    let resume_context_json =
-        serde_json::to_string_pretty(resume_context).unwrap_or_else(|_| resume_context.to_string());
-    let binding_context_json = serde_json::to_string_pretty(binding_context)
-        .unwrap_or_else(|_| binding_context.to_string());
-    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
-        state,
-        RESUME_FOLLOWUP_INTENT_PROMPT_PATH,
-        RESUME_FOLLOWUP_INTENT_PROMPT_TEMPLATE,
-    );
-    let prompt = crate::render_prompt_template(
-        &prompt_template,
-        &[
-            ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
-            ("__RESUME_CONTEXT__", &resume_context_json),
-            ("__BINDING_CONTEXT__", &binding_context_json),
-            ("__REQUEST__", user_request.trim()),
-        ],
-    );
-    crate::log_prompt_render(
-        &task.task_id,
-        "resume_followup_intent_prompt",
-        &prompt_file,
-        None,
-    );
-    let llm_out =
-        match llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file)
-            .await
-        {
-            Ok(v) => v,
-            Err(err) => {
-                warn!(
-                    "classify_resume_followup_intent llm failed, fallback defer: task_id={} err={}",
-                    task.task_id, err
-                );
-                return ResumeFollowupDecision {
-                    decision: "defer".to_string(),
-                    reason: "llm_failed".to_string(),
-                    confidence: None,
-                    bind_resume_context: false,
-                };
-            }
-        };
-    let parsed = crate::parse_llm_json_extract_then_raw::<ResumeFollowupIntentOut>(&llm_out);
-    if let Some(out) = parsed {
-        let decision = match out.decision.trim().to_ascii_lowercase().as_str() {
-            "resume" | "abandon" | "defer" => out.decision.trim().to_ascii_lowercase(),
-            _ => "defer".to_string(),
-        };
-        info!(
-            "{} classify_resume_followup_intent task_id={} decision={} confidence={} reason={}",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            decision,
-            out.confidence.unwrap_or(-1.0),
-            crate::truncate_for_log(&out.reason)
-        );
-        return ResumeFollowupDecision {
-            decision,
+        return IntentNormalizerOutput {
+            resolved_user_intent: if resolved.is_empty() {
+                req.to_string()
+            } else {
+                resolved.to_string()
+            },
+            resume_behavior,
+            schedule_kind,
+            needs_clarify: out.needs_clarify,
             reason: out.reason,
-            confidence: out.confidence.map(|c| c.clamp(0.0, 1.0)),
-            bind_resume_context: out.bind_resume_context,
+            confidence,
+            routed_mode,
         };
     }
     warn!(
-        "classify_resume_followup_intent parse failed, fallback defer: task_id={} raw={}",
+        "intent_normalizer parse failed, fallback pass-through: task_id={} raw={}",
         task.task_id,
         crate::truncate_for_log(&llm_out)
     );
-    ResumeFollowupDecision {
-        decision: "defer".to_string(),
+    IntentNormalizerOutput {
+        resolved_user_intent: req.to_string(),
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        needs_clarify: false,
         reason: "parse_failed".to_string(),
-        confidence: None,
-        bind_resume_context: false,
+        confidence: 0.0,
+        routed_mode: RoutedMode::AskClarify,
     }
 }
 
@@ -343,11 +330,18 @@ pub(crate) async fn generate_clarify_question(
     }
 }
 
+/// **[FALLBACK]** Used only when normalizer did not provide a mode (e.g. JSON parse failure or legacy entry).
+/// Ask main path always passes `Some(normalizer_out.routed_mode)`; this must not be called when normalizer
+/// has already run. Do not expand usage; do not wire as primary path.
 pub(crate) async fn route_request_mode(
     state: &AppState,
     task: &ClaimedTask,
     user_request: &str,
 ) -> RoutedMode {
+    info!(
+        "route_request_mode fallback path: normalizer did not provide mode, using legacy router LLM task_id={}",
+        task.task_id
+    );
     let recent_execution_context = routing_context::build_recent_execution_context(state, task, 5);
     let (memory_context, _log_long_term, _log_prefs, _log_recalled) =
         if state.memory.route_memory_enabled {
@@ -459,6 +453,7 @@ pub(crate) async fn route_request_mode(
     RoutedMode::AskClarify
 }
 
+/// Used only by fallback `route_request_mode` to parse legacy router LLM output.
 fn parse_route_decision(raw: &str) -> Option<RouteDecision> {
     let value = crate::parse_llm_json_extract_then_raw::<Value>(raw);
     if let Some(v) = value {
@@ -488,6 +483,7 @@ fn parse_route_decision(raw: &str) -> Option<RouteDecision> {
     })
 }
 
+/// Parses normalizer/legacy router mode string. chat_act is secondary: only when user explicitly asked for action + narrated summary.
 fn parse_mode_text(raw: &str) -> Option<RoutedMode> {
     let mode_text = raw.trim().to_ascii_lowercase();
     if mode_text.contains("ask_clarify") {

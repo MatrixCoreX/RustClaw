@@ -5,11 +5,30 @@
 # 桌面/自启动时 PATH 可能只有 /usr/bin，先保证能找到 python3
 export PATH="/usr/bin:/usr/local/bin:${PATH:-/usr/bin:/bin}"
 
-# 未设置 DISPLAY 时用 :0（本机默认显示器），并设置 X 鉴权
+# 未设置 DISPLAY 时用 :0（本机默认显示器），并设置 X 鉴权（开机自启动时常见）
 if [[ -z "${DISPLAY}" ]]; then
   export DISPLAY=:0
   export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
-  sleep 2
+  # 开机自启动时桌面可能尚未就绪，先等 8 秒再检测
+  sleep 8
+  # 再轮询直到 Tk 能连上 X（最多约 30 秒）
+  wait_sec=0
+  while [ "$wait_sec" -lt 30 ]; do
+    if /usr/bin/env python3 -c "
+import os
+os.environ.setdefault('DISPLAY', os.environ.get('DISPLAY', ':0'))
+import tkinter as tk
+try:
+    r = tk.Tk()
+    r.destroy()
+except Exception:
+    exit(1)
+" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+    wait_sec=$((wait_sec + 1))
+  done
 else
   export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 fi

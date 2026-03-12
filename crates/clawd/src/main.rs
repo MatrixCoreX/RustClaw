@@ -3,7 +3,7 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::IsTerminal;
 use std::io::Write as IoWrite;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path as AxumPath, State};
@@ -14,6 +14,7 @@ use claw_core::config::{
     AppConfig, ChannelBindingConfig, CommandIntentConfig, LlmProviderConfig, MaintenanceConfig,
     MemoryConfig, PersonaConfig, RoutingConfig, ScheduleConfig, ToolsConfig,
 };
+use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 use claw_core::hard_rules::main_flow::load_main_flow_rules;
 use claw_core::hard_rules::trade as hard_trade;
 use claw_core::hard_rules::trade::CompiledTradeRules;
@@ -36,6 +37,7 @@ use tracing::{debug, error, info, info_span, warn, Instrument};
 use uuid::Uuid;
 
 mod agent_engine;
+mod channel_send;
 mod execution_adapters;
 mod http;
 mod intent_router;
@@ -79,6 +81,132 @@ const SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT: &str =
 const SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT: &str =
     include_str!("../../../prompts/vendors/default/schedule_intent_rules.md");
 
+/// Phase 4: 统一 skill 视图重建结果，供启动与 reload 复用。
+struct SkillViews {
+    registry: Option<Arc<SkillsRegistry>>,
+    execution_skills: HashSet<String>,
+    planner_visible: Vec<String>,
+}
+
+/// Phase 4 review: 原子快照，reload 时整体替换，避免混合视图。
+pub(crate) struct SkillViewsSnapshot {
+    pub registry: Option<Arc<SkillsRegistry>>,
+    pub skills_list: Arc<HashSet<String>>,
+    pub planner_visible_skills: Arc<Vec<String>>,
+}
+
+/// Phase 4: 从 registry 路径 + skill_switches 重建 skill 视图。无 registry 时用 initial_skills_list（启动用）；reload 时 registry_path 必设。
+fn build_skill_views(
+    workspace_root: &Path,
+    registry_path: Option<&str>,
+    skill_switches: &HashMap<String, bool>,
+    initial_skills_list: &[String],
+) -> Result<SkillViews, String> {
+    let registry: Option<Arc<SkillsRegistry>> = if let Some(p) = registry_path {
+        let path = if Path::new(p).is_absolute() {
+            PathBuf::from(p)
+        } else {
+            workspace_root.join(p)
+        };
+        match SkillsRegistry::load_from_path(&path) {
+            Ok(reg) => Some(Arc::new(reg)),
+            Err(e) => return Err(format!("registry load failed: {}: {}", path.display(), e)),
+        }
+    } else {
+        None
+    };
+
+    // 显式 false 的 canonical 集合：用于覆盖 core-floor，使 skill_switches=false 真正生效
+    let explicitly_disabled: HashSet<String> = skill_switches
+        .iter()
+        .filter(|(_, &on)| !on)
+        .map(|(skill, _)| {
+            registry
+                .as_ref()
+                .and_then(|r| r.resolve_canonical(skill).map(String::from))
+                .unwrap_or_else(|| canonical_skill_name(skill).to_string())
+        })
+        .collect();
+
+    let mut enabled: HashSet<String> = if let Some(ref reg) = registry {
+        reg.enabled_names().into_iter().collect()
+    } else {
+        initial_skills_list
+            .iter()
+            .map(|s| canonical_skill_name(s).to_string())
+            .collect()
+    };
+    for (skill, is_enabled) in skill_switches {
+        let canonical = registry
+            .as_ref()
+            .and_then(|r| r.resolve_canonical(skill).map(String::from))
+            .unwrap_or_else(|| canonical_skill_name(skill).to_string());
+        if *is_enabled {
+            enabled.insert(canonical);
+        } else {
+            enabled.remove(&canonical);
+        }
+    }
+    // core-floor 仅作默认保底；显式 skill_switches=false 可覆盖，与 config 注释「false = 强制关闭」一致
+    for s in claw_core::config::core_skills_always_enabled() {
+        let c = canonical_skill_name(s).to_string();
+        if !explicitly_disabled.contains(&c) {
+            enabled.insert(c);
+        }
+    }
+    // planner_visible 与 execution 一致：同一 enabled 集合（含 skill_switches + core floor），避免 planner 看到 execution 已关的技能
+    let mut planner_visible: Vec<String> = enabled.iter().cloned().collect();
+    planner_visible.sort_unstable();
+
+    Ok(SkillViews {
+        registry,
+        execution_skills: enabled,
+        planner_visible,
+    })
+}
+
+/// Phase 4: 重载 skill 视图并更新 AppState。从 config_path_for_reload 重读 config，取最新 skills.registry_path / skill_switches / skills_list，再重建视图。失败不更新状态，返回 Err。
+pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsResult, String> {
+    info!("reload_skill_views: started config_path={}", state.config_path_for_reload);
+    let config = AppConfig::load(&state.config_path_for_reload)
+        .map_err(|e| format!("reload_skill_views: load config failed: {}", e))?;
+    let registry_path = config.skills.registry_path.as_deref();
+    let path_display = registry_path.unwrap_or("(none)");
+    let views = build_skill_views(
+        &state.workspace_root,
+        registry_path,
+        &config.skills.skill_switches,
+        &config.skills.skills_list,
+    )?;
+    let registry_entries = views.registry.as_ref().map(|r| r.all_names().len()).unwrap_or(0);
+    let execution_count = views.execution_skills.len();
+    let planner_count = views.planner_visible.len();
+
+    let snapshot = SkillViewsSnapshot {
+        registry: views.registry,
+        skills_list: Arc::new(views.execution_skills),
+        planner_visible_skills: Arc::new(views.planner_visible),
+    };
+    *state.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
+
+    info!(
+        "reload_skill_views: success path={} registry_entries={} execution_skills_count={} planner_visible_count={}",
+        path_display, registry_entries, execution_count, planner_count
+    );
+    Ok(ReloadSkillViewsResult {
+        registry_entries,
+        execution_skills_count: execution_count,
+        planner_visible_count: planner_count,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ReloadSkillViewsResult {
+    pub registry_entries: usize,
+    pub execution_skills_count: usize,
+    pub planner_visible_count: usize,
+}
+
 #[derive(Clone)]
 struct AppState {
     started_at: Instant,
@@ -87,9 +215,8 @@ struct AppState {
     llm_providers: Vec<Arc<LlmProviderRuntime>>,
     skill_timeout_seconds: u64,
     skill_runner_path: PathBuf,
-    skills_list: Arc<HashSet<String>>,
-    #[allow(dead_code)] // reserved for future use (e.g. capability view / UI)
-    configured_skills: Arc<HashSet<String>>,
+    /// 原子快照（可重载）。reload 时整体替换，读用 get_skill_views_snapshot()。
+    skill_views_snapshot: Arc<RwLock<Arc<SkillViewsSnapshot>>>,
     skill_semaphore: Arc<Semaphore>,
     rate_limiter: Arc<Mutex<RateLimiter>>,
     maintenance: MaintenanceConfig,
@@ -116,6 +243,78 @@ struct AppState {
     whatsapp_web_bridge_base_url: String,
     future_adapters_enabled: Arc<Vec<String>>,
     http_client: Client,
+    /// reload 时用：主配置路径，reload 时从此文件重读 skills.registry_path / skill_switches / skills_list
+    config_path_for_reload: String,
+    /// 兼容保留：仅启动时写入，reload 不再使用（改由重读 config 得到）
+    #[allow(dead_code)]
+    registry_path_for_reload: Option<String>,
+    #[allow(dead_code)]
+    skill_switches_for_reload: Arc<HashMap<String, bool>>,
+    #[allow(dead_code)]
+    initial_skills_list_for_reload: Vec<String>,
+}
+
+impl AppState {
+    fn snapshot(&self) -> Arc<SkillViewsSnapshot> {
+        self.skill_views_snapshot.read().unwrap().clone()
+    }
+    pub(crate) fn get_skills_registry(&self) -> Option<Arc<SkillsRegistry>> {
+        self.snapshot().registry.clone()
+    }
+    pub(crate) fn get_skills_list(&self) -> Arc<HashSet<String>> {
+        self.snapshot().skills_list.clone()
+    }
+    pub(crate) fn get_planner_visible_skills(&self) -> Arc<Vec<String>> {
+        self.snapshot().planner_visible_skills.clone()
+    }
+
+    /// 解析为 canonical 技能名：有 registry 时先查 registry，否则走代码内 canonical_skill_name。
+    pub(crate) fn resolve_canonical_skill_name(&self, name: &str) -> String {
+        if let Some(ref r) = self.get_skills_registry() {
+            if let Some(c) = r.resolve_canonical(name) {
+                return c.to_string();
+            }
+        }
+        canonical_skill_name(name).to_string()
+    }
+
+    /// 是否 builtin 技能：有 registry 时按 kind，否则走静态白名单。
+    pub(crate) fn is_builtin_skill(&self, name: &str) -> bool {
+        let canonical = self.resolve_canonical_skill_name(name);
+        if let Some(ref r) = self.get_skills_registry() {
+            return r.is_builtin(&canonical);
+        }
+        is_builtin_skill_name(&canonical)
+    }
+
+    /// 该技能在 registry 中的 prompt 文件路径；无 registry 或未配置则返回 None（Phase 2 可由此处接动态加载）。
+    pub(crate) fn skill_prompt_file(&self, canonical_name: &str) -> Option<String> {
+        self.get_skills_registry()
+            .as_ref()
+            .and_then(|r| r.prompt_file(canonical_name).map(String::from))
+    }
+
+    /// Phase 3: 执行分发用。有 registry 时以 registry.kind 为准；无 registry 时兼容 fallback：builtin 白名单为 Builtin，否则 Runner。
+    pub(crate) fn skill_kind_for_dispatch(&self, canonical_name: &str) -> SkillKind {
+        if let Some(ref r) = self.get_skills_registry() {
+            if let Some(entry) = r.get(canonical_name) {
+                return entry.kind;
+            }
+        }
+        if is_builtin_skill_name(canonical_name) {
+            SkillKind::Builtin
+        } else {
+            SkillKind::Runner
+        }
+    }
+
+    /// Phase 5: Runner 执行名；有 registry 时用 registry.runner_name，否则 canonical。
+    pub(crate) fn runner_name_for_skill(&self, canonical_name: &str) -> String {
+        self.get_skills_registry()
+            .as_ref()
+            .map(|r| r.runner_name(canonical_name))
+            .unwrap_or_else(|| canonical_skill_name(canonical_name).to_string())
+    }
 }
 
 #[derive(Clone)]
@@ -1259,32 +1458,24 @@ async fn main() -> anyhow::Result<()> {
         config.whatsapp_cloud.phone_number_id.clone()
     };
 
-    let mut enabled_skills: HashSet<String> = config
-        .skills
-        .skills_list
-        .iter()
-        .map(|skill| canonical_skill_name(skill).to_string())
-        .collect();
-    let mut configured_skills = enabled_skills.clone();
-    for (skill, is_enabled) in &config.skills.skill_switches {
-        let canonical = canonical_skill_name(skill);
-        configured_skills.insert(canonical.to_string());
-        if *is_enabled {
-            enabled_skills.insert(canonical.to_string());
-        } else {
-            enabled_skills.remove(canonical);
-        }
-    }
-    for s in claw_core::config::core_skills_always_enabled() {
-        enabled_skills.insert(canonical_skill_name(s).to_string());
-        configured_skills.insert(canonical_skill_name(s).to_string());
-    }
-    let mut enabled_skills_for_log: Vec<String> = enabled_skills.iter().cloned().collect();
-    enabled_skills_for_log.sort();
+    // Phase 4: 统一 skill 视图重建（启动与 reload 复用）
+    let views = build_skill_views(
+        &workspace_root,
+        config.skills.registry_path.as_deref(),
+        &config.skills.skill_switches,
+        &config.skills.skills_list,
+    )
+    .map_err(|e| {
+        error!("startup: build_skill_views failed: {}", e);
+        anyhow::anyhow!(e)
+    })?;
+    let registry_entries = views.registry.as_ref().map(|r| r.all_names().len()).unwrap_or(0);
     info!(
-        "enabled skills resolved count={} skills={}",
-        enabled_skills_for_log.len(),
-        enabled_skills_for_log.join(", ")
+        "skills registry path={} entries={} execution_count={} planner_visible_count={}",
+        config.skills.registry_path.as_deref().unwrap_or("(none)"),
+        registry_entries,
+        views.execution_skills.len(),
+        views.planner_visible.len()
     );
 
     let state = AppState {
@@ -1294,8 +1485,11 @@ async fn main() -> anyhow::Result<()> {
         llm_providers,
         skill_timeout_seconds: config.skills.skill_timeout_seconds,
         skill_runner_path: effective_skill_runner_path,
-        skills_list: Arc::new(enabled_skills),
-        configured_skills: Arc::new(configured_skills),
+        skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+            registry: views.registry,
+            skills_list: Arc::new(views.execution_skills),
+            planner_visible_skills: Arc::new(views.planner_visible),
+        }))),
         skill_semaphore: Arc::new(Semaphore::new(config.skills.skill_max_concurrency.max(1))),
         rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
             config.limits.global_rpm,
@@ -1332,6 +1526,10 @@ async fn main() -> anyhow::Result<()> {
                 .collect(),
         ),
         http_client: Client::new(),
+        config_path_for_reload: "configs/config.toml".to_string(),
+        registry_path_for_reload: config.skills.registry_path.clone(),
+        skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
+        initial_skills_list_for_reload: config.skills.skills_list.clone(),
     };
 
     spawn_worker(
@@ -1357,6 +1555,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/tasks", post(submit_task))
         .route("/tasks/:task_id", get(get_task))
         .route("/tasks/cancel", post(cancel_tasks))
+        .route("/admin/reload-skills", post(reload_skills_handler))
         .with_state(state.clone());
 
     let ui_service =
@@ -1733,7 +1932,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
-            let injected_resume_followup_decision = maybe_bind_recent_failed_resume_context(
+            let _ = maybe_bind_recent_failed_resume_context(
                 state,
                 &task,
                 &mut payload,
@@ -1750,55 +1949,40 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .unwrap_or("");
             let main_rules = main_flow_rules(state);
             let is_resume_continue = is_resume_continue_source(main_rules, source);
-            let resume_followup_decision = if is_resume_continue {
-                if let Some(decision) = injected_resume_followup_decision.clone() {
-                    Some(decision)
-                } else if payload.get("resume_context").is_some()
-                    && payload.get("resume_user_text").is_some()
-                {
-                    Some(intent_router::ResumeFollowupDecision {
-                        decision: "resume".to_string(),
-                        reason: "resume_context_bound".to_string(),
-                        confidence: Some(1.0),
-                        bind_resume_context: true,
-                    })
-                } else {
-                    let resume_context = payload
-                        .get("resume_context")
-                        .cloned()
-                        .unwrap_or_else(|| json!({}));
-                    Some(
-                        intent_router::classify_resume_followup_intent(
-                            state,
-                            &task,
-                            &prompt,
-                            &resume_context,
-                            &json!({
-                                "source": "resume_continue_source",
-                                "failed_resume_context_ts": Value::Null,
-                                "has_newer_successful_ask_after_failed_task": false,
-                            }),
-                        )
-                        .await,
-                    )
-                }
+            // Unified intent normalizer: one LLM call for resume + context resolution + schedule classification (replaces resume_followup_intent -> context_resolver -> schedule_intent).
+            let (now_iso, timezone_str, schedule_rules) =
+                schedule_service::schedule_context_for_normalizer(state);
+            let resume_context_opt = if is_resume_continue {
+                payload.get("resume_context").map(|v| v.clone())
             } else {
                 None
             };
-            let resume_should_apply_context = resume_followup_decision
-                .as_ref()
-                .map(|d| d.decision == "resume")
-                .unwrap_or(false);
-            let resume_should_discuss_context = resume_followup_decision
-                .as_ref()
-                .map(|d| d.decision == "defer")
-                .unwrap_or(false);
-            let runtime_prompt = if is_resume_continue && resume_should_apply_context {
+            let binding_context_json = json!({
+                "source": "resume_continue_source",
+                "failed_resume_context_ts": Value::Null,
+                "has_newer_successful_ask_after_failed_task": false,
+            });
+            let normalizer_out = intent_router::run_intent_normalizer(
+                state,
+                &task,
+                prompt,
+                resume_context_opt.as_ref(),
+                Some(&binding_context_json),
+                &now_iso,
+                &timezone_str,
+                &schedule_rules,
+            )
+            .await;
+            let resume_should_apply_context = is_resume_continue
+                && normalizer_out.resume_behavior == intent_router::ResumeBehavior::ResumeExecute;
+            let resume_should_discuss_context = is_resume_continue
+                && normalizer_out.resume_behavior == intent_router::ResumeBehavior::ResumeDiscuss;
+            let runtime_prompt = if resume_should_apply_context {
                 build_resume_continue_execute_prompt(state, &payload, prompt)
-            } else if is_resume_continue && resume_should_discuss_context {
+            } else if resume_should_discuss_context {
                 build_resume_followup_discussion_prompt(state, &payload, prompt)
             } else {
-                prompt.to_string()
+                normalizer_out.resolved_user_intent.clone()
             };
             info!(
                 "worker_once: ask received_message task_id={} user_id={} chat_id={} text={}",
@@ -1989,19 +2173,12 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             }
             let direct_resume_execution = is_resume_continue && resume_should_apply_context;
             let direct_resume_discussion = is_resume_continue && resume_should_discuss_context;
-            let context_resolution = if direct_resume_execution || direct_resume_discussion {
-                intent_router::ContextResolution {
-                    resolved_user_intent: runtime_prompt.clone(),
-                    needs_clarify: false,
-                    confidence: Some(1.0),
-                    reason: if direct_resume_execution {
-                        "resume_context_execute".to_string()
-                    } else {
-                        "resume_context_followup_defer".to_string()
-                    },
-                }
-            } else {
-                intent_router::resolve_user_request_with_context(state, &task, &runtime_prompt).await
+            // context_resolution from normalizer output (no second LLM for context_resolver).
+            let context_resolution = intent_router::ContextResolution {
+                resolved_user_intent: runtime_prompt.clone(),
+                needs_clarify: normalizer_out.needs_clarify,
+                confidence: Some(normalizer_out.confidence),
+                reason: normalizer_out.reason.clone(),
             };
             let resolved_prompt = context_resolution.resolved_user_intent.clone();
             info!(
@@ -2059,9 +2236,8 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .iter()
                 .any(|s| s == &source.to_ascii_lowercase());
 
-            let low_confidence = context_resolution.confidence.unwrap_or(0.0)
-                < main_flow_rules(state).context_low_confidence_threshold;
-            let force_clarify = context_resolution.needs_clarify && low_confidence;
+            // needs_clarify is the main signal: if normalizer says clarify, we clarify. confidence is for logging only.
+            let force_clarify = context_resolution.needs_clarify;
 
             let result = if force_clarify {
                 let clarify = intent_router::generate_clarify_question(
@@ -2095,7 +2271,9 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             } else if direct_resume_execution {
                 agent_engine::run_agent_with_tools(state, &task, &prompt_with_memory, &resolved_prompt)
                     .await
-            } else if !is_resume_continue {
+            } else if !is_resume_continue
+                && normalizer_out.schedule_kind != intent_router::ScheduleKind::None
+            {
                 if let Ok(Some(schedule_reply)) =
                     intent_router::try_handle_schedule_request(state, &task, &resolved_prompt).await
                 {
@@ -2134,8 +2312,6 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     return Ok(());
                 }
                 if classifier_direct_mode && !resume_should_discuss_context {
-                    // Classifier-style sub-requests (like telegram voice mode intent detection)
-                    // need raw label outputs, so bypass chat response wrapping.
                     log_prompt_render(
                         &task.task_id,
                         "classifier_direct",
@@ -2150,76 +2326,21 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     )
                     .await
                     .map(|s| AskReply::llm(s.trim().to_string()))
+                    .map_err(|e| e.to_string())
                 } else {
-                    let routed_mode = if resume_should_discuss_context {
-                        RoutedMode::Chat
-                    } else if agent_mode {
-                        intent_router::route_request_mode(state, &task, &resolved_prompt).await
-                    } else {
-                        RoutedMode::Chat
-                    };
-                    info!(
-                    "{} worker_once: ask task_id={} routed_mode={:?} agent_mode={}",
-                    highlight_tag("routing"),
-                        task.task_id, routed_mode, agent_mode
-                    );
-
-                    match routed_mode {
-                        RoutedMode::Chat => {
-                            let (chat_prompt_template, chat_prompt_file) = load_prompt_template_for_state(
-                                state,
-                                CHAT_RESPONSE_PROMPT_PATH,
-                                CHAT_RESPONSE_PROMPT_TEMPLATE,
-                            );
-                            log_prompt_render(
-                                &task.task_id,
-                                "chat_response_prompt",
-                                &chat_prompt_file,
-                                None,
-                            );
-                            let chat_prompt = render_prompt_template(
-                                &chat_prompt_template,
-                                &[
-                                    ("__PERSONA_PROMPT__", &state.persona_prompt),
-                                    ("__CONTEXT__", &chat_prompt_context),
-                                    ("__REQUEST__", &resolved_prompt),
-                                ],
-                            );
-                            llm_gateway::run_with_fallback_with_prompt_file(
-                                state,
-                                &task,
-                                &chat_prompt,
-                                &chat_prompt_file,
-                            )
-                                .await
-                                .map(AskReply::llm)
-                        }
-                        RoutedMode::Act => {
-                            agent_engine::run_agent_with_tools(state, &task, &prompt_with_memory, &resolved_prompt)
-                                .await
-                        }
-                        RoutedMode::ChatAct => {
-                            let chat_act_goal = format!(
-                                "{}\n\nMode hint: chat_act. Complete required actions first, then return a concise user-facing reply that confirms results naturally.",
-                                prompt_with_memory
-                            );
-                            agent_engine::run_agent_with_tools(state, &task, &chat_act_goal, &resolved_prompt).await
-                        }
-                        RoutedMode::AskClarify => {
-                            let clarify = intent_router::generate_clarify_question(
-                                state,
-                                &task,
-                                &resolved_prompt,
-                                "router_selected_ask_clarify",
-                            )
-                            .await;
-                            Ok(AskReply::non_llm(clarify))
-                        }
-                    }
+                    execute_ask_routed(
+                        state,
+                        &task,
+                        &chat_prompt_context,
+                        &prompt_with_memory,
+                        &resolved_prompt,
+                        agent_mode,
+                        resume_should_discuss_context,
+                        Some(normalizer_out.routed_mode),
+                    )
+                    .await
                 }
             } else if classifier_direct_mode {
-                // Classifier-style sub-requests (like telegram voice mode intent detection)
-                // need raw label outputs, so bypass chat response wrapping.
                 log_prompt_render(
                     &task.task_id,
                     "classifier_direct",
@@ -2232,72 +2353,21 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     &resolved_prompt,
                     "prompts/classifier_direct.md",
                 )
-                    .await
-                    .map(|s| AskReply::llm(s.trim().to_string()))
+                .await
+                .map(|s| AskReply::llm(s.trim().to_string()))
+                .map_err(|e| e.to_string())
             } else {
-                let routed_mode = if agent_mode {
-                    intent_router::route_request_mode(state, &task, &resolved_prompt).await
-                } else {
-                    RoutedMode::Chat
-                };
-                info!(
-                "{} worker_once: ask task_id={} routed_mode={:?} agent_mode={}",
-                highlight_tag("routing"),
-                    task.task_id, routed_mode, agent_mode
-                );
-
-                match routed_mode {
-                    RoutedMode::Chat => {
-                        let (chat_prompt_template, chat_prompt_file) = load_prompt_template_for_state(
-                            state,
-                            CHAT_RESPONSE_PROMPT_PATH,
-                            CHAT_RESPONSE_PROMPT_TEMPLATE,
-                        );
-                        log_prompt_render(
-                            &task.task_id,
-                            "chat_response_prompt",
-                            &chat_prompt_file,
-                            None,
-                        );
-                        let chat_prompt = render_prompt_template(
-                            &chat_prompt_template,
-                            &[
-                                ("__PERSONA_PROMPT__", &state.persona_prompt),
-                                ("__CONTEXT__", &chat_prompt_context),
-                                ("__REQUEST__", &resolved_prompt),
-                            ],
-                        );
-                        llm_gateway::run_with_fallback_with_prompt_file(
-                            state,
-                            &task,
-                            &chat_prompt,
-                            &chat_prompt_file,
-                        )
-                            .await
-                            .map(AskReply::llm)
-                    }
-                    RoutedMode::Act => {
-                        agent_engine::run_agent_with_tools(state, &task, &prompt_with_memory, &resolved_prompt)
-                            .await
-                    }
-                    RoutedMode::ChatAct => {
-                        let chat_act_goal = format!(
-                            "{}\n\nMode hint: chat_act. Complete required actions first, then return a concise user-facing reply that confirms results naturally.",
-                            prompt_with_memory
-                        );
-                        agent_engine::run_agent_with_tools(state, &task, &chat_act_goal, &resolved_prompt).await
-                    }
-                    RoutedMode::AskClarify => {
-                        let clarify = intent_router::generate_clarify_question(
-                            state,
-                            &task,
-                            &resolved_prompt,
-                            "router_selected_ask_clarify",
-                        )
-                        .await;
-                        Ok(AskReply::non_llm(clarify))
-                    }
-                }
+                execute_ask_routed(
+                    state,
+                    &task,
+                    &chat_prompt_context,
+                    &prompt_with_memory,
+                    &resolved_prompt,
+                    agent_mode,
+                    false,
+                    Some(normalizer_out.routed_mode),
+                )
+                .await
             };
 
             match result {
@@ -2320,23 +2390,11 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                         answer.text,
                         answer.messages,
                     );
-                    let mut result = if answer_messages.is_empty() {
+                    let result = if answer_messages.is_empty() {
                         json!({ "text": answer_text.clone() })
                     } else {
                         json!({ "text": answer_text.clone(), "messages": answer_messages })
                     };
-                    if let Some(decision) = &resume_followup_decision {
-                        if let Some(obj) = result.as_object_mut() {
-                            obj.insert(
-                                "resume_followup_decision".to_string(),
-                                json!({
-                                    "decision": decision.decision,
-                                    "reason": decision.reason,
-                                    "confidence": decision.confidence,
-                                }),
-                            );
-                        }
-                    }
                     repo::update_task_success(state, &task.task_id, &result.to_string())?;
                     maybe_notify_schedule_result(state, &task, &payload, true, &answer_text).await;
                     let _ = memory::service::insert_memory(
@@ -2657,12 +2715,14 @@ fn is_resume_continue_source(rules: &MainFlowRules, raw: &str) -> bool {
     rules.resume_continue_sources.iter().any(|v| v == &source)
 }
 
+/// Injects recent failed resume context into payload when present. No LLM call: the single
+/// intent normalizer in the ask path will later decide resume_behavior from this context.
 async fn maybe_bind_recent_failed_resume_context(
     state: &AppState,
     task: &ClaimedTask,
     payload: &mut Value,
     user_text: &str,
-) -> Option<intent_router::ResumeFollowupDecision> {
+) -> Option<()> {
     if payload.get("resume_context").is_some() {
         return None;
     }
@@ -2673,29 +2733,8 @@ async fn maybe_bind_recent_failed_resume_context(
     if is_resume_continue_source(main_flow_rules(state), source) {
         return None;
     }
-    let (resume_context, resume_context_ts) =
+    let (resume_context, _resume_context_ts) =
         find_recent_failed_resume_context(state, task.user_id, task.chat_id)?;
-    let binding_context = json!({
-        "source": "recent_failed_resume_context",
-        "failed_resume_context_ts": resume_context_ts,
-        "has_newer_successful_ask_after_failed_task": has_newer_successful_ask_after(
-            state,
-            task.user_id,
-            task.chat_id,
-            resume_context_ts,
-        ),
-    });
-    let decision = intent_router::classify_resume_followup_intent(
-        state,
-        task,
-        user_text,
-        &resume_context,
-        &binding_context,
-    )
-    .await;
-    if decision.decision != "resume" && !decision.bind_resume_context {
-        return None;
-    }
     let obj = payload.as_object_mut()?;
     let resume_source = main_flow_rules(state)
         .resume_continue_sources
@@ -2708,7 +2747,7 @@ async fn maybe_bind_recent_failed_resume_context(
         Value::String(user_text.to_string()),
     );
     obj.insert("resume_context".to_string(), resume_context);
-    Some(decision)
+    Some(())
 }
 
 fn parse_task_status_with_rules(rules: &MainFlowRules, raw: &str) -> TaskStatus {
@@ -2736,7 +2775,7 @@ fn task_payload_value(task: &ClaimedTask) -> Option<Value> {
 
 fn is_crypto_price_alert_action(state: &AppState, skill_name: &str, args: &Value) -> bool {
     // Route crypto alert-action aliases via hard_rules instead of inline literals.
-    if canonical_skill_name(skill_name) != "crypto" {
+    if state.resolve_canonical_skill_name(skill_name) != "crypto" {
         return false;
     }
     let rules = main_flow_rules(state);
@@ -2794,7 +2833,7 @@ async fn send_task_channel_message(
     text: &str,
 ) -> Result<(), String> {
     match runtime_channel_from_payload(state, payload) {
-        RuntimeChannel::Telegram => send_telegram_message(state, task.chat_id, text).await,
+        RuntimeChannel::Telegram => channel_send::send_telegram_message(state, task.chat_id, text).await,
         RuntimeChannel::Whatsapp => {
             let to = task_external_chat_id(task)
                 .or_else(|| {
@@ -2807,10 +2846,10 @@ async fn send_task_channel_message(
                 .ok_or_else(|| "missing external_chat_id for whatsapp task".to_string())?;
             match resolve_whatsapp_delivery_route(state, payload) {
                 WhatsappDeliveryRoute::WebBridge => {
-                    send_whatsapp_web_bridge_text_message(state, &to, text).await
+                    channel_send::send_whatsapp_web_bridge_text_message(state, &to, text).await
                 }
                 WhatsappDeliveryRoute::Cloud => {
-                    send_whatsapp_cloud_text_message(state, &to, text).await
+                    channel_send::send_whatsapp_cloud_text_message(state, &to, text).await
                 }
             }
         }
@@ -2838,108 +2877,18 @@ fn resolve_whatsapp_delivery_route(state: &AppState, payload: &Value) -> Whatsap
     WhatsappDeliveryRoute::Cloud
 }
 
-async fn send_telegram_message(state: &AppState, chat_id: i64, text: &str) -> Result<(), String> {
-    let token = state.telegram_bot_token.trim();
-    if token.is_empty() {
-        return Err("telegram bot token is empty".to_string());
-    }
-    let url = format!("https://api.telegram.org/bot{token}/sendMessage");
-    let resp = state
-        .http_client
-        .post(&url)
-        .json(&json!({
-            "chat_id": chat_id,
-            "text": text
-        }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("status={status} body={body}"));
-    }
-    Ok(())
-}
-
-async fn send_whatsapp_cloud_text_message(
-    state: &AppState,
-    to: &str,
-    text: &str,
-) -> Result<(), String> {
-    let token = state.whatsapp_access_token.trim();
-    if token.is_empty() {
-        return Err("whatsapp access_token is empty".to_string());
-    }
-    let phone_number_id = state.whatsapp_phone_number_id.trim();
-    if phone_number_id.is_empty() {
-        return Err("whatsapp phone_number_id is empty".to_string());
-    }
-    let base = state.whatsapp_api_base.trim().trim_end_matches('/');
-    if base.is_empty() {
-        return Err("whatsapp api_base is empty".to_string());
-    }
-    let url = format!("{base}/v23.0/{phone_number_id}/messages");
-    let resp = state
-        .http_client
-        .post(&url)
-        .bearer_auth(token)
-        .json(&json!({
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "text",
-            "text": {
-                "body": text
-            }
-        }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("status={status} body={body}"));
-    }
-    Ok(())
-}
-
-async fn send_whatsapp_web_bridge_text_message(
-    state: &AppState,
-    to: &str,
-    text: &str,
-) -> Result<(), String> {
-    let base = state
-        .whatsapp_web_bridge_base_url
-        .trim()
-        .trim_end_matches('/');
-    if base.is_empty() {
-        return Err("whatsapp_web.bridge_base_url is empty".to_string());
-    }
-    let url = format!("{base}/v1/send-text");
-    let resp = state
-        .http_client
-        .post(&url)
-        .json(&json!({
-            "to": to,
-            "text": text
-        }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("wa-web bridge status={status} body={body}"));
-    }
-    Ok(())
-}
-
+/// Phase 3: 统一 skill 执行入口。按 registry.kind 分发：builtin -> 进程内；runner -> skill-runner；external -> 占位未实现。
 async fn run_skill_with_runner(
     state: &AppState,
     task: &ClaimedTask,
     skill_name: &str,
     args: serde_json::Value,
 ) -> Result<String, String> {
+    let skill_name = state.resolve_canonical_skill_name(skill_name);
+    if skill_name.is_empty() {
+        return Err("skill_name is empty".to_string());
+    }
+
     let policy_token = format!("skill:{skill_name}");
     if !state
         .tools_policy
@@ -2948,46 +2897,8 @@ async fn run_skill_with_runner(
         return Err(format!("blocked by policy: {policy_token}"));
     }
 
-    let skill_timeout_secs = match skill_name {
-        "image_generate" | "image_edit" => state.skill_timeout_seconds.max(180),
-        "image_vision" => state.skill_timeout_seconds.max(90),
-        "audio_transcribe" => state.skill_timeout_seconds.max(120),
-        "audio_synthesize" => state.skill_timeout_seconds.max(90),
-        "crypto" => state.skill_timeout_seconds.max(60),
-        _ => state.skill_timeout_seconds,
-    };
-
-    if skill_name.is_empty() {
-        return Err("skill_name is empty".to_string());
-    }
-
-    const BUILTIN_SKILL_NAMES: &[&str] = &[
-        "run_cmd",
-        "read_file",
-        "write_file",
-        "list_dir",
-        "make_dir",
-        "remove_file",
-    ];
-    if BUILTIN_SKILL_NAMES.contains(&skill_name) {
-        if !state.skills_list.contains(skill_name) {
-            let mut allowed: Vec<String> = state.skills_list.iter().cloned().collect();
-            allowed.sort();
-            let enabled = allowed.join(", ");
-            let err_text = i18n_t_with_default(
-                state,
-                "clawd.msg.skill_disabled_with_enabled_list",
-                "Skill is not enabled: {skill}. Please enable it in config and try again. (Currently enabled: {enabled_skills})",
-            )
-            .replace("{skill}", skill_name)
-            .replace("{enabled_skills}", &enabled);
-            return Err(err_text);
-        }
-        return execute_builtin_skill(state, skill_name, &args).await;
-    }
-
-    if !state.skills_list.contains(skill_name) {
-        let mut allowed: Vec<String> = state.skills_list.iter().cloned().collect();
+    if !state.get_skills_list().contains(&skill_name) {
+        let mut allowed: Vec<String> = state.get_skills_list().iter().cloned().collect();
         allowed.sort();
         let enabled = allowed.join(", ");
         let err_text = i18n_t_with_default(
@@ -2995,10 +2906,48 @@ async fn run_skill_with_runner(
             "clawd.msg.skill_disabled_with_enabled_list",
             "Skill is not enabled: {skill}. Please enable it in config and try again. (Currently enabled: {enabled_skills})",
         )
-        .replace("{skill}", skill_name)
+        .replace("{skill}", &skill_name)
         .replace("{enabled_skills}", &enabled);
         return Err(err_text);
     }
+
+    let kind = state.skill_kind_for_dispatch(&skill_name);
+    let kind_str = match kind {
+        SkillKind::Builtin => "builtin",
+        SkillKind::Runner => "runner",
+        SkillKind::External => "external",
+    };
+    info!(
+        "skill_dispatch skill={} kind={} branch={}",
+        skill_name, kind_str, kind_str
+    );
+
+    match kind {
+        SkillKind::Builtin => {
+            return execute_builtin_skill(state, &skill_name, &args).await;
+        }
+        SkillKind::External | SkillKind::Runner => {}
+    }
+
+    let skill_timeout_secs = state
+        .get_skills_registry()
+        .as_ref()
+        .and_then(|r| {
+            let s = r.timeout_seconds(&skill_name);
+            if s > 0 {
+                Some(state.skill_timeout_seconds.max(s))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| match skill_name.as_str() {
+            "image_generate" | "image_edit" => state.skill_timeout_seconds.max(180),
+            "image_vision" => state.skill_timeout_seconds.max(90),
+            "audio_transcribe" => state.skill_timeout_seconds.max(120),
+            "audio_synthesize" => state.skill_timeout_seconds.max(90),
+            "crypto" => state.skill_timeout_seconds.max(60),
+            _ => state.skill_timeout_seconds,
+        });
 
     let _permit = state
         .skill_semaphore
@@ -3007,23 +2956,43 @@ async fn run_skill_with_runner(
         .await
         .map_err(|err| format!("skill semaphore closed: {err}"))?;
 
-    let args = enrich_skill_args_with_memory(state, task, skill_name, args).await;
-    let args = inject_skill_memory_context(state, task, skill_name, args);
-    let args = ensure_default_output_dir_for_skill_args(&state.workspace_root, skill_name, args);
+    let args = enrich_skill_args_with_memory(state, task, &skill_name, args).await;
+    let args = inject_skill_memory_context(state, task, &skill_name, args);
+    let args = ensure_default_output_dir_for_skill_args(&state.workspace_root, &skill_name, args);
     let source = match task_runtime_channel(state, task) {
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
     };
-    let mut value =
-        run_skill_with_runner_once(state, task, skill_name, &args, &source, skill_timeout_secs)
-            .await?;
+
+    let mut value = match kind {
+        SkillKind::External => {
+            execute_external_http_json(state, task, &skill_name, &args, &source).await?
+        }
+        SkillKind::Runner => {
+            let runner_name = state.runner_name_for_skill(&skill_name);
+            info!(
+                "skill_dispatch skill={} runner_name={} kind=runner",
+                skill_name, runner_name
+            );
+            run_skill_with_runner_once(
+                state,
+                task,
+                &runner_name,
+                &args,
+                &source,
+                skill_timeout_secs,
+            )
+            .await?
+        }
+        SkillKind::Builtin => unreachable!(),
+    };
     let mut status = value
         .get("status")
         .and_then(|v| v.as_str())
         .unwrap_or("error")
         .to_string();
 
-    if status != "ok" && canonical_skill_name(skill_name) == "crypto" {
+    if status != "ok" && canonical_skill_name(&skill_name) == "crypto" {
         let main_rules = main_flow_rules(state);
         let action = args
             .as_object()
@@ -3049,10 +3018,11 @@ async fn run_skill_with_runner(
                 } else {
                     break;
                 }
+                let runner_name = state.runner_name_for_skill(&skill_name);
                 let retry_value = run_skill_with_runner_once(
                     state,
                     task,
-                    skill_name,
+                    &runner_name,
                     &retry_args,
                     &source,
                     skill_timeout_secs,
@@ -3124,7 +3094,7 @@ async fn run_skill_with_runner(
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    if canonical_skill_name(skill_name) == "image_vision" {
+    if canonical_skill_name(&skill_name) == "image_vision" {
         let action = args
             .as_object()
             .and_then(|m| m.get("action"))
@@ -3187,6 +3157,264 @@ fn extract_skill_provider_model(value: &Value) -> Option<(String, String, String
         model.to_string(),
         model_kind.to_string(),
     ))
+}
+
+/// Phase 6: 解析并解析 external_auth_ref（从环境变量等取 secret），不打印 secret。
+/// 约定：`env:VAR` → 从环境变量 VAR 取值，注入 `Authorization: Bearer <value>`；
+///       `env:VAR:header:HeaderName` → 从环境变量 VAR 取值，注入 `HeaderName: <value>`（不加重 Bearer 前缀）。
+/// 返回 (header_name, header_value)；取不到 secret 时返回 Err。
+fn resolve_external_auth(
+    auth_ref: Option<&str>,
+) -> Result<Option<(String, String)>, String> {
+    let s = match auth_ref {
+        Some(x) => x.trim(),
+        None => return Ok(None),
+    };
+    if s.is_empty() {
+        return Ok(None);
+    }
+    let parts: Vec<&str> = s.splitn(4, ':').collect();
+    let auth_type = parts.get(0).map(|x| x.trim()).unwrap_or("");
+    if auth_type != "env" {
+        return Err(format!(
+            "external_auth_ref unsupported type: {:?}, only env is supported",
+            auth_type
+        ));
+    }
+    let var_name = parts.get(1).map(|x| x.trim()).filter(|x| !x.is_empty());
+    let Some(var_name) = var_name else {
+        return Err("external_auth_ref env: missing variable name".to_string());
+    };
+    let (header_name, use_bearer) = if parts.get(2) == Some(&"header") {
+        let h = parts.get(3).map(|x| x.trim()).filter(|x| !x.is_empty());
+        let Some(h) = h else {
+            return Err("external_auth_ref env:var:header: missing header name".to_string());
+        };
+        (h.to_string(), false)
+    } else {
+        ("Authorization".to_string(), true)
+    };
+    let value = std::env::var(var_name).map_err(|_| {
+        format!(
+            "external_auth_ref env:{} not set or empty (set the environment variable)",
+            var_name
+        )
+    })?;
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(format!(
+            "external_auth_ref env:{} is empty (set the environment variable)",
+            var_name
+        ));
+    }
+    let header_value = if use_bearer {
+        format!("Bearer {}", value)
+    } else {
+        value.to_string()
+    };
+    Ok(Some((header_name, header_value)))
+}
+
+/// Phase 5: 脱敏 endpoint 用于日志（仅保留 scheme+host，路径用 ...）
+fn mask_endpoint_for_log(endpoint: &str) -> String {
+    let s = endpoint.trim();
+    if s.is_empty() {
+        return "<empty>".to_string();
+    }
+    if let Some((scheme, rest)) = s.split_once("://") {
+        if let Some(after) = rest.find('/') {
+            return format!("{}://{}...", scheme, rest.split_at(after).0);
+        }
+        return format!("{}://...", scheme);
+    }
+    if s.len() > 32 {
+        return format!("{}...", &s[..32.min(s.len())]);
+    }
+    s.to_string()
+}
+
+/// Phase 5: External 技能 http_json 执行。请求体含 skill/args/task_id/source；响应含 ok/text/messages/file/image_file/error，转为与 runner 一致的 Value 形状。
+async fn execute_external_http_json(
+    state: &AppState,
+    task: &ClaimedTask,
+    canonical_skill_name: &str,
+    args: &Value,
+    source: &str,
+) -> Result<Value, String> {
+    use claw_core::skill_registry::ExternalSkillConfig;
+
+    let reg = state
+        .get_skills_registry()
+        .ok_or_else(|| "external skill requires registry".to_string())?;
+    let config: ExternalSkillConfig<'_> = reg
+        .external_config(canonical_skill_name)
+        .ok_or_else(|| {
+            "external skill missing external_kind or external_endpoint in registry".to_string()
+        })?;
+    if config.kind != "http_json" {
+        return Err(format!(
+            "external_kind not supported: {}, only http_json is supported",
+            config.kind
+        ));
+    }
+    let timeout_secs = config
+        .timeout_seconds
+        .unwrap_or(state.skill_timeout_seconds)
+        .max(1);
+    let endpoint_masked = mask_endpoint_for_log(config.endpoint);
+
+    let auth_header = match resolve_external_auth(config.auth_ref) {
+        Ok(Some((name, value))) => {
+            info!(
+                "skill_dispatch external skill={} external_kind={} external_endpoint={} auth_ref_type=env auth_header={} auth_resolved=ok",
+                canonical_skill_name, config.kind, endpoint_masked, name
+            );
+            Some((name, value))
+        }
+        Ok(None) => {
+            info!(
+                "skill_dispatch external skill={} external_kind={} external_endpoint={} auth_ref=none",
+                canonical_skill_name, config.kind, endpoint_masked
+            );
+            None
+        }
+        Err(e) => {
+            warn!(
+                "skill_dispatch external skill={} external_endpoint={} auth_ref_type=env auth_resolved=fail err={}",
+                canonical_skill_name, endpoint_masked, e
+            );
+            return Err(e);
+        }
+    };
+
+    let body = json!({
+        "skill": canonical_skill_name,
+        "args": args,
+        "task_id": task.task_id,
+        "source": source,
+    });
+
+    let timeout = Duration::from_secs(timeout_secs);
+    let mut req = state
+        .http_client
+        .post(config.endpoint)
+        .json(&body)
+        .timeout(timeout);
+    if let Some((name, value)) = auth_header {
+        req = req.header(name.as_str(), value);
+    }
+    let res = req
+        .send()
+        .await
+        .map_err(|e| {
+            let msg = format!("external http_json request failed: {}", e);
+            warn!("skill_dispatch external request failed skill={} endpoint={} err={}", canonical_skill_name, endpoint_masked, e);
+            msg
+        })?;
+
+    let status_code = res.status();
+    let resp_body = res.text().await.map_err(|e| {
+        let msg = format!("external http_json read body failed: {}", e);
+        warn!("skill_dispatch external read_body failed skill={} err={}", canonical_skill_name, e);
+        msg
+    })?;
+
+    if !status_code.is_success() {
+        warn!(
+            "skill_dispatch external response non-2xx skill={} endpoint={} status={} body_len={}",
+            canonical_skill_name,
+            endpoint_masked,
+            status_code,
+            resp_body.len()
+        );
+        return Err(format!(
+            "external endpoint returned {}: {}",
+            status_code,
+            resp_body.chars().take(200).collect::<String>()
+        ));
+    }
+
+    let parsed: Value = serde_json::from_str(&resp_body).map_err(|e| {
+        let msg = format!("external http_json response parse failed: {}", e);
+        warn!(
+            "skill_dispatch external response parse failed skill={} err={} raw_len={}",
+            canonical_skill_name, e, resp_body.len()
+        );
+        msg
+    })?;
+
+    let ok = parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    let status = if ok { "ok" } else { "error" };
+    let error_str = parsed
+        .get("error")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let text_str = parsed
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or_default();
+    let messages: Vec<&str> = parsed
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let file_path = parsed
+        .get("file")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let image_file_path = parsed
+        .get("image_file")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let mut text = text_str.to_string();
+    for m in messages {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(m);
+    }
+    if let Some(p) = file_path {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str("FILE: ");
+        text.push_str(p);
+    }
+    if let Some(p) = image_file_path {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str("IMAGE_FILE: ");
+        text.push_str(p);
+    }
+
+    info!(
+        "skill_dispatch external response_parse_ok skill={} status={} text_len={}",
+        canonical_skill_name, status, text.len()
+    );
+
+    let error_text = if ok {
+        ""
+    } else {
+        error_str.unwrap_or("external returned ok=false")
+    };
+    let value = json!({
+        "status": status,
+        "text": text,
+        "error_text": error_text,
+    });
+    Ok(value)
 }
 
 async fn run_skill_with_runner_once(
@@ -3930,17 +4158,16 @@ pub(crate) fn append_subtask_result(
     detail: &str,
 ) {
     let status = if success { "success" } else { "failed" };
-    let detail_line = detail
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("");
-    let detail_trimmed = detail_line.trim();
+    let detail_trimmed = detail.trim();
     if detail_trimmed.is_empty() {
         subtask_results.push(format!("subtask#{index} {action_label}: {status}"));
+    } else if detail_trimmed.contains('\n') {
+        let header = format!("subtask#{index} {action_label}: {status}");
+        subtask_results.push(format!("{}\n{}", header, detail_trimmed));
     } else {
         subtask_results.push(format!(
             "subtask#{index} {action_label}: {status} | {}",
-            truncate_for_agent_trace(detail_trimmed)
+            detail_trimmed
         ));
     }
 }
@@ -4041,6 +4268,105 @@ fn build_resume_followup_discussion_prompt(
             ("__RESUME_CONTEXT__", &resume_context_json),
         ],
     )
+}
+
+/// Secondary mode only: goal suffix when user explicitly asked for execute + summary (see intent_normalizer_prompt).
+fn chat_act_goal_from_prompt(prompt_with_memory: &str) -> String {
+    format!(
+        "{}\n\nMode hint: chat_act. Complete required actions first, then return a concise user-facing reply that confirms results naturally.",
+        prompt_with_memory
+    )
+}
+
+/// Single implementation for chat / act / chat_act / ask_clarify.
+/// Ask main path always passes Some(normalizer_out.routed_mode). When normalizer_mode is None
+/// (e.g. legacy or parse-failure path), we fall back to route_request_mode; do not use that as primary.
+async fn execute_ask_routed(
+    state: &AppState,
+    task: &ClaimedTask,
+    chat_prompt_context: &str,
+    prompt_with_memory: &str,
+    resolved_prompt: &str,
+    agent_mode: bool,
+    resume_force_chat: bool,
+    normalizer_mode: Option<RoutedMode>,
+) -> Result<AskReply, String> {
+    let routed_mode = if resume_force_chat {
+        RoutedMode::Chat
+    } else if agent_mode {
+        match normalizer_mode {
+            Some(m) => m,
+            None => {
+                // Legacy/fallback only: ask main path always passes Some(normalizer_out.routed_mode).
+                intent_router::route_request_mode(state, task, resolved_prompt).await
+            }
+        }
+    } else {
+        RoutedMode::Chat
+    };
+    info!(
+        "{} worker_once: ask task_id={} routed_mode={:?} agent_mode={}",
+        highlight_tag("routing"),
+        task.task_id,
+        routed_mode,
+        agent_mode
+    );
+    match routed_mode {
+        RoutedMode::Chat => {
+            let (chat_prompt_template, chat_prompt_file) = load_prompt_template_for_state(
+                state,
+                CHAT_RESPONSE_PROMPT_PATH,
+                CHAT_RESPONSE_PROMPT_TEMPLATE,
+            );
+            log_prompt_render(
+                &task.task_id,
+                "chat_response_prompt",
+                &chat_prompt_file,
+                None,
+            );
+            let chat_prompt = render_prompt_template(
+                &chat_prompt_template,
+                &[
+                    ("__PERSONA_PROMPT__", &state.persona_prompt),
+                    ("__CONTEXT__", chat_prompt_context),
+                    ("__REQUEST__", resolved_prompt),
+                ],
+            );
+            llm_gateway::run_with_fallback_with_prompt_file(
+                state,
+                task,
+                &chat_prompt,
+                &chat_prompt_file,
+            )
+            .await
+            .map(|s| AskReply::llm(s))
+            .map_err(|e| e.to_string())
+        }
+        RoutedMode::Act => agent_engine::run_agent_with_tools(
+            state,
+            task,
+            prompt_with_memory,
+            resolved_prompt,
+        )
+        .await,
+        RoutedMode::ChatAct => agent_engine::run_agent_with_tools(
+            state,
+            task,
+            &chat_act_goal_from_prompt(prompt_with_memory),
+            resolved_prompt,
+        )
+        .await,
+        RoutedMode::AskClarify => {
+            let clarify = intent_router::generate_clarify_question(
+                state,
+                task,
+                resolved_prompt,
+                "router_selected_ask_clarify",
+            )
+            .await;
+            Ok(AskReply::non_llm(clarify))
+        }
+    }
 }
 
 pub(crate) fn i18n_t_with_default(state: &AppState, key: &str, default_text: &str) -> String {
@@ -4496,7 +4822,10 @@ pub(crate) fn extract_agent_action_objects(text: &str) -> Vec<String> {
     out
 }
 
-pub(crate) fn parse_agent_action_json_with_repair(raw: &str) -> Result<Value, String> {
+pub(crate) fn parse_agent_action_json_with_repair(
+    raw: &str,
+    state: &AppState,
+) -> Result<Value, String> {
     let parsed = match serde_json::from_str::<Value>(raw) {
         Ok(v) => Ok(v),
         Err(first_err) => {
@@ -4509,7 +4838,7 @@ pub(crate) fn parse_agent_action_json_with_repair(raw: &str) -> Result<Value, St
             }
         }
     }?;
-    Ok(normalize_agent_action_shape(parsed))
+    Ok(normalize_agent_action_shape(parsed, state))
 }
 
 fn repair_invalid_json_escapes(raw: &str) -> String {
@@ -4553,14 +4882,14 @@ fn repair_invalid_json_escapes(raw: &str) -> String {
     out
 }
 
-fn normalize_agent_action_shape(value: Value) -> Value {
+fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
     let Some(obj) = value.as_object() else {
         return value;
     };
     let Some(raw_type) = obj.get("type").and_then(|v| v.as_str()) else {
         if let Some(skill) = obj.get("skill").and_then(|v| v.as_str()) {
-            let normalized_skill = canonical_skill_name(skill.trim()).to_string();
-            if is_builtin_skill_name(&normalized_skill) {
+            let normalized_skill = state.resolve_canonical_skill_name(skill.trim());
+            if state.is_builtin_skill(&normalized_skill) {
                 let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
                 return json!({
                     "type": "call_skill",
@@ -4570,7 +4899,7 @@ fn normalize_agent_action_shape(value: Value) -> Value {
             }
         }
         if let Some(tool) = obj.get("tool").and_then(|v| v.as_str()) {
-            let normalized_tool = tool.trim().to_ascii_lowercase();
+            let normalized_tool = state.resolve_canonical_skill_name(tool.trim());
             let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
             return json!({
                 "type": "call_skill",
@@ -4593,7 +4922,7 @@ fn normalize_agent_action_shape(value: Value) -> Value {
     ) {
         if step_type == "call_tool" {
             if let Some(tool) = obj.get("tool").and_then(|v| v.as_str()) {
-                let normalized_tool = tool.trim().to_ascii_lowercase();
+                let normalized_tool = state.resolve_canonical_skill_name(tool.trim());
                 let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
                 return json!({
                     "type": "call_skill",
@@ -4606,7 +4935,7 @@ fn normalize_agent_action_shape(value: Value) -> Value {
     }
 
     let args = collect_bare_action_args(obj);
-    if is_builtin_skill_name(&step_type) {
+    if state.is_builtin_skill(&step_type) {
         return json!({
             "type": "call_skill",
             "skill": step_type,
@@ -4614,8 +4943,8 @@ fn normalize_agent_action_shape(value: Value) -> Value {
         });
     }
 
-    let normalized_skill = canonical_skill_name(&step_type).to_string();
-    if is_builtin_skill_name(&normalized_skill) {
+    let normalized_skill = state.resolve_canonical_skill_name(&step_type);
+    if state.is_builtin_skill(&normalized_skill) {
         return json!({
             "type": "call_skill",
             "skill": normalized_skill,
@@ -6841,35 +7170,6 @@ fn find_recent_duplicate_affirmation_task(
     None
 }
 
-fn has_newer_successful_ask_after(
-    state: &AppState,
-    user_id: i64,
-    chat_id: i64,
-    ts: i64,
-) -> bool {
-    let Ok(db) = state.db.lock() else {
-        return false;
-    };
-    let mut stmt = match db.prepare(
-        "SELECT 1
-         FROM tasks
-         WHERE user_id = ?1
-           AND chat_id = ?2
-           AND kind = 'ask'
-           AND status = 'succeeded'
-           AND CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) > ?3
-         LIMIT 1",
-    ) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    let mut rows = match stmt.query(params![user_id, chat_id, ts]) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    matches!(rows.next(), Ok(Some(_)))
-}
-
 fn find_recent_failed_resume_context(
     state: &AppState,
     user_id: i64,
@@ -7721,6 +8021,37 @@ async fn cancel_tasks(
                     ok: false,
                     data: None,
                     error: Some("Cancel tasks failed".to_string()),
+                }),
+            )
+        }
+    }
+}
+
+/// Phase 4: 重载 skill 视图。POST /v1/admin/reload-skills。与现有管理接口一致：需 x-rustclaw-key 鉴权。
+async fn reload_skills_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    if let Err((status, json)) = http::ui_routes::require_ui_identity(&state, &headers) {
+        return (status, json);
+    }
+    match reload_skill_views(&state) {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(serde_json::to_value(&result).unwrap_or_default()),
+                error: None,
+            }),
+        ),
+        Err(e) => {
+            warn!("reload_skill_views failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("reload failed: {}", e)),
                 }),
             )
         }

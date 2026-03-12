@@ -173,6 +173,16 @@ pub(crate) fn clean_schedule_kind(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
 
+/// Returns (now_iso, timezone, schedule_rules) for intent normalizer prompt.
+pub(crate) fn schedule_context_for_normalizer(state: &AppState) -> (String, String, String) {
+    let tz = parse_timezone(&state.schedule.timezone);
+    let now_local = Utc::now().with_timezone(&tz);
+    let now_iso = now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string();
+    let timezone = state.schedule.timezone.clone();
+    let rules = state.schedule.intent_rules_template.clone();
+    (now_iso, timezone, rules)
+}
+
 pub(crate) fn schedule_timezone_from_intent(state: &AppState, intent_tz: &str) -> String {
     let chosen = if intent_tz.trim().is_empty() {
         state.schedule.timezone.clone()
