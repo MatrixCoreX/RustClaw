@@ -70,6 +70,8 @@
 - **Respond**: Do not summarize unless the user explicitly asks for a summary. When the user did not ask for a summary, return only the skill result or one short necessary reply; no extra recap or conclusion.
 - Prefer calling `trade_preview` before `trade_submit` when the user intent is ambiguous or high-value; the planner decides whether to ask for confirmation first.
 - `trade_submit` may be called when the planner infers the user has confirmed (e.g. after preview and user said "确认执行" / "yes"); pass `confirm=true` in that case. No runtime guard enforces this—the planner decides.
+- **Planner routing**: Explicit place-order (e.g. “在0.09挂单5U狗狗币”) → output `trade_preview` then `trade_submit` with same params and `confirm=true`. Preview-only (e.g. “预览一下”“先算算”) → only `trade_preview`. Cancel one order → `cancel_order` (require `order_id` or `client_order_id`; if missing, call `open_orders` first or ask). Cancel all for symbol → `cancel_all_orders` only when user said “所有”/“全部” for that symbol. Query open orders → `open_orders` only (do not route “查挂单” to cancel). For trade_preview and trade_submit, prefer including `exchange` (e.g. binance, okx) when known so same-round preview→submit flows work reliably.
+- **Cancel safety**: Do not call `cancel_order` without at least one of `order_id` or `client_order_id` (or a prior step that supplies it). Do not call `cancel_all_orders` unless the user explicitly requested to cancel all orders or all for a symbol.
 - Binance spot orders are subject to `min_notional_usd` (default 1.0 USDT; Binance actually requires ~10 USDT) and `max_notional_usd` limits.
 - `qty=all` is only valid for `side=sell`.
 - `stop_loss_limit`/`take_profit_limit` require both `price` (limit price) and `stop_price` (trigger price).

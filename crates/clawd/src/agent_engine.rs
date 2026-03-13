@@ -403,6 +403,94 @@ fn publish_progress(state: &AppState, task: &ClaimedTask, progress_messages: &[S
     }
 }
 
+/// Max length for args summary in progress hint. Longer summaries are truncated with "...".
+const PROGRESS_ARGS_SUMMARY_MAX_LEN: usize = 160;
+
+/// Keys allowed in progress hint args summary (fixed order). Any other key is omitted.
+const PROGRESS_ARGS_WHITELIST: &[&str] = &[
+    "action",
+    "exchange",
+    "symbol",
+    "side",
+    "order_type",
+    "quote_qty_usd",
+    "qty",
+    "price",
+    "stop_price",
+    "time_in_force",
+    "limit",
+    "order_id",
+    "client_order_id",
+];
+
+/// Keys that must never appear in progress hint (case-insensitive substring match).
+const PROGRESS_ARGS_SENSITIVE: &[&str] = &[
+    "api_key",
+    "api_secret",
+    "passphrase",
+    "user_key",
+    "authorization",
+    "token",
+    "credential",
+    "secret",
+    "password",
+];
+
+fn is_sensitive_key(key: &str) -> bool {
+    let k = key.to_lowercase();
+    PROGRESS_ARGS_SENSITIVE
+        .iter()
+        .any(|s| k.contains(&s.to_lowercase()))
+}
+
+fn value_to_short_string(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.as_str().trim().to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => String::new(),
+        _ => v.to_string(),
+    }
+}
+
+/// Build a safe, whitelisted args summary for progress hint. No sensitive keys; truncated to max_len.
+pub(crate) fn build_safe_skill_args_summary(args: &Value, max_len: usize) -> String {
+    let obj = match args.as_object() {
+        Some(o) => o,
+        None => return String::new(),
+    };
+    let mut parts: Vec<String> = Vec::new();
+    for &key in PROGRESS_ARGS_WHITELIST {
+        if is_sensitive_key(key) {
+            continue;
+        }
+        let Some(v) = obj.get(key) else { continue };
+        let s = value_to_short_string(v);
+        if s.is_empty() {
+            continue;
+        }
+        // Truncate single value if very long (e.g. pasted text)
+        let val_display = if s.len() > 40 { format!("{}...", &s[..37]) } else { s };
+        parts.push(format!("{key}={val_display}"));
+    }
+    let summary = parts.join(", ");
+    if summary.len() <= max_len {
+        summary
+    } else {
+        format!("{}...", summary.chars().take(max_len.saturating_sub(3)).collect::<String>())
+    }
+}
+
+/// Encode a progress hint for telegramd to render with its i18n. Format: "I18N:key:json_vars".
+pub(crate) fn encode_progress_i18n(key: &str, vars: &[(&str, &str)]) -> String {
+    let obj: HashMap<String, String> = vars
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let vars_json = serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
+    format!("I18N:{}:{}", key, vars_json)
+}
+
 /// Append a short progress hint and publish. For "processing..." display only. Do not pass full raw output.
 fn append_progress_hint(
     state: &AppState,
@@ -575,6 +663,8 @@ struct LoopState {
     has_tool_or_skill_output: bool,
     written_file_aliases: HashMap<String, String>,
     last_written_file_path: Option<String>,
+    /// Last user-visible respond text (final or publishable). Used when delivery_messages was not filled so we do not fall back to subtask summary.
+    last_user_visible_respond: Option<String>,
 }
 
 impl LoopState {
@@ -957,6 +1047,235 @@ fn remaining_actions_are_discussion_only(
             AgentAction::Think { .. } => true,
             _ => false,
         })
+}
+
+/// Parameters extracted from a trade_preview call for consistency check with the next trade_submit.
+#[derive(Debug, Clone)]
+pub(crate) struct TradePreviewParamsForConsistency {
+    exchange: String,
+    symbol: String,
+    side: String,
+    order_type: String,
+    quote_qty_usd: Option<f64>,
+    qty: f64,
+    price: Option<f64>,
+    stop_price: Option<f64>,
+    time_in_force: Option<String>,
+}
+
+const TRADE_PARAMS_FLOAT_EPS: f64 = 1e-9;
+
+/// Default exchange when preview/submit args omit it; must match crypto skill resolve_exchange fallback (binance).
+const DEFAULT_CRYPTO_EXCHANGE: &str = "binance";
+
+fn value_to_f64_opt(v: &Value) -> Option<f64> {
+    v.as_f64()
+        .or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
+}
+
+pub(crate) fn extract_trade_preview_params_for_consistency(args: &Value) -> Option<TradePreviewParamsForConsistency> {
+    let obj = args.as_object()?;
+    let exchange = obj
+        .get("exchange")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| DEFAULT_CRYPTO_EXCHANGE.to_string());
+    let symbol = obj.get("symbol").and_then(|v| v.as_str()).map(str::to_string)?;
+    let side = obj
+        .get("side")
+        .and_then(|v| v.as_str())
+        .unwrap_or("buy")
+        .trim()
+        .to_ascii_lowercase();
+    let order_type = obj
+        .get("order_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("market")
+        .trim()
+        .to_ascii_lowercase();
+    let quote_qty_usd = obj.get("quote_qty_usd").and_then(value_to_f64_opt);
+    let qty = obj.get("qty").and_then(value_to_f64_opt).unwrap_or(0.0);
+    let price = obj.get("price").and_then(value_to_f64_opt);
+    let stop_price = obj
+        .get("stop_price")
+        .and_then(value_to_f64_opt)
+        .or_else(|| obj.get("stopPrice").and_then(value_to_f64_opt));
+    let time_in_force = obj
+        .get("time_in_force")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    Some(TradePreviewParamsForConsistency {
+        exchange,
+        symbol,
+        side,
+        order_type,
+        quote_qty_usd,
+        qty,
+        price,
+        stop_price,
+        time_in_force,
+    })
+}
+
+fn floats_near(a: Option<f64>, b: Option<f64>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => (x - y).abs() <= TRADE_PARAMS_FLOAT_EPS,
+        _ => false,
+    }
+}
+
+fn trade_submit_params_consistent_with_preview(
+    preview: &TradePreviewParamsForConsistency,
+    submit_args: &Value,
+) -> bool {
+    let obj = match submit_args.as_object() {
+        Some(o) => o,
+        None => return false,
+    };
+    let submit_exchange = obj
+        .get("exchange")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| DEFAULT_CRYPTO_EXCHANGE.to_string());
+    if submit_exchange != preview.exchange {
+        return false;
+    }
+    let symbol_ok = obj
+        .get("symbol")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_uppercase())
+        .as_ref()
+        .map(|s| s == &preview.symbol.to_ascii_uppercase())
+        .unwrap_or(false);
+    if !symbol_ok {
+        return false;
+    }
+    let side_ok = obj
+        .get("side")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .as_ref()
+        .map(|s| s == &preview.side)
+        .unwrap_or(false);
+    if !side_ok {
+        return false;
+    }
+    let order_type_ok = obj
+        .get("order_type")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .as_ref()
+        .map(|s| s == &preview.order_type)
+        .unwrap_or(false);
+    if !order_type_ok {
+        return false;
+    }
+    let quote_ok = floats_near(
+        preview.quote_qty_usd,
+        obj.get("quote_qty_usd").and_then(value_to_f64_opt),
+    );
+    if !quote_ok && preview.quote_qty_usd.is_some() {
+        return false;
+    }
+    let qty_ok = floats_near(
+        Some(preview.qty),
+        obj.get("qty").and_then(value_to_f64_opt),
+    );
+    if !qty_ok && preview.quote_qty_usd.is_none() {
+        return false;
+    }
+    if !floats_near(preview.price, obj.get("price").and_then(value_to_f64_opt)) {
+        return false;
+    }
+    if !floats_near(
+        preview.stop_price,
+        obj.get("stop_price")
+            .and_then(value_to_f64_opt)
+            .or_else(|| obj.get("stopPrice").and_then(value_to_f64_opt)),
+    ) {
+        return false;
+    }
+    let tif_submit = obj
+        .get("time_in_force")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_ascii_uppercase());
+    if preview.time_in_force.as_deref().map(|s| s.to_ascii_uppercase()) != tif_submit {
+        return false;
+    }
+    true
+}
+
+/// Result of checking whether to continue after trade_preview.
+/// `Allow` = same-round matching trade_submit present; do not stop.
+/// `Reject(reason)` = stop and wait for confirmation; reason is for logging.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum TradePreviewContinue {
+    Allow,
+    Reject(&'static str),
+}
+
+/// Core check: given the next step's normalized skill and resolved args, decide Allow or Reject.
+/// Used by check_continue_after_trade_preview and by unit tests.
+pub(crate) fn check_continue_after_trade_preview_core(
+    next_normalized_skill: Option<&str>,
+    next_resolved_args: Option<&Value>,
+    preview_params: &TradePreviewParamsForConsistency,
+) -> TradePreviewContinue {
+    let normalized = match next_normalized_skill {
+        Some(s) => s,
+        None => return TradePreviewContinue::Reject("preview_only_no_next_step"),
+    };
+    if normalized != "crypto" {
+        return TradePreviewContinue::Reject("preview_only_next_not_crypto");
+    }
+    let resolved = match next_resolved_args {
+        Some(v) => v,
+        None => return TradePreviewContinue::Reject("preview_only_next_invalid_args"),
+    };
+    let obj = match resolved.as_object() {
+        Some(o) => o,
+        None => return TradePreviewContinue::Reject("preview_only_next_invalid_args"),
+    };
+    if obj.get("action").and_then(|v| v.as_str()) != Some("trade_submit") {
+        return TradePreviewContinue::Reject("preview_only_next_not_submit");
+    }
+    if obj.get("confirm").and_then(|v| v.as_bool()) != Some(true) {
+        return TradePreviewContinue::Reject("submit_missing_confirm_true");
+    }
+    if !trade_submit_params_consistent_with_preview(preview_params, resolved) {
+        return TradePreviewContinue::Reject("submit_params_inconsistent_with_preview");
+    }
+    TradePreviewContinue::Allow
+}
+
+/// Returns Allow when the same-round next plan step is a valid trade_submit that matches the
+/// preview (same exchange/symbol/side/order_type/qty/price/confirm=true). When Allow, the
+/// executor should NOT stop after trade_preview and may continue to execute submit in the same round.
+fn check_continue_after_trade_preview(
+    state: &AppState,
+    actions: &[AgentAction],
+    idx: usize,
+    loop_state: &LoopState,
+    preview_params: &TradePreviewParamsForConsistency,
+) -> TradePreviewContinue {
+    let next_idx = idx + 1;
+    let next_action = match actions.get(next_idx) {
+        Some(a) => a,
+        None => return TradePreviewContinue::Reject("preview_only_no_next_step"),
+    };
+    let (next_skill, next_args) = match next_action {
+        AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+        AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        _ => return TradePreviewContinue::Reject("preview_only_next_not_skill"),
+    };
+    let normalized = state.resolve_canonical_skill_name(next_skill);
+    let resolved = resolve_arg_value(next_args, loop_state);
+    check_continue_after_trade_preview_core(
+        Some(normalized.as_str()),
+        Some(&resolved),
+        preview_params,
+    )
 }
 
 fn rewrite_run_cmd_with_written_aliases(command: &str, loop_state: &LoopState) -> String {
@@ -1487,6 +1806,8 @@ async fn execute_actions_once(
                 }
                 rewrite_tool_path_with_written_aliases(&normalized_skill, &mut resolved_args, loop_state);
                 loop_state.tool_calls_total += 1;
+                let args_summary =
+                    build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
                 info!(
                     "{} executor_step_execute task_id={} round={} step={} type=call_skill(legacy_tool) skill={} args={}",
                     crate::highlight_tag("skill"),
@@ -1543,11 +1864,25 @@ async fn execute_actions_once(
                         if !out.trim().is_empty() {
                             loop_state.has_tool_or_skill_output = true;
                             ended_with_user_visible_output = true;
+                            let hint = if args_summary.is_empty() {
+                                encode_progress_i18n(
+                                    "telegram.progress.skill_completed",
+                                    &[("skill", normalized_skill.as_str())],
+                                )
+                            } else {
+                                encode_progress_i18n(
+                                    "telegram.progress.skill_completed_with_args",
+                                    &[
+                                        ("skill", normalized_skill.as_str()),
+                                        ("args_summary", args_summary.as_str()),
+                                    ],
+                                )
+                            };
                             append_progress_hint(
                                 state,
                                 task,
                                 &mut loop_state.progress_messages,
-                                format!("Skill {} completed", normalized_skill),
+                                hint,
                             );
                         }
                         register_step_output(
@@ -1573,11 +1908,29 @@ async fn execute_actions_once(
                             loop_state.round_no, step_in_round, normalized_skill
                         ));
                         if crypto_action.as_deref() == Some("trade_preview") {
-                            executed_actions += 1;
-                            loop_state.total_steps_executed += 1;
-                            stop_signal =
-                                Some("trade_preview_awaiting_confirmation".to_string());
-                            break;
+                            let decision = extract_trade_preview_params_for_consistency(&resolved_args)
+                                .as_ref()
+                                .map(|p| check_continue_after_trade_preview(state, actions, idx, loop_state, p))
+                                .unwrap_or(TradePreviewContinue::Reject("preview_params_extract_failed"));
+                            match &decision {
+                                TradePreviewContinue::Allow => {
+                                    info!(
+                                        "trade_preview_followed_by_submit_continue task_id={} round={} step={} reason=same_round_submit_matching",
+                                        task.task_id, loop_state.round_no, step_in_round
+                                    );
+                                }
+                                TradePreviewContinue::Reject(reason) => {
+                                    info!(
+                                        "trade_preview_awaiting_confirmation task_id={} round={} step={} reason={}",
+                                        task.task_id, loop_state.round_no, step_in_round, reason
+                                    );
+                                    executed_actions += 1;
+                                    loop_state.total_steps_executed += 1;
+                                    stop_signal =
+                                        Some("trade_preview_awaiting_confirmation".to_string());
+                                    break;
+                                }
+                            }
                         }
                     }
                     Err(err) => {
@@ -1649,6 +2002,16 @@ async fn execute_actions_once(
                 } else {
                     None
                 };
+                // Extract preview params for same-round submit check (must be before run_skill consumes resolved_args).
+                let preview_params = if normalized_skill == "crypto"
+                    && crypto_action.as_deref() == Some("trade_preview")
+                {
+                    extract_trade_preview_params_for_consistency(&resolved_args)
+                } else {
+                    None
+                };
+                let args_summary =
+                    build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
                 // Whether to require user confirmation before trade_submit is decided by the planner; no hard block here.
                 info!(
                     "{} executor_step_execute task_id={} round={} step={} type=call_skill skill={} args={}",
@@ -1673,11 +2036,25 @@ async fn execute_actions_once(
                         if !out.trim().is_empty() {
                             loop_state.has_tool_or_skill_output = true;
                             ended_with_user_visible_output = true;
+                            let hint = if args_summary.is_empty() {
+                                encode_progress_i18n(
+                                    "telegram.progress.skill_completed",
+                                    &[("skill", normalized_skill.as_str())],
+                                )
+                            } else {
+                                encode_progress_i18n(
+                                    "telegram.progress.skill_completed_with_args",
+                                    &[
+                                        ("skill", normalized_skill.as_str()),
+                                        ("args_summary", args_summary.as_str()),
+                                    ],
+                                )
+                            };
                             append_progress_hint(
                                 state,
                                 task,
                                 &mut loop_state.progress_messages,
-                                format!("Skill {} completed", normalized_skill),
+                                hint,
                             );
                         }
                         register_step_output(
@@ -1702,14 +2079,30 @@ async fn execute_actions_once(
                             "round={} step={} skill={} ok",
                             loop_state.round_no, step_in_round, normalized_skill
                         ));
-                        // trade_preview publishes a confirm-gated message; stop the loop
-                        // immediately so the agent does not spin into another round and
-                        // waste an LLM call planning the same (now-guarded) action again.
+                        // trade_preview: stop only when next step is not a matching same-round trade_submit.
                         if crypto_action.as_deref() == Some("trade_preview") {
-                            executed_actions += 1;
-                            loop_state.total_steps_executed += 1;
-                            stop_signal = Some("trade_preview_awaiting_confirmation".to_string());
-                            break;
+                            let decision = preview_params
+                                .as_ref()
+                                .map(|p| check_continue_after_trade_preview(state, actions, idx, loop_state, p))
+                                .unwrap_or(TradePreviewContinue::Reject("preview_params_extract_failed"));
+                            match &decision {
+                                TradePreviewContinue::Allow => {
+                                    info!(
+                                        "trade_preview_followed_by_submit_continue task_id={} round={} step={} reason=same_round_submit_matching",
+                                        task.task_id, loop_state.round_no, step_in_round
+                                    );
+                                }
+                                TradePreviewContinue::Reject(reason) => {
+                                    info!(
+                                        "trade_preview_awaiting_confirmation task_id={} round={} step={} reason={}",
+                                        task.task_id, loop_state.round_no, step_in_round, reason
+                                    );
+                                    executed_actions += 1;
+                                    loop_state.total_steps_executed += 1;
+                                    stop_signal = Some("trade_preview_awaiting_confirmation".to_string());
+                                    break;
+                                }
+                            }
                         }
                     }
                     Err(err) => {
@@ -1753,6 +2146,9 @@ async fn execute_actions_once(
                     has_remaining_action_after(actions, idx, policy.max_steps);
                 let publish_respond =
                     should_publish_respond_message(state, loop_state, user_text, &text);
+                if !text.is_empty() && (publish_respond || !has_remaining_actions) {
+                    loop_state.last_user_visible_respond = Some(text.clone());
+                }
                 if publish_respond {
                     crate::append_subtask_result(
                         &mut loop_state.subtask_results,
@@ -1769,11 +2165,18 @@ async fn execute_actions_once(
                         &mut loop_state.delivery_messages,
                         text.clone(),
                     );
+                    info!(
+                        "delivery appended from respond task_id={} len={} has_remaining={}",
+                        task.task_id,
+                        loop_state.delivery_messages.len(),
+                        has_remaining_actions
+                    );
+                    let hint = encode_progress_i18n("telegram.progress.reply_generated", &[]);
                     append_progress_hint(
                         state,
                         task,
                         &mut loop_state.progress_messages,
-                        "Reply generated".to_string(),
+                        hint,
                     );
                 }
                 if !publish_respond && !text.is_empty() {
@@ -1874,6 +2277,39 @@ fn is_publishable_raw(s: &str) -> bool {
         return false;
     }
     true
+}
+
+/// Build final delivery list and final_text with priority: last_user_visible_respond > delivery_messages (deduped).
+/// Used for testing and by run_agent_with_loop. Does not apply fallback_from_raw.
+pub(crate) fn build_final_delivery_with_priority(
+    delivery_messages: &[String],
+    last_user_visible_respond: Option<&String>,
+) -> (Vec<String>, String, bool) {
+    let mut delivery_deduped: Vec<String> = Vec::new();
+    for m in delivery_messages {
+        let t = m.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(pos) = delivery_deduped.iter().position(|x| x.trim() == t) {
+            delivery_deduped.remove(pos);
+        }
+        delivery_deduped.push(m.clone());
+    }
+    let used_last_respond = if let Some(last_respond) = last_user_visible_respond {
+        let trimmed = last_respond.trim();
+        if !trimmed.is_empty() {
+            delivery_deduped.retain(|x| x.trim() != trimmed);
+            delivery_deduped.push(last_respond.clone());
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    let final_text = delivery_deduped.last().cloned().unwrap_or_default();
+    (delivery_deduped, final_text, used_last_respond)
 }
 
 /// Build a single final delivery string from raw subtask results (no LLM). Only include publishable raw;
@@ -2039,8 +2475,24 @@ async fn run_agent_with_loop(
         }
     }
 
-    // Fallback finalizer: when no respond was published, build delivery from raw (no extra LLM first).
-    // Only append when fallback is non-empty (publishable filter may leave nothing → then synthesize).
+    // When delivery is empty, fill from last_user_visible_respond so fallback path still has a candidate.
+    if loop_state.delivery_messages.is_empty() {
+        if let Some(ref last_respond) = loop_state.last_user_visible_respond {
+            if !last_respond.trim().is_empty() {
+                append_delivery_message(
+                    &task.task_id,
+                    &mut loop_state.delivery_messages,
+                    last_respond.clone(),
+                );
+                info!(
+                    "final_result_use_last_respond task_id={} (delivery was empty)",
+                    task.task_id
+                );
+            }
+        }
+    }
+
+    // Fallback finalizer: only when we still have no delivery.
     if loop_state.delivery_messages.is_empty() && !loop_state.subtask_results.is_empty() {
         let fallback = fallback_finalize_from_raw(loop_state.subtask_results.as_slice());
         if !fallback.trim().is_empty() {
@@ -2050,7 +2502,7 @@ async fn run_agent_with_loop(
                 fallback,
             );
             info!(
-                "delivery fallback_from_raw task_id={} subtask_count={}",
+                "final_result_fallback_from_raw task_id={} subtask_count={}",
                 task.task_id,
                 loop_state.subtask_results.len()
             );
@@ -2086,12 +2538,36 @@ async fn run_agent_with_loop(
         }
     }
 
-    let final_text = loop_state
-        .delivery_messages
+    let (delivery_deduped, _, used_last_respond) = build_final_delivery_with_priority(
+        &loop_state.delivery_messages,
+        loop_state.last_user_visible_respond.as_ref(),
+    );
+
+    let final_text = delivery_deduped
         .last()
         .cloned()
         .or_else(|| loop_state.subtask_results.last().cloned())
         .unwrap_or_default();
+
+    if used_last_respond {
+        info!(
+            "final_result_source=last_respond task_id={} len={}",
+            task.task_id,
+            delivery_deduped.len()
+        );
+    } else if !delivery_deduped.is_empty() {
+        info!(
+            "final_result_source=delivery_messages task_id={} len={}",
+            task.task_id,
+            delivery_deduped.len()
+        );
+    } else if !loop_state.subtask_results.is_empty() {
+        info!(
+            "final_result_source=fallback_from_raw task_id={}",
+            task.task_id
+        );
+    }
+
     crate::append_act_plan_log(
         state,
         task,
@@ -2106,7 +2582,7 @@ async fn run_agent_with_loop(
             loop_state.consecutive_no_progress
         ),
     );
-    Ok(AskReply::non_llm(final_text).with_messages(loop_state.delivery_messages))
+    Ok(AskReply::non_llm(final_text).with_messages(delivery_deduped))
 }
 
 fn plan_step_label(action: &AgentAction) -> String {
@@ -2222,4 +2698,460 @@ pub(crate) async fn run_agent_with_tools(
         return run_agent_with_loop(state, task, goal, user_text).await;
     }
     return Ok(AskReply::non_llm(String::new()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 1. trade_preview 后面没有 next step -> Reject preview_only_no_next_step
+    #[test]
+    fn test_trade_preview_continue_no_next_step() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let out = check_continue_after_trade_preview_core(None, None, &params);
+        assert_eq!(out, TradePreviewContinue::Reject("preview_only_no_next_step"));
+    }
+
+    /// 2. next step 不是 crypto -> Reject
+    #[test]
+    fn test_trade_preview_continue_next_not_crypto() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("chat"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Reject("preview_only_next_not_crypto"));
+    }
+
+    /// 3. next step 是 crypto 但 action 不是 trade_submit -> Reject
+    #[test]
+    fn test_trade_preview_continue_next_not_submit() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let next = json!({
+            "action": "open_orders",
+            "exchange": "binance"
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&next), &params);
+        assert_eq!(out, TradePreviewContinue::Reject("preview_only_next_not_submit"));
+    }
+
+    /// 4. trade_submit 缺 confirm=true -> Reject
+    #[test]
+    fn test_trade_preview_continue_submit_missing_confirm() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Reject("submit_missing_confirm_true"));
+    }
+
+    /// 5. trade_submit 与 preview symbol 不一致 -> Reject
+    #[test]
+    fn test_trade_preview_continue_symbol_mismatch() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+    }
+
+    /// 6. trade_submit 与 preview side 不一致 -> Reject
+    #[test]
+    fn test_trade_preview_continue_side_mismatch() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "sell",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+    }
+
+    /// 7. trade_submit 与 preview price 不一致 (limit) -> Reject
+    #[test]
+    fn test_trade_preview_continue_price_mismatch() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.10,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+    }
+
+    /// 8. trade_submit 与 preview qty/quote_qty_usd 不一致 -> Reject
+    #[test]
+    fn test_trade_preview_continue_qty_mismatch() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 10.0,
+            "price": 0.09,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+    }
+
+    /// 9. limit 单参数完全一致且 confirm=true -> Allow
+    #[test]
+    fn test_trade_preview_continue_limit_allow() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 5.0,
+            "price": 0.09,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Allow);
+    }
+
+    /// 10. market 单参数完全一致且 confirm=true -> Allow
+    #[test]
+    fn test_trade_preview_continue_market_allow() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "market",
+            "quote_qty_usd": 10.0
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "market",
+            "quote_qty_usd": 10.0,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Allow);
+    }
+
+    /// preview 缺 exchange，submit 也缺 exchange，其他参数一致 -> Allow
+    #[test]
+    fn test_trade_preview_continue_missing_exchange_both_allow() {
+        let preview = json!({
+            "action": "trade_preview",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 10.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        assert_eq!(params.exchange, "binance");
+        let submit = json!({
+            "action": "trade_submit",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 10.0,
+            "price": 0.09,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Allow);
+    }
+
+    /// preview 缺 exchange，submit 显式带默认 exchange (binance) -> Allow
+    #[test]
+    fn test_trade_preview_continue_preview_no_exchange_submit_binance_allow() {
+        let preview = json!({
+            "action": "trade_preview",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 10.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 10.0,
+            "price": 0.09,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Allow);
+    }
+
+    /// preview 显式 binance，submit 缺 exchange（默认也是 binance）-> Allow
+    #[test]
+    fn test_trade_preview_continue_preview_binance_submit_no_exchange_allow() {
+        let preview = json!({
+            "action": "trade_preview",
+            "exchange": "binance",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 10.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 10.0,
+            "price": 0.09,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Allow);
+    }
+
+    /// preview 缺 exchange，submit 也缺 exchange，但其他参数不一致 (symbol) -> Reject
+    #[test]
+    fn test_trade_preview_continue_missing_exchange_but_params_mismatch_reject() {
+        let preview = json!({
+            "action": "trade_preview",
+            "symbol": "DOGEUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 10.0,
+            "price": 0.09
+        });
+        let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
+        let submit = json!({
+            "action": "trade_submit",
+            "symbol": "BTCUSDT",
+            "side": "buy",
+            "order_type": "limit",
+            "quote_qty_usd": 10.0,
+            "price": 0.09,
+            "confirm": true
+        });
+        let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
+        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+    }
+
+    // --- build_safe_skill_args_summary: progress hint args must be whitelisted and safe ---
+    #[test]
+    fn test_build_safe_skill_args_summary_whitelist_order() {
+        let args = json!({
+            "symbol": "DOGEUSDT",
+            "action": "open_orders",
+            "exchange": "binance"
+        });
+        let s = build_safe_skill_args_summary(&args, 160);
+        assert!(s.contains("action=open_orders"));
+        assert!(s.contains("exchange=binance"));
+        assert!(s.contains("symbol=DOGEUSDT"));
+        assert!(s.starts_with("action="));
+    }
+
+    #[test]
+    fn test_build_safe_skill_args_summary_sensitive_omitted() {
+        let args = json!({
+            "action": "trade_submit",
+            "symbol": "DOGEUSDT",
+            "api_key": "secret123",
+            "api_secret": "never-show"
+        });
+        let s = build_safe_skill_args_summary(&args, 160);
+        assert!(!s.contains("api_key"));
+        assert!(!s.contains("api_secret"));
+        assert!(!s.contains("secret123"));
+        assert!(s.contains("action=trade_submit"));
+        assert!(s.contains("symbol=DOGEUSDT"));
+    }
+
+    #[test]
+    fn test_build_safe_skill_args_summary_truncate() {
+        let args = json!({
+            "action": "trade_history",
+            "symbol": "DOGEUSDT",
+            "limit": 10
+        });
+        let s = build_safe_skill_args_summary(&args, 30);
+        assert!(s.len() <= 33);
+        assert!(s.ends_with("...") || s.len() <= 30);
+    }
+
+    #[test]
+    fn test_build_safe_skill_args_summary_empty_object() {
+        let args = json!({});
+        let s = build_safe_skill_args_summary(&args, 160);
+        assert!(s.is_empty());
+    }
+
+    // --- build_final_delivery_with_priority: last_respond has priority over delivery_messages ---
+    #[test]
+    fn test_final_delivery_last_respond_priority_when_different() {
+        let delivery = vec!["early answer".to_string()];
+        let last_respond = "final answer".to_string();
+        let (deduped, final_text, used) =
+            build_final_delivery_with_priority(&delivery, Some(&last_respond));
+        assert!(used);
+        assert_eq!(deduped.len(), 2);
+        assert_eq!(deduped[0], "early answer");
+        assert_eq!(deduped[1], "final answer");
+        assert_eq!(final_text, "final answer");
+    }
+
+    #[test]
+    fn test_final_delivery_last_respond_same_as_delivery_no_duplicate() {
+        let delivery = vec!["same text".to_string()];
+        let last_respond = "same text".to_string();
+        let (deduped, final_text, used) =
+            build_final_delivery_with_priority(&delivery, Some(&last_respond));
+        assert!(used);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0], "same text");
+        assert_eq!(final_text, "same text");
+    }
+
+    #[test]
+    fn test_final_delivery_no_last_respond_uses_delivery() {
+        let delivery = vec!["only delivery".to_string()];
+        let (deduped, final_text, used) =
+            build_final_delivery_with_priority(&delivery, None);
+        assert!(!used);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(final_text, "only delivery");
+    }
+
+    #[test]
+    fn test_final_delivery_both_empty() {
+        let delivery: Vec<String> = vec![];
+        let (deduped, final_text, used) =
+            build_final_delivery_with_priority(&delivery, None);
+        assert!(!used);
+        assert!(deduped.is_empty());
+        assert!(final_text.is_empty());
+    }
 }

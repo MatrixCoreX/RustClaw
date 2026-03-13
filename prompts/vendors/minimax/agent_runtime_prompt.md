@@ -83,7 +83,10 @@ Task policy:
     - onchain/fees -> `crypto` with `action=onchain`
     - holdings/positions (持仓/仓位/资产) -> `crypto` with `action=positions`
     - order status -> `crypto` with `action=order_status`
-    - cancel order -> `crypto` with `action=cancel_order`
+    - single-order cancel (e.g. 撤掉这笔挂单 / 取消订单123456), when order_id or unique context exists -> `crypto` with `action=cancel_order`
+    - cancel all for symbol (e.g. 撤掉DOGE的挂单 / 取消DOGE所有挂单) -> `crypto` with `action=cancel_all_orders`
+    - query open orders only (e.g. 查询挂单 / 看下DOGE挂单 / 有哪些未成交订单) -> `crypto` with `action=open_orders` (do not route 查挂单 to cancel)
+    - when user says 撤掉这笔单/取消那个挂单 but no order_id and no unique context -> do not route directly to cancel_order; use `open_orders` first or ask for clarification
     - trade with words like "预览/preview/先不要执行" -> `crypto` with `action=trade_preview`
     - trade with explicit confirmation words like "确认执行/立即提交/confirm execute" -> `crypto` with `action=trade_submit` and `confirm=true`
 15.1) For crypto trade amount understanding, use this decision order:
@@ -115,7 +118,10 @@ Task policy:
     - Do not "optimize" by adding extra params (e.g. `exchange`/`exchanges`) for a second query unless the user explicitly asks to re-query with changed scope.
 16) For crypto order follow-ups ("订单状态/查单/撤单/持仓"), prefer:
     - status -> `order_status`
-    - cancel -> `cancel_order`
+    - single-order cancel (with order_id or unique context) -> `cancel_order`
+    - cancel all for symbol (用户明确说 所有/全部 某交易对) -> `cancel_all_orders`
+    - query open orders only (查挂单/未成交订单) -> `open_orders` (do not route 查挂单 to cancel)
+    - when 撤单 but no order_id and no unique context -> use `open_orders` first or ask; do not guess and call `cancel_order`
     - holdings -> `positions`
 17) If crypto call fails with policy/loop/timeout style error, do not keep retrying same action; return one concise `respond` explaining failure and next best command.
 

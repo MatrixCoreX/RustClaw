@@ -3074,22 +3074,24 @@ fn spawn_task_result_delivery(
                         );
                         if sent_progress_count < progress_messages.len() {
                             for answer in progress_messages.iter().skip(sent_progress_count) {
+                                let progress_text =
+                                    render_progress_message(state.i18n.as_ref(), answer);
                                 let requires_confirmation =
-                                    is_crypto_trade_confirm_prompt(answer, false);
+                                    is_crypto_trade_confirm_prompt(&progress_text, false);
                                 debug!(
                                     "phase=deliver_progress task_id={} chat_id={} msg_fp={} msg_len={} requires_confirmation={} msg_preview={}",
                                     task_id,
                                     chat_id.0,
-                                    text_fingerprint_hex(answer),
-                                    answer.len(),
+                                    text_fingerprint_hex(&progress_text),
+                                    progress_text.len(),
                                     requires_confirmation,
-                                    text_preview_for_log(answer, 160)
+                                    text_preview_for_log(&progress_text, 160)
                                 );
                                 let _ = send_text_or_image(
                                     &bot,
                                     &state,
                                     chat_id,
-                                    answer,
+                                    &progress_text,
                                     requires_confirmation,
                                 )
                                 .await;
@@ -3290,6 +3292,30 @@ fn task_success_messages_from_offset(
         text.len()
     );
     vec![text]
+}
+
+/// If raw is "I18N:key:vars_json", render with i18n and return; otherwise return raw as-is. Unknown format does not crash.
+fn render_progress_message(i18n: &TextCatalog, raw: &str) -> String {
+    const PREFIX: &str = "I18N:";
+    if !raw.starts_with(PREFIX) {
+        return raw.to_string();
+    }
+    let rest = raw[PREFIX.len()..].trim();
+    let mut parts = rest.splitn(2, ':');
+    let key = match parts.next() {
+        Some(k) => k.trim(),
+        None => return raw.to_string(),
+    };
+    let vars_json = parts.next().unwrap_or("{}").trim();
+    let vars: HashMap<String, String> = match serde_json::from_str(vars_json) {
+        Ok(m) => m,
+        Err(_) => return raw.to_string(),
+    };
+    let var_refs: Vec<(&str, &str)> = vars
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    i18n.t_with(key, &var_refs)
 }
 
 fn task_progress_messages(task: &TaskQueryResponse) -> Vec<String> {

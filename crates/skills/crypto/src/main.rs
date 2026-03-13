@@ -430,6 +430,40 @@ fn default_crypto_catalog(lang: &str) -> TextCatalog {
         "crypto.msg.price_alert_not_triggered".to_string(),
         "{symbol} monitor: {window_minutes}m change {change_pct}% has not reached threshold {threshold_pct}% (start={start_price}, now={current_price}, direction={direction})".to_string(),
     );
+    current.insert(
+        "crypto.msg.trade_submitted_pending_suffix".to_string(),
+        " (order placed, awaiting fill)".to_string(),
+    );
+    current.insert("crypto.msg.trade_preview_summary".to_string(), "trade_preview {exchange} {symbol} {side} {qty_part} notional_usd={notional} checks={checks}".to_string());
+    current.insert("crypto.msg.trade_submitted_filled".to_string(), "trade_submitted order_id={order_id} status=FILLED {exchange} {symbol} {side} qty_filled={qty_filled}{price_part} quote_spent={quote_spent} USDT".to_string());
+    current.insert("crypto.msg.trade_submitted_partial".to_string(), "trade_submitted order_id={order_id} status=PARTIAL {exchange} {symbol} {side} filled={filled}/{total} notional_usd={notional}".to_string());
+    current.insert("crypto.msg.trade_submitted_fallback".to_string(), "trade_submitted order_id={order_id} status={status} {exchange} {symbol} {side} qty={qty} notional_usd={notional}".to_string());
+    current.insert("crypto.msg.open_orders_none".to_string(), "open_orders {exchange}{symbol_suffix}: none".to_string());
+    current.insert("crypto.msg.open_orders_header".to_string(), "open_orders {exchange} count={count}\n{body}".to_string());
+    current.insert("crypto.msg.open_orders_line_binance".to_string(), "{sym} {side} {otype} qty={orig_qty} filled={exec_qty} price={price} status={status} id={oid}".to_string());
+    current.insert("crypto.msg.open_orders_line_okx".to_string(), "{inst} {side} {otype} sz={sz} price={px} state={state} id={oid}".to_string());
+    current.insert("crypto.msg.cancel_all_orders_done".to_string(), "cancel_all_orders {exchange} {sym} cancelled={count}".to_string());
+    current.insert("crypto.msg.cancel_all_orders_no_open_orders".to_string(), "cancel_all_orders {exchange} {sym_info}: no open orders".to_string());
+    current.insert("crypto.msg.cancel_order_done".to_string(), "order_cancelled {id_text}".to_string());
+    current.insert("crypto.msg.indicator_rsi_summary".to_string(), "{symbol} RSI{period}={rsi} last={last} signal={signal}".to_string());
+    current.insert("crypto.msg.indicator_ema_summary".to_string(), "{symbol} EMA{period}={ema} last={last} signal={signal}".to_string());
+    current.insert("crypto.msg.indicator_sma_summary".to_string(), "{symbol} SMA{period}={sma} last={last} signal={signal}".to_string());
+    current.insert("crypto.msg.indicator_signal_neutral".to_string(), "neutral".to_string());
+    current.insert("crypto.msg.indicator_signal_overbought".to_string(), "overbought".to_string());
+    current.insert("crypto.msg.indicator_signal_oversold".to_string(), "oversold".to_string());
+    current.insert("crypto.msg.indicator_signal_above_ema".to_string(), "above_ema".to_string());
+    current.insert("crypto.msg.indicator_signal_below_ema".to_string(), "below_ema".to_string());
+    current.insert("crypto.msg.indicator_signal_above_sma".to_string(), "above_sma".to_string());
+    current.insert("crypto.msg.indicator_signal_below_sma".to_string(), "below_sma".to_string());
+    current.insert("crypto.msg.trade_submitted_pending".to_string(), "Order placed (pending): order_id={order_id}, status=PENDING, {exchange} {symbol} {side} {order_type} qty={qty}{price_str}{stop_str} notional_usd={notional}{pending_suffix}".to_string());
+    current.insert("crypto.msg.positions_balance_line".to_string(), "{asset} free={free} locked={locked}".to_string());
+    current.insert("crypto.msg.positions_balance_line_okx".to_string(), "{ccy} eq={eq} avail={avail}".to_string());
+    current.insert("crypto.msg.order_status_summary".to_string(), "Order status: {symbol} id={id_text} status={status}".to_string());
+    current.insert("crypto.msg.order_status_skipped_missing_symbol".to_string(), "Order status skipped ({id_text}): missing symbol, {exchange} requires symbol for query".to_string());
+    current.insert("crypto.msg.onchain_btc_fees".to_string(), "BTC fee(sat/vB): fastest={fastest}, half_hour={half_hour}, hour={hour}".to_string());
+    current.insert("crypto.msg.onchain_eth_stats_summary".to_string(), "ETH onchain: tx_24h={tx_24h}, blocks_24h={blocks_24h}, market_price_usd={market_price_usd}".to_string());
+    current.insert("crypto.msg.onchain_eth_native_summary".to_string(), "ETH address={address} token=ETH balance={balance} recent_txs={recent_txs}".to_string());
+    current.insert("crypto.msg.onchain_eth_token_summary".to_string(), "ETH address={address} token={token} balance={balance} recent_txs={recent_txs}".to_string());
     TextCatalog { current }
 }
 
@@ -1139,15 +1173,26 @@ fn handle_indicator(
             let rsi = calc_rsi(&values, period).ok_or_else(|| {
                 format!("not enough candles for RSI{}: got={}", period, values.len())
             })?;
-            let signal = if rsi >= 70.0 {
-                "overbought"
+            let signal_key = if rsi >= 70.0 {
+                "crypto.msg.indicator_signal_overbought"
             } else if rsi <= 30.0 {
-                "oversold"
+                "crypto.msg.indicator_signal_oversold"
             } else {
-                "neutral"
+                "crypto.msg.indicator_signal_neutral"
             };
+            let signal_display = tr(signal_key);
+            let raw_signal = if rsi >= 70.0 { "overbought" } else if rsi <= 30.0 { "oversold" } else { "neutral" };
             Ok((
-                format!("{symbol} RSI{period}={rsi:.2} last={last:.6} signal={signal}"),
+                tr_with(
+                    "crypto.msg.indicator_rsi_summary",
+                    &[
+                        ("symbol", symbol.as_str()),
+                        ("period", &period.to_string()),
+                        ("rsi", &format!("{rsi:.2}")),
+                        ("last", &format!("{last:.6}")),
+                        ("signal", signal_display.as_str()),
+                    ],
+                ),
                 json!({
                     "action":"indicator",
                     "indicator":"rsi",
@@ -1155,7 +1200,7 @@ fn handle_indicator(
                     "symbol":symbol,
                     "rsi":rsi,
                     "last":last,
-                    "signal":signal
+                    "signal":raw_signal
                 }),
             ))
         }
@@ -1163,9 +1208,24 @@ fn handle_indicator(
             let ema = calc_ema(&values, period).ok_or_else(|| {
                 format!("not enough candles for EMA{}: got={}", period, values.len())
             })?;
-            let signal = if last >= ema { "above_ema" } else { "below_ema" };
+            let signal_key = if last >= ema {
+                "crypto.msg.indicator_signal_above_ema"
+            } else {
+                "crypto.msg.indicator_signal_below_ema"
+            };
+            let signal_display = tr(signal_key);
+            let raw_signal = if last >= ema { "above_ema" } else { "below_ema" };
             Ok((
-                format!("{symbol} EMA{period}={ema:.6} last={last:.6} signal={signal}"),
+                tr_with(
+                    "crypto.msg.indicator_ema_summary",
+                    &[
+                        ("symbol", symbol.as_str()),
+                        ("period", &period.to_string()),
+                        ("ema", &format!("{ema:.6}")),
+                        ("last", &format!("{last:.6}")),
+                        ("signal", signal_display.as_str()),
+                    ],
+                ),
                 json!({
                     "action":"indicator",
                     "indicator":"ema",
@@ -1173,12 +1233,11 @@ fn handle_indicator(
                     "symbol":symbol,
                     "ema":ema,
                     "last":last,
-                    "signal":signal
+                    "signal":raw_signal
                 }),
             ))
         }
         _ => {
-            // Default: SMA
             if values.len() < period {
                 return Err(format!(
                     "not enough candles for SMA{}: got={}",
@@ -1187,9 +1246,24 @@ fn handle_indicator(
                 ));
             }
             let sma = calc_sma(&values, period).unwrap_or(0.0);
-            let signal = if last >= sma { "above_sma" } else { "below_sma" };
+            let signal_key = if last >= sma {
+                "crypto.msg.indicator_signal_above_sma"
+            } else {
+                "crypto.msg.indicator_signal_below_sma"
+            };
+            let signal_display = tr(signal_key);
+            let raw_signal = if last >= sma { "above_sma" } else { "below_sma" };
             Ok((
-                format!("{symbol} SMA{period}={sma:.6} last={last:.6} signal={signal}"),
+                tr_with(
+                    "crypto.msg.indicator_sma_summary",
+                    &[
+                        ("symbol", symbol.as_str()),
+                        ("period", &period.to_string()),
+                        ("sma", &format!("{sma:.6}")),
+                        ("last", &format!("{last:.6}")),
+                        ("signal", signal_display.as_str()),
+                    ],
+                ),
                 json!({
                     "action":"indicator",
                     "indicator":"sma",
@@ -1197,7 +1271,7 @@ fn handle_indicator(
                     "symbol":symbol,
                     "sma":sma,
                     "last":last,
-                    "signal":signal
+                    "signal":raw_signal
                 }),
             ))
         }
@@ -1367,13 +1441,18 @@ fn handle_onchain(client: &Client, cfg: &RootConfig, obj: &serde_json::Map<Strin
                 .map_err(|err| format!("fetch bitcoin onchain failed: {err}"))?
                 .json()
                 .map_err(|err| format!("parse bitcoin onchain failed: {err}"))?;
-            let fast = v.get("fastestFee").and_then(|x| x.as_u64()).unwrap_or(0);
-            let half = v.get("halfHourFee").and_then(|x| x.as_u64()).unwrap_or(0);
+            let fastest = v.get("fastestFee").and_then(|x| x.as_u64()).unwrap_or(0);
+            let half_hour = v.get("halfHourFee").and_then(|x| x.as_u64()).unwrap_or(0);
             let hour = v.get("hourFee").and_then(|x| x.as_u64()).unwrap_or(0);
-            Ok((
-                format!("BTC fee(sat/vB): fastest={fast}, half_hour={half}, hour={hour}"),
-                json!({"action":"onchain","chain":"bitcoin","fees":v}),
-            ))
+            let text = tr_with(
+                "crypto.msg.onchain_btc_fees",
+                &[
+                    ("fastest", &fastest.to_string()),
+                    ("half_hour", &half_hour.to_string()),
+                    ("hour", &hour.to_string()),
+                ],
+            );
+            Ok((text, json!({"action":"onchain","chain":"bitcoin","fees":v})))
         }
         "ethereum" | "eth" => {
             if let Some(address) = obj
@@ -1401,12 +1480,16 @@ fn handle_onchain(client: &Client, cfg: &RootConfig, obj: &serde_json::Map<Strin
                 .get("market_price_usd")
                 .and_then(|x| x.as_f64())
                 .unwrap_or(0.0);
-            Ok((
-                format!(
-                    "ETH onchain: tx_24h={tx_24h}, blocks_24h={blocks_24h}, market_price_usd={market:.4}"
-                ),
-                json!({"action":"onchain","chain":"ethereum","stats":data}),
-            ))
+            let market_price_usd = format!("{market:.4}");
+            let text = tr_with(
+                "crypto.msg.onchain_eth_stats_summary",
+                &[
+                    ("tx_24h", &tx_24h.to_string()),
+                    ("blocks_24h", &blocks_24h.to_string()),
+                    ("market_price_usd", market_price_usd.as_str()),
+                ],
+            );
+            Ok((text, json!({"action":"onchain","chain":"ethereum","stats":data})))
         }
         _ => Err(tr("crypto.err.unsupported_chain")),
     }
@@ -1456,11 +1539,14 @@ fn handle_eth_address_onchain(
         let raw = parse_evm_api_result_string(&bal_resp)
             .ok_or_else(|| "ethereum native balance response missing result".to_string())?;
         let amount = raw_to_decimal_string(&raw, 18);
-        let text = format!(
-            "ETH address={} token=ETH balance={} recent_txs={}",
-            address,
-            amount,
-            tx_items.len()
+        let recent_txs = tx_items.len().to_string();
+        let text = tr_with(
+            "crypto.msg.onchain_eth_native_summary",
+            &[
+                ("address", address),
+                ("balance", amount.as_str()),
+                ("recent_txs", recent_txs.as_str()),
+            ],
         );
         return Ok((
             text,
@@ -1505,12 +1591,16 @@ fn handle_eth_address_onchain(
     let raw = parse_evm_api_result_string(&bal_resp)
         .ok_or_else(|| "ethereum token balance response missing result".to_string())?;
     let amount = raw_to_decimal_string(&raw, decimals);
-    let text = format!(
-        "ETH address={} token={} balance={} recent_txs={}",
-        address,
-        token.to_ascii_uppercase(),
-        amount,
-        tx_items.len()
+    let token_upper = token.to_ascii_uppercase();
+    let recent_txs = tx_items.len().to_string();
+    let text = tr_with(
+        "crypto.msg.onchain_eth_token_summary",
+        &[
+            ("address", address),
+            ("token", token_upper.as_str()),
+            ("balance", amount.as_str()),
+            ("recent_txs", recent_txs.as_str()),
+        ],
     );
     Ok((
         text,
@@ -1575,20 +1665,20 @@ fn handle_trade_preview(
     } else {
         String::new()
     };
-    let text = format!(
-        "trade_preview {} {} {} {}={:.6}{}{}{}{}{} notional_usd={:.4} checks={}",
-        trade.exchange,
-        trade.symbol,
-        trade.side,
-        qty_label,
-        preview_qty,
-        quote_part,
-        order_type_part,
-        price_part,
-        stop_price_part,
-        tif_part,
-        notional,
-        checks.len(),
+    let qty_part = format!(
+        "{}={:.6}{}{}{}{}{}",
+        qty_label, preview_qty, quote_part, order_type_part, price_part, stop_price_part, tif_part
+    );
+    let text = tr_with(
+        "crypto.msg.trade_preview_summary",
+        &[
+            ("exchange", trade.exchange.as_str()),
+            ("symbol", trade.symbol.as_str()),
+            ("side", trade.side.as_str()),
+            ("qty_part", qty_part.as_str()),
+            ("notional", &format!("{:.4}", notional)),
+            ("checks", &checks.len().to_string()),
+        ],
     );
     Ok((
         text,
@@ -1634,7 +1724,6 @@ fn build_trade_submitted_text(event: &OrderEvent) -> String {
     let status_upper = event.status.to_ascii_uppercase();
     match status_upper.as_str() {
         "FILLED" => {
-            // Fully executed: show actual fill amounts
             let qty_filled = if let Some(eq) = event.executed_qty {
                 format!("{}", fmt_num(eq))
             } else {
@@ -1648,19 +1737,20 @@ fn build_trade_submitted_text(event: &OrderEvent) -> String {
             let price_part = event.avg_fill_price
                 .map(|p| format!(" avg_price={}", fmt_num(p)))
                 .unwrap_or_default();
-            format!(
-                "trade_submitted order_id={} status=FILLED {} {} side={} qty_filled={}{} quote_spent={} USDT",
-                event.order_id,
-                event.exchange,
-                event.symbol,
-                event.side,
-                qty_filled,
-                price_part,
-                quote_spent,
+            tr_with(
+                "crypto.msg.trade_submitted_filled",
+                &[
+                    ("order_id", event.order_id.as_str()),
+                    ("exchange", event.exchange.as_str()),
+                    ("symbol", event.symbol.as_str()),
+                    ("side", event.side.as_str()),
+                    ("qty_filled", qty_filled.as_str()),
+                    ("price_part", price_part.as_str()),
+                    ("quote_spent", quote_spent.as_str()),
+                ],
             )
         }
         "NEW" | "LIVE" => {
-            // Pending (limit/stop order placed, not yet filled)
             let price_str = event.price
                 .map(|p| format!(" price={}", fmt_num(p)))
                 .unwrap_or_default();
@@ -1669,17 +1759,21 @@ fn build_trade_submitted_text(event: &OrderEvent) -> String {
                 .filter(|r| !r.is_empty())
                 .map(|r| format!(" info={r}"))
                 .unwrap_or_default();
-            format!(
-                "trade_submitted order_id={} status=PENDING {} {} {} {} qty={:.6}{}{} notional_usd={:.4} (已挂单，等待成交)",
-                event.order_id,
-                event.exchange,
-                event.symbol,
-                event.side,
-                event.order_type,
-                event.qty,
-                price_str,
-                stop_str,
-                event.notional_usd,
+            let pending_suffix = tr("crypto.msg.trade_submitted_pending_suffix");
+            tr_with(
+                "crypto.msg.trade_submitted_pending",
+                &[
+                    ("order_id", event.order_id.as_str()),
+                    ("exchange", event.exchange.as_str()),
+                    ("symbol", event.symbol.as_str()),
+                    ("side", event.side.as_str()),
+                    ("order_type", event.order_type.as_str()),
+                    ("qty", &format!("{:.6}", event.qty)),
+                    ("price_str", price_str.as_str()),
+                    ("stop_str", stop_str.as_str()),
+                    ("notional", &format!("{:.4}", event.notional_usd)),
+                    ("pending_suffix", pending_suffix.as_str()),
+                ],
             )
         }
         "PARTIALLY_FILLED" => {
@@ -1687,30 +1781,31 @@ fn build_trade_submitted_text(event: &OrderEvent) -> String {
                 .map(|q| format!("{:.6}", q))
                 .unwrap_or_else(|| "?".to_string());
             let total_str = format!("{:.6}", event.qty);
-            format!(
-                "trade_submitted order_id={} status=PARTIAL {} {} {} filled={}/{} notional_usd={:.4}",
-                event.order_id,
-                event.exchange,
-                event.symbol,
-                event.side,
-                filled_str,
-                total_str,
-                event.notional_usd,
+            tr_with(
+                "crypto.msg.trade_submitted_partial",
+                &[
+                    ("order_id", event.order_id.as_str()),
+                    ("exchange", event.exchange.as_str()),
+                    ("symbol", event.symbol.as_str()),
+                    ("side", event.side.as_str()),
+                    ("filled", filled_str.as_str()),
+                    ("total", total_str.as_str()),
+                    ("notional", &format!("{:.4}", event.notional_usd)),
+                ],
             )
         }
-        _ => {
-            // Fallback for any other status
-            format!(
-                "trade_submitted order_id={} status={} {} {} {} qty={:.6} notional_usd={:.4}",
-                event.order_id,
-                event.status,
-                event.exchange,
-                event.symbol,
-                event.side,
-                event.qty,
-                event.notional_usd,
-            )
-        }
+        _ => tr_with(
+            "crypto.msg.trade_submitted_fallback",
+            &[
+                ("order_id", event.order_id.as_str()),
+                ("status", event.status.as_str()),
+                ("exchange", event.exchange.as_str()),
+                ("symbol", event.symbol.as_str()),
+                ("side", event.side.as_str()),
+                ("qty", &format!("{:.6}", event.qty)),
+                ("notional", &format!("{:.4}", event.notional_usd)),
+            ],
+        )
     }
 }
 
@@ -1782,14 +1877,35 @@ fn handle_open_orders(
                 let orig_qty = order.get("origQty").and_then(|x| x.as_str()).unwrap_or("0");
                 let exec_qty = order.get("executedQty").and_then(|x| x.as_str()).unwrap_or("0");
                 let status = order.get("status").and_then(|x| x.as_str()).unwrap_or("");
-                lines.push(format!(
-                    "{sym} {side} {otype} qty={orig_qty} filled={exec_qty} price={price} status={status} id={oid}"
+                lines.push(tr_with(
+                    "crypto.msg.open_orders_line_binance",
+                    &[
+                        ("sym", sym),
+                        ("side", side),
+                        ("otype", otype),
+                        ("orig_qty", orig_qty),
+                        ("exec_qty", exec_qty),
+                        ("price", price),
+                        ("status", status),
+                        ("oid", &oid),
+                    ],
                 ));
             }
+            let symbol_suffix = symbol.as_ref().map(|s| format!(" {s}")).unwrap_or_default();
             let summary = if lines.is_empty() {
-                format!("open_orders binance{}: none", symbol.map(|s| format!(" {s}")).unwrap_or_default())
+                tr_with(
+                    "crypto.msg.open_orders_none",
+                    &[("exchange", "binance"), ("symbol_suffix", symbol_suffix.as_str())],
+                )
             } else {
-                format!("open_orders binance count={}\n{}", arr.len(), lines.join("\n"))
+                tr_with(
+                    "crypto.msg.open_orders_header",
+                    &[
+                        ("exchange", "binance"),
+                        ("count", &arr.len().to_string()),
+                        ("body", &lines.join("\n")),
+                    ],
+                )
             };
             Ok((summary, json!({"action":"open_orders","exchange":"binance","orders":arr})))
         }
@@ -1816,14 +1932,34 @@ fn handle_open_orders(
                 let sz = order.get("sz").and_then(|x| x.as_str()).unwrap_or("0");
                 let px = order.get("px").and_then(|x| x.as_str()).unwrap_or("0");
                 let state = order.get("state").and_then(|x| x.as_str()).unwrap_or("");
-                lines.push(format!(
-                    "{inst} {side} {otype} sz={sz} price={px} state={state} id={oid}"
+                lines.push(tr_with(
+                    "crypto.msg.open_orders_line_okx",
+                    &[
+                        ("inst", inst),
+                        ("side", side),
+                        ("otype", otype),
+                        ("sz", sz),
+                        ("px", px),
+                        ("state", state),
+                        ("oid", oid),
+                    ],
                 ));
             }
+            let symbol_suffix = symbol.as_ref().map(|s| format!(" {s}")).unwrap_or_default();
             let summary = if lines.is_empty() {
-                format!("open_orders okx{}: none", symbol.map(|s| format!(" {s}")).unwrap_or_default())
+                tr_with(
+                    "crypto.msg.open_orders_none",
+                    &[("exchange", "okx"), ("symbol_suffix", symbol_suffix.as_str())],
+                )
             } else {
-                format!("open_orders okx count={}\n{}", arr.len(), lines.join("\n"))
+                tr_with(
+                    "crypto.msg.open_orders_header",
+                    &[
+                        ("exchange", "okx"),
+                        ("count", &arr.len().to_string()),
+                        ("body", &lines.join("\n")),
+                    ],
+                )
             };
             Ok((summary, json!({"action":"open_orders","exchange":"okx","orders":arr})))
         }
@@ -1848,7 +1984,10 @@ fn handle_cancel_all_orders(
             let mut params = vec![("symbol", sym.clone())];
             let v = binance_signed_request(client, cfg, Method::DELETE, "/api/v3/openOrders", &mut params)?;
             let arr = v.as_array().cloned().unwrap_or_default();
-            let text = format!("cancel_all_orders binance {sym} cancelled={}", arr.len());
+            let text = tr_with(
+                "crypto.msg.cancel_all_orders_done",
+                &[("exchange", "binance"), ("sym", sym.as_str()), ("count", &arr.len().to_string())],
+            );
             Ok((text, json!({"action":"cancel_all_orders","exchange":"binance","symbol":sym,"cancelled":arr})))
         }
         "okx" => {
@@ -1865,7 +2004,10 @@ fn handle_cancel_all_orders(
             if arr.is_empty() {
                 let sym_info = symbol.as_deref().unwrap_or("all");
                 return Ok((
-                    format!("cancel_all_orders okx {sym_info}: no open orders"),
+                    tr_with(
+                        "crypto.msg.cancel_all_orders_no_open_orders",
+                        &[("exchange", "okx"), ("sym_info", sym_info)],
+                    ),
                     json!({"action":"cancel_all_orders","exchange":"okx","cancelled":[]}),
                 ));
             }
@@ -1881,7 +2023,10 @@ fn handle_cancel_all_orders(
             let v = okx_request(client, cfg, Method::POST, "/api/v5/trade/cancel-batch-orders", None, Some(body))?;
             let cancelled = v.get("data").and_then(|x| x.as_array()).cloned().unwrap_or_default();
             let sym_info = symbol.as_deref().unwrap_or("all");
-            let text = format!("cancel_all_orders okx {sym_info} cancelled={}", cancelled.len());
+            let text = tr_with(
+                "crypto.msg.cancel_all_orders_done",
+                &[("exchange", "okx"), ("sym", sym_info), ("count", &cancelled.len().to_string())],
+            );
             Ok((text, json!({"action":"cancel_all_orders","exchange":"okx","cancelled":cancelled})))
         }
         _ => Err(format!("cancel_all_orders: unsupported exchange={exchange}")),
@@ -1983,9 +2128,9 @@ fn handle_order_status_binance(
     }
     let Some(symbol) = obj.get("symbol").and_then(|v| v.as_str()) else {
         let id_text = order_id.or(client_order_id).unwrap_or("unknown");
-        let text = format!(
-            "order_status skipped {}: missing symbol (binance requires symbol for query)",
-            id_text
+        let text = tr_with(
+            "crypto.msg.order_status_skipped_missing_symbol",
+            &[("id_text", id_text), ("exchange", "binance")],
         );
         return Ok((
             text,
@@ -2009,11 +2154,10 @@ fn handle_order_status_binance(
     let v = binance_signed_request(client, cfg, Method::GET, "/api/v3/order", &mut params)?;
     let status = v.get("status").and_then(|x| x.as_str()).unwrap_or("UNKNOWN");
     let id_text = order_id.or(client_order_id).unwrap_or("unknown");
-    let text = format!(
-        "order_status {} {} {}",
-        normalize_symbol(symbol),
-        id_text,
-        status
+    let sym = normalize_symbol(symbol);
+    let text = tr_with(
+        "crypto.msg.order_status_summary",
+        &[("symbol", sym.as_str()), ("id_text", id_text), ("status", status)],
     );
     Ok((text, json!({"action":"order_status","exchange":"binance","order":v})))
 }
@@ -2041,7 +2185,7 @@ fn handle_cancel_order_binance(
     }
     let v = binance_signed_request(client, cfg, Method::DELETE, "/api/v3/order", &mut params)?;
     let id_text = order_id.or(client_order_id).unwrap_or("unknown");
-    let text = format!("order_cancelled {}", id_text);
+    let text = tr_with("crypto.msg.cancel_order_done", &[("id_text", id_text)]);
     Ok((text, json!({"action":"cancel_order","exchange":"binance","order":v})))
 }
 
@@ -2066,7 +2210,12 @@ fn handle_positions_binance(client: &Client, cfg: &RootConfig) -> Result<(String
             if free + locked <= 0.0 {
                 continue;
             }
-            lines.push(format!("{asset} free={} locked={}", fmt_num(free), fmt_num(locked)));
+            let free_s = fmt_num(free);
+            let locked_s = fmt_num(locked);
+            lines.push(tr_with(
+                "crypto.msg.positions_balance_line",
+                &[("asset", asset), ("free", free_s.as_str()), ("locked", locked_s.as_str())],
+            ));
             items.push(json!({"asset":asset,"free":free,"locked":locked}));
         }
     }
@@ -2091,9 +2240,9 @@ fn handle_order_status_okx(
     }
     let Some(symbol) = obj.get("symbol").and_then(|v| v.as_str()) else {
         let id_text = order_id.or(client_order_id).unwrap_or("unknown");
-        let text = format!(
-            "order_status skipped {}: missing symbol (okx requires symbol for query)",
-            id_text
+        let text = tr_with(
+            "crypto.msg.order_status_skipped_missing_symbol",
+            &[("id_text", id_text), ("exchange", "okx")],
         );
         return Ok((
             text,
@@ -2124,7 +2273,11 @@ fn handle_order_status_okx(
         .unwrap_or(Value::Null);
     let state = data.get("state").and_then(|x| x.as_str()).unwrap_or("unknown");
     let id_text = order_id.or(client_order_id).unwrap_or("unknown");
-    let text = format!("order_status {} {} {}", normalize_symbol(symbol), id_text, state);
+    let sym = normalize_symbol(symbol);
+    let text = tr_with(
+        "crypto.msg.order_status_summary",
+        &[("symbol", sym.as_str()), ("id_text", id_text), ("status", state)],
+    );
     Ok((text, json!({"action":"order_status","exchange":"okx","order":data})))
 }
 
@@ -2158,7 +2311,7 @@ fn handle_cancel_order_okx(
         Some(body),
     )?;
     let id_text = order_id.or(client_order_id).unwrap_or("unknown");
-    let text = format!("order_cancelled {}", id_text);
+    let text = tr_with("crypto.msg.cancel_order_done", &[("id_text", id_text)]);
     Ok((text, json!({"action":"cancel_order","exchange":"okx","order":v})))
 }
 
@@ -2188,7 +2341,12 @@ fn handle_positions_okx(client: &Client, cfg: &RootConfig) -> Result<(String, Va
             if eq <= 0.0 {
                 continue;
             }
-            lines.push(format!("{ccy} eq={} avail={}", fmt_num(eq), fmt_num(avail)));
+            let eq_s = fmt_num(eq);
+            let avail_s = fmt_num(avail);
+            lines.push(tr_with(
+                "crypto.msg.positions_balance_line_okx",
+                &[("ccy", ccy), ("eq", eq_s.as_str()), ("avail", avail_s.as_str())],
+            ));
             items.push(json!({"ccy":ccy,"eq":eq,"avail":avail}));
         }
     }

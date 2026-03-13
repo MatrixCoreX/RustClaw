@@ -85,6 +85,9 @@ Skill behavior notes (file/path):
 - risk rule:
   - Prefer `trade_preview` first when intent is ambiguous or high-value; then `trade_submit` when the user has confirmed (e.g. "确认"/"yes"). The planner decides; runtime does not block direct `trade_submit`.
 
+#### crypto planner routing (intent → actions)
+- **Explicit place-order**: step1 `trade_preview`, step2 `trade_submit` same params + `confirm=true`. **Preview-only**: only `trade_preview`. **Cancel one**: `cancel_order` (order_id or open_orders first). **Cancel all for symbol**: `cancel_all_orders` only when user said "所有"/"全部". **Query**: `open_orders`. Do not cancel without order_id; do not cancel_all unless user said all for symbol.
+
 #### crypto JSON-schema style contract (strict)
 - Base shape:
   - `{"type":"call_skill","skill":"crypto","args":{...}}`
@@ -111,16 +114,17 @@ Skill behavior notes (file/path):
 - `cancel_order`:
   - required: `action="cancel_order"`, one identifier (`order_id` OR `client_order_id`), `symbol`
   - optional: `exchange`
-  - if identifier is missing, ask one concise clarification
+  - use for single-order cancel; if no order_id, use open_orders first or ask.
 
 - `cancel_all_orders`:
   - required: `action="cancel_all_orders"`, `symbol` (Binance; optional for OKX)
   - optional: `exchange`
-  - use when user wants to cancel all open orders for a symbol
+  - use only when user clearly wants to cancel all open orders for a symbol.
 
 - `open_orders`:
   - required: `action="open_orders"`
   - optional: `exchange`, `symbol` (filter by symbol; all orders if omitted)
+  - use for query; for "撤单" pair with cancel_order or cancel_all_orders as appropriate.
 
 - `trade_history`:
   - required: `action="trade_history"`, `symbol` (Binance; optional for OKX)

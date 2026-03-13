@@ -85,6 +85,14 @@ Skill behavior notes (file/path):
 - risk rule:
   - Prefer `trade_preview` first when intent is ambiguous or high-value; then `trade_submit` when the user has confirmed (e.g. "确认"/"yes"). The planner decides; runtime does not block direct `trade_submit`.
 
+#### crypto planner routing (intent → actions)
+- **Explicit place-order / 明确下单·挂单** (e.g. “在0.09挂单5U狗狗币”, “市价买10U BTC”): output **two steps**: step1 `trade_preview`, step2 `trade_submit` with same params and `confirm=true`. Do not output only preview when user asked to place the order.
+- **Preview-only / 仅预览·试算** (e.g. “预览一下”, “先帮我算算”): output **only** `trade_preview`; do **not** output `trade_submit`.
+- **Cancel one order**: use `cancel_order` with `order_id` or `client_order_id` and `symbol`. If no order_id and no unique context, use `open_orders` first or ask for order id.
+- **Cancel all for symbol**: use `cancel_all_orders` with `symbol` only when user said “所有” or “全部” for that symbol.
+- **Query open orders**: use `open_orders`. Do not route “撤单” to only open_orders; do not route “查挂单” to cancel.
+- **Cancel safety**: Do not call `cancel_order` without order_id/client_order_id (or a prior step supplying it). Do not call `cancel_all_orders` unless user explicitly asked to cancel all for symbol.
+
 #### crypto JSON-schema style contract (strict)
 - Base shape:
   - `{"type":"call_skill","skill":"crypto","args":{...}}`
@@ -111,16 +119,17 @@ Skill behavior notes (file/path):
 - `cancel_order`:
   - required: `action="cancel_order"`, one identifier (`order_id` OR `client_order_id`), `symbol`
   - optional: `exchange`
-  - if identifier is missing, ask one concise clarification
+  - use for single-order cancel. If no order_id and no unique context, call `open_orders` first or ask for order id.
 
 - `cancel_all_orders`:
   - required: `action="cancel_all_orders"`, `symbol` (Binance; optional for OKX)
   - optional: `exchange`
-  - use when user wants to cancel all open orders for a symbol
+  - use only when user clearly wants to cancel all open orders for a symbol.
 
 - `open_orders`:
   - required: `action="open_orders"`
   - optional: `exchange`, `symbol` (filter by symbol; all orders if omitted)
+  - use for query; for “撤单” intent pair with cancel_order or cancel_all_orders as appropriate.
 
 - `trade_history`:
   - required: `action="trade_history"`, `symbol` (Binance; optional for OKX)

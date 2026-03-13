@@ -85,6 +85,14 @@ Skill behavior notes (file/path):
 - risk rule:
   - Prefer `trade_preview` first when intent is ambiguous or high-value; then `trade_submit` when the user has confirmed (e.g. "确认"/"yes"). The planner decides; runtime does not block direct `trade_submit`.
 
+#### crypto planner routing (intent → actions)
+- **Explicit place-order / 明确下单·挂单** (e.g. “在0.09挂单5U狗狗币”, “市价买10U BTC”, “限价卖1个ETH 3500”): when user clearly wants to place an order and params are complete, output **two steps in one plan**: step1 `trade_preview`, step2 `trade_submit` with **same** `exchange/symbol/side/order_type/quote_qty_usd|qty/price` and `confirm=true`. Do not output only preview when the user asked to place the order.
+- **Preview-only / 仅预览·试算** (e.g. “预览一下”, “先帮我算算”, “如果买5U大概多少”): output **only** `trade_preview`; do **not** output `trade_submit`. User did not ask to execute.
+- **Cancel one order / 单笔撤单** (e.g. “撤掉这笔挂单”, “取消这个订单”, “撤销订单123456”, “把DOGE那个限价单撤掉”): use `cancel_order` with `order_id` or `client_order_id` and `symbol`. If user says “撤掉这笔” but **no** `order_id` and no unique context, do **not** guess; either call `open_orders` first (with `symbol` if given) then cancel by chosen order, or ask for the order id.
+- **Cancel all for symbol / 某交易对全部撤单** (e.g. “撤掉DOGE的挂单”, “取消DOGE所有挂单”, “把DOGEUSDT的挂单都撤了”): use `cancel_all_orders` with `symbol`. Use **only** when user clearly said “所有” or “全部” for that symbol.
+- **Query open orders / 查挂单** (e.g. “查询我的挂单”, “看下DOGE挂单”, “有哪些未成交订单”): use `open_orders`; optional `symbol` to filter. Do **not** route “查挂单” to cancel; do **not** route “撤单” to only `open_orders` without then cancelling when user asked to cancel.
+- **Cancel safety**: Do not call `cancel_order` without at least one of `order_id` or `client_order_id` (or a prior step that supplies it). Do not call `cancel_all_orders` unless user explicitly requested to cancel “all” or “all for symbol”.
+
 #### crypto JSON-schema style contract (strict)
 - Base shape:
   - `{"type":"call_skill","skill":"crypto","args":{...}}`
@@ -95,6 +103,7 @@ Skill behavior notes (file/path):
   - quantity rule: exactly one of `quote_qty_usd` (USDT amount) or `qty` (base qty). Use `qty="all"` for full-position sell.
   - limit/stop orders: also require `price`; stop orders also require `stop_price`
   - optional: `exchange`, `price`, `stop_price`, `time_in_force`, `client_order_id`
+  - prefer including `exchange` (e.g. `binance`, `okx`) when known so same-round preview→submit consistency works reliably.
   - forbid: `confirm=true` (preview phase should not submit)
 
 - `trade_submit`:
@@ -102,6 +111,7 @@ Skill behavior notes (file/path):
   - required: `action="trade_submit"`, `symbol`, `side`, `order_type`
   - quantity rule: exactly one of `quote_qty_usd` or `qty`
   - optional: `confirm` (set true when planner has inferred user confirmation), `exchange`, `price`, `stop_price`, `time_in_force`
+  - prefer including `exchange` when known so it matches the preview step.
 
 - `order_status`:
   - required: `action="order_status"`
@@ -111,16 +121,17 @@ Skill behavior notes (file/path):
 - `cancel_order`:
   - required: `action="cancel_order"`, one identifier (`order_id` OR `client_order_id`), `symbol`
   - optional: `exchange`
-  - if identifier is missing, ask one concise clarification
+  - use for **single-order** cancel (e.g. “撤掉这笔挂单”, “取消订单123456”). If user did not give order_id and context does not uniquely identify one order, call `open_orders` first or ask for order id; do not guess.
 
 - `cancel_all_orders`:
   - required: `action="cancel_all_orders"`, `symbol` (Binance; optional for OKX)
   - optional: `exchange`
-  - use when user wants to cancel all open orders for a symbol
+  - use **only** when user clearly wants to cancel **all** open orders (e.g. “撤掉DOGE所有挂单”, “取消该交易对全部挂单”). Do not use for single-order cancel.
 
 - `open_orders`:
   - required: `action="open_orders"`
   - optional: `exchange`, `symbol` (filter by symbol; all orders if omitted)
+  - use for **query only** (e.g. “查挂单”, “看下DOGE挂单”). For “撤单” intent, pair with `cancel_order` or `cancel_all_orders` as appropriate; do not respond with only open_orders when user asked to cancel.
 
 - `trade_history`:
   - required: `action="trade_history"`, `symbol` (Binance; optional for OKX)
