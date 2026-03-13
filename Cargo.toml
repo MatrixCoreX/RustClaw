@@ -5,6 +5,8 @@ members = [
     "crates/clawd",
     "crates/skill-runner",
     "crates/telegramd",
+    "crates/feishud",
+    "crates/larkd",
     "crates/whatsappd",
     "crates/whatsapp_webd",
     "crates/skills/archive_basic",
@@ -33,11 +35,15 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 license = "MIT"
 authors = ["RustClaw"]
 repository = ""
+
+[patch.crates-io]
+# feishud long_connection: receive raw event payload to tolerate null fields (open-lark strong types fail)
+open-lark = { path = "patches/open-lark" }
 
 [workspace.dependencies]
 anyhow = "1"

@@ -58,9 +58,12 @@ if ! stop_by_pid_file "$PID_DIR/whatsapp_webd.pid" "whatsapp_webd"; then
 fi
 # Always cleanup bridge process even when whatsapp_webd was stopped via pid file.
 stop_by_name 'services/wa-web-bridge/index.js'
+if ! stop_by_pid_file "$PID_DIR/feishud.pid" "feishud"; then
+  stop_by_name 'target/(debug|release)/feishud|cargo run -p feishud'
+fi
 
 if [[ -d "$PID_DIR" ]]; then
-  rm -f "$PID_DIR/clawd.pid" "$PID_DIR/telegramd.pid" "$PID_DIR/whatsappd.pid" "$PID_DIR/whatsapp_webd.pid"
+  rm -f "$PID_DIR/clawd.pid" "$PID_DIR/telegramd.pid" "$PID_DIR/whatsappd.pid" "$PID_DIR/whatsapp_webd.pid" "$PID_DIR/feishud.pid"
 fi
 
 echo "RustClaw has been stopped." # zh: RustClaw 已停止。

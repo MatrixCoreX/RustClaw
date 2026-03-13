@@ -80,9 +80,10 @@ echo "Check time: $(date '+%F %T')" # zh: 检查时间: $(date '+%F %T')
 
 print_file_report "${LOG_DIR}/clawd.log"
 print_file_report "${LOG_DIR}/telegramd.log"
+print_file_report "${LOG_DIR}/feishud.log"
 
 if [[ "${FOLLOW}" == "1" ]]; then
   echo
   echo "Start following logs (Ctrl+C to exit)..." # zh: 开始持续跟踪日志（Ctrl+C 退出）...
-  tail -F "${LOG_DIR}/clawd.log" "${LOG_DIR}/telegramd.log"
+  tail -F "${LOG_DIR}/clawd.log" "${LOG_DIR}/telegramd.log" "${LOG_DIR}/feishud.log"
 fi

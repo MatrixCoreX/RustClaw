@@ -56,7 +56,7 @@ Usage:
   rustclaw restart -q          # 简化：免配置直接重启
   rustclaw -status
   rustclaw -build [all|release|debug]
-  rustclaw -logs [all|clawd|telegramd|whatsappd|whatsapp_webd] [lines] [--follow]
+  rustclaw -logs [all|clawd|telegramd|whatsappd|whatsapp_webd|feishud] [lines] [--follow]
   rustclaw -health
   rustclaw -key list
   rustclaw -key generate [admin|user]
@@ -85,7 +85,7 @@ Parameters:
     profile    : all | release | debug (default: release)
 
   -logs:
-    service    : all | clawd | telegramd | whatsappd | whatsapp_webd (default: all)
+    service    : all | clawd | telegramd | whatsappd | whatsapp_webd | feishud (default: all)
     lines      : integer, number of tail lines (default: 80)
     --follow   : follow log output continuously
 
@@ -138,12 +138,13 @@ print_proc_status() {
   fi
 }
 
-# 是否有 RustClaw 相关进程在运行（clawd/telegramd/whatsappd/whatsapp_webd）
+# 是否有 RustClaw 相关进程在运行（clawd/telegramd/whatsappd/whatsapp_webd/feishud）
 is_rustclaw_running() {
   pgrep -f 'target/(debug|release)/clawd|cargo run -p clawd' >/dev/null 2>&1 && return 0
   pgrep -f 'target/(debug|release)/telegramd|cargo run -p telegramd' >/dev/null 2>&1 && return 0
   pgrep -f 'target/(debug|release)/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1 && return 0
   pgrep -f 'target/(debug|release)/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/(debug|release)/feishud|cargo run -p feishud' >/dev/null 2>&1 && return 0
   return 1
 }
 
@@ -267,6 +268,7 @@ cmd_status() {
   print_proc_status "telegramd" "target/(debug|release)/telegramd|cargo run -p telegramd"
   print_proc_status "whatsappd" "target/(debug|release)/whatsappd|cargo run -p whatsappd"
   print_proc_status "whatsapp_webd" "target/(debug|release)/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge/index.js"
+  print_proc_status "feishud" "target/(debug|release)/feishud|cargo run -p feishud"
 }
 
 cmd_build() {
@@ -281,7 +283,7 @@ cmd_logs() {
   local do_follow=0
   for arg in "$@"; do
     case "$arg" in
-      all|clawd|telegramd|whatsappd|whatsapp_webd)
+      all|clawd|telegramd|whatsappd|whatsapp_webd|feishud)
         service="$arg"
         ;;
       --follow)
@@ -306,9 +308,9 @@ cmd_logs() {
   local files=()
   case "$service" in
     all)
-      files=("$log_dir/clawd.log" "$log_dir/telegramd.log" "$log_dir/whatsappd.log" "$log_dir/whatsapp_webd.log")
+      files=("$log_dir/clawd.log" "$log_dir/telegramd.log" "$log_dir/whatsappd.log" "$log_dir/whatsapp_webd.log" "$log_dir/feishud.log")
       ;;
-    clawd|telegramd|whatsappd|whatsapp_webd)
+    clawd|telegramd|whatsappd|whatsapp_webd|feishud)
       files=("$log_dir/$service.log")
       ;;
     *)

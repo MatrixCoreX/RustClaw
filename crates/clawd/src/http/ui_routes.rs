@@ -9,8 +9,8 @@ use std::io::{Read, Seek, SeekFrom};
 use tokio::process::Command;
 
 use super::super::{
-    bind_channel_identity, current_rss_bytes, exchange_credential_status_for_user_key, mask_secret,
-    oldest_running_task_age_seconds, resolve_auth_identity_by_key,
+    bind_channel_identity, current_rss_bytes, exchange_credential_status_for_user_key, feishud_process_stats,
+    larkd_process_stats, mask_secret, oldest_running_task_age_seconds, resolve_auth_identity_by_key,
     resolve_channel_binding_identity, task_count_by_status, telegramd_process_stats,
     upsert_exchange_credential_for_user_key, wa_webd_process_stats, whatsappd_process_stats,
     ApiResponse, AppState, HealthResponse, LocalInteractionContext,
@@ -160,6 +160,8 @@ async fn resolve_channel_binding(
             claw_core::types::ChannelKind::Telegram => "telegram",
             claw_core::types::ChannelKind::Whatsapp => "whatsapp",
             claw_core::types::ChannelKind::Ui => "ui",
+            claw_core::types::ChannelKind::Feishu => "feishu",
+            claw_core::types::ChannelKind::Lark => "lark",
         },
         req.external_user_id.as_deref(),
         req.external_chat_id.as_deref(),
@@ -196,6 +198,8 @@ async fn bind_channel_key(
             claw_core::types::ChannelKind::Telegram => "telegram",
             claw_core::types::ChannelKind::Whatsapp => "whatsapp",
             claw_core::types::ChannelKind::Ui => "ui",
+            claw_core::types::ChannelKind::Feishu => "feishu",
+            claw_core::types::ChannelKind::Lark => "lark",
         },
         req.external_user_id.as_deref(),
         req.external_chat_id.as_deref(),
@@ -443,6 +447,8 @@ fn service_start_script(service: &str) -> Option<&'static str> {
         "telegramd" => Some("start-telegramd.sh"),
         "whatsappd" => Some("start-whatsappd.sh"),
         "whatsapp_webd" => Some("start-whatsapp-webd.sh"),
+        "feishud" => Some("start-feishud.sh"),
+        "larkd" => Some("start-larkd.sh"),
         _ => None,
     }
 }
@@ -452,6 +458,8 @@ fn service_process_name(service: &str) -> Option<&'static str> {
         "telegramd" => Some("telegramd"),
         "whatsappd" => Some("whatsappd"),
         "whatsapp_webd" => Some("whatsapp_webd"),
+        "feishud" => Some("feishud"),
+        "larkd" => Some("larkd"),
         _ => None,
     }
 }
@@ -461,6 +469,8 @@ fn service_pid_file(service: &str) -> Option<&'static str> {
         "telegramd" => Some("telegramd.pid"),
         "whatsappd" => Some("whatsappd.pid"),
         "whatsapp_webd" => Some("whatsapp_webd.pid"),
+        "feishud" => Some("feishud.pid"),
+        "larkd" => Some("larkd.pid"),
         _ => None,
     }
 }
@@ -481,6 +491,12 @@ fn service_is_running(service: &str) -> bool {
             .map(|(count, _)| count > 0)
             .unwrap_or(false),
         "whatsapp_webd" => wa_webd_process_stats()
+            .map(|(count, _)| count > 0)
+            .unwrap_or(false),
+        "feishud" => feishud_process_stats()
+            .map(|(count, _)| count > 0)
+            .unwrap_or(false),
+        "larkd" => larkd_process_stats()
             .map(|(count, _)| count > 0)
             .unwrap_or(false),
         _ => false,
@@ -894,6 +910,14 @@ async fn health(
     let wa_webd_process_count = wa_webd_stats.map(|(count, _)| count);
     let wa_webd_memory_rss_bytes = wa_webd_stats.map(|(_, rss_bytes)| rss_bytes);
     let wa_webd_healthy = wa_webd_process_count.map(|count| count > 0);
+    let feishud_stats = feishud_process_stats();
+    let feishud_process_count = feishud_stats.map(|(count, _)| count);
+    let feishud_memory_rss_bytes = feishud_stats.map(|(_, rss_bytes)| rss_bytes);
+    let feishud_healthy = feishud_process_count.map(|count| count > 0);
+    let larkd_stats = larkd_process_stats();
+    let larkd_process_count = larkd_stats.map(|(count, _)| count);
+    let larkd_memory_rss_bytes = larkd_stats.map(|(_, rss_bytes)| rss_bytes);
+    let larkd_healthy = larkd_process_count.map(|count| count > 0);
     let (user_count, bound_channel_count) = auth_user_summary_counts(&state).unwrap_or_default();
     let data = HealthResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -919,6 +943,12 @@ async fn health(
         whatsapp_web_healthy: wa_webd_healthy,
         whatsapp_web_process_count: wa_webd_process_count,
         whatsapp_web_memory_rss_bytes: wa_webd_memory_rss_bytes,
+        feishud_healthy,
+        feishud_process_count,
+        feishud_memory_rss_bytes,
+        larkd_healthy,
+        larkd_process_count,
+        larkd_memory_rss_bytes,
         user_count,
         bound_channel_count,
         future_adapters_enabled: state.future_adapters_enabled.as_ref().clone(),

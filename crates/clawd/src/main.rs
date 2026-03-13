@@ -242,6 +242,10 @@ struct AppState {
     whatsapp_web_enabled: bool,
     whatsapp_web_bridge_base_url: String,
     future_adapters_enabled: Arc<Vec<String>>,
+    /// 定时任务结果主动推送到 Feishu 时使用（从 configs/channels/feishu.toml 可选加载）
+    feishu_send_config: Option<channel_send::FeishuSendConfig>,
+    /// 定时任务结果主动推送到 Lark 时使用（从 configs/channels/lark.toml 可选加载）
+    lark_send_config: Option<channel_send::LarkSendConfig>,
     http_client: Client,
     /// reload 时用：主配置路径，reload 时从此文件重读 skills.registry_path / skill_switches / skills_list
     config_path_for_reload: String,
@@ -340,6 +344,8 @@ struct ClaimedTask {
 enum RuntimeChannel {
     Telegram,
     Whatsapp,
+    Feishu,
+    Lark,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1478,6 +1484,15 @@ async fn main() -> anyhow::Result<()> {
         views.planner_visible.len()
     );
 
+    let feishu_send_config = load_feishu_send_config(&workspace_root);
+    let lark_send_config = load_lark_send_config(&workspace_root);
+    if feishu_send_config.is_some() {
+        info!("feishu send config loaded for schedule push (configs/channels/feishu.toml)");
+    }
+    if lark_send_config.is_some() {
+        info!("lark send config loaded for schedule push (configs/channels/lark.toml)");
+    }
+
     let state = AppState {
         started_at: Instant::now(),
         queue_limit: config.worker.queue_limit,
@@ -1525,6 +1540,8 @@ async fn main() -> anyhow::Result<()> {
                 .filter_map(|(k, v)| if v.enabled { Some(k.clone()) } else { None })
                 .collect(),
         ),
+        feishu_send_config,
+        lark_send_config,
         http_client: Client::new(),
         config_path_for_reload: "configs/config.toml".to_string(),
         registry_path_for_reload: config.skills.registry_path.clone(),
@@ -1596,6 +1613,54 @@ fn resolve_ui_dist_dir(workspace_root: &Path) -> PathBuf {
         }
     }
     workspace_root.join("UI").join("dist")
+}
+
+/// 从 configs/channels/feishu.toml 加载发送配置（定时任务主动推送用）。缺文件或缺 app_id/app_secret 则返回 None。
+fn load_feishu_send_config(workspace_root: &Path) -> Option<channel_send::FeishuSendConfig> {
+    let path = workspace_root.join("configs/channels/feishu.toml");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let table: TomlValue = toml::from_str(&content).ok()?;
+    let feishu = table.get("feishu")?.as_table()?;
+    let app_id = feishu.get("app_id")?.as_str()?.trim().to_string();
+    let app_secret = feishu.get("app_secret")?.as_str()?.trim().to_string();
+    if app_id.is_empty() || app_secret.is_empty() {
+        return None;
+    }
+    let api_base_url = feishu
+        .get("api_base_url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "https://open.feishu.cn".to_string());
+    Some(channel_send::FeishuSendConfig {
+        app_id,
+        app_secret,
+        api_base_url,
+    })
+}
+
+/// 从 configs/channels/lark.toml 加载发送配置（定时任务主动推送用）。缺文件或缺 app_id/app_secret 则返回 None。
+fn load_lark_send_config(workspace_root: &Path) -> Option<channel_send::LarkSendConfig> {
+    let path = workspace_root.join("configs/channels/lark.toml");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let table: TomlValue = toml::from_str(&content).ok()?;
+    let lark = table.get("lark")?.as_table()?;
+    let app_id = lark.get("app_id")?.as_str()?.trim().to_string();
+    let app_secret = lark.get("app_secret")?.as_str()?.trim().to_string();
+    if app_id.is_empty() || app_secret.is_empty() {
+        return None;
+    }
+    let api_base_url = lark
+        .get("api_base_url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "https://open.larksuite.com".to_string());
+    Some(channel_send::LarkSendConfig {
+        app_id,
+        app_secret,
+        api_base_url,
+    })
 }
 
 fn recover_stale_running_tasks_on_startup(
@@ -2696,10 +2761,21 @@ async fn maybe_notify_schedule_result(
 }
 
 fn runtime_channel_from_payload(state: &AppState, payload: &Value) -> RuntimeChannel {
-    match payload.get("channel").and_then(|v| v.as_str()) {
-        Some(v) if is_whatsapp_channel_value(main_flow_rules(state), v) => RuntimeChannel::Whatsapp,
-        _ => RuntimeChannel::Telegram,
+    let ch = payload
+        .get("channel")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if is_whatsapp_channel_value(main_flow_rules(state), &ch) {
+        return RuntimeChannel::Whatsapp;
     }
+    if ch == "feishu" {
+        return RuntimeChannel::Feishu;
+    }
+    if ch == "lark" {
+        return RuntimeChannel::Lark;
+    }
+    RuntimeChannel::Telegram
 }
 
 fn is_whatsapp_channel_value(rules: &MainFlowRules, raw: &str) -> bool {
@@ -2800,8 +2876,15 @@ fn strip_price_alert_tag(text: &str, rules: &MainFlowRules) -> String {
 }
 
 fn task_runtime_channel(state: &AppState, task: &ClaimedTask) -> RuntimeChannel {
-    if is_whatsapp_channel_value(main_flow_rules(state), &task.channel) {
+    let ch = task.channel.trim().to_ascii_lowercase();
+    if is_whatsapp_channel_value(main_flow_rules(state), &ch) {
         return RuntimeChannel::Whatsapp;
+    }
+    if ch == "feishu" {
+        return RuntimeChannel::Feishu;
+    }
+    if ch == "lark" {
+        return RuntimeChannel::Lark;
     }
     let Some(payload) = task_payload_value(task) else {
         return RuntimeChannel::Telegram;
@@ -2852,6 +2935,30 @@ async fn send_task_channel_message(
                     channel_send::send_whatsapp_cloud_text_message(state, &to, text).await
                 }
             }
+        }
+        RuntimeChannel::Feishu => {
+            let receive_id = task_external_chat_id(task)
+                .or_else(|| {
+                    payload
+                        .get("external_chat_id")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                })
+                .ok_or_else(|| "missing external_chat_id for feishu task".to_string())?;
+            channel_send::send_feishu_text_message(state, &receive_id, text).await
+        }
+        RuntimeChannel::Lark => {
+            let receive_id = task_external_chat_id(task)
+                .or_else(|| {
+                    payload
+                        .get("external_chat_id")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                })
+                .ok_or_else(|| "missing external_chat_id for lark task".to_string())?;
+            channel_send::send_lark_text_message(state, &receive_id, text).await
         }
     }
 }
@@ -2962,6 +3069,8 @@ async fn run_skill_with_runner(
     let source = match task_runtime_channel(state, task) {
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
+        RuntimeChannel::Feishu => "feishu",
+        RuntimeChannel::Lark => "lark",
     };
 
     let mut value = match kind {
@@ -4279,8 +4388,9 @@ fn chat_act_goal_from_prompt(prompt_with_memory: &str) -> String {
 }
 
 /// Single implementation for chat / act / chat_act / ask_clarify.
-/// Ask main path always passes Some(normalizer_out.routed_mode). When normalizer_mode is None
-/// (e.g. legacy or parse-failure path), we fall back to route_request_mode; do not use that as primary.
+/// Ask main path always passes Some(normalizer_out.routed_mode). When normalizer_mode is Some(...),
+/// we use it so that explicit-execute intents (e.g. "执行ls") get Act regardless of payload agent_mode.
+/// When normalizer_mode is None (parse failure or legacy path), we fall back to route_request_mode only if agent_mode.
 async fn execute_ask_routed(
     state: &AppState,
     task: &ClaimedTask,
@@ -4291,25 +4401,30 @@ async fn execute_ask_routed(
     resume_force_chat: bool,
     normalizer_mode: Option<RoutedMode>,
 ) -> Result<AskReply, String> {
-    let routed_mode = if resume_force_chat {
-        RoutedMode::Chat
+    let (routed_mode, used_fallback_router, override_reason) = if resume_force_chat {
+        (
+            RoutedMode::Chat,
+            false,
+            Some("resume_force_chat"),
+        )
+    } else if let Some(m) = normalizer_mode {
+        // Normalizer already decided; respect it so Feishu/any client explicit-execute (e.g. "执行ls") gets Act.
+        (m, false, None)
     } else if agent_mode {
-        match normalizer_mode {
-            Some(m) => m,
-            None => {
-                // Legacy/fallback only: ask main path always passes Some(normalizer_out.routed_mode).
-                intent_router::route_request_mode(state, task, resolved_prompt).await
-            }
-        }
+        let mode = intent_router::route_request_mode(state, task, resolved_prompt).await;
+        (mode, true, None)
     } else {
-        RoutedMode::Chat
+        (RoutedMode::Chat, false, Some("normalizer_mode=None and agent_mode=false"))
     };
     info!(
-        "{} worker_once: ask task_id={} routed_mode={:?} agent_mode={}",
+        "{} worker_once: ask task_id={} normalizer_mode={:?} routed_mode={:?} agent_mode={} used_fallback_router={} override={}",
         highlight_tag("routing"),
         task.task_id,
+        normalizer_mode,
         routed_mode,
-        agent_mode
+        agent_mode,
+        used_fallback_router,
+        override_reason.unwrap_or("")
     );
     match routed_mode {
         RoutedMode::Chat => {
@@ -4998,34 +5113,11 @@ pub(crate) fn canonical_skill_name(name: &str) -> &str {
     }
 }
 
-/// Unified skill registry: base (builtin) + runner skills. All capabilities are skills.
+/// Fallback 仅当无 registry 时使用：只包含 execute_builtin_skill 真正支持的进程内技能，避免把 runner skill 错判成 builtin。
 pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
     matches!(
         name,
         "run_cmd" | "read_file" | "write_file" | "list_dir" | "make_dir" | "remove_file"
-            | "archive_basic"
-            | "audio_synthesize"
-            | "audio_transcribe"
-            | "config_guard"
-            | "crypto"
-            | "chat"
-            | "db_basic"
-            | "docker_basic"
-            | "fs_search"
-            | "git_basic"
-            | "health_check"
-            | "http_basic"
-            | "image_edit"
-            | "image_generate"
-            | "image_vision"
-            | "install_module"
-            | "log_analyze"
-            | "package_manager"
-            | "process_basic"
-            | "rss_fetch"
-            | "service_control"
-            | "system_basic"
-            | "x"
     )
 }
 
@@ -6270,7 +6362,7 @@ fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
             job_id            TEXT NOT NULL UNIQUE,
             user_id           INTEGER NOT NULL,
             chat_id           INTEGER NOT NULL,
-            channel           TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui')),
+            channel           TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
             external_user_id  TEXT,
             external_chat_id  TEXT,
             schedule_type     TEXT NOT NULL CHECK (schedule_type IN ('once', 'daily', 'weekly', 'interval', 'cron')),
@@ -6393,7 +6485,7 @@ fn ensure_channel_schema(db: &Connection) -> anyhow::Result<()> {
         db,
         "tasks",
         "channel",
-        "ALTER TABLE tasks ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui'))",
+        "ALTER TABLE tasks ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark'))",
     )?;
     ensure_column_exists(
         db,
@@ -6412,7 +6504,7 @@ fn ensure_channel_schema(db: &Connection) -> anyhow::Result<()> {
         db,
         "scheduled_jobs",
         "channel",
-        "ALTER TABLE scheduled_jobs ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui'))",
+        "ALTER TABLE scheduled_jobs ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark'))",
     )?;
     ensure_column_exists(
         db,
@@ -6431,7 +6523,7 @@ fn ensure_channel_schema(db: &Connection) -> anyhow::Result<()> {
         db,
         "memories",
         "channel",
-        "ALTER TABLE memories ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui'))",
+        "ALTER TABLE memories ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark'))",
     )?;
     ensure_column_exists(
         db,
@@ -6448,9 +6540,10 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
         [],
         |row| row.get(0),
     )?;
-    if tasks_sql.contains("'ui'") {
+    if tasks_sql.contains("'lark'") {
         return Ok(());
     }
+    info!("channel schema: rebuilding tasks/scheduled_jobs/memories to allow channel=lark (and feishu)");
     db.execute_batch(
         "BEGIN IMMEDIATE;
          ALTER TABLE tasks RENAME TO tasks_old;
@@ -6458,7 +6551,7 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
              task_id       TEXT PRIMARY KEY,
              user_id       INTEGER NOT NULL,
              chat_id       INTEGER NOT NULL,
-             channel       TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui')),
+             channel       TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
              external_user_id TEXT,
              external_chat_id TEXT,
              message_id    INTEGER,
@@ -6489,7 +6582,7 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
              job_id            TEXT NOT NULL UNIQUE,
              user_id           INTEGER NOT NULL,
              chat_id           INTEGER NOT NULL,
-             channel           TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui')),
+             channel           TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
              external_user_id  TEXT,
              external_chat_id  TEXT,
              user_key          TEXT,
@@ -6532,7 +6625,7 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
              user_id          INTEGER NOT NULL,
              chat_id          INTEGER NOT NULL,
              user_key         TEXT,
-             channel          TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui')),
+             channel          TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
              external_chat_id TEXT,
              role             TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
              content          TEXT NOT NULL,
@@ -6836,6 +6929,17 @@ fn wa_webd_process_stats() -> Option<(usize, u64)> {
     daemon_process_stats("whatsapp_webd")
 }
 
+fn feishud_process_stats() -> Option<(usize, u64)> {
+    daemon_process_stats("feishud")
+}
+
+fn larkd_process_stats() -> Option<(usize, u64)> {
+    daemon_process_stats("larkd")
+}
+
+/// 仅当“可执行文件名/进程名”与目标 daemon 名**完全一致**时计数，避免 substring 误判。
+/// 使用 cmdline.contains(process_name) 会把 grep/rg/bash -c ... whatsappd、启动脚本参数里带
+/// whatsappd 的临时进程都算进去，导致未运行 whatsappd 时仍误报 healthy。
 fn daemon_process_stats(process_name: &str) -> Option<(usize, u64)> {
     let entries = std::fs::read_dir("/proc").ok()?;
     let mut count = 0usize;
@@ -6847,25 +6951,57 @@ fn daemon_process_stats(process_name: &str) -> Option<(usize, u64)> {
         if !pid.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        let cmdline_path = format!("/proc/{pid}/cmdline");
-        let bytes = match std::fs::read(&cmdline_path) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if bytes.is_empty() {
+        if !process_name_matches(&pid, process_name) {
             continue;
         }
-        let cmdline = String::from_utf8_lossy(&bytes);
-        if cmdline.contains(process_name) {
-            count += 1;
-            let status_path = format!("/proc/{pid}/status");
-            if let Some(rss_bytes) = current_rss_bytes_from_status(&status_path) {
-                total_rss_bytes = total_rss_bytes.saturating_add(rss_bytes);
-            }
+        count += 1;
+        let status_path = format!("/proc/{pid}/status");
+        if let Some(rss_bytes) = current_rss_bytes_from_status(&status_path) {
+            total_rss_bytes = total_rss_bytes.saturating_add(rss_bytes);
         }
     }
 
     Some((count, total_rss_bytes))
+}
+
+/// 判断该 pid 对应的进程是否就是目标 daemon：用 exe basename / comm / argv[0] basename 做**精确匹配**，
+/// 避免把包含 daemon 名字的 grep/rg/bash 等临时进程算进去。
+fn process_name_matches(pid: &str, process_name: &str) -> bool {
+    // 1) 优先：/proc/<pid>/exe 的 basename（真实可执行文件）
+    let exe_path = format!("/proc/{pid}/exe");
+    if let Ok(target) = std::fs::read_link(&exe_path) {
+        let name = target
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        let name = name.strip_suffix(" (deleted)").unwrap_or(name);
+        if name == process_name {
+            return true;
+        }
+    }
+
+    // 2) /proc/<pid>/comm（内核/进程设置的 16 字符内名称，通常与可执行文件名一致）
+    let comm_path = format!("/proc/{pid}/comm");
+    if let Ok(s) = std::fs::read_to_string(&comm_path) {
+        let comm = s.trim();
+        if comm == process_name {
+            return true;
+        }
+    }
+
+    // 3) 退回：argv[0] 的 basename（可能被进程改写，仅作补充）
+    let cmdline_path = format!("/proc/{pid}/cmdline");
+    if let Ok(bytes) = std::fs::read(&cmdline_path) {
+        if let Some(first_arg) = bytes.split(|&b| b == 0).next() {
+            let argv0 = std::str::from_utf8(first_arg).unwrap_or("");
+            let base = argv0.rsplit('/').next().unwrap_or(argv0);
+            if base == process_name {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 fn task_count_by_status(state: &AppState, status: &str) -> anyhow::Result<usize> {
@@ -7660,6 +7796,8 @@ fn channel_kind_name(channel: ChannelKind) -> &'static str {
         ChannelKind::Telegram => "telegram",
         ChannelKind::Whatsapp => "whatsapp",
         ChannelKind::Ui => "ui",
+        ChannelKind::Feishu => "feishu",
+        ChannelKind::Lark => "lark",
     }
 }
 

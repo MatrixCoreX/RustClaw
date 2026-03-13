@@ -38,6 +38,7 @@ CLAWD_BIN="$SCRIPT_DIR/target/$PROFILE/clawd"
 TELEGRAMD_BIN="$SCRIPT_DIR/target/$PROFILE/telegramd"
 WHATSAPPD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsappd"
 WHATSAPP_WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsapp_webd"
+FEISHUD_BIN="$SCRIPT_DIR/target/$PROFILE/feishud"
 
 if [[ ! -x "$CLAWD_BIN" ]]; then
   echo "Binary not found or not executable: $CLAWD_BIN" # zh: 二进制不存在或不可执行：$CLAWD_BIN
@@ -193,6 +194,45 @@ PY
   fi
 }
 
+start_feishud() {
+  local feishu_enabled
+  feishu_enabled="$(
+python3 - <<'PY'
+import tomllib
+from pathlib import Path
+path = Path("configs/channels/feishu.toml")
+if not path.exists():
+    print("0")
+    raise SystemExit(0)
+cfg = tomllib.loads(path.read_text(encoding="utf-8"))
+feishu = cfg.get("feishu", {}) or {}
+print("1" if bool(feishu.get("enabled", False)) else "0")
+PY
+  )"
+  if [[ "$feishu_enabled" != "1" ]]; then
+    echo "feishu.enabled=false, skipping feishud startup." # zh: feishu.enabled=false，跳过 feishud 启动。
+    return 0
+  fi
+  if [[ ! -x "$FEISHUD_BIN" ]]; then
+    echo "Binary not found or not executable: $FEISHUD_BIN" # zh: 二进制不存在或不可执行：$FEISHUD_BIN
+    return 0
+  fi
+  if pgrep -f 'target/(debug|release)/feishud|cargo run -p feishud' >/dev/null 2>&1; then
+    echo "feishud is already running, skipping startup." # zh: feishud 已在运行，跳过启动。
+    return 0
+  fi
+  export FEISHU_CONFIG_PATH="${FEISHU_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/feishu.toml}"
+  nohup "$FEISHUD_BIN" >"$LOG_DIR/feishud.log" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$PID_DIR/feishud.pid"
+  echo "Starting feishud binary, PID=$pid, log: $LOG_DIR/feishud.log" # zh: feishud 二进制启动中，PID=$pid, 日志: $LOG_DIR/feishud.log
+  sleep 2
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    echo "Failed to start feishud binary. Check log: $LOG_DIR/feishud.log" # zh: feishud 二进制启动失败，请检查日志: $LOG_DIR/feishud.log
+    return 1
+  fi
+}
+
 start_future_adapters_placeholder() {
   "$SCRIPT_DIR/start-future-adapters.sh" || true
 }
@@ -202,5 +242,6 @@ start_telegramd
 start_future_adapters_placeholder
 start_whatsapp_webd
 start_whatsappd
+start_feishud
 
 echo "One-click binary startup command executed (profile: $PROFILE)." # zh: 一键启动已编译二进制命令已执行（profile: $PROFILE）。

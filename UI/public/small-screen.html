@@ -71,6 +71,11 @@
       if (tg != null) parts.push('TG: ' + (tg ? '✓' : '✗'));
       const wa = h.whatsapp_web_healthy ?? h.whatsappd_healthy;
       if (wa != null) parts.push('WA: ' + (wa ? '✓' : '✗'));
+      const lark = h.larkd_healthy;
+      if (lark != null) {
+        const larkRss = h.larkd_memory_rss_bytes;
+        parts.push('Lark: ' + (lark ? '✓' : '✗') + (larkRss != null ? ' ' + fmtBytes(larkRss) : ''));
+      }
       document.getElementById('services').textContent = parts.length ? parts.join('  ') : '';
     }
 

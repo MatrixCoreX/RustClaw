@@ -15,6 +15,7 @@ RustClaw is a Rust-based local agent runtime stack. It is powered by `clawd` (ta
   - `crates/telegramd`
   - `crates/whatsappd` (Cloud API)
   - `crates/whatsapp_webd` + `services/wa-web-bridge` (WhatsApp Web)
+  - `crates/feishud` (Feishu/Lark app bot; webhook / long_connection; config: `configs/channels/feishu.toml`)
 - Skill implementations: `crates/skills/*`
 - Configs: `configs/`
 - Data and migrations: `data/`, `migrations/`
@@ -227,6 +228,7 @@ rustclaw -stop
 - `start-telegramd.sh`: start `telegramd`
 - `start-whatsappd.sh`: start `whatsappd`
 - `start-whatsapp-webd.sh`: start `whatsapp_webd`
+- `start-feishud.sh`: start `feishud` (Feishu app bot; config `configs/channels/feishu.toml`; webhook / long_connection)
 - `start-wa-web-bridge.sh`: start WhatsApp Web bridge
 - `start-future-adapters.sh`: start placeholder processes for future adapters
 - `stop-rustclaw.sh`: stop core daemons and clean PID files

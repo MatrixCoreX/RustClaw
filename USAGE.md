@@ -40,7 +40,11 @@ If you use custom settings, review files under `configs/` before starting servic
 ./start-telegramd.sh
 ./start-whatsappd.sh
 ./start-whatsapp-webd.sh
+./start-feishud.sh
 ```
+
+`feishud` 为飞书应用机器人客户端，支持 webhook / long_connection 两种入站模式，配置文件：`configs/channels/feishu.toml`。  
+`feishud` is the Feishu (Lark) app bot channel daemon; it supports webhook and long_connection modes. Config: `configs/channels/feishu.toml`.
 
 ### 回归与模拟脚本（按需） / Regression and Simulation (Optional)
 

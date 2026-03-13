@@ -45,6 +45,12 @@ interface HealthResponse {
   whatsapp_web_healthy?: boolean | null;
   whatsapp_web_process_count?: number | null;
   whatsapp_web_memory_rss_bytes?: number | null;
+  feishud_healthy?: boolean | null;
+  feishud_process_count?: number | null;
+  feishud_memory_rss_bytes?: number | null;
+  larkd_healthy?: boolean | null;
+  larkd_process_count?: number | null;
+  larkd_memory_rss_bytes?: number | null;
   user_count?: number;
   bound_channel_count?: number;
   future_adapters_enabled?: string[];
@@ -119,7 +125,7 @@ interface ChatMessage {
 interface AdapterHealthRow {
   key: string;
   label: string;
-  serviceName: "telegramd" | "whatsappd" | "whatsapp_webd";
+  serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "feishud" | "larkd";
   healthy: boolean | null | undefined;
   processCount: number | null | undefined;
   memoryRssBytes: number | null | undefined;
@@ -277,7 +283,7 @@ export default function App() {
   const [trackingTaskId, setTrackingTaskId] = useState<string | null>(null);
 
   const [interactionKind, setInteractionKind] = useState<"ask" | "run_skill">("ask");
-  const [interactionChannel, setInteractionChannel] = useState<"ui" | "telegram" | "whatsapp">("ui");
+  const [interactionChannel, setInteractionChannel] = useState<"ui" | "telegram" | "whatsapp" | "feishu">("ui");
   const [interactionExternalUserId, setInteractionExternalUserId] = useState("");
   const [interactionExternalChatId, setInteractionExternalChatId] = useState("");
   const [interactionAdapter, setInteractionAdapter] = useState("");
@@ -438,7 +444,7 @@ export default function App() {
   };
 
   const controlService = async (
-    serviceName: "telegramd" | "whatsappd" | "whatsapp_webd",
+    serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "feishud" | "larkd",
     action: "start" | "stop" | "restart",
   ) => {
     setServiceActionMessage(null);
@@ -989,8 +995,30 @@ export default function App() {
         processCount: health?.whatsapp_cloud_process_count ?? health?.whatsappd_process_count,
         memoryRssBytes: health?.whatsapp_cloud_memory_rss_bytes ?? health?.whatsappd_memory_rss_bytes,
       },
+      {
+        key: "feishu_bot",
+        label: "feishu_bot",
+        serviceName: "feishud",
+        healthy: health?.feishud_healthy,
+        processCount: health?.feishud_process_count,
+        memoryRssBytes: health?.feishud_memory_rss_bytes,
+      },
+      {
+        key: "lark_bot",
+        label: "lark_bot",
+        serviceName: "larkd",
+        healthy: health?.larkd_healthy,
+        processCount: health?.larkd_process_count,
+        memoryRssBytes: health?.larkd_memory_rss_bytes,
+      },
     ];
-    return rows;
+    // 运行的（healthy）排上面，未运行的排下面；同组内按 key 稳定排序
+    return [...rows].sort((a, b) => {
+      const aUp = a.healthy === true ? 1 : 0;
+      const bUp = b.healthy === true ? 1 : 0;
+      if (bUp !== aUp) return bUp - aUp;
+      return (a.key || "").localeCompare(b.key || "");
+    });
   }, [health]);
   const managedSkills = useMemo(() => {
     const set = new Set<string>(skillsConfigData?.managed_skills ?? []);
@@ -1976,11 +2004,12 @@ export default function App() {
               <select
                 className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
                 value={interactionChannel}
-                onChange={(e) => setInteractionChannel(e.target.value as "ui" | "telegram" | "whatsapp")}
+                onChange={(e) => setInteractionChannel(e.target.value as "ui" | "telegram" | "whatsapp" | "feishu")}
               >
                 <option value="ui">ui</option>
                 <option value="telegram">telegram</option>
                 <option value="whatsapp">whatsapp</option>
+                <option value="feishu">feishu</option>
               </select>
             </label>
             <label className="space-y-2">
@@ -1989,7 +2018,7 @@ export default function App() {
                 className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none ring-[#f74c00] focus:ring-2"
                 value={interactionAdapter}
                 onChange={(e) => setInteractionAdapter(e.target.value)}
-                placeholder="telegram_bot / whatsapp_cloud / whatsapp_web"
+                placeholder="telegram_bot / whatsapp_cloud / whatsapp_web / feishu"
               />
             </label>
             <label className="space-y-2">

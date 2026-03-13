@@ -2262,7 +2262,7 @@ class SmallScreenApp:
         self.running_var.set(str(data.get("running_length") if data.get("running_length") is not None else "--"))
         self.worker_var.set((data.get("worker_state") or "--")[:16])
         self.rss_var.set(fmt_bytes(data.get("memory_rss_bytes")))
-        # 通信端：TG 后显示 TG 占用内存，WA / WA-Web
+        # 通信端：TG 后显示 TG 占用内存，WA / WA-Web / FS(Feishu)
         parts = []
         if data.get("telegramd_healthy") or data.get("telegram_bot_healthy"):
             tg_rss = data.get("telegramd_memory_rss_bytes") or data.get("telegram_bot_memory_rss_bytes")
@@ -2271,14 +2271,22 @@ class SmallScreenApp:
             parts.append("WA")
         if data.get("whatsapp_web_healthy"):
             parts.append("WA-Web")
+        if data.get("feishud_healthy"):
+            fs_rss = data.get("feishud_memory_rss_bytes")
+            parts.append("FS " + fmt_bytes(fs_rss) if fs_rss is not None else "FS")
+        if data.get("larkd_healthy"):
+            lk_rss = data.get("larkd_memory_rss_bytes")
+            parts.append("Lark " + fmt_bytes(lk_rss) if lk_rss is not None else "Lark")
         self.adapters_var.set(", ".join(parts) if parts else "--")
-        # 通信端占的内存（TG + WA + WA-Web 进程 RSS 之和，接口用 telegramd/whatsappd/whatsapp_web）
+        # 通信端占的内存（TG + WA + WA-Web + Feishu + Lark 进程 RSS 之和）
         def _n(v):
             return v if isinstance(v, (int, float)) and v is not None else 0
         total = (
             _n(data.get("telegramd_memory_rss_bytes"))
             + _n(data.get("whatsappd_memory_rss_bytes"))
             + _n(data.get("whatsapp_web_memory_rss_bytes"))
+            + _n(data.get("feishud_memory_rss_bytes"))
+            + _n(data.get("larkd_memory_rss_bytes"))
         )
         self.adapters_rss_var.set(fmt_bytes(int(total)) if total else "--")
         self._update_user_summary_view()

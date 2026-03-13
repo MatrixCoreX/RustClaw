@@ -23,6 +23,9 @@ pub enum ChannelKind {
     Telegram,
     Whatsapp,
     Ui,
+    Feishu,
+    /// 国际版 Lark（与 Feishu 中国站分开）
+    Lark,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +169,18 @@ pub struct HealthResponse {
     pub whatsapp_web_process_count: Option<usize>,
     /// whatsapp web adapter RSS 内存总和（字节，None 表示无法检测）
     pub whatsapp_web_memory_rss_bytes: Option<u64>,
+    /// feishud 进程健康状态（None 表示无法检测）
+    pub feishud_healthy: Option<bool>,
+    /// 检测到的 feishud 进程数量（None 表示无法检测）
+    pub feishud_process_count: Option<usize>,
+    /// feishud 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub feishud_memory_rss_bytes: Option<u64>,
+    /// larkd 进程健康状态（None 表示无法检测，国际版 Lark）
+    pub larkd_healthy: Option<bool>,
+    /// 检测到的 larkd 进程数量（None 表示无法检测）
+    pub larkd_process_count: Option<usize>,
+    /// larkd 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub larkd_memory_rss_bytes: Option<u64>,
     /// 当前启用中的用户 key 数量
     pub user_count: usize,
     /// 当前已绑定的通信端数量

@@ -1,5 +1,5 @@
-//! Channel text sending with safe chunking (Telegram, WhatsApp Cloud, WhatsApp Web Bridge).
-//! Used when clawd delivers task results directly to a channel.
+//! Channel text sending with safe chunking (Telegram, WhatsApp Cloud, WhatsApp Web Bridge, Feishu, Lark).
+//! Used when clawd delivers task results directly to a channel (e.g. schedule_triggered notify).
 
 use serde_json::json;
 use tracing::info;
@@ -7,6 +7,22 @@ use tracing::info;
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 
 use crate::AppState;
+
+/// Feishu 中国站发送配置（定时任务主动推送用，从 configs/channels/feishu.toml 可选加载）
+#[derive(Clone, Debug)]
+pub struct FeishuSendConfig {
+    pub app_id: String,
+    pub app_secret: String,
+    pub api_base_url: String,
+}
+
+/// Lark 国际版发送配置（定时任务主动推送用，从 configs/channels/lark.toml 可选加载）
+#[derive(Clone, Debug)]
+pub struct LarkSendConfig {
+    pub app_id: String,
+    pub app_secret: String,
+    pub api_base_url: String,
+}
 
 /// Max characters per Telegram message (conservative; platform limit ~4096).
 const TELEGRAM_TEXT_CHUNK_CHARS: usize = 3500;
@@ -165,6 +181,148 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             return Err(format!("wa-web bridge status={status} body={body}"));
+        }
+    }
+    Ok(())
+}
+
+/// Max characters per Feishu/Lark text message (conservative; platform limit ~4096).
+const FEISHU_LARK_TEXT_CHUNK_CHARS: usize = 3500;
+
+async fn get_tenant_access_token(
+    client: &reqwest::Client,
+    api_base: &str,
+    app_id: &str,
+    app_secret: &str,
+) -> Result<String, String> {
+    let base = api_base.trim_end_matches('/');
+    let url = format!("{base}/open-apis/auth/v3/tenant_access_token/internal");
+    let body = json!({ "app_id": app_id, "app_secret": app_secret });
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("token request status={status} body={text}"));
+    }
+    #[derive(serde::Deserialize)]
+    struct TokenResp {
+        tenant_access_token: Option<String>,
+    }
+    let data: TokenResp = resp.json().await.map_err(|e| e.to_string())?;
+    data.tenant_access_token
+        .ok_or_else(|| "token response missing tenant_access_token".to_string())
+}
+
+pub(crate) async fn send_feishu_text_message(
+    state: &AppState,
+    receive_id: &str,
+    text: &str,
+) -> Result<(), String> {
+    let config = state
+        .feishu_send_config
+        .as_ref()
+        .ok_or_else(|| "feishu send not configured (configs/channels/feishu.toml app_id/app_secret)".to_string())?;
+    let token = get_tenant_access_token(
+        &state.http_client,
+        &config.api_base_url,
+        &config.app_id,
+        &config.app_secret,
+    )
+    .await?;
+    let base = config.api_base_url.trim_end_matches('/');
+    let url = format!("{base}/open-apis/im/v1/messages?receive_id_type=chat_id");
+    let chunks = chunk_text_for_channel(text, FEISHU_LARK_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let n = chunks.len();
+    if n > 1 {
+        info!(
+            "send_chunks channel=feishu receive_id={} original_len={} chunk_count={}",
+            receive_id,
+            text.len(),
+            n
+        );
+    }
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        let body = if n > 1 {
+            format!("（{}/{}）\n{}", i + 1, n, chunk)
+        } else {
+            chunk
+        };
+        let resp = state
+            .http_client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&json!({
+                "receive_id": receive_id,
+                "msg_type": "text",
+                "content": json!({ "text": body }).to_string()
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let resp_body = resp.text().await.unwrap_or_default();
+            return Err(format!("feishu send status={status} body={resp_body}"));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn send_lark_text_message(
+    state: &AppState,
+    receive_id: &str,
+    text: &str,
+) -> Result<(), String> {
+    let config = state
+        .lark_send_config
+        .as_ref()
+        .ok_or_else(|| "lark send not configured (configs/channels/lark.toml app_id/app_secret)".to_string())?;
+    let token = get_tenant_access_token(
+        &state.http_client,
+        &config.api_base_url,
+        &config.app_id,
+        &config.app_secret,
+    )
+    .await?;
+    let base = config.api_base_url.trim_end_matches('/');
+    let url = format!("{base}/open-apis/im/v1/messages?receive_id_type=chat_id");
+    let chunks = chunk_text_for_channel(text, FEISHU_LARK_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let n = chunks.len();
+    if n > 1 {
+        info!(
+            "send_chunks channel=lark receive_id={} original_len={} chunk_count={}",
+            receive_id,
+            text.len(),
+            n
+        );
+    }
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        let body = if n > 1 {
+            format!("（{}/{}）\n{}", i + 1, n, chunk)
+        } else {
+            chunk
+        };
+        let resp = state
+            .http_client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&json!({
+                "receive_id": receive_id,
+                "msg_type": "text",
+                "content": json!({ "text": body }).to_string()
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let resp_body = resp.text().await.unwrap_or_default();
+            return Err(format!("lark send status={status} body={resp_body}"));
         }
     }
     Ok(())

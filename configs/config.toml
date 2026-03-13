@@ -268,6 +268,8 @@ request_timeout_seconds = 30
 # 建议修改/Recommended change: 可改，但建议优先用 skill_switches 管理开关.
 # 风险/Risk: 并发过高可能争用资源；超时过低会误判失败.
 [skills]
+# 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
+registry_path = "configs/skills_registry.toml"
 skill_switches = {}
 skill_max_concurrency = 1
 skill_timeout_seconds = 30

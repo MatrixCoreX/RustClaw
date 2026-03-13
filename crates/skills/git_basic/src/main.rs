@@ -69,7 +69,7 @@ fn default_catalog(lang: &str) -> TextCatalog {
     );
     current.insert(
         "git_basic.err.unsupported_action".to_string(),
-        "unsupported action; use status|log|diff|branch|show|rev_parse".to_string(),
+        "unsupported action; use status|log|diff|branch|show|rev_parse|diff_cached|current_branch|remote|changed_files|show_file_at_rev".to_string(),
     );
     current.insert("git_basic.err.run_git_failed".to_string(), "run git failed: {error}".to_string());
     TextCatalog { current }
@@ -175,8 +175,15 @@ fn execute(args: Value) -> Result<String, String> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     if !is_git_repo(&root) {
-        return Ok(tr("git_basic.msg.not_git_repo"));
+        return Err(tr("git_basic.msg.not_git_repo"));
     }
+
+    let log_n = obj
+        .get("n")
+        .or_else(|| obj.get("limit"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(20)
+        .min(100);
 
     let (subcmd, mut extra): (&str, Vec<String>) = match action {
         "status" => ("status", vec!["--short".to_string(), "--branch".to_string()]),
@@ -185,21 +192,35 @@ fn execute(args: Value) -> Result<String, String> {
             vec![
                 "--oneline".to_string(),
                 "-n".to_string(),
-                obj.get("n")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(20)
-                    .min(100)
-                    .to_string(),
+                log_n.to_string(),
             ],
         ),
         "diff" => ("diff", vec![]),
+        "diff_cached" => ("diff", vec!["--cached".to_string()]),
         "branch" => ("branch", vec!["--all".to_string()]),
+        "current_branch" => ("rev-parse", vec!["--abbrev-ref".to_string(), "HEAD".to_string()]),
+        "remote" => ("remote", vec!["-v".to_string()]),
+        "changed_files" => (
+            "diff",
+            vec!["--name-only".to_string(), "HEAD".to_string()],
+        ),
         "show" => {
             let target = obj
                 .get("target")
                 .and_then(|v| v.as_str())
                 .unwrap_or("HEAD");
             ("show", vec!["--stat".to_string(), target.to_string()])
+        }
+        "show_file_at_rev" => {
+            let target = obj
+                .get("target")
+                .and_then(|v| v.as_str())
+                .unwrap_or("HEAD");
+            let path = obj.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if path.is_empty() {
+                return Err("show_file_at_rev requires path".to_string());
+            }
+            ("show", vec![format!("{}:{}", target, path)])
         }
         "rev_parse" => ("rev-parse", vec!["HEAD".to_string()]),
         _ => {
@@ -227,13 +248,37 @@ fn execute(args: Value) -> Result<String, String> {
         }
         text.push_str(&String::from_utf8_lossy(&out.stderr));
     }
-    if text.len() > 12000 {
-        text.truncate(12000);
+    const MAX_LEN: usize = 12000;
+    let marker = "\n...(truncated)";
+    let max_bytes = MAX_LEN.saturating_sub(marker.len());
+    if text.len() > MAX_LEN {
+        let mut boundary = 0usize;
+        for (i, c) in text.char_indices() {
+            if i + c.len_utf8() > max_bytes {
+                break;
+            }
+            boundary = i + c.len_utf8();
+        }
+        text.truncate(boundary);
+        text.push_str(marker);
     }
 
     Ok(format!("exit={}\n{}", out.status.code().unwrap_or(-1), text))
 }
 
+/// 使用 `git rev-parse --is-inside-work-tree` 可靠识别仓库根、子目录与 worktree。
 fn is_git_repo(root: &PathBuf) -> bool {
-    root.join(".git").exists()
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root.as_os_str())
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(out) = out else {
+        return false;
+    };
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    out.status.success() && s == "true"
 }
