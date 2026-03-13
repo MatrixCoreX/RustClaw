@@ -3421,8 +3421,8 @@ async fn submit_task_only(
         payload_preview
     );
     let submit_req = SubmitTaskRequest {
-        user_id,
-        chat_id,
+        user_id: Some(user_id),
+        chat_id: Some(chat_id),
         user_key,
         channel: Some(ChannelKind::Telegram),
         external_user_id: Some(user_id.to_string()),

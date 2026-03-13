@@ -689,8 +689,8 @@ async fn submit_task_only(
         );
     }
     let req = SubmitTaskRequest {
-        user_id,
-        chat_id,
+        user_id: Some(user_id),
+        chat_id: Some(chat_id),
         user_key,
         channel: Some(ChannelKind::Whatsapp),
         external_user_id: Some(wa_id.to_string()),

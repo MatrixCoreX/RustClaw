@@ -369,14 +369,17 @@ Skill behavior notes (file/path):
 - Forbid broad pattern-based kill without specific target.
 
 ### service_control
-- action: `status|start|stop|restart`
-- required: none (action required)
+- action: `status|start|stop|restart|reload|logs|verify|diagnose_start_failure|diagnose_unhealthy_state`
+- required: `action`. `target` (or `service`) required for all actions except `status` (when querying all).
+- optional: `manager_type` (systemd|service|rustclaw|...), `tail_lines` (default 100, max 500), `verify` (default true), `allow_risky` (default false).
+- Managers implemented: rustclaw (RustClaw daemons via clawd API), systemd, service. Others may return not implemented.
+- Output is structured JSON in skill text: status, service_name, manager_type, requested_action, executed_actions, pre_state, post_state, verified, key_evidence, failure_reason, next_step, summary.
+- High-risk (stop/restart) refused for ambiguous targets (e.g. "后端", "服务们") unless allow_risky. After start/restart/reload the skill auto-runs verify; on failure it auto-fetches recent logs.
 
 #### service_control JSON-schema style contract (strict)
-- Base shape: `{"type":"call_skill","skill":"service_control","args":{...}}`
-- Use only supported service lifecycle actions.
-- Prefer status checks before/after mutating actions when useful.
-- Forbid unsupported bulk/global service operations.
+- Base shape: `{"type":"call_skill","skill":"service_control","args":{"action":"...","target":"..."}}`
+- Use only supported actions; prefer status/verify before and after mutating actions.
+- Forbid unsupported bulk/global service operations; do not invent target when missing.
 
 ### system_basic (supplementary — system introspection only)
 - **File/command/dir 能力已全部收口为独立 base skill**：run_cmd, read_file, write_file, list_dir, make_dir, remove_file 均使用上方的独立 skill，不要用 system_basic。

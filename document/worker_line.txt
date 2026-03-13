@@ -1,1 +1,0 @@
-Worker: active in /home/guagua/RustClaw — ready to execute.

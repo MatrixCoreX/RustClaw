@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "archive-basic-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -86,7 +86,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audio-synthesize-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "audio-transcribe-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -252,7 +252,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chat-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "claw-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "config",
  "regex",
@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "clawd"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "config-guard-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "crypto-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -485,7 +485,7 @@ checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
 name = "db-basic-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "docker-basic-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -627,7 +627,7 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
 name = "feishud"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "fs-search-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -827,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "git-basic-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "health-check-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -949,7 +949,7 @@ dependencies = [
 
 [[package]]
 name = "http-basic-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -1249,7 +1249,7 @@ dependencies = [
 
 [[package]]
 name = "image-edit-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1265,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "image-generate-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1277,7 +1277,7 @@ dependencies = [
 
 [[package]]
 name = "image-vision-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1301,7 +1301,7 @@ dependencies = [
 
 [[package]]
 name = "install-module-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -1390,6 +1390,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "larkd"
+version = "0.1.3"
+dependencies = [
+ "anyhow",
+ "axum",
+ "claw-core",
+ "open-lark",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1447,7 +1467,7 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "log-analyze-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -1595,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "package-manager-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -1809,7 +1829,7 @@ dependencies = [
 
 [[package]]
 name = "process-basic-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -2201,7 +2221,7 @@ dependencies = [
 
 [[package]]
 name = "rss-fetch-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -2546,9 +2566,10 @@ dependencies = [
 
 [[package]]
 name = "service-control-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
 ]
@@ -2614,7 +2635,7 @@ checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
 name = "skill-runner"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -2739,7 +2760,7 @@ dependencies = [
 
 [[package]]
 name = "system-basic-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -2781,7 +2802,7 @@ checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
 
 [[package]]
 name = "telegramd"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "claw-core",
@@ -3558,7 +3579,7 @@ dependencies = [
 
 [[package]]
 name = "whatsapp_webd"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -3571,7 +3592,7 @@ dependencies = [
 
 [[package]]
 name = "whatsappd"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -3992,7 +4013,7 @@ checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
 
 [[package]]
 name = "x-skill"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "serde",

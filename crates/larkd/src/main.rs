@@ -287,8 +287,8 @@ fn handle_text_message_to_clawd(
     let chat_id_i64 = lark_id_to_i64(&chat_id);
 
     let submit_req = SubmitTaskRequest {
-        user_id,
-        chat_id: chat_id_i64,
+        user_id: Some(user_id),
+        chat_id: Some(chat_id_i64),
         user_key: user_key.clone(),
         channel: Some(ChannelKind::Lark),
         external_user_id: Some(open_id.clone()),

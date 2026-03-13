@@ -674,10 +674,6 @@ export default function App() {
   };
 
   const submitInteractionTask = async () => {
-    if (interactionUserId == null || interactionChatId == null) {
-      setInteractionError(t("未获取到 key 身份，请先登录。", "Missing key identity. Please sign in first."));
-      return;
-    }
     setInteractionLoading(true);
     setInteractionError(null);
     setInteractionSubmittedTaskId(null);
@@ -706,8 +702,6 @@ export default function App() {
       }
 
       const body: Record<string, unknown> = {
-        user_id: interactionUserId,
-        chat_id: interactionChatId,
         user_key: uiKey,
         channel: interactionChannel,
         kind: interactionKind,
@@ -748,10 +742,6 @@ export default function App() {
   const sendChatMessage = async () => {
     const text = chatInput.trim();
     if (!text || chatSending) return;
-    if (interactionUserId == null || interactionChatId == null) {
-      setChatError("未获取到本地可用账号，请先检查 clawd 用户配置。");
-      return;
-    }
     setChatSending(true);
     setChatError(null);
     const userMsg: ChatMessage = {
@@ -773,8 +763,6 @@ export default function App() {
         chatPayload.adapter = adapterName;
       }
       const submitBody = {
-        user_id: interactionUserId,
-        chat_id: interactionChatId,
         user_key: uiKey,
         channel: interactionChannel,
         ...(interactionExternalUserId.trim() ? { external_user_id: interactionExternalUserId.trim() } : {}),
@@ -1340,7 +1328,7 @@ export default function App() {
                 <h2 className="text-sm font-semibold">
                   {t("小龙虾聊天", "Lobster Chat")}
                   <span className="ml-2 text-xs font-normal text-white/60">
-                    {t("用户ID", "User ID")}: {interactionUserId ?? "--"}
+                    {t("鉴权", "Auth")}: key
                   </span>
                 </h2>
               </div>

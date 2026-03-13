@@ -2752,11 +2752,25 @@ async fn maybe_notify_schedule_result(
     } else {
         format!("{text_trimmed}\n\n{status_block}")
     };
-    if let Err(err) = send_task_channel_message(state, task, payload, &message).await {
-        warn!(
-            "schedule notify failed: task_id={} chat_id={} err={}",
-            task.task_id, task.chat_id, err
-        );
+    let runtime_ch = runtime_channel_from_payload(state, payload);
+    let channel_str = task.channel.trim();
+    info!(
+        "schedule notify push: task_id={} channel={} runtime_channel={:?}",
+        task.task_id, channel_str, runtime_ch
+    );
+    match send_task_channel_message(state, task, payload, &message).await {
+        Ok(()) => {
+            info!(
+                "schedule notify success: task_id={} channel={} runtime_channel={:?}",
+                task.task_id, channel_str, runtime_ch
+            );
+        }
+        Err(err) => {
+            warn!(
+                "schedule notify failed: task_id={} channel={} runtime_channel={:?} err={}",
+                task.task_id, channel_str, runtime_ch, err
+            );
+        }
     }
 }
 
@@ -7369,11 +7383,25 @@ async fn submit_task(
         },
         None => None,
     };
+    // Key-only: if client sent user_key but it is invalid, reject immediately (no fallback to user_id/chat_id)
+    if req.user_key.is_some() && resolved_identity.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("Invalid user_key".to_string()),
+            }),
+        );
+    }
     let effective_user_key = resolved_identity.as_ref().map(|v| v.user_key.clone());
+    let requested_user_id = req.user_id;
+    let requested_chat_id = req.chat_id;
     let effective_user_id = resolved_identity
         .as_ref()
         .map(|v| v.user_id)
-        .unwrap_or(req.user_id);
+        .or(requested_user_id)
+        .unwrap_or_default();
     let channel = req.channel.unwrap_or(ChannelKind::Telegram);
     let normalized_external_user_id = normalize_external_id_opt(req.external_user_id.as_deref());
     let normalized_external_chat_id = normalize_external_id_opt(req.external_chat_id.as_deref());
@@ -7384,34 +7412,55 @@ async fn submit_task(
             normalized_external_chat_id.as_deref(),
             user_key,
         )
+    } else if let Some(chat_id) = requested_chat_id {
+        chat_id
     } else {
-        req.chat_id
-    };
-
-    if resolved_identity.is_none() && !is_user_allowed(&state, req.user_id) {
-        let unauthorized = "Unauthorized user".to_string();
-        let _ = insert_audit_log(
-            &state,
-            Some(effective_user_id),
-            "auth_fail",
-            Some(
-                &json!({
-                    "chat_id": effective_chat_id,
-                    "kind": format!("{:?}", req.kind),
-                    "user_key": effective_user_key,
-                })
-                .to_string(),
-            ),
-            Some(&unauthorized),
-        );
         return (
-            StatusCode::FORBIDDEN,
+            StatusCode::BAD_REQUEST,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(unauthorized),
+                error: Some("chat_id is required when user_key is absent".to_string()),
             }),
         );
+    };
+
+    if resolved_identity.is_none() {
+        let Some(request_user_id) = requested_user_id else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("user_id is required when user_key is absent".to_string()),
+                }),
+            );
+        };
+        if !is_user_allowed(&state, request_user_id) {
+            let unauthorized = "Unauthorized user".to_string();
+            let _ = insert_audit_log(
+                &state,
+                Some(effective_user_id),
+                "auth_fail",
+                Some(
+                    &json!({
+                        "chat_id": effective_chat_id,
+                        "kind": format!("{:?}", req.kind),
+                        "user_key": effective_user_key,
+                    })
+                    .to_string(),
+                ),
+                Some(&unauthorized),
+            );
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(unauthorized),
+                }),
+            );
+        }
     }
 
     let limit_result = {

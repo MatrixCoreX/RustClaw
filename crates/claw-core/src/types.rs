@@ -30,8 +30,10 @@ pub enum ChannelKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmitTaskRequest {
-    pub user_id: i64,
-    pub chat_id: i64,
+    #[serde(default)]
+    pub user_id: Option<i64>,
+    #[serde(default)]
+    pub chat_id: Option<i64>,
     #[serde(default)]
     pub user_key: Option<String>,
     #[serde(default)]
