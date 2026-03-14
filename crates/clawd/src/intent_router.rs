@@ -145,8 +145,7 @@ pub(crate) async fn run_intent_normalizer(
         .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
         .filter(|s| !s.is_empty() && s != "{}")
         .unwrap_or_else(|| "<none>".to_string());
-    let recent_execution_context =
-        routing_context::build_recent_execution_context(state, task, 8);
+    let recent_execution_context = routing_context::build_recent_execution_context(state, task, 8);
     let memory_context = if state.memory.route_memory_enabled {
         let (long_term_summary, preferences, recalled) =
             memory::service::recall_memory_context_parts(
@@ -193,31 +192,27 @@ pub(crate) async fn run_intent_normalizer(
         &prompt_file,
         None,
     );
-    let llm_out = match llm_gateway::run_with_fallback_with_prompt_file(
-        state,
-        task,
-        &prompt,
-        &prompt_file,
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(err) => {
-            warn!(
-                "intent_normalizer llm failed, fallback pass-through: task_id={} err={}",
-                task.task_id, err
-            );
-            return IntentNormalizerOutput {
-                resolved_user_intent: req.to_string(),
-                resume_behavior: ResumeBehavior::None,
-                schedule_kind: ScheduleKind::None,
-                needs_clarify: false,
-                reason: "llm_failed".to_string(),
-                confidence: 0.0,
-                routed_mode: RoutedMode::AskClarify,
-            };
-        }
-    };
+    let llm_out =
+        match llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file)
+            .await
+        {
+            Ok(v) => v,
+            Err(err) => {
+                warn!(
+                    "intent_normalizer llm failed, fallback pass-through: task_id={} err={}",
+                    task.task_id, err
+                );
+                return IntentNormalizerOutput {
+                    resolved_user_intent: req.to_string(),
+                    resume_behavior: ResumeBehavior::None,
+                    schedule_kind: ScheduleKind::None,
+                    needs_clarify: false,
+                    reason: "llm_failed".to_string(),
+                    confidence: 0.0,
+                    routed_mode: RoutedMode::AskClarify,
+                };
+            }
+        };
     let trimmed = llm_out.trim();
     let parsed_raw = serde_json::from_str::<IntentNormalizerOut>(trimmed).ok();
     let raw_parse_ok = parsed_raw.is_some();

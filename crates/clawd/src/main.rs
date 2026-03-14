@@ -14,11 +14,11 @@ use claw_core::config::{
     AppConfig, ChannelBindingConfig, CommandIntentConfig, LlmProviderConfig, MaintenanceConfig,
     MemoryConfig, PersonaConfig, RoutingConfig, ScheduleConfig, ToolsConfig,
 };
-use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 use claw_core::hard_rules::main_flow::load_main_flow_rules;
 use claw_core::hard_rules::trade as hard_trade;
 use claw_core::hard_rules::trade::CompiledTradeRules;
 use claw_core::hard_rules::types::MainFlowRules;
+use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 use claw_core::types::{
     ApiResponse, AuthIdentity, ChannelKind, ExchangeCredentialStatus, HealthResponse,
     SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse, TaskStatus,
@@ -167,7 +167,10 @@ fn build_skill_views(
 
 /// Phase 4: 重载 skill 视图并更新 AppState。从 config_path_for_reload 重读 config，取最新 skills.registry_path / skill_switches / skills_list，再重建视图。失败不更新状态，返回 Err。
 pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsResult, String> {
-    info!("reload_skill_views: started config_path={}", state.config_path_for_reload);
+    info!(
+        "reload_skill_views: started config_path={}",
+        state.config_path_for_reload
+    );
     let config = AppConfig::load(&state.config_path_for_reload)
         .map_err(|e| format!("reload_skill_views: load config failed: {}", e))?;
     let registry_path = config.skills.registry_path.as_deref();
@@ -178,7 +181,11 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
         &config.skills.skill_switches,
         &config.skills.skills_list,
     )?;
-    let registry_entries = views.registry.as_ref().map(|r| r.all_names().len()).unwrap_or(0);
+    let registry_entries = views
+        .registry
+        .as_ref()
+        .map(|r| r.all_names().len())
+        .unwrap_or(0);
     let execution_count = views.execution_skills.len();
     let planner_count = views.planner_visible.len();
 
@@ -1475,7 +1482,11 @@ async fn main() -> anyhow::Result<()> {
         error!("startup: build_skill_views failed: {}", e);
         anyhow::anyhow!(e)
     })?;
-    let registry_entries = views.registry.as_ref().map(|r| r.all_names().len()).unwrap_or(0);
+    let registry_entries = views
+        .registry
+        .as_ref()
+        .map(|r| r.all_names().len())
+        .unwrap_or(0);
     info!(
         "skills registry path={} entries={} execution_count={} planner_visible_count={}",
         config.skills.registry_path.as_deref().unwrap_or("(none)"),
@@ -2930,7 +2941,9 @@ async fn send_task_channel_message(
     text: &str,
 ) -> Result<(), String> {
     match runtime_channel_from_payload(state, payload) {
-        RuntimeChannel::Telegram => channel_send::send_telegram_message(state, task.chat_id, text).await,
+        RuntimeChannel::Telegram => {
+            channel_send::send_telegram_message(state, task.chat_id, text).await
+        }
         RuntimeChannel::Whatsapp => {
             let to = task_external_chat_id(task)
                 .or_else(|| {
@@ -3286,9 +3299,7 @@ fn extract_skill_provider_model(value: &Value) -> Option<(String, String, String
 /// 约定：`env:VAR` → 从环境变量 VAR 取值，注入 `Authorization: Bearer <value>`；
 ///       `env:VAR:header:HeaderName` → 从环境变量 VAR 取值，注入 `HeaderName: <value>`（不加重 Bearer 前缀）。
 /// 返回 (header_name, header_value)；取不到 secret 时返回 Err。
-fn resolve_external_auth(
-    auth_ref: Option<&str>,
-) -> Result<Option<(String, String)>, String> {
+fn resolve_external_auth(auth_ref: Option<&str>) -> Result<Option<(String, String)>, String> {
     let s = match auth_ref {
         Some(x) => x.trim(),
         None => return Ok(None),
@@ -3369,9 +3380,8 @@ async fn execute_external_http_json(
     let reg = state
         .get_skills_registry()
         .ok_or_else(|| "external skill requires registry".to_string())?;
-    let config: ExternalSkillConfig<'_> = reg
-        .external_config(canonical_skill_name)
-        .ok_or_else(|| {
+    let config: ExternalSkillConfig<'_> =
+        reg.external_config(canonical_skill_name).ok_or_else(|| {
             "external skill missing external_kind or external_endpoint in registry".to_string()
         })?;
     if config.kind != "http_json" {
@@ -3426,19 +3436,22 @@ async fn execute_external_http_json(
     if let Some((name, value)) = auth_header {
         req = req.header(name.as_str(), value);
     }
-    let res = req
-        .send()
-        .await
-        .map_err(|e| {
-            let msg = format!("external http_json request failed: {}", e);
-            warn!("skill_dispatch external request failed skill={} endpoint={} err={}", canonical_skill_name, endpoint_masked, e);
-            msg
-        })?;
+    let res = req.send().await.map_err(|e| {
+        let msg = format!("external http_json request failed: {}", e);
+        warn!(
+            "skill_dispatch external request failed skill={} endpoint={} err={}",
+            canonical_skill_name, endpoint_masked, e
+        );
+        msg
+    })?;
 
     let status_code = res.status();
     let resp_body = res.text().await.map_err(|e| {
         let msg = format!("external http_json read body failed: {}", e);
-        warn!("skill_dispatch external read_body failed skill={} err={}", canonical_skill_name, e);
+        warn!(
+            "skill_dispatch external read_body failed skill={} err={}",
+            canonical_skill_name, e
+        );
         msg
     })?;
 
@@ -3461,7 +3474,9 @@ async fn execute_external_http_json(
         let msg = format!("external http_json response parse failed: {}", e);
         warn!(
             "skill_dispatch external response parse failed skill={} err={} raw_len={}",
-            canonical_skill_name, e, resp_body.len()
+            canonical_skill_name,
+            e,
+            resp_body.len()
         );
         msg
     })?;
@@ -3524,7 +3539,9 @@ async fn execute_external_http_json(
 
     info!(
         "skill_dispatch external response_parse_ok skill={} status={} text_len={}",
-        canonical_skill_name, status, text.len()
+        canonical_skill_name,
+        status,
+        text.len()
     );
 
     let error_text = if ok {
@@ -4416,11 +4433,7 @@ async fn execute_ask_routed(
     normalizer_mode: Option<RoutedMode>,
 ) -> Result<AskReply, String> {
     let (routed_mode, used_fallback_router, override_reason) = if resume_force_chat {
-        (
-            RoutedMode::Chat,
-            false,
-            Some("resume_force_chat"),
-        )
+        (RoutedMode::Chat, false, Some("resume_force_chat"))
     } else if let Some(m) = normalizer_mode {
         // Normalizer already decided; respect it so Feishu/any client explicit-execute (e.g. "执行ls") gets Act.
         (m, false, None)
@@ -4428,7 +4441,11 @@ async fn execute_ask_routed(
         let mode = intent_router::route_request_mode(state, task, resolved_prompt).await;
         (mode, true, None)
     } else {
-        (RoutedMode::Chat, false, Some("normalizer_mode=None and agent_mode=false"))
+        (
+            RoutedMode::Chat,
+            false,
+            Some("normalizer_mode=None and agent_mode=false"),
+        )
     };
     info!(
         "{} worker_once: ask task_id={} normalizer_mode={:?} routed_mode={:?} agent_mode={} used_fallback_router={} override={}",
@@ -4471,20 +4488,19 @@ async fn execute_ask_routed(
             .map(|s| AskReply::llm(s))
             .map_err(|e| e.to_string())
         }
-        RoutedMode::Act => agent_engine::run_agent_with_tools(
-            state,
-            task,
-            prompt_with_memory,
-            resolved_prompt,
-        )
-        .await,
-        RoutedMode::ChatAct => agent_engine::run_agent_with_tools(
-            state,
-            task,
-            &chat_act_goal_from_prompt(prompt_with_memory),
-            resolved_prompt,
-        )
-        .await,
+        RoutedMode::Act => {
+            agent_engine::run_agent_with_tools(state, task, prompt_with_memory, resolved_prompt)
+                .await
+        }
+        RoutedMode::ChatAct => {
+            agent_engine::run_agent_with_tools(
+                state,
+                task,
+                &chat_act_goal_from_prompt(prompt_with_memory),
+                resolved_prompt,
+            )
+            .await
+        }
         RoutedMode::AskClarify => {
             let clarify = intent_router::generate_clarify_question(
                 state,
@@ -5343,10 +5359,12 @@ async fn execute_builtin_skill(
                 state.allow_path_outside_workspace,
             )?;
             if real_path.is_dir() {
-                return Err("remove_file only supports files; use run_cmd for directory removal".to_string());
+                return Err(
+                    "remove_file only supports files; use run_cmd for directory removal"
+                        .to_string(),
+                );
             }
-            std::fs::remove_file(&real_path)
-                .map_err(|err| format!("remove_file failed: {err}"))?;
+            std::fs::remove_file(&real_path).map_err(|err| format!("remove_file failed: {err}"))?;
             Ok(format!("removed {}", real_path.display()))
         }
         _ => Err(format!("unknown skill: {skill_name}")),
@@ -6984,10 +7002,7 @@ fn process_name_matches(pid: &str, process_name: &str) -> bool {
     // 1) 优先：/proc/<pid>/exe 的 basename（真实可执行文件）
     let exe_path = format!("/proc/{pid}/exe");
     if let Ok(target) = std::fs::read_link(&exe_path) {
-        let name = target
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let name = target.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let name = name.strip_suffix(" (deleted)").unwrap_or(name);
         if name == process_name {
             return true;

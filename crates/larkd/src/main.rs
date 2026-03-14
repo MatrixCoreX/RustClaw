@@ -13,8 +13,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
-    ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind, TaskQueryResponse,
-    TaskStatus,
+    ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
+    TaskQueryResponse, TaskStatus,
 };
 use reqwest::Client;
 use serde::Deserialize;
@@ -116,16 +116,31 @@ fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String
     if message.get("message_type").and_then(|v| v.as_str())? != "text" {
         return None;
     }
-    let content_str = message.get("content").and_then(|v| v.as_str()).unwrap_or("{}");
+    let content_str = message
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("{}");
     let content: Value = serde_json::from_str(content_str).ok()?;
-    let text = content.get("text").and_then(|v| v.as_str()).map(str::trim).unwrap_or("");
+    let text = content
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
     if text.is_empty() {
         return None;
     }
     let sender = event.get("sender")?;
     let sender_id = sender.get("sender_id")?;
-    let open_id = sender_id.get("open_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let chat_id = message.get("chat_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let open_id = sender_id
+        .get("open_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let chat_id = message
+        .get("chat_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if chat_id.is_empty() {
         return None;
     }
@@ -156,9 +171,7 @@ async fn resolve_lark_identity(
         .await
         .map_err(|e| format!("resolve response parse failed: {}", e))?;
     if !status.is_success() || !body.ok {
-        return Err(body
-            .error
-            .unwrap_or_else(|| "resolve failed".to_string()));
+        return Err(body.error.unwrap_or_else(|| "resolve failed".to_string()));
     }
     Ok(body.data.and_then(|d| d.identity))
 }
@@ -211,38 +224,92 @@ async fn handle_incoming_lark_text(
         Ok(ident) => ident,
         Err(e) => {
             warn!("larkd: binding resolve failed err={}", e);
-            let _ = send_lark_text(&config, &client, &token_cache, &chat_id, "Identity check temporarily unavailable, please try again later.").await;
+            let _ = send_lark_text(
+                &config,
+                &client,
+                &token_cache,
+                &chat_id,
+                "Identity check temporarily unavailable, please try again later.",
+            )
+            .await;
             return;
         }
     };
 
     if let Some(ident) = identity {
-        info!("larkd: binding resolve result bound=true external_chat_id={}", chat_id);
+        info!(
+            "larkd: binding resolve result bound=true external_chat_id={}",
+            chat_id
+        );
         handle_text_message_to_clawd(state, open_id, chat_id, text, Some(ident.user_key));
         return;
     }
 
-    info!("larkd: binding resolve result bound=false external_chat_id={}", chat_id);
+    info!(
+        "larkd: binding resolve result bound=false external_chat_id={}",
+        chat_id
+    );
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        info!("larkd: unbound user prompted for key (empty text) external_chat_id={}", chat_id);
-        let _ = send_lark_text(&config, &client, &token_cache, &chat_id, "Please send your RustClaw key to bind first.").await;
+        info!(
+            "larkd: unbound user prompted for key (empty text) external_chat_id={}",
+            chat_id
+        );
+        let _ = send_lark_text(
+            &config,
+            &client,
+            &token_cache,
+            &chat_id,
+            "Please send your RustClaw key to bind first.",
+        )
+        .await;
         return;
     }
 
-    info!("larkd: bind attempt external_chat_id={} key_len={}", chat_id, trimmed.len());
+    info!(
+        "larkd: bind attempt external_chat_id={} key_len={}",
+        chat_id,
+        trimmed.len()
+    );
     match bind_lark_identity(&client, &base, &open_id, &chat_id, trimmed).await {
         Ok(Some(_)) => {
             info!("larkd: bind success external_chat_id={}", chat_id);
-            let _ = send_lark_text(&config, &client, &token_cache, &chat_id, "Bound successfully. Please send your question again.").await;
+            let _ = send_lark_text(
+                &config,
+                &client,
+                &token_cache,
+                &chat_id,
+                "Bound successfully. Please send your question again.",
+            )
+            .await;
         }
         Ok(None) => {
-            warn!("larkd: bind failure (invalid key) external_chat_id={}", chat_id);
-            let _ = send_lark_text(&config, &client, &token_cache, &chat_id, "Invalid key or bind failed. Please send a valid key.").await;
+            warn!(
+                "larkd: bind failure (invalid key) external_chat_id={}",
+                chat_id
+            );
+            let _ = send_lark_text(
+                &config,
+                &client,
+                &token_cache,
+                &chat_id,
+                "Invalid key or bind failed. Please send a valid key.",
+            )
+            .await;
         }
         Err(e) => {
-            warn!("larkd: bind request failed err={} external_chat_id={}", e, chat_id);
-            let _ = send_lark_text(&config, &client, &token_cache, &chat_id, "Bind request failed, please try again later.").await;
+            warn!(
+                "larkd: bind request failed err={} external_chat_id={}",
+                e, chat_id
+            );
+            let _ = send_lark_text(
+                &config,
+                &client,
+                &token_cache,
+                &chat_id,
+                "Bind request failed, please try again later.",
+            )
+            .await;
         }
     }
 }
@@ -283,7 +350,11 @@ fn handle_text_message_to_clawd(
     text: String,
     user_key: Option<String>,
 ) {
-    let user_id = lark_id_to_i64(if open_id.is_empty() { &chat_id } else { &open_id });
+    let user_id = lark_id_to_i64(if open_id.is_empty() {
+        &chat_id
+    } else {
+        &open_id
+    });
     let chat_id_i64 = lark_id_to_i64(&chat_id);
 
     let submit_req = SubmitTaskRequest {
@@ -321,7 +392,11 @@ fn handle_text_message_to_clawd(
         if !submit_resp.status().is_success() {
             let status = submit_resp.status();
             let resp_body = submit_resp.text().await.unwrap_or_default();
-            warn!("larkd: task submit failed status={} body_len={}", status, resp_body.len());
+            warn!(
+                "larkd: task submit failed status={} body_len={}",
+                status,
+                resp_body.len()
+            );
             return;
         }
 
@@ -338,12 +413,18 @@ fn handle_text_message_to_clawd(
             return;
         };
         let task_id = data.task_id.to_string();
-        info!("larkd: bound user task submitted task_id={} external_chat_id={}", task_id, chat_id);
+        info!(
+            "larkd: bound user task submitted task_id={} external_chat_id={}",
+            task_id, chat_id
+        );
 
         let clawd_base = config.lark.clawd_base_url.clone();
         let chat_id_delivery = chat_id.clone();
 
-        info!("larkd: task delivery started task_id={} chat_id={} task_delivery_timeout_seconds={}", task_id, chat_id_delivery, delivery_timeout_secs);
+        info!(
+            "larkd: task delivery started task_id={} chat_id={} task_delivery_timeout_seconds={}",
+            task_id, chat_id_delivery, delivery_timeout_secs
+        );
         let started = std::time::Instant::now();
         let mut last_seen_status: Option<TaskStatus> = None;
         loop {
@@ -361,7 +442,14 @@ fn handle_text_message_to_clawd(
                     warn!("larkd: poll failed task_id={} err={}", task_id, e);
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                         warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=poll_failed", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_lark_text(&config, &client, &token_cache, &chat_id_delivery, "Request timed out, please try again later.").await;
+                        let _ = send_lark_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            "Request timed out, please try again later.",
+                        )
+                        .await;
                         break;
                     }
                     tokio::time::sleep(poll_interval).await;
@@ -372,13 +460,28 @@ fn handle_text_message_to_clawd(
                 let status = resp.status();
                 let body_preview = resp.text().await.unwrap_or_default();
                 if body_preview.len() > 200 {
-                    debug!("larkd: poll http error task_id={} status={} body_len={}", task_id, status, body_preview.len());
+                    debug!(
+                        "larkd: poll http error task_id={} status={} body_len={}",
+                        task_id,
+                        status,
+                        body_preview.len()
+                    );
                 } else {
-                    debug!("larkd: poll http error task_id={} status={} body={}", task_id, status, body_preview);
+                    debug!(
+                        "larkd: poll http error task_id={} status={} body={}",
+                        task_id, status, body_preview
+                    );
                 }
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                     warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=http status={}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, status);
-                    let _ = send_lark_text(&config, &client, &token_cache, &chat_id_delivery, "Request timed out, please try again later.").await;
+                    let _ = send_lark_text(
+                        &config,
+                        &client,
+                        &token_cache,
+                        &chat_id_delivery,
+                        "Request timed out, please try again later.",
+                    )
+                    .await;
                     break;
                 }
                 tokio::time::sleep(poll_interval).await;
@@ -390,7 +493,14 @@ fn handle_text_message_to_clawd(
                     debug!("larkd: poll parse failed task_id={} err={}", task_id, e);
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                         warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=parse_failed", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_lark_text(&config, &client, &token_cache, &chat_id_delivery, "Request timed out, please try again later.").await;
+                        let _ = send_lark_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            "Request timed out, please try again later.",
+                        )
+                        .await;
                         break;
                     }
                     tokio::time::sleep(poll_interval).await;
@@ -399,10 +509,20 @@ fn handle_text_message_to_clawd(
             };
             let Some(ref task) = body.data else {
                 let err_msg = body.error.as_deref().unwrap_or("no data");
-                debug!("larkd: poll no data task_id={} ok={} error={}", task_id, body.ok, err_msg);
+                debug!(
+                    "larkd: poll no data task_id={} ok={} error={}",
+                    task_id, body.ok, err_msg
+                );
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                     warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=no_task_data error={}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, err_msg);
-                    let _ = send_lark_text(&config, &client, &token_cache, &chat_id_delivery, "Request timed out, please try again later.").await;
+                    let _ = send_lark_text(
+                        &config,
+                        &client,
+                        &token_cache,
+                        &chat_id_delivery,
+                        "Request timed out, please try again later.",
+                    )
+                    .await;
                     break;
                 }
                 tokio::time::sleep(poll_interval).await;
@@ -413,7 +533,14 @@ fn handle_text_message_to_clawd(
                 TaskStatus::Queued | TaskStatus::Running => {
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                         warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_lark_text(&config, &client, &token_cache, &chat_id_delivery, "Request timed out, please try again later.").await;
+                        let _ = send_lark_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            "Request timed out, please try again later.",
+                        )
+                        .await;
                         break;
                     }
                     tokio::time::sleep(poll_interval).await;
@@ -422,17 +549,45 @@ fn handle_text_message_to_clawd(
                 TaskStatus::Succeeded => {
                     let to_send = lark_task_success_text(task);
                     for chunk in chunk_text_utf8(to_send.as_str(), chunk_chars) {
-                        if let Err(e) = send_lark_text(&config, &client, &token_cache, &chat_id_delivery, &chunk).await {
-                            warn!("larkd: send success text failed task_id={} err={}", task_id, e);
+                        if let Err(e) = send_lark_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            &chunk,
+                        )
+                        .await
+                        {
+                            warn!(
+                                "larkd: send success text failed task_id={} err={}",
+                                task_id, e
+                            );
                         }
                     }
-                    info!("larkd: task delivery success task_id={} (result sent)", task_id);
+                    info!(
+                        "larkd: task delivery success task_id={} (result sent)",
+                        task_id
+                    );
                     break;
                 }
                 TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
-                    let detail = task.error_text.as_deref().unwrap_or("Task failed").to_string();
-                    let _ = send_lark_text(&config, &client, &token_cache, &chat_id_delivery, &format!("Failed: {}", detail)).await;
-                    info!("larkd: task delivery failure task_id={} status={:?}", task_id, task.status);
+                    let detail = task
+                        .error_text
+                        .as_deref()
+                        .unwrap_or("Task failed")
+                        .to_string();
+                    let _ = send_lark_text(
+                        &config,
+                        &client,
+                        &token_cache,
+                        &chat_id_delivery,
+                        &format!("Failed: {}", detail),
+                    )
+                    .await;
+                    info!(
+                        "larkd: task delivery failure task_id={} status={:?}",
+                        task_id, task.status
+                    );
                     break;
                 }
             }
@@ -442,7 +597,11 @@ fn handle_text_message_to_clawd(
 
 const LARK_TIMESTAMP_TOLERANCE_SECS: u64 = 300;
 
-fn verify_lark_signature(headers: &HeaderMap, body: &str, encrypt_key: &str) -> Result<(), &'static str> {
+fn verify_lark_signature(
+    headers: &HeaderMap,
+    body: &str,
+    encrypt_key: &str,
+) -> Result<(), &'static str> {
     if encrypt_key.is_empty() {
         return Ok(());
     }
@@ -481,7 +640,11 @@ fn verify_lark_signature(headers: &HeaderMap, body: &str, encrypt_key: &str) -> 
     }
 }
 
-fn verify_verification_token(body: &Value, is_challenge: bool, expected: &str) -> Result<(), &'static str> {
+fn verify_verification_token(
+    body: &Value,
+    is_challenge: bool,
+    expected: &str,
+) -> Result<(), &'static str> {
     if expected.is_empty() {
         return Ok(());
     }
@@ -508,7 +671,8 @@ async fn callback_handler(
     info!("larkd: callback received body_len={}", body.len());
 
     if !state.config.lark.encrypt_key.is_empty() {
-        if let Err(reason) = verify_lark_signature(&headers, &body, &state.config.lark.encrypt_key) {
+        if let Err(reason) = verify_lark_signature(&headers, &body, &state.config.lark.encrypt_key)
+        {
             warn!("larkd: signature verification failed reason={}", reason);
             return (
                 StatusCode::FORBIDDEN,
@@ -536,12 +700,13 @@ async fn callback_handler(
     if let Some(challenge) = body_json.get("challenge").and_then(|v| v.as_str()) {
         let typ = body_json.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if typ == "url_verification" {
-            if let Err(reason) = verify_verification_token(
-                &body_json,
-                true,
-                &state.config.lark.verification_token,
-            ) {
-                warn!("larkd: challenge verification_token mismatch reason={}", reason);
+            if let Err(reason) =
+                verify_verification_token(&body_json, true, &state.config.lark.verification_token)
+            {
+                warn!(
+                    "larkd: challenge verification_token mismatch reason={}",
+                    reason
+                );
                 return (
                     StatusCode::FORBIDDEN,
                     Json(json!({ "error": "token_mismatch" })),
@@ -553,11 +718,9 @@ async fn callback_handler(
         }
     }
 
-    if let Err(reason) = verify_verification_token(
-        &body_json,
-        false,
-        &state.config.lark.verification_token,
-    ) {
+    if let Err(reason) =
+        verify_verification_token(&body_json, false, &state.config.lark.verification_token)
+    {
         warn!("larkd: event verification_token mismatch reason={}", reason);
         return (
             StatusCode::FORBIDDEN,
@@ -636,7 +799,10 @@ async fn get_tenant_access_token(
         tenant_access_token: Option<String>,
         expire: Option<u64>,
     }
-    let data: TokenResp = resp.json().await.map_err(|e| format!("token parse failed: {}", e))?;
+    let data: TokenResp = resp
+        .json()
+        .await
+        .map_err(|e| format!("token parse failed: {}", e))?;
     let token = data
         .tenant_access_token
         .ok_or_else(|| "token response missing tenant_access_token".to_string())?;
@@ -646,7 +812,10 @@ async fn get_tenant_access_token(
         let mut guard = cache.write().await;
         *guard = Some((token.clone(), expires_at));
     }
-    info!("larkd: tenant_access_token refreshed expires_in={} base={}", expire, base);
+    info!(
+        "larkd: tenant_access_token refreshed expires_in={} base={}",
+        expire, base
+    );
     Ok(token)
 }
 
@@ -675,9 +844,17 @@ async fn send_lark_text(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("lark send status={} body_len={}", status, body.len()));
+        return Err(format!(
+            "lark send status={} body_len={}",
+            status,
+            body.len()
+        ));
     }
-    info!("larkd: send success receive_id={} text_len={}", receive_id, text.len());
+    info!(
+        "larkd: send success receive_id={} text_len={}",
+        receive_id,
+        text.len()
+    );
     Ok(())
 }
 
@@ -690,7 +867,12 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
 
     let app_id = state.config.lark.app_id.clone();
     let app_secret = state.config.lark.app_secret.clone();
-    let api_base_url = state.config.lark.api_base_url.trim_end_matches('/').to_string();
+    let api_base_url = state
+        .config
+        .lark
+        .api_base_url
+        .trim_end_matches('/')
+        .to_string();
     if app_id.is_empty() || app_secret.is_empty() {
         anyhow::bail!("larkd long_connection mode requires app_id and app_secret");
     }
@@ -710,7 +892,10 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
     const MAX_BACKOFF_SECS: u64 = 300;
 
     loop {
-        info!("larkd: long connection starting (app_id={} base={})", app_id, api_base_url);
+        info!(
+            "larkd: long connection starting (app_id={} base={})",
+            app_id, api_base_url
+        );
         let handler = EventDispatcherHandler::builder()
             .register_p2_im_message_receive_v1_raw({
                 let state = state_arc.clone();
@@ -760,7 +945,10 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
                 warn!("larkd: long connection closed normally, reconnecting");
             }
             Err(e) => {
-                warn!("larkd: long connection error: {}, reconnecting in {}s", e, backoff_secs);
+                warn!(
+                    "larkd: long connection error: {}, reconnecting in {}s",
+                    e, backoff_secs
+                );
             }
         }
         tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
@@ -771,13 +959,17 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info,larkd=debug".to_string()))
+        .with_env_filter(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info,larkd=debug".to_string()),
+        )
         .init();
     let _ = tracing_log::LogTracer::init();
 
-    let config_path = std::env::var("LARK_CONFIG_PATH").unwrap_or_else(|_| "configs/channels/lark.toml".to_string());
+    let config_path = std::env::var("LARK_CONFIG_PATH")
+        .unwrap_or_else(|_| "configs/channels/lark.toml".to_string());
     let config: LarkConfig = {
-        let raw = std::fs::read_to_string(&config_path).map_err(|e| anyhow::anyhow!("read config {}: {}", config_path, e))?;
+        let raw = std::fs::read_to_string(&config_path)
+            .map_err(|e| anyhow::anyhow!("read config {}: {}", config_path, e))?;
         toml::from_str(&raw).map_err(|e| anyhow::anyhow!("parse config: {}", e))?
     };
 
@@ -808,13 +1000,22 @@ async fn main() -> anyhow::Result<()> {
             let app = Router::new()
                 .route("/", post(callback_handler))
                 .with_state(state);
-            let listen = config.lark.listen.parse::<std::net::SocketAddr>()
+            let listen = config
+                .lark
+                .listen
+                .parse::<std::net::SocketAddr>()
                 .map_err(|e| anyhow::anyhow!("listen address {}: {}", config.lark.listen, e))?;
-            info!("larkd: mode=webhook listening on {} (Lark international app bot callback)", listen);
+            info!(
+                "larkd: mode=webhook listening on {} (Lark international app bot callback)",
+                listen
+            );
             axum::serve(tokio::net::TcpListener::bind(listen).await?, app).await?;
         }
         LarkMode::LongConnection => {
-            let listen = config.lark.listen.parse::<std::net::SocketAddr>()
+            let listen = config
+                .lark
+                .listen
+                .parse::<std::net::SocketAddr>()
                 .map_err(|e| anyhow::anyhow!("listen address {}: {}", config.lark.listen, e))?;
             let health_app = Router::new().route("/health", get(|| async { "ok" }));
             let listener = tokio::net::TcpListener::bind(listen).await?;
@@ -823,7 +1024,10 @@ async fn main() -> anyhow::Result<()> {
                     tracing::warn!("larkd: health server exited err={}", err);
                 }
             });
-            info!("larkd: mode=long_connection health check on {} (GET /health)", listen);
+            info!(
+                "larkd: mode=long_connection health check on {} (GET /health)",
+                listen
+            );
             run_long_connection_loop(state).await?;
         }
     }

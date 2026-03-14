@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
     let shutdown = async {
         #[cfg(unix)]
         {
-            use tokio::signal::unix::{SignalKind, signal};
+            use tokio::signal::unix::{signal, SignalKind};
             let mut term_signal = signal(SignalKind::terminate()).ok();
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {}
@@ -119,9 +119,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn health_handler(
-    State(health): State<Arc<Mutex<BridgeHealth>>>,
-) -> Json<serde_json::Value> {
+async fn health_handler(State(health): State<Arc<Mutex<BridgeHealth>>>) -> Json<serde_json::Value> {
     let snapshot = health
         .lock()
         .map(|v| v.clone())

@@ -30,13 +30,20 @@ const TELEGRAM_TEXT_CHUNK_CHARS: usize = 3500;
 /// Max characters per WhatsApp text message (conservative; platform limit ~4096).
 const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
 
-pub(crate) async fn send_telegram_message(state: &AppState, chat_id: i64, text: &str) -> Result<(), String> {
+pub(crate) async fn send_telegram_message(
+    state: &AppState,
+    chat_id: i64,
+    text: &str,
+) -> Result<(), String> {
     let token = state.telegram_bot_token.trim();
     if token.is_empty() {
         return Err("telegram bot token is empty".to_string());
     }
     let url = format!("https://api.telegram.org/bot{token}/sendMessage");
-    let chunks = chunk_text_for_channel(text, TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let chunks = chunk_text_for_channel(
+        text,
+        TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
     let n = chunks.len();
     if n > 1 {
         info!(
@@ -53,7 +60,12 @@ pub(crate) async fn send_telegram_message(state: &AppState, chat_id: i64, text: 
             chunk
         };
         if n > 1 {
-            info!("send_chunk channel=telegram chat_id={} index={} total={}", chat_id, i + 1, n);
+            info!(
+                "send_chunk channel=telegram chat_id={} index={} total={}",
+                chat_id,
+                i + 1,
+                n
+            );
         }
         let resp = state
             .http_client
@@ -92,7 +104,10 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
         return Err("whatsapp api_base is empty".to_string());
     }
     let url = format!("{base}/v23.0/{phone_number_id}/messages");
-    let chunks = chunk_text_for_channel(text, WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let chunks = chunk_text_for_channel(
+        text,
+        WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
     let n = chunks.len();
     if n > 1 {
         info!(
@@ -109,7 +124,12 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
             chunk
         };
         if n > 1 {
-            info!("send_chunk channel=whatsapp_cloud to={} index={} total={}", to, i + 1, n);
+            info!(
+                "send_chunk channel=whatsapp_cloud to={} index={} total={}",
+                to,
+                i + 1,
+                n
+            );
         }
         let resp = state
             .http_client
@@ -148,7 +168,10 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
         return Err("whatsapp_web.bridge_base_url is empty".to_string());
     }
     let url = format!("{base}/v1/send-text");
-    let chunks = chunk_text_for_channel(text, WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let chunks = chunk_text_for_channel(
+        text,
+        WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
     let n = chunks.len();
     if n > 1 {
         info!(
@@ -165,7 +188,12 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
             chunk
         };
         if n > 1 {
-            info!("send_chunk channel=whatsapp_web_bridge to={} index={} total={}", to, i + 1, n);
+            info!(
+                "send_chunk channel=whatsapp_web_bridge to={} index={} total={}",
+                to,
+                i + 1,
+                n
+            );
         }
         let resp = state
             .http_client
@@ -223,10 +251,9 @@ pub(crate) async fn send_feishu_text_message(
     receive_id: &str,
     text: &str,
 ) -> Result<(), String> {
-    let config = state
-        .feishu_send_config
-        .as_ref()
-        .ok_or_else(|| "feishu send not configured (configs/channels/feishu.toml app_id/app_secret)".to_string())?;
+    let config = state.feishu_send_config.as_ref().ok_or_else(|| {
+        "feishu send not configured (configs/channels/feishu.toml app_id/app_secret)".to_string()
+    })?;
     let token = get_tenant_access_token(
         &state.http_client,
         &config.api_base_url,
@@ -236,7 +263,10 @@ pub(crate) async fn send_feishu_text_message(
     .await?;
     let base = config.api_base_url.trim_end_matches('/');
     let url = format!("{base}/open-apis/im/v1/messages?receive_id_type=chat_id");
-    let chunks = chunk_text_for_channel(text, FEISHU_LARK_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let chunks = chunk_text_for_channel(
+        text,
+        FEISHU_LARK_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
     let n = chunks.len();
     if n > 1 {
         info!(
@@ -278,10 +308,9 @@ pub(crate) async fn send_lark_text_message(
     receive_id: &str,
     text: &str,
 ) -> Result<(), String> {
-    let config = state
-        .lark_send_config
-        .as_ref()
-        .ok_or_else(|| "lark send not configured (configs/channels/lark.toml app_id/app_secret)".to_string())?;
+    let config = state.lark_send_config.as_ref().ok_or_else(|| {
+        "lark send not configured (configs/channels/lark.toml app_id/app_secret)".to_string()
+    })?;
     let token = get_tenant_access_token(
         &state.http_client,
         &config.api_base_url,
@@ -291,7 +320,10 @@ pub(crate) async fn send_lark_text_message(
     .await?;
     let base = config.api_base_url.trim_end_matches('/');
     let url = format!("{base}/open-apis/im/v1/messages?receive_id_type=chat_id");
-    let chunks = chunk_text_for_channel(text, FEISHU_LARK_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let chunks = chunk_text_for_channel(
+        text,
+        FEISHU_LARK_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
     let n = chunks.len();
     if n > 1 {
         info!(

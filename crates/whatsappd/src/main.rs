@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
 use axum::body::Bytes;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -15,14 +15,14 @@ use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS}
 use claw_core::config::AppConfig;
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
-    ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind, TaskQueryResponse,
-    TaskStatus,
+    ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
+    TaskQueryResponse, TaskStatus,
 };
 use hmac::{Hmac, Mac};
-use reqwest::Client;
 use reqwest::multipart::{Form, Part};
+use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::Sha256;
 use tracing::{info, warn};
 
@@ -132,23 +132,21 @@ async fn main() -> anyhow::Result<()> {
         warn!("whatsappd disabled by config [whatsapp].enabled=false");
     }
 
-    let clawd_base_url = config
-        .server
-        .clawd_base_url
-        .clone()
-        .unwrap_or_else(|| {
-            let listen = config.server.listen.as_str();
-            let host = if listen.starts_with("0.0.0.0:") {
-                listen.replacen("0.0.0.0", "127.0.0.1", 1)
-            } else {
-                listen.to_string()
-            };
-            format!("http://{}", host)
-        });
+    let clawd_base_url = config.server.clawd_base_url.clone().unwrap_or_else(|| {
+        let listen = config.server.listen.as_str();
+        let host = if listen.starts_with("0.0.0.0:") {
+            listen.replacen("0.0.0.0", "127.0.0.1", 1)
+        } else {
+            listen.to_string()
+        };
+        format!("http://{}", host)
+    });
     let state = AppState {
         clawd_base_url,
         client: Client::builder()
-            .timeout(Duration::from_secs(config.server.request_timeout_seconds.max(5)))
+            .timeout(Duration::from_secs(
+                config.server.request_timeout_seconds.max(5),
+            ))
             .build()
             .context("build reqwest client failed")?,
         api_base: config.whatsapp.api_base.trim_end_matches('/').to_string(),
@@ -245,8 +243,8 @@ fn verify_signature(app_secret: &str, headers: &HeaderMap, body: &[u8]) -> anyho
     let provided = header
         .strip_prefix("sha256=")
         .ok_or_else(|| anyhow!("x-hub-signature-256 prefix invalid"))?;
-    let mut mac =
-        HmacSha256::new_from_slice(app_secret.as_bytes()).map_err(|_| anyhow!("invalid app_secret"))?;
+    let mut mac = HmacSha256::new_from_slice(app_secret.as_bytes())
+        .map_err(|_| anyhow!("invalid app_secret"))?;
     mac.update(body);
     let digest = mac.finalize().into_bytes();
     let expected = hex::encode(digest);
@@ -289,7 +287,10 @@ fn bound_user_key_for_wa(state: &AppState, wa_id: &str) -> Option<String> {
         .and_then(|map| map.get(wa_id).map(|identity| identity.user_key.clone()))
 }
 
-async fn resolve_whatsapp_identity(state: &AppState, wa_id: &str) -> anyhow::Result<Option<AuthIdentity>> {
+async fn resolve_whatsapp_identity(
+    state: &AppState,
+    wa_id: &str,
+) -> anyhow::Result<Option<AuthIdentity>> {
     let url = format!("{}/v1/auth/channel/resolve", state.clawd_base_url);
     let req = ResolveChannelBindingRequest {
         channel: ChannelKind::Whatsapp,
@@ -349,12 +350,13 @@ fn dedup_message_key(msg: &WaMessage) -> String {
     if !msg.id.trim().is_empty() {
         return format!("wa_msg:{}", msg.id.trim());
     }
-    let text = msg
-        .text
-        .as_ref()
-        .map(|t| t.body.trim())
-        .unwrap_or("");
-    format!("wa_fallback:{}:{}:{}", msg.from.trim(), msg.message_type.trim(), text)
+    let text = msg.text.as_ref().map(|t| t.body.trim()).unwrap_or("");
+    format!(
+        "wa_fallback:{}:{}:{}",
+        msg.from.trim(),
+        msg.message_type.trim(),
+        text
+    )
 }
 
 fn should_process_inbound(state: &AppState, msg: &WaMessage) -> bool {
@@ -382,9 +384,7 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
     if !should_process_inbound(state, &msg) {
         info!(
             "skip duplicated inbound message: wa_id={} msg_id={} type={}",
-            msg.from,
-            msg.id,
-            msg.message_type
+            msg.from, msg.id, msg.message_type
         );
         return Ok(());
     }
@@ -415,7 +415,8 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
                     }
                 });
             if let Some(candidate) = maybe_candidate {
-                if let Some(identity) = bind_whatsapp_identity(state, &msg.from, &candidate).await? {
+                if let Some(identity) = bind_whatsapp_identity(state, &msg.from, &candidate).await?
+                {
                     set_expect_key_reply(state, &msg.from, false);
                     store_bound_identity(state, &msg.from, &identity);
                     let _ = send_whatsapp_text(
@@ -461,15 +462,9 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
                 handle_run_command(state, &msg.from, user_id, chat_id, &text).await?;
             } else {
                 let payload = json!({ "text": text.trim(), "agent_mode": true });
-                let task_id = submit_task_only(
-                    state,
-                    user_id,
-                    chat_id,
-                    &msg.from,
-                    TaskKind::Ask,
-                    payload,
-                )
-                .await?;
+                let task_id =
+                    submit_task_only(state, user_id, chat_id, &msg.from, TaskKind::Ask, payload)
+                        .await?;
                 let delivered = try_deliver_quick_result(state, &msg.from, &task_id, None).await?;
                 if !delivered {
                     spawn_task_result_delivery(state.clone(), msg.from.clone(), task_id, None);
@@ -527,7 +522,8 @@ async fn handle_run_command(
         "skill_name": skill_name,
         "args": args
     });
-    let task_id = submit_task_only(state, user_id, chat_id, wa_id, TaskKind::RunSkill, payload).await?;
+    let task_id =
+        submit_task_only(state, user_id, chat_id, wa_id, TaskKind::RunSkill, payload).await?;
     let delivered = try_deliver_quick_result(state, wa_id, &task_id, None).await?;
     if !delivered {
         spawn_task_result_delivery(state.clone(), wa_id.to_string(), task_id, None);
@@ -563,7 +559,8 @@ async fn handle_image_message(
             "detail_level": "normal"
         }
     });
-    let task_id = submit_task_only(state, user_id, chat_id, wa_id, TaskKind::RunSkill, payload).await?;
+    let task_id =
+        submit_task_only(state, user_id, chat_id, wa_id, TaskKind::RunSkill, payload).await?;
     let delivered = try_deliver_quick_result(state, wa_id, &task_id, None).await?;
     if !delivered {
         spawn_task_result_delivery(state.clone(), wa_id.to_string(), task_id, None);
@@ -597,7 +594,15 @@ async fn handle_audio_message(
             "audio": {"path": rel_path}
         }
     });
-    let task_id = submit_task_only(state, user_id, chat_id, wa_id, TaskKind::RunSkill, transcribe_payload).await?;
+    let task_id = submit_task_only(
+        state,
+        user_id,
+        chat_id,
+        wa_id,
+        TaskKind::RunSkill,
+        transcribe_payload,
+    )
+    .await?;
     let delivered = try_deliver_quick_result(state, wa_id, &task_id, Some(120)).await?;
     if !delivered {
         spawn_task_result_delivery(state.clone(), wa_id.to_string(), task_id, Some(120));
@@ -636,7 +641,11 @@ fn build_inbox_rel_path(base_dir: &str, wa_id: &str, user_id: i64, ext: &str) ->
     format!("{}/wa_{}_{}_{}.{}", base_dir, clean_id, user_id, ts, ext)
 }
 
-async fn download_whatsapp_media(state: &AppState, media_id: &str, local_path: &Path) -> anyhow::Result<()> {
+async fn download_whatsapp_media(
+    state: &AppState,
+    media_id: &str,
+    local_path: &Path,
+) -> anyhow::Result<()> {
     let meta_url = format!("{}/v23.0/{}", state.api_base, media_id);
     let meta = state
         .client
@@ -711,7 +720,10 @@ async fn submit_task_only(
         let body = resp.text().await.unwrap_or_default();
         return Err(anyhow!("submit task http {}: {}", status, body));
     }
-    let body: ApiResponse<SubmitTaskResponse> = resp.json().await.context("decode submit task response failed")?;
+    let body: ApiResponse<SubmitTaskResponse> = resp
+        .json()
+        .await
+        .context("decode submit task response failed")?;
     if !body.ok {
         return Err(anyhow!(
             "submit task rejected: {}",
@@ -741,7 +753,10 @@ async fn query_task_status(
         let body = resp.text().await.unwrap_or_default();
         return Err(anyhow!("query task status http {}: {}", status, body));
     }
-    let body: ApiResponse<TaskQueryResponse> = resp.json().await.context("decode query task response failed")?;
+    let body: ApiResponse<TaskQueryResponse> = resp
+        .json()
+        .await
+        .context("decode query task response failed")?;
     if !body.ok {
         return Err(anyhow!(
             "query task failed: {}",
@@ -758,7 +773,9 @@ async fn poll_task_result(
     wait_override_seconds: Option<u64>,
 ) -> anyhow::Result<String> {
     let poll_interval_ms = state.poll_interval_ms.max(1);
-    let wait_seconds = wait_override_seconds.unwrap_or(state.task_wait_seconds).max(1);
+    let wait_seconds = wait_override_seconds
+        .unwrap_or(state.task_wait_seconds)
+        .max(1);
     let max_rounds = ((wait_seconds * 1000) / poll_interval_ms).max(1);
     for _ in 0..max_rounds {
         let task = query_task_status(state, task_id, user_key).await?;
@@ -792,7 +809,14 @@ async fn try_deliver_quick_result(
     wait_override_seconds: Option<u64>,
 ) -> anyhow::Result<bool> {
     let wait = wait_override_seconds.or(Some(state.quick_result_wait_seconds));
-    match poll_task_result(state, task_id, bound_user_key_for_wa(state, wa_id).as_deref(), wait).await {
+    match poll_task_result(
+        state,
+        task_id,
+        bound_user_key_for_wa(state, wa_id).as_deref(),
+        wait,
+    )
+    .await
+    {
         Ok(answer) => {
             send_answer(state, wa_id, &answer).await?;
             Ok(true)
@@ -838,9 +862,10 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
     let image_paths = extract_prefixed_paths(answer, IMAGE_PREFIX);
     let file_paths = extract_prefixed_paths(answer, FILE_PREFIX);
     let voice_paths = extract_prefixed_paths(answer, VOICE_PREFIX);
-    let text_without_tokens = strip_prefixed_tokens(answer, &[IMAGE_PREFIX, FILE_PREFIX, VOICE_PREFIX])
-        .trim()
-        .to_string();
+    let text_without_tokens =
+        strip_prefixed_tokens(answer, &[IMAGE_PREFIX, FILE_PREFIX, VOICE_PREFIX])
+            .trim()
+            .to_string();
 
     if !text_without_tokens.is_empty() {
         send_whatsapp_text(state, wa_id, &text_without_tokens).await?;
@@ -863,7 +888,11 @@ async fn send_answer(state: &AppState, wa_id: &str, answer: &str) -> anyhow::Res
         send_whatsapp_media_by_id(state, wa_id, "audio", &media_id, None).await?;
     }
 
-    if text_without_tokens.is_empty() && image_paths.is_empty() && file_paths.is_empty() && voice_paths.is_empty() {
+    if text_without_tokens.is_empty()
+        && image_paths.is_empty()
+        && file_paths.is_empty()
+        && voice_paths.is_empty()
+    {
         send_whatsapp_text(state, wa_id, answer).await?;
     }
     Ok(())
@@ -886,7 +915,11 @@ fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
 fn strip_prefixed_tokens(answer: &str, prefixes: &[&str]) -> String {
     answer
         .lines()
-        .filter(|line| !prefixes.iter().any(|prefix| line.trim_start().starts_with(prefix)))
+        .filter(|line| {
+            !prefixes
+                .iter()
+                .any(|prefix| line.trim_start().starts_with(prefix))
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -927,7 +960,10 @@ async fn upload_media(state: &AppState, path: &str, mime: &str) -> anyhow::Resul
         let body = resp.text().await.unwrap_or_default();
         return Err(anyhow!("upload media http {}: {}", status, body));
     }
-    let body: Value = resp.json().await.context("decode upload media response failed")?;
+    let body: Value = resp
+        .json()
+        .await
+        .context("decode upload media response failed")?;
     let media_id = body
         .get("id")
         .and_then(|v| v.as_str())
@@ -989,7 +1025,10 @@ async fn send_whatsapp_text(state: &AppState, wa_id: &str, text: &str) -> anyhow
         state.api_base,
         state.phone_number_id.trim()
     );
-    let chunks = chunk_text_for_channel(text, WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let chunks = chunk_text_for_channel(
+        text,
+        WHATSAPP_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
     let n = chunks.len();
     if n > 1 {
         info!(
@@ -1006,7 +1045,12 @@ async fn send_whatsapp_text(state: &AppState, wa_id: &str, text: &str) -> anyhow
             chunk
         };
         if n > 1 {
-            info!("send_chunk channel=whatsapp wa_id={} index={} total={}", wa_id, i + 1, n);
+            info!(
+                "send_chunk channel=whatsapp wa_id={} index={} total={}",
+                wa_id,
+                i + 1,
+                n
+            );
         }
         let resp = state
             .client

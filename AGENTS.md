@@ -3,6 +3,46 @@
 本文件给所有参与本仓库的 agent 使用。目标是统一技能接入流程，确保“代码上传后编译通过即可允许启用”。  
 This file is for all agents working in this repository. The goal is to standardize skill integration so that “once code is pushed and compilation passes, the skill can be considered allowed/enabled”.
 
+## Design Context
+
+### Users
+- 主要用户是“不懂技术的普通小白”。  
+  The primary user is a non-technical beginner.
+- 他们希望通过可视化界面完成部署后的日常使用、状态查看、渠道接入和基础排障，而不是阅读日志、编辑配置文件或依赖命令行。  
+  They want to operate RustClaw through a visual console for daily use, status checks, channel setup, and basic troubleshooting instead of reading logs, editing config files, or using the command line.
+- UI 应优先降低理解门槛，让用户先建立“我看得懂、我敢点、我不会弄坏”的信心。  
+  The UI should reduce cognitive load first and build the feeling of “I understand this, I can click this, and I probably will not break it.”
+
+### Brand Personality
+- 气质关键词：可靠、克制、简洁简单。  
+  Personality keywords: reliable, restrained, simple.
+- 产品语气应稳定、直接、友好，不卖弄技术感，不制造压迫感。  
+  The product voice should feel steady, direct, and friendly without showing off technical complexity or creating intimidation.
+- 即使底层是 agent runtime / multi-channel / task orchestration，前端表达也应尽量像“清晰的控制面板”，而不是“工程师调试工具”。  
+  Even though the backend is an agent runtime with multi-channel orchestration, the frontend should feel like a clear control console rather than an engineer-only debugging tool.
+
+### Aesthetic Direction
+- 采用双主题。  
+  Support both light and dark themes.
+- 默认设计判断优先服务非技术用户的可读性、层级清晰度和表单易用性，而不是追求“酷炫”或“黑客感”。  
+  Design decisions should prioritize readability, hierarchy clarity, and approachable forms over “coolness” or “hacker vibes.”
+- 避免高饱和霓虹色、大面积纯黑终端风、过强攻击性的红绿对比，以及会让用户联想到复杂运维工具的视觉语言。  
+  Avoid neon saturation, large pure-black terminal aesthetics, overly aggressive red/green contrast, and visual language that feels like an intimidating ops-only tool.
+- 可以保留适度的专业感与系统感，但必须通过明确的分区、卡片层级、状态标签、说明文字来化解技术门槛。  
+  A measured sense of professionalism and system control is good, but it must be softened through clear sections, card hierarchy, status labels, and supportive copy.
+
+### Design Principles
+- 先解释，再操作：重要动作、状态、渠道概念都要先让用户看懂，再让用户点击。  
+  Explain before action: users should understand important actions, states, and channel concepts before being asked to interact.
+- 默认安全且可恢复：危险操作要弱化，关键操作要有明确反馈，失败时要告诉用户下一步。  
+  Default to safe and recoverable flows: de-emphasize dangerous actions, provide clear feedback for key actions, and always tell the user what to do next when something fails.
+- 面向任务，而不是面向实现：页面结构应围绕“我要登录”“我要绑定渠道”“我要看服务是否正常”来组织，而不是围绕底层模块名。  
+  Organize around user tasks, not implementation details: structure pages around “I want to log in,” “I want to bind a channel,” and “I want to check service health,” not backend module names.
+- 渐进披露复杂度：默认只展示最必要的信息，把日志、原始 JSON、底层细节放在第二层。  
+  Use progressive disclosure: show only the most necessary information by default, with logs, raw JSON, and low-level details in secondary layers.
+- 任何新增 UI 改动都要自查：一个从未接触过 RustClaw 的普通用户，第一次打开时能否理解这个页面在做什么、能做什么、下一步该做什么。  
+  Every new UI change should be checked against this question: can a first-time, non-technical RustClaw user understand what this page does, what it is for, and what to do next?
+
 ## 1) Communication Flow / 通讯链路（技能、路由、主程序）
 
 1. 用户请求进入 `clawd`：`POST /v1/tasks`，`kind=ask|run_skill`。  

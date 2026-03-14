@@ -52,18 +52,12 @@ const SKILL_PROMPT_SYSTEM_BASIC: &str =
     include_str!("../../../prompts/vendors/default/skills/system_basic.md");
 const SKILL_PROMPT_X: &str = include_str!("../../../prompts/vendors/default/skills/x.md");
 // Standalone base skills (A scheme: independent from system_basic)
-const SKILL_PROMPT_RUN_CMD: &str =
-    include_str!("../../../prompts/skills/run_cmd.md");
-const SKILL_PROMPT_READ_FILE: &str =
-    include_str!("../../../prompts/skills/read_file.md");
-const SKILL_PROMPT_WRITE_FILE: &str =
-    include_str!("../../../prompts/skills/write_file.md");
-const SKILL_PROMPT_LIST_DIR: &str =
-    include_str!("../../../prompts/skills/list_dir.md");
-const SKILL_PROMPT_MAKE_DIR: &str =
-    include_str!("../../../prompts/skills/make_dir.md");
-const SKILL_PROMPT_REMOVE_FILE: &str =
-    include_str!("../../../prompts/skills/remove_file.md");
+const SKILL_PROMPT_RUN_CMD: &str = include_str!("../../../prompts/skills/run_cmd.md");
+const SKILL_PROMPT_READ_FILE: &str = include_str!("../../../prompts/skills/read_file.md");
+const SKILL_PROMPT_WRITE_FILE: &str = include_str!("../../../prompts/skills/write_file.md");
+const SKILL_PROMPT_LIST_DIR: &str = include_str!("../../../prompts/skills/list_dir.md");
+const SKILL_PROMPT_MAKE_DIR: &str = include_str!("../../../prompts/skills/make_dir.md");
+const SKILL_PROMPT_REMOVE_FILE: &str = include_str!("../../../prompts/skills/remove_file.md");
 const AGENT_TOOL_SPEC_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/agent_tool_spec.md");
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
@@ -79,11 +73,31 @@ type SkillPlaybookDef = (&'static str, &'static str, &'static str);
 /// Compatibility fallback only. Primary path for planner is registry-driven: enabled skills + prompt_file per skill.
 const BUNDLED_SKILL_PLAYBOOKS: &[SkillPlaybookDef] = &[
     ("run_cmd", "prompts/skills/run_cmd.md", SKILL_PROMPT_RUN_CMD),
-    ("read_file", "prompts/skills/read_file.md", SKILL_PROMPT_READ_FILE),
-    ("write_file", "prompts/skills/write_file.md", SKILL_PROMPT_WRITE_FILE),
-    ("list_dir", "prompts/skills/list_dir.md", SKILL_PROMPT_LIST_DIR),
-    ("make_dir", "prompts/skills/make_dir.md", SKILL_PROMPT_MAKE_DIR),
-    ("remove_file", "prompts/skills/remove_file.md", SKILL_PROMPT_REMOVE_FILE),
+    (
+        "read_file",
+        "prompts/skills/read_file.md",
+        SKILL_PROMPT_READ_FILE,
+    ),
+    (
+        "write_file",
+        "prompts/skills/write_file.md",
+        SKILL_PROMPT_WRITE_FILE,
+    ),
+    (
+        "list_dir",
+        "prompts/skills/list_dir.md",
+        SKILL_PROMPT_LIST_DIR,
+    ),
+    (
+        "make_dir",
+        "prompts/skills/make_dir.md",
+        SKILL_PROMPT_MAKE_DIR,
+    ),
+    (
+        "remove_file",
+        "prompts/skills/remove_file.md",
+        SKILL_PROMPT_REMOVE_FILE,
+    ),
     (
         "archive_basic",
         "prompts/skills/archive_basic.md",
@@ -266,12 +280,8 @@ fn build_skill_playbooks_text(state: &AppState) -> String {
             continue;
         }
 
-        let prompt_body = crate::load_prompt_template_for_state(
-            state,
-            effective_path,
-            fallback_body,
-        )
-        .0;
+        let prompt_body =
+            crate::load_prompt_template_for_state(state, effective_path, fallback_body).0;
 
         debug!(
             "planner skill playbook: skill={} prompt_file={} source={}",
@@ -470,14 +480,24 @@ pub(crate) fn build_safe_skill_args_summary(args: &Value, max_len: usize) -> Str
             continue;
         }
         // Truncate single value if very long (e.g. pasted text)
-        let val_display = if s.len() > 40 { format!("{}...", &s[..37]) } else { s };
+        let val_display = if s.len() > 40 {
+            format!("{}...", &s[..37])
+        } else {
+            s
+        };
         parts.push(format!("{key}={val_display}"));
     }
     let summary = parts.join(", ");
     if summary.len() <= max_len {
         summary
     } else {
-        format!("{}...", summary.chars().take(max_len.saturating_sub(3)).collect::<String>())
+        format!(
+            "{}...",
+            summary
+                .chars()
+                .take(max_len.saturating_sub(3))
+                .collect::<String>()
+        )
     }
 }
 
@@ -503,11 +523,7 @@ fn append_progress_hint(
 }
 
 /// Append to final delivery only. This is the only path that feeds user-visible result. No progress publish.
-fn append_delivery_message(
-    task_id: &str,
-    delivery_messages: &mut Vec<String>,
-    message: String,
-) {
+fn append_delivery_message(task_id: &str, delivery_messages: &mut Vec<String>, message: String) {
     delivery_messages.push(message.clone());
     info!(
         "delivery appended task_id={} len={} content={}",
@@ -689,7 +705,9 @@ fn action_fingerprint(state: &AppState, action: &AgentAction) -> String {
     match action {
         // LEGACY: CallTool normalized to skill view so capability/fingerprint is unified.
         AgentAction::CallTool { tool, args } => {
-            let normalized_skill = state.resolve_canonical_skill_name(tool.trim()).to_ascii_lowercase();
+            let normalized_skill = state
+                .resolve_canonical_skill_name(tool.trim())
+                .to_ascii_lowercase();
             let normalized_args = normalize_args_for_fingerprint(&normalized_skill, args);
             format!(
                 "skill:{}:{}",
@@ -698,7 +716,9 @@ fn action_fingerprint(state: &AppState, action: &AgentAction) -> String {
             )
         }
         AgentAction::CallSkill { skill, args } => {
-            let normalized_skill = state.resolve_canonical_skill_name(skill).to_ascii_lowercase();
+            let normalized_skill = state
+                .resolve_canonical_skill_name(skill)
+                .to_ascii_lowercase();
             let normalized_args = normalize_args_for_fingerprint(&normalized_skill, args);
             format!(
                 "skill:{}:{}",
@@ -1041,9 +1061,9 @@ fn remaining_actions_are_discussion_only(
     !remaining.is_empty()
         && remaining.iter().all(|action| match action {
             AgentAction::Respond { .. } => true,
-            AgentAction::CallSkill { skill, .. } => {
-                state.resolve_canonical_skill_name(skill).eq_ignore_ascii_case("chat")
-            }
+            AgentAction::CallSkill { skill, .. } => state
+                .resolve_canonical_skill_name(skill)
+                .eq_ignore_ascii_case("chat"),
             AgentAction::Think { .. } => true,
             _ => false,
         })
@@ -1073,14 +1093,19 @@ fn value_to_f64_opt(v: &Value) -> Option<f64> {
         .or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
 }
 
-pub(crate) fn extract_trade_preview_params_for_consistency(args: &Value) -> Option<TradePreviewParamsForConsistency> {
+pub(crate) fn extract_trade_preview_params_for_consistency(
+    args: &Value,
+) -> Option<TradePreviewParamsForConsistency> {
     let obj = args.as_object()?;
     let exchange = obj
         .get("exchange")
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_ascii_lowercase())
         .unwrap_or_else(|| DEFAULT_CRYPTO_EXCHANGE.to_string());
-    let symbol = obj.get("symbol").and_then(|v| v.as_str()).map(str::to_string)?;
+    let symbol = obj
+        .get("symbol")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)?;
     let side = obj
         .get("side")
         .and_then(|v| v.as_str())
@@ -1178,10 +1203,7 @@ fn trade_submit_params_consistent_with_preview(
     if !quote_ok && preview.quote_qty_usd.is_some() {
         return false;
     }
-    let qty_ok = floats_near(
-        Some(preview.qty),
-        obj.get("qty").and_then(value_to_f64_opt),
-    );
+    let qty_ok = floats_near(Some(preview.qty), obj.get("qty").and_then(value_to_f64_opt));
     if !qty_ok && preview.quote_qty_usd.is_none() {
         return false;
     }
@@ -1200,7 +1222,12 @@ fn trade_submit_params_consistent_with_preview(
         .get("time_in_force")
         .and_then(|v| v.as_str())
         .map(|s| s.to_ascii_uppercase());
-    if preview.time_in_force.as_deref().map(|s| s.to_ascii_uppercase()) != tif_submit {
+    if preview
+        .time_in_force
+        .as_deref()
+        .map(|s| s.to_ascii_uppercase())
+        != tif_submit
+    {
         return false;
     }
     true
@@ -1763,10 +1790,7 @@ async fn execute_actions_once(
                 let mut resolved_args = resolve_arg_value(args, loop_state);
                 let normalized_skill = state.resolve_canonical_skill_name(tool);
                 if normalized_skill == "chat" {
-                    attach_recent_execution_context_to_chat_args(
-                        &mut resolved_args,
-                        loop_state,
-                    );
+                    attach_recent_execution_context_to_chat_args(&mut resolved_args, loop_state);
                 }
                 let crypto_action = if normalized_skill == "crypto" {
                     resolved_args
@@ -1804,7 +1828,11 @@ async fn execute_actions_once(
                         }
                     }
                 }
-                rewrite_tool_path_with_written_aliases(&normalized_skill, &mut resolved_args, loop_state);
+                rewrite_tool_path_with_written_aliases(
+                    &normalized_skill,
+                    &mut resolved_args,
+                    loop_state,
+                );
                 loop_state.tool_calls_total += 1;
                 let args_summary =
                     build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
@@ -1842,9 +1870,7 @@ async fn execute_actions_once(
                                 user_visible_path,
                             );
                         } else if tool == "read_file" {
-                            if let Some(path) =
-                                resolved_args.get("path").and_then(|v| v.as_str())
-                            {
+                            if let Some(path) = resolved_args.get("path").and_then(|v| v.as_str()) {
                                 register_file_path_output(
                                     loop_state,
                                     global_step,
@@ -1908,10 +1934,17 @@ async fn execute_actions_once(
                             loop_state.round_no, step_in_round, normalized_skill
                         ));
                         if crypto_action.as_deref() == Some("trade_preview") {
-                            let decision = extract_trade_preview_params_for_consistency(&resolved_args)
-                                .as_ref()
-                                .map(|p| check_continue_after_trade_preview(state, actions, idx, loop_state, p))
-                                .unwrap_or(TradePreviewContinue::Reject("preview_params_extract_failed"));
+                            let decision =
+                                extract_trade_preview_params_for_consistency(&resolved_args)
+                                    .as_ref()
+                                    .map(|p| {
+                                        check_continue_after_trade_preview(
+                                            state, actions, idx, loop_state, p,
+                                        )
+                                    })
+                                    .unwrap_or(TradePreviewContinue::Reject(
+                                        "preview_params_extract_failed",
+                                    ));
                             match &decision {
                                 TradePreviewContinue::Allow => {
                                     info!(
@@ -1948,8 +1981,12 @@ async fn execute_actions_once(
                             step_in_round,
                             crate::truncate_for_log(&err)
                         );
-                        if remaining_actions_are_discussion_only(state, actions, idx, policy.max_steps)
-                        {
+                        if remaining_actions_are_discussion_only(
+                            state,
+                            actions,
+                            idx,
+                            policy.max_steps,
+                        ) {
                             register_failed_step_output(
                                 loop_state,
                                 global_step,
@@ -1967,8 +2004,7 @@ async fn execute_actions_once(
                             ));
                             executed_actions += 1;
                             loop_state.total_steps_executed += 1;
-                            stop_signal =
-                                Some("recoverable_failure_continue_round".to_string());
+                            stop_signal = Some("recoverable_failure_continue_round".to_string());
                             break;
                         }
                         let resume_err = build_resume_context_error(
@@ -2083,8 +2119,14 @@ async fn execute_actions_once(
                         if crypto_action.as_deref() == Some("trade_preview") {
                             let decision = preview_params
                                 .as_ref()
-                                .map(|p| check_continue_after_trade_preview(state, actions, idx, loop_state, p))
-                                .unwrap_or(TradePreviewContinue::Reject("preview_params_extract_failed"));
+                                .map(|p| {
+                                    check_continue_after_trade_preview(
+                                        state, actions, idx, loop_state, p,
+                                    )
+                                })
+                                .unwrap_or(TradePreviewContinue::Reject(
+                                    "preview_params_extract_failed",
+                                ));
                             match &decision {
                                 TradePreviewContinue::Allow => {
                                     info!(
@@ -2099,7 +2141,8 @@ async fn execute_actions_once(
                                     );
                                     executed_actions += 1;
                                     loop_state.total_steps_executed += 1;
-                                    stop_signal = Some("trade_preview_awaiting_confirmation".to_string());
+                                    stop_signal =
+                                        Some("trade_preview_awaiting_confirmation".to_string());
                                     break;
                                 }
                             }
@@ -2172,12 +2215,7 @@ async fn execute_actions_once(
                         has_remaining_actions
                     );
                     let hint = encode_progress_i18n("telegram.progress.reply_generated", &[]);
-                    append_progress_hint(
-                        state,
-                        task,
-                        &mut loop_state.progress_messages,
-                        hint,
-                    );
+                    append_progress_hint(state, task, &mut loop_state.progress_messages, hint);
                 }
                 if !publish_respond && !text.is_empty() {
                     debug!(
@@ -2270,10 +2308,15 @@ fn is_publishable_raw(s: &str) -> bool {
         "command completed",
         "success.",
     ];
-    if INTERNAL_PHRASES.iter().any(|p| lower == *p || (lower.starts_with(p) && t.len() <= p.len() + 2)) {
+    if INTERNAL_PHRASES
+        .iter()
+        .any(|p| lower == *p || (lower.starts_with(p) && t.len() <= p.len() + 2))
+    {
         return false;
     }
-    if t.chars().all(|c| c.is_ascii_digit() || c.is_ascii_punctuation() || c.is_whitespace()) {
+    if t.chars()
+        .all(|c| c.is_ascii_digit() || c.is_ascii_punctuation() || c.is_whitespace())
+    {
         return false;
     }
     true
@@ -2496,11 +2539,7 @@ async fn run_agent_with_loop(
     if loop_state.delivery_messages.is_empty() && !loop_state.subtask_results.is_empty() {
         let fallback = fallback_finalize_from_raw(loop_state.subtask_results.as_slice());
         if !fallback.trim().is_empty() {
-            append_delivery_message(
-                &task.task_id,
-                &mut loop_state.delivery_messages,
-                fallback,
-            );
+            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, fallback);
             info!(
                 "final_result_fallback_from_raw task_id={} subtask_count={}",
                 task.task_id,
@@ -2510,9 +2549,7 @@ async fn run_agent_with_loop(
     }
 
     // Last resort: synthesize via chat when still no delivery (e.g. raw was empty or finalizer skipped).
-    if loop_state.delivery_messages.is_empty()
-        && should_synthesize_final_response(&loop_state)
-    {
+    if loop_state.delivery_messages.is_empty() && should_synthesize_final_response(&loop_state) {
         if let Some(synthesized) =
             synthesize_final_response(state, task, user_text, &loop_state).await?
         {
@@ -2521,10 +2558,7 @@ async fn run_agent_with_loop(
                 &mut loop_state.delivery_messages,
                 synthesized.clone(),
             );
-            info!(
-                "delivery fallback_from_synthesize task_id={}",
-                task.task_id
-            );
+            info!("delivery fallback_from_synthesize task_id={}", task.task_id);
             crate::append_subtask_result(
                 &mut loop_state.subtask_results,
                 loop_state.total_steps_executed + 1,
@@ -2719,7 +2753,10 @@ mod tests {
         });
         let params = extract_trade_preview_params_for_consistency(&preview).unwrap();
         let out = check_continue_after_trade_preview_core(None, None, &params);
-        assert_eq!(out, TradePreviewContinue::Reject("preview_only_no_next_step"));
+        assert_eq!(
+            out,
+            TradePreviewContinue::Reject("preview_only_no_next_step")
+        );
     }
 
     /// 2. next step 不是 crypto -> Reject
@@ -2746,7 +2783,10 @@ mod tests {
             "confirm": true
         });
         let out = check_continue_after_trade_preview_core(Some("chat"), Some(&submit), &params);
-        assert_eq!(out, TradePreviewContinue::Reject("preview_only_next_not_crypto"));
+        assert_eq!(
+            out,
+            TradePreviewContinue::Reject("preview_only_next_not_crypto")
+        );
     }
 
     /// 3. next step 是 crypto 但 action 不是 trade_submit -> Reject
@@ -2767,7 +2807,10 @@ mod tests {
             "exchange": "binance"
         });
         let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&next), &params);
-        assert_eq!(out, TradePreviewContinue::Reject("preview_only_next_not_submit"));
+        assert_eq!(
+            out,
+            TradePreviewContinue::Reject("preview_only_next_not_submit")
+        );
     }
 
     /// 4. trade_submit 缺 confirm=true -> Reject
@@ -2793,7 +2836,10 @@ mod tests {
             "price": 0.09
         });
         let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
-        assert_eq!(out, TradePreviewContinue::Reject("submit_missing_confirm_true"));
+        assert_eq!(
+            out,
+            TradePreviewContinue::Reject("submit_missing_confirm_true")
+        );
     }
 
     /// 5. trade_submit 与 preview symbol 不一致 -> Reject
@@ -2820,7 +2866,10 @@ mod tests {
             "confirm": true
         });
         let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
-        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+        assert_eq!(
+            out,
+            TradePreviewContinue::Reject("submit_params_inconsistent_with_preview")
+        );
     }
 
     /// 6. trade_submit 与 preview side 不一致 -> Reject
@@ -2847,7 +2896,10 @@ mod tests {
             "confirm": true
         });
         let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
-        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+        assert_eq!(
+            out,
+            TradePreviewContinue::Reject("submit_params_inconsistent_with_preview")
+        );
     }
 
     /// 7. trade_submit 与 preview price 不一致 (limit) -> Reject
@@ -2874,7 +2926,10 @@ mod tests {
             "confirm": true
         });
         let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
-        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+        assert_eq!(
+            out,
+            TradePreviewContinue::Reject("submit_params_inconsistent_with_preview")
+        );
     }
 
     /// 8. trade_submit 与 preview qty/quote_qty_usd 不一致 -> Reject
@@ -2901,7 +2956,10 @@ mod tests {
             "confirm": true
         });
         let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
-        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+        assert_eq!(
+            out,
+            TradePreviewContinue::Reject("submit_params_inconsistent_with_preview")
+        );
     }
 
     /// 9. limit 单参数完全一致且 confirm=true -> Allow
@@ -3056,7 +3114,10 @@ mod tests {
             "confirm": true
         });
         let out = check_continue_after_trade_preview_core(Some("crypto"), Some(&submit), &params);
-        assert_eq!(out, TradePreviewContinue::Reject("submit_params_inconsistent_with_preview"));
+        assert_eq!(
+            out,
+            TradePreviewContinue::Reject("submit_params_inconsistent_with_preview")
+        );
     }
 
     // --- build_safe_skill_args_summary: progress hint args must be whitelisted and safe ---
@@ -3138,8 +3199,7 @@ mod tests {
     #[test]
     fn test_final_delivery_no_last_respond_uses_delivery() {
         let delivery = vec!["only delivery".to_string()];
-        let (deduped, final_text, used) =
-            build_final_delivery_with_priority(&delivery, None);
+        let (deduped, final_text, used) = build_final_delivery_with_priority(&delivery, None);
         assert!(!used);
         assert_eq!(deduped.len(), 1);
         assert_eq!(final_text, "only delivery");
@@ -3148,8 +3208,7 @@ mod tests {
     #[test]
     fn test_final_delivery_both_empty() {
         let delivery: Vec<String> = vec![];
-        let (deduped, final_text, used) =
-            build_final_delivery_with_priority(&delivery, None);
+        let (deduped, final_text, used) = build_final_delivery_with_priority(&delivery, None);
         assert!(!used);
         assert!(deduped.is_empty());
         assert!(final_text.is_empty());

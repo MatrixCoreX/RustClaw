@@ -12,8 +12,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
-    ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind, TaskQueryResponse,
-    TaskStatus,
+    ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
+    TaskQueryResponse, TaskStatus,
 };
 use reqwest::Client;
 use serde::Deserialize;
@@ -109,16 +109,31 @@ fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String
     if message.get("message_type").and_then(|v| v.as_str())? != "text" {
         return None;
     }
-    let content_str = message.get("content").and_then(|v| v.as_str()).unwrap_or("{}");
+    let content_str = message
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("{}");
     let content: Value = serde_json::from_str(content_str).ok()?;
-    let text = content.get("text").and_then(|v| v.as_str()).map(str::trim).unwrap_or("");
+    let text = content
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
     if text.is_empty() {
         return None;
     }
     let sender = event.get("sender")?;
     let sender_id = sender.get("sender_id")?;
-    let open_id = sender_id.get("open_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let chat_id = message.get("chat_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let open_id = sender_id
+        .get("open_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let chat_id = message
+        .get("chat_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if chat_id.is_empty() {
         return None;
     }
@@ -150,9 +165,7 @@ async fn resolve_feishu_identity(
         .await
         .map_err(|e| format!("resolve response parse failed: {}", e))?;
     if !status.is_success() || !body.ok {
-        return Err(body
-            .error
-            .unwrap_or_else(|| "resolve failed".to_string()));
+        return Err(body.error.unwrap_or_else(|| "resolve failed".to_string()));
     }
     Ok(body.data.and_then(|d| d.identity))
 }
@@ -202,43 +215,100 @@ async fn handle_incoming_feishu_text(
     let config = state.config.clone();
     let token_cache = state.token_cache.clone();
 
-    info!("feishud: binding resolve start external_chat_id={}", chat_id);
+    info!(
+        "feishud: binding resolve start external_chat_id={}",
+        chat_id
+    );
     let identity = match resolve_feishu_identity(&client, &base, &open_id, &chat_id).await {
         Ok(ident) => ident,
         Err(e) => {
             warn!("feishud: binding resolve failed err={}", e);
-            let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, "身份校验暂时不可用，请稍后重试。").await;
+            let _ = send_feishu_text(
+                &config,
+                &client,
+                &token_cache,
+                &chat_id,
+                "身份校验暂时不可用，请稍后重试。",
+            )
+            .await;
             return;
         }
     };
 
     if let Some(ident) = identity {
-        info!("feishud: binding resolve result bound=true external_chat_id={}", chat_id);
+        info!(
+            "feishud: binding resolve result bound=true external_chat_id={}",
+            chat_id
+        );
         handle_text_message_to_clawd(state, open_id, chat_id, text, Some(ident.user_key));
         return;
     }
 
-    info!("feishud: binding resolve result bound=false external_chat_id={}", chat_id);
+    info!(
+        "feishud: binding resolve result bound=false external_chat_id={}",
+        chat_id
+    );
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        info!("feishud: unbound user prompted for key (empty text) external_chat_id={}", chat_id);
-        let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, "请先发送你的 RustClaw key 完成绑定。").await;
+        info!(
+            "feishud: unbound user prompted for key (empty text) external_chat_id={}",
+            chat_id
+        );
+        let _ = send_feishu_text(
+            &config,
+            &client,
+            &token_cache,
+            &chat_id,
+            "请先发送你的 RustClaw key 完成绑定。",
+        )
+        .await;
         return;
     }
 
-    info!("feishud: bind attempt external_chat_id={} key_len={}", chat_id, trimmed.len());
+    info!(
+        "feishud: bind attempt external_chat_id={} key_len={}",
+        chat_id,
+        trimmed.len()
+    );
     match bind_feishu_identity(&client, &base, &open_id, &chat_id, trimmed).await {
         Ok(Some(_)) => {
             info!("feishud: bind success external_chat_id={}", chat_id);
-            let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, "绑定成功，请重新发送你的问题。").await;
+            let _ = send_feishu_text(
+                &config,
+                &client,
+                &token_cache,
+                &chat_id,
+                "绑定成功，请重新发送你的问题。",
+            )
+            .await;
         }
         Ok(None) => {
-            warn!("feishud: bind failure (invalid key) external_chat_id={}", chat_id);
-            let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, "key 无效或绑定失败，请发送有效 key 完成绑定。").await;
+            warn!(
+                "feishud: bind failure (invalid key) external_chat_id={}",
+                chat_id
+            );
+            let _ = send_feishu_text(
+                &config,
+                &client,
+                &token_cache,
+                &chat_id,
+                "key 无效或绑定失败，请发送有效 key 完成绑定。",
+            )
+            .await;
         }
         Err(e) => {
-            warn!("feishud: bind request failed err={} external_chat_id={}", e, chat_id);
-            let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, "绑定请求失败，请稍后重试。").await;
+            warn!(
+                "feishud: bind request failed err={} external_chat_id={}",
+                e, chat_id
+            );
+            let _ = send_feishu_text(
+                &config,
+                &client,
+                &token_cache,
+                &chat_id,
+                "绑定请求失败，请稍后重试。",
+            )
+            .await;
         }
     }
 }
@@ -281,7 +351,11 @@ fn handle_text_message_to_clawd(
     text: String,
     user_key: Option<String>,
 ) {
-    let user_id = feishu_id_to_i64(if open_id.is_empty() { &chat_id } else { &open_id });
+    let user_id = feishu_id_to_i64(if open_id.is_empty() {
+        &chat_id
+    } else {
+        &open_id
+    });
     let chat_id_i64 = feishu_id_to_i64(&chat_id);
 
     let submit_req = SubmitTaskRequest {
@@ -319,7 +393,11 @@ fn handle_text_message_to_clawd(
         if !submit_resp.status().is_success() {
             let status = submit_resp.status();
             let resp_body = submit_resp.text().await.unwrap_or_default();
-            warn!("feishud: task submit failed status={} body_len={}", status, resp_body.len());
+            warn!(
+                "feishud: task submit failed status={} body_len={}",
+                status,
+                resp_body.len()
+            );
             return;
         }
 
@@ -336,12 +414,18 @@ fn handle_text_message_to_clawd(
             return;
         };
         let task_id = data.task_id.to_string();
-        info!("feishud: bound user task submitted task_id={} external_chat_id={}", task_id, chat_id);
+        info!(
+            "feishud: bound user task submitted task_id={} external_chat_id={}",
+            task_id, chat_id
+        );
 
         let clawd_base = config.feishu.clawd_base_url.clone();
         let chat_id_delivery = chat_id.clone();
 
-        info!("feishud: task delivery started task_id={} chat_id={} task_delivery_timeout_seconds={}", task_id, chat_id_delivery, delivery_timeout_secs);
+        info!(
+            "feishud: task delivery started task_id={} chat_id={} task_delivery_timeout_seconds={}",
+            task_id, chat_id_delivery, delivery_timeout_secs
+        );
         let started = std::time::Instant::now();
         let mut last_seen_status: Option<TaskStatus> = None;
         loop {
@@ -359,7 +443,14 @@ fn handle_text_message_to_clawd(
                     warn!("feishud: poll failed task_id={} err={}", task_id, e);
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                         warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=poll_failed", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_feishu_text(&config, &client, &token_cache, &chat_id_delivery, "请求处理超时，请稍后重试。").await;
+                        let _ = send_feishu_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            "请求处理超时，请稍后重试。",
+                        )
+                        .await;
                         break;
                     }
                     tokio::time::sleep(poll_interval).await;
@@ -370,13 +461,28 @@ fn handle_text_message_to_clawd(
                 let status = resp.status();
                 let body_preview = resp.text().await.unwrap_or_default();
                 if body_preview.len() > 200 {
-                    debug!("feishud: poll http error task_id={} status={} body_len={}", task_id, status, body_preview.len());
+                    debug!(
+                        "feishud: poll http error task_id={} status={} body_len={}",
+                        task_id,
+                        status,
+                        body_preview.len()
+                    );
                 } else {
-                    debug!("feishud: poll http error task_id={} status={} body={}", task_id, status, body_preview);
+                    debug!(
+                        "feishud: poll http error task_id={} status={} body={}",
+                        task_id, status, body_preview
+                    );
                 }
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                     warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=http status={}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, status);
-                    let _ = send_feishu_text(&config, &client, &token_cache, &chat_id_delivery, "请求处理超时，请稍后重试。").await;
+                    let _ = send_feishu_text(
+                        &config,
+                        &client,
+                        &token_cache,
+                        &chat_id_delivery,
+                        "请求处理超时，请稍后重试。",
+                    )
+                    .await;
                     break;
                 }
                 tokio::time::sleep(poll_interval).await;
@@ -388,7 +494,14 @@ fn handle_text_message_to_clawd(
                     debug!("feishud: poll parse failed task_id={} err={}", task_id, e);
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                         warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=parse_failed", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_feishu_text(&config, &client, &token_cache, &chat_id_delivery, "请求处理超时，请稍后重试。").await;
+                        let _ = send_feishu_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            "请求处理超时，请稍后重试。",
+                        )
+                        .await;
                         break;
                     }
                     tokio::time::sleep(poll_interval).await;
@@ -397,24 +510,53 @@ fn handle_text_message_to_clawd(
             };
             let Some(ref task) = body.data else {
                 let err_msg = body.error.as_deref().unwrap_or("no data");
-                debug!("feishud: poll no data task_id={} ok={} error={}", task_id, body.ok, err_msg);
+                debug!(
+                    "feishud: poll no data task_id={} ok={} error={}",
+                    task_id, body.ok, err_msg
+                );
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                     warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=no_task_data error={}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, err_msg);
-                    let _ = send_feishu_text(&config, &client, &token_cache, &chat_id_delivery, "请求处理超时，请稍后重试。").await;
+                    let _ = send_feishu_text(
+                        &config,
+                        &client,
+                        &token_cache,
+                        &chat_id_delivery,
+                        "请求处理超时，请稍后重试。",
+                    )
+                    .await;
                     break;
                 }
                 tokio::time::sleep(poll_interval).await;
                 continue;
             };
             last_seen_status = Some(task.status.clone());
-            let msg_len = task.result_json.as_ref().and_then(|v| v.get("messages")).and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-            let text_len = task.result_json.as_ref().and_then(|v| v.get("text")).and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0);
+            let msg_len = task
+                .result_json
+                .as_ref()
+                .and_then(|v| v.get("messages"))
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let text_len = task
+                .result_json
+                .as_ref()
+                .and_then(|v| v.get("text"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.len())
+                .unwrap_or(0);
             debug!("feishud: poll task_id={} status={:?} result_json={} messages_len={} text_len={} elapsed_secs={}", task_id, task.status, task.result_json.is_some(), msg_len, text_len, started.elapsed().as_secs());
             match task.status {
                 TaskStatus::Queued | TaskStatus::Running => {
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
                         warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_feishu_text(&config, &client, &token_cache, &chat_id_delivery, "请求处理超时，请稍后重试。").await;
+                        let _ = send_feishu_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            "请求处理超时，请稍后重试。",
+                        )
+                        .await;
                         break;
                     }
                     tokio::time::sleep(poll_interval).await;
@@ -423,17 +565,41 @@ fn handle_text_message_to_clawd(
                 TaskStatus::Succeeded => {
                     let to_send = feishu_task_success_text(task);
                     for chunk in chunk_text_utf8(to_send.as_str(), chunk_chars) {
-                        if let Err(e) = send_feishu_text(&config, &client, &token_cache, &chat_id_delivery, &chunk).await {
-                            warn!("feishud: send success text failed task_id={} err={}", task_id, e);
+                        if let Err(e) = send_feishu_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            &chunk,
+                        )
+                        .await
+                        {
+                            warn!(
+                                "feishud: send success text failed task_id={} err={}",
+                                task_id, e
+                            );
                         }
                     }
-                    info!("feishud: task delivery success task_id={} (result sent)", task_id);
+                    info!(
+                        "feishud: task delivery success task_id={} (result sent)",
+                        task_id
+                    );
                     break;
                 }
                 TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
                     let detail = task.error_text.as_deref().unwrap_or("任务失败").to_string();
-                    let _ = send_feishu_text(&config, &client, &token_cache, &chat_id_delivery, &format!("处理失败：{}", detail)).await;
-                    info!("feishud: task delivery failure task_id={} status={:?}", task_id, task.status);
+                    let _ = send_feishu_text(
+                        &config,
+                        &client,
+                        &token_cache,
+                        &chat_id_delivery,
+                        &format!("处理失败：{}", detail),
+                    )
+                    .await;
+                    info!(
+                        "feishud: task delivery failure task_id={} status={:?}",
+                        task_id, task.status
+                    );
                     break;
                 }
             }
@@ -520,7 +686,9 @@ async fn callback_handler(
     info!("feishud: callback received body_len={}", body.len());
 
     if !state.config.feishu.encrypt_key.is_empty() {
-        if let Err(reason) = verify_feishu_signature(&headers, &body, &state.config.feishu.encrypt_key) {
+        if let Err(reason) =
+            verify_feishu_signature(&headers, &body, &state.config.feishu.encrypt_key)
+        {
             warn!("feishud: signature verification failed reason={}", reason);
             return (
                 StatusCode::FORBIDDEN,
@@ -548,12 +716,13 @@ async fn callback_handler(
     if let Some(challenge) = body_json.get("challenge").and_then(|v| v.as_str()) {
         let typ = body_json.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if typ == "url_verification" {
-            if let Err(reason) = verify_verification_token(
-                &body_json,
-                true,
-                &state.config.feishu.verification_token,
-            ) {
-                warn!("feishud: challenge verification_token mismatch reason={}", reason);
+            if let Err(reason) =
+                verify_verification_token(&body_json, true, &state.config.feishu.verification_token)
+            {
+                warn!(
+                    "feishud: challenge verification_token mismatch reason={}",
+                    reason
+                );
                 return (
                     StatusCode::FORBIDDEN,
                     Json(json!({ "error": "token_mismatch" })),
@@ -565,12 +734,13 @@ async fn callback_handler(
         }
     }
 
-    if let Err(reason) = verify_verification_token(
-        &body_json,
-        false,
-        &state.config.feishu.verification_token,
-    ) {
-        warn!("feishud: event verification_token mismatch reason={}", reason);
+    if let Err(reason) =
+        verify_verification_token(&body_json, false, &state.config.feishu.verification_token)
+    {
+        warn!(
+            "feishud: event verification_token mismatch reason={}",
+            reason
+        );
         return (
             StatusCode::FORBIDDEN,
             Json(json!({ "error": "token_mismatch" })),
@@ -647,7 +817,10 @@ async fn get_tenant_access_token(
         tenant_access_token: Option<String>,
         expire: Option<u64>,
     }
-    let data: TokenResp = resp.json().await.map_err(|e| format!("token parse failed: {}", e))?;
+    let data: TokenResp = resp
+        .json()
+        .await
+        .map_err(|e| format!("token parse failed: {}", e))?;
     let token = data
         .tenant_access_token
         .ok_or_else(|| "token response missing tenant_access_token".to_string())?;
@@ -657,7 +830,10 @@ async fn get_tenant_access_token(
         let mut guard = cache.write().await;
         *guard = Some((token.clone(), expires_at));
     }
-    info!("feishud: tenant_access_token refreshed expires_in={}", expire);
+    info!(
+        "feishud: tenant_access_token refreshed expires_in={}",
+        expire
+    );
     Ok(token)
 }
 
@@ -685,9 +861,17 @@ async fn send_feishu_text(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("feishu send status={} body_len={}", status, body.len()));
+        return Err(format!(
+            "feishu send status={} body_len={}",
+            status,
+            body.len()
+        ));
     }
-    info!("feishud: send success receive_id={} text_len={}", receive_id, text.len());
+    info!(
+        "feishud: send success receive_id={} text_len={}",
+        receive_id,
+        text.len()
+    );
     Ok(())
 }
 
@@ -768,7 +952,10 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
                 warn!("feishud: long connection closed normally, reconnecting");
             }
             Err(e) => {
-                warn!("feishud: long connection error: {}, reconnecting in {}s", e, backoff_secs);
+                warn!(
+                    "feishud: long connection error: {}, reconnecting in {}s",
+                    e, backoff_secs
+                );
             }
         }
         tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
@@ -779,13 +966,17 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info,feishud=debug".to_string()))
+        .with_env_filter(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info,feishud=debug".to_string()),
+        )
         .init();
     let _ = tracing_log::LogTracer::init();
 
-    let config_path = std::env::var("FEISHU_CONFIG_PATH").unwrap_or_else(|_| "configs/channels/feishu.toml".to_string());
+    let config_path = std::env::var("FEISHU_CONFIG_PATH")
+        .unwrap_or_else(|_| "configs/channels/feishu.toml".to_string());
     let config: FeishuConfig = {
-        let raw = std::fs::read_to_string(&config_path).map_err(|e| anyhow::anyhow!("read config {}: {}", config_path, e))?;
+        let raw = std::fs::read_to_string(&config_path)
+            .map_err(|e| anyhow::anyhow!("read config {}: {}", config_path, e))?;
         toml::from_str(&raw).map_err(|e| anyhow::anyhow!("parse config: {}", e))?
     };
 
@@ -816,13 +1007,22 @@ async fn main() -> anyhow::Result<()> {
             let app = Router::new()
                 .route("/", post(callback_handler))
                 .with_state(state);
-            let listen = config.feishu.listen.parse::<std::net::SocketAddr>()
+            let listen = config
+                .feishu
+                .listen
+                .parse::<std::net::SocketAddr>()
                 .map_err(|e| anyhow::anyhow!("listen address {}: {}", config.feishu.listen, e))?;
-            info!("feishud: mode=webhook listening on {} (Feishu app bot callback)", listen);
+            info!(
+                "feishud: mode=webhook listening on {} (Feishu app bot callback)",
+                listen
+            );
             axum::serve(tokio::net::TcpListener::bind(listen).await?, app).await?;
         }
         FeishuMode::LongConnection => {
-            let listen = config.feishu.listen.parse::<std::net::SocketAddr>()
+            let listen = config
+                .feishu
+                .listen
+                .parse::<std::net::SocketAddr>()
                 .map_err(|e| anyhow::anyhow!("listen address {}: {}", config.feishu.listen, e))?;
             let health_app = Router::new().route("/health", get(|| async { "ok" }));
             let listener = tokio::net::TcpListener::bind(listen).await?;
@@ -831,7 +1031,10 @@ async fn main() -> anyhow::Result<()> {
                     tracing::warn!("feishud: health server exited err={}", err);
                 }
             });
-            info!("feishud: mode=long_connection health check on {} (GET /health)", listen);
+            info!(
+                "feishud: mode=long_connection health check on {} (GET /health)",
+                listen
+            );
             run_long_connection_loop(state).await?;
         }
     }

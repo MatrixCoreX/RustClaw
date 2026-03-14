@@ -2400,7 +2400,10 @@ fn telegram_text_payload(text: &str) -> (String, Option<ParseMode>) {
 }
 
 async fn send_telegram_text(bot: &Bot, chat_id: ChatId, text: &str) -> anyhow::Result<Message> {
-    let chunks = chunk_text_for_channel(text, TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let chunks = chunk_text_for_channel(
+        text,
+        TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
     if chunks.is_empty() {
         return Err(anyhow::anyhow!("empty text"));
     }
@@ -2425,7 +2428,12 @@ async fn send_telegram_text(bot: &Bot, chat_id: ChatId, text: &str) -> anyhow::R
     let mut last = None;
     for (i, chunk) in chunks.into_iter().enumerate() {
         let body = format!("（{}/{}）\n{}", i + 1, n, chunk);
-        info!("send_chunk channel=telegram chat_id={:?} index={} total={}", chat_id, i + 1, n);
+        info!(
+            "send_chunk channel=telegram chat_id={:?} index={} total={}",
+            chat_id,
+            i + 1,
+            n
+        );
         let msg = bot.send_message(chat_id, body).await?;
         last = Some(msg);
     }
@@ -2438,7 +2446,10 @@ async fn send_telegram_text_with_markup(
     text: &str,
     reply_markup: InlineKeyboardMarkup,
 ) -> anyhow::Result<Message> {
-    let chunks = chunk_text_for_channel(text, TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS));
+    let chunks = chunk_text_for_channel(
+        text,
+        TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
     if chunks.is_empty() {
         return Err(anyhow::anyhow!("empty text"));
     }
@@ -2463,7 +2474,12 @@ async fn send_telegram_text_with_markup(
     let mut last = None;
     for (i, chunk) in chunks.into_iter().enumerate() {
         let body = format!("（{}/{}）\n{}", i + 1, n, chunk);
-        info!("send_chunk channel=telegram chat_id={:?} index={} total={}", chat_id, i + 1, n);
+        info!(
+            "send_chunk channel=telegram chat_id={:?} index={} total={}",
+            chat_id,
+            i + 1,
+            n
+        );
         let req = bot.send_message(chat_id, body);
         let req = if i == n - 1 {
             req.reply_markup(reply_markup.clone())
@@ -3311,10 +3327,7 @@ fn render_progress_message(i18n: &TextCatalog, raw: &str) -> String {
         Ok(m) => m,
         Err(_) => return raw.to_string(),
     };
-    let var_refs: Vec<(&str, &str)> = vars
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
+    let var_refs: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     i18n.t_with(key, &var_refs)
 }
 

@@ -46,8 +46,14 @@ fn parse_mode_token(text: &str) -> Option<&'static str> {
 
 fn parse_json_mode_and_confidence(raw: &str) -> Option<(&'static str, Option<f64>)> {
     let parse_from_json_value = |v: &JsonValue| {
-        let mode = v.get("mode").and_then(|x| x.as_str()).and_then(parse_mode_token)?;
-        let confidence = v.get("confidence").and_then(|x| x.as_f64()).map(|c| c.clamp(0.0, 1.0));
+        let mode = v
+            .get("mode")
+            .and_then(|x| x.as_str())
+            .and_then(parse_mode_token)?;
+        let confidence = v
+            .get("confidence")
+            .and_then(|x| x.as_f64())
+            .map(|c| c.clamp(0.0, 1.0));
         Some((mode, confidence))
     };
 
@@ -164,14 +170,19 @@ pub fn parse_voice_mode_intent_decision(
         }
     }
 
-    parse_voice_mode_intent_label_fallback(&normalized, aliases).map(|mode| VoiceModeIntentDecision {
-        mode,
-        confidence: None,
-        parser_path: "fallback",
+    parse_voice_mode_intent_label_fallback(&normalized, aliases).map(|mode| {
+        VoiceModeIntentDecision {
+            mode,
+            confidence: None,
+            parser_path: "fallback",
+        }
     })
 }
 
-pub fn parse_voice_mode_intent_label(raw: &str, aliases: &VoiceModeIntentAliases) -> Option<&'static str> {
+pub fn parse_voice_mode_intent_label(
+    raw: &str,
+    aliases: &VoiceModeIntentAliases,
+) -> Option<&'static str> {
     parse_voice_mode_intent_decision(raw, aliases).map(|d| d.mode)
 }
 

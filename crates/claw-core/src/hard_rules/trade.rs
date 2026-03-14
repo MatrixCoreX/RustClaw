@@ -320,16 +320,25 @@ pub fn parse_trade_preview_submit_args(
     base.insert("exchange".to_string(), Value::String(exchange));
     base.insert("symbol".to_string(), Value::String(symbol));
     base.insert("side".to_string(), Value::String(side.to_string()));
-    base.insert("order_type".to_string(), Value::String(order_type.to_string()));
+    base.insert(
+        "order_type".to_string(),
+        Value::String(order_type.to_string()),
+    );
     base.insert("qty".to_string(), Value::from(qty));
     if order_type == "limit" {
         base.insert("price".to_string(), Value::from(price));
     }
 
     let mut preview = base.clone();
-    preview.insert("action".to_string(), Value::String("trade_preview".to_string()));
+    preview.insert(
+        "action".to_string(),
+        Value::String("trade_preview".to_string()),
+    );
     let mut submit = base;
-    submit.insert("action".to_string(), Value::String("trade_submit".to_string()));
+    submit.insert(
+        "action".to_string(),
+        Value::String("trade_submit".to_string()),
+    );
     submit.insert("confirm".to_string(), Value::Bool(true));
     Some((Value::Object(preview), Value::Object(submit)))
 }
@@ -355,7 +364,8 @@ mod tests {
     fn parse_limit_requires_price() {
         let rules = CompiledTradeRules::from_rules(TradeRules::defaults());
         assert!(parse_trade_preview_submit_args("买入 BTCUSDT 数量 1 限价", &rules).is_none());
-        assert!(parse_trade_preview_submit_args("买入 BTCUSDT 数量 1 限价 价格 1000", &rules).is_some());
+        assert!(
+            parse_trade_preview_submit_args("买入 BTCUSDT 数量 1 限价 价格 1000", &rules).is_some()
+        );
     }
-
 }

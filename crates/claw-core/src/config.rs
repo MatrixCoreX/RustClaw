@@ -561,7 +561,8 @@ impl Default for MemoryConfig {
             skill_memory_enabled: default_memory_skill_memory_enabled(),
             skill_memory_max_chars: default_memory_skill_memory_max_chars(),
             schedule_memory_include_long_term: default_memory_schedule_memory_include_long_term(),
-            schedule_memory_include_preferences: default_memory_schedule_memory_include_preferences(),
+            schedule_memory_include_preferences: default_memory_schedule_memory_include_preferences(
+            ),
             schedule_memory_max_chars: default_memory_schedule_memory_max_chars(),
             image_memory_include_long_term: default_memory_image_memory_include_long_term(),
             image_memory_include_preferences: default_memory_image_memory_include_preferences(),
@@ -754,7 +755,9 @@ pub struct RoutingConfig {
 
 impl Default for RoutingConfig {
     fn default() -> Self {
-        Self { debug_log_prompt: false }
+        Self {
+            debug_log_prompt: false,
+        }
     }
 }
 
@@ -1336,8 +1339,12 @@ impl AppConfig {
             // Legacy mixed WhatsApp config (kept for backward compatibility).
             .add_source(config::File::from(base_dir.join("channels/whatsapp.toml")).required(false))
             // Split WhatsApp configs.
-            .add_source(config::File::from(base_dir.join("channels/whatsapp-cloud.toml")).required(false))
-            .add_source(config::File::from(base_dir.join("channels/whatsapp-web.toml")).required(false))
+            .add_source(
+                config::File::from(base_dir.join("channels/whatsapp-cloud.toml")).required(false),
+            )
+            .add_source(
+                config::File::from(base_dir.join("channels/whatsapp-web.toml")).required(false),
+            )
             .build()?;
         let mut app: AppConfig = cfg.try_deserialize()?;
 
