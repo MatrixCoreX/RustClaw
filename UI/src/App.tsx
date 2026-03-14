@@ -10,6 +10,7 @@ import {
   MessageCircle,
   RefreshCw,
   Server,
+  Settings,
   Timer,
   X,
 } from "lucide-react";
@@ -92,6 +93,28 @@ interface SkillsConfigResponse {
   effective_enabled_skills_preview: string[];
   runtime_enabled_skills: string[];
   restart_required: boolean;
+}
+
+interface ModelConfigItem {
+  vendor: string;
+  model: string;
+}
+
+interface ModelConfigResponse {
+  llm: ModelConfigItem;
+  image_edit: ModelConfigItem;
+  image_generation: ModelConfigItem;
+  image_vision: ModelConfigItem;
+  audio_transcribe: ModelConfigItem;
+  audio_synthesize: ModelConfigItem;
+  restart_required?: boolean;
+}
+
+/** 主模型 config.toml [llm.*]；图像 image.toml [image_*].providers.*；声音 audio.toml [audio_*].providers.* */
+interface ProviderKeysResponse {
+  llm?: Record<string, string>;
+  image?: Record<string, Record<string, string>>;
+  audio?: Record<string, Record<string, string>>;
 }
 
 interface LogLatestResponse {
@@ -276,6 +299,23 @@ export default function App() {
   const [skillSwitchSaving, setSkillSwitchSaving] = useState(false);
   const [skillSwitchSaveMessage, setSkillSwitchSaveMessage] = useState<string | null>(null);
 
+  const [modelConfigLoading, setModelConfigLoading] = useState(false);
+  const [modelConfigError, setModelConfigError] = useState<string | null>(null);
+  const [modelConfigData, setModelConfigData] = useState<ModelConfigResponse | null>(null);
+  const [modelConfigDraft, setModelConfigDraft] = useState<ModelConfigResponse | null>(null);
+  const [modelConfigSaving, setModelConfigSaving] = useState(false);
+  const [modelConfigSaveMessage, setModelConfigSaveMessage] = useState<string | null>(null);
+
+  const [providerKeysLoading, setProviderKeysLoading] = useState(false);
+  const [providerKeysError, setProviderKeysError] = useState<string | null>(null);
+  const [providerKeysData, setProviderKeysData] = useState<ProviderKeysResponse>({});
+  const [providerKeysDraft, setProviderKeysDraft] = useState<ProviderKeysResponse>({});
+  const [providerKeysSaving, setProviderKeysSaving] = useState<"llm" | "image" | "audio" | null>(null);
+  const [providerKeysSaveMessage, setProviderKeysSaveMessage] = useState<string | null>(null);
+
+  const [restartClawdLoading, setRestartClawdLoading] = useState(false);
+  const [restartClawdMessage, setRestartClawdMessage] = useState<string | null>(null);
+
   const [taskId, setTaskId] = useState("");
   const [taskLoading, setTaskLoading] = useState(false);
   const [taskResult, setTaskResult] = useState<TaskQueryResponse | null>(null);
@@ -319,7 +359,7 @@ export default function App() {
   const [waLoginError, setWaLoginError] = useState<string | null>(null);
   const [waLoginStatus, setWaLoginStatus] = useState<WhatsappWebLoginStatus | null>(null);
   const [waLogoutLoading, setWaLogoutLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<"dashboard" | "logs">("dashboard");
+  const [viewMode, setViewMode] = useState<"dashboard" | "logs" | "config">("dashboard");
   const [selectedLogFile, setSelectedLogFile] = useState("clawd.log");
   const [logTailLines, setLogTailLines] = useState(200);
   const [logLoading, setLogLoading] = useState(false);
@@ -611,6 +651,202 @@ export default function App() {
     }
   };
 
+  const fetchModelConfig = async () => {
+    setModelConfigLoading(true);
+    setModelConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/admin/model-config`);
+      const body = (await res.json()) as ApiResponse<ModelConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `模型配置获取失败 (${res.status})`);
+      }
+      setModelConfigData(body.data);
+      setModelConfigDraft(body.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setModelConfigError(message);
+    } finally {
+      setModelConfigLoading(false);
+    }
+  };
+
+  const saveModelConfig = async () => {
+    if (!modelConfigDraft) return;
+    setModelConfigSaving(true);
+    setModelConfigSaveMessage(null);
+    setModelConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/admin/model-config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          llm: modelConfigDraft.llm,
+          image_edit: modelConfigDraft.image_edit,
+          image_generation: modelConfigDraft.image_generation,
+          image_vision: modelConfigDraft.image_vision,
+          audio_transcribe: modelConfigDraft.audio_transcribe,
+          audio_synthesize: modelConfigDraft.audio_synthesize,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<ModelConfigResponse>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `模型配置保存失败 (${res.status})`);
+      }
+      setModelConfigData(body.data ?? modelConfigDraft);
+      setModelConfigDraft(body.data ?? modelConfigDraft);
+      setModelConfigSaveMessage(
+        body.data?.restart_required
+          ? t("保存成功，需重启相关服务后生效。", "Saved. Restart required to take effect.")
+          : t("保存成功", "Saved successfully"),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setModelConfigError(message);
+    } finally {
+      setModelConfigSaving(false);
+    }
+  };
+
+  const parseJsonOrThrow = async (res: Response, context: string): Promise<ApiResponse<ProviderKeysResponse>> => {
+    const text = await res.text();
+    const trimmed = text.trim().toLowerCase();
+    if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
+      throw new Error(
+        t(
+          "接口返回了 HTML 而非 JSON，请确认「clawd API 地址」指向已启动的 clawd（例如 http://主机:8787），若通过 nginx 访问需将 /v1 代理到 clawd。",
+          "API returned HTML instead of JSON. Ensure «clawd API URL» points to running clawd (e.g. http://host:8787), or proxy /v1 to clawd if using nginx.",
+        ),
+      );
+    }
+    try {
+      return JSON.parse(text) as ApiResponse<ProviderKeysResponse>;
+    } catch {
+      throw new Error(`${context}: ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`);
+    }
+  };
+
+  const fetchProviderKeys = async () => {
+    setProviderKeysLoading(true);
+    setProviderKeysError(null);
+    try {
+      const res = await apiFetch(`/v1/admin/provider-keys`);
+      const body = await parseJsonOrThrow(res, "API Key 列表");
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `API Key 列表获取失败 (${res.status})`);
+      }
+      const data = {
+        llm: body.data.llm ?? {},
+        image: body.data.image ?? {},
+        audio: body.data.audio ?? {},
+      };
+      setProviderKeysData(data);
+      setProviderKeysDraft(data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setProviderKeysError(message);
+    } finally {
+      setProviderKeysLoading(false);
+    }
+  };
+
+  const restartClawd = async () => {
+    setRestartClawdLoading(true);
+    setRestartClawdMessage(null);
+    try {
+      const res = await apiFetch(`/v1/admin/restart-clawd`, { method: "POST" });
+      const body = (await res.json()) as ApiResponse<{ message?: string; restart_triggered?: boolean }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `重启失败 (${res.status})`);
+      }
+      setRestartClawdMessage(
+        t("已触发重启，clawd 将在数秒后重启，页面可能断开。", "Restart triggered; clawd will restart in a few seconds; page may disconnect."),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setRestartClawdMessage(`${t("重启失败", "Restart failed")}: ${message}`);
+    } finally {
+      setRestartClawdLoading(false);
+    }
+  };
+
+  const saveProviderKeysGroup = async (group: "llm" | "image" | "audio") => {
+    setProviderKeysSaving(group);
+    setProviderKeysSaveMessage(null);
+    setProviderKeysError(null);
+    try {
+      const toSend: ProviderKeysResponse = {};
+      if (group === "llm") {
+        const dl = providerKeysDraft.llm ?? {};
+        const da = providerKeysData.llm ?? {};
+        const out: Record<string, string> = {};
+        for (const [vendor, value] of Object.entries(dl)) {
+          if (value.trim() === "") continue;
+          if (value !== (da[vendor] ?? "")) out[vendor] = value;
+        }
+        toSend.llm = out;
+      } else if (group === "image") {
+        const il = providerKeysDraft.image ?? {};
+        const ia = providerKeysData.image ?? {};
+        const out: Record<string, Record<string, string>> = {};
+        for (const [section, vendors] of Object.entries(il)) {
+          const changed: Record<string, string> = {};
+          for (const [vendor, value] of Object.entries(vendors)) {
+            if (value.trim() === "") continue;
+            if (value !== ((ia[section] ?? {})[vendor] ?? "")) changed[vendor] = value;
+          }
+          if (Object.keys(changed).length > 0) out[section] = changed;
+        }
+        toSend.image = out;
+      } else {
+        const al = providerKeysDraft.audio ?? {};
+        const aa = providerKeysData.audio ?? {};
+        const out: Record<string, Record<string, string>> = {};
+        for (const [section, vendors] of Object.entries(al)) {
+          const changed: Record<string, string> = {};
+          for (const [vendor, value] of Object.entries(vendors)) {
+            if (value.trim() === "") continue;
+            if (value !== ((aa[section] ?? {})[vendor] ?? "")) changed[vendor] = value;
+          }
+          if (Object.keys(changed).length > 0) out[section] = changed;
+        }
+        toSend.audio = out;
+      }
+      const res = await apiFetch(`/v1/admin/provider-keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toSend),
+      });
+      const body = await parseJsonOrThrow(res, "API Key 保存");
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `API Key 保存失败 (${res.status})`);
+      }
+      setProviderKeysData((prev) => ({
+        ...prev,
+        llm: body.data?.llm ?? prev.llm ?? {},
+        image: body.data?.image ?? prev.image ?? {},
+        audio: body.data?.audio ?? prev.audio ?? {},
+      }));
+      setProviderKeysDraft((prev) => ({
+        ...prev,
+        llm: body.data?.llm ?? prev.llm ?? {},
+        image: body.data?.image ?? prev.image ?? {},
+        audio: body.data?.audio ?? prev.audio ?? {},
+      }));
+      const msg =
+        group === "llm"
+          ? t("主模型 API Key 已写入 config.toml，需重启后生效。", "LLM API keys saved to config.toml; restart to apply.")
+          : group === "image"
+            ? t("图像 API Key 已写入 image.toml，需重启后生效。", "Image API keys saved to image.toml; restart to apply.")
+            : t("声音 API Key 已写入 audio.toml，需重启后生效。", "Audio API keys saved to audio.toml; restart to apply.");
+      setProviderKeysSaveMessage(msg);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setProviderKeysError(message);
+    } finally {
+      setProviderKeysSaving(null);
+    }
+  };
+
   const fetchLatestLog = async () => {
     setLogLoading(true);
     setLogError(null);
@@ -847,6 +1083,7 @@ export default function App() {
     void fetchHealth();
     void fetchSkills();
     void fetchSkillsConfig();
+    void fetchModelConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiAuthReady]);
@@ -893,6 +1130,7 @@ export default function App() {
     if (!uiAuthReady) return;
     void fetchSkills();
     void fetchSkillsConfig();
+    void fetchModelConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, uiAuthReady]);
@@ -910,6 +1148,16 @@ export default function App() {
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackingTaskId, apiBase, uiAuthReady]);
+
+  useEffect(() => {
+    if (!uiAuthReady) return;
+    if (viewMode === "config") {
+      void fetchModelConfig();
+      void fetchSkillsConfig();
+      void fetchProviderKeys();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, uiAuthReady]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -1217,6 +1465,18 @@ export default function App() {
               <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               <span className="hidden sm:inline">{viewMode === "logs" ? t("控制台", "Console") : t("日志", "Logs")}</span>
             </button>
+            <button
+              onClick={() => setViewMode("config")}
+              className={`relative inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs transition sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm ${
+                viewMode === "config"
+                  ? "border-amber-400/50 bg-amber-500/25 text-white"
+                  : "border-white/20 bg-white/10 text-white hover:bg-white/15"
+              }`}
+              title={t("配置（模型、技能、API Key）", "Config (models, skills, API keys)")}
+            >
+              <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span className="hidden sm:inline">{tSlash("配置 / Config")}</span>
+            </button>
 
             <button
               onClick={() => {
@@ -1318,6 +1578,265 @@ export default function App() {
               {logText || t("日志为空", "Log is empty")}
             </pre>
           </section>
+        ) : viewMode === "config" ? (
+          <>
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <h2 className="mb-4 text-lg font-semibold">{tSlash("配置 / Config")}</h2>
+              <p className="mb-4 text-xs text-white/50">
+                {t("模型、技能开关与 LLM 厂商 API Key 写入 config.toml 等；修改后需重启相关服务生效。", "Models, skill switches and provider API keys are written to config.toml etc.; restart required to apply.")}
+              </p>
+              {providerKeysError ? (
+                <p className="mb-3 rounded border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-sm text-red-200">{providerKeysError}</p>
+              ) : null}
+              {providerKeysSaveMessage ? (
+                <p className="mb-3 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-sm text-emerald-200">{providerKeysSaveMessage}</p>
+              ) : null}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void restartClawd()}
+                  disabled={restartClawdLoading}
+                  className="inline-flex items-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {restartClawdLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  {tSlash("重启 clawd / Restart clawd")}
+                </button>
+                <span className="text-[10px] text-white/50">
+                  {t("修改配置或 API Key 后点击以使生效；页面可能短暂断开。", "Click after changing config or API keys to apply; page may disconnect briefly.")}
+                </span>
+              </div>
+              {restartClawdMessage ? (
+                <p className={`mt-2 rounded border px-2 py-1.5 text-sm ${restartClawdMessage.startsWith(t("重启失败", "Restart failed")) ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}>
+                  {restartClawdMessage}
+                </p>
+              ) : null}
+            </section>
+
+            {modelConfigLoading && !modelConfigDraft ? (
+              <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                <p className="text-xs text-white/50">{tSlash("模型配置加载中... / Loading model config...")}</p>
+              </section>
+            ) : null}
+            {modelConfigDraft ? (
+              <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 sm:mb-3 sm:gap-3">
+                  <h2 className="text-lg font-semibold">{tSlash("模型配置 / Model Config")}</h2>
+                  <button
+                    onClick={() => void saveModelConfig()}
+                    disabled={modelConfigSaving || modelConfigLoading}
+                    className="inline-flex items-center gap-1 rounded-lg bg-[#f74c00] px-2 py-1 text-[10px] font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60 sm:gap-2 sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs"
+                  >
+                    {modelConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                    {tSlash("保存 / Save")}
+                  </button>
+                </div>
+                <p className="mb-3 text-xs text-white/50">{t("写入 config.toml / image.toml / audio.toml；需重启后生效。", "Writes to config.toml, image.toml, audio.toml; restart required.")}</p>
+                {modelConfigError ? <p className="mt-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-sm text-red-200">{modelConfigError}</p> : null}
+                {modelConfigSaveMessage ? <p className="mt-2 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-sm text-emerald-200">{modelConfigSaveMessage}</p> : null}
+                <div className="mt-3 space-y-4">
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                    <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">{tSlash("主模型设置 / Main Model (Text LLM)")}</h4>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="space-y-1"><span className="text-[10px] text-white/50">Vendor</span>
+                        <input className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm" value={modelConfigDraft.llm.vendor} onChange={(e) => setModelConfigDraft((p) => p ? { ...p, llm: { ...p.llm, vendor: e.target.value } } : p)} />
+                      </label>
+                      <label className="space-y-1"><span className="text-[10px] text-white/50">Model</span>
+                        <input className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm" value={modelConfigDraft.llm.model} onChange={(e) => setModelConfigDraft((p) => p ? { ...p, llm: { ...p.llm, model: e.target.value } } : p)} />
+                      </label>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[10px] text-white/50">{tSlash("API Key")}</span>
+                      <button
+                        onClick={() => void saveProviderKeysGroup("llm")}
+                        disabled={providerKeysSaving !== null || providerKeysLoading}
+                        className="inline-flex items-center gap-1 rounded-lg bg-[#f74c00] px-2 py-1 text-xs font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {providerKeysSaving === "llm" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        {tSlash("保存 / Save")}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-white/50">{t("config.toml [llm].api_key", "config.toml [llm].api_key")}</p>
+                    {providerKeysLoading ? (
+                      <p className="mt-2 text-xs text-white/50">{tSlash("加载中... / Loading...")}</p>
+                    ) : (
+                      <label className="mt-2 block space-y-1">
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm"
+                          placeholder={(providerKeysData.llm ?? {})[modelConfigDraft.llm.vendor] || t("未配置", "not set")}
+                          value={providerKeysDraft.llm?.[modelConfigDraft.llm.vendor] ?? ""}
+                          onChange={(e) => {
+                            const v = modelConfigDraft.llm.vendor;
+                            setProviderKeysDraft((prev) => ({
+                              ...prev,
+                              llm: { ...(prev.llm ?? {}), [v]: e.target.value },
+                            }));
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                    <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">{tSlash("图像 / Image")}</h4>
+                    {(["image_edit", "image_generation", "image_vision"] as const).map((field) => (
+                      <div key={field} className="mb-2 grid gap-2 sm:grid-cols-2">
+                        <span className="text-[10px] text-white/60">{field}</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm" placeholder="vendor" value={modelConfigDraft[field].vendor} onChange={(e) => setModelConfigDraft((p) => p ? { ...p, [field]: { ...p[field], vendor: e.target.value } } : p)} />
+                          <input className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm" placeholder="model" value={modelConfigDraft[field].model} onChange={(e) => setModelConfigDraft((p) => p ? { ...p, [field]: { ...p[field], model: e.target.value } } : p)} />
+                        </div>
+                      </div>
+                    ))}
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[10px] text-white/50">{tSlash("API Key")}</span>
+                      <button
+                        onClick={() => void saveProviderKeysGroup("image")}
+                        disabled={providerKeysSaving !== null || providerKeysLoading}
+                        className="inline-flex items-center gap-1 rounded-lg bg-[#f74c00] px-2 py-1 text-xs font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {providerKeysSaving === "image" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        {tSlash("保存 / Save")}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-white/50">{t("configs/image.toml [image_*].providers.<vendor>.api_key", "configs/image.toml")}</p>
+                    {providerKeysLoading ? (
+                      <p className="mt-2 text-xs text-white/50">{tSlash("加载中... / Loading...")}</p>
+                    ) : (
+                      <div className="mt-2 space-y-3">
+                        {(["image_edit", "image_generation", "image_vision"] as const).map((section) => {
+                          const vendor = modelConfigDraft[section].vendor;
+                          return (
+                            <div key={`img-${section}`}>
+                              <span className="text-[10px] text-white/50">{section}</span>
+                              <input
+                                type="password"
+                                autoComplete="off"
+                                className="mt-1 w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm"
+                                placeholder={(providerKeysData.image ?? {})[section]?.[vendor] || t("未配置", "not set")}
+                                value={providerKeysDraft.image?.[section]?.[vendor] ?? ""}
+                                onChange={(e) =>
+                                  setProviderKeysDraft((prev) => ({
+                                    ...prev,
+                                    image: {
+                                      ...(prev.image ?? {}),
+                                      [section]: { ...(prev.image?.[section] ?? {}), [vendor]: e.target.value },
+                                    },
+                                  }))
+                                }
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                    <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">{tSlash("语音转文字 / Audio Transcribe")}</h4>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="space-y-1"><span className="text-[10px] text-white/50">Vendor</span>
+                        <input className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm" value={modelConfigDraft.audio_transcribe.vendor} onChange={(e) => setModelConfigDraft((p) => p ? { ...p, audio_transcribe: { ...p.audio_transcribe, vendor: e.target.value } } : p)} />
+                      </label>
+                      <label className="space-y-1"><span className="text-[10px] text-white/50">Model</span>
+                        <input className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm" value={modelConfigDraft.audio_transcribe.model} onChange={(e) => setModelConfigDraft((p) => p ? { ...p, audio_transcribe: { ...p.audio_transcribe, model: e.target.value } } : p)} />
+                      </label>
+                    </div>
+                    <div className="mt-3">
+                      <span className="text-[10px] text-white/50">{tSlash("API Key")}</span>
+                      {providerKeysLoading ? (
+                        <p className="mt-1 text-xs text-white/50">{tSlash("加载中... / Loading...")}</p>
+                      ) : (
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          className="mt-1 w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm"
+                          placeholder={(providerKeysData.audio?.audio_transcribe ?? {})[modelConfigDraft.audio_transcribe.vendor] || t("未配置", "not set")}
+                          value={providerKeysDraft.audio?.audio_transcribe?.[modelConfigDraft.audio_transcribe.vendor] ?? ""}
+                          onChange={(e) => {
+                            const v = modelConfigDraft.audio_transcribe.vendor;
+                            setProviderKeysDraft((prev) => ({
+                              ...prev,
+                              audio: {
+                                ...(prev.audio ?? {}),
+                                audio_transcribe: { ...(prev.audio?.audio_transcribe ?? {}), [v]: e.target.value },
+                              },
+                            }));
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                    <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">{tSlash("文字转语音 / Audio Synthesize")}</h4>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="space-y-1"><span className="text-[10px] text-white/50">Vendor</span>
+                        <input className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm" value={modelConfigDraft.audio_synthesize.vendor} onChange={(e) => setModelConfigDraft((p) => p ? { ...p, audio_synthesize: { ...p.audio_synthesize, vendor: e.target.value } } : p)} />
+                      </label>
+                      <label className="space-y-1"><span className="text-[10px] text-white/50">Model</span>
+                        <input className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm" value={modelConfigDraft.audio_synthesize.model} onChange={(e) => setModelConfigDraft((p) => p ? { ...p, audio_synthesize: { ...p.audio_synthesize, model: e.target.value } } : p)} />
+                      </label>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[10px] text-white/50">{tSlash("API Key")}</span>
+                      <button
+                        onClick={() => void saveProviderKeysGroup("audio")}
+                        disabled={providerKeysSaving !== null || providerKeysLoading}
+                        className="inline-flex items-center gap-1 rounded-lg bg-[#f74c00] px-2 py-1 text-xs font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {providerKeysSaving === "audio" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        {tSlash("保存 / Save")}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-white/50">{t("configs/audio.toml [audio_*].providers.<vendor>.api_key", "configs/audio.toml")}</p>
+                    {providerKeysLoading ? (
+                      <p className="mt-2 text-xs text-white/50">{tSlash("加载中... / Loading...")}</p>
+                    ) : (
+                      <div className="mt-2">
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-sm"
+                          placeholder={(providerKeysData.audio?.audio_synthesize ?? {})[modelConfigDraft.audio_synthesize.vendor] || t("未配置", "not set")}
+                          value={providerKeysDraft.audio?.audio_synthesize?.[modelConfigDraft.audio_synthesize.vendor] ?? ""}
+                          onChange={(e) => {
+                            const v = modelConfigDraft.audio_synthesize.vendor;
+                            setProviderKeysDraft((prev) => ({
+                              ...prev,
+                              audio: {
+                                ...(prev.audio ?? {}),
+                                audio_synthesize: { ...(prev.audio?.audio_synthesize ?? {}), [v]: e.target.value },
+                              },
+                            }));
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-semibold">{tSlash("技能开关 / Skill Switches")}</h2>
+                <button onClick={() => void saveSkillSwitches()} disabled={skillSwitchSaving || skillsConfigLoading || !hasUnsavedSkillSwitchChanges} className="inline-flex items-center gap-1 rounded-lg bg-[#f74c00] px-2 py-1 text-xs font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60">
+                  {skillSwitchSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  {tSlash("保存开关 / Save Switches")}
+                </button>
+              </div>
+              <p className="text-xs text-white/50">{t("只改 skill_switches；需重启 clawd 生效。", "Updates skill_switches only; restart clawd to apply.")}</p>
+              {skillsConfigError ? <p className="mt-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-sm text-red-200">{skillsConfigError}</p> : null}
+              {skillSwitchSaveMessage ? <p className="mt-2 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-sm text-emerald-200">{skillSwitchSaveMessage}</p> : null}
+              {hasUnsavedSkillSwitchChanges ? <p className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-sm text-amber-200">{t("有未保存的开关变更。", "Unsaved switch changes.")}</p> : null}
+              <div className="mt-3 space-y-4">
+                {imageSkillsList.length > 0 ? <div><h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">{tSlash("图像技能 / Image")}</h4><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{imageSkillsList.map((name) => { const re = visibleRuntimeSkills.includes(name); const ce = configuredEnabledSkills.has(name); const pa = re !== ce; return (<label key={name} className="flex items-center justify-between gap-2 rounded border border-white/10 bg-[#12151f] px-2 py-1.5 text-xs"><span className="truncate text-white/85">{name}</span><span className="flex shrink-0 items-center gap-1"><span className={ce ? "text-emerald-200" : "text-amber-200"}>{ce ? t("已开启", "enabled") : t("已关闭", "disabled")}</span>{pa ? <span className="text-sky-200 text-[10px]">{t("待重启", "pending")}</span> : null}<button type="button" onClick={() => toggleSkillEnabled(name, !ce)} className="rounded border border-white/20 bg-white/5 px-1.5 py-0.5 text-[10px]">{ce ? t("关闭", "Disable") : t("开启", "Enable")}</button></span></label>); })}</div></div> : null}
+                {audioSkillsList.length > 0 ? <div><h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">{tSlash("语音技能 / Audio")}</h4><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{audioSkillsList.map((name) => { const re = visibleRuntimeSkills.includes(name); const ce = configuredEnabledSkills.has(name); const pa = re !== ce; return (<label key={name} className="flex items-center justify-between gap-2 rounded border border-white/10 bg-[#12151f] px-2 py-1.5 text-xs"><span className="truncate text-white/85">{name}</span><span className="flex shrink-0 items-center gap-1"><span className={ce ? "text-emerald-200" : "text-amber-200"}>{ce ? t("已开启", "enabled") : t("已关闭", "disabled")}</span>{pa ? <span className="text-sky-200 text-[10px]">{t("待重启", "pending")}</span> : null}<button type="button" onClick={() => toggleSkillEnabled(name, !ce)} className="rounded border border-white/20 bg-white/5 px-1.5 py-0.5 text-[10px]">{ce ? t("关闭", "Disable") : t("开启", "Enable")}</button></span></label>); })}</div></div> : null}
+                {otherSkillsList.length > 0 ? <div><h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">{tSlash("其他技能 / Other")}</h4><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{otherSkillsList.map((name) => { const re = visibleRuntimeSkills.includes(name); const ce = configuredEnabledSkills.has(name); const pa = re !== ce; return (<label key={name} className="flex items-center justify-between gap-2 rounded border border-white/10 bg-[#12151f] px-2 py-1.5 text-xs"><span className="truncate text-white/85">{name}</span><span className="flex shrink-0 items-center gap-1"><span className={ce ? "text-emerald-200" : "text-amber-200"}>{ce ? t("已开启", "enabled") : t("已关闭", "disabled")}</span>{pa ? <span className="text-sky-200 text-[10px]">{t("待重启", "pending")}</span> : null}<button type="button" onClick={() => toggleSkillEnabled(name, !ce)} className="rounded border border-white/20 bg-white/5 px-1.5 py-0.5 text-[10px]">{ce ? t("关闭", "Disable") : t("开启", "Enable")}</button></span></label>); })}</div></div> : null}
+                {baseSkillsList.length > 0 ? <div><h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">{tSlash("基本技能 / Base")}</h4><p className="mb-2 text-xs text-amber-200/90">{t("不建议关闭。", "Not recommended to disable.")}</p><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{baseSkillsList.map((name) => { const re = visibleRuntimeSkills.includes(name); const ce = configuredEnabledSkills.has(name); const pa = re !== ce; return (<label key={name} className="flex items-center justify-between gap-2 rounded border border-white/10 bg-[#12151f] px-2 py-1.5 text-xs"><span className="truncate text-white/85">{name}</span><span className="flex shrink-0 items-center gap-1"><span className={ce ? "text-emerald-200" : "text-amber-200"}>{ce ? t("已开启", "enabled") : t("已关闭", "disabled")}</span>{pa ? <span className="text-sky-200 text-[10px]">{t("待重启", "pending")}</span> : null}<button type="button" onClick={() => toggleSkillEnabled(name, !ce)} className="rounded border border-white/20 bg-white/5 px-1.5 py-0.5 text-[10px]">{ce ? t("关闭", "Disable") : t("开启", "Enable")}</button></span></label>); })}</div></div> : null}
+                {managedSkills.length === 0 ? <span className="text-xs text-white/50">{skillsConfigLoading ? tSlash("加载中... / Loading...") : "--"}</span> : null}
+              </div>
+            </section>
+          </>
         ) : (
           <>
         {chatDialogOpen && (
@@ -1837,131 +2356,17 @@ export default function App() {
               <span className="text-xs text-white/50">{skillsLoading ? tSlash("加载中... / Loading...") : "--"}</span>
             )}
           </div>
-
-          <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-2 sm:mt-5 sm:rounded-xl sm:p-4">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 sm:mb-3 sm:gap-3">
-              <h3 className="text-xs font-semibold sm:text-sm">{tSlash("技能开关（写入 config.toml）/ Skill Switches (config.toml)")}</h3>
-              <button
-                onClick={() => void saveSkillSwitches()}
-                disabled={skillSwitchSaving || skillsConfigLoading || !hasUnsavedSkillSwitchChanges}
-                className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#f74c00] px-2 py-1 text-[10px] font-medium text-white transition hover:bg-[#ff5c1a] disabled:cursor-not-allowed disabled:opacity-60 sm:gap-2 sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs"
-              >
-                {skillSwitchSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                {tSlash("保存开关 / Save Switches")}
-              </button>
-            </div>
-            <p className="text-xs text-white/50">
-              {t("说明：这里只改 skill_switches；运行时生效需要重启 clawd。", "Note: this updates skill_switches only; restart clawd to apply at runtime.")}
+          <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 sm:rounded-xl sm:p-4">
+            <p className="text-xs text-white/70">
+              {t("模型、技能开关与 API Key 请在「配置」页修改。", "Edit models, skill switches and API keys on the Config page.")}
             </p>
-            {hasUnsavedSkillSwitchChanges ? (
-              <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                {t("你有未保存的技能开关变更，请点击“保存开关”。", "You have unsaved skill switch changes. Click \"Save Switches\".")}
-              </p>
-            ) : (
-              <p className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/60">
-                {t("当前开关变更已保存。", "All skill switch changes are saved.")}
-              </p>
-            )}
-            {skillsConfigError ? (
-              <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                {tSlash("配置读取/保存失败 / Config read/save failed")}: {skillsConfigError}
-              </p>
-            ) : null}
-            {skillSwitchSaveMessage ? (
-              <p className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
-                {skillSwitchSaveMessage}
-              </p>
-            ) : null}
-
-            {(() => {
-              const renderSkillRow = (name: string) => {
-                const runtimeEnabled = visibleRuntimeSkills.includes(name);
-                const configuredEnabled = configuredEnabledSkills.has(name);
-                const pendingApply = runtimeEnabled !== configuredEnabled;
-                return (
-                  <label
-                    key={name}
-                    className="flex items-center justify-between gap-1 rounded border border-white/10 bg-[#12151f] px-2 py-1.5 text-[10px] sm:gap-2 sm:rounded-lg sm:px-3 sm:py-2 sm:text-xs"
-                  >
-                    <span className="min-w-0 truncate text-white/85">{name}</span>
-                    <span className="flex shrink-0 items-center gap-1 sm:gap-2">
-                      <span
-                        className={
-                          configuredEnabled
-                            ? "rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] text-emerald-200 sm:px-1.5 sm:text-[10px]"
-                            : "rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] text-amber-200 sm:px-1.5 sm:text-[10px]"
-                        }
-                      >
-                        {configuredEnabled ? t("已开启", "enabled") : t("已关闭", "disabled")}
-                      </span>
-                      {pendingApply ? (
-                        <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1 py-0.5 text-[9px] text-sky-200 sm:px-1.5 sm:text-[10px]">
-                          {t("待重启生效", "pending restart")}
-                        </span>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => toggleSkillEnabled(name, !configuredEnabled)}
-                        className="rounded border border-white/20 bg-white/5 px-1.5 py-0.5 text-[9px] text-white/80 hover:bg-white/10 sm:px-2 sm:py-1 sm:text-[10px]"
-                        title={configuredEnabled ? t("点击关闭技能", "Click to disable skill") : t("点击开启技能", "Click to enable skill")}
-                      >
-                        {configuredEnabled ? t("关闭", "Disable") : t("开启", "Enable")}
-                      </button>
-                    </span>
-                  </label>
-                );
-              };
-              return (
-                <div className="mt-3 space-y-4">
-                  {imageSkillsList.length > 0 ? (
-                    <div>
-                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
-                        {tSlash("图像技能 / Image")}
-                      </h4>
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {imageSkillsList.map(renderSkillRow)}
-                      </div>
-                    </div>
-                  ) : null}
-                  {audioSkillsList.length > 0 ? (
-                    <div>
-                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
-                        {tSlash("语音技能 / Audio")}
-                      </h4>
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {audioSkillsList.map(renderSkillRow)}
-                      </div>
-                    </div>
-                  ) : null}
-                  {otherSkillsList.length > 0 ? (
-                    <div>
-                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
-                        {tSlash("其他技能 / Other")}
-                      </h4>
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {otherSkillsList.map(renderSkillRow)}
-                      </div>
-                    </div>
-                  ) : null}
-                  {baseSkillsList.length > 0 ? (
-                    <div>
-                      <h4 className="mb-2 text-xs font-medium uppercase tracking-widest text-white/50">
-                        {tSlash("基本技能 / Base")}
-                      </h4>
-                      <p className="mb-2 text-xs text-amber-200/90">
-                        {t("不建议关闭。由原 tool 转换的系统基本能力，关闭后读写/执行/列目录/建目录等将不可用。", "Not recommended to disable. Core skills (from tools); file/command/dir operations will be unavailable if disabled.")}
-                      </p>
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {baseSkillsList.map(renderSkillRow)}
-                      </div>
-                    </div>
-                  ) : null}
-                  {managedSkills.length === 0 ? (
-                    <span className="text-xs text-white/50">{skillsConfigLoading ? tSlash("加载中... / Loading...") : "--"}</span>
-                  ) : null}
-                </div>
-              );
-            })()}
+            <button
+              onClick={() => setViewMode("config")}
+              className="mt-2 inline-flex items-center gap-2 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-200 transition hover:bg-amber-500/30"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              {tSlash("前往配置页 / Go to Config")}
+            </button>
           </div>
         </section>
 

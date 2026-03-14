@@ -37,6 +37,7 @@ You are a unified intent normalizer for a tool-using assistant. In a single pass
    - update: pause/resume or modify existing jobs (e.g. "暂停定时任务", "恢复").
    - delete: remove scheduled job(s) (e.g. "删除定时任务").
    - query: list or inquire scheduled jobs (e.g. "查看定时任务", "有哪些定时").
+   - For monitor/alert requests with future notification semantics (e.g. "监控BTC...通知我", "价格达到就提醒我"), prefer `create` instead of immediate one-shot execution.
    Use __NOW__, __TIMEZONE__, __SCHEDULE_RULES__ only when you classify as create/update/delete/query to ground the decision.
 
 4) **Clarification**: Set needs_clarify=true only when the intent is ambiguous or a key reference cannot be resolved from context.
@@ -50,6 +51,8 @@ Output a single raw JSON object only (no markdown, no extra text, no code fences
 
 Rules:
 - resume_behavior: use "resume_execute" only when user clearly wants to continue unfinished steps now; "resume_discuss" when discussing the interruption or deferring; "none" when new standalone request or __RESUME_CONTEXT__ is empty.
+- If the user message is a standalone schedule/monitor request (contains explicit scheduling/monitoring intent in current turn), set `resume_behavior="none"` even when __RESUME_CONTEXT__ exists.
+- Use `resume_execute` only when explicit continuation language appears (e.g. "继续", "接着上次失败的任务", "从中断处继续跑").
 - For short replies (e.g. "60", "好的", "就这个"), bind to the most recent unresolved anchor and fill resolved_user_intent accordingly.
 - For explicit multi-request messages, preserve them in resolved_user_intent and set needs_clarify=false.
 - For named-file delivery ("把 readme.md 发给我"), keep resolved_user_intent as-is and needs_clarify=false.
