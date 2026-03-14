@@ -57,6 +57,24 @@ pub struct SkillRegistryEntry {
     /// External 技能：调用地址（如 HTTP URL）
     #[serde(default)]
     pub external_endpoint: Option<String>,
+    /// External 技能：本地 bundle 目录（相对 workspace 或绝对路径）
+    #[serde(default)]
+    pub external_bundle_dir: Option<String>,
+    /// External 技能：入口文件（如 SKILL.md、scripts/stock_cli.py）
+    #[serde(default)]
+    pub external_entry_file: Option<String>,
+    /// External 技能：运行时（如 python3、node）
+    #[serde(default)]
+    pub external_runtime: Option<String>,
+    /// External 技能：依赖的二进制命令
+    #[serde(default)]
+    pub external_require_bins: Vec<String>,
+    /// External 技能：依赖的 Python 模块
+    #[serde(default)]
+    pub external_require_py_modules: Vec<String>,
+    /// External 技能：来源链接或本地来源描述
+    #[serde(default)]
+    pub external_source_url: Option<String>,
     /// External 技能：专用超时（秒）；未设则用 timeout_seconds
     #[serde(default)]
     pub external_timeout_seconds: Option<u64>,
@@ -154,7 +172,13 @@ impl SkillsRegistry {
     /// 该技能在 registry 中配置的 timeout（秒）；0 表示用全局默认
     pub fn timeout_seconds(&self, canonical_name: &str) -> u64 {
         self.get(canonical_name)
-            .and_then(|e| if e.timeout_seconds > 0 { Some(e.timeout_seconds) } else { None })
+            .and_then(|e| {
+                if e.timeout_seconds > 0 {
+                    Some(e.timeout_seconds)
+                } else {
+                    None
+                }
+            })
             .unwrap_or(0)
     }
 
@@ -179,15 +203,14 @@ impl SkillsRegistry {
 
     /// 该技能在 registry 中配置的 prompt 文件路径；空字符串视为 None
     pub fn prompt_file(&self, canonical_name: &str) -> Option<&str> {
-        self.get(canonical_name)
-            .and_then(|e| {
-                let s = e.prompt_file.trim();
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(e.prompt_file.as_str())
-                }
-            })
+        self.get(canonical_name).and_then(|e| {
+            let s = e.prompt_file.trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(e.prompt_file.as_str())
+            }
+        })
     }
 
     /// Phase 5: Runner 执行名；未配置则用 canonical_name。返回 String 避免混合借用来源的 lifetime 问题。
@@ -206,11 +229,40 @@ impl SkillsRegistry {
         if e.kind != SkillKind::External {
             return None;
         }
-        let kind = e.external_kind.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
-        let endpoint = e.external_endpoint.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
+        let kind = e
+            .external_kind
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())?;
         Some(ExternalSkillConfig {
             kind,
-            endpoint,
+            endpoint: e
+                .external_endpoint
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            bundle_dir: e
+                .external_bundle_dir
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            entry_file: e
+                .external_entry_file
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            runtime: e
+                .external_runtime
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            require_bins: &e.external_require_bins,
+            require_py_modules: &e.external_require_py_modules,
+            source_url: e
+                .external_source_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
             timeout_seconds: e
                 .external_timeout_seconds
                 .filter(|&t| t > 0)
@@ -224,7 +276,13 @@ impl SkillsRegistry {
 #[derive(Debug, Clone)]
 pub struct ExternalSkillConfig<'a> {
     pub kind: &'a str,
-    pub endpoint: &'a str,
+    pub endpoint: Option<&'a str>,
+    pub bundle_dir: Option<&'a str>,
+    pub entry_file: Option<&'a str>,
+    pub runtime: Option<&'a str>,
+    pub require_bins: &'a [String],
+    pub require_py_modules: &'a [String],
+    pub source_url: Option<&'a str>,
     pub timeout_seconds: Option<u64>,
     pub auth_ref: Option<&'a str>,
 }

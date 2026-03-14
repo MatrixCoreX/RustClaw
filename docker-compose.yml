@@ -20,6 +20,8 @@ services:
       - ./document:/app/document
       - ./image:/app/image
       - ./docker/config:/app/docker/config
+      - ./prompts:/app/prompts
+      - ./third_party:/app/third_party
 
 volumes:
   rustclaw-data:

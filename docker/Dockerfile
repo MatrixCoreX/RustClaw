@@ -38,7 +38,7 @@ RUN cargo build --release \
 
 FROM alpine:3.21
 
-RUN apk add --no-cache bash ca-certificates python3
+RUN apk add --no-cache bash ca-certificates curl jq openssl python3
 
 WORKDIR /app
 
@@ -55,6 +55,7 @@ COPY UI/dist/ /app/UI/dist/
 COPY configs/ /app/configs/
 COPY migrations/ /app/migrations/
 COPY prompts/ /app/prompts/
+COPY third_party/ /app/third_party/
 COPY services/ /app/services/
 COPY scripts/ /app/scripts/
 COPY start-all-bin.sh /app/start-all-bin.sh

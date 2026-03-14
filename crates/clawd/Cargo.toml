@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-axum.workspace = true
+axum = { workspace = true, features = ["multipart"] }
 claw-core = { path = "../claw-core" }
 reqwest.workspace = true
 rusqlite.workspace = true

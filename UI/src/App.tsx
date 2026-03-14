@@ -15,6 +15,7 @@ import {
   Server,
   Sun,
   Timer,
+  Trash2,
   Wrench,
   X,
 } from "lucide-react";
@@ -99,9 +100,24 @@ interface SkillsConfigResponse {
   managed_skills: string[];
   /** 基本技能（由 tool 转换的系统基本能力），UI 归类为「基本技能」，不建议关闭 */
   base_skill_names?: string[];
+  external_skill_names?: string[];
   effective_enabled_skills_preview: string[];
   runtime_enabled_skills: string[];
   restart_required: boolean;
+}
+
+interface ImportedSkillResponse {
+  skill_name: string;
+  display_name: string;
+  description: string;
+  external_kind: string;
+  bundle_dir: string;
+  entry_file: string;
+  runtime?: string | null;
+  require_bins: string[];
+  require_py_modules: string[];
+  prompt_file: string;
+  source: string;
 }
 
 interface LlmVendorOption {
@@ -150,6 +166,10 @@ interface ChatMessage {
   ts: number;
 }
 
+type BrowserFileWithPath = File & {
+  webkitRelativePath?: string;
+};
+
 interface AdapterHealthRow {
   key: string;
   label: string;
@@ -180,10 +200,38 @@ type ThemeMode = "dark" | "light";
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "services", "channels", "models", "skills", "chat", "logs", "tasks"];
 
 const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
-const IMAGE_SKILLS = new Set<string>(["image_vision", "image_generate", "image_edit"]);
-const AUDIO_SKILLS = new Set<string>(["audio_transcribe", "audio_synthesize"]);
 /** 基本技能（与后端 base_skill_names 一致，由 tool 转换），API 未返回时用此兜底 */
 const FALLBACK_BASE_SKILL_NAMES = ["run_cmd", "read_file", "write_file", "list_dir", "make_dir", "remove_file"];
+const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
+  archive_basic: { zh: "压缩、解压和整理归档文件。", en: "Compress, extract, and organize archives." },
+  audio_synthesize: { zh: "把文字转成语音。", en: "Turn text into speech." },
+  audio_transcribe: { zh: "把语音转成文字。", en: "Turn speech into text." },
+  config_guard: { zh: "检查配置是否缺项或明显不合理。", en: "Check configs for missing or risky values." },
+  crypto: { zh: "查看币价、账户、订单和交易相关能力。", en: "Handle crypto quotes, balances, orders, and trading tasks." },
+  db_basic: { zh: "查看和处理数据库里的基础数据。", en: "Inspect and work with basic database data." },
+  docker_basic: { zh: "查看和操作 Docker 容器、镜像与服务。", en: "Inspect and control Docker containers, images, and services." },
+  fs_search: { zh: "在文件里搜索关键词或定位内容。", en: "Search files and locate content." },
+  git_basic: { zh: "查看提交、分支和常见 Git 操作。", en: "Inspect commits, branches, and common Git actions." },
+  health_check: { zh: "快速检查系统和服务是否正常。", en: "Run quick health checks for the system and services." },
+  http_basic: { zh: "发起 HTTP 请求并查看返回结果。", en: "Send HTTP requests and inspect responses." },
+  image_edit: { zh: "修改、扩图或局部编辑图片。", en: "Edit, extend, or patch images." },
+  image_generate: { zh: "根据描述生成图片。", en: "Generate images from prompts." },
+  image_vision: { zh: "识别和理解图片内容。", en: "Analyze and understand image content." },
+  install_module: { zh: "安装或补齐项目依赖模块。", en: "Install or restore project dependencies." },
+  list_dir: { zh: "查看目录结构和文件列表。", en: "List directories and files." },
+  log_analyze: { zh: "分析日志，定位错误和异常。", en: "Analyze logs and find issues." },
+  make_dir: { zh: "创建新目录。", en: "Create directories." },
+  package_manager: { zh: "处理包管理、安装与版本问题。", en: "Manage packages, installs, and versions." },
+  process_basic: { zh: "查看和管理进程。", en: "Inspect and manage processes." },
+  read_file: { zh: "读取文件内容。", en: "Read file contents." },
+  remove_file: { zh: "删除文件。", en: "Remove files." },
+  rss_fetch: { zh: "抓取和整理 RSS 资讯。", en: "Fetch and summarize RSS feeds." },
+  run_cmd: { zh: "运行命令行命令。", en: "Run shell commands." },
+  service_control: { zh: "启动、停止或重启服务。", en: "Start, stop, or restart services." },
+  system_basic: { zh: "查看系统信息和基础环境。", en: "Inspect system information and environment basics." },
+  write_file: { zh: "写入或修改文件内容。", en: "Write or update file contents." },
+  x: { zh: "一个保留的扩展技能入口。", en: "A reserved extension skill entry point." },
+};
 
 const STORAGE_KEYS = {
   baseUrl: "rustclaw.monitor.baseUrl",
@@ -344,8 +392,18 @@ export default function App() {
   const [skillsConfigData, setSkillsConfigData] = useState<SkillsConfigResponse | null>(null);
   const [skillSwitchDraft, setSkillSwitchDraft] = useState<Record<string, boolean>>({});
   const [skillSwitchSaving, setSkillSwitchSaving] = useState(false);
+  const [skillUninstallingName, setSkillUninstallingName] = useState<string | null>(null);
   const [skillSwitchSaveMessage, setSkillSwitchSaveMessage] = useState<string | null>(null);
   const [skillsSearchQuery, setSkillsSearchQuery] = useState("");
+  const [skillImportSource, setSkillImportSource] = useState("");
+  const [skillImportLoading, setSkillImportLoading] = useState(false);
+  const [skillImportError, setSkillImportError] = useState<string | null>(null);
+  const [skillImportMessage, setSkillImportMessage] = useState<string | null>(null);
+  const [skillImportPreview, setSkillImportPreview] = useState<ImportedSkillResponse | null>(null);
+  const [recentImportedSkillName, setRecentImportedSkillName] = useState<string | null>(null);
+  const [localImportPickerOpen, setLocalImportPickerOpen] = useState(false);
+  const folderImportInputRef = useRef<HTMLInputElement | null>(null);
+  const fileImportInputRef = useRef<HTMLInputElement | null>(null);
   const [llmConfigLoading, setLlmConfigLoading] = useState(false);
   const [llmConfigError, setLlmConfigError] = useState<string | null>(null);
   const [llmConfigData, setLlmConfigData] = useState<LlmConfigResponse | null>(null);
@@ -872,6 +930,13 @@ export default function App() {
     }
   };
 
+  const scrollToSkillRow = (skillName: string) => {
+    window.setTimeout(() => {
+      const row = document.getElementById(`skill-row-${skillName}`);
+      row?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 180);
+  };
+
   const saveSkillSwitches = async () => {
     setSkillSwitchSaving(true);
     setSkillSwitchSaveMessage(null);
@@ -888,10 +953,180 @@ export default function App() {
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `技能配置保存失败 (${res.status})`);
       }
-      setSkillSwitchSaveMessage(
+      const restartRequired = body.data?.restart_required ?? true;
+      let savedMessage = t(
+        "技能开关已保存到 config.toml。",
+        "Skill switches were saved to config.toml.",
+      );
+      if (restartRequired) {
+        const confirmed = window.confirm(
+          t(
+            "这些变更需要重启 RustClaw 才会生效。现在就自动重启吗？",
+            "These changes need a RustClaw restart to take effect. Restart now?",
+          ),
+        );
+        if (confirmed) {
+          savedMessage = t(
+            "技能开关已保存，正在重启 RustClaw，请稍候。",
+            "Skill switches were saved. Restarting RustClaw now.",
+          );
+        } else {
+          savedMessage = t(
+            "技能开关已保存。你可以稍后再重启 RustClaw 让它生效。",
+            "Skill switches were saved. You can restart RustClaw later to apply them.",
+          );
+        }
+        setSkillSwitchSaveMessage(savedMessage);
+        await fetchSkillsConfig();
+        await fetchSkills();
+        if (confirmed) {
+          const restarted = await restartSystem();
+          setSkillSwitchSaveMessage(
+            restarted
+              ? t("RustClaw 已重启完成，技能开关现在已经生效。", "RustClaw restarted successfully. Skill switches are now active.")
+              : t("重启请求已经发出，请稍后刷新确认技能开关是否生效。", "Restart was requested. Please refresh shortly to confirm the skill switches are active."),
+          );
+        }
+        return;
+      }
+      setSkillSwitchSaveMessage(savedMessage);
+      await fetchSkillsConfig();
+      await fetchSkills();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setSkillsConfigError(message);
+    } finally {
+      setSkillSwitchSaving(false);
+    }
+  };
+
+  const importExternalSkill = async () => {
+    const source = skillImportSource.trim();
+    if (!source) {
+      setSkillImportError(t("请先输入 skill 链接或本地目录。", "Please enter a skill link or local bundle path first."));
+      return;
+    }
+    setSkillImportLoading(true);
+    setSkillImportError(null);
+    setSkillImportMessage(null);
+    try {
+      const res = await apiFetch(`/v1/skills/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source, enabled: true }),
+      });
+      const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `技能导入失败 (${res.status})`);
+      }
+      setSkillImportPreview(body.data);
+      setRecentImportedSkillName(body.data.skill_name);
+      setSkillImportMessage(
         t(
-          "技能开关已保存到 config.toml（需重启 clawd 生效）",
-          "Skill switches saved to config.toml (restart clawd to apply)",
+          `已导入 ${body.data.display_name}。下一步：在下面找到高亮的 ${body.data.skill_name}，点“设为开启”，再点“保存开关”。`,
+          `${body.data.display_name} was imported. Next: find the highlighted ${body.data.skill_name} below, choose Enable, then click Save Switches.`,
+        ),
+      );
+      setSkillsSearchQuery(body.data.skill_name);
+      await fetchSkillsConfig();
+      await fetchSkills();
+      scrollToSkillRow(body.data.skill_name);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setSkillImportError(message);
+    } finally {
+      setSkillImportLoading(false);
+    }
+  };
+
+  const uploadImportedSkillFiles = async (fileList: FileList | null) => {
+    const files = fileList ? Array.from(fileList) as BrowserFileWithPath[] : [];
+    if (files.length === 0) {
+      return;
+    }
+    const firstFile = files[0];
+    const guessedBundleName =
+      firstFile.webkitRelativePath?.split("/")[0]?.trim() ||
+      firstFile.name.replace(/\.[^.]+$/, "").trim() ||
+      "uploaded-skill";
+    const formData = new FormData();
+    formData.append("bundle_name", guessedBundleName);
+    formData.append("enabled", "true");
+    for (const file of files) {
+      const relativePath = file.webkitRelativePath?.trim() || file.name;
+      formData.append("files", file, relativePath);
+    }
+
+    setSkillImportLoading(true);
+    setSkillImportError(null);
+    setSkillImportMessage(null);
+    try {
+      const res = await apiFetch(`/v1/skills/import/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `本地导入失败 (${res.status})`);
+      }
+      setSkillImportPreview(body.data);
+      setRecentImportedSkillName(body.data.skill_name);
+      setSkillImportMessage(
+        t(
+          `已导入 ${body.data.display_name}。下一步：在下面找到高亮的 ${body.data.skill_name}，点“设为开启”，再点“保存开关”。`,
+          `${body.data.display_name} was imported. Next: find the highlighted ${body.data.skill_name} below, choose Enable, then click Save Switches.`,
+        ),
+      );
+      setSkillsSearchQuery(body.data.skill_name);
+      await fetchSkillsConfig();
+      await fetchSkills();
+      scrollToSkillRow(body.data.skill_name);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setSkillImportError(message);
+    } finally {
+      setSkillImportLoading(false);
+      setLocalImportPickerOpen(false);
+      if (folderImportInputRef.current) folderImportInputRef.current.value = "";
+      if (fileImportInputRef.current) fileImportInputRef.current.value = "";
+    }
+  };
+
+  const uninstallExternalSkill = async (skillName: string) => {
+    const confirmed = window.confirm(
+      t(
+        `卸载 ${skillName} 后，会删除它导入进来的文件和注册信息。确认继续吗？`,
+        `Uninstall ${skillName}? Its imported files and registration will be removed.`,
+      ),
+    );
+    if (!confirmed) return;
+    setSkillUninstallingName(skillName);
+    setSkillImportError(null);
+    setSkillImportMessage(null);
+    setSkillsConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/skills/uninstall`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skill_name: skillName }),
+      });
+      const body = (await res.json()) as ApiResponse<{ skill_name: string }>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `技能卸载失败 (${res.status})`);
+      }
+      if (recentImportedSkillName === skillName) {
+        setRecentImportedSkillName(null);
+      }
+      if (skillImportPreview?.skill_name === skillName) {
+        setSkillImportPreview(null);
+      }
+      if (skillsSearchQuery.trim().toLowerCase() === skillName.toLowerCase()) {
+        setSkillsSearchQuery("");
+      }
+      setSkillImportMessage(
+        t(
+          `${skillName} 已卸载，现在已经从技能列表里移除。`,
+          `${skillName} was uninstalled and removed from the skill list.`,
         ),
       );
       await fetchSkillsConfig();
@@ -900,7 +1135,7 @@ export default function App() {
       const message = err instanceof Error ? err.message : "未知错误";
       setSkillsConfigError(message);
     } finally {
-      setSkillSwitchSaving(false);
+      setSkillUninstallingName(null);
     }
   };
 
@@ -962,18 +1197,46 @@ export default function App() {
           "Restart requested. The page may disconnect briefly and then recover.",
         ),
       );
-      [4000, 8000, 12000].forEach((delayMs) => {
-        window.setTimeout(() => {
-          void fetchHealth();
-          void fetchLlmConfig();
-          void fetchSkillsConfig();
-          void fetchSkills();
-        }, delayMs);
-      });
-      window.setTimeout(() => setSystemRestarting(false), 14000);
+      await sleep(1800);
+      let recovered = false;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        try {
+          const probe = await apiFetch(`/v1/health`);
+          const body = (await probe.json()) as ApiResponse<HealthResponse>;
+          if (probe.ok && body.ok && body.data) {
+            recovered = true;
+            setHealth(body.data);
+            setError(null);
+            break;
+          }
+        } catch {
+          // The restart window is expected to cause transient failures while clawd comes back up.
+        }
+        await sleep(1500);
+      }
+
+      if (recovered) {
+        await Promise.allSettled([fetchLlmConfig(), fetchSkillsConfig(), fetchSkills()]);
+        setSystemRestartMessage(
+          t(
+            "RustClaw 已重启完成，当前页面已经恢复。",
+            "RustClaw restarted successfully and the page is back online.",
+          ),
+        );
+      } else {
+        setSystemRestartMessage(
+          t(
+            "重启请求已经发出，但暂时还没等到服务恢复。请稍后手动刷新。",
+            "Restart was requested, but the service has not recovered yet. Please refresh shortly.",
+          ),
+        );
+      }
+      setSystemRestarting(false);
+      return recovered;
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setSystemRestartMessage(`${t("重启失败", "Restart failed")}: ${message}`);
+      return false;
     } finally {
       if (!restartAccepted) {
         setSystemRestarting(false);
@@ -1479,19 +1742,9 @@ export default function App() {
     const useList = list && list.length > 0 ? list : FALLBACK_BASE_SKILL_NAMES;
     return new Set<string>(useList);
   }, [skillsConfigData?.base_skill_names]);
-  const baseSkillsList = useMemo(
-    () => managedSkills.filter((n) => baseSkillNamesSet.has(n)),
-    [managedSkills, baseSkillNamesSet],
-  );
-  const imageSkillsList = useMemo(() => managedSkills.filter((n) => IMAGE_SKILLS.has(n)), [managedSkills]);
-  const audioSkillsList = useMemo(() => managedSkills.filter((n) => AUDIO_SKILLS.has(n)), [managedSkills]);
-  const otherSkillsList = useMemo(
-    () =>
-      managedSkills.filter(
-        (n) => !baseSkillNamesSet.has(n) && !IMAGE_SKILLS.has(n) && !AUDIO_SKILLS.has(n),
-      ),
-    [managedSkills, baseSkillNamesSet],
-  );
+  const externalSkillNamesSet = useMemo(() => {
+    return new Set<string>((skillsConfigData?.external_skill_names ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
+  }, [skillsConfigData?.external_skill_names]);
   const baseEnabledSkills = useMemo(() => {
     return new Set<string>((skillsConfigData?.skills_list ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
   }, [skillsConfigData]);
@@ -1556,74 +1809,29 @@ export default function App() {
     return llmConfigData.restart_required || runtimeVendor !== savedVendor || runtimeModel !== savedModel;
   }, [llmConfigData]);
   const normalizedSkillsSearchQuery = useMemo(() => skillsSearchQuery.trim().toLowerCase(), [skillsSearchQuery]);
-  const filteredImageSkills = useMemo(
-    () => imageSkillsList.filter((name) => !normalizedSkillsSearchQuery || name.toLowerCase().includes(normalizedSkillsSearchQuery)),
-    [imageSkillsList, normalizedSkillsSearchQuery],
+  const filteredManagedSkills = useMemo(
+    () => managedSkills.filter((name) => !normalizedSkillsSearchQuery || name.toLowerCase().includes(normalizedSkillsSearchQuery)),
+    [managedSkills, normalizedSkillsSearchQuery],
   );
-  const filteredAudioSkills = useMemo(
-    () => audioSkillsList.filter((name) => !normalizedSkillsSearchQuery || name.toLowerCase().includes(normalizedSkillsSearchQuery)),
-    [audioSkillsList, normalizedSkillsSearchQuery],
-  );
-  const filteredOtherSkills = useMemo(
-    () => otherSkillsList.filter((name) => !normalizedSkillsSearchQuery || name.toLowerCase().includes(normalizedSkillsSearchQuery)),
-    [otherSkillsList, normalizedSkillsSearchQuery],
-  );
-  const filteredBaseSkills = useMemo(
-    () => baseSkillsList.filter((name) => !normalizedSkillsSearchQuery || name.toLowerCase().includes(normalizedSkillsSearchQuery)),
-    [baseSkillsList, normalizedSkillsSearchQuery],
-  );
+  useEffect(() => {
+    if (!skillImportPreview) return;
+    if (managedSkills.includes(skillImportPreview.skill_name)) return;
+    setSkillImportPreview(null);
+    if (recentImportedSkillName === skillImportPreview.skill_name) {
+      setRecentImportedSkillName(null);
+    }
+  }, [managedSkills, recentImportedSkillName, skillImportPreview]);
   const visibleRuntimeSkills = useMemo(
     () => (skillsData?.skills ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)),
     [skillsData],
   );
-  const pendingRestartSkillCount = useMemo(() => {
-    return managedSkills.filter((name) => visibleRuntimeSkills.includes(name) !== configuredEnabledSkills.has(name)).length;
-  }, [configuredEnabledSkills, managedSkills, visibleRuntimeSkills]);
-  const skillSections = useMemo(
-    () =>
-      [
-        {
-          id: "other",
-          title: t("常用技能", "Common skills"),
-          helper: t("大多数业务能力都在这里，通常是你最常改的一组。", "Most business-facing capabilities live here, so this is usually the group you change most."),
-          items: filteredOtherSkills,
-          total: otherSkillsList.length,
-          defaultOpen: true,
-          caution: null,
-        },
-        {
-          id: "image",
-          title: t("图像技能", "Image skills"),
-          helper: t("和识图、生成图、改图有关的能力。", "Capabilities related to image understanding, generation, and editing."),
-          items: filteredImageSkills,
-          total: imageSkillsList.length,
-          defaultOpen: false,
-          caution: null,
-        },
-        {
-          id: "audio",
-          title: t("语音技能", "Audio skills"),
-          helper: t("和语音转写、语音合成有关的能力。", "Capabilities related to transcription and speech synthesis."),
-          items: filteredAudioSkills,
-          total: audioSkillsList.length,
-          defaultOpen: false,
-          caution: null,
-        },
-        {
-          id: "base",
-          title: t("基础技能", "Base skills"),
-          helper: t("这是 RustClaw 的底层读写与执行能力，不建议随意关闭。", "These are RustClaw's low-level read/write and execution capabilities, and they are not recommended to disable."),
-          items: filteredBaseSkills,
-          total: baseSkillsList.length,
-          defaultOpen: false,
-          caution: t(
-            "不建议关闭。由原 tool 转换的系统基本能力，关闭后读写/执行/列目录/建目录等将不可用。",
-            "Not recommended to disable. Core skills (from tools); file, command, and directory operations will be unavailable if disabled.",
-          ),
-        },
-      ].filter((section) => section.total > 0 && (!normalizedSkillsSearchQuery || section.items.length > 0)),
-    [filteredAudioSkills, filteredBaseSkills, filteredImageSkills, filteredOtherSkills, imageSkillsList.length, audioSkillsList.length, otherSkillsList.length, baseSkillsList.length, normalizedSkillsSearchQuery, lang],
-  );
+  const describeSkill = (name: string) =>
+    SKILL_SUMMARY[name]
+      ? t(SKILL_SUMMARY[name].zh, SKILL_SUMMARY[name].en)
+      : t(
+          "这是一个额外接入的技能。先在这里设定开关，保存后才会真正生效。",
+          "This is an additional integrated skill. Choose its switch here and save to apply it.",
+        );
   const applyLlmVendorDraft = (nextVendor: string) => {
     const vendorInfo = llmConfigData?.vendors.find((vendor) => vendor.name === nextVendor);
     setLlmDraftVendor(nextVendor);
@@ -1979,8 +2187,8 @@ export default function App() {
         </aside>
 
         <main className="space-y-4">
-          <section className={`theme-panel ${isDashboardPage ? "p-5 sm:p-6" : "px-4 py-3.5 sm:px-5 sm:py-4"}`}>
-            {isDashboardPage ? (
+          {isDashboardPage ? (
+            <section className="theme-panel p-5 sm:p-6">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                 <div>
                   <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("页面", "Page")}</p>
@@ -1988,41 +2196,13 @@ export default function App() {
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs text-white/70 sm:text-sm">
                   <div className="theme-meta-pill">
-                    <span className="text-white/45">{t("API", "API")}</span>
-                    <span className="ml-2 font-mono text-white/80">{apiBase}</span>
-                  </div>
-                  <div className="theme-meta-pill">
-                    <span className="text-white/45">{t("刷新", "Refresh")}</span>
-                    <span className="ml-2 text-white/80">
-                      {pollingSeconds > 0 ? t(`每 ${pollingSeconds} 秒`, `Every ${pollingSeconds}s`) : t("已关闭", "Off")}
-                    </span>
-                  </div>
-                  <div className="theme-meta-pill">
                     <span className="text-white/45">{t("下一步", "Next")}</span>
                     <span className="ml-2 text-white/80">{suggestedNextStep.title}</span>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                <div className="min-w-0">
-                  <h2 className="text-lg font-semibold tracking-tight sm:text-xl">{currentPageMeta.title}</h2>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs text-white/70">
-                  <div className="theme-meta-pill">
-                    <span className="text-white/45">{t("API", "API")}</span>
-                    <span className="ml-2 font-mono text-white/80">{apiBase}</span>
-                  </div>
-                  <div className="theme-meta-pill">
-                    <span className="text-white/45">{t("刷新", "Refresh")}</span>
-                    <span className="ml-2 text-white/80">
-                      {pollingSeconds > 0 ? t(`每 ${pollingSeconds} 秒`, `Every ${pollingSeconds}s`) : t("已关闭", "Off")}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
+            </section>
+          ) : null}
 
           {isDashboardPage ? (
             <>
@@ -3000,129 +3180,180 @@ export default function App() {
 
           {currentPage === "skills" ? (
             <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-              <div className="mb-5 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-                <div className={`rounded-2xl border px-4 py-4 sm:px-5 ${pendingRestartSkillCount > 0 ? "border-amber-500/25 bg-amber-500/10" : "border-emerald-500/25 bg-emerald-500/10"}`}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="mb-5">
+                <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4 sm:p-5">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-[10px] uppercase tracking-[0.28em] text-white/50">{t("技能状态", "Skill status")}</p>
-                      <h3 className="mt-2 text-base font-semibold">
-                        {pendingRestartSkillCount > 0
-                          ? t("有技能改动已经保存，还差重启才能真正切换", "Some saved skill changes still need a restart to apply")
-                          : t("运行中的技能和已保存开关一致", "Running skills match the saved switches")}
+                      <p className="text-[10px] uppercase tracking-[0.28em] text-sky-100/70">{t("导入外部技能", "Import External Skills")}</p>
+                      <h3 className="mt-2 text-base font-semibold text-white">
+                        {t("把别人做好的技能接入进来，扩展 RustClaw 的能力。", "Bring in ready-made skills to extend what RustClaw can do.")}
                       </h3>
+                      <p className="mt-2 text-sm text-white/65">
+                        {t(
+                          "你可以贴一个技能链接，也可以直接上传本地技能文件夹或文件。导入完成后，再决定要不要启用它。",
+                          "You can paste a skill link, or directly upload a local skill folder or file. After import, you can decide whether to enable it.",
+                        )}
+                      </p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={
-                          pendingRestartSkillCount > 0
-                            ? "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-200"
-                            : "rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200"
-                        }
+                    <Sparkles className="mt-1 h-4 w-4 shrink-0 text-sky-200" />
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                    <label className="block space-y-2">
+                      <span className="text-[10px] uppercase tracking-widest text-sky-100/70">{t("技能链接或文件夹", "Skill link or folder")}</span>
+                      <input
+                        className="theme-input"
+                        value={skillImportSource}
+                        onChange={(e) => setSkillImportSource(e.target.value)}
+                        placeholder={t(
+                          "例如一个技能链接，或一个本地技能文件夹",
+                          "For example, a skill link or a local skill folder",
+                        )}
+                      />
+                    </label>
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        onClick={() => void importExternalSkill()}
+                        disabled={skillImportLoading}
+                        className="theme-accent-btn px-4 py-2.5 text-sm"
                       >
-                        {pendingRestartSkillCount > 0 ? t("待重启生效", "Restart required") : t("已同步", "In sync")}
-                      </span>
-                      {pendingRestartSkillCount > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => void restartSystem()}
-                          disabled={systemRestarting}
-                          className="theme-accent-btn px-3 py-2 text-xs"
-                        >
-                          {systemRestarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                          {t("立即重启", "Restart now")}
-                        </button>
+                        {skillImportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        {t("导入 Skill", "Import Skill")}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <div className="relative inline-flex">
+                      <button
+                        type="button"
+                        onClick={() => setLocalImportPickerOpen((prev) => !prev)}
+                        disabled={skillImportLoading}
+                        className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs text-white/85 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {t("选择本地技能", "Choose Local Skill")}
+                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${localImportPickerOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      {localImportPickerOpen ? (
+                        <div className="absolute left-0 top-full z-20 mt-2 min-w-[12rem] rounded-xl border border-white/10 bg-[#12151f] p-1.5 shadow-2xl">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLocalImportPickerOpen(false);
+                              folderImportInputRef.current?.click();
+                            }}
+                            className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs text-white/85 hover:bg-white/5"
+                          >
+                            <span>{t("从文件夹导入", "Import Folder")}</span>
+                            <span className="text-[10px] text-white/40">{t("适合整个技能包", "Full bundle")}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLocalImportPickerOpen(false);
+                              fileImportInputRef.current?.click();
+                            }}
+                            className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs text-white/85 hover:bg-white/5"
+                          >
+                            <span>{t("从文件导入", "Import File")}</span>
+                            <span className="text-[10px] text-white/40">{t("适合单个 SKILL.md", "Single file")}</span>
+                          </button>
+                        </div>
                       ) : null}
                     </div>
+                    <input
+                      ref={folderImportInputRef}
+                      type="file"
+                      className="hidden"
+                      multiple
+                      onChange={(e) => void uploadImportedSkillFiles(e.target.files)}
+                      {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+                    />
+                    <input
+                      ref={fileImportInputRef}
+                      type="file"
+                      className="hidden"
+                      multiple
+                      onChange={(e) => void uploadImportedSkillFiles(e.target.files)}
+                    />
                   </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="theme-meta-pill !rounded-xl !px-3 !py-2">{t("运行中", "Runtime")}: {visibleRuntimeSkills.length}</span>
-                    <span className="theme-meta-pill !rounded-xl !px-3 !py-2">{t("可管理", "Managed")}: {managedSkills.length}</span>
-                    <span className="theme-meta-pill !rounded-xl !px-3 !py-2">{t("待重启", "Pending restart")}: {pendingRestartSkillCount}</span>
-                  </div>
+                  {skillImportError ? (
+                    <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                      {skillImportError}
+                    </p>
+                  ) : null}
+                  {skillImportMessage ? (
+                    <p className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                      {skillImportMessage}
+                    </p>
+                  ) : null}
                   {systemRestartMessage ? (
-                    <p className="mt-4 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80">
+                    <p className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80">
                       {systemRestartMessage}
                     </p>
                   ) : null}
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <label className="block space-y-2">
-                    <span className="text-[10px] uppercase tracking-widest text-white/50">{t("搜索技能", "Search skills")}</span>
-                    <input
-                      className="theme-input"
-                      value={skillsSearchQuery}
-                      onChange={(e) => setSkillsSearchQuery(e.target.value)}
-                      placeholder={t("输入技能名，例如 crypto / image / audio", "Type a skill name like crypto / image / audio")}
-                    />
-                  </label>
+                  {skillImportPreview ? (
+                    <div className="mt-3 rounded-lg border border-white/10 bg-[#12151f] px-3 py-3 text-xs text-white/75">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-md border border-sky-400/30 bg-sky-500/10 px-2 py-1 text-sky-200">{skillImportPreview.skill_name}</span>
+                          <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/70">{skillImportPreview.external_kind}</span>
+                          {skillImportPreview.runtime ? (
+                            <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/70">{skillImportPreview.runtime}</span>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSkillImportPreview(null)}
+                          className="rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-white/65 hover:bg-white/10 hover:text-white/85"
+                        >
+                          {t("收起", "Dismiss")}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-sm text-white/85">{skillImportPreview.description}</p>
+                      <p className="mt-2 text-sm text-emerald-200">
+                        {t(
+                          "下面的技能列表里已经帮你定位到它了。点“设为开启”，再点右上角“保存开关”，确认后系统会自动重启。",
+                          "It is now highlighted in the skill list below. Choose Enable, then click Save Switches. The system will restart automatically after you confirm.",
+                        )}
+                      </p>
+                      {skillImportPreview.require_bins.length > 0 ? (
+                        <p className="mt-2 text-white/55">{t("需要这些本地工具", "Needs these local tools")}: {skillImportPreview.require_bins.join(", ")}</p>
+                      ) : null}
+                      {skillImportPreview.require_py_modules.length > 0 ? (
+                        <p className="mt-1 text-white/55">{t("还需要这些 Python 依赖", "Also needs these Python packages")}: {skillImportPreview.require_py_modules.join(", ")}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-base font-semibold">{tSlash("当前运行中的技能 / Runtime Skills")}</h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => void fetchSkills()}
-                    disabled={skillsLoading}
-                    className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {skillsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    {tSlash("刷新运行态 / Refresh Runtime")}
-                  </button>
-                  <button
-                    onClick={() => void fetchSkillsConfig()}
-                    disabled={skillsConfigLoading}
-                    className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {skillsConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    {tSlash("刷新配置 / Refresh Config")}
-                  </button>
-                </div>
-              </div>
-              <p className="text-xs text-white/50">
-                {tSlash("技能数量 / Skill Count")}: {visibleRuntimeSkills.length}
-                {skillsData?.skill_runner_path ? ` | skill-runner: ${skillsData.skill_runner_path}` : ""}
-              </p>
-              {skillsError ? (
-                <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                  {tSlash("技能读取失败 / Skills fetch failed")}: {skillsError}
-                </p>
-              ) : null}
-              <div className="mt-3 flex flex-wrap gap-2">
-                {visibleRuntimeSkills.length > 0 ? (
-                  visibleRuntimeSkills.map((name) => (
-                    <span key={name} className="rounded-md border border-sky-400/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-200">
-                      {name}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs text-white/50">{skillsLoading ? tSlash("加载中... / Loading...") : "--"}</span>
-                )}
-              </div>
-
-              <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <h4 className="text-sm font-semibold">{tSlash("技能开关（写入 config.toml）/ Skill Switches (config.toml)")}</h4>
-                  <button
-                    onClick={() => void saveSkillSwitches()}
-                    disabled={skillSwitchSaving || skillsConfigLoading || !hasUnsavedSkillSwitchChanges}
-                    className="theme-accent-btn px-3 py-2 text-xs"
-                  >
-                    {skillSwitchSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
-                    {tSlash("保存开关 / Save Switches")}
-                  </button>
+                  <h4 className="text-sm font-semibold">{t("技能开关", "Skill Switches")}</h4>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => void fetchSkillsConfig()}
+                      disabled={skillsConfigLoading}
+                      className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {skillsConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      {tSlash("刷新配置 / Refresh Config")}
+                    </button>
+                    <button
+                      onClick={() => void saveSkillSwitches()}
+                      disabled={skillSwitchSaving || skillsConfigLoading || !hasUnsavedSkillSwitchChanges}
+                      className="theme-accent-btn px-3 py-2 text-xs"
+                    >
+                      {skillSwitchSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
+                      {tSlash("保存开关 / Save Switches")}
+                    </button>
+                  </div>
                 </div>
                 {hasUnsavedSkillSwitchChanges ? (
                   <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
                     {t("你有未保存的技能开关变更，请点击“保存开关”。", "You have unsaved skill switch changes. Click \"Save Switches\".")}
                   </p>
-                ) : (
-                  <p className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/60">
-                    {t("当前开关变更已保存。", "All skill switch changes are saved.")}
-                  </p>
-                )}
+                ) : null}
                 {skillsConfigError ? (
                   <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                     {tSlash("配置读取/保存失败 / Config read/save failed")}: {skillsConfigError}
@@ -3133,41 +3364,86 @@ export default function App() {
                     {skillSwitchSaveMessage}
                   </p>
                 ) : null}
+                <p className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/65">
+                  {t(
+                    "这里按名称统一列出所有技能，不再强行分类。按钮只是先选择；点击“保存开关”后会提示重启，确认后系统会自动帮你重启并生效。",
+                    "All skills are listed together by name here. Buttons only stage your choice first; when you click Save Switches, you will be asked to restart and the system will restart automatically after you confirm.",
+                  )}
+                </p>
 
                 {(() => {
                   const renderSkillRow = (name: string) => {
                     const runtimeEnabled = visibleRuntimeSkills.includes(name);
                     const configuredEnabled = configuredEnabledSkills.has(name);
                     const pendingApply = runtimeEnabled !== configuredEnabled;
+                    const isRecentImport = recentImportedSkillName === name;
+                    const isExternalSkill = externalSkillNamesSet.has(name);
+                    const isUninstalling = skillUninstallingName === name;
+                    const statusMeta = [
+                      baseSkillNamesSet.has(name) ? t("系统基础能力", "Core capability") : null,
+                      isExternalSkill ? t("外部导入", "Imported") : null,
+                    ].filter(Boolean) as string[];
                     return (
                       <label
+                        id={`skill-row-${name}`}
                         key={name}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-[#12151f] px-3 py-2 text-xs"
+                        className={
+                          isRecentImport
+                            ? "flex flex-col gap-3 rounded-lg border border-sky-400/40 bg-sky-500/10 px-3 py-3 text-xs shadow-[0_0_0_1px_rgba(56,189,248,0.18)] sm:flex-row sm:items-start sm:justify-between"
+                            : "flex flex-col gap-3 rounded-lg border border-white/10 bg-[#12151f] px-3 py-3 text-xs sm:flex-row sm:items-start sm:justify-between"
+                        }
                       >
-                        <span className="min-w-0 truncate text-white/85">{name}</span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          <span
-                            className={
-                              configuredEnabled
-                                ? "rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-200"
-                                : "rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-200"
-                            }
-                          >
-                            {configuredEnabled ? t("已开启", "enabled") : t("已关闭", "disabled")}
-                          </span>
-                          {pendingApply ? (
-                            <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-200">
-                              {t("待重启生效", "pending restart")}
-                            </span>
+                        <span className="min-w-0 flex min-h-[8.5rem] flex-1 flex-col self-stretch">
+                          <span className="block break-words text-sm text-white/90">{name}</span>
+                          <span className="mt-1 block text-[11px] leading-5 text-white/50">{describeSkill(name)}</span>
+                          {statusMeta.length > 0 ? (
+                            <span className="mt-3 block text-[11px] leading-5 text-white/35">{statusMeta.join(" · ")}</span>
                           ) : null}
+                          <span className="mt-auto pt-4">
+                            <span
+                              className={
+                                configuredEnabled
+                                  ? "inline-flex items-center gap-2 rounded-full border border-emerald-500/35 bg-emerald-500/12 px-2.5 py-1 text-[11px] font-medium text-emerald-200"
+                                  : "inline-flex items-center gap-2 rounded-full border border-amber-500/35 bg-amber-500/12 px-2.5 py-1 text-[11px] font-medium text-amber-200"
+                              }
+                            >
+                              <span
+                                className={
+                                  configuredEnabled
+                                    ? "h-1.5 w-1.5 rounded-full bg-emerald-300"
+                                    : "h-1.5 w-1.5 rounded-full bg-amber-300"
+                                }
+                              />
+                              {configuredEnabled ? t("当前已开启", "Currently enabled") : t("当前已关闭", "Currently disabled")}
+                            </span>
+                            {pendingApply ? (
+                              <span className="mt-2 block text-[11px] leading-5 text-amber-200/85">
+                                {t("保存后会自动重启生效", "Will apply after save and restart")}
+                              </span>
+                            ) : null}
+                          </span>
+                        </span>
+                        <span className="flex flex-wrap items-center gap-2 sm:max-w-[55%] sm:justify-end">
                           <button
                             type="button"
                             onClick={() => toggleSkillEnabled(name, !configuredEnabled)}
                             className="rounded border border-white/20 bg-white/5 px-2 py-1 text-[10px] text-white/80 hover:bg-white/10"
-                            title={configuredEnabled ? t("点击关闭技能", "Click to disable skill") : t("点击开启技能", "Click to enable skill")}
+                            title={configuredEnabled ? t("先设为关闭，保存后才会真正关闭", "Choose Disable first. It only turns off after you save.") : t("先设为开启，保存后才会真正开启", "Choose Enable first. It only turns on after you save.")}
                           >
-                            {configuredEnabled ? t("关闭", "Disable") : t("开启", "Enable")}
+                            {configuredEnabled ? t("关闭", "Disable") : isRecentImport ? t("启用这个技能", "Enable this skill") : t("启用", "Enable")}
                           </button>
+                          {isExternalSkill ? (
+                            <button
+                              type="button"
+                              onClick={() => void uninstallExternalSkill(name)}
+                              disabled={isUninstalling}
+                              className="inline-flex items-center gap-1 rounded border border-red-500/25 bg-red-500/10 px-2 py-1 text-[10px] text-red-100 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                              title={t("卸载这个外部技能，并删除它导入的文件", "Uninstall this imported skill and delete its files")}
+                            >
+                              {isUninstalling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                              {t("卸载", "Uninstall")}
+                            </button>
+                          ) : null}
                         </span>
                       </label>
                     );
@@ -3175,36 +3451,35 @@ export default function App() {
 
                   return (
                     <div className="mt-4 space-y-4">
-                      {skillSections.map((section) => (
-                        <details
-                          key={section.id}
-                          className="group rounded-2xl border border-white/10 bg-[#12151f] p-4"
-                          open={Boolean(normalizedSkillsSearchQuery) || section.defaultOpen}
-                        >
-                          <summary className="flex cursor-pointer list-none items-start gap-3">
-                            <div className="min-w-0">
-                              <h5 className="text-sm font-semibold text-white">{section.title}</h5>
-                            </div>
-                            <div className="ml-auto flex shrink-0 items-center gap-2">
-                              <span className="theme-meta-pill !rounded-xl !px-2.5 !py-1 text-[11px]">
-                                {section.items.length}/{section.total}
-                              </span>
-                              <span className="text-[11px] font-medium text-white/45">
-                                <span className="group-open:hidden">{t("点击展开", "Click to expand")}</span>
-                                <span className="hidden group-open:inline">{t("点击收起", "Click to collapse")}</span>
-                              </span>
-                              <ChevronDown className="h-4 w-4 text-white/55 transition group-open:rotate-180" />
-                            </div>
-                          </summary>
-                          {section.caution ? (
-                            <p className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                              {section.caution}
-                            </p>
-                          ) : null}
-                          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{section.items.map(renderSkillRow)}</div>
-                        </details>
-                      ))}
-                      {normalizedSkillsSearchQuery && skillSections.length === 0 ? (
+                      <div className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <h5 className="text-sm font-semibold text-white">{t("全部技能", "All skills")}</h5>
+                          <span className="theme-meta-pill !rounded-xl !px-2.5 !py-1 text-[11px]">
+                            {filteredManagedSkills.length}/{managedSkills.length}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-white/50">
+                          {t(
+                            "按名称统一管理。后面导入的新技能也会直接出现在这里。",
+                            "All skills are managed together by name. Newly imported skills will also appear here.",
+                          )}
+                        </p>
+                        <label className="mt-3 block space-y-2">
+                          <span className="text-[10px] uppercase tracking-widest text-white/45">
+                            {t("按名称查找技能", "Find a skill by name")}
+                          </span>
+                          <input
+                            className="theme-input"
+                            value={skillsSearchQuery}
+                            onChange={(e) => setSkillsSearchQuery(e.target.value)}
+                            placeholder={t("例如 crypto、image、binance", "For example crypto, image, or binance")}
+                          />
+                        </label>
+                      </div>
+                      {filteredManagedSkills.length > 0 ? (
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{filteredManagedSkills.map(renderSkillRow)}</div>
+                      ) : null}
+                      {normalizedSkillsSearchQuery && filteredManagedSkills.length === 0 ? (
                         <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/60">
                           {t("没有找到匹配的技能。可以试试更短的关键词，比如 crypto、image、audio。", "No matching skills found. Try a shorter keyword like crypto, image, or audio.")}
                         </div>

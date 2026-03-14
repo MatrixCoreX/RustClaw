@@ -10,3 +10,4 @@ data/*.db-wal
 # Common local files
 .DS_Store
 .vscode/
+

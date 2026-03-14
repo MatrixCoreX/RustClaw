@@ -8,7 +8,9 @@ PROFILE="${RUSTCLAW_PROFILE:-release}"
 PID_DIR="$SCRIPT_DIR/.pids"
 MOUNTED_CONFIG_DIR="$SCRIPT_DIR/docker/config"
 MOUNTED_CONFIG_FILE="$MOUNTED_CONFIG_DIR/config.toml"
+MOUNTED_REGISTRY_FILE="$MOUNTED_CONFIG_DIR/skills_registry.toml"
 ACTIVE_CONFIG_FILE="$SCRIPT_DIR/configs/config.toml"
+ACTIVE_REGISTRY_FILE="$SCRIPT_DIR/configs/skills_registry.toml"
 
 sync_config_from_mount() {
   if [[ -f "$MOUNTED_CONFIG_FILE" ]]; then
@@ -17,6 +19,14 @@ sync_config_from_mount() {
   elif [[ ! -f "$MOUNTED_CONFIG_FILE" ]]; then
     cp "$ACTIVE_CONFIG_FILE" "$MOUNTED_CONFIG_FILE"
     echo "Seeded mounted config at $MOUNTED_CONFIG_FILE"
+  fi
+
+  if [[ -f "$MOUNTED_REGISTRY_FILE" ]]; then
+    cp "$MOUNTED_REGISTRY_FILE" "$ACTIVE_REGISTRY_FILE"
+    echo "Loaded skills registry override from $MOUNTED_REGISTRY_FILE"
+  elif [[ -f "$ACTIVE_REGISTRY_FILE" ]]; then
+    cp "$ACTIVE_REGISTRY_FILE" "$MOUNTED_REGISTRY_FILE"
+    echo "Seeded mounted skills registry at $MOUNTED_REGISTRY_FILE"
   fi
 }
 
