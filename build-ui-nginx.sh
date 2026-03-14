@@ -99,5 +99,7 @@ if [[ -n "$DO_DEPLOY" ]]; then
     sudo cp -r "$DIST_DIR/"* "$NGINX_ROOT/"
     echo "Copied UI to $NGINX_ROOT (sudo)."
   fi
-  echo "Deploy done. Reload nginx if needed: sudo systemctl reload nginx"
+  echo "Reloading nginx..."
+  sudo systemctl reload nginx
+  echo "Deploy done."
 fi

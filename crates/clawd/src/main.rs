@@ -1421,7 +1421,12 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let llm_providers = llm_gateway::build_providers(&config);
-    info!("Loaded LLM providers count={}", llm_providers.len());
+    info!(
+        "Loaded LLM providers count={} (config selected_vendor={:?}, selected_model={:?})",
+        llm_providers.len(),
+        config.llm.selected_vendor,
+        config.llm.selected_model
+    );
     for p in &llm_providers {
         info!(
             "Active provider: name={}, type={}, model={}",
@@ -2314,6 +2319,13 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
 
             // needs_clarify is the main signal: if normalizer says clarify, we clarify. confidence is for logging only.
             let force_clarify = context_resolution.needs_clarify;
+            let has_schedule_intent =
+                normalizer_out.schedule_kind != intent_router::ScheduleKind::None;
+            // Schedule intent should be honored even when payload source was auto-marked as
+            // resume_continue_execute by failed-task context binding, as long as normalizer
+            // did not request resume execution/discussion.
+            let should_route_schedule_direct =
+                has_schedule_intent && !direct_resume_execution && !direct_resume_discussion;
 
             let result = if force_clarify {
                 let clarify = intent_router::generate_clarify_question(
@@ -2347,9 +2359,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             } else if direct_resume_execution {
                 agent_engine::run_agent_with_tools(state, &task, &prompt_with_memory, &resolved_prompt)
                     .await
-            } else if !is_resume_continue
-                && normalizer_out.schedule_kind != intent_router::ScheduleKind::None
-            {
+            } else if should_route_schedule_direct {
                 if let Ok(Some(schedule_reply)) =
                     intent_router::try_handle_schedule_request(state, &task, &resolved_prompt).await
                 {
