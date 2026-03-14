@@ -238,7 +238,11 @@ start_future_adapters_placeholder() {
 }
 
 start_clawd
-start_telegramd
+if [[ "${RUSTCLAW_SKIP_TELEGRAMD:-0}" == "1" ]]; then
+  echo "RUSTCLAW_SKIP_TELEGRAMD=1, skipping telegramd startup."
+else
+  start_telegramd
+fi
 start_future_adapters_placeholder
 start_whatsapp_webd
 start_whatsappd

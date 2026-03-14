@@ -9,11 +9,11 @@ use std::io::{Read, Seek, SeekFrom};
 use tokio::process::Command;
 
 use super::super::{
-    bind_channel_identity, current_rss_bytes, exchange_credential_status_for_user_key, feishud_process_stats,
-    larkd_process_stats, mask_secret, oldest_running_task_age_seconds, resolve_auth_identity_by_key,
-    resolve_channel_binding_identity, task_count_by_status, telegramd_process_stats,
-    upsert_exchange_credential_for_user_key, wa_webd_process_stats, whatsappd_process_stats,
-    ApiResponse, AppState, HealthResponse, LocalInteractionContext,
+    bind_channel_identity, current_rss_bytes, exchange_credential_status_for_user_key,
+    feishud_process_stats, larkd_process_stats, mask_secret, oldest_running_task_age_seconds,
+    resolve_auth_identity_by_key, resolve_channel_binding_identity, task_count_by_status,
+    telegramd_process_stats, upsert_exchange_credential_for_user_key, wa_webd_process_stats,
+    whatsappd_process_stats, ApiResponse, AppState, HealthResponse, LocalInteractionContext,
 };
 use claw_core::types::{
     AuthIdentity, BindChannelKeyRequest, ExchangeCredentialStatus, ResolveChannelBindingRequest,
@@ -50,10 +50,12 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/skills/config",
             get(get_skills_config).post(update_skills_config),
         )
+        .route("/llm/config", get(get_llm_config).post(update_llm_config))
         .route("/logs/latest", get(logs_latest))
         .route("/whatsapp-web/login-status", get(whatsapp_web_login_status))
         .route("/whatsapp-web/logout", post(whatsapp_web_logout))
         .route("/services/:service/:action", post(control_service))
+        .route("/system/restart", post(restart_system))
         .route("/local/interaction-context", get(local_interaction_context))
 }
 
@@ -881,6 +883,66 @@ async fn control_service(
     }
 }
 
+async fn restart_system(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can restart RustClaw".to_string()),
+            }),
+        );
+    }
+
+    if !std::path::Path::new("/.dockerenv").exists() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("frontend restart is only available in Docker deployment".to_string()),
+            }),
+        );
+    }
+
+    let mut cmd = Command::new("bash");
+    cmd.arg("-lc")
+        .arg("sleep 1 && kill -TERM 1 >/dev/null 2>&1")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    if let Err(err) = cmd.spawn() {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("failed to schedule restart: {err}")),
+            }),
+        );
+    }
+
+    (
+        StatusCode::ACCEPTED,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "status": "restarting",
+                "mode": "docker",
+            })),
+            error: None,
+        }),
+    )
+}
+
 async fn health(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -993,11 +1055,196 @@ struct UpdateSkillsConfigRequest {
     skill_switches: HashMap<String, bool>,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateLlmConfigRequest {
+    selected_vendor: String,
+    selected_model: String,
+    #[serde(default)]
+    vendor_base_url: Option<String>,
+    #[serde(default)]
+    vendor_api_key: Option<String>,
+}
+
 fn read_skill_config_file(state: &AppState) -> anyhow::Result<(String, toml::Value)> {
     let path = state.workspace_root.join("configs/config.toml");
     let raw = std::fs::read_to_string(&path)?;
     let parsed = toml::from_str::<toml::Value>(&raw)?;
     Ok((raw, parsed))
+}
+
+fn write_runtime_config_file(state: &AppState, raw: &str) -> std::io::Result<()> {
+    let active_path = state.workspace_root.join("configs/config.toml");
+    std::fs::write(&active_path, raw)?;
+
+    let mounted_path = state.workspace_root.join("docker/config/config.toml");
+    if let Some(parent) = mounted_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&mounted_path, raw)?;
+    Ok(())
+}
+
+fn upsert_string_key_in_section(
+    raw: &str,
+    section_name: &str,
+    key: &str,
+    rendered_line: &str,
+) -> String {
+    let mut lines: Vec<String> = raw.lines().map(|s| s.to_string()).collect();
+    let section_header = format!("[{section_name}]");
+    let mut in_section = false;
+    let mut section_seen = false;
+    let mut inserted_or_replaced = false;
+    let mut insert_index_in_section: Option<usize> = None;
+    let mut section_end: Option<usize> = None;
+
+    for idx in 0..lines.len() {
+        let trimmed = lines[idx].trim();
+        if trimmed == section_header {
+            in_section = true;
+            section_seen = true;
+            insert_index_in_section = Some(idx + 1);
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed != section_header {
+            if in_section {
+                section_end = Some(idx);
+                break;
+            }
+            continue;
+        }
+        if in_section && trimmed.starts_with(key) && trimmed.contains('=') {
+            lines[idx] = rendered_line.to_string();
+            inserted_or_replaced = true;
+            break;
+        }
+    }
+
+    if !inserted_or_replaced && section_seen {
+        let idx = insert_index_in_section
+            .or(section_end)
+            .unwrap_or(lines.len());
+        lines.insert(idx, rendered_line.to_string());
+    }
+
+    let mut out = lines.join("\n");
+    if raw.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn llm_vendor_names() -> [&'static str; 8] {
+    [
+        "openai",
+        "google",
+        "anthropic",
+        "grok",
+        "deepseek",
+        "qwen",
+        "minimax",
+        "custom",
+    ]
+}
+
+fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
+    let mut vendors = Vec::new();
+    let Some(llm) = value.get("llm").and_then(|v| v.as_table()) else {
+        return vendors;
+    };
+    for vendor_name in llm_vendor_names() {
+        let Some(vendor) = llm.get(vendor_name).and_then(|v| v.as_table()) else {
+            continue;
+        };
+        let base_url = vendor
+            .get("base_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let default_model = vendor
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let api_key_configured = vendor
+            .get("api_key")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        let api_key_masked = vendor
+            .get("api_key")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(mask_secret);
+        let mut models = vendor
+            .get("models")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !default_model.is_empty() && !models.iter().any(|m| m == &default_model) {
+            models.insert(0, default_model.clone());
+        }
+        vendors.push(json!({
+            "name": vendor_name,
+            "default_model": default_model,
+            "models": models,
+            "base_url": base_url,
+            "api_key_configured": api_key_configured,
+            "api_key_masked": api_key_masked
+        }));
+    }
+    vendors
+}
+
+fn current_runtime_llm_info(state: &AppState) -> Value {
+    if let Some(provider) = state.llm_providers.first() {
+        let vendor = provider
+            .config
+            .name
+            .strip_prefix("vendor-")
+            .unwrap_or(provider.config.name.as_str())
+            .to_string();
+        return json!({
+            "vendor": vendor,
+            "model": provider.config.model,
+            "provider_name": provider.config.name,
+            "provider_type": provider.config.provider_type
+        });
+    }
+    json!(null)
+}
+
+fn llm_restart_required(state: &AppState, selected_vendor: &str, selected_model: &str) -> bool {
+    let runtime = current_runtime_llm_info(state);
+    let runtime_vendor = runtime
+        .get("vendor")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let runtime_model = runtime
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    runtime_vendor != selected_vendor.trim() || runtime_model != selected_model.trim()
+}
+
+fn skills_restart_required(runtime_visible: &[String], effective_visible: &[String]) -> bool {
+    let mut runtime_sorted = runtime_visible.to_vec();
+    runtime_sorted.sort_unstable();
+    let mut effective_sorted = effective_visible.to_vec();
+    effective_sorted.sort_unstable();
+    runtime_sorted != effective_sorted
 }
 
 fn collect_skills_baseline(value: &toml::Value, state: &AppState) -> Vec<String> {
@@ -1168,6 +1415,7 @@ async fn get_skills_config(
     };
     let mut effective = compute_effective_enabled(&baseline, &switches, &state);
     effective.retain(|s| !hide_skill_in_ui(&state, s));
+    let restart_required = skills_restart_required(&runtime_visible, &effective);
     let base_skill_names: Vec<String> = claw_core::config::base_skill_names()
         .iter()
         .map(|s| s.to_string())
@@ -1184,7 +1432,221 @@ async fn get_skills_config(
                 "base_skill_names": base_skill_names,
                 "effective_enabled_skills_preview": effective,
                 "runtime_enabled_skills": runtime_visible,
-                "restart_required": true
+                "restart_required": restart_required
+            })),
+            error: None,
+        }),
+    )
+}
+
+async fn get_llm_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let parsed = match read_skill_config_file(&state) {
+        Ok((_, v)) => v,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read llm config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let llm = parsed.get("llm").and_then(|v| v.as_table());
+    let selected_vendor = llm
+        .and_then(|tbl| tbl.get("selected_vendor"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let selected_model = llm
+        .and_then(|tbl| tbl.get("selected_model"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let vendors = collect_llm_vendor_info(&parsed);
+    let restart_required = llm_restart_required(&state, &selected_vendor, &selected_model);
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "config_path": "configs/config.toml",
+                "selected_vendor": selected_vendor,
+                "selected_model": selected_model,
+                "vendors": vendors,
+                "runtime": current_runtime_llm_info(&state),
+                "restart_required": restart_required
+            })),
+            error: None,
+        }),
+    )
+}
+
+async fn update_llm_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateLlmConfigRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
+    let selected_model = req.selected_model.trim().to_string();
+    if selected_vendor.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("selected_vendor is required".to_string()),
+            }),
+        );
+    }
+    if selected_model.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("selected_model is required".to_string()),
+            }),
+        );
+    }
+
+    let (raw, parsed) = match read_skill_config_file(&state) {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read llm config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let vendors = collect_llm_vendor_info(&parsed);
+    let Some(vendor_info) = vendors.iter().find(|item| {
+        item.get("name")
+            .and_then(|v| v.as_str())
+            .map(|name| name.eq_ignore_ascii_case(&selected_vendor))
+            .unwrap_or(false)
+    }) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("unsupported vendor: {selected_vendor}")),
+            }),
+        );
+    };
+
+    let allowed_models = vendor_info
+        .get("models")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if selected_vendor != "custom"
+        && !allowed_models.is_empty()
+        && !allowed_models.iter().any(|m| m == &selected_model)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("model is not in the configured pool for vendor {selected_vendor}: {selected_model}")),
+            }),
+        );
+    }
+
+    let vendor_base_url = req.vendor_base_url.as_deref().map(str::trim).unwrap_or("");
+    if vendor_base_url.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("vendor_base_url is required".to_string()),
+            }),
+        );
+    }
+
+    let updated_vendor = upsert_string_key_in_section(
+        &raw,
+        "llm",
+        "selected_vendor",
+        &format!("selected_vendor = {:?}", selected_vendor),
+    );
+    let updated_raw = upsert_string_key_in_section(
+        &updated_vendor,
+        "llm",
+        "selected_model",
+        &format!("selected_model = {:?}", selected_model),
+    );
+    let updated_vendor_base_url = upsert_string_key_in_section(
+        &updated_raw,
+        &format!("llm.{selected_vendor}"),
+        "base_url",
+        &format!("base_url = {:?}", vendor_base_url),
+    );
+    let updated_vendor_model = upsert_string_key_in_section(
+        &updated_vendor_base_url,
+        &format!("llm.{selected_vendor}"),
+        "model",
+        &format!("model = {:?}", selected_model),
+    );
+    let vendor_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
+    let final_updated = if vendor_api_key.is_empty() {
+        updated_vendor_model
+    } else {
+        upsert_string_key_in_section(
+            &updated_vendor_model,
+            &format!("llm.{selected_vendor}"),
+            "api_key",
+            &format!("api_key = {:?}", vendor_api_key),
+        )
+    };
+    if let Err(err) = write_runtime_config_file(&state, &final_updated) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("write llm config failed: {err}")),
+            }),
+        );
+    }
+    let restart_required = llm_restart_required(&state, &selected_vendor, &selected_model);
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "config_path": "configs/config.toml",
+                "selected_vendor": selected_vendor,
+                "selected_model": selected_model,
+                "runtime": current_runtime_llm_info(&state),
+                "restart_required": restart_required
             })),
             error: None,
         }),
@@ -1225,8 +1687,7 @@ async fn update_skills_config(
     }
     let rendered = render_switches_inline_table(&switches);
     let updated = upsert_skill_switches_line(&raw, &rendered);
-    let path = state.workspace_root.join("configs/config.toml");
-    if let Err(err) = std::fs::write(&path, updated) {
+    if let Err(err) = write_runtime_config_file(&state, &updated) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -1237,6 +1698,20 @@ async fn update_skills_config(
         );
     }
     let effective = compute_effective_enabled(&baseline, &switches, &state);
+    let mut effective_visible = effective
+        .iter()
+        .filter(|s| !hide_skill_in_ui(&state, s))
+        .cloned()
+        .collect::<Vec<_>>();
+    effective_visible.sort_unstable();
+    let mut runtime_visible = state
+        .get_skills_list()
+        .iter()
+        .filter(|s| !hide_skill_in_ui(&state, s))
+        .cloned()
+        .collect::<Vec<_>>();
+    runtime_visible.sort_unstable();
+    let restart_required = skills_restart_required(&runtime_visible, &effective_visible);
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -1245,7 +1720,7 @@ async fn update_skills_config(
                 "config_path": "configs/config.toml",
                 "skill_switches": switches,
                 "effective_enabled_skills_preview": effective,
-                "restart_required": true
+                "restart_required": restart_required
             })),
             error: None,
         }),
