@@ -1,0 +1,30 @@
+name: rustclaw
+
+services:
+  rustclaw:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: rustclaw
+    environment:
+      RUST_LOG: warn
+      RUSTCLAW_PROFILE: release
+      RUSTCLAW_SKIP_TELEGRAMD: "1"
+    ports:
+      - "8787:8787"
+    restart: unless-stopped
+    volumes:
+      - rustclaw-data:/app/data
+      - rustclaw-logs:/app/logs
+      - ./audio:/app/audio
+      - ./document:/app/document
+      - ./image:/app/image
+      - ./docker/config:/app/docker/config
+      - ./prompts:/app/prompts
+      - ./third_party:/app/third_party
+
+volumes:
+  rustclaw-data:
+    name: rustclaw_rustclaw-data
+  rustclaw-logs:
+    name: rustclaw_rustclaw-logs

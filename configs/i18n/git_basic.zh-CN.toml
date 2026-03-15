@@ -1,0 +1,6 @@
+[dict]
+git_basic.err.invalid_input = "输入格式无效：{error}"
+git_basic.err.args_object = "args 必须是 object"
+git_basic.msg.not_git_repo = "当前目录不是 git 仓库。请在 git 仓库目录中使用 git_basic。"
+git_basic.err.unsupported_action = "不支持的 action；可选 status|log|diff|branch|show|rev_parse"
+git_basic.err.run_git_failed = "执行 git 失败：{error}"

@@ -1,0 +1,206 @@
+# =========================
+# Image Edit / 图像编辑
+# =========================
+# Vendor routing / 厂商路由规则：
+# - openai/google: prefer native adapters / 优先原生适配
+# - anthropic/grok/custom: compat only (OpenAI-compatible) / 仅兼容通道（OpenAI-compatible）
+# - qwen: native + compat dual channels / 支持 native + compat 双通道
+# - OSS note / OSS 说明：
+#   - compat never uses OSS / compat 通道不使用 OSS
+#   - qwen native only uses OSS when the selected native edit API requires URL input
+#     and the request provides local/base64 input
+#     / qwen 原生仅在所选原生编辑接口要求 URL 输入、而请求给的是本地/base64 输入时才会用 OSS
+#   - current multimodal native edit models such as `qwen-image-edit-max` and `wan2.6-image`
+#     accept direct image content and do NOT need OSS
+#     / 当前多模态原生编辑模型（如 `qwen-image-edit-max`、`wan2.6-image`）可直接接收图像内容，不需要 OSS
+#   - legacy URL-style native edit models such as `wanx2.1-imageedit` may still use OSS
+#     for local/base64 input / 旧的 URL 型原生编辑模型（如 `wanx2.1-imageedit`）在本地/base64 输入时仍可能用 OSS
+#
+# adapter_mode:
+# - auto: auto select (qwen/wanx prefers native, others compat) / 自动选择（qwen/wanx 优先 native，其它走 compat）
+# - native: force native channel / 强制原生通道
+# - compat: force compatible channel / 强制兼容通道
+#
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+[image_edit]
+# Routing & mode / 路由与模式
+default_vendor = "minimax"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+qwen_native_function = "description_edit"
+
+# Default model / 默认模型
+default_model = "image-01"
+
+# Vendor models / 按厂商模型
+openai_models = ["gpt-image-1"]
+google_models = ["gemini-2.5-flash-image-preview"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["qwen-image-edit-max", "wan2.6-image", "wanx2.1-imageedit"]
+minimax_models = ["image-01"]
+native_models = ["qwen-image-edit-max", "wan2.6-image", "wanx2.1-imageedit"]
+models = ["qwen-image-edit-max", "wan2.6-image", "wanx2.1-imageedit"]
+
+# Runtime limits / 运行限制
+default_output_dir = "image/download"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+
+# Local file auto-upload for qwen native edit (optional) / 千问原生编辑的本地文件自动上传（可选）
+# - applies only to URL-style qwen native edit flows / 仅作用于 URL 型 qwen 原生编辑链路
+# - off: native mode requires image.url / 关闭时：native 模式要求传 image.url
+# - on: local path/base64 uploads to OSS first, then uses signed URL / 开启时：本地 path/base64 会先上传 OSS，再自动生成签名 URL
+# - no effect on multimodal native edit models that accept direct image content
+#   / 对可直接接收图像内容的多模态原生编辑模型无影响
+local_auto_upload_enabled = true
+oss_access_key_id = ""
+oss_access_key_secret = ""
+oss_bucket = "rustclaw"
+oss_endpoint = "oss-cn-beijing.aliyuncs.com"
+oss_object_prefix = "rustclaw/image"
+oss_url_ttl_seconds = 3600
+
+# Optional dedicated provider override / 可选独立 provider 覆盖
+# Recommended / 推荐：
+# - image_edit: Qwen `qwen-image-edit-max` for current edit quality and native support
+#   / 图片编辑推荐 Qwen `qwen-image-edit-max`，当前编辑效果和原生支持更合适
+# [image_edit.providers.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key = "REPLACE_ME_OPENAI_API_KEY"
+# model = "gpt-image-1"
+# timeout_seconds = 120
+[image_edit.providers.minimax]
+base_url = "https://api.minimax.io/v1"
+api_key = "REPLACE_ME"
+model = "image-01"
+timeout_seconds = 120
+# [image_edit.providers.qwen]
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = "sk-0f59ace4739a4fa897b0f3fa0a7b5ff2"
+# model = "qwen-image-edit-max"
+# timeout_seconds = 120
+
+# =========================
+# Image Generate / 文生图
+# =========================
+# Vendor routing / 厂商路由规则：
+# - openai/google: prefer native adapters / 优先原生适配
+# - anthropic/grok/custom: compat only (OpenAI-compatible) / 仅兼容通道（OpenAI-compatible）
+# - qwen: native + compat dual channels / 支持 native + compat 双通道
+# - OSS note / OSS 说明：
+#   - text-to-image generation does NOT use OSS in the current implementation
+#     because there is no local image upload step / 当前文生图实现不使用 OSS，因为没有本地图像上传步骤
+#
+# adapter_mode:
+# - auto: auto select (qwen/wanx prefers native, others compat) / 自动选择（qwen/wanx 优先 native，其它走 compat）
+# - native: force native channel / 强制原生通道
+# - compat: force compatible channel / 强制兼容通道
+#
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+[image_generation]
+# Routing & mode / 路由与模式
+default_vendor = "minimax"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+
+# Default model / 默认模型
+default_model = "image-01"
+
+# Vendor models / 按厂商模型
+openai_models = ["gpt-image-1"]
+google_models = ["gemini-2.5-flash-image-preview"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["wan2.6-image", "wanx2.1-t2i-turbo"]
+minimax_models = ["image-01"]
+native_models = ["wan2.6-image", "wanx2.1-t2i-turbo"]
+models = ["wan2.6-image", "wanx2.1-t2i-turbo"]
+
+# Runtime limits / 运行限制
+default_output_dir = "image/download"
+max_concurrency = 1
+max_images = 4
+max_input_bytes = 10485760
+timeout_seconds = 120
+
+# Optional dedicated provider override / 可选独立 provider 覆盖
+# Recommended / 推荐：
+# - image_generation: Qwen `wan2.6-image` for current default generation path
+#   / 文生图推荐 Qwen `wan2.6-image`，和当前默认生成链路最匹配
+# [image_generation.providers.qwen]
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = "REPLACE_ME_QWEN_API_KEY"
+# model = "wan2.6-image"
+# timeout_seconds = 120
+[image_generation.providers.minimax]
+base_url = "https://api.minimax.io/v1"
+api_key = "REPLACE_ME"
+model = "image-01"
+timeout_seconds = 120
+# [image_generation.providers.qwen]
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = "sk-0f59ace4739a4fa897b0f3fa0a7b5ff2"
+# model = "wan2.6-image"
+# timeout_seconds = 120
+
+# =========================
+# Image Vision / 图像理解
+# =========================
+# This skill currently uses compatible I/O contract and routes internally by vendor adapters.
+# 该技能当前统一走兼容式输入输出，内部按厂商适配。
+# OSS note / OSS 说明：
+# - current image vision path does NOT use OSS / 当前图像理解链路不使用 OSS
+# Vendor selection priority / 厂商选择优先级：
+# request.vendor > default_vendor > llm.selected_vendor
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+[image_vision]
+# Routing & mode / 路由与模式
+default_vendor = "minimax"
+adapter_mode = "compat" # Vision currently recommended to stay in compat / vision 当前建议保持 compat
+
+# Default model / 默认模型
+default_model = "MiniMax-VL-01"
+
+# Vendor models / 按厂商模型
+openai_models = ["gpt-4o-mini", "gpt-4o"]
+google_models = ["gemini-2.5-flash", "gemini-2.5-pro"]
+anthropic_models = ["claude-sonnet-4-6"]
+qwen_models = ["qwen-vl-max", "qwen-vl-plus"]
+minimax_models = ["MiniMax-VL-01"]
+models = ["qwen-vl-max", "qwen-vl-plus"]
+
+# Runtime limits / 运行限制
+default_output_dir = "image/upload"
+max_concurrency = 1
+max_images = 6
+max_input_bytes = 10485760
+timeout_seconds = 90
+
+# Optional dedicated provider override / 可选独立 provider 覆盖
+# Recommended / 推荐：
+# - image_vision: OpenAI `gpt-4o-mini` for broad compatibility and steady vision output
+#   / 图片理解推荐 OpenAI `gpt-4o-mini`，兼容性更广、输出更稳
+# [image_vision.providers.google]
+# base_url = "https://generativelanguage.googleapis.com/v1beta"
+# api_key = "REPLACE_ME_GOOGLE_API_KEY"
+# model = "gemini-2.5-flash"
+# timeout_seconds = 90
+[image_vision.providers.minimax]
+base_url = "https://api.minimax.io/v1"
+api_key = "REPLACE_ME"
+model = "MiniMax-VL-01"
+timeout_seconds = 90
+# [image_vision.providers.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key = "sk-proj-..."
+# model = "gpt-4o-mini"
+# timeout_seconds = 90
+

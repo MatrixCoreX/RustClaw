@@ -1,0 +1,14 @@
+.git
+.gitignore
+.pids
+audio/*
+document/*
+image/*
+logs/*
+tmp/*
+data/*
+node_modules
+UI/node_modules
+target
+docker/config/*
+!docker/config/.gitkeep

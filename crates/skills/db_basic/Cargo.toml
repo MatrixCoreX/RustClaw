@@ -1,0 +1,15 @@
+[package]
+name = "db-basic-skill"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "db-basic-skill"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true

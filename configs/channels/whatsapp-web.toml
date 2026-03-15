@@ -1,0 +1,31 @@
+# WhatsApp Web / QR login config.
+# Current primary identity flow is key-based:
+# - WhatsApp account id is only the external transport identity
+# - Real auth/role/memory identity comes from bound user_key
+# - bindings can be used for static pre-bind seeding
+#
+# This file configures whatsapp_webd and the local bridge/wrapper.
+
+[whatsapp_web]
+# 是否启用扫码登录模式
+enabled = false
+# bridge 服务监听地址（供 clawd 调用）
+bridge_listen = "127.0.0.1:8092"
+# wrapper 服务监听地址（对外包装层）
+wrapper_listen = "127.0.0.1:8094"
+# clawd 访问 bridge 的基础地址
+bridge_base_url = "http://127.0.0.1:8092"
+# 登录态/会话缓存目录
+auth_dir = "data/wa-web-auth"
+# 快速结果等待秒数；超时后转为异步回传
+quick_result_wait_seconds = 3
+# Legacy bootstrap admin list.
+# Kept for compatibility only; runtime access now depends on key binding.
+admins = []
+# Legacy bootstrap allowlist.
+# Kept for compatibility only; runtime access now depends on key binding.
+allowlist = []
+# Optional static bindings loaded into channel_bindings on clawd startup.
+# Example:
+# bindings = [{ external_user_id = "8613800138000", external_chat_id = "8613800138000", user_key = "rk-REPLACE_ME" }]
+bindings = []

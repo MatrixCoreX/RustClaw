@@ -1,0 +1,4 @@
+locale = "zh-CN"
+
+[dict]
+"image_generate.msg.saved" = "图片生成成功并已保存：{path}"

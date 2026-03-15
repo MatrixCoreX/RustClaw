@@ -1,0 +1,68 @@
+# your_skill_name Interface Spec
+
+## Capability Summary
+- 一句话描述技能能力。
+- One-paragraph summary of the skill capability.
+
+## Actions
+- `action_a`: 用途说明 / purpose
+- `action_b`: 用途说明 / purpose
+
+## Parameter Contract
+| Action | Param | Required | Type | Default | Description |
+|---|---|---|---|---|---|
+| action_a | action | yes | string | action_a | 固定值 / fixed action name |
+| action_a | foo | yes | string | - | 参数说明 |
+| action_a | bar | no | number | 10 | 参数说明 |
+| action_b | action | yes | string | action_b | 固定值 / fixed action name |
+
+## Error Contract
+- 当参数缺失：`status=error`，`error_text` 返回可读错误。
+- When required params are missing: return `status=error` with readable `error_text`.
+- 当 action 不支持：返回 `unsupported action: <name>`。
+
+## Request/Response Examples
+
+### Example 1: action_a success
+Request:
+```json
+{
+  "request_id": "demo-1",
+  "args": {
+    "action": "action_a",
+    "foo": "abc",
+    "bar": 3
+  }
+}
+```
+
+Response:
+```json
+{
+  "request_id": "demo-1",
+  "status": "ok",
+  "text": "done",
+  "error_text": null
+}
+```
+
+### Example 2: validation error
+Request:
+```json
+{
+  "request_id": "demo-2",
+  "args": {
+    "action": "action_a"
+  }
+}
+```
+
+Response:
+```json
+{
+  "request_id": "demo-2",
+  "status": "error",
+  "text": "",
+  "error_text": "missing required param: foo"
+}
+```

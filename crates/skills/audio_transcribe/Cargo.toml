@@ -1,0 +1,21 @@
+[package]
+name = "audio-transcribe-skill"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "audio-transcribe-skill"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+hmac = "0.12"
+httpdate = "1"
+reqwest = { workspace = true, features = ["blocking", "multipart"] }
+serde.workspace = true
+serde_json.workspace = true
+sha1 = "0.10"
+toml.workspace = true
+urlencoding = "2"

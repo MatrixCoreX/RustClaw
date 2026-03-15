@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@xdevplatform/xurl": "^1.0.3"
+  }
+}

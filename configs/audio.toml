@@ -1,0 +1,162 @@
+# =========================
+# Audio Synthesize / 语音合成（TTS）
+# =========================
+# Vendor routing / 厂商路由：
+# - google/qwen: support native + compat dual channels / 支持 native + compat 双通道
+# - openai/anthropic/grok/custom: compat channel / 走 compat 通道
+# - OSS note / OSS 说明：
+#   - compat never uses OSS / compat 通道不使用 OSS
+#   - qwen native may use OSS only when the native API requires URL-style input
+#     and the request provides a local file / qwen 原生仅在接口要求 URL 且请求给的是本地文件时才会用 OSS
+#   - current qwen TTS native does NOT use OSS / 当前 qwen TTS 原生不使用 OSS
+#
+# adapter_mode:
+# - auto: auto select (qwen3-tts prefers native) / 自动选择（qwen3-tts 系列优先 native）
+# - native: force native / 强制原生
+# - compat: force compatible / 强制兼容
+#
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+[audio_synthesize]
+# Routing & mode / 路由与模式
+default_vendor = "minimax"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+
+# Default model & output / 默认模型与输出（MiniMax 推荐最新：speech-2.8-turbo / speech-2.8-hd）
+# Voice recommendation / recommended voices
+# - OpenAI compat (`gpt-4o-mini-tts`, `gpt-4o-realtime-preview`): `alloy` / `coral` / `shimmer`
+# - Google native (`gemini-2.5-flash-preview-tts`): `Kore` / `Puck` / `Aoede`
+# - Qwen native (`qwen3-tts-instruct-flash`, `qwen3-tts-flash`): `Cherry` / `Serena` / `Ethan`
+# - MiniMax native (`speech-2.8-*`, `speech-2.6-*`, `speech-02-*`): `male-qn-qingse`
+# Fault-tolerant fallback / vendor-default fallback
+# - request.voice > default_voice > vendor builtin default
+# - unsupported / mismatched voice names fall back to the selected vendor default
+# - current vendor defaults: OpenAI compat=`alloy`, Google=`Kore`, Qwen=`Cherry`, MiniMax=`male-qn-qingse`
+default_model = "speech-2.8-turbo"
+default_voice = "male-qn-qingse"
+default_format = "opus"
+default_output_dir = "audio/download"
+
+# Vendor models / 按厂商模型
+openai_models = ["gpt-4o-mini-tts", "gpt-4o-realtime-preview"]
+google_models = ["gemini-2.5-flash-preview-tts"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["qwen3-tts-instruct-flash", "qwen3-tts-flash"]
+minimax_models = ["speech-2.8-turbo", "speech-2.8-hd", "speech-2.6-turbo", "speech-2.6-hd", "speech-02-turbo", "speech-02-hd"]
+native_models = ["qwen3-tts-instruct-flash", "qwen3-tts-flash"]
+custom_models = []
+models = ["qwen3-tts-instruct-flash", "qwen3-tts-flash"]
+
+# Runtime limits / 运行限制
+max_concurrency = 1
+max_input_chars = 4000
+timeout_seconds = 60
+
+# Optional dedicated provider override / 可选独立 provider 覆盖
+# If set, this module uses its own base_url/api_key/model instead of [llm.<vendor>].
+# Recommended / 推荐：
+# - audio_synthesize: OpenAI `gpt-4o-mini-tts` for stable TTS compatibility
+#   / 语音合成推荐 OpenAI `gpt-4o-mini-tts`，兼容性和稳定性更好
+# [audio_synthesize.providers.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key = "REPLACE_ME_OPENAI_API_KEY"
+# model = "gpt-4o-mini-tts"
+# timeout_seconds = 60
+[audio_synthesize.providers.minimax]
+base_url = "https://api.minimax.io/v1"
+api_key = "REPLACE_ME"
+model = "speech-2.8-turbo"
+timeout_seconds = 60
+# [audio_synthesize.providers.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key = "sk-proj-..."
+# model = "gpt-4o-mini-tts"
+# timeout_seconds = 60
+
+# =========================
+# Audio Transcribe / 语音转写（STT）
+# =========================
+# Vendor routing / 厂商路由：
+# - qwen:
+#   - qwen3-asr-flash: prefer compat direct upload / 建议 compat 直传
+#   - fun-asr / filetrans: prefer native flow / 建议 native 链路
+# - google: native / 原生
+# - openai/anthropic/grok/minimax/custom: compat / compat
+# - OSS note / OSS 说明：
+#   - compat never uses OSS / compat 通道不使用 OSS
+#   - qwen native ASR uses `file_urls`, so local files need OSS (or another public URL)
+#     before request submission / qwen 原生 ASR 走 `file_urls`，本地文件需先转成 OSS 或其它公网 URL
+#   - if you pass `args.audio.url`, native ASR does NOT need OSS / 如果直接传 `args.audio.url`，原生 ASR 不需要 OSS
+#
+# adapter_mode:
+# - auto: auto select by native_models / 按 native_models 自动选择
+# - native: force native / 强制原生
+# - compat: force compatible / 强制兼容
+#
+# Model selection priority / 模型选择优先级：
+# request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
+[audio_transcribe]
+# Routing & mode / 路由与模式
+default_vendor = "minimax"
+adapter_mode = "auto"
+allow_compat_adapters = true
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+
+# Default model / 默认模型
+default_model = "speech-01"
+
+# Vendor models / 按厂商模型
+openai_models = ["whisper-1", "gpt-4o-mini-transcribe"]
+google_models = ["gemini-2.5-flash"]
+anthropic_models = []
+grok_models = []
+qwen_models = ["qwen3-asr-flash", "fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
+minimax_models = ["speech-01"]
+native_models = ["fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
+custom_models = []
+models = ["qwen3-asr-flash", "fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
+
+# Runtime limits / 运行限制
+max_concurrency = 1
+max_input_bytes = 26214400
+timeout_seconds = 90
+
+# Local file auto-upload (optional) / 本地文件自动上传（可选）
+# - applies only to qwen native ASR models that require `file_urls`
+#   / 仅作用于要求 `file_urls` 的 qwen 原生 ASR 模型
+# - off: native mode requires audio_url / 关闭时：native 模式要求传 audio_url
+# - on: local path uploads to OSS first, then uses signed URL / 开启时：传本地 path 会先上传 OSS，再自动生成签名 URL
+# - no effect on compat upload path or qwen native TTS / 对 compat 上传路径和 qwen 原生 TTS 无影响
+local_auto_upload_enabled = true
+oss_access_key_id = ""
+oss_access_key_secret = ""
+oss_bucket = "rustclaw"
+oss_endpoint = "oss-cn-beijing.aliyuncs.com"
+oss_object_prefix = "rustclaw/audio"
+oss_url_ttl_seconds = 3600
+
+# Optional dedicated provider override / 可选独立 provider 覆盖
+# Recommended / 推荐：
+# - current default keeps MiniMax (`speech-01`) on the compat STT path
+#   / 当前默认使用 MiniMax（`speech-01`）走 compat 转写链路
+# - Qwen `qwen3-asr-flash` remains a good alternative when you want direct upload or native ASR
+#   / 若你更想要直传或原生 ASR，Qwen `qwen3-asr-flash` 仍是更稳妥的备选
+# [audio_transcribe.providers.qwen]
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = "REPLACE_ME_QWEN_API_KEY"
+# model = "qwen3-asr-flash"
+# timeout_seconds = 90
+[audio_transcribe.providers.minimax]
+base_url = "https://api.minimax.io/v1"
+api_key = "REPLACE_ME"
+model = "speech-01"
+timeout_seconds = 90
+# [audio_transcribe.providers.qwen]
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key = "sk-..."
+# model = "qwen3-asr-flash"
+# timeout_seconds = 90
+

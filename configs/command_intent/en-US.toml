@@ -1,0 +1,24 @@
+locale = "en-US"
+
+execute_prefixes = [
+  "run ",
+  "please run ",
+  "execute ",
+  "please execute ",
+  "execute command ",
+]
+
+result_suffixes = [
+  "and tell me the result",
+  "then tell me the result",
+  "and show me the result",
+  "and tell me the output",
+  "then reply with result",
+]
+
+negative_markers = [
+  "what does this command do",
+  "what is this command",
+  "how to use",
+  "meaning of",
+]
