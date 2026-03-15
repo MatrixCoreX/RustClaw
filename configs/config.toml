@@ -50,7 +50,7 @@ selected_vendor = "qwen"
 # 建议修改/Recommended change: 可改，需保证 key/base_url/model 对齐.
 # 风险/Risk: key 无效或 URL 错误会直接失败；并发过高可能触发限流.
 [llm.anthropic]
-api_key = "REPLACE_ME_ANTHROPIC_API_KEY"
+api_key = "__RC_SECRET_0006__"
 base_url = "https://api.anthropic.com/v1"
 # 该提供商最大并发 / Max concurrency for this provider.
 max_concurrency = 1
@@ -74,7 +74,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: 预览模型可能变更快，需关注兼容性与稳定性.
 [llm.google]
-api_key = "REPLACE_ME_GOOGLE_API_KEY"
+api_key = "__RC_SECRET_0007__"
 base_url = "https://generativelanguage.googleapis.com/v1beta"
 max_concurrency = 1
 model = "gemini-2.5-pro"
@@ -93,7 +93,7 @@ timeout_seconds = 90
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: 模型上下线较快，建议保留至少一个稳定回退模型.
 [llm.grok]
-api_key = "REPLACE_ME_GROK_API_KEY"
+api_key = "__RC_SECRET_0008__"
 base_url = "https://api.x.ai/v1"
 max_concurrency = 1
 model = "grok-3"

@@ -18,10 +18,10 @@ clawd_base_url = "http://127.0.0.1:8787"
 # 飞书应用 App ID
 app_id = "cli_a939d198c8ba1cc8"
 # 飞书应用 App Secret（日志不打印）
-app_secret = "REPLACE_ME"
+app_secret = "__RC_SECRET_0003__"
 # 事件订阅 Verification Token（webhook 时校验请求来自飞书）
 # webhook 模式下 verification_token 与 encrypt_key 至少配置一个，否则启动失败；生产环境建议两者都配置
-verification_token = "REPLACE_ME"
+verification_token = "__RC_SECRET_0004__"
 # 事件加密密钥（webhook 时用于签名校验；Phase 1 不解密请求体）
 # webhook 模式下与 verification_token 至少配置一个；生产环境建议两者都配置
 encrypt_key = ""

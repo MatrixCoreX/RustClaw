@@ -1,6 +1,6 @@
 use axum::extract::{Multipart, Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -11,12 +11,12 @@ use std::process::{Command as StdCommand, Stdio as StdProcessStdio};
 use tokio::process::Command;
 
 use super::super::{
-    bind_channel_identity, create_auth_key, current_rss_bytes, exchange_credential_status_for_user_key,
-    feishud_process_stats, larkd_process_stats, list_auth_keys, mask_secret, oldest_running_task_age_seconds,
-    reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
-    task_count_by_status, telegramd_process_stats, upsert_exchange_credential_for_user_key,
-    wa_webd_process_stats, whatsappd_process_stats, ApiResponse, AppState, HealthResponse,
-    LocalInteractionContext,
+    bind_channel_identity, create_auth_key, current_rss_bytes, delete_auth_key_by_id,
+    exchange_credential_status_for_user_key, feishud_process_stats, larkd_process_stats, list_auth_keys,
+    mask_secret, oldest_running_task_age_seconds, reload_skill_views, resolve_auth_identity_by_key,
+    resolve_channel_binding_identity, task_count_by_status, telegramd_process_stats,
+    update_auth_key_by_id, upsert_exchange_credential_for_user_key, wa_webd_process_stats,
+    whatsappd_process_stats, ApiResponse, AppState, HealthResponse, LocalInteractionContext,
 };
 use claw_core::skill_registry::SkillKind;
 use claw_core::types::{
@@ -74,6 +74,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/admin/restart-clawd", post(restart_clawd))
         .route("/admin/auth-keys", get(get_auth_keys).post(create_auth_key_handler))
+        .route(
+            "/admin/auth-keys/:key_id",
+            put(update_auth_key_handler).delete(delete_auth_key_handler),
+        )
 }
 
 fn ui_auth_error(message: &str) -> (StatusCode, Json<ApiResponse<Value>>) {
@@ -952,6 +956,12 @@ struct CreateAuthKeyRequest {
     role: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateAuthKeyRequest {
+    role: Option<String>,
+    enabled: Option<bool>,
+}
+
 async fn get_auth_keys(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -974,8 +984,9 @@ async fn get_auth_keys(
         Ok(rows) => {
             let list: Vec<Value> = rows
                 .into_iter()
-                .map(|(user_key_masked, role, enabled, created_at, last_used_at)| {
+                .map(|(key_id, user_key_masked, role, enabled, created_at, last_used_at)| {
                     json!({
+                        "key_id": key_id,
                         "user_key_masked": user_key_masked,
                         "role": role,
                         "enabled": enabled != 0,
@@ -999,6 +1010,105 @@ async fn get_auth_keys(
                 ok: false,
                 data: None,
                 error: Some(format!("list auth keys failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn update_auth_key_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(key_id): AxumPath<i64>,
+    Json(req): Json<UpdateAuthKeyRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can update auth keys".to_string()),
+            }),
+        );
+    }
+
+    let role = req.role.as_deref();
+    let role = role.map(str::trim).filter(|v| !v.is_empty());
+    match update_auth_key_by_id(&state, key_id, role, req.enabled, &identity.user_key) {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({ "updated": true })),
+                error: None,
+            }),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("auth key not found".to_string()),
+            }),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("update auth key failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn delete_auth_key_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(key_id): AxumPath<i64>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can delete auth keys".to_string()),
+            }),
+        );
+    }
+
+    match delete_auth_key_by_id(&state, key_id, &identity.user_key) {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({ "deleted": true })),
+                error: None,
+            }),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("auth key not found".to_string()),
+            }),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("delete auth key failed: {err}")),
             }),
         ),
     }

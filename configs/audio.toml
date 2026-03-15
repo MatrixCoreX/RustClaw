@@ -67,7 +67,7 @@ timeout_seconds = 60
 # timeout_seconds = 60
 [audio_synthesize.providers.minimax]
 base_url = "https://api.minimax.io/v1"
-api_key = "REPLACE_ME"
+api_key = "__RC_SECRET_0001__"
 model = "speech-2.8-turbo"
 timeout_seconds = 60
 # [audio_synthesize.providers.openai]
@@ -151,7 +151,7 @@ oss_url_ttl_seconds = 3600
 # timeout_seconds = 90
 [audio_transcribe.providers.minimax]
 base_url = "https://api.minimax.io/v1"
-api_key = "REPLACE_ME"
+api_key = "__RC_SECRET_0002__"
 model = "speech-01"
 timeout_seconds = 90
 # [audio_transcribe.providers.qwen]

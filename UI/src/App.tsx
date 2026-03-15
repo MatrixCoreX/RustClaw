@@ -83,6 +83,15 @@ interface AuthIdentityResponse extends LocalInteractionContextResponse {
   user_key: string;
 }
 
+interface AuthKeyListItem {
+  key_id: number;
+  user_key_masked: string;
+  role: string;
+  enabled: boolean;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 interface ResolveChannelBindingResponse {
   bound: boolean;
   identity?: AuthIdentityResponse | null;
@@ -539,11 +548,13 @@ export default function App() {
   const [channelBindLoading, setChannelBindLoading] = useState(false);
   const [channelBindError, setChannelBindError] = useState<string | null>(null);
   const [channelBindMessage, setChannelBindMessage] = useState<string | null>(null);
-  const [authKeysList, setAuthKeysList] = useState<Array<{ user_key_masked: string; role: string; enabled: boolean; created_at: string; last_used_at: string | null }>>([]);
+  const [authKeysList, setAuthKeysList] = useState<AuthKeyListItem[]>([]);
   const [authKeysLoading, setAuthKeysLoading] = useState(false);
   const [authKeysError, setAuthKeysError] = useState<string | null>(null);
   const [authKeyCreateLoading, setAuthKeyCreateLoading] = useState(false);
   const [authKeyCreateError, setAuthKeyCreateError] = useState<string | null>(null);
+  const [authKeyActionLoading, setAuthKeyActionLoading] = useState<number | null>(null);
+  const [authKeyActionError, setAuthKeyActionError] = useState<string | null>(null);
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
   const [diagnosticsRefreshing, setDiagnosticsRefreshing] = useState(false);
   const [selectedLogFile, setSelectedLogFile] = useState("clawd.log");
@@ -573,6 +584,7 @@ export default function App() {
   }, [navDropdownOpen]);
 
   const t = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const isAdminIdentity = authIdentity?.role?.toLowerCase() === "admin";
   const tSlash = (mixed: string) => {
     const [zh, en] = mixed.split(" / ");
     return lang === "zh" ? zh : en ?? zh;
@@ -586,6 +598,20 @@ export default function App() {
       lark: "Lark",
     };
     return labels[channel];
+  };
+  const formatDateTimeHuman = (raw: string | null | undefined) => {
+    if (!raw) return "--";
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return raw;
+    return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(date);
   };
   const serviceDisplayName = (key: AdapterHealthRow["key"]) => {
     const labels: Record<AdapterHealthRow["key"], string> = {
@@ -647,14 +673,51 @@ export default function App() {
   const queuePressureHigh = (health?.queue_length ?? 0) >= queueWarn;
   const runningTooOld = (health?.running_oldest_age_seconds ?? 0) >= ageWarnSeconds;
   const authHeaders = uiKey ? { "X-RustClaw-Key": uiKey } : {};
-  const apiFetch = (path: string, init?: RequestInit) =>
-    fetch(`${apiBase.replace(/\/$/, "")}${path}`, {
-      ...init,
-      headers: {
-        ...(init?.headers ?? {}),
-        ...authHeaders,
-      },
-    });
+  const normalizeFetchError = (err: unknown, targetUrl: string) => {
+    const fallback = t("未知错误", "Unknown error");
+    if (!(err instanceof Error)) return fallback;
+    const raw = err.message || fallback;
+    const lower = raw.toLowerCase();
+    const looksLikeNetworkError =
+      lower.includes("failed to fetch") || lower.includes("networkerror") || lower.includes("load failed");
+    if (!looksLikeNetworkError) return raw;
+
+    try {
+      const pageProtocol = window.location.protocol;
+      const apiProtocol = new URL(targetUrl, window.location.href).protocol;
+      if (pageProtocol === "https:" && apiProtocol === "http:") {
+        return t(
+          `无法连接到服务：当前页面是 HTTPS，但服务地址是 HTTP（${targetUrl}）。请改成 HTTPS 服务地址，或改用 HTTP 打开前端。`,
+          `Cannot reach backend: current page is HTTPS but API is HTTP (${targetUrl}). Use an HTTPS API URL or open the UI over HTTP.`,
+        );
+      }
+    } catch {
+      // ignore URL parse failures and use generic network guidance
+    }
+
+    return t(
+      `无法连接到服务：${targetUrl}。请检查服务是否启动、Base URL 是否正确、以及浏览器是否拦截跨域请求。`,
+      `Cannot reach backend: ${targetUrl}. Check backend is running, Base URL is correct, and whether browser/CORS policy blocks the request.`,
+    );
+  };
+
+  const safeFetch = async (path: string, init?: RequestInit, withAuth = true) => {
+    const targetUrl = `${apiBase.replace(/\/$/, "")}${path}`;
+    try {
+      return await fetch(targetUrl, {
+        ...init,
+        headers: {
+          ...(init?.headers ?? {}),
+          ...(withAuth ? authHeaders : {}),
+        },
+      });
+    } catch (err) {
+      throw new Error(normalizeFetchError(err, targetUrl));
+    }
+  };
+
+  const apiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, true);
+  const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
 
   const applyIdentity = (identity: AuthIdentityResponse) => {
     setAuthIdentity(identity);
@@ -702,7 +765,7 @@ export default function App() {
     setUiAuthLoading(true);
     setUiAuthError(null);
     try {
-      const res = await fetch(`${apiBase.replace(/\/$/, "")}/v1/auth/ui-key/verify`, {
+      const res = await publicApiFetch(`/v1/auth/ui-key/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_key: normalized }),
@@ -952,9 +1015,10 @@ export default function App() {
   const fetchAuthKeys = async () => {
     setAuthKeysLoading(true);
     setAuthKeysError(null);
+    setAuthKeyActionError(null);
     try {
       const res = await apiFetch("/v1/admin/auth-keys");
-      const body = (await res.json()) as ApiResponse<{ keys: Array<{ user_key_masked: string; role: string; enabled: boolean; created_at: string; last_used_at: string | null }> }>;
+      const body = (await res.json()) as ApiResponse<{ keys: AuthKeyListItem[] }>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `Key 列表获取失败 (${res.status})`);
       }
@@ -986,6 +1050,51 @@ export default function App() {
       setAuthKeyCreateError(err instanceof Error ? err.message : "未知错误");
     } finally {
       setAuthKeyCreateLoading(false);
+    }
+  };
+
+  const updateAuthKey = async (keyId: number, patch: { role?: "user" | "admin"; enabled?: boolean }) => {
+    setAuthKeyActionLoading(keyId);
+    setAuthKeyActionError(null);
+    try {
+      const res = await apiFetch(`/v1/admin/auth-keys/${keyId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const body = (await res.json()) as ApiResponse<{ updated: boolean }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `更新 Key 失败 (${res.status})`);
+      }
+      await fetchAuthKeys();
+    } catch (err) {
+      setAuthKeyActionError(err instanceof Error ? err.message : "未知错误");
+    } finally {
+      setAuthKeyActionLoading(null);
+    }
+  };
+
+  const deleteAuthKey = async (row: AuthKeyListItem) => {
+    const ok = window.confirm(
+      t(
+        `确认删除 ${row.user_key_masked}？删除后将移除该 Key 及关联绑定。`,
+        `Delete ${row.user_key_masked}? This will remove the key and related bindings.`,
+      ),
+    );
+    if (!ok) return;
+    setAuthKeyActionLoading(row.key_id);
+    setAuthKeyActionError(null);
+    try {
+      const res = await apiFetch(`/v1/admin/auth-keys/${row.key_id}`, { method: "DELETE" });
+      const body = (await res.json()) as ApiResponse<{ deleted: boolean }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `删除 Key 失败 (${res.status})`);
+      }
+      await fetchAuthKeys();
+    } catch (err) {
+      setAuthKeyActionError(err instanceof Error ? err.message : "未知错误");
+    } finally {
+      setAuthKeyActionLoading(null);
     }
   };
 
@@ -1813,7 +1922,7 @@ export default function App() {
     if (currentPage === "channels") {
       void fetchAuthKeys();
     }
-  }, [currentPage, uiAuthReady]);
+  }, [currentPage, uiAuthReady, isAdminIdentity]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -3182,7 +3291,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => void createAuthKey("user")}
-                    disabled={authKeyCreateLoading}
+                    disabled={authKeyCreateLoading || !isAdminIdentity}
                     className="theme-accent-btn px-3 py-2 text-sm"
                   >
                     {authKeyCreateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -3191,18 +3300,26 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => void createAuthKey("admin")}
-                    disabled={authKeyCreateLoading}
+                    disabled={authKeyCreateLoading || !isAdminIdentity}
                     className="theme-secondary-btn px-3 py-2 text-sm"
                   >
                     {authKeyCreateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                     {t("生成新 Key（admin）", "Generate new key (admin)")}
                   </button>
                 </div>
+                {!isAdminIdentity ? (
+                  <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                    {t("当前不是 admin 账号：可查看页面，但不能创建/修改/删除账号。", "Current key is not admin: view-only mode for account management.")}
+                  </p>
+                ) : null}
                 {authKeysError ? (
                   <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{authKeysError}</p>
                 ) : null}
                 {authKeyCreateError ? (
                   <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{authKeyCreateError}</p>
+                ) : null}
+                {authKeyActionError ? (
+                  <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{authKeyActionError}</p>
                 ) : null}
                 {newlyCreatedKey ? (
                   <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
@@ -3226,23 +3343,56 @@ export default function App() {
                         <th className="px-4 py-3 font-medium text-white/80">{t("启用", "Enabled")}</th>
                         <th className="px-4 py-3 font-medium text-white/80">{t("创建时间", "Created")}</th>
                         <th className="px-4 py-3 font-medium text-white/80">{t("最后使用", "Last used")}</th>
+                        <th className="px-4 py-3 font-medium text-white/80">{t("操作", "Actions")}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {authKeysList.length === 0 && !authKeysLoading ? (
                         <tr>
-                          <td colSpan={5} className="px-4 py-6 text-center text-white/50">
+                          <td colSpan={6} className="px-4 py-6 text-center text-white/50">
                             {t("暂无数据，点击「刷新列表」或「生成新 Key」", "No keys yet. Click Refresh list or Generate new key.")}
                           </td>
                         </tr>
                       ) : (
-                        authKeysList.map((row, i) => (
-                          <tr key={i} className="border-b border-white/5">
+                        authKeysList.map((row) => (
+                          <tr key={row.key_id} className="border-b border-white/5">
                             <td className="px-4 py-2 font-mono text-white/85">{row.user_key_masked}</td>
                             <td className="px-4 py-2 text-white/75">{row.role}</td>
                             <td className="px-4 py-2">{row.enabled ? t("是", "Yes") : t("否", "No")}</td>
-                            <td className="px-4 py-2 text-white/65">{row.created_at || "--"}</td>
-                            <td className="px-4 py-2 text-white/65">{row.last_used_at ?? "--"}</td>
+                            <td className="px-4 py-2 text-white/65">{formatDateTimeHuman(row.created_at)}</td>
+                            <td className="px-4 py-2 text-white/65">{formatDateTimeHuman(row.last_used_at)}</td>
+                            <td className="px-4 py-2">
+                              {isAdminIdentity ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={authKeyActionLoading === row.key_id}
+                                    className="theme-topbar-btn px-2 py-1 text-xs"
+                                    onClick={() => void updateAuthKey(row.key_id, { enabled: !row.enabled })}
+                                  >
+                                    {row.enabled ? t("禁用", "Disable") : t("启用", "Enable")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={authKeyActionLoading === row.key_id}
+                                    className="theme-secondary-btn px-2 py-1 text-xs"
+                                    onClick={() => void updateAuthKey(row.key_id, { role: row.role === "admin" ? "user" : "admin" })}
+                                  >
+                                    {row.role === "admin" ? t("设为 user", "Set as user") : t("设为 admin", "Set as admin")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={authKeyActionLoading === row.key_id}
+                                    className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200 transition hover:bg-red-500/20 disabled:opacity-50"
+                                    onClick={() => void deleteAuthKey(row)}
+                                  >
+                                    {t("删除", "Delete")}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-white/45">--</span>
+                              )}
+                            </td>
                           </tr>
                         ))
                       )}
@@ -3253,7 +3403,7 @@ export default function App() {
               <aside className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <p className="text-[10px] uppercase tracking-widest text-white/45">{t("当前登录身份", "Current identity")}</p>
                 <p className="mt-2 text-sm text-white/85">
-                  {authIdentity ? `${authIdentity.role} / user_id=${authIdentity.user_id}` : authMeLoading ? t("读取中...", "Loading...") : t("暂无数据", "No data")}
+                  {authIdentity ? authIdentity.role : authMeLoading ? t("读取中...", "Loading...") : t("暂无数据", "No data")}
                 </p>
                 <p className="mt-1 break-all font-mono text-xs text-white/55">{maskStoredKey(authIdentity?.user_key ?? "", 8) || "--"}</p>
               </aside>
