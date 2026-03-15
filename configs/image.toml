@@ -76,7 +76,7 @@ oss_url_ttl_seconds = 3600
 # timeout_seconds = 120
 [image_edit.providers.minimax]
 base_url = "https://api.minimax.io/v1"
-api_key = "REPLACE_ME"
+api_key = "__RC_SECRET_0009__"
 model = "image-01"
 timeout_seconds = 120
 # [image_edit.providers.qwen]
@@ -141,7 +141,7 @@ timeout_seconds = 120
 # timeout_seconds = 120
 [image_generation.providers.minimax]
 base_url = "https://api.minimax.io/v1"
-api_key = "REPLACE_ME"
+api_key = "__RC_SECRET_0010__"
 model = "image-01"
 timeout_seconds = 120
 # [image_generation.providers.qwen]
@@ -195,7 +195,7 @@ timeout_seconds = 90
 # timeout_seconds = 90
 [image_vision.providers.minimax]
 base_url = "https://api.minimax.io/v1"
-api_key = "REPLACE_ME"
+api_key = "__RC_SECRET_0011__"
 model = "MiniMax-VL-01"
 timeout_seconds = 90
 # [image_vision.providers.openai]

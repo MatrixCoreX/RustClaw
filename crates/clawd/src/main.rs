@@ -1603,6 +1603,8 @@ async fn main() -> anyhow::Result<()> {
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
+                    axum::http::Method::PUT,
+                    axum::http::Method::DELETE,
                     axum::http::Method::OPTIONS,
                 ])
                 .allow_headers([
@@ -7408,25 +7410,35 @@ fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Option<String>>
     Ok(Some(user_key))
 }
 
-/// 列出所有 auth key（脱敏），仅 admin 调用。
-pub(crate) fn list_auth_keys(state: &AppState) -> anyhow::Result<Vec<(String, String, i64, String, Option<String>)>> {
+/// 列出所有 auth key（脱敏 + rowid），仅 admin 调用。
+pub(crate) fn list_auth_keys(
+    state: &AppState,
+) -> anyhow::Result<Vec<(i64, String, String, i64, String, Option<String>)>> {
     let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
     let mut stmt = db.prepare(
-        "SELECT user_key, role, enabled, created_at, last_used_at FROM auth_keys ORDER BY created_at DESC",
+        "SELECT rowid, user_key, role, enabled, created_at, last_used_at FROM auth_keys ORDER BY created_at DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
-            row.get::<_, String>(0)?,
+            row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, Option<String>>(4)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (user_key, role, enabled, created_at, last_used_at) = row?;
-        out.push((mask_secret(&user_key), role, enabled, created_at, last_used_at));
+        let (key_id, user_key, role, enabled, created_at, last_used_at) = row?;
+        out.push((
+            key_id,
+            mask_secret(&user_key),
+            role,
+            enabled,
+            created_at,
+            last_used_at,
+        ));
     }
     Ok(out)
 }
@@ -7445,6 +7457,99 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
         params![user_key, role, now_ts()],
     )?;
     Ok(user_key)
+}
+
+/// 更新 auth key 的角色或启用状态。返回是否命中记录。
+pub(crate) fn update_auth_key_by_id(
+    state: &AppState,
+    key_id: i64,
+    role: Option<&str>,
+    enabled: Option<bool>,
+    actor_user_key: &str,
+) -> anyhow::Result<bool> {
+    if role.is_none() && enabled.is_none() {
+        return Err(anyhow::anyhow!("nothing to update"));
+    }
+    let normalized_role = role.map(|v| if v.eq_ignore_ascii_case("admin") { "admin" } else { "user" });
+    let enabled_i64 = enabled.map(|v| if v { 1_i64 } else { 0_i64 });
+
+    let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    let target = db.query_row(
+        "SELECT user_key FROM auth_keys WHERE rowid = ?1",
+        params![key_id],
+        |row| row.get::<_, String>(0),
+    );
+    let target_user_key = match target {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(false),
+        Err(err) => return Err(err.into()),
+    };
+    let actor_user_key = normalize_user_key(actor_user_key);
+    if !actor_user_key.is_empty() && target_user_key == actor_user_key {
+        if enabled == Some(false) {
+            return Err(anyhow::anyhow!("cannot disable current key"));
+        }
+        if normalized_role == Some("user") {
+            return Err(anyhow::anyhow!("cannot demote current admin key"));
+        }
+    }
+
+    let changed = db.execute(
+        "UPDATE auth_keys
+         SET role = COALESCE(?2, role),
+             enabled = COALESCE(?3, enabled)
+         WHERE rowid = ?1",
+        params![key_id, normalized_role, enabled_i64],
+    )?;
+    Ok(changed > 0)
+}
+
+/// 删除 auth key 及其关联绑定。返回是否命中记录。
+pub(crate) fn delete_auth_key_by_id(
+    state: &AppState,
+    key_id: i64,
+    actor_user_key: &str,
+) -> anyhow::Result<bool> {
+    let mut db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    let target = db.query_row(
+        "SELECT user_key, role FROM auth_keys WHERE rowid = ?1",
+        params![key_id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    );
+    let (target_user_key, target_role) = match target {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(false),
+        Err(err) => return Err(err.into()),
+    };
+
+    let actor_user_key = normalize_user_key(actor_user_key);
+    if !actor_user_key.is_empty() && target_user_key == actor_user_key {
+        return Err(anyhow::anyhow!("cannot delete current key"));
+    }
+
+    if target_role.eq_ignore_ascii_case("admin") {
+        let admin_count: i64 = db.query_row(
+            "SELECT COUNT(*) FROM auth_keys WHERE role = 'admin' AND enabled = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        if admin_count <= 1 {
+            return Err(anyhow::anyhow!("cannot delete the last enabled admin key"));
+        }
+    }
+
+    let tx = db.transaction()?;
+    tx.execute(
+        "DELETE FROM channel_bindings WHERE user_key = ?1",
+        params![target_user_key],
+    )?;
+    tx.execute(
+        "DELETE FROM exchange_api_credentials WHERE user_key = ?1",
+        params![target_user_key],
+    )?;
+    let changed = tx.execute("DELETE FROM auth_keys WHERE rowid = ?1", params![key_id])?;
+    tx.commit()?;
+    Ok(changed > 0)
 }
 
 fn seed_channel_binding_rows(
