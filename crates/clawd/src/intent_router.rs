@@ -147,22 +147,23 @@ pub(crate) async fn run_intent_normalizer(
         .unwrap_or_else(|| "<none>".to_string());
     let recent_execution_context = routing_context::build_recent_execution_context(state, task, 8);
     let memory_context = if state.memory.route_memory_enabled {
-        let (long_term_summary, preferences, recalled) =
-            memory::service::recall_memory_context_parts(
-                state,
-                task.user_key.as_deref(),
-                task.user_id,
-                task.chat_id,
-                user_request,
-                state.memory.prompt_recall_limit.max(1),
-                true,
-                true,
-            );
-        memory::service::memory_context_block(
-            long_term_summary.as_deref(),
-            &preferences,
-            &recalled,
-            state.memory.route_memory_max_chars.max(384),
+        let structured = memory::service::recall_structured_memory_context(
+            state,
+            task.user_key.as_deref(),
+            task.user_id,
+            task.chat_id,
+            user_request,
+            state.memory.prompt_recall_limit.max(1),
+            true,
+            true,
+        );
+        memory::service::structured_memory_context_block(
+            &structured,
+            memory::retrieval::MemoryContextMode::Route,
+            state.memory
+                .route_trigger_budget_chars
+                .max(384)
+                .min(state.memory.route_memory_max_chars.max(384)),
         )
     } else {
         "<none>".to_string()
@@ -340,38 +341,43 @@ pub(crate) async fn route_request_mode(
     let recent_execution_context = routing_context::build_recent_execution_context(state, task, 5);
     let (memory_context, _log_long_term, _log_prefs, _log_recalled) =
         if state.memory.route_memory_enabled {
-            let (long_term_summary, preferences, recalled) =
-                memory::service::recall_memory_context_parts(
-                    state,
-                    task.user_key.as_deref(),
-                    task.user_id,
-                    task.chat_id,
-                    user_request,
-                    state.memory.prompt_recall_limit.max(1),
-                    true,
-                    true,
-                );
-            let memory_context = memory::service::memory_context_block(
-                long_term_summary.as_deref(),
-                &preferences,
-                &recalled,
-                state.memory.route_memory_max_chars.max(384),
+            let structured = memory::service::recall_structured_memory_context(
+                state,
+                task.user_key.as_deref(),
+                task.user_id,
+                task.chat_id,
+                user_request,
+                state.memory.prompt_recall_limit.max(1),
+                true,
+                true,
             );
-            let lt = long_term_summary
+            let memory_context = memory::service::structured_memory_context_block(
+                &structured,
+                memory::retrieval::MemoryContextMode::Route,
+                state
+                    .memory
+                    .route_trigger_budget_chars
+                    .max(384)
+                    .min(state.memory.route_memory_max_chars.max(384)),
+            );
+            let lt = structured
+                .long_term_summary
                 .as_deref()
                 .map(crate::truncate_for_log)
                 .unwrap_or_else(|| "<none>".to_string());
-            let pref = if preferences.is_empty() {
+            let pref = if structured.preferences.is_empty() {
                 "<none>".to_string()
             } else {
                 crate::truncate_for_log(
-                    &preferences
+                    &structured
+                        .preferences
                         .iter()
                         .map(|(k, v)| format!("{k}={v}"))
                         .collect::<Vec<_>>()
                         .join(" | "),
                 )
             };
+            let recalled = crate::memory::retrieval::legacy_pairs_from_structured(&structured);
             let rec = if recalled.is_empty() {
                 "<none>".to_string()
             } else {

@@ -1340,6 +1340,13 @@ async fn main() -> anyhow::Result<()> {
     ensure_memory_schema(&db)?;
     ensure_channel_schema(&db)?;
     ensure_key_auth_schema(&db)?;
+    memory::indexing::ensure_retrieval_schema(&db)?;
+    if config.memory.hybrid_recall_enabled
+        && (config.memory.reindex_on_startup
+            || memory::indexing::retrieval_index_is_empty(&db).unwrap_or(true))
+    {
+        memory::indexing::rebuild_retrieval_index(&db, &config.memory)?;
+    }
     let bootstrap_admin_key = ensure_bootstrap_admin_key(&db)?;
     seed_channel_bindings(&db, &config)?;
     if let Some(user_key) = bootstrap_admin_key.as_deref() {
@@ -1954,6 +1961,10 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
          )",
         params![state.memory.max_rows as i64],
     )?;
+    if state.memory.hybrid_recall_enabled {
+        let index_max_rows = state.memory.max_rows.saturating_mul(3).max(2000);
+        memory::indexing::cleanup_retrieval_index(&db, memory_cutoff, index_max_rows)?;
+    }
 
     let long_term_cutoff = now - (state.memory.long_term_retention_days as i64 * 86400);
     db.execute(
@@ -2285,9 +2296,11 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             let long_term_summary = memory_ctx.long_term_summary;
             let preferences = memory_ctx.preferences;
             let recalled = memory_ctx.recalled;
+            let similar_triggers = memory_ctx.similar_triggers;
+            let relevant_facts = memory_ctx.relevant_facts;
+            let recent_related_events = memory_ctx.recent_related_events;
             let prompt_with_memory = memory_ctx.prompt_with_memory;
-            let chat_prompt_context =
-                memory::service::memory_context_block(None, &preferences, &[], 512);
+            let chat_prompt_context = memory_ctx.chat_prompt_context;
             let mut resolved_prompt_for_execution = resolved_prompt.clone();
             let mut prompt_with_memory_for_execution = prompt_with_memory.clone();
             if let Some(image_context) =
@@ -2327,11 +2340,47 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                     .join(" | ");
                 truncate_for_log(&merged)
             };
+            let trigger_log = if similar_triggers.is_empty() {
+                "<none>".to_string()
+            } else {
+                truncate_for_log(
+                    &similar_triggers
+                        .iter()
+                        .map(|v| v.text.clone())
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                )
+            };
+            let fact_log = if relevant_facts.is_empty() {
+                "<none>".to_string()
+            } else {
+                truncate_for_log(
+                    &relevant_facts
+                        .iter()
+                        .map(|v| v.text.clone())
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                )
+            };
+            let related_log = if recent_related_events.is_empty() {
+                "<none>".to_string()
+            } else {
+                truncate_for_log(
+                    &recent_related_events
+                        .iter()
+                        .map(|v| v.text.clone())
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                )
+            };
             info!(
-                "worker_once: ask memory task_id={} memory.long_term_summary={} memory.preferences={} memory.recalled_recent_count={} memory.recalled_recent={}",
+                "worker_once: ask memory task_id={} memory.long_term_summary={} memory.preferences={} memory.similar_triggers={} memory.relevant_facts={} memory.related_events={} memory.recalled_recent_count={} memory.recalled_recent={}",
                 task.task_id,
                 long_term_log,
                 preferences_log,
+                trigger_log,
+                fact_log,
+                related_log,
                 recalled.len(),
                 recalled_log,
             );
@@ -4234,7 +4283,7 @@ fn inject_skill_memory_context(
         return Value::Object(obj);
     }
     let anchor = skill_memory_anchor(skill_name, &obj);
-    let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
+    let structured = memory::service::recall_structured_memory_context(
         state,
         task.user_key.as_deref(),
         task.user_id,
@@ -4244,22 +4293,22 @@ fn inject_skill_memory_context(
         true,
         true,
     );
-    let memory_context = memory::service::memory_context_block(
-        long_term_summary.as_deref(),
-        &preferences,
-        &recalled,
+    let memory_context = memory::service::structured_memory_context_block(
+        &structured,
+        memory::retrieval::MemoryContextMode::Skill,
         state.memory.skill_memory_max_chars.max(384),
     );
     let mut pref_map = serde_json::Map::new();
-    for (k, v) in &preferences {
+    for (k, v) in &structured.preferences {
         pref_map.insert(k.clone(), Value::String(v.clone()));
     }
-    let lang_hint = memory::service::preferred_response_language(&preferences).unwrap_or_default();
+    let lang_hint =
+        memory::service::preferred_response_language(&structured.preferences).unwrap_or_default();
     obj.insert(
         "_memory".to_string(),
         json!({
             "context": memory_context,
-            "long_term_summary": long_term_summary.unwrap_or_default(),
+            "long_term_summary": structured.long_term_summary.clone().unwrap_or_default(),
             "preferences": Value::Object(pref_map),
             "lang_hint": lang_hint
         }),
@@ -4361,7 +4410,7 @@ async fn infer_language_preference_from_memory_llm(
         );
         return Some(lang);
     }
-    let (long_term_summary, pref_fallback, recalled) = memory::service::recall_memory_context_parts(
+    let structured = memory::service::recall_structured_memory_context(
         state,
         task.user_key.as_deref(),
         task.user_id,
@@ -4371,10 +4420,9 @@ async fn infer_language_preference_from_memory_llm(
         state.memory.image_memory_include_long_term,
         state.memory.image_memory_include_preferences,
     );
-    let memory_context = memory::service::memory_context_block(
-        long_term_summary.as_deref(),
-        &pref_fallback,
-        &recalled,
+    let memory_context = memory::service::structured_memory_context_block(
+        &structured,
+        memory::retrieval::MemoryContextMode::Image,
         state.memory.image_memory_max_chars.max(384),
     );
     if memory_context == "<none>" {
@@ -4407,7 +4455,10 @@ async fn infer_language_preference_from_memory_llm(
         task.task_id,
         task.user_id,
         task.chat_id,
-        recalled.len(),
+        structured.recalled_recent.len()
+            + structured.similar_triggers.len()
+            + structured.relevant_facts.len()
+            + structured.recent_related_events.len(),
         parsed.as_deref().unwrap_or("unknown"),
         truncate_for_log(&out)
     );
@@ -5246,7 +5297,7 @@ async fn resolve_image_for_edit_from_context_llm(
     if candidates.is_empty() {
         return None;
     }
-    let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
+    let structured = memory::service::recall_structured_memory_context(
         state,
         task.user_key.as_deref(),
         task.user_id,
@@ -5256,10 +5307,9 @@ async fn resolve_image_for_edit_from_context_llm(
         state.memory.image_memory_include_long_term,
         state.memory.image_memory_include_preferences,
     );
-    let memory_text = memory::service::memory_context_block(
-        long_term_summary.as_deref(),
-        &preferences,
-        &recalled,
+    let memory_text = memory::service::structured_memory_context_block(
+        &structured,
+        memory::retrieval::MemoryContextMode::Image,
         state.memory.image_memory_max_chars.max(384),
     );
     let candidate_lines = candidates
@@ -6819,25 +6869,6 @@ fn utf8_safe_prefix(text: &str, max_len: usize) -> &str {
     &text[..cut]
 }
 
-fn build_prompt_with_memory(
-    prompt: &str,
-    long_term_summary: Option<&str>,
-    preferences: &[(String, String)],
-    memories: &[(String, String)],
-    max_chars: usize,
-) -> String {
-    memory::build_prompt_with_memory(prompt, long_term_summary, preferences, memories, max_chars)
-}
-
-fn memory_context_block(
-    long_term_summary: Option<&str>,
-    preferences: &[(String, String)],
-    memories: &[(String, String)],
-    max_chars: usize,
-) -> String {
-    memory::build_memory_context_block(long_term_summary, preferences, memories, max_chars)
-}
-
 fn preferred_response_language(preferences: &[(String, String)]) -> Option<String> {
     for (k, v) in preferences.iter().rev() {
         if k.trim() == "response_language" || k.trim() == "language" {
@@ -6848,51 +6879,6 @@ fn preferred_response_language(preferences: &[(String, String)]) -> Option<Strin
         }
     }
     None
-}
-
-fn recall_memory_context_parts(
-    state: &AppState,
-    user_key: Option<&str>,
-    user_id: i64,
-    chat_id: i64,
-    anchor_prompt: &str,
-    recent_limit: usize,
-    include_long_term: bool,
-    include_preferences: bool,
-) -> (Option<String>, Vec<(String, String)>, Vec<(String, String)>) {
-    let long_term_summary = if include_long_term && state.memory.long_term_enabled {
-        recall_long_term_summary(state, user_key, user_id, chat_id)
-            .unwrap_or(None)
-            .map(|s| truncate_text(&s, state.memory.long_term_recall_max_chars.max(256)))
-    } else {
-        None
-    };
-    let preferences = if include_preferences {
-        recall_user_preferences(
-            state,
-            user_key,
-            user_id,
-            chat_id,
-            state.memory.preference_recall_limit.max(1),
-        )
-        .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-    let recalled = recall_recent_memories(state, user_key, user_id, chat_id, recent_limit.max(1))
-        .unwrap_or_default();
-    let recalled =
-        filter_memories_for_prompt_recall(recalled, state.memory.prefer_llm_assistant_memory);
-    let recalled = if state.memory.recent_relevance_enabled {
-        select_relevant_memories_for_prompt(
-            recalled,
-            anchor_prompt,
-            state.memory.recent_relevance_min_score.clamp(0.0, 1.0),
-        )
-    } else {
-        recalled
-    };
-    (long_term_summary, preferences, recalled)
 }
 
 fn init_db(config: &AppConfig) -> anyhow::Result<Connection> {

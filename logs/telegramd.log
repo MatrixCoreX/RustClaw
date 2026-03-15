@@ -1,3 +1,9 @@
-[2m2026-03-15T10:53:45.946699Z[0m [32m INFO[0m registered Telegram menu commands
-[2m2026-03-15T10:53:46.186205Z[0m [32m INFO[0m telegramd 已启动，admins=[1985996990]，allowlist=[1985996990]，skills=run_cmd,read_file,write_file,list_dir,make_dir,remove_file,x,system_basic,http_basic,git_basic,install_module,process_basic,package_manager,archive_basic,db_basic,docker_basic,fs_search,rss_fetch,image_vision,image_generate,image_edit,audio_transcribe,audio_synthesize,health_check,log_analyze,service_control,config_guard,crypto,chat
-[2m2026-03-15T10:53:46.193908Z[0m [32m INFO[0m 启动内存 RSS bytes=9654272
+[2m2026-03-15T14:54:37.262929Z[0m [32m INFO[0m registered Telegram menu commands
+[2m2026-03-15T14:54:37.272582Z[0m [32m INFO[0m telegramd 已启动，admins=[1985996990]，allowlist=[1985996990]，skills=run_cmd,read_file,write_file,list_dir,make_dir,remove_file,x,system_basic,http_basic,git_basic,install_module,process_basic,package_manager,archive_basic,db_basic,docker_basic,fs_search,rss_fetch,image_vision,image_generate,image_edit,audio_transcribe,audio_synthesize,health_check,log_analyze,service_control,config_guard,crypto,chat
+[2m2026-03-15T14:54:37.274802Z[0m [32m INFO[0m 启动内存 RSS bytes=9961472
+[2m2026-03-15T14:54:38.560841Z[0m [32m INFO[0m handle_message: chat_id=1985996990 user_id=1985996990 text=hi
+[2m2026-03-15T14:54:38.662343Z[0m [32m INFO[0m telegramd: submitted ask task_id=7887ca47-d747-4098-ab32-74001f0f1345 user_id=4485248433400232408 chat_id=1985996990 agent_mode=true
+[2m2026-03-15T14:54:38.662854Z[0m [32m INFO[0m handle_message: chat_id=1985996990 user_id=1985996990 text=hi
+[2m2026-03-15T14:54:38.687446Z[0m [32m INFO[0m telegramd: submitted ask task_id=406036f6-1c1b-49d7-9507-c35f0a867f1c user_id=4485248433400232408 chat_id=1985996990 agent_mode=true
+[2m2026-03-15T14:54:38.687774Z[0m [32m INFO[0m handle_message: chat_id=1985996990 user_id=1985996990 text=hi
+[2m2026-03-15T14:54:38.707892Z[0m [32m INFO[0m telegramd: submitted ask task_id=3448a519-9985-4d2c-8073-e700f07f99e9 user_id=4485248433400232408 chat_id=1985996990 agent_mode=true

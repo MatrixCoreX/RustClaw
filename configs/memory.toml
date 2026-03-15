@@ -32,6 +32,17 @@ schedule_memory_max_chars = 1600
 image_memory_include_long_term = true
 image_memory_include_preferences = true
 image_memory_max_chars = 1400
+hybrid_recall_enabled = true
+fts_candidate_limit = 24
+vector_candidate_limit = 24
+trigger_anchor_limit = 2
+fact_card_limit = 3
+chat_memory_budget_chars = 1200
+agent_memory_budget_chars = 2200
+route_trigger_budget_chars = 900
+embedding_model = "local-hash-v1"
+embedding_batch_size = 16
+reindex_on_startup = false
 
 [rules]
 assistant_ack_skip = ["ok", "okay", "done", "received", "收到", "好的", "明白了"]

@@ -524,6 +524,28 @@ pub struct MemoryConfig {
     pub image_memory_include_preferences: bool,
     #[serde(default = "default_memory_image_memory_max_chars")]
     pub image_memory_max_chars: usize,
+    #[serde(default = "default_memory_hybrid_recall_enabled")]
+    pub hybrid_recall_enabled: bool,
+    #[serde(default = "default_memory_fts_candidate_limit")]
+    pub fts_candidate_limit: usize,
+    #[serde(default = "default_memory_vector_candidate_limit")]
+    pub vector_candidate_limit: usize,
+    #[serde(default = "default_memory_trigger_anchor_limit")]
+    pub trigger_anchor_limit: usize,
+    #[serde(default = "default_memory_fact_card_limit")]
+    pub fact_card_limit: usize,
+    #[serde(default = "default_memory_chat_memory_budget_chars")]
+    pub chat_memory_budget_chars: usize,
+    #[serde(default = "default_memory_agent_memory_budget_chars")]
+    pub agent_memory_budget_chars: usize,
+    #[serde(default = "default_memory_route_trigger_budget_chars")]
+    pub route_trigger_budget_chars: usize,
+    #[serde(default = "default_memory_embedding_model")]
+    pub embedding_model: String,
+    #[serde(default = "default_memory_embedding_batch_size")]
+    pub embedding_batch_size: usize,
+    #[serde(default = "default_memory_reindex_on_startup")]
+    pub reindex_on_startup: bool,
     #[serde(default)]
     pub rules: MemoryRulesConfig,
 }
@@ -567,6 +589,17 @@ impl Default for MemoryConfig {
             image_memory_include_long_term: default_memory_image_memory_include_long_term(),
             image_memory_include_preferences: default_memory_image_memory_include_preferences(),
             image_memory_max_chars: default_memory_image_memory_max_chars(),
+            hybrid_recall_enabled: default_memory_hybrid_recall_enabled(),
+            fts_candidate_limit: default_memory_fts_candidate_limit(),
+            vector_candidate_limit: default_memory_vector_candidate_limit(),
+            trigger_anchor_limit: default_memory_trigger_anchor_limit(),
+            fact_card_limit: default_memory_fact_card_limit(),
+            chat_memory_budget_chars: default_memory_chat_memory_budget_chars(),
+            agent_memory_budget_chars: default_memory_agent_memory_budget_chars(),
+            route_trigger_budget_chars: default_memory_route_trigger_budget_chars(),
+            embedding_model: default_memory_embedding_model(),
+            embedding_batch_size: default_memory_embedding_batch_size(),
+            reindex_on_startup: default_memory_reindex_on_startup(),
             rules: MemoryRulesConfig::default(),
         }
     }
@@ -1064,6 +1097,50 @@ fn default_memory_image_memory_include_preferences() -> bool {
 
 fn default_memory_image_memory_max_chars() -> usize {
     1400
+}
+
+fn default_memory_hybrid_recall_enabled() -> bool {
+    true
+}
+
+fn default_memory_fts_candidate_limit() -> usize {
+    24
+}
+
+fn default_memory_vector_candidate_limit() -> usize {
+    24
+}
+
+fn default_memory_trigger_anchor_limit() -> usize {
+    2
+}
+
+fn default_memory_fact_card_limit() -> usize {
+    3
+}
+
+fn default_memory_chat_memory_budget_chars() -> usize {
+    1200
+}
+
+fn default_memory_agent_memory_budget_chars() -> usize {
+    2200
+}
+
+fn default_memory_route_trigger_budget_chars() -> usize {
+    900
+}
+
+fn default_memory_embedding_model() -> String {
+    "local-hash-v1".to_string()
+}
+
+fn default_memory_embedding_batch_size() -> usize {
+    16
+}
+
+fn default_memory_reindex_on_startup() -> bool {
+    false
 }
 
 fn default_memory_rule_assistant_ack_skip() -> Vec<String> {

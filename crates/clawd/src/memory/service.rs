@@ -1,10 +1,15 @@
 use crate::{AppState, ClaimedTask};
+use crate::memory::retrieval::{MemoryContextMode, RetrievedMemoryItem, StructuredMemoryContext};
 
 pub(crate) struct PromptMemoryContext {
     pub(crate) prompt_with_memory: String,
+    pub(crate) chat_prompt_context: String,
     pub(crate) long_term_summary: Option<String>,
     pub(crate) preferences: Vec<(String, String)>,
     pub(crate) recalled: Vec<(String, String)>,
+    pub(crate) similar_triggers: Vec<RetrievedMemoryItem>,
+    pub(crate) relevant_facts: Vec<RetrievedMemoryItem>,
+    pub(crate) recent_related_events: Vec<RetrievedMemoryItem>,
 }
 
 pub(crate) fn prepare_prompt_with_memory(
@@ -12,58 +17,47 @@ pub(crate) fn prepare_prompt_with_memory(
     task: &ClaimedTask,
     prompt: &str,
 ) -> PromptMemoryContext {
-    let long_term_summary = if state.memory.long_term_enabled {
-        crate::recall_long_term_summary(state, task.user_key.as_deref(), task.user_id, task.chat_id)
-            .unwrap_or(None)
-            .map(|s| crate::truncate_text(&s, state.memory.long_term_recall_max_chars.max(256)))
-    } else {
-        None
-    };
-    let recalled = crate::recall_recent_memories(
+    let structured = recall_structured_memory_context(
         state,
         task.user_key.as_deref(),
         task.user_id,
         task.chat_id,
-        state.memory.prompt_recall_limit.max(1),
-    )
-    .unwrap_or_default();
-    let recalled = crate::filter_memories_for_prompt_recall(
-        recalled,
-        state.memory.prefer_llm_assistant_memory,
-    );
-    let recalled = if state.memory.recent_relevance_enabled {
-        crate::select_relevant_memories_for_prompt(
-            recalled,
-            prompt,
-            state.memory.recent_relevance_min_score.clamp(0.0, 1.0),
-        )
-    } else {
-        recalled
-    };
-    let preferences = crate::recall_user_preferences(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        state.memory.preference_recall_limit.max(1),
-    )
-    .unwrap_or_default();
-    let prompt_with_memory = crate::build_prompt_with_memory(
         prompt,
-        long_term_summary.as_deref(),
-        &preferences,
-        &recalled,
-        state.memory.prompt_max_chars.max(512),
+        state.memory.prompt_recall_limit.max(1),
+        true,
+        true,
+    );
+    let prompt_with_memory = structured_memory_context_block(
+        &structured,
+        MemoryContextMode::Agent,
+        state
+            .memory
+            .agent_memory_budget_chars
+            .max(512)
+            .min(state.memory.prompt_max_chars.max(512)),
+    );
+    let chat_prompt_context = structured_memory_context_block(
+        &structured,
+        MemoryContextMode::Chat,
+        state
+            .memory
+            .chat_memory_budget_chars
+            .max(384)
+            .min(state.memory.prompt_max_chars.max(384)),
     );
     PromptMemoryContext {
+        chat_prompt_context,
+        long_term_summary: structured.long_term_summary.clone(),
+        preferences: structured.preferences.clone(),
+        recalled: crate::memory::retrieval::legacy_pairs_from_structured(&structured),
+        similar_triggers: structured.similar_triggers.clone(),
+        relevant_facts: structured.relevant_facts.clone(),
+        recent_related_events: structured.recent_related_events.clone(),
         prompt_with_memory,
-        long_term_summary,
-        preferences,
-        recalled,
     }
 }
 
-pub(crate) fn recall_memory_context_parts(
+pub(crate) fn recall_structured_memory_context(
     state: &AppState,
     user_key: Option<&str>,
     user_id: i64,
@@ -72,26 +66,71 @@ pub(crate) fn recall_memory_context_parts(
     recent_limit: usize,
     include_long_term: bool,
     include_preferences: bool,
-) -> (Option<String>, Vec<(String, String)>, Vec<(String, String)>) {
-    crate::recall_memory_context_parts(
-        state,
-        user_key,
-        user_id,
-        chat_id,
-        anchor_prompt,
-        recent_limit,
-        include_long_term,
-        include_preferences,
-    )
+) -> StructuredMemoryContext {
+    let long_term_summary = if include_long_term && state.memory.long_term_enabled {
+        crate::recall_long_term_summary(state, user_key, user_id, chat_id)
+            .unwrap_or(None)
+            .map(|s| crate::truncate_text(&s, state.memory.long_term_recall_max_chars.max(256)))
+    } else {
+        None
+    };
+    let preferences = if include_preferences {
+        crate::recall_user_preferences(
+            state,
+            user_key,
+            user_id,
+            chat_id,
+            state.memory.preference_recall_limit.max(1),
+        )
+        .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let recalled_recent = crate::recall_recent_memories(state, user_key, user_id, chat_id, recent_limit)
+        .unwrap_or_default();
+    let recalled_recent = crate::filter_memories_for_prompt_recall(
+        recalled_recent,
+        state.memory.prefer_llm_assistant_memory,
+    );
+    let recalled_recent = if state.memory.recent_relevance_enabled {
+        crate::select_relevant_memories_for_prompt(
+            recalled_recent,
+            anchor_prompt,
+            state.memory.recent_relevance_min_score.clamp(0.0, 1.0),
+        )
+    } else {
+        recalled_recent
+    };
+
+    let indexed = if state.memory.hybrid_recall_enabled {
+        crate::memory::retrieval::retrieve_indexed_memories(
+            state,
+            user_key,
+            user_id,
+            chat_id,
+            anchor_prompt,
+        )
+        .unwrap_or_default()
+    } else {
+        crate::memory::retrieval::IndexedRecall::default()
+    };
+
+    StructuredMemoryContext {
+        long_term_summary,
+        preferences,
+        similar_triggers: indexed.similar_triggers,
+        relevant_facts: indexed.relevant_facts,
+        recent_related_events: indexed.recent_related_events,
+        recalled_recent,
+    }
 }
 
-pub(crate) fn memory_context_block(
-    long_term_summary: Option<&str>,
-    preferences: &[(String, String)],
-    memories: &[(String, String)],
+pub(crate) fn structured_memory_context_block(
+    ctx: &StructuredMemoryContext,
+    mode: MemoryContextMode,
     max_chars: usize,
 ) -> String {
-    crate::memory_context_block(long_term_summary, preferences, memories, max_chars)
+    crate::memory::retrieval::build_structured_memory_context_block(ctx, mode, max_chars)
 }
 
 pub(crate) async fn maybe_refresh_long_term_summary(
