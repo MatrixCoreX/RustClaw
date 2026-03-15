@@ -1,0 +1,4 @@
+locale = "zh-CN"
+
+[dict]
+"image_edit.msg.saved" = "图片编辑成功并已保存：{path}"

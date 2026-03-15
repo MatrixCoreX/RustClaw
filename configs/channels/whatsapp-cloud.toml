@@ -1,0 +1,59 @@
+# WhatsApp Cloud / webhook config.
+# Current primary identity flow is key-based:
+# - msg.from is only the external transport identity
+# - Real auth/role/memory identity comes from bound user_key
+# - bindings can be used for static pre-bind seeding
+#
+# [whatsapp] is the section currently used by whatsappd.
+# [whatsapp_cloud] is kept as a naming-compatible mirror/extension section.
+
+[whatsapp]
+# 是否启用 WhatsApp Cloud / webhook 通道
+enabled = false
+# Meta Graph API 基础地址
+api_base = "https://graph.facebook.com"
+# 云端访问令牌 / Access token
+access_token = "REPLACE_ME_WHATSAPP_ACCESS_TOKEN"
+# Webhook 签名校验密钥 / App secret
+app_secret = "REPLACE_ME_META_APP_SECRET"
+# Webhook 校验用 token
+verify_token = "REPLACE_ME_WHATSAPP_VERIFY_TOKEN"
+# Meta 电话号码 ID
+phone_number_id = "REPLACE_ME_PHONE_NUMBER_ID"
+# 本地 webhook 监听地址
+webhook_listen = "127.0.0.1:8091"
+# 本地 webhook 路径
+webhook_path = "/webhook"
+# Legacy bootstrap admin list (exact msg.from match).
+# Kept for compatibility only; runtime access now depends on key binding.
+admins = []
+# Legacy bootstrap allowlist (exact msg.from match).
+# Kept for compatibility only; runtime access now depends on key binding.
+allowlist = []
+# Optional static bindings loaded into channel_bindings on clawd startup.
+# Example:
+# bindings = [{ external_user_id = "8613800138000", external_chat_id = "8613800138000", user_key = "rk-REPLACE_ME" }]
+bindings = []
+# 快速结果等待秒数；超时后转为异步回传
+quick_result_wait_seconds = 3
+# 图片落盘目录
+image_inbox_dir = "image/upload"
+# 音频落盘目录
+audio_inbox_dir = "audio/upload"
+
+[whatsapp_cloud]
+# 兼容/扩展段：供 clawd 读取云端能力状态时使用
+enabled = false
+api_base = "https://graph.facebook.com"
+access_token = ""
+app_secret = ""
+verify_token = ""
+phone_number_id = ""
+webhook_listen = "127.0.0.1:8091"
+webhook_path = "/webhook"
+admins = []
+allowlist = []
+bindings = []
+quick_result_wait_seconds = 3
+image_inbox_dir = "image/upload"
+audio_inbox_dir = "audio/upload"

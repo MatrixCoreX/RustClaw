@@ -1,0 +1,54 @@
+mark_llm_reply_in_short_term = true
+prefer_llm_assistant_memory = false
+prompt_recall_limit = 3
+recall_limit = 6
+item_max_chars = 1200
+prompt_max_chars = 4500
+retention_days = 21
+max_rows = 30000
+long_term_enabled = true
+long_term_every_rounds = 8
+long_term_source_rounds = 12
+long_term_summary_max_chars = 1600
+long_term_recall_max_chars = 700
+long_term_retention_days = 120
+long_term_max_rows = 5000
+write_filter_enabled = true
+write_min_chars = 4
+enable_preference_extraction = true
+preference_recall_limit = 8
+recent_relevance_enabled = true
+recent_relevance_min_score = 0.16
+safety_filter_enabled = true
+long_term_refresh_min_new_chars = 80
+long_term_refresh_max_repeat_ratio = 0.72
+route_memory_enabled = true
+route_memory_max_chars = 1400
+skill_memory_enabled = true
+skill_memory_max_chars = 1800
+schedule_memory_include_long_term = true
+schedule_memory_include_preferences = true
+schedule_memory_max_chars = 1600
+image_memory_include_long_term = true
+image_memory_include_preferences = true
+image_memory_max_chars = 1400
+
+[rules]
+assistant_ack_skip = ["ok", "okay", "done", "received", "收到", "好的", "明白了"]
+instruction_markers = ["请", "执行", "run ", "please "]
+injection_markers = [
+    "ignore previous instructions",
+    "ignore all previous rules",
+    "system prompt",
+    "泄露提示词",
+    "忽略之前所有规则",
+    "忽略系统规则",
+]
+salience_boost_markers = ["以后", "always", "默认"]
+
+[rules.preferences]
+language_zh = ["以后都用中文", "请用中文", "中文回复", "默认中文", "都说中文"]
+language_en = ["以后都用英文", "请用英文", "英文回复", "reply in english", "speak english"]
+style_concise = ["简洁", "简短", "精简", "concise", "brief"]
+style_detailed = ["详细", "展开", "细一点", "detailed", "step by step"]
+format_plain_text = ["不要markdown", "别用markdown", "纯文本", "plain text", "no markdown"]

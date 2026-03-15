@@ -1,0 +1,16 @@
+[Unit]
+Description=RustClaw Core Daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/rustclaw
+ExecStart=/opt/rustclaw/bin/clawd
+Restart=always
+RestartSec=2
+TasksMax=128
+MemoryMax=384M
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

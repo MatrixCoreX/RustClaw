@@ -1,0 +1,8 @@
+[2m2026-03-15T08:26:31.227832Z[0m [33m WARN[0m register Telegram menu failed: setMyCommands http 404 Not Found: {"ok":false,"error_code":404,"description":"Not Found"}
+[2m2026-03-15T08:26:31.239931Z[0m [32m INFO[0m telegramd 已启动，admins=[1985996990]，allowlist=[1985996990]，skills=run_cmd,read_file,write_file,list_dir,make_dir,remove_file,x,system_basic,http_basic,git_basic,install_module,process_basic,package_manager,archive_basic,db_basic,docker_basic,fs_search,rss_fetch,image_vision,image_generate,image_edit,audio_transcribe,audio_synthesize,health_check,log_analyze,service_control,config_guard,crypto,chat
+[2m2026-03-15T08:26:31.245087Z[0m [32m INFO[0m 启动内存 RSS bytes=9797632
+[2m2026-03-15T08:26:31.772083Z[0m [31mERROR[0m Failed to get webhook info: Api(Unknown("Not Found"))
+
+thread 'main' (80227) panicked at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/teloxide-0.12.2/src/dispatching/dispatcher.rs:306:49:
+Failed to retrieve 'me': Api(Unknown("Not Found"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

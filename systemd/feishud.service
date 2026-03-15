@@ -1,0 +1,18 @@
+[Unit]
+Description=RustClaw Feishu (Lark) App Bot Daemon
+After=network.target clawd.service
+Requires=clawd.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/rustclaw
+ExecStart=/opt/rustclaw/bin/feishud
+Restart=always
+RestartSec=2
+TasksMax=96
+MemoryMax=256M
+Environment=RUST_LOG=info
+Environment=FEISHU_CONFIG_PATH=/opt/rustclaw/configs/channels/feishu.toml
+
+[Install]
+WantedBy=multi-user.target

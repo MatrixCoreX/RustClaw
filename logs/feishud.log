@@ -1,0 +1,21 @@
+[2m2026-03-15T07:56:20.867792Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: mode=long_connection health check on 0.0.0.0:8789 (GET /health)
+[2m2026-03-15T07:56:20.868788Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T07:56:23.138844Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 5s
+[2m2026-03-15T07:56:28.142187Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T07:56:28.659234Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 10s
+[2m2026-03-15T07:56:38.659733Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T07:56:39.174799Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 20s
+[2m2026-03-15T07:56:59.176308Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T07:56:59.689623Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 40s
+[2m2026-03-15T07:57:39.690788Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T07:57:40.211646Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 80s
+[2m2026-03-15T07:59:00.212643Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T07:59:02.500302Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 160s
+[2m2026-03-15T08:01:42.501988Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T08:01:44.701313Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 300s
+[2m2026-03-15T08:06:44.703383Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T08:06:47.139956Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 300s
+[2m2026-03-15T08:11:47.141517Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T08:11:50.098822Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 300s
+[2m2026-03-15T08:16:50.185486Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
+[2m2026-03-15T08:16:54.062368Z[0m [33m WARN[0m [2mfeishud[0m[2m:[0m feishud: long connection error: Client error: 1000040345, app_id or app_secret is invalid, reconnecting in 300s
