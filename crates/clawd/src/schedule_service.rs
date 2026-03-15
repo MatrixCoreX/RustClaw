@@ -14,7 +14,7 @@ pub(crate) async fn parse_schedule_intent(
 ) -> Option<ScheduleIntentOutput> {
     let tz = parse_timezone(&state.schedule.timezone);
     let now_local = Utc::now().with_timezone(&tz);
-    let (long_term_summary, preferences, recalled) = memory::service::recall_memory_context_parts(
+    let structured = memory::service::recall_structured_memory_context(
         state,
         task.user_key.as_deref(),
         task.user_id,
@@ -24,10 +24,9 @@ pub(crate) async fn parse_schedule_intent(
         state.memory.schedule_memory_include_long_term,
         state.memory.schedule_memory_include_preferences,
     );
-    let memory_context = memory::service::memory_context_block(
-        long_term_summary.as_deref(),
-        &preferences,
-        &recalled,
+    let memory_context = memory::service::structured_memory_context_block(
+        &structured,
+        memory::retrieval::MemoryContextMode::Schedule,
         state.memory.schedule_memory_max_chars.max(384),
     );
     let prompt = crate::render_prompt_template(
