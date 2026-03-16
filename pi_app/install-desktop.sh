@@ -4,25 +4,27 @@
 
 set -e
 PI_APP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-LAUNCHER="${PI_APP_DIR}/run-small-screen-launcher.sh"
-ICON="${PI_APP_DIR}/longxia.png"
+REGISTER="${PI_APP_DIR}/register-launcher.sh"
+WRAPPER="${HOME}/.local/bin/rustclaw-small-screen-launcher"
+ICON="${HOME}/.local/share/icons/rustclaw-small-screen.png"
 DESKTOP_FILE="${HOME}/Desktop/RustClaw.desktop"
 
+"$REGISTER"
 mkdir -p "$(dirname "$DESKTOP_FILE")"
 cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
 Type=Application
 Name=RustClaw
 Comment=480×320 小屏状态（Python），请求 /v1/health
-Exec=${LAUNCHER}
-Path=${PI_APP_DIR}
-TryExec=${LAUNCHER}
+Exec=${WRAPPER}
+Path=${HOME}
+TryExec=${WRAPPER}
 Icon=${ICON}
 Terminal=false
 Categories=Utility;
 StartupNotify=true
 EOF
 chmod +x "$DESKTOP_FILE"
-chmod +x "$LAUNCHER"
+chmod +x "$WRAPPER"
 echo "已创建桌面快捷方式: $DESKTOP_FILE"
 echo "双击桌面上的 RustClaw 图标即可启动小屏。"

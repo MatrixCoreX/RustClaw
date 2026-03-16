@@ -12,9 +12,9 @@ if [[ -f "$DESKTOP_FILE" ]]; then
 fi
 
 if [[ -f "$LXDE_AUTOSTART" ]]; then
-  if grep -q "run-small-screen-launcher.sh" "$LXDE_AUTOSTART" 2>/dev/null; then
+  if grep -qE "run-small-screen-launcher\.sh|rustclaw-small-screen-launcher" "$LXDE_AUTOSTART" 2>/dev/null; then
     tmp=$(mktemp)
-    grep -v "run-small-screen-launcher.sh" "$LXDE_AUTOSTART" | grep -v "# RustClaw small screen" > "$tmp" || true
+    grep -v "run-small-screen-launcher.sh" "$LXDE_AUTOSTART" | grep -v "rustclaw-small-screen-launcher" | grep -v "# RustClaw small screen" > "$tmp" || true
     mv -f "$tmp" "$LXDE_AUTOSTART"
     echo "已从 LXDE-pi 自启动中移除: $LXDE_AUTOSTART"
     removed=1
