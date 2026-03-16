@@ -1487,6 +1487,24 @@ class SmallScreenApp:
         s = (str(out).strip() if out is not None else "") or "#e8e6e3"
         return s if s else "#e8e6e3"
 
+    def _style_scrollbar(self, scrollbar):
+        """为右侧滚动条套用主题色，避免默认灰色过于突兀。"""
+        try:
+            scrollbar.configure(
+                bg=self._safe_color("button_bg", "accent"),
+                activebackground=self._safe_color("button_active_bg", "accent"),
+                troughcolor=self._safe_color("box_bg", "bg"),
+                highlightbackground=self._safe_color("bg"),
+                highlightcolor=self._safe_color("accent", "fg"),
+                relief=tk.FLAT,
+                activerelief=tk.FLAT,
+                borderwidth=0,
+                elementborderwidth=1,
+                width=12,
+            )
+        except tk.TclError:
+            pass
+
     def _apply_lang(self):
         self.root.title(self._t("app_title"))
         for w, k in self._i18n:
@@ -2294,9 +2312,38 @@ class SmallScreenApp:
             for symbol in [item.get("name") or item.get("code") or "--" for item in self._stock_items]
         ]
         self._stock_cards = []
+        list_wrapper = tk.Frame(self.stock_frame, bg=self._c("bg"))
+        list_wrapper.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(list_wrapper, bg=self._c("bg"), highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_wrapper)
+        inner = tk.Frame(canvas, bg=self._c("bg"))
+        win_id = canvas.create_window((0, 0), window=inner, anchor=tk.NW)
+
+        def _on_inner_configure(_):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(evt):
+            canvas.itemconfig(win_id, width=evt.width)
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._style_scrollbar(scrollbar)
+
+        def _after_scroll():
+            canvas.update_idletasks()
+
+        def _scrollbar_cmd(*args):
+            canvas.yview(*args)
+            _after_scroll()
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.configure(command=_scrollbar_cmd)
+
         if not items:
             tk.Label(
-                self.stock_frame, text=self._t("stock_empty"), font=("", 12),
+                inner, text=self._t("stock_empty"), font=("", 12),
                 bg=self._c("bg"), fg=self._c("status_off")
             ).pack(anchor=tk.W, pady=(12, 0))
             return
@@ -2304,31 +2351,75 @@ class SmallScreenApp:
         box_bg = self._c("box_bg")
         box_border = self._c("box_border")
         for item in items:
-            card = tk.Frame(self.stock_frame, bg=box_border, padx=2, pady=2)
-            card.pack(fill=tk.X, pady=3)
-            inner = tk.Frame(card, bg=box_bg, padx=8, pady=6)
-            inner.pack(fill=tk.BOTH, expand=True)
+            card = tk.Frame(inner, bg=box_border, padx=2, pady=2)
+            card.pack(fill=tk.X, pady=2)
+            inner_card = tk.Frame(card, bg=box_bg, padx=8, pady=4)
+            inner_card.pack(fill=tk.BOTH, expand=True)
             title_var = tk.StringVar(value=item.get("title") or "--")
             price_var = tk.StringVar(value=item.get("price") or "--")
             pct_var = tk.StringVar(value=item.get("pct") or "--")
-            meta1_var = tk.StringVar(value=item.get("meta1") or "")
-            meta2_var = tk.StringVar(value=item.get("meta2") or "")
-            top_row = tk.Frame(inner, bg=box_bg)
+            detail_var = tk.StringVar(value=item.get("meta1") or "")
+            top_row = tk.Frame(inner_card, bg=box_bg)
             top_row.pack(fill=tk.X)
-            tk.Label(top_row, textvariable=title_var, font=("", 11), bg=box_bg, fg=self._c("fg_dim"), anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
-            pct_label = tk.Label(top_row, textvariable=pct_var, font=("", 11, "bold"), bg=box_bg, fg=self._c("fg"))
-            pct_label.pack(side=tk.RIGHT)
-            tk.Label(inner, textvariable=price_var, font=("", 16, "bold"), bg=box_bg, fg=self._c("fg"), anchor=tk.W).pack(anchor=tk.W, pady=(2, 0))
-            tk.Label(inner, textvariable=meta1_var, font=("", 10), bg=box_bg, fg=self._c("fg")).pack(anchor=tk.W, pady=(2, 0))
-            tk.Label(inner, textvariable=meta2_var, font=("", 10), bg=box_bg, fg=self._c("fg_dim")).pack(anchor=tk.W)
+            tk.Label(top_row, textvariable=title_var, font=("", 10), bg=box_bg, fg=self._c("fg_dim"), anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            price_label = tk.Label(top_row, textvariable=price_var, font=("", 12, "bold"), bg=box_bg, fg=self._c("fg"))
+            price_label.pack(side=tk.RIGHT)
+            pct_label = tk.Label(top_row, textvariable=pct_var, font=("", 10, "bold"), bg=box_bg, fg=self._c("fg"))
+            pct_label.pack(side=tk.RIGHT, padx=(0, 8))
+            tk.Label(inner_card, textvariable=detail_var, font=("", 9), bg=box_bg, fg=self._c("fg"), anchor=tk.W, justify=tk.LEFT).pack(anchor=tk.W, pady=(1, 0))
             self._stock_cards.append({
                 "title": title_var,
                 "price": price_var,
                 "pct": pct_var,
-                "meta1": meta1_var,
-                "meta2": meta2_var,
+                "detail": detail_var,
                 "pct_label": pct_label,
+                "price_label": price_label,
             })
+
+        _scroll_units = 3
+
+        def _scroll(evt):
+            if getattr(evt, "num", None) == 5 or getattr(evt, "delta", 0) == -120:
+                canvas.yview_scroll(_scroll_units, "units")
+            else:
+                canvas.yview_scroll(-_scroll_units, "units")
+            _after_scroll()
+
+        _drag_y_root = [None]
+
+        def _on_drag_start(evt):
+            _drag_y_root[0] = evt.y_root
+
+        def _on_drag_motion(evt):
+            if _drag_y_root[0] is not None:
+                dy = evt.y_root - _drag_y_root[0]
+                step = max(-12, min(12, int(dy)))
+                if step != 0:
+                    canvas.yview_scroll(step, "units")
+                    _after_scroll()
+                _drag_y_root[0] = evt.y_root
+
+        def _on_drag_end(_evt):
+            _drag_y_root[0] = None
+
+        def _bind_scroll(widget):
+            widget.bind("<MouseWheel>", _scroll)
+            widget.bind("<Button-4>", lambda e: (canvas.yview_scroll(-_scroll_units, "units"), _after_scroll()))
+            widget.bind("<Button-5>", lambda e: (canvas.yview_scroll(_scroll_units, "units"), _after_scroll()))
+            widget.bind("<Button-1>", _on_drag_start)
+            widget.bind("<B1-Motion>", _on_drag_motion)
+            widget.bind("<ButtonRelease-1>", _on_drag_end)
+
+        _bind_scroll(list_wrapper)
+        _bind_scroll(canvas)
+        _bind_scroll(inner)
+        _bind_scroll(scrollbar)
+        for row in inner.winfo_children():
+            _bind_scroll(row)
+            for child in row.winfo_children():
+                _bind_scroll(child)
+                for grand in child.winfo_children():
+                    _bind_scroll(grand)
 
         def _fetch_and_update():
             stock_data = fetch_a_share_quotes(getattr(self, "_stock_items", None))
@@ -2350,15 +2441,19 @@ class SmallScreenApp:
             card["price"].set(item.get("price") or "--")
             pct_text = item.get("pct") or "--"
             card["pct"].set(pct_text)
-            card["meta1"].set(item.get("meta1") or "")
-            card["meta2"].set(item.get("meta2") or "")
+            detail_text = "   ".join(part for part in [item.get("meta1") or "", item.get("meta2") or ""] if part).strip()
+            card["detail"].set(detail_text)
             pct_fg = self._c("fg")
+            price_fg = self._c("fg")
             if pct_text.startswith("+"):
                 pct_fg = self._c("status_ok")
             elif pct_text.startswith("-"):
                 pct_fg = self._c("status_err")
+            if item.get("price") == "--":
+                price_fg = self._c("fg_dim")
             try:
                 card["pct_label"].config(fg=pct_fg)
+                card["price_label"].config(fg=price_fg)
             except tk.TclError:
                 pass
 
@@ -2460,6 +2555,7 @@ class SmallScreenApp:
         canvas.configure(yscrollcommand=scrollbar.set, yscrollincrement=row_h)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._style_scrollbar(scrollbar)
 
         def _after_scroll():
             canvas.update_idletasks()
@@ -2518,8 +2614,10 @@ class SmallScreenApp:
             widget.bind("<B1-Motion>", _on_drag_motion)
             widget.bind("<ButtonRelease-1>", _on_drag_end)
 
+        _bind_scroll(list_wrapper)
         _bind_scroll(canvas)
         _bind_scroll(inner)
+        _bind_scroll(scrollbar)
         for row in inner.winfo_children():
             _bind_scroll(row)
             for child in row.winfo_children():
