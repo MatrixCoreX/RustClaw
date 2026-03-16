@@ -294,6 +294,7 @@ async fn resolve_whatsapp_identity(
     let url = format!("{}/v1/auth/channel/resolve", state.clawd_base_url);
     let req = ResolveChannelBindingRequest {
         channel: ChannelKind::Whatsapp,
+        telegram_bot_name: None,
         external_user_id: Some(wa_id.to_string()),
         external_chat_id: Some(wa_id.to_string()),
     };
@@ -317,6 +318,7 @@ async fn bind_whatsapp_identity(
     let url = format!("{}/v1/auth/channel/bind", state.clawd_base_url);
     let req = BindChannelKeyRequest {
         channel: ChannelKind::Whatsapp,
+        telegram_bot_name: None,
         external_user_id: Some(wa_id.to_string()),
         external_chat_id: Some(wa_id.to_string()),
         user_key: user_key.trim().to_string(),
