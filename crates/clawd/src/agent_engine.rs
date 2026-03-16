@@ -1816,6 +1816,23 @@ async fn execute_actions_once(
                 let mut resolved_args = resolve_arg_value(args, loop_state);
                 loop_state.tool_calls_total += 1;
                 let normalized_skill = state.resolve_canonical_skill_name(skill);
+                let write_file_effective_path = if normalized_skill == "write_file" {
+                    resolved_args
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .map(|path| {
+                            let effective =
+                                crate::ensure_default_file_path(&state.workspace_root, path);
+                            let user_visible = if Path::new(&effective).is_absolute() {
+                                effective.clone()
+                            } else {
+                                state.workspace_root.join(&effective).display().to_string()
+                            };
+                            (path.to_string(), effective, user_visible)
+                        })
+                } else {
+                    None
+                };
                 if normalized_skill == "chat" {
                     attach_recent_execution_context_to_chat_args(&mut resolved_args, loop_state);
                 }
@@ -1852,6 +1869,22 @@ async fn execute_actions_once(
                     .await
                 {
                     Ok(out) => {
+                        if let Some((original_path, _effective_path, user_visible_path)) =
+                            &write_file_effective_path
+                        {
+                            remember_written_file_alias(
+                                loop_state,
+                                original_path,
+                                user_visible_path,
+                            );
+                            register_file_path_output(
+                                loop_state,
+                                global_step,
+                                step_in_round,
+                                &format!("skill.{normalized_skill}"),
+                                user_visible_path,
+                            );
+                        }
                         crate::append_subtask_result(
                             &mut loop_state.subtask_results,
                             global_step,
