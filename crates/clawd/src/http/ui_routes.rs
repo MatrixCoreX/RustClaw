@@ -1,34 +1,360 @@
 use axum::extract::{Multipart, Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use rusqlite::OptionalExtension;
 use std::collections::{BTreeMap, HashMap};
-use std::io::{Read, Seek, SeekFrom};
+use std::fs;
+use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio as StdProcessStdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 
 use super::super::{
-    bind_channel_identity, create_auth_key, current_rss_bytes, delete_auth_key_by_id,
-    exchange_credential_status_for_user_key, feishud_process_stats, larkd_process_stats, list_auth_keys,
-    mask_secret, oldest_running_task_age_seconds, reload_skill_views, resolve_auth_identity_by_key,
-    resolve_channel_binding_identity, task_count_by_status, telegramd_process_stats,
-    update_auth_key_by_id, upsert_exchange_credential_for_user_key, wa_webd_process_stats,
-    whatsappd_process_stats, ApiResponse, AppState, HealthResponse, LocalInteractionContext,
+    bind_channel_identity, current_rss_bytes, exchange_credential_status_for_user_key,
+    feishud_process_stats, larkd_process_stats, mask_secret, oldest_running_task_age_seconds,
+    reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
+    task_count_by_status, telegramd_process_stats, upsert_exchange_credential_for_user_key,
+    wa_webd_process_stats, whatsappd_process_stats, ApiResponse, AppState, HealthResponse,
+    LocalInteractionContext, channel_gateway_process_stats,
 };
 use claw_core::skill_registry::SkillKind;
 use claw_core::types::{
-    AuthIdentity, BindChannelKeyRequest, ExchangeCredentialStatus, ResolveChannelBindingRequest,
-    ResolveChannelBindingResponse, UiKeyVerifyRequest, UpsertExchangeCredentialRequest,
+    AuthIdentity, BindChannelKeyRequest, ExchangeCredentialStatus, GatewayInstanceRuntimeStatus,
+    ResolveChannelBindingRequest, ResolveChannelBindingResponse, TelegramBotRuntimeStatus,
+    UiKeyVerifyRequest, UpsertExchangeCredentialRequest,
 };
 
 const UI_HIDDEN_SKILLS: &[&str] = &["chat"];
+const TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS: i64 = 45;
 
 fn hide_skill_in_ui(state: &AppState, name: &str) -> bool {
     let canonical = state.resolve_canonical_skill_name(name);
     UI_HIDDEN_SKILLS.iter().any(|s| *s == canonical)
+}
+
+fn read_telegram_bot_statuses(
+    workspace_root: &Path,
+    configured_names: &[String],
+) -> Vec<TelegramBotRuntimeStatus> {
+    let status_dir = workspace_root.join("run").join("telegram-bot-status");
+    let mut by_name: HashMap<String, TelegramBotRuntimeStatus> = HashMap::new();
+    if let Ok(entries) = fs::read_dir(&status_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(raw) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(mut status) = serde_json::from_str::<TelegramBotRuntimeStatus>(&raw) else {
+                continue;
+            };
+            if let Some(last_ts) = status.last_heartbeat_ts {
+                let age = current_unix_ts().saturating_sub(last_ts);
+                if age > TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS {
+                    status.healthy = false;
+                    if status.status == "running" {
+                        status.status = "stale".to_string();
+                    }
+                }
+            } else {
+                status.healthy = false;
+            }
+            by_name.insert(status.name.clone(), status);
+        }
+    }
+
+    configured_names
+        .iter()
+        .map(|name| {
+            by_name.remove(name).unwrap_or_else(|| TelegramBotRuntimeStatus {
+                name: name.clone(),
+                healthy: false,
+                status: "missing".to_string(),
+                last_heartbeat_ts: None,
+                last_error: None,
+            })
+        })
+        .collect()
+}
+
+fn read_gateway_instance_statuses(
+    workspace_root: &Path,
+) -> HashMap<String, GatewayInstanceRuntimeStatus> {
+    let status_dir = workspace_root.join("run").join("gateway-instance-status");
+    let mut by_scope = HashMap::new();
+    if let Ok(entries) = fs::read_dir(&status_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(raw) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(mut status) = serde_json::from_str::<GatewayInstanceRuntimeStatus>(&raw) else {
+                continue;
+            };
+            if let Some(last_ts) = status.last_heartbeat_ts {
+                let age = current_unix_ts().saturating_sub(last_ts);
+                if age > TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS {
+                    status.healthy = false;
+                    if status.status == "running" {
+                        status.status = "stale".to_string();
+                    }
+                }
+            } else {
+                status.healthy = false;
+            }
+            by_scope.insert(status.scope.clone(), status);
+        }
+    }
+    by_scope
+}
+
+fn current_unix_ts() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default()
+}
+
+fn telegram_config_path(state: &AppState) -> PathBuf {
+    state.workspace_root.join("configs/channels/telegram.toml")
+}
+
+fn read_telegram_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
+    let path = telegram_config_path(state);
+    if !path.exists() {
+        return Ok(toml::Value::Table(Default::default()));
+    }
+    let raw = std::fs::read_to_string(&path)?;
+    if raw.trim().is_empty() {
+        return Ok(toml::Value::Table(Default::default()));
+    }
+    Ok(toml::from_str(&raw)?)
+}
+
+fn ensure_toml_table<'a>(
+    root: &'a mut toml::Value,
+    path: &[&str],
+) -> anyhow::Result<&'a mut toml::map::Map<String, toml::Value>> {
+    let mut current = root
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("config root is not a TOML table"))?;
+    for segment in path {
+        let value = current
+            .entry((*segment).to_string())
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        if !value.is_table() {
+            *value = toml::Value::Table(Default::default());
+        }
+        current = value
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("config section {} is not a table", segment))?;
+    }
+    Ok(current)
+}
+
+fn telegram_bots_from_config(config: &claw_core::config::AppConfig) -> Vec<TelegramBotConfigItem> {
+    let mut bots = Vec::new();
+    if !config.telegram.bot_token.trim().is_empty() {
+        bots.push(TelegramBotConfigItem {
+            name: "primary".to_string(),
+            bot_token: config.telegram.bot_token.clone(),
+            agent_id: if config.telegram.agent_id.trim().is_empty() {
+                "main".to_string()
+            } else {
+                config.telegram.agent_id.trim().to_string()
+            },
+            admins: config.telegram.admins.clone(),
+            allowlist: config.telegram.allowlist.clone(),
+            access_mode: normalize_telegram_access_mode(&config.telegram.access_mode),
+            allowed_telegram_usernames: normalize_telegram_username_list(&config.telegram.allowed_usernames),
+            is_primary: true,
+        });
+    }
+    bots.extend(config.telegram.bots.iter().map(|bot| TelegramBotConfigItem {
+        name: bot.name.clone(),
+        bot_token: bot.bot_token.clone(),
+        agent_id: if bot.agent_id.trim().is_empty() {
+            "main".to_string()
+        } else {
+            bot.agent_id.trim().to_string()
+        },
+        admins: bot.admins.clone(),
+        allowlist: bot.allowlist.clone(),
+        access_mode: if bot.access_mode.trim().is_empty() {
+            normalize_telegram_access_mode(&config.telegram.access_mode)
+        } else {
+            normalize_telegram_access_mode(&bot.access_mode)
+        },
+        allowed_telegram_usernames: if bot.allowed_usernames.is_empty() {
+            normalize_telegram_username_list(&config.telegram.allowed_usernames)
+        } else {
+            normalize_telegram_username_list(&bot.allowed_usernames)
+        },
+        is_primary: false,
+    }));
+    bots
+}
+
+fn agents_from_config(config: &claw_core::config::AppConfig) -> Vec<AgentConfigItem> {
+    config
+        .normalized_agents()
+        .into_iter()
+        .map(|agent| AgentConfigItem {
+            id: agent.id,
+            name: agent.name,
+            description: agent.description,
+            persona_prompt: agent.persona_prompt,
+            preferred_vendor: agent.preferred_vendor,
+            preferred_model: agent.preferred_model,
+            allowed_skills: agent.allowed_skills,
+        })
+        .collect()
+}
+
+fn normalize_agent_items(agents: &[AgentConfigItem]) -> anyhow::Result<Vec<AgentConfigItem>> {
+    let mut normalized = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (index, agent) in agents.iter().enumerate() {
+        let id = if agent.id.trim().is_empty() {
+            if index == 0 {
+                "main".to_string()
+            } else {
+                format!("agent-{}", index + 1)
+            }
+        } else {
+            agent.id.trim().to_string()
+        };
+        if !seen.insert(id.clone()) {
+            return Err(anyhow::anyhow!("duplicate agent id: {id}"));
+        }
+        normalized.push(AgentConfigItem {
+            id: id.clone(),
+            name: if agent.name.trim().is_empty() {
+                if id == "main" {
+                    "Main".to_string()
+                } else {
+                    id.clone()
+                }
+            } else {
+                agent.name.trim().to_string()
+            },
+            description: agent.description.trim().to_string(),
+            persona_prompt: agent.persona_prompt.trim().to_string(),
+            preferred_vendor: agent
+                .preferred_vendor
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(ToString::to_string),
+            preferred_model: agent
+                .preferred_model
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(ToString::to_string),
+            allowed_skills: agent
+                .allowed_skills
+                .iter()
+                .map(|skill| skill.trim())
+                .filter(|skill| !skill.is_empty())
+                .map(ToString::to_string)
+                .collect(),
+        });
+    }
+    if !seen.contains("main") {
+        normalized.insert(
+            0,
+            AgentConfigItem {
+                id: "main".to_string(),
+                name: "Main".to_string(),
+                description: String::new(),
+                persona_prompt: String::new(),
+                preferred_vendor: None,
+                preferred_model: None,
+                allowed_skills: Vec::new(),
+            },
+        );
+    }
+    Ok(normalized)
+}
+
+fn normalize_telegram_bot_items(
+    bots: &[TelegramBotConfigItem],
+    known_agent_ids: &std::collections::HashSet<String>,
+) -> anyhow::Result<Vec<TelegramBotConfigItem>> {
+    let mut normalized = Vec::new();
+    let mut has_primary = false;
+    let mut names = std::collections::HashSet::new();
+    for (index, bot) in bots.iter().enumerate() {
+        let is_primary = bot.is_primary || index == 0;
+        let name = if is_primary {
+            "primary".to_string()
+        } else {
+            bot.name.trim().to_string()
+        };
+        if !is_primary && name.is_empty() {
+            return Err(anyhow::anyhow!("secondary telegram bot name is required"));
+        }
+        if !name.is_empty() && !names.insert(name.clone()) {
+            return Err(anyhow::anyhow!("duplicate telegram bot name: {name}"));
+        }
+        if is_primary {
+            if has_primary {
+                return Err(anyhow::anyhow!("only one primary telegram bot is allowed"));
+            }
+            has_primary = true;
+        }
+        let agent_id = if bot.agent_id.trim().is_empty() {
+            "main".to_string()
+        } else {
+            bot.agent_id.trim().to_string()
+        };
+        if !known_agent_ids.contains(&agent_id) {
+            return Err(anyhow::anyhow!("unknown agent id for telegram bot {name}: {agent_id}"));
+        }
+        normalized.push(TelegramBotConfigItem {
+            name,
+            bot_token: bot.bot_token.trim().to_string(),
+            agent_id,
+            admins: bot.admins.clone(),
+            allowlist: bot.allowlist.clone(),
+            access_mode: normalize_telegram_access_mode(&bot.access_mode),
+            allowed_telegram_usernames: normalize_telegram_username_list(&bot.allowed_telegram_usernames),
+            is_primary,
+        });
+    }
+    Ok(normalized)
+}
+
+fn normalize_telegram_access_mode(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "specified" | "specified_accounts" | "restricted" | "private" => "specified".to_string(),
+        _ => "public".to_string(),
+    }
+}
+
+fn normalize_telegram_username(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_start_matches('@').trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_ascii_lowercase())
+}
+
+fn normalize_telegram_username_list(values: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut normalized = Vec::new();
+    for value in values {
+        if let Some(name) = normalize_telegram_username(value) {
+            if seen.insert(name.clone()) {
+                normalized.push(name);
+            }
+        }
+    }
+    normalized
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,11 +380,19 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/skills/config",
             get(get_skills_config).post(update_skills_config),
         )
+        .route(
+            "/telegram/config",
+            get(get_telegram_config).post(update_telegram_config),
+        )
         .route("/skills/import", post(import_external_skill))
         .route("/skills/import/upload", post(import_external_skill_upload))
         .route("/skills/uninstall", post(uninstall_external_skill))
         .route("/llm/config", get(get_llm_config).post(update_llm_config))
         .route("/logs/latest", get(logs_latest))
+        .route("/debug/tasks/:task_id", get(task_debug_detail))
+        .route("/debug/recent-robot-tasks", get(recent_robot_tasks))
+        .route("/debug/usage-records", get(usage_records))
+        .route("/debug/usage-records/:record_id", get(usage_record_detail))
         .route("/whatsapp-web/login-status", get(whatsapp_web_login_status))
         .route("/whatsapp-web/logout", post(whatsapp_web_logout))
         .route("/services/:service/:action", post(control_service))
@@ -73,11 +407,6 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_provider_keys).post(update_provider_keys),
         )
         .route("/admin/restart-clawd", post(restart_clawd))
-        .route("/admin/auth-keys", get(get_auth_keys).post(create_auth_key_handler))
-        .route(
-            "/admin/auth-keys/:key_id",
-            put(update_auth_key_handler).delete(delete_auth_key_handler),
-        )
 }
 
 fn ui_auth_error(message: &str) -> (StatusCode, Json<ApiResponse<Value>>) {
@@ -179,13 +508,7 @@ async fn resolve_channel_binding(
 ) -> (StatusCode, Json<ApiResponse<ResolveChannelBindingResponse>>) {
     match resolve_channel_binding_identity(
         &state,
-        match req.channel {
-            claw_core::types::ChannelKind::Telegram => "telegram",
-            claw_core::types::ChannelKind::Whatsapp => "whatsapp",
-            claw_core::types::ChannelKind::Ui => "ui",
-            claw_core::types::ChannelKind::Feishu => "feishu",
-            claw_core::types::ChannelKind::Lark => "lark",
-        },
+        &scoped_channel_name(req.channel, req.telegram_bot_name.as_deref()),
         req.external_user_id.as_deref(),
         req.external_chat_id.as_deref(),
     ) {
@@ -217,13 +540,7 @@ async fn bind_channel_key(
 ) -> (StatusCode, Json<ApiResponse<AuthIdentity>>) {
     match bind_channel_identity(
         &state,
-        match req.channel {
-            claw_core::types::ChannelKind::Telegram => "telegram",
-            claw_core::types::ChannelKind::Whatsapp => "whatsapp",
-            claw_core::types::ChannelKind::Ui => "ui",
-            claw_core::types::ChannelKind::Feishu => "feishu",
-            claw_core::types::ChannelKind::Lark => "lark",
-        },
+        &scoped_channel_name(req.channel, req.telegram_bot_name.as_deref()),
         req.external_user_id.as_deref(),
         req.external_chat_id.as_deref(),
         &req.user_key,
@@ -252,6 +569,352 @@ async fn bind_channel_key(
                 error: Some(format!("bind channel key failed: {err}")),
             }),
         ),
+    }
+}
+
+async fn get_telegram_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<TelegramConfigResponse>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+    let config_path = state.workspace_root.join("configs/config.toml");
+    let config = match claw_core::config::AppConfig::load(&config_path.to_string_lossy()) {
+        Ok(config) => config,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read telegram config failed: {err}")),
+                }),
+            );
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(TelegramConfigResponse {
+                config_path: "configs/channels/telegram.toml".to_string(),
+                bots: telegram_bots_from_config(&config),
+                agents: agents_from_config(&config),
+                restart_required: true,
+            }),
+            error: None,
+        }),
+    )
+}
+
+async fn update_telegram_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateTelegramConfigRequest>,
+) -> (StatusCode, Json<ApiResponse<TelegramConfigResponse>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+
+    let normalized_agents = match normalize_agent_items(&req.agents) {
+        Ok(items) => items,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(err.to_string()),
+                }),
+            );
+        }
+    };
+    let known_agent_ids = normalized_agents
+        .iter()
+        .map(|agent| agent.id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let normalized = match normalize_telegram_bot_items(&req.bots, &known_agent_ids) {
+        Ok(items) => items,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(err.to_string()),
+                }),
+            );
+        }
+    };
+
+    let mut value = match read_telegram_config_value(&state) {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read telegram config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let telegram_table = match ensure_toml_table(&mut value, &["telegram"]) {
+        Ok(table) => table,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("prepare telegram config failed: {err}")),
+                }),
+            );
+        }
+    };
+
+    let primary = normalized.iter().find(|bot| bot.is_primary).cloned();
+    telegram_table.insert(
+        "bot_token".to_string(),
+        toml::Value::String(primary.as_ref().map(|bot| bot.bot_token.clone()).unwrap_or_default()),
+    );
+    telegram_table.insert(
+        "agent_id".to_string(),
+        toml::Value::String(
+            primary
+                .as_ref()
+                .map(|bot| bot.agent_id.clone())
+                .unwrap_or_else(|| "main".to_string()),
+        ),
+    );
+    telegram_table.insert(
+        "admins".to_string(),
+        toml::Value::Array(
+            primary
+                .as_ref()
+                .map(|bot| bot.admins.as_slice())
+                .unwrap_or(&[])
+                .iter()
+                .copied()
+                .map(|id| toml::Value::Integer(id))
+                .collect(),
+        ),
+    );
+    telegram_table.insert(
+        "allowlist".to_string(),
+        toml::Value::Array(
+            primary
+                .as_ref()
+                .map(|bot| bot.allowlist.as_slice())
+                .unwrap_or(&[])
+                .iter()
+                .copied()
+                .map(|id| toml::Value::Integer(id))
+                .collect(),
+        ),
+    );
+    telegram_table.insert(
+        "access_mode".to_string(),
+        toml::Value::String(
+            primary
+                .as_ref()
+                .map(|bot| bot.access_mode.clone())
+                .unwrap_or_else(|| "public".to_string()),
+        ),
+    );
+    telegram_table.insert(
+        "allowed_usernames".to_string(),
+        toml::Value::Array(
+            primary
+                .as_ref()
+                .map(|bot| bot.allowed_telegram_usernames.as_slice())
+                .unwrap_or(&[])
+                .iter()
+                .cloned()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    );
+
+    let extra_bots = normalized
+        .iter()
+        .filter(|bot| !bot.is_primary)
+        .map(|bot| {
+            let mut table = toml::map::Map::new();
+            table.insert("name".to_string(), toml::Value::String(bot.name.clone()));
+            table.insert(
+                "bot_token".to_string(),
+                toml::Value::String(bot.bot_token.clone()),
+            );
+            table.insert("agent_id".to_string(), toml::Value::String(bot.agent_id.clone()));
+            table.insert(
+                "admins".to_string(),
+                toml::Value::Array(
+                    bot.admins
+                        .iter()
+                        .copied()
+                        .map(|id| toml::Value::Integer(id))
+                        .collect(),
+                ),
+            );
+            table.insert(
+                "allowlist".to_string(),
+                toml::Value::Array(
+                    bot.allowlist
+                        .iter()
+                        .copied()
+                        .map(|id| toml::Value::Integer(id))
+                        .collect(),
+                ),
+            );
+            table.insert(
+                "access_mode".to_string(),
+                toml::Value::String(bot.access_mode.clone()),
+            );
+            table.insert(
+                "allowed_usernames".to_string(),
+                toml::Value::Array(
+                    bot.allowed_telegram_usernames
+                        .iter()
+                        .cloned()
+                        .map(toml::Value::String)
+                        .collect(),
+                ),
+            );
+            toml::Value::Table(table)
+        })
+        .collect::<Vec<_>>();
+    telegram_table.insert("bots".to_string(), toml::Value::Array(extra_bots));
+    if let Some(root_table) = value.as_table_mut() {
+        root_table.insert(
+            "agents".to_string(),
+            toml::Value::Array(
+                normalized_agents
+                    .iter()
+                    .map(|agent| {
+                        let mut table = toml::map::Map::new();
+                        table.insert("id".to_string(), toml::Value::String(agent.id.clone()));
+                        table.insert("name".to_string(), toml::Value::String(agent.name.clone()));
+                        if !agent.description.trim().is_empty() {
+                            table.insert(
+                                "description".to_string(),
+                                toml::Value::String(agent.description.clone()),
+                            );
+                        }
+                        table.insert(
+                            "persona_prompt".to_string(),
+                            toml::Value::String(agent.persona_prompt.clone()),
+                        );
+                        if let Some(vendor) = agent.preferred_vendor.as_ref() {
+                            table.insert(
+                                "preferred_vendor".to_string(),
+                                toml::Value::String(vendor.clone()),
+                            );
+                        }
+                        if let Some(model) = agent.preferred_model.as_ref() {
+                            table.insert(
+                                "preferred_model".to_string(),
+                                toml::Value::String(model.clone()),
+                            );
+                        }
+                        table.insert(
+                            "allowed_skills".to_string(),
+                            toml::Value::Array(
+                                agent.allowed_skills
+                                    .iter()
+                                    .map(|skill| toml::Value::String(skill.clone()))
+                                    .collect(),
+                            ),
+                        );
+                        toml::Value::Table(table)
+                    })
+                    .collect(),
+            ),
+        );
+    }
+
+    let output = match toml::to_string_pretty(&value) {
+        Ok(output) => output,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("serialize telegram config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let path = telegram_config_path(&state);
+    if let Some(parent) = path.parent() {
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("prepare telegram config dir failed: {err}")),
+                }),
+            );
+        }
+    }
+    if let Err(err) = std::fs::write(&path, output) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("write telegram config failed: {err}")),
+            }),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(TelegramConfigResponse {
+                config_path: "configs/channels/telegram.toml".to_string(),
+                bots: normalized,
+                agents: normalized_agents,
+                restart_required: true,
+            }),
+            error: None,
+        }),
+    )
+}
+
+fn scoped_channel_name(
+    channel: claw_core::types::ChannelKind,
+    telegram_bot_name: Option<&str>,
+) -> String {
+    match channel {
+        claw_core::types::ChannelKind::Telegram => telegram_bot_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(|name| format!("telegram:{name}"))
+            .unwrap_or_else(|| "telegram".to_string()),
+        claw_core::types::ChannelKind::Whatsapp => "whatsapp".to_string(),
+        claw_core::types::ChannelKind::Ui => "ui".to_string(),
+        claw_core::types::ChannelKind::Feishu => "feishu".to_string(),
+        claw_core::types::ChannelKind::Lark => "lark".to_string(),
     }
 }
 
@@ -353,6 +1016,153 @@ struct LogsLatestQuery {
     lines: Option<usize>,
 }
 
+#[derive(Debug, serde::Deserialize, Default)]
+struct RecentRobotTasksQuery {
+    limit: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, Default)]
+struct UsageRecordsQuery {
+    page: Option<usize>,
+    page_size: Option<usize>,
+    search: Option<String>,
+    channel: Option<String>,
+    status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RecentRobotTaskSummary {
+    task_id: String,
+    status: String,
+    kind: String,
+    channel: String,
+    telegram_bot_name: Option<String>,
+    external_user_id: Option<String>,
+    external_chat_id: Option<String>,
+    request_text: Option<String>,
+    result_text: Option<String>,
+    error_text: Option<String>,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UsageHistoryStats {
+    total_requests: usize,
+    success_requests: usize,
+    failed_requests: usize,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UsageHistoryRecordSummary {
+    record_id: String,
+    task_id: String,
+    ts: Option<u64>,
+    channel: Option<String>,
+    kind: Option<String>,
+    task_status: Option<String>,
+    telegram_bot_name: Option<String>,
+    external_user_id: Option<String>,
+    external_chat_id: Option<String>,
+    request_text: Option<String>,
+    vendor: Option<String>,
+    provider: Option<String>,
+    provider_type: Option<String>,
+    model: Option<String>,
+    model_kind: Option<String>,
+    prompt_file: Option<String>,
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    total_tokens: Option<u64>,
+    llm_call_count: usize,
+    status: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UsageHistoryRecordDetail {
+    #[serde(flatten)]
+    summary: UsageHistoryRecordSummary,
+    entries: Vec<UsageHistoryChainEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UsageHistoryChainEntry {
+    ts: Option<u64>,
+    vendor: Option<String>,
+    provider: Option<String>,
+    provider_type: Option<String>,
+    model: Option<String>,
+    model_kind: Option<String>,
+    status: Option<String>,
+    prompt_file: Option<String>,
+    prompt: Option<String>,
+    request_payload: Option<Value>,
+    raw_response: Option<String>,
+    clean_response: Option<String>,
+    error: Option<String>,
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    total_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UsageHistoryPage {
+    page: usize,
+    page_size: usize,
+    total_records: usize,
+    total_pages: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TaskDebugUsage {
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    total_tokens: Option<u64>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    cached_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TaskDebugEntry {
+    ts: Option<u64>,
+    task_id: Option<String>,
+    vendor: Option<String>,
+    provider: Option<String>,
+    provider_type: Option<String>,
+    model: Option<String>,
+    model_kind: Option<String>,
+    status: Option<String>,
+    prompt_file: Option<String>,
+    prompt: Option<String>,
+    request_payload: Option<Value>,
+    response: Option<String>,
+    raw_response: Option<String>,
+    clean_response: Option<String>,
+    sanitized: Option<bool>,
+    error: Option<String>,
+    usage: Option<TaskDebugUsage>,
+}
+
+#[derive(Debug, Clone)]
+struct UsageTaskMeta {
+    channel: String,
+    kind: String,
+    task_status: String,
+    user_key: Option<String>,
+    external_user_id: Option<String>,
+    external_chat_id: Option<String>,
+    telegram_bot_name: Option<String>,
+    request_text: Option<String>,
+}
+
 fn normalize_log_file_name(raw: Option<&str>) -> String {
     let fallback = "agent_trace.log".to_string();
     let candidate = raw.unwrap_or("").trim();
@@ -365,6 +1175,7 @@ fn normalize_log_file_name(raw: Option<&str>) -> String {
         "routing.log",
         "act_plan.log",
         "clawd.log",
+        "channel-gateway.log",
         "telegramd.log",
         "whatsappd.log",
         "whatsapp_webd.log",
@@ -452,6 +1263,713 @@ async fn logs_latest(
     )
 }
 
+fn channel_allows_shared_ui_task_access(channel: &str) -> bool {
+    matches!(channel, "telegram" | "whatsapp" | "feishu" | "lark")
+}
+
+fn task_access_meta_for_debug(
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<Option<(Option<String>, String)>> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    db.query_row(
+        "SELECT user_key, channel FROM tasks WHERE task_id = ?1 LIMIT 1",
+        [task_id],
+        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+fn preview_text(raw: &str, limit: usize) -> Option<String> {
+    let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut preview = String::new();
+    let mut count = 0usize;
+    for ch in trimmed.chars() {
+        if count >= limit {
+            break;
+        }
+        preview.push(ch);
+        count += 1;
+    }
+    if trimmed.chars().count() > limit {
+        preview.push_str("...");
+    }
+    Some(preview)
+}
+
+fn preview_text_from_json(raw: Option<&str>, preferred_keys: &[&str]) -> Option<String> {
+    let raw = raw?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let value = serde_json::from_str::<Value>(raw).ok()?;
+    for key in preferred_keys {
+        if let Some(text) = value.get(*key).and_then(|v| v.as_str()) {
+            if let Some(preview) = preview_text(text, 180) {
+                return Some(preview);
+            }
+        }
+    }
+    if let Some(text) = value.as_str() {
+        return preview_text(text, 180);
+    }
+    None
+}
+
+fn payload_telegram_bot_name(raw: Option<&str>) -> Option<String> {
+    let raw = raw?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let value = serde_json::from_str::<Value>(raw).ok()?;
+    value
+        .get("telegram_bot_name")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn payload_request_text(raw: Option<&str>) -> Option<String> {
+    preview_text_from_json(raw, &["text"])
+}
+
+fn usage_record_visible_to_identity(identity: &AuthIdentity, meta: &UsageTaskMeta) -> bool {
+    if meta.channel == "ui" {
+        let expected_key = meta
+            .user_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        return expected_key == Some(identity.user_key.trim());
+    }
+    channel_allows_shared_ui_task_access(&meta.channel)
+}
+
+fn usage_chain_entry_from_entry(entry: &TaskDebugEntry) -> UsageHistoryChainEntry {
+    let prompt_tokens = entry
+        .usage
+        .as_ref()
+        .and_then(|usage| usage.prompt_tokens.or(usage.input_tokens));
+    let completion_tokens = entry
+        .usage
+        .as_ref()
+        .and_then(|usage| usage.completion_tokens.or(usage.output_tokens));
+    let total_tokens = entry.usage.as_ref().and_then(|usage| usage.total_tokens);
+    UsageHistoryChainEntry {
+        ts: entry.ts,
+        vendor: entry.vendor.clone(),
+        provider: entry.provider.clone(),
+        provider_type: entry.provider_type.clone(),
+        model: entry.model.clone(),
+        model_kind: entry.model_kind.clone(),
+        prompt_file: entry.prompt_file.clone(),
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        status: entry.status.clone(),
+        error: entry.error.clone(),
+        prompt: entry.prompt.clone(),
+        request_payload: entry.request_payload.clone(),
+        raw_response: entry.raw_response.clone(),
+        clean_response: entry.clean_response.clone().or(entry.response.clone()),
+    }
+}
+
+fn summarize_usage_task(
+    task_id: String,
+    meta: UsageTaskMeta,
+    entries: &[TaskDebugEntry],
+) -> UsageHistoryRecordSummary {
+    let mut prompt_tokens = 0u64;
+    let mut completion_tokens = 0u64;
+    let mut total_tokens = 0u64;
+    let mut latest_entry: Option<&TaskDebugEntry> = None;
+    for entry in entries {
+        let chain_entry = usage_chain_entry_from_entry(entry);
+        prompt_tokens += chain_entry.prompt_tokens.unwrap_or(0);
+        completion_tokens += chain_entry.completion_tokens.unwrap_or(0);
+        total_tokens += chain_entry
+            .total_tokens
+            .unwrap_or_else(|| chain_entry.prompt_tokens.unwrap_or(0) + chain_entry.completion_tokens.unwrap_or(0));
+        let replace = latest_entry
+            .map(|current| entry.ts.unwrap_or(0) >= current.ts.unwrap_or(0))
+            .unwrap_or(true);
+        if replace {
+            latest_entry = Some(entry);
+        }
+    }
+    let latest = latest_entry.cloned().unwrap_or(TaskDebugEntry {
+        ts: None,
+        task_id: Some(task_id.clone()),
+        vendor: None,
+        provider: None,
+        provider_type: None,
+        model: None,
+        model_kind: None,
+        status: None,
+        prompt_file: None,
+        prompt: None,
+        request_payload: None,
+        response: None,
+        raw_response: None,
+        clean_response: None,
+        sanitized: None,
+        error: None,
+        usage: None,
+    });
+    UsageHistoryRecordSummary {
+        record_id: task_id.clone(),
+        task_id,
+        ts: latest.ts,
+        channel: Some(meta.channel),
+        kind: Some(meta.kind),
+        task_status: Some(meta.task_status),
+        telegram_bot_name: meta.telegram_bot_name,
+        external_user_id: meta.external_user_id,
+        external_chat_id: meta.external_chat_id,
+        request_text: meta.request_text,
+        vendor: latest.vendor,
+        provider: latest.provider,
+        provider_type: latest.provider_type,
+        model: latest.model,
+        model_kind: latest.model_kind,
+        prompt_file: latest.prompt_file,
+        prompt_tokens: Some(prompt_tokens),
+        completion_tokens: Some(completion_tokens),
+        total_tokens: Some(total_tokens),
+        llm_call_count: entries.len(),
+        status: latest.status,
+        error: latest.error,
+    }
+}
+
+fn usage_stats_add(stats: &mut UsageHistoryStats, record: &UsageHistoryRecordSummary) {
+    stats.total_requests += 1;
+    if record.status.as_deref() == Some("ok") {
+        stats.success_requests += 1;
+    } else {
+        stats.failed_requests += 1;
+    }
+    stats.prompt_tokens += record.prompt_tokens.unwrap_or(0);
+    stats.completion_tokens += record.completion_tokens.unwrap_or(0);
+    stats.total_tokens += record
+        .total_tokens
+        .unwrap_or_else(|| record.prompt_tokens.unwrap_or(0) + record.completion_tokens.unwrap_or(0));
+}
+
+fn usage_channel_matches(query_channel: Option<&str>, record: &UsageHistoryRecordSummary) -> bool {
+    let Some(query_channel) = query_channel.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    record.channel.as_deref().unwrap_or_default() == query_channel
+}
+
+fn usage_status_matches(query_status: Option<&str>, record: &UsageHistoryRecordSummary) -> bool {
+    let Some(query_status) = query_status.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    match query_status {
+        "success" => record.status.as_deref() == Some("ok"),
+        "failed" => record.status.as_deref() != Some("ok"),
+        _ => true,
+    }
+}
+
+fn usage_search_matches(query: Option<&str>, record: &UsageHistoryRecordSummary) -> bool {
+    let Some(query) = query.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    let query = query.to_lowercase();
+    let haystack = [
+        Some(record.task_id.as_str()),
+        record.request_text.as_deref(),
+        record.model.as_deref(),
+        record.vendor.as_deref(),
+        record.provider.as_deref(),
+        record.telegram_bot_name.as_deref(),
+        record.external_user_id.as_deref(),
+        record.external_chat_id.as_deref(),
+        record.prompt_file.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ")
+    .to_lowercase();
+    haystack.contains(&query)
+}
+
+fn task_usage_meta(
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<Option<UsageTaskMeta>> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    db.query_row(
+        "SELECT channel, kind, status, user_key, external_user_id, external_chat_id, payload_json
+         FROM tasks
+         WHERE task_id = ?1
+         LIMIT 1",
+        [task_id],
+        |row| {
+            let payload_json: Option<String> = row.get(6)?;
+            Ok(UsageTaskMeta {
+                channel: row.get(0)?,
+                kind: row.get(1)?,
+                task_status: row.get(2)?,
+                user_key: row.get(3)?,
+                external_user_id: row.get(4)?,
+                external_chat_id: row.get(5)?,
+                telegram_bot_name: payload_telegram_bot_name(payload_json.as_deref()),
+                request_text: payload_request_text(payload_json.as_deref()),
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+async fn recent_robot_tasks(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<RecentRobotTasksQuery>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let limit = query.limit.unwrap_or(12).clamp(1, 50);
+
+    let read_result = (|| -> anyhow::Result<Vec<RecentRobotTaskSummary>> {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        let mut stmt = db.prepare(
+            "SELECT task_id, status, kind, channel, external_user_id, external_chat_id, payload_json, result_json, error_text,
+                    CAST(NULLIF(created_at, '') AS INTEGER) AS created_ts,
+                    CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) AS updated_ts
+             FROM tasks
+             WHERE channel IN ('telegram', 'whatsapp', 'feishu', 'lark')
+             ORDER BY updated_ts DESC
+             LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            let payload_json: Option<String> = row.get(6)?;
+            let result_json: Option<String> = row.get(7)?;
+            Ok(RecentRobotTaskSummary {
+                task_id: row.get(0)?,
+                status: row.get(1)?,
+                kind: row.get(2)?,
+                channel: row.get(3)?,
+                external_user_id: row.get(4)?,
+                external_chat_id: row.get(5)?,
+                telegram_bot_name: payload_telegram_bot_name(payload_json.as_deref()),
+                request_text: preview_text_from_json(payload_json.as_deref(), &["text"]),
+                result_text: preview_text_from_json(result_json.as_deref(), &["text"]),
+                error_text: row.get(8)?,
+                created_at: row.get::<_, Option<i64>>(9)?.map(|v| v.max(0) as u64),
+                updated_at: row.get::<_, Option<i64>>(10)?.map(|v| v.max(0) as u64),
+            })
+        })?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+        Ok(items)
+    })();
+
+    match read_result {
+        Ok(tasks) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({ "tasks": tasks })),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("read recent robot tasks failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn usage_records(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<UsageRecordsQuery>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    let page_size = query.page_size.unwrap_or(20).clamp(10, 100);
+    let page = query.page.unwrap_or(1).max(1);
+    let search = query.search.as_deref();
+    let channel = query.channel.as_deref().filter(|value| *value != "all");
+    let status = query.status.as_deref().filter(|value| *value != "all");
+    let log_path = state.workspace_root.join("logs").join("model_io.log");
+    if !log_path.exists() {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "stats": UsageHistoryStats {
+                        total_requests: 0,
+                        success_requests: 0,
+                        failed_requests: 0,
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                        total_tokens: 0,
+                    },
+                    "records": Vec::<UsageHistoryRecordSummary>::new(),
+                    "pagination": UsageHistoryPage {
+                        page,
+                        page_size,
+                        total_records: 0,
+                        total_pages: 0,
+                    },
+                })),
+                error: None,
+            }),
+        );
+    }
+
+    let file = match std::fs::File::open(&log_path) {
+        Ok(file) => file,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("open usage log failed: {err}")),
+                }),
+            );
+        }
+    };
+    let reader = std::io::BufReader::new(file);
+    let mut meta_cache: HashMap<String, Option<UsageTaskMeta>> = HashMap::new();
+    let mut tasks_by_id: HashMap<String, (UsageTaskMeta, Vec<TaskDebugEntry>)> = HashMap::new();
+    let mut stats = UsageHistoryStats {
+        total_requests: 0,
+        success_requests: 0,
+        failed_requests: 0,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+    };
+    for line in reader.lines() {
+        let Ok(line) = line else {
+            continue;
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<TaskDebugEntry>(trimmed) else {
+            continue;
+        };
+        let Some(task_id) = entry
+            .task_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToString::to_string)
+        else {
+            continue;
+        };
+        let meta = if let Some(existing) = meta_cache.get(&task_id) {
+            existing.clone()
+        } else {
+            let loaded = match task_usage_meta(&state, &task_id) {
+                Ok(value) => value,
+                Err(err) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiResponse {
+                            ok: false,
+                            data: None,
+                            error: Some(format!("load usage task meta failed: {err}")),
+                        }),
+                    );
+                }
+            };
+            meta_cache.insert(task_id.clone(), loaded.clone());
+            loaded
+        };
+        let Some(meta) = meta else {
+            continue;
+        };
+        if !usage_record_visible_to_identity(&identity, &meta) {
+            continue;
+        }
+        tasks_by_id
+            .entry(task_id)
+            .and_modify(|(_, entries)| entries.push(entry.clone()))
+            .or_insert_with(|| (meta, vec![entry]));
+    }
+    let mut matched_records = Vec::new();
+    for (task_id, (meta, mut entries)) in tasks_by_id {
+        entries.sort_by(|a, b| (a.ts.unwrap_or(0)).cmp(&b.ts.unwrap_or(0)));
+        let summary = summarize_usage_task(task_id, meta, &entries);
+        if !usage_channel_matches(channel, &summary) {
+            continue;
+        }
+        if !usage_status_matches(status, &summary) {
+            continue;
+        }
+        if !usage_search_matches(search, &summary) {
+            continue;
+        }
+        usage_stats_add(&mut stats, &summary);
+        matched_records.push(summary);
+    }
+    matched_records.sort_by(|a, b| (b.ts.unwrap_or(0)).cmp(&a.ts.unwrap_or(0)));
+    let total_records = matched_records.len();
+    let total_pages = if total_records == 0 { 0 } else { total_records.div_ceil(page_size) };
+    let safe_page = if total_pages == 0 { 1 } else { page.min(total_pages) };
+    let start = (safe_page.saturating_sub(1)) * page_size;
+    let records = matched_records
+        .into_iter()
+        .skip(start)
+        .take(page_size)
+        .collect::<Vec<_>>();
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "stats": stats,
+                "records": records,
+                "pagination": UsageHistoryPage {
+                    page: safe_page,
+                    page_size,
+                    total_records,
+                    total_pages,
+                },
+            })),
+            error: None,
+        }),
+    )
+}
+
+async fn usage_record_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(task_id): AxumPath<String>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    let task_id = task_id.trim();
+    if task_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("invalid task id".to_string()),
+            }),
+        );
+    }
+    let meta = match task_usage_meta(&state, task_id) {
+        Ok(Some(meta)) => meta,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("usage record not found".to_string()),
+                }),
+            );
+        }
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("load usage task meta failed: {err}")),
+                }),
+            );
+        }
+    };
+    if !usage_record_visible_to_identity(&identity, &meta) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("usage record access denied".to_string()),
+            }),
+        );
+    }
+
+    let mut entries = match read_task_debug_entries(&state, task_id) {
+        Ok(entries) => entries,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read usage chain failed: {err}")),
+                }),
+            );
+        }
+    };
+    if entries.is_empty() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("usage record detail not found".to_string()),
+            }),
+        );
+    }
+    entries.sort_by(|a, b| (a.ts.unwrap_or(0)).cmp(&b.ts.unwrap_or(0)));
+    let summary = summarize_usage_task(task_id.to_string(), meta, &entries);
+    let record = UsageHistoryRecordDetail {
+        summary,
+        entries: entries.iter().map(usage_chain_entry_from_entry).collect(),
+    };
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!(record)),
+            error: None,
+        }),
+    )
+}
+
+fn read_task_debug_entries(state: &AppState, task_id: &str) -> anyhow::Result<Vec<TaskDebugEntry>> {
+    let path = state.workspace_root.join("logs").join("model_io.log");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut entries = Vec::new();
+    for line in reader.lines() {
+        let Ok(line) = line else {
+            continue;
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<TaskDebugEntry>(trimmed) else {
+            continue;
+        };
+        if entry.task_id.as_deref() == Some(task_id) {
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
+}
+
+async fn task_debug_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(task_id): AxumPath<String>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    let normalized_task_id = task_id.trim();
+    if normalized_task_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("task_id is required".to_string()),
+            }),
+        );
+    }
+    let Some((task_user_key, channel)) = (match task_access_meta_for_debug(&state, normalized_task_id) {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read task owner failed: {err}")),
+                }),
+            );
+        }
+    }) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("Task not found".to_string()),
+            }),
+        );
+    };
+    let expected_key = task_user_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    if !channel_allows_shared_ui_task_access(&channel)
+        && expected_key.is_some()
+        && identity.user_key.trim() != expected_key.unwrap_or_default()
+    {
+        return ui_auth_error("Task owner mismatch");
+    }
+    let entries = match read_task_debug_entries(&state, normalized_task_id) {
+        Ok(entries) => entries,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read task debug failed: {err}")),
+                }),
+            );
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "task_id": normalized_task_id,
+                "entries": entries,
+            })),
+            error: None,
+        }),
+    )
+}
+
 fn shell_escape_arg(raw: &str) -> String {
     format!("'{}'", raw.replace('\'', "'\"'\"'"))
 }
@@ -467,7 +1985,7 @@ fn parse_service_action(raw: &str) -> Option<ServiceAction> {
 
 fn service_start_script(service: &str) -> Option<&'static str> {
     match service {
-        "telegramd" => Some("start-telegramd.sh"),
+        "channel-gateway" | "channel_gateway" | "telegramd" => Some("start-channel-gateway.sh"),
         "whatsappd" => Some("start-whatsappd.sh"),
         "whatsapp_webd" => Some("start-whatsapp-webd.sh"),
         "feishud" => Some("start-feishud.sh"),
@@ -478,6 +1996,7 @@ fn service_start_script(service: &str) -> Option<&'static str> {
 
 fn service_process_name(service: &str) -> Option<&'static str> {
     match service {
+        "channel-gateway" | "channel_gateway" => Some("channel-gateway"),
         "telegramd" => Some("telegramd"),
         "whatsappd" => Some("whatsappd"),
         "whatsapp_webd" => Some("whatsapp_webd"),
@@ -489,6 +2008,7 @@ fn service_process_name(service: &str) -> Option<&'static str> {
 
 fn service_pid_file(service: &str) -> Option<&'static str> {
     match service {
+        "channel-gateway" | "channel_gateway" => Some("channel-gateway.pid"),
         "telegramd" => Some("telegramd.pid"),
         "whatsappd" => Some("whatsappd.pid"),
         "whatsapp_webd" => Some("whatsapp_webd.pid"),
@@ -507,7 +2027,11 @@ fn service_extra_process_names_on_stop(service: &str) -> &'static [&'static str]
 
 fn service_is_running(service: &str) -> bool {
     match service {
-        "telegramd" => telegramd_process_stats()
+        "channel-gateway" | "channel_gateway" => channel_gateway_process_stats()
+            .map(|(count, _)| count > 0)
+            .unwrap_or(false),
+        "telegramd" => channel_gateway_process_stats()
+            .or_else(telegramd_process_stats)
             .map(|(count, _)| count > 0)
             .unwrap_or(false),
         "whatsappd" => whatsappd_process_stats()
@@ -564,30 +2088,6 @@ fn runtime_profile_default() -> &'static str {
     } else {
         "release"
     }
-}
-
-/// 轮询直到服务进程就绪，或超时。用于 Start/Restart。
-async fn poll_service_running(service: &str, interval_ms: u64, timeout_secs: u64) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
-    while std::time::Instant::now() < deadline {
-        if service_is_running(service) {
-            return true;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
-    }
-    false
-}
-
-/// 轮询直到服务进程已退出，或超时。用于 Stop。
-async fn poll_service_stopped(service: &str, interval_ms: u64, timeout_secs: u64) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
-    while std::time::Instant::now() < deadline {
-        if !service_is_running(service) {
-            return true;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
-    }
-    false
 }
 
 async fn control_service(
@@ -688,9 +2188,10 @@ async fn control_service(
                     }),
                 );
             }
-            // Start command returns immediately (nohup ... &). Poll until process is up or timeout.
-            // Preflight (e.g. Telegram API) can take several seconds.
-            if !poll_service_running(service.as_str(), 400, 12).await {
+            // The start command may return success even if script preflight exits quickly
+            // (for example, service disabled or missing required config). Verify process is up.
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            if !service_is_running(service.as_str()) {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ApiResponse {
@@ -755,19 +2256,6 @@ async fn control_service(
                             "status": "already_stopped"
                         })),
                         error: None,
-                    }),
-                );
-            }
-            // Wait until process is actually gone so UI refresh shows stopped state.
-            if !poll_service_stopped(service.as_str(), 500, 15).await {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!(
-                            "service {service} did not stop within timeout. try again or check process manually."
-                        )),
                     }),
                 );
             }
@@ -860,18 +2348,7 @@ async fn control_service(
                 );
                 let _ = Command::new("bash").arg("-lc").arg(cmd).output().await;
             }
-            if !poll_service_stopped(service.as_str(), 500, 15).await {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!(
-                            "service {service} did not fully stop before restart. try again or check process manually."
-                        )),
-                    }),
-                );
-            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             let profile = std::env::var("RUSTCLAW_START_PROFILE")
                 .ok()
                 .filter(|v| matches!(v.as_str(), "debug" | "release"))
@@ -921,7 +2398,8 @@ async fn control_service(
                     }),
                 );
             }
-            if !poll_service_running(service.as_str(), 400, 12).await {
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            if !service_is_running(service.as_str()) {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ApiResponse {
@@ -947,209 +2425,6 @@ async fn control_service(
                 }),
             )
         }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateAuthKeyRequest {
-    #[serde(default)]
-    role: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateAuthKeyRequest {
-    role: Option<String>,
-    enabled: Option<bool>,
-}
-
-async fn get_auth_keys(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
-    if !identity.role.eq_ignore_ascii_case("admin") {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("only admin can list auth keys".to_string()),
-            }),
-        );
-    }
-    match list_auth_keys(&state) {
-        Ok(rows) => {
-            let list: Vec<Value> = rows
-                .into_iter()
-                .map(|(key_id, user_key_masked, role, enabled, created_at, last_used_at)| {
-                    json!({
-                        "key_id": key_id,
-                        "user_key_masked": user_key_masked,
-                        "role": role,
-                        "enabled": enabled != 0,
-                        "created_at": created_at,
-                        "last_used_at": last_used_at,
-                    })
-                })
-                .collect();
-            (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    ok: true,
-                    data: Some(json!({ "keys": list })),
-                    error: None,
-                }),
-            )
-        }
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("list auth keys failed: {err}")),
-            }),
-        ),
-    }
-}
-
-async fn update_auth_key_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxumPath(key_id): AxumPath<i64>,
-    Json(req): Json<UpdateAuthKeyRequest>,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
-    if !identity.role.eq_ignore_ascii_case("admin") {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("only admin can update auth keys".to_string()),
-            }),
-        );
-    }
-
-    let role = req.role.as_deref();
-    let role = role.map(str::trim).filter(|v| !v.is_empty());
-    match update_auth_key_by_id(&state, key_id, role, req.enabled, &identity.user_key) {
-        Ok(true) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(json!({ "updated": true })),
-                error: None,
-            }),
-        ),
-        Ok(false) => (
-            StatusCode::NOT_FOUND,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("auth key not found".to_string()),
-            }),
-        ),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("update auth key failed: {err}")),
-            }),
-        ),
-    }
-}
-
-async fn delete_auth_key_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxumPath(key_id): AxumPath<i64>,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
-    if !identity.role.eq_ignore_ascii_case("admin") {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("only admin can delete auth keys".to_string()),
-            }),
-        );
-    }
-
-    match delete_auth_key_by_id(&state, key_id, &identity.user_key) {
-        Ok(true) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(json!({ "deleted": true })),
-                error: None,
-            }),
-        ),
-        Ok(false) => (
-            StatusCode::NOT_FOUND,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("auth key not found".to_string()),
-            }),
-        ),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("delete auth key failed: {err}")),
-            }),
-        ),
-    }
-}
-
-async fn create_auth_key_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<CreateAuthKeyRequest>,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
-    if !identity.role.eq_ignore_ascii_case("admin") {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("only admin can create auth keys".to_string()),
-            }),
-        );
-    }
-    match create_auth_key(&state, req.role.as_str()) {
-        Ok(user_key) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(json!({ "user_key": user_key })),
-                error: None,
-            }),
-        ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("create auth key failed: {err}")),
-            }),
-        ),
     }
 }
 
@@ -1230,11 +2505,17 @@ async fn health(
     let queue_length = task_count_by_status(&state, "queued").unwrap_or_default();
     let running_length = task_count_by_status(&state, "running").unwrap_or_default();
     let running_oldest_age_seconds = oldest_running_task_age_seconds(&state).unwrap_or(0);
-    let telegramd_stats = telegramd_process_stats();
+    let legacy_telegramd_stats = telegramd_process_stats();
+    let channel_gateway_stats = channel_gateway_process_stats();
     let whatsappd_stats = whatsappd_process_stats();
     let wa_webd_stats = wa_webd_process_stats();
-    let telegramd_process_count = telegramd_stats.map(|(count, _)| count);
-    let telegramd_memory_rss_bytes = telegramd_stats.map(|(_, rss_bytes)| rss_bytes);
+    let channel_gateway_process_count = channel_gateway_stats.map(|(count, _)| count);
+    let channel_gateway_memory_rss_bytes = channel_gateway_stats.map(|(_, rss_bytes)| rss_bytes);
+    let channel_gateway_healthy = channel_gateway_process_count.map(|count| count > 0);
+    let telegramd_process_count =
+        channel_gateway_process_count.or_else(|| legacy_telegramd_stats.map(|(count, _)| count));
+    let telegramd_memory_rss_bytes = channel_gateway_memory_rss_bytes
+        .or_else(|| legacy_telegramd_stats.map(|(_, rss_bytes)| rss_bytes));
     let telegramd_healthy = telegramd_process_count.map(|count| count > 0);
     let whatsappd_process_count = whatsappd_stats.map(|(count, _)| count);
     let whatsappd_memory_rss_bytes = whatsappd_stats.map(|(_, rss_bytes)| rss_bytes);
@@ -1251,6 +2532,108 @@ async fn health(
     let larkd_memory_rss_bytes = larkd_stats.map(|(_, rss_bytes)| rss_bytes);
     let larkd_healthy = larkd_process_count.map(|count| count > 0);
     let (user_count, bound_channel_count) = auth_user_summary_counts(&state).unwrap_or_default();
+    let telegram_configured_bot_names = state.telegram_configured_bot_names.as_ref().clone();
+    let telegram_bot_statuses =
+        read_telegram_bot_statuses(&state.workspace_root, &telegram_configured_bot_names);
+    let mut gateway_instance_statuses_by_scope = read_gateway_instance_statuses(&state.workspace_root);
+    let mut gateway_instance_statuses = Vec::new();
+    for bot_status in &telegram_bot_statuses {
+        let scope = format!("telegram:{}", bot_status.name);
+        gateway_instance_statuses.push(
+            gateway_instance_statuses_by_scope
+                .remove(&scope)
+                .unwrap_or_else(|| GatewayInstanceRuntimeStatus {
+                    kind: "telegram".to_string(),
+                    name: bot_status.name.clone(),
+                    scope,
+                    healthy: bot_status.healthy,
+                    status: bot_status.status.clone(),
+                    last_heartbeat_ts: bot_status.last_heartbeat_ts,
+                    last_error: bot_status.last_error.clone(),
+                }),
+        );
+    }
+    if state.whatsapp_cloud_enabled {
+        let scope = "whatsapp_cloud:primary".to_string();
+        gateway_instance_statuses.push(
+            gateway_instance_statuses_by_scope
+                .remove(&scope)
+                .unwrap_or_else(|| GatewayInstanceRuntimeStatus {
+                    kind: "whatsapp_cloud".to_string(),
+                    name: "primary".to_string(),
+                    scope,
+                    healthy: whatsappd_healthy.unwrap_or(false),
+                    status: if whatsappd_healthy.unwrap_or(false) {
+                        "running".to_string()
+                    } else {
+                        "stopped".to_string()
+                    },
+                    last_heartbeat_ts: None,
+                    last_error: None,
+                }),
+        );
+    }
+    if state.whatsapp_web_enabled {
+        let scope = "whatsapp_web:primary".to_string();
+        gateway_instance_statuses.push(
+            gateway_instance_statuses_by_scope
+                .remove(&scope)
+                .unwrap_or_else(|| GatewayInstanceRuntimeStatus {
+                    kind: "whatsapp_web".to_string(),
+                    name: "primary".to_string(),
+                    scope,
+                    healthy: wa_webd_healthy.unwrap_or(false),
+                    status: if wa_webd_healthy.unwrap_or(false) {
+                        "running".to_string()
+                    } else {
+                        "stopped".to_string()
+                    },
+                    last_heartbeat_ts: None,
+                    last_error: None,
+                }),
+        );
+    }
+    if state.feishu_send_config.is_some() {
+        let scope = "feishu:primary".to_string();
+        gateway_instance_statuses.push(
+            gateway_instance_statuses_by_scope
+                .remove(&scope)
+                .unwrap_or_else(|| GatewayInstanceRuntimeStatus {
+                    kind: "feishu".to_string(),
+                    name: "primary".to_string(),
+                    scope,
+                    healthy: feishud_healthy.unwrap_or(false),
+                    status: if feishud_healthy.unwrap_or(false) {
+                        "running".to_string()
+                    } else {
+                        "stopped".to_string()
+                    },
+                    last_heartbeat_ts: None,
+                    last_error: None,
+                }),
+        );
+    }
+    if state.lark_send_config.is_some() {
+        let scope = "lark:primary".to_string();
+        gateway_instance_statuses.push(
+            gateway_instance_statuses_by_scope
+                .remove(&scope)
+                .unwrap_or_else(|| GatewayInstanceRuntimeStatus {
+                    kind: "lark".to_string(),
+                    name: "primary".to_string(),
+                    scope,
+                    healthy: larkd_healthy.unwrap_or(false),
+                    status: if larkd_healthy.unwrap_or(false) {
+                        "running".to_string()
+                    } else {
+                        "stopped".to_string()
+                    },
+                    last_heartbeat_ts: None,
+                    last_error: None,
+                }),
+        );
+    }
+    gateway_instance_statuses.extend(gateway_instance_statuses_by_scope.into_values());
     let data = HealthResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
         queue_length,
@@ -1263,12 +2646,19 @@ async fn health(
         telegramd_healthy,
         telegramd_process_count,
         telegramd_memory_rss_bytes,
+        channel_gateway_healthy,
+        channel_gateway_process_count,
+        channel_gateway_memory_rss_bytes,
         whatsappd_healthy,
         whatsappd_process_count,
         whatsappd_memory_rss_bytes,
         telegram_bot_healthy: telegramd_healthy,
         telegram_bot_process_count: telegramd_process_count,
         telegram_bot_memory_rss_bytes: telegramd_memory_rss_bytes,
+        telegram_configured_bot_count: telegram_configured_bot_names.len(),
+        telegram_configured_bot_names,
+        telegram_bot_statuses,
+        gateway_instance_statuses,
         whatsapp_cloud_healthy: whatsappd_healthy,
         whatsapp_cloud_process_count: whatsappd_process_count,
         whatsapp_cloud_memory_rss_bytes: whatsappd_memory_rss_bytes,
@@ -1563,13 +2953,68 @@ struct UpdateLlmConfigRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct TelegramBotConfigItem {
+    name: String,
+    bot_token: String,
+    #[serde(default = "default_agent_id")]
+    agent_id: String,
+    #[serde(default)]
+    admins: Vec<i64>,
+    #[serde(default)]
+    allowlist: Vec<i64>,
+    #[serde(default = "default_telegram_access_mode")]
+    access_mode: String,
+    #[serde(default)]
+    allowed_telegram_usernames: Vec<String>,
+    #[serde(default)]
+    is_primary: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TelegramConfigResponse {
+    config_path: String,
+    bots: Vec<TelegramBotConfigItem>,
+    agents: Vec<AgentConfigItem>,
+    restart_required: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateTelegramConfigRequest {
+    #[serde(default)]
+    bots: Vec<TelegramBotConfigItem>,
+    #[serde(default)]
+    agents: Vec<AgentConfigItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AgentConfigItem {
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    persona_prompt: String,
+    #[serde(default)]
+    preferred_vendor: Option<String>,
+    #[serde(default)]
+    preferred_model: Option<String>,
+    #[serde(default)]
+    allowed_skills: Vec<String>,
+}
+
+fn default_agent_id() -> String {
+    "main".to_string()
+}
+
+fn default_telegram_access_mode() -> String {
+    "public".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ModelConfigItem {
     vendor: String,
     model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    base_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    api_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1607,8 +3052,6 @@ fn default_model_item() -> ModelConfigItem {
     ModelConfigItem {
         vendor: String::new(),
         model: String::new(),
-        base_url: None,
-        api_key: None,
     }
 }
 
@@ -1633,8 +3076,6 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
-            base_url: None,
-            api_key: None,
         })
         .unwrap_or_else(default_model_item);
 
@@ -1644,37 +3085,22 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
         toml::from_str(&image_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
 
     let read_image_section = |section: &str| -> ModelConfigItem {
-        let sec = image.get(section).and_then(|t| t.as_table());
-        let vendor = sec
-            .and_then(|t| t.get("default_vendor").and_then(|v| v.as_str()))
-            .unwrap_or("")
-            .to_string();
-        let model = sec
-            .and_then(|t| t.get("default_model").and_then(|v| v.as_str()))
-            .unwrap_or("")
-            .to_string();
-        let (base_url, api_key) = if vendor.is_empty() {
-            (None, None)
-        } else {
-            let prov = image
-                .get(section)
-                .and_then(|t| t.get("providers"))
-                .and_then(|p| p.get(&vendor))
-                .and_then(|v| v.as_table());
-            let base_url = prov
-                .and_then(|t| t.get("base_url").and_then(|v| v.as_str()))
-                .map(|s| s.to_string());
-            let api_key = prov
-                .and_then(|t| t.get("api_key").and_then(|v| v.as_str()))
-                .map(mask_secret);
-            (base_url, api_key)
-        };
-        ModelConfigItem {
-            vendor,
-            model,
-            base_url,
-            api_key,
-        }
+        image
+            .get(section)
+            .and_then(|t| t.as_table())
+            .map(|t| ModelConfigItem {
+                vendor: t
+                    .get("default_vendor")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                model: t
+                    .get("default_model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            })
+            .unwrap_or_else(default_model_item)
     };
     let image_edit = read_image_section("image_edit");
     let image_generation = read_image_section("image_generation");
@@ -1685,41 +3111,39 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
     let audio: toml::Value =
         toml::from_str(&audio_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
 
-    let read_audio_section = |section: &str| -> ModelConfigItem {
-        let sec = audio.get(section).and_then(|t| t.as_table());
-        let vendor = sec
-            .and_then(|t| t.get("default_vendor").and_then(|v| v.as_str()))
-            .unwrap_or("")
-            .to_string();
-        let model = sec
-            .and_then(|t| t.get("default_model").and_then(|v| v.as_str()))
-            .unwrap_or("")
-            .to_string();
-        let (base_url, api_key) = if vendor.is_empty() {
-            (None, None)
-        } else {
-            let prov = audio
-                .get(section)
-                .and_then(|t| t.get("providers"))
-                .and_then(|p| p.get(&vendor))
-                .and_then(|v| v.as_table());
-            let base_url = prov
-                .and_then(|t| t.get("base_url").and_then(|v| v.as_str()))
-                .map(|s| s.to_string());
-            let api_key = prov
-                .and_then(|t| t.get("api_key").and_then(|v| v.as_str()))
-                .map(mask_secret);
-            (base_url, api_key)
-        };
-        ModelConfigItem {
-            vendor,
-            model,
-            base_url,
-            api_key,
-        }
-    };
-    let audio_transcribe = read_audio_section("audio_transcribe");
-    let audio_synthesize = read_audio_section("audio_synthesize");
+    let audio_transcribe = audio
+        .get("audio_transcribe")
+        .and_then(|t| t.as_table())
+        .map(|t| ModelConfigItem {
+            vendor: t
+                .get("default_vendor")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            model: t
+                .get("default_model")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+        .unwrap_or_else(default_model_item);
+
+    let audio_synthesize = audio
+        .get("audio_synthesize")
+        .and_then(|t| t.as_table())
+        .map(|t| ModelConfigItem {
+            vendor: t
+                .get("default_vendor")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            model: t
+                .get("default_model")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+        .unwrap_or_else(default_model_item);
 
     Ok(ModelConfigResponse {
         llm,
@@ -1738,24 +3162,39 @@ fn write_model_config(state: &AppState, req: &ModelConfigUpdateRequest) -> anyho
     if let Some(ref llm) = req.llm {
         let path = root.join("configs/config.toml");
         let raw = std::fs::read_to_string(&path)?;
-        let updated_vendor = upsert_string_key_in_section(
-            &raw,
-            "llm",
-            "selected_vendor",
-            &format!("selected_vendor = {:?}", llm.vendor.trim()),
-        );
-        let updated = upsert_string_key_in_section(
-            &updated_vendor,
-            "llm",
-            "selected_model",
-            &format!("selected_model = {:?}", llm.model.trim()),
-        );
-        std::fs::write(&path, updated)?;
+        let mut value: toml::Value = toml::from_str(&raw)?;
+        if let Some(t) = value.get_mut("llm").and_then(|v| v.as_table_mut()) {
+            t.insert(
+                "selected_vendor".to_string(),
+                toml::Value::String(llm.vendor.clone()),
+            );
+            t.insert(
+                "selected_model".to_string(),
+                toml::Value::String(llm.model.clone()),
+            );
+        } else {
+            let mut tbl = toml::map::Map::new();
+            tbl.insert(
+                "selected_vendor".to_string(),
+                toml::Value::String(llm.vendor.clone()),
+            );
+            tbl.insert(
+                "selected_model".to_string(),
+                toml::Value::String(llm.model.clone()),
+            );
+            value
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("config.toml root is not a table"))?
+                .insert("llm".to_string(), toml::Value::Table(tbl));
+        }
+        std::fs::write(&path, toml::to_string_pretty(&value)?)?;
     }
 
-    let image_path = root.join("configs/image.toml");
-    let mut image_raw = std::fs::read_to_string(&image_path).unwrap_or_else(|_| String::new());
     let mut image_modified = false;
+    let image_path = root.join("configs/image.toml");
+    let image_raw = std::fs::read_to_string(&image_path).unwrap_or_else(|_| String::new());
+    let mut image: toml::Value =
+        toml::from_str(&image_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
 
     for (section, item) in [
         ("image_edit", req.image_edit.as_ref()),
@@ -1764,114 +3203,71 @@ fn write_model_config(state: &AppState, req: &ModelConfigUpdateRequest) -> anyho
     ] {
         if let Some(it) = item {
             image_modified = true;
-            let vendor = it.vendor.trim();
-            image_raw = upsert_string_key_in_section(
-                &image_raw,
-                section,
-                "default_vendor",
-                &format!("default_vendor = {:?}", vendor),
-            );
-            image_raw = upsert_string_key_in_section(
-                &image_raw,
-                section,
-                "default_model",
-                &format!("default_model = {:?}", it.model.trim()),
-            );
-            if !vendor.is_empty() {
-                let provider_section = format!("{section}.providers.{vendor}");
-                if let Some(ref u) = it.base_url {
-                    let trimmed = u.trim();
-                    image_raw = if trimmed.is_empty() {
-                        remove_key_in_section(&image_raw, &provider_section, "base_url")
-                    } else {
-                        upsert_string_key_in_section(
-                            &image_raw,
-                            &provider_section,
-                            "base_url",
-                            &format!("base_url = {:?}", trimmed),
-                        )
-                    };
-                }
-                if let Some(ref k) = it.api_key {
-                    let trimmed = k.trim();
-                    if !trimmed.contains("***") {
-                        image_raw = if trimmed.is_empty() {
-                            remove_key_in_section(&image_raw, &provider_section, "api_key")
-                        } else {
-                            upsert_string_key_in_section(
-                                &image_raw,
-                                &provider_section,
-                                "api_key",
-                                &format!("api_key = {:?}", trimmed),
-                            )
-                        };
-                    }
-                }
+            let tbl = image
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("image.toml root is not a table"))?
+                .entry(section.to_string())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            if let Some(t) = tbl.as_table_mut() {
+                t.insert(
+                    "default_vendor".to_string(),
+                    toml::Value::String(it.vendor.clone()),
+                );
+                t.insert(
+                    "default_model".to_string(),
+                    toml::Value::String(it.model.clone()),
+                );
             }
         }
     }
     if image_modified {
-        std::fs::write(&image_path, image_raw)?;
+        std::fs::write(&image_path, toml::to_string_pretty(&image)?)?;
     }
 
-    let audio_path = root.join("configs/audio.toml");
-    let mut audio_raw = std::fs::read_to_string(&audio_path).unwrap_or_else(|_| String::new());
     let mut audio_modified = false;
+    let audio_path = root.join("configs/audio.toml");
+    let audio_raw = std::fs::read_to_string(&audio_path).unwrap_or_else(|_| String::new());
+    let mut audio: toml::Value =
+        toml::from_str(&audio_raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
 
-    for (section, item) in [
-        ("audio_transcribe", req.audio_transcribe.as_ref()),
-        ("audio_synthesize", req.audio_synthesize.as_ref()),
-    ] {
-        if let Some(it) = item {
-            audio_modified = true;
-            let vendor = it.vendor.trim();
-            audio_raw = upsert_string_key_in_section(
-                &audio_raw,
-                section,
-                "default_vendor",
-                &format!("default_vendor = {:?}", vendor),
+    if let Some(ref it) = req.audio_transcribe {
+        audio_modified = true;
+        let tbl = audio
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("audio.toml root is not a table"))?
+            .entry("audio_transcribe".to_string())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+        if let Some(t) = tbl.as_table_mut() {
+            t.insert(
+                "default_vendor".to_string(),
+                toml::Value::String(it.vendor.clone()),
             );
-            audio_raw = upsert_string_key_in_section(
-                &audio_raw,
-                section,
-                "default_model",
-                &format!("default_model = {:?}", it.model.trim()),
+            t.insert(
+                "default_model".to_string(),
+                toml::Value::String(it.model.clone()),
             );
-            if !vendor.is_empty() {
-                let provider_section = format!("{section}.providers.{vendor}");
-                if let Some(ref u) = it.base_url {
-                    let trimmed = u.trim();
-                    audio_raw = if trimmed.is_empty() {
-                        remove_key_in_section(&audio_raw, &provider_section, "base_url")
-                    } else {
-                        upsert_string_key_in_section(
-                            &audio_raw,
-                            &provider_section,
-                            "base_url",
-                            &format!("base_url = {:?}", trimmed),
-                        )
-                    };
-                }
-                if let Some(ref k) = it.api_key {
-                    let trimmed = k.trim();
-                    if !trimmed.contains("***") {
-                        audio_raw = if trimmed.is_empty() {
-                            remove_key_in_section(&audio_raw, &provider_section, "api_key")
-                        } else {
-                            upsert_string_key_in_section(
-                                &audio_raw,
-                                &provider_section,
-                                "api_key",
-                                &format!("api_key = {:?}", trimmed),
-                            )
-                        };
-                    }
-                }
-            }
+        }
+    }
+    if let Some(ref it) = req.audio_synthesize {
+        audio_modified = true;
+        let tbl = audio
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("audio.toml root is not a table"))?
+            .entry("audio_synthesize".to_string())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+        if let Some(t) = tbl.as_table_mut() {
+            t.insert(
+                "default_vendor".to_string(),
+                toml::Value::String(it.vendor.clone()),
+            );
+            t.insert(
+                "default_model".to_string(),
+                toml::Value::String(it.model.clone()),
+            );
         }
     }
     if audio_modified {
-        std::fs::write(&audio_path, audio_raw)?;
+        std::fs::write(&audio_path, toml::to_string_pretty(&audio)?)?;
     }
 
     Ok(())
@@ -1970,66 +3366,99 @@ fn write_provider_keys(state: &AppState, req: &ProviderKeysResponse) -> anyhow::
     if !req.llm.is_empty() {
         let path = root.join("configs/config.toml");
         let raw = std::fs::read_to_string(&path)?;
-        let mut updated = raw;
+        let mut config: toml::Value = toml::from_str(&raw)?;
+        let llm = config
+            .get_mut("llm")
+            .and_then(|v| v.as_table_mut())
+            .ok_or_else(|| anyhow::anyhow!("config.toml has no [llm] table"))?;
         for (vendor, new_key) in &req.llm {
-            let section = format!("llm.{}", vendor.trim());
-            let trimmed = new_key.trim();
-            updated = if trimmed.is_empty() {
-                remove_key_in_section(&updated, &section, "api_key")
-            } else {
-                upsert_string_key_in_section(
-                    &updated,
-                    &section,
-                    "api_key",
-                    &format!("api_key = {:?}", trimmed),
-                )
-            };
+            if new_key.is_empty() {
+                continue;
+            }
+            let entry = llm
+                .entry(vendor.clone())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            if let Some(t) = entry.as_table_mut() {
+                t.insert("api_key".to_string(), toml::Value::String(new_key.clone()));
+            }
         }
-        std::fs::write(&path, updated)?;
+        std::fs::write(&path, toml::to_string_pretty(&config)?)?;
     }
 
     if !req.image.is_empty() {
         let path = root.join("configs/image.toml");
-        let mut updated = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
+        let mut image: toml::Value =
+            toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+        let root_t = image
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("image.toml root not a table"))?;
         for (section, vendors) in &req.image {
+            if vendors.is_empty() {
+                continue;
+            }
+            let section_t = root_t
+                .entry(section.clone())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let providers = section_t
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("image.toml [{}] not a table", section))?
+                .entry("providers".to_string())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let prov_t = providers
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("providers not a table"))?;
             for (vendor, new_key) in vendors {
-                let provider_section = format!("{}.providers.{}", section, vendor.trim());
-                let trimmed = new_key.trim();
-                updated = if trimmed.is_empty() {
-                    remove_key_in_section(&updated, &provider_section, "api_key")
-                } else {
-                    upsert_string_key_in_section(
-                        &updated,
-                        &provider_section,
-                        "api_key",
-                        &format!("api_key = {:?}", trimmed),
-                    )
-                };
+                if new_key.is_empty() {
+                    continue;
+                }
+                let entry = prov_t
+                    .entry(vendor.clone())
+                    .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+                if let Some(t) = entry.as_table_mut() {
+                    t.insert("api_key".to_string(), toml::Value::String(new_key.clone()));
+                }
             }
         }
-        std::fs::write(&path, updated)?;
+        std::fs::write(&path, toml::to_string_pretty(&image)?)?;
     }
 
     if !req.audio.is_empty() {
         let path = root.join("configs/audio.toml");
-        let mut updated = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|_| String::new());
+        let mut audio: toml::Value =
+            toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
+        let root_t = audio
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("audio.toml root not a table"))?;
         for (section, vendors) in &req.audio {
+            if vendors.is_empty() {
+                continue;
+            }
+            let section_t = root_t
+                .entry(section.clone())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let providers = section_t
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("audio.toml [{}] not a table", section))?
+                .entry("providers".to_string())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let prov_t = providers
+                .as_table_mut()
+                .ok_or_else(|| anyhow::anyhow!("providers not a table"))?;
             for (vendor, new_key) in vendors {
-                let provider_section = format!("{}.providers.{}", section, vendor.trim());
-                let trimmed = new_key.trim();
-                updated = if trimmed.is_empty() {
-                    remove_key_in_section(&updated, &provider_section, "api_key")
-                } else {
-                    upsert_string_key_in_section(
-                        &updated,
-                        &provider_section,
-                        "api_key",
-                        &format!("api_key = {:?}", trimmed),
-                    )
-                };
+                if new_key.is_empty() {
+                    continue;
+                }
+                let entry = prov_t
+                    .entry(vendor.clone())
+                    .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+                if let Some(t) = entry.as_table_mut() {
+                    t.insert("api_key".to_string(), toml::Value::String(new_key.clone()));
+                }
             }
         }
-        std::fs::write(&path, updated)?;
+        std::fs::write(&path, toml::to_string_pretty(&audio)?)?;
     }
 
     Ok(())
@@ -3014,49 +4443,10 @@ fn upsert_string_key_in_section(
     }
 
     if !inserted_or_replaced && section_seen {
-        let idx = insert_index_in_section.or(section_end).unwrap_or(lines.len());
+        let idx = insert_index_in_section
+            .or(section_end)
+            .unwrap_or(lines.len());
         lines.insert(idx, rendered_line.to_string());
-    } else if !inserted_or_replaced {
-        if !lines.is_empty() && !lines.last().map(|s| s.trim().is_empty()).unwrap_or(false) {
-            lines.push(String::new());
-        }
-        lines.push(section_header);
-        lines.push(rendered_line.to_string());
-    }
-
-    let mut out = lines.join("\n");
-    if raw.ends_with('\n') {
-        out.push('\n');
-    }
-    out
-}
-
-fn remove_key_in_section(raw: &str, section_name: &str, key: &str) -> String {
-    let mut lines: Vec<String> = raw.lines().map(|s| s.to_string()).collect();
-    let section_header = format!("[{section_name}]");
-    let mut in_section = false;
-    let mut remove_index: Option<usize> = None;
-
-    for idx in 0..lines.len() {
-        let trimmed = lines[idx].trim();
-        if trimmed == section_header {
-            in_section = true;
-            continue;
-        }
-        if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed != section_header {
-            if in_section {
-                break;
-            }
-            continue;
-        }
-        if in_section && trimmed.starts_with(key) && trimmed.contains('=') {
-            remove_index = Some(idx);
-            break;
-        }
-    }
-
-    if let Some(idx) = remove_index {
-        lines.remove(idx);
     }
 
     let mut out = lines.join("\n");
@@ -3571,11 +4961,7 @@ async fn update_llm_config(
     );
     let vendor_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
     let final_updated = if vendor_api_key.is_empty() {
-        remove_key_in_section(
-            &updated_vendor_model,
-            &format!("llm.{selected_vendor}"),
-            "api_key",
-        )
+        updated_vendor_model
     } else {
         upsert_string_key_in_section(
             &updated_vendor_model,

@@ -34,8 +34,23 @@ pub(crate) async fn send_telegram_message(
     state: &AppState,
     chat_id: i64,
     text: &str,
+    bot_name: Option<&str>,
 ) -> Result<(), String> {
-    let token = state.telegram_bot_token.trim();
+    let bot_name = bot_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "telegram strict mode: missing telegram_bot_name".to_string())?;
+    let token = state
+        .telegram_bot_tokens
+        .get(bot_name)
+        .map(String::as_str)
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "telegram strict mode: unknown or unconfigured telegram_bot_name={bot_name}"
+            )
+        })?
+        .trim();
     if token.is_empty() {
         return Err("telegram bot token is empty".to_string());
     }
