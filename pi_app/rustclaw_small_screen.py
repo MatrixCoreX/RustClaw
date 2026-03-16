@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RustClaw 小屏监控：480×320 全屏，健康状态慢刷新、日志近实时刷新，左侧龙虾动图 + RustClaw 标题。
+# RustClaw 小屏监控：480×320 全屏，健康状态慢刷新、日志温和刷新，左侧龙虾动图 + RustClaw 标题。
 # 需先启动 clawd（8787）。按 F11 或 Escape 退出全屏/关闭。
 
 import errno
@@ -26,7 +26,7 @@ except ModuleNotFoundError:
 
 API_BASE = "http://127.0.0.1:8787"
 HEALTH_REFRESH_SEC = 15
-LOGS_REFRESH_SEC = 1
+LOGS_REFRESH_SEC = 5
 W, H = 480, 320
 ASSETS_DIR = None
 
@@ -71,7 +71,10 @@ STRINGS = {
         "lang_cn": "CN",
         "ok": "确定",
         "cancel": "取消",
-        "crypto_refresh_hint": "每15秒自动刷新",
+        "crypto_refresh_hint": "每{sec}秒自动刷新",
+        "crypto_empty": "请在 small_screen_markets.toml 配置展示币种",
+        "stock_refresh_hint": "每{sec}秒自动刷新",
+        "stock_empty": "请在 small_screen_markets.toml 配置展示股票",
         "refresh": "刷新",
         "llm_title": "NNI分布式模型 (test)",
         "llm_join": "加入",
@@ -118,7 +121,10 @@ STRINGS = {
         "lang_cn": "CN",
         "ok": "OK",
         "cancel": "Cancel",
-        "crypto_refresh_hint": "Auto refresh every 15s",
+        "crypto_refresh_hint": "Auto refresh every {sec}s",
+        "crypto_empty": "Configure crypto items in small_screen_markets.toml",
+        "stock_refresh_hint": "Auto refresh every {sec}s",
+        "stock_empty": "Configure stock items in small_screen_markets.toml",
         "refresh": "Refresh",
         "llm_title": "Network Native Intelligence (test)",
         "llm_join": "Join",
@@ -822,10 +828,27 @@ def fetch_clawd_log_summary(user_key="", lang="CN"):
 
 
 BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
-CRYPTO_PAIRS = [
-    ("BTC", "BTCUSDT"), ("ETH", "ETHUSDT"), ("BCH", "BCHUSDT"), ("LTC", "LTCUSDT"),
-    ("SOL", "SOLUSDT"), ("BNB", "BNBUSDT"), ("XRP", "XRPUSDT"), ("DOGE", "DOGEUSDT"),
-    ("PEPE", "PEPEUSDT"), ("SHIB", "SHIBUSDT"),
+SINA_HQ_URL = "http://hq.sinajs.cn/list="
+SINA_REFERER = "https://finance.sina.com.cn"
+DEFAULT_A_SHARE_REFRESH_SEC = 15
+DEFAULT_CRYPTO_REFRESH_SEC = 15
+DEFAULT_A_SHARE_ITEMS = [
+    {"name": "中国移动", "code": "600941"},
+    {"name": "贵州茅台", "code": "600519"},
+    {"name": "宁德时代", "code": "300750"},
+    {"name": "比亚迪", "code": "002594"},
+]
+DEFAULT_CRYPTO_ITEMS = [
+    {"name": "BTC", "symbol": "BTCUSDT"},
+    {"name": "ETH", "symbol": "ETHUSDT"},
+    {"name": "BCH", "symbol": "BCHUSDT"},
+    {"name": "LTC", "symbol": "LTCUSDT"},
+    {"name": "SOL", "symbol": "SOLUSDT"},
+    {"name": "BNB", "symbol": "BNBUSDT"},
+    {"name": "XRP", "symbol": "XRPUSDT"},
+    {"name": "DOGE", "symbol": "DOGEUSDT"},
+    {"name": "PEPE", "symbol": "PEPEUSDT"},
+    {"name": "SHIB", "symbol": "SHIBUSDT"},
 ]
 
 
@@ -839,8 +862,48 @@ def _strip_trailing_zeros(price_str):
     return int_part if not frac else f"{int_part}.{frac}"
 
 
-def fetch_crypto_prices():
+def _small_screen_market_config_path():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, "small_screen_markets.toml")
+
+
+def _load_small_screen_market_config():
+    if tomllib is None:
+        return {}
+    try:
+        with open(_small_screen_market_config_path(), "rb") as f:
+            cfg = tomllib.load(f)
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
+def _parse_refresh_seconds(value, default_value):
+    if isinstance(value, (int, float)):
+        return max(5, min(int(value), 3600))
+    return default_value
+
+
+def _load_small_screen_crypto_config():
+    cfg = _load_small_screen_market_config()
+    section = (cfg.get("crypto") or {}) if isinstance(cfg, dict) else {}
+    refresh_seconds = _parse_refresh_seconds(section.get("refresh_seconds"), DEFAULT_CRYPTO_REFRESH_SEC)
+    items = []
+    for item in section.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        symbol = str(item.get("symbol") or "").strip().upper()
+        if name and symbol:
+            items.append({"name": name, "symbol": symbol})
+    if not items:
+        items = [dict(item) for item in DEFAULT_CRYPTO_ITEMS]
+    return items, refresh_seconds
+
+
+def fetch_crypto_prices(crypto_items=None):
     """从币安 API 拉取 USDT 价格，返回 { "BTC": "43210.5", ... }，失败返回 None。去掉小数点后尾部的 0。"""
+    items = crypto_items or _load_small_screen_crypto_config()[0]
     try:
         req = urllib.request.Request(BINANCE_TICKER_URL)
         with urllib.request.urlopen(req, timeout=8) as r:
@@ -849,7 +912,11 @@ def fetch_crypto_prices():
             return None
         by_symbol = {item.get("symbol"): item.get("price") for item in data if isinstance(item, dict) and item.get("symbol") and item.get("price")}
         out = {}
-        for name, symbol in CRYPTO_PAIRS:
+        for item in items:
+            name = item.get("name")
+            symbol = item.get("symbol")
+            if not name or not symbol:
+                continue
             p = by_symbol.get(symbol)
             if p is not None:
                 out[name] = _strip_trailing_zeros(p)
@@ -858,6 +925,128 @@ def fetch_crypto_prices():
         return out
     except Exception:
         return None
+
+
+def _normalize_stock_code(input_text):
+    s = str(input_text or "").strip().lower()
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if s.startswith(("sh", "sz")) and len(digits) == 6:
+        return s[:2] + digits
+    if len(digits) == 6:
+        return ("sh" if digits.startswith("6") else "sz") + digits
+    return ""
+
+
+def _load_small_screen_stock_config():
+    cfg = _load_small_screen_market_config()
+    section = (cfg.get("stocks") or {}) if isinstance(cfg, dict) else {}
+    refresh_seconds = _parse_refresh_seconds(section.get("refresh_seconds"), DEFAULT_A_SHARE_REFRESH_SEC)
+    items = []
+    for item in section.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        code = _normalize_stock_code(item.get("code"))
+        if code:
+            items.append({"name": name or code.upper(), "code": code})
+    if not items:
+        items = [
+            {"name": item["name"], "code": _normalize_stock_code(item["code"])}
+            for item in DEFAULT_A_SHARE_ITEMS
+        ]
+    return items, refresh_seconds
+
+
+def _decode_sina_body(raw):
+    try:
+        text = raw.decode("utf-8")
+        if "var hq_str_" in text:
+            return text
+    except UnicodeDecodeError:
+        pass
+    return raw.decode("gbk", errors="ignore")
+
+
+def _safe_float(value):
+    try:
+        return float(str(value).strip())
+    except Exception:
+        return None
+
+
+def _fmt_signed_pct(current, prev_close):
+    current_num = _safe_float(current)
+    prev_num = _safe_float(prev_close)
+    if current_num is None or prev_num is None or prev_num <= 0:
+        return "--"
+    pct = (current_num - prev_num) / prev_num * 100.0
+    sign = "+" if pct >= 0 else ""
+    return f"{sign}{pct:.2f}%"
+
+
+def _parse_sina_quotes(body):
+    out = {}
+    for code, payload in re.findall(r'var hq_str_([a-z]{2}\d{6})="([^"]*)";', body, flags=re.I):
+        parts = [part.strip() for part in payload.split(",")]
+        if len(parts) < 32:
+            continue
+        name = parts[0]
+        if not name:
+            continue
+        norm_code = code.lower()
+        out[norm_code] = {
+            "name": name,
+            "code": norm_code[2:],
+            "open": parts[1] or "--",
+            "prev_close": parts[2] or "--",
+            "current": parts[3] or "--",
+            "high": parts[4] or "--",
+            "low": parts[5] or "--",
+            "time": parts[31] or "--",
+        }
+        out[norm_code]["pct"] = _fmt_signed_pct(out[norm_code]["current"], out[norm_code]["prev_close"])
+    return out
+
+
+def fetch_a_share_quotes(stock_items=None):
+    items = stock_items or _load_small_screen_stock_config()[0]
+    stock_codes = [item["code"] for item in items if item.get("code")]
+    quotes = {}
+    error = None
+    if stock_codes:
+        try:
+            req = urllib.request.Request(SINA_HQ_URL + ",".join(stock_codes))
+            req.add_header("Referer", SINA_REFERER)
+            req.add_header("User-Agent", "RustClaw-Small-Screen/1.0")
+            with urllib.request.urlopen(req, timeout=8) as r:
+                quotes = _parse_sina_quotes(_decode_sina_body(r.read()))
+        except Exception as exc:
+            error = str(exc)
+
+    out = []
+    for item in items:
+        code = item.get("code") or ""
+        quote = quotes.get(code.lower()) if code else None
+        if quote:
+            display_name = item.get("name") or quote.get("name") or code.upper()
+            out.append({
+                "title": f"{display_name} · {quote.get('code') or '--'}",
+                "price": quote.get("current") or "--",
+                "pct": quote.get("pct") or "--",
+                "meta1": f"今开 {quote.get('open') or '--'}  昨收 {quote.get('prev_close') or '--'}",
+                "meta2": f"高/低 {quote.get('high') or '--'}/{quote.get('low') or '--'}  {quote.get('time') or '--'}",
+            })
+            continue
+        reason = "行情获取失败" if error else "暂无今日行情"
+        out.append({
+            "title": item.get("name") or code.upper() or "--",
+            "price": "--",
+            "pct": "--",
+            "meta1": reason[:28],
+            "meta2": code.upper()[:28],
+        })
+
+    return {"items": out, "error": error}
 
 
 def fetch_skills_config(user_key=""):
@@ -1107,12 +1296,14 @@ class SmallScreenApp:
         self.skills_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.gallery_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.crypto_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
+        self.stock_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.users_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=20, pady=18)
         self.logs_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=10, pady=8)
         self.settings_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=24, pady=20)
-        # 顺序（左滑下一页）：首页 → 用户 → 日志 → 技能 → 加密货币 → 挖矿 → 设置 → 首页；右滑=上一页
-        self._view_mode = "dashboard"  # dashboard | users | logs | skills | crypto | gallery | settings
+        # 顺序（左滑下一页）：首页 → 用户 → 日志 → 技能 → A股 → 加密货币 → 挖矿 → 设置 → 首页；右滑=上一页
+        self._view_mode = "dashboard"  # dashboard | users | logs | skills | stock | crypto | gallery | settings
         self._crypto_job = None
+        self._stock_job = None
         self._gallery_images = []
         self._gallery_index = 0
         self._gallery_photos = []
@@ -1687,7 +1878,7 @@ class SmallScreenApp:
         self.root.after(15000, reenable)
 
     def _toggle_view(self):
-        """左滑/下一页：dashboard -> users -> logs -> skills -> crypto -> gallery -> settings -> dashboard"""
+        """左滑/下一页：dashboard -> users -> logs -> skills -> stock -> crypto -> gallery -> settings -> dashboard"""
         if self._gallery_job:
             self.root.after_cancel(self._gallery_job)
             self._gallery_job = None
@@ -1707,8 +1898,16 @@ class SmallScreenApp:
             self.skills_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._refresh_skills_view()
         elif self._view_mode == "skills":
-            self._view_mode = "crypto"
+            self._view_mode = "stock"
             self.skills_frame.pack_forget()
+            self.stock_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            self._show_stock()
+        elif self._view_mode == "stock":
+            if self._stock_job:
+                self.root.after_cancel(self._stock_job)
+                self._stock_job = None
+            self.stock_frame.pack_forget()
+            self._view_mode = "crypto"
             self.crypto_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._show_crypto()
         elif self._view_mode == "crypto":
@@ -1731,7 +1930,7 @@ class SmallScreenApp:
         self._refresh_topbar()
 
     def _go_prev_view(self):
-        """右滑/上一页：dashboard -> settings -> gallery -> crypto -> skills -> logs -> users -> dashboard（循环）。"""
+        """右滑/上一页：dashboard -> settings -> gallery -> crypto -> stock -> skills -> logs -> users -> dashboard（循环）。"""
         if self._gallery_job:
             self.root.after_cancel(self._gallery_job)
             self._gallery_job = None
@@ -1751,11 +1950,19 @@ class SmallScreenApp:
             self.crypto_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._show_crypto()
         elif self._view_mode == "crypto":
-            self._view_mode = "skills"
+            self._view_mode = "stock"
             if self._crypto_job:
                 self.root.after_cancel(self._crypto_job)
                 self._crypto_job = None
             self.crypto_frame.pack_forget()
+            self.stock_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            self._show_stock()
+        elif self._view_mode == "stock":
+            self._view_mode = "skills"
+            if self._stock_job:
+                self.root.after_cancel(self._stock_job)
+                self._stock_job = None
+            self.stock_frame.pack_forget()
             self.skills_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._refresh_skills_view()
         elif self._view_mode == "skills":
@@ -1961,6 +2168,7 @@ class SmallScreenApp:
     def _show_crypto(self):
         for w in self.crypto_frame.winfo_children():
             w.destroy()
+        self._crypto_items, self._crypto_refresh_sec = _load_small_screen_crypto_config()
         title_row = tk.Frame(self.crypto_frame, bg=self._c("bg"))
         title_row.pack(fill=tk.X, pady=(0, 6))
         tk.Label(
@@ -1974,7 +2182,7 @@ class SmallScreenApp:
         )
         self._crypto_refresh_btn.pack(side=tk.RIGHT, padx=(6, 0))
         tk.Label(
-            title_row, text=self._t("crypto_refresh_hint"), font=("", 10),
+            title_row, text=self._t("crypto_refresh_hint").format(sec=self._crypto_refresh_sec), font=("", 10),
             bg=self._c("bg"), fg=self._c("foot_fg")
         ).pack(side=tk.RIGHT)
         box_bg = self._c("box_bg")
@@ -1983,14 +2191,20 @@ class SmallScreenApp:
         cell_h = 28
         cell_w = (W - 16 - 8 - cell_gap) // 2
         self._crypto_vars = {}
-        for i in range(0, len(CRYPTO_PAIRS), 2):
+        if not self._crypto_items:
+            tk.Label(
+                self.crypto_frame, text=self._t("crypto_empty"), font=("", 12),
+                bg=self._c("bg"), fg=self._c("status_off")
+            ).pack(anchor=tk.W, pady=(12, 0))
+            return
+        for i in range(0, len(self._crypto_items), 2):
             row = tk.Frame(self.crypto_frame, bg=self._c("bg"), height=cell_h)
             row.pack(fill=tk.X, pady=2)
             row.pack_propagate(False)
             for j in range(2):
-                if i + j >= len(CRYPTO_PAIRS):
+                if i + j >= len(self._crypto_items):
                     break
-                name, _ = CRYPTO_PAIRS[i + j]
+                name = self._crypto_items[i + j]["name"]
                 var = tk.StringVar(value="--")
                 self._crypto_vars[name] = var
                 f = tk.Frame(row, bg=box_border, padx=3, pady=2, width=cell_w, height=cell_h - 4)
@@ -2001,10 +2215,10 @@ class SmallScreenApp:
                 tk.Label(inner, text=name + " ", font=("", 11), bg=box_bg, fg=self._c("fg_dim")).pack(side=tk.LEFT)
                 tk.Label(inner, textvariable=var, font=("", 12, "bold"), bg=box_bg, fg=self._c("fg")).pack(side=tk.RIGHT)
         def _fetch_and_update():
-            prices = fetch_crypto_prices()
+            prices = fetch_crypto_prices(self._crypto_items)
             self.root.after(0, lambda: self._update_crypto_prices(prices))
         threading.Thread(target=_fetch_and_update, daemon=True).start()
-        self._crypto_job = self.root.after(15000, self._crypto_refresh_loop)
+        self._crypto_job = self.root.after(self._crypto_refresh_sec * 1000, self._crypto_refresh_loop)
 
     def _update_crypto_prices(self, prices):
         if getattr(self, "_closing", False) or prices is None or self._view_mode != "crypto":
@@ -2023,7 +2237,7 @@ class SmallScreenApp:
         def _fetch():
             if getattr(self, "_closing", False):
                 return
-            prices = fetch_crypto_prices()
+            prices = fetch_crypto_prices(getattr(self, "_crypto_items", None))
             try:
                 self.root.after(0, lambda: self._update_crypto_prices(prices))
             except tk.TclError:
@@ -2049,10 +2263,147 @@ class SmallScreenApp:
         def _fetch():
             if getattr(self, "_closing", False):
                 return
-            prices = fetch_crypto_prices()
+            prices = fetch_crypto_prices(getattr(self, "_crypto_items", None))
             self.root.after(0, lambda: self._update_crypto_prices(prices))
         threading.Thread(target=_fetch, daemon=True).start()
-        self._crypto_job = self.root.after(15000, self._crypto_refresh_loop)
+        self._crypto_job = self.root.after(self._crypto_refresh_sec * 1000, self._crypto_refresh_loop)
+
+    def _show_stock(self):
+        for w in self.stock_frame.winfo_children():
+            w.destroy()
+        self._stock_items, self._stock_refresh_sec = _load_small_screen_stock_config()
+        title_row = tk.Frame(self.stock_frame, bg=self._c("bg"))
+        title_row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(
+            title_row, text="A-SHARES", font=("DejaVu Sans", 14, "bold"),
+            bg=self._c("bg"), fg=self._c("fg")
+        ).pack(side=tk.LEFT)
+        self._stock_refresh_btn = tk.Button(
+            title_row, text=self._t("refresh"), font=("", 10), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"), activeforeground=self._c("fg"), cursor="hand2",
+            command=self._stock_manual_refresh, padx=8, pady=2
+        )
+        self._stock_refresh_btn.pack(side=tk.RIGHT, padx=(6, 0))
+        tk.Label(
+            title_row, text=self._t("stock_refresh_hint").format(sec=self._stock_refresh_sec), font=("", 10),
+            bg=self._c("bg"), fg=self._c("foot_fg")
+        ).pack(side=tk.RIGHT)
+
+        items = [
+            {"title": symbol, "price": "--", "pct": "--", "meta1": "...", "meta2": ""}
+            for symbol in [item.get("name") or item.get("code") or "--" for item in self._stock_items]
+        ]
+        self._stock_cards = []
+        if not items:
+            tk.Label(
+                self.stock_frame, text=self._t("stock_empty"), font=("", 12),
+                bg=self._c("bg"), fg=self._c("status_off")
+            ).pack(anchor=tk.W, pady=(12, 0))
+            return
+
+        box_bg = self._c("box_bg")
+        box_border = self._c("box_border")
+        for item in items:
+            card = tk.Frame(self.stock_frame, bg=box_border, padx=2, pady=2)
+            card.pack(fill=tk.X, pady=3)
+            inner = tk.Frame(card, bg=box_bg, padx=8, pady=6)
+            inner.pack(fill=tk.BOTH, expand=True)
+            title_var = tk.StringVar(value=item.get("title") or "--")
+            price_var = tk.StringVar(value=item.get("price") or "--")
+            pct_var = tk.StringVar(value=item.get("pct") or "--")
+            meta1_var = tk.StringVar(value=item.get("meta1") or "")
+            meta2_var = tk.StringVar(value=item.get("meta2") or "")
+            top_row = tk.Frame(inner, bg=box_bg)
+            top_row.pack(fill=tk.X)
+            tk.Label(top_row, textvariable=title_var, font=("", 11), bg=box_bg, fg=self._c("fg_dim"), anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            pct_label = tk.Label(top_row, textvariable=pct_var, font=("", 11, "bold"), bg=box_bg, fg=self._c("fg"))
+            pct_label.pack(side=tk.RIGHT)
+            tk.Label(inner, textvariable=price_var, font=("", 16, "bold"), bg=box_bg, fg=self._c("fg"), anchor=tk.W).pack(anchor=tk.W, pady=(2, 0))
+            tk.Label(inner, textvariable=meta1_var, font=("", 10), bg=box_bg, fg=self._c("fg")).pack(anchor=tk.W, pady=(2, 0))
+            tk.Label(inner, textvariable=meta2_var, font=("", 10), bg=box_bg, fg=self._c("fg_dim")).pack(anchor=tk.W)
+            self._stock_cards.append({
+                "title": title_var,
+                "price": price_var,
+                "pct": pct_var,
+                "meta1": meta1_var,
+                "meta2": meta2_var,
+                "pct_label": pct_label,
+            })
+
+        def _fetch_and_update():
+            stock_data = fetch_a_share_quotes(getattr(self, "_stock_items", None))
+            try:
+                self.root.after(0, lambda: self._update_stock_quotes(stock_data))
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=_fetch_and_update, daemon=True).start()
+        self._stock_job = self.root.after(self._stock_refresh_sec * 1000, self._stock_refresh_loop)
+
+    def _update_stock_quotes(self, stock_data):
+        if getattr(self, "_closing", False) or self._view_mode != "stock" or not isinstance(stock_data, dict):
+            return
+        items = stock_data.get("items") or []
+        for idx, card in enumerate(getattr(self, "_stock_cards", [])):
+            item = items[idx] if idx < len(items) else {}
+            card["title"].set(item.get("title") or "--")
+            card["price"].set(item.get("price") or "--")
+            pct_text = item.get("pct") or "--"
+            card["pct"].set(pct_text)
+            card["meta1"].set(item.get("meta1") or "")
+            card["meta2"].set(item.get("meta2") or "")
+            pct_fg = self._c("fg")
+            if pct_text.startswith("+"):
+                pct_fg = self._c("status_ok")
+            elif pct_text.startswith("-"):
+                pct_fg = self._c("status_err")
+            try:
+                card["pct_label"].config(fg=pct_fg)
+            except tk.TclError:
+                pass
+
+    def _stock_manual_refresh(self):
+        if getattr(self, "_closing", False) or self._view_mode != "stock":
+            return
+        btn = getattr(self, "_stock_refresh_btn", None)
+        if btn and btn.winfo_exists():
+            btn.config(state=tk.DISABLED)
+            self.root.after(3000, self._stock_reenable_refresh_btn)
+
+        def _fetch():
+            if getattr(self, "_closing", False):
+                return
+            stock_data = fetch_a_share_quotes(getattr(self, "_stock_items", None))
+            try:
+                self.root.after(0, lambda: self._update_stock_quotes(stock_data))
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _stock_reenable_refresh_btn(self):
+        if getattr(self, "_closing", False) or self._view_mode != "stock":
+            return
+        btn = getattr(self, "_stock_refresh_btn", None)
+        if btn and btn.winfo_exists():
+            try:
+                btn.config(state=tk.NORMAL)
+            except tk.TclError:
+                pass
+
+    def _stock_refresh_loop(self):
+        if getattr(self, "_closing", False) or self._view_mode != "stock":
+            self._stock_job = None
+            return
+
+        def _fetch():
+            if getattr(self, "_closing", False):
+                return
+            stock_data = fetch_a_share_quotes(getattr(self, "_stock_items", None))
+            self.root.after(0, lambda: self._update_stock_quotes(stock_data))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+        self._stock_job = self.root.after(self._stock_refresh_sec * 1000, self._stock_refresh_loop)
 
     def _refresh_skills_view(self):
         for w in self.skills_frame.winfo_children():
@@ -2300,7 +2651,7 @@ class SmallScreenApp:
 
     def _on_close(self):
         self._closing = True
-        for attr in ("_blink_job", "_gallery_job", "_crypto_job", "_llm_lobster_job"):
+        for attr in ("_blink_job", "_gallery_job", "_crypto_job", "_stock_job", "_llm_lobster_job"):
             job = getattr(self, attr, None)
             if job is not None:
                 try:

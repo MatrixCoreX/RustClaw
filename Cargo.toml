@@ -30,7 +30,9 @@ members = [
     "crates/skills/process_basic",
     "crates/skills/rss_fetch",
     "crates/skills/service_control",
+    "crates/skills/task_control",
     "crates/skills/system_basic",
+    "crates/skills/stock",
     "crates/skills/x",
 ]
 

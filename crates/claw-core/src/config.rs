@@ -926,6 +926,7 @@ fn default_skills_list() -> Vec<String> {
         "health_check".to_string(),
         "log_analyze".to_string(),
         "service_control".to_string(),
+        "task_control".to_string(),
         "config_guard".to_string(),
         "chat".to_string(),
     ]

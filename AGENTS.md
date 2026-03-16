@@ -59,8 +59,8 @@ This file is for all agents working in this repository. The goal is to standardi
    `call_skill` goes through `execution_adapters::run_skill()` -> `run_skill_with_runner()`.
 5. `run_skill_with_runner()` 启动 `skill-runner` 子进程，STDIN/STDOUT 传一行 JSON。  
    `run_skill_with_runner()` launches `skill-runner`, passing one-line JSON over STDIN/STDOUT.
-6. `skill-runner` 根据 `skill_name` 路由到具体技能二进制（`target/debug|release/*-skill`）。  
-   `skill-runner` dispatches by `skill_name` to a concrete skill binary (`target/debug|release/*-skill`).
+6. `skill-runner` 根据 `skill_name` 按约定推导具体技能二进制（默认 `foo_bar` -> `target/debug|release/foo-bar-skill`；若 registry 配了 `runner_name` 则优先用它）。  
+   `skill-runner` derives the concrete skill binary from `skill_name` by convention (default `foo_bar` -> `target/debug|release/foo-bar-skill`; if registry sets `runner_name`, that takes precedence).
 7. 技能进程读取请求 JSON，输出响应 JSON，回传 `clawd` 汇总为任务结果。  
    The skill process reads request JSON, writes response JSON, and returns it to `clawd` for task result aggregation.
 
@@ -100,16 +100,15 @@ When adding a new skill `foo_bar`, all of the following are required:
    Create crate: `crates/skills/foo_bar` (binary name recommended: `foo-bar-skill`).
 2. 加入工作区：`Cargo.toml` 的 `[workspace].members`。  
    Add to workspace: `[workspace].members` in `Cargo.toml`.
-3. 注册 `skill-runner` 映射：`crates/skill-runner/src/main.rs` 的 `skill_binary_path()`。  
-   Register `skill-runner` mapping in `skill_binary_path()` of `crates/skill-runner/src/main.rs`.
-4. 注册执行别名（可选但建议）：`crates/clawd/src/main.rs` 的 `canonical_skill_name()`。  
-   Register aliases (optional but recommended) in `canonical_skill_name()` of `crates/clawd/src/main.rs`.
+3. 使用约定式 runner 二进制名：默认将 `foo_bar` 编译为 `foo-bar-skill`；只有当二进制名不符合约定时，才在 `configs/skills_registry.toml` 中配置 `runner_name`。  
+   Use the conventional runner binary name: by default `foo_bar` should compile to `foo-bar-skill`; only configure `runner_name` in `configs/skills_registry.toml` when the binary name does not follow the convention.
+4. 注册执行别名（可选但建议）：优先在 `configs/skills_registry.toml` 的 `aliases` 中配置；`crates/clawd/src/main.rs` 的 `canonical_skill_name()` 仅作无 registry 的兼容回退。  
+   Register aliases (optional but recommended): prefer `aliases` in `configs/skills_registry.toml`; `canonical_skill_name()` in `crates/clawd/src/main.rs` is compatibility fallback only when no registry is used.
 5. 加入 agent 技能认知 / Add agent skill awareness:
-   - `prompts/skills/foo_bar.md`
-   - `crates/clawd/src/agent_engine.rs` 的 `SKILL_PLAYBOOKS`  
-     `SKILL_PLAYBOOKS` in `crates/clawd/src/agent_engine.rs`
-   - `prompts/agent_tool_spec.md` 增加该技能参数契约  
-     Add skill arg contract to `prompts/agent_tool_spec.md`
+ - `crates/skills/foo_bar/INTERFACE.md`
+ - 运行 `python3 scripts/sync_skill_docs.py`，生成/更新 `prompts/vendors/default/skills/foo_bar.md`
+ - 在 `configs/skills_registry.toml` 中为该技能配置 `prompt_file = "prompts/skills/foo_bar.md"`
+ - `prompts/agent_tool_spec.md` 增加该技能参数契约
 6. 配置基线 / Config baseline:
    - `crates/claw-core/src/config.rs` 的默认 `skills_list`（按需要）  
      Default `skills_list` in `crates/claw-core/src/config.rs` (as needed)

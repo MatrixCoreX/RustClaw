@@ -1594,7 +1594,9 @@ async fn main() -> anyhow::Result<()> {
         .merge(http::ui_routes::build_ui_router())
         .route("/tasks", post(submit_task))
         .route("/tasks/:task_id", get(get_task))
+        .route("/tasks/active", post(list_active_tasks))
         .route("/tasks/cancel", post(cancel_tasks))
+        .route("/tasks/cancel-one", post(cancel_one_task))
         .route("/admin/reload-skills", post(reload_skills_handler))
         .with_state(state.clone());
 
@@ -2691,7 +2693,14 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                         text.clone()
                     };
                     let clean_text = intercept_response_text_for_delivery(&clean_text);
-                    let result = json!({ "text": clean_text });
+                    let result = json!({
+                        "text": clean_text,
+                        "delivery_meta": {
+                            "mode": "single_step_skill",
+                            "label": "step",
+                            "skill_name": skill_name
+                        }
+                    });
                     repo::update_task_success(state, &task.task_id, &result.to_string())?;
                     if !(schedule_triggered && is_price_alert_action && no_trigger) {
                         maybe_notify_schedule_result(state, &task, &payload, true, &clean_text).await;
@@ -3207,6 +3216,7 @@ async fn run_skill_with_runner(
             run_skill_with_runner_once(
                 state,
                 task,
+                &skill_name,
                 &runner_name,
                 &args,
                 &source,
@@ -3252,6 +3262,7 @@ async fn run_skill_with_runner(
                 let retry_value = run_skill_with_runner_once(
                     state,
                     task,
+                    &skill_name,
                     &runner_name,
                     &retry_args,
                     &source,
@@ -4111,17 +4122,18 @@ async fn execute_external_http_json(
 async fn run_skill_with_runner_once(
     state: &AppState,
     task: &ClaimedTask,
-    skill_name: &str,
+    canonical_skill_name: &str,
+    runner_name: &str,
     args: &serde_json::Value,
     source: &str,
     skill_timeout_secs: u64,
 ) -> Result<serde_json::Value, String> {
-    let credential_context = if canonical_skill_name(skill_name) == "crypto" {
+    let credential_context = if canonical_skill_name == "crypto" {
         exchange_credential_context_for_task(state, task)
     } else {
         json!({})
     };
-    let llm_skill = canonical_skill_name(skill_name) == "chat";
+    let llm_skill = canonical_skill_name == "chat";
     let user_key_for_skill = if llm_skill {
         Value::Null
     } else {
@@ -4137,7 +4149,7 @@ async fn run_skill_with_runner_once(
         "user_key": user_key_for_skill,
         "external_user_id": task.external_user_id,
         "external_chat_id": task_external_chat_id(task),
-        "skill_name": skill_name,
+        "skill_name": runner_name,
         "args": args,
         "context": {
             "source": source,
@@ -4854,14 +4866,9 @@ pub(crate) fn append_subtask_result(
     let detail_trimmed = detail.trim();
     if detail_trimmed.is_empty() {
         subtask_results.push(format!("subtask#{index} {action_label}: {status}"));
-    } else if detail_trimmed.contains('\n') {
+    } else {
         let header = format!("subtask#{index} {action_label}: {status}");
         subtask_results.push(format!("{}\n{}", header, detail_trimmed));
-    } else {
-        subtask_results.push(format!(
-            "subtask#{index} {action_label}: {status} | {}",
-            detail_trimmed
-        ));
     }
 }
 
@@ -8836,6 +8843,170 @@ async fn get_task(
 struct CancelTasksRequest {
     user_id: i64,
     chat_id: i64,
+    exclude_task_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ActiveTasksRequest {
+    user_id: i64,
+    chat_id: i64,
+    exclude_task_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActiveTaskItem {
+    index: usize,
+    task_id: String,
+    kind: String,
+    status: String,
+    summary: String,
+    age_seconds: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct CancelOneTaskRequest {
+    user_id: i64,
+    chat_id: i64,
+    index: usize,
+    exclude_task_id: Option<String>,
+}
+
+fn normalized_optional_task_id(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn summarize_active_task_payload(kind: &str, payload_json: &str) -> String {
+    let Ok(v) = serde_json::from_str::<Value>(payload_json) else {
+        return truncate_for_log(payload_json);
+    };
+    let summary = match kind {
+        "ask" => v
+            .get("text")
+            .and_then(|x| x.as_str())
+            .unwrap_or(payload_json)
+            .to_string(),
+        "run_skill" => {
+            let skill = v
+                .get("skill_name")
+                .and_then(|x| x.as_str())
+                .unwrap_or("unknown");
+            let action = v
+                .get("args")
+                .and_then(|x| x.get("action"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .trim();
+            if action.is_empty() {
+                format!("run_skill:{skill}")
+            } else {
+                format!("run_skill:{skill} action={action}")
+            }
+        }
+        _ => payload_json.to_string(),
+    };
+    truncate_for_log(summary.trim())
+}
+
+fn list_active_tasks_internal(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    exclude_task_id: Option<&str>,
+) -> anyhow::Result<Vec<ActiveTaskItem>> {
+    let exclude_task_id = normalized_optional_task_id(exclude_task_id);
+    let now = now_ts().parse::<i64>().unwrap_or_default();
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    let mut stmt = db.prepare(
+        "SELECT task_id, kind, payload_json, status,
+                CAST(COALESCE(NULLIF(created_at, ''), '0') AS INTEGER) AS created_ts,
+                CAST(COALESCE(NULLIF(updated_at, ''), created_at, '0') AS INTEGER) AS updated_ts
+         FROM tasks
+         WHERE user_id = ?1
+           AND chat_id = ?2
+           AND status IN ('running', 'queued')
+           AND (?3 IS NULL OR task_id <> ?3)
+         ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,
+                  created_ts ASC,
+                  task_id ASC",
+    )?;
+    let rows = stmt.query_map(
+        params![user_id, chat_id, exclude_task_id.as_deref()],
+        |row| {
+            let task_id: String = row.get(0)?;
+            let kind: String = row.get(1)?;
+            let payload_json: String = row.get(2)?;
+            let status: String = row.get(3)?;
+            let created_ts: i64 = row.get(4)?;
+            let updated_ts: i64 = row.get(5)?;
+            Ok((task_id, kind, payload_json, status, created_ts, updated_ts))
+        },
+    )?;
+    let mut out = Vec::new();
+    for (idx, row) in rows.enumerate() {
+        let (task_id, kind, payload_json, status, created_ts, updated_ts) = row?;
+        let ref_ts = if updated_ts > 0 { updated_ts } else { created_ts };
+        let age_seconds = if ref_ts > 0 { (now - ref_ts).max(0) } else { 0 };
+        let summary = summarize_active_task_payload(&kind, &payload_json);
+        out.push(ActiveTaskItem {
+            index: idx + 1,
+            task_id,
+            kind,
+            status,
+            summary,
+            age_seconds,
+        });
+    }
+    Ok(out)
+}
+
+async fn list_active_tasks(
+    State(state): State<AppState>,
+    Json(req): Json<ActiveTasksRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    if !is_user_allowed(&state, req.user_id) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("Unauthorized user".to_string()),
+            }),
+        );
+    }
+    match list_active_tasks_internal(
+        &state,
+        req.user_id,
+        req.chat_id,
+        req.exclude_task_id.as_deref(),
+    ) {
+        Ok(tasks) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "count": tasks.len(),
+                    "tasks": tasks,
+                })),
+                error: None,
+            }),
+        ),
+        Err(err) => {
+            error!("List active tasks failed: {}", err);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("List active tasks failed".to_string()),
+                }),
+            )
+        }
+    }
 }
 
 async fn cancel_tasks(
@@ -8867,9 +9038,12 @@ async fn cancel_tasks(
                  updated_at = ?1
              WHERE user_id = ?2
                AND chat_id = ?3
-               AND status IN ('queued', 'running')",
+               AND status IN ('queued', 'running')
+               AND (?4 IS NULL OR task_id <> ?4)",
         )?;
-        let affected = stmt.execute(params![now, req.user_id, req.chat_id])?;
+        let exclude_task_id = normalized_optional_task_id(req.exclude_task_id.as_deref());
+        let affected =
+            stmt.execute(params![now, req.user_id, req.chat_id, exclude_task_id.as_deref()])?;
         Ok(affected as i64)
     })();
 
@@ -8896,6 +9070,112 @@ async fn cancel_tasks(
                     ok: false,
                     data: None,
                     error: Some("Cancel tasks failed".to_string()),
+                }),
+            )
+        }
+    }
+}
+
+async fn cancel_one_task(
+    State(state): State<AppState>,
+    Json(req): Json<CancelOneTaskRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    if !is_user_allowed(&state, req.user_id) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("Unauthorized user".to_string()),
+            }),
+        );
+    }
+    if req.index == 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("index must be >= 1".to_string()),
+            }),
+        );
+    }
+    let tasks = match list_active_tasks_internal(
+        &state,
+        req.user_id,
+        req.chat_id,
+        req.exclude_task_id.as_deref(),
+    ) {
+        Ok(tasks) => tasks,
+        Err(err) => {
+            error!("Cancel one task list failed: {}", err);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("Cancel one task failed".to_string()),
+                }),
+            );
+        }
+    };
+    let Some(target) = tasks.into_iter().find(|t| t.index == req.index) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("Active task index {} not found", req.index)),
+            }),
+        );
+    };
+    let now = now_ts();
+    let result = (|| -> anyhow::Result<i64> {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        let mut stmt = db.prepare(
+            "UPDATE tasks
+             SET status = 'canceled',
+                 error_text = COALESCE(error_text, 'Canceled by user'),
+                 updated_at = ?1
+             WHERE user_id = ?2
+               AND chat_id = ?3
+               AND task_id = ?4
+               AND status IN ('queued', 'running')",
+        )?;
+        let affected = stmt.execute(params![now, req.user_id, req.chat_id, &target.task_id])?;
+        Ok(affected as i64)
+    })();
+    match result {
+        Ok(count) if count > 0 => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "canceled": count,
+                    "task": target,
+                })),
+                error: None,
+            }),
+        ),
+        Ok(_) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("Target task is no longer active".to_string()),
+            }),
+        ),
+        Err(err) => {
+            error!("Cancel one task failed: {}", err);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("Cancel one task failed".to_string()),
                 }),
             )
         }

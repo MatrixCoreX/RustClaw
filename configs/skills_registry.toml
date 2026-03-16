@@ -237,6 +237,15 @@ prompt_file = "prompts/skills/service_control.md"
 output_kind = "text"
 
 [[skills]]
+name = "task_control"
+enabled = true
+kind = "runner"
+aliases = ["task_manager", "task_status", "task_cancel"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/task_control.md"
+output_kind = "text"
+
+[[skills]]
 name = "config_guard"
 enabled = true
 kind = "runner"
@@ -261,6 +270,15 @@ kind = "runner"
 aliases = ["talk", "smalltalk", "joke", "chitchat"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/chat.md"
+output_kind = "text"
+
+[[skills]]
+name = "stock"
+enabled = true
+kind = "runner"
+aliases = ["a_stock", "stock_quote", "股票"]
+timeout_seconds = 15
+prompt_file = "prompts/skills/stock.md"
 output_kind = "text"
 
 # Phase 5 示例（可选）：

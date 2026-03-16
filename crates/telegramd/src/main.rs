@@ -2284,6 +2284,20 @@ async fn send_text_or_image(
                     let _ = bot_clone.delete_message(chat_id, msg_id).await;
                 });
             }
+        } else if let Some(inline_text) =
+            inline_single_small_text_file(&file_paths, &image_paths, &voice_paths)
+        {
+            let sent = send_telegram_text(bot, chat_id, &inline_text)
+                .await
+                .context("send inline text file body failed")?;
+            debug!(
+                "phase=deliver_inline_text_file chat_id={} answer_fp={} telegram_msg_id={} text_preview={}",
+                chat_id.0,
+                text_fingerprint_hex(&inline_text),
+                sent.id.0,
+                text_preview_for_log(&inline_text, 120)
+            );
+            return Ok(());
         }
 
         for path in image_paths {
@@ -2379,8 +2393,43 @@ async fn send_text_or_image(
     Ok(())
 }
 
+fn inline_single_small_text_file(
+    file_paths: &[String],
+    image_paths: &[String],
+    voice_paths: &[String],
+) -> Option<String> {
+    if !image_paths.is_empty() || !voice_paths.is_empty() || file_paths.len() != 1 {
+        return None;
+    }
+    let path = file_paths.first()?;
+    if !is_inline_text_file(path) {
+        return None;
+    }
+    let raw = fs::read_to_string(path).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > TELEGRAM_INLINE_TEXT_FILE_MAX_CHARS
+        || trimmed.lines().count() > TELEGRAM_INLINE_TEXT_FILE_MAX_LINES
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn is_inline_text_file(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".txt")
+        || lower.ends_with(".md")
+        || lower.ends_with(".markdown")
+        || lower.ends_with(".json")
+        || lower.ends_with(".csv")
+        || lower.ends_with(".log")
+}
+
 /// Max characters per Telegram message (conservative; platform limit ~4096).
 const TELEGRAM_TEXT_CHUNK_CHARS: usize = 3500;
+const TELEGRAM_INLINE_TEXT_FILE_MAX_CHARS: usize = 3000;
+const TELEGRAM_INLINE_TEXT_FILE_MAX_LINES: usize = 120;
 
 fn telegram_text_payload(text: &str) -> (String, Option<ParseMode>) {
     let trimmed = text.trim();
@@ -3089,29 +3138,12 @@ fn spawn_task_result_delivery(
                             progress_messages.len()
                         );
                         if sent_progress_count < progress_messages.len() {
-                            for answer in progress_messages.iter().skip(sent_progress_count) {
-                                let progress_text =
-                                    render_progress_message(state.i18n.as_ref(), answer);
-                                let requires_confirmation =
-                                    is_crypto_trade_confirm_prompt(&progress_text, false);
-                                debug!(
-                                    "phase=deliver_progress task_id={} chat_id={} msg_fp={} msg_len={} requires_confirmation={} msg_preview={}",
-                                    task_id,
-                                    chat_id.0,
-                                    text_fingerprint_hex(&progress_text),
-                                    progress_text.len(),
-                                    requires_confirmation,
-                                    text_preview_for_log(&progress_text, 160)
-                                );
-                                let _ = send_text_or_image(
-                                    &bot,
-                                    &state,
-                                    chat_id,
-                                    &progress_text,
-                                    requires_confirmation,
-                                )
-                                .await;
-                            }
+                            debug!(
+                                "phase=skip_progress_delivery task_id={} chat_id={} skipped_count={}",
+                                task_id,
+                                chat_id.0,
+                                progress_messages.len() - sent_progress_count
+                            );
                             sent_progress_count = progress_messages.len();
                         }
                         if soft_notice_seconds > 0
@@ -3152,8 +3184,7 @@ fn spawn_task_result_delivery(
                         tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
                     }
                     TaskStatus::Succeeded => {
-                        let answers =
-                            task_success_messages_from_offset(&state, &task, sent_progress_count);
+                        let answers = task_success_messages(&state, &task);
                         let resume_followup_decision = task
                             .result_json
                             .as_ref()
@@ -3191,7 +3222,7 @@ fn spawn_task_result_delivery(
                                 requires_confirmation,
                                 text_preview_for_log(&answer, 160)
                             );
-                            let _ = send_text_or_image(
+                            let _ = send_success_message_for_telegram(
                                 &bot,
                                 &state,
                                 chat_id,
@@ -3252,6 +3283,136 @@ fn task_success_messages(state: &BotState, task: &TaskQueryResponse) -> Vec<Stri
     task_success_messages_from_offset(state, task, 0)
 }
 
+async fn send_success_message_for_telegram(
+    bot: &Bot,
+    state: &BotState,
+    chat_id: ChatId,
+    answer: &str,
+    requires_confirmation: bool,
+) -> anyhow::Result<()> {
+    if let Some(blocks) = split_subtask_success_messages(answer) {
+        for (header, body) in blocks {
+            if body.is_empty() {
+                send_telegram_text(bot, chat_id, &header)
+                    .await
+                    .context("send subtask header failed")?;
+                continue;
+            }
+            if should_send_subtask_body_as_file(&header, &body) {
+                let file_path = write_subtask_body_to_temp_file(&header, &body)?;
+                let answer_with_file = format!("{header}\nFILE:{file_path}");
+                send_text_or_image(bot, state, chat_id, &answer_with_file, false).await?;
+                continue;
+            }
+            let html = format!(
+                "{}\n<pre><code>{}</code></pre>",
+                escape_telegram_html(&header),
+                escape_telegram_html(&body)
+            );
+            bot.send_message(chat_id, html)
+                .parse_mode(ParseMode::Html)
+                .await
+                .context("send subtask code block failed")?;
+        }
+        return Ok(());
+    }
+    send_text_or_image(bot, state, chat_id, answer, requires_confirmation).await
+}
+
+fn split_subtask_success_messages(text: &str) -> Option<Vec<(String, String)>> {
+    let trimmed = text.trim();
+    if !trimmed.starts_with("subtask#") {
+        return None;
+    }
+
+    let mut raw_blocks = Vec::new();
+    let mut current = String::new();
+
+    for line in trimmed.lines() {
+        let line = line.trim_end();
+        if line.starts_with("subtask#") {
+            if !current.trim().is_empty() {
+                raw_blocks.push(current.trim().to_string());
+                current.clear();
+            }
+            current.push_str(line);
+        } else {
+            if !current.is_empty() {
+                current.push('\n');
+            }
+            current.push_str(line);
+        }
+    }
+
+    if !current.trim().is_empty() {
+        raw_blocks.push(current.trim().to_string());
+    }
+
+    let blocks = raw_blocks
+        .into_iter()
+        .map(|block| split_single_subtask_block(&block))
+        .collect::<Vec<_>>();
+    Some(blocks)
+}
+
+fn split_single_subtask_block(block: &str) -> (String, String) {
+    let trimmed = block.trim();
+    let (first_line, rest) = match trimmed.split_once('\n') {
+        Some((head, tail)) => (head.trim(), tail.trim()),
+        None => (trimmed, ""),
+    };
+
+    if let Some((header, inline_body)) = first_line.split_once(" | ") {
+        let mut body = inline_body.trim().to_string();
+        if !rest.is_empty() {
+            if !body.is_empty() {
+                body.push('\n');
+            }
+            body.push_str(rest);
+        }
+        return (header.trim().to_string(), body);
+    }
+
+    (first_line.to_string(), rest.to_string())
+}
+
+fn should_send_subtask_body_as_file(header: &str, body: &str) -> bool {
+    let html_len = escape_telegram_html(header).len() + escape_telegram_html(body).len() + 32;
+    html_len > 3000 || body.lines().count() > 120
+}
+
+fn write_subtask_body_to_temp_file(header: &str, body: &str) -> anyhow::Result<String> {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let sanitized = sanitize_filename_fragment(header);
+    let path = std::env::temp_dir().join(format!("rustclaw-{sanitized}-{millis}.txt"));
+    fs::write(&path, body).with_context(|| format!("write subtask temp file failed: {}", path.display()))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+fn sanitize_filename_fragment(text: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in text.chars() {
+        let keep = ch.is_ascii_alphanumeric();
+        if keep {
+            out.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "subtask".to_string()
+    } else {
+        trimmed
+    }
+}
+
 fn task_success_messages_from_offset(
     state: &BotState,
     task: &TaskQueryResponse,
@@ -3300,6 +3461,7 @@ fn task_success_messages_from_offset(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| state.i18n.t("telegram.msg.task_done_no_text"));
+    let text = wrap_single_step_skill_message(task, &text).unwrap_or(text);
     debug!(
         "phase=success_source task_id={} source=text_only offset={} text_fp={} text_len={}",
         task_id,
@@ -3310,25 +3472,40 @@ fn task_success_messages_from_offset(
     vec![text]
 }
 
-/// If raw is "I18N:key:vars_json", render with i18n and return; otherwise return raw as-is. Unknown format does not crash.
-fn render_progress_message(i18n: &TextCatalog, raw: &str) -> String {
-    const PREFIX: &str = "I18N:";
-    if !raw.starts_with(PREFIX) {
-        return raw.to_string();
+fn wrap_single_step_skill_message(task: &TaskQueryResponse, text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("subtask#")
+        || contains_delivery_tokens(trimmed)
+        || trimmed.starts_with("<pre>")
+    {
+        return None;
     }
-    let rest = raw[PREFIX.len()..].trim();
-    let mut parts = rest.splitn(2, ':');
-    let key = match parts.next() {
-        Some(k) => k.trim(),
-        None => return raw.to_string(),
+    let meta = task.result_json.as_ref()?.get("delivery_meta")?;
+    if meta.get("mode").and_then(|v| v.as_str()) != Some("single_step_skill") {
+        return None;
+    }
+    let label = meta
+        .get("label")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("step");
+    let skill_name = meta
+        .get("skill_name")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let header = if let Some(skill_name) = skill_name {
+        format!("{label} · skill({skill_name})")
+    } else {
+        label.to_string()
     };
-    let vars_json = parts.next().unwrap_or("{}").trim();
-    let vars: HashMap<String, String> = match serde_json::from_str(vars_json) {
-        Ok(m) => m,
-        Err(_) => return raw.to_string(),
-    };
-    let var_refs: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    i18n.t_with(key, &var_refs)
+    Some(format!("subtask#1 {header}: success\n{trimmed}"))
+}
+
+fn contains_delivery_tokens(text: &str) -> bool {
+    text.lines().map(str::trim).any(has_delivery_prefix)
 }
 
 fn task_progress_messages(task: &TaskQueryResponse) -> Vec<String> {
