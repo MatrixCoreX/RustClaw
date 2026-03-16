@@ -7,12 +7,13 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path as AxumPath, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::{get, get_service, post};
 use axum::{Json, Router};
+use chrono::{Local, TimeZone};
 use claw_core::config::{
-    AppConfig, ChannelBindingConfig, CommandIntentConfig, LlmProviderConfig, MaintenanceConfig,
-    MemoryConfig, PersonaConfig, RoutingConfig, ScheduleConfig, ToolsConfig,
+    AgentConfig, AppConfig, ChannelBindingConfig, CommandIntentConfig, LlmProviderConfig,
+    MaintenanceConfig, MemoryConfig, PersonaConfig, RoutingConfig, ScheduleConfig, ToolsConfig,
 };
 use claw_core::hard_rules::main_flow::load_main_flow_rules;
 use claw_core::hard_rules::trade as hard_trade;
@@ -32,6 +33,7 @@ use tokio::process::Command;
 use tokio::sync::Semaphore;
 use toml::Value as TomlValue;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{debug, error, info, info_span, warn, Instrument};
 use uuid::Uuid;
@@ -59,6 +61,7 @@ const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
 const MODEL_IO_LOG_MAX_CHARS: usize = 16000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
 const LOG_CALL_WRAP: &str = "---- task-call ----";
+const DEFAULT_AGENT_ID: &str = "main";
 
 const CHAT_RESPONSE_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/chat_response_prompt.md");
@@ -220,6 +223,8 @@ struct AppState {
     queue_limit: usize,
     db: Arc<Mutex<Connection>>,
     llm_providers: Vec<Arc<LlmProviderRuntime>>,
+    agents_by_id: Arc<HashMap<String, AgentRuntimeConfig>>,
+    bot_agent_ids: Arc<HashMap<String, String>>,
     skill_timeout_seconds: u64,
     skill_runner_path: PathBuf,
     /// 原子快照（可重载）。reload 时整体替换，读用 get_skill_views_snapshot()。
@@ -241,6 +246,8 @@ struct AppState {
     command_intent: CommandIntentRuntime,
     schedule: ScheduleRuntime,
     telegram_bot_token: String,
+    telegram_bot_tokens: Arc<HashMap<String, String>>,
+    telegram_configured_bot_names: Arc<Vec<String>>,
     telegram_crypto_confirm_ttl_seconds: i64,
     whatsapp_cloud_enabled: bool,
     whatsapp_api_base: String,
@@ -277,6 +284,82 @@ impl AppState {
     }
     pub(crate) fn get_planner_visible_skills(&self) -> Arc<Vec<String>> {
         self.snapshot().planner_visible_skills.clone()
+    }
+
+    fn normalize_known_agent_id(&self, agent_id: Option<&str>) -> Option<String> {
+        agent_id
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .and_then(|id| self.agents_by_id.get(id).map(|_| id.to_string()))
+    }
+
+    pub(crate) fn task_agent_id(&self, task: &ClaimedTask) -> String {
+        if let Some(payload) = task_payload_value(task) {
+            if let Some(agent_id) =
+                self.normalize_known_agent_id(payload.get("agent_id").and_then(|v| v.as_str()))
+            {
+                return agent_id;
+            }
+            if let Some(bot_name) = payload
+                .get("telegram_bot_name")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            {
+                if let Some(agent_id) = self.bot_agent_ids.get(bot_name) {
+                    return agent_id.clone();
+                }
+            }
+        }
+        DEFAULT_AGENT_ID.to_string()
+    }
+
+    fn task_agent(&self, task: &ClaimedTask) -> AgentRuntimeConfig {
+        let agent_id = self.task_agent_id(task);
+        self.agents_by_id
+            .get(&agent_id)
+            .cloned()
+            .or_else(|| self.agents_by_id.get(DEFAULT_AGENT_ID).cloned())
+            .unwrap_or_else(|| AgentRuntimeConfig {
+                persona_prompt: String::new(),
+                restrict_skills: false,
+                allowed_skills: Arc::new(HashSet::new()),
+                llm_providers: Vec::new(),
+            })
+    }
+
+    pub(crate) fn task_persona_prompt(&self, task: &ClaimedTask) -> String {
+        let agent = self.task_agent(task);
+        if !agent.persona_prompt.trim().is_empty() {
+            agent.persona_prompt
+        } else {
+            self.persona_prompt.clone()
+        }
+    }
+
+    pub(crate) fn task_planner_visible_skills(&self, task: &ClaimedTask) -> Vec<String> {
+        let agent = self.task_agent(task);
+        let skills = self.get_planner_visible_skills();
+        if !agent.restrict_skills {
+            return skills.as_ref().clone();
+        }
+        skills
+            .iter()
+            .filter(|skill| agent.allows_skill(skill))
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn task_allows_skill(&self, task: &ClaimedTask, canonical_skill: &str) -> bool {
+        self.task_agent(task).allows_skill(canonical_skill)
+    }
+
+    fn task_llm_providers(&self, task: &ClaimedTask) -> Vec<Arc<LlmProviderRuntime>> {
+        let agent = self.task_agent(task);
+        if !agent.llm_providers.is_empty() {
+            return agent.llm_providers;
+        }
+        self.llm_providers.clone()
     }
 
     /// 解析为 canonical 技能名：有 registry 时先查 registry，否则走代码内 canonical_skill_name。
@@ -328,11 +411,39 @@ impl AppState {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct LlmProviderRuntime {
     config: LlmProviderConfig,
     client: Client,
     semaphore: Arc<Semaphore>,
+}
+
+#[derive(Debug, Clone)]
+struct AgentRuntimeConfig {
+    persona_prompt: String,
+    restrict_skills: bool,
+    allowed_skills: Arc<HashSet<String>>,
+    llm_providers: Vec<Arc<LlmProviderRuntime>>,
+}
+
+impl AgentRuntimeConfig {
+    fn from_config(config: &AgentConfig, llm_providers: Vec<Arc<LlmProviderRuntime>>) -> Self {
+        let allowed_skills = config
+            .allowed_skills
+            .iter()
+            .map(|skill| canonical_skill_name(skill).to_string())
+            .collect::<HashSet<_>>();
+        Self {
+            persona_prompt: config.persona_prompt.trim().to_string(),
+            restrict_skills: !allowed_skills.is_empty(),
+            allowed_skills: Arc::new(allowed_skills),
+            llm_providers,
+        }
+    }
+
+    fn allows_skill(&self, canonical_skill: &str) -> bool {
+        !self.restrict_skills || self.allowed_skills.contains(canonical_skill)
+    }
 }
 
 struct ClaimedTask {
@@ -1464,8 +1575,56 @@ async fn main() -> anyhow::Result<()> {
     let active_provider_type = llm_providers
         .first()
         .map(|p| p.config.provider_type.clone());
+    let normalized_agents = config.normalized_agents();
+    let mut agents_by_id = HashMap::new();
+    for agent in &normalized_agents {
+        let override_providers = if agent.preferred_vendor.is_some() || agent.preferred_model.is_some()
+        {
+            llm_gateway::build_providers_for_selection(
+                &config,
+                agent.preferred_vendor.as_deref(),
+                agent.preferred_model.as_deref(),
+            )
+        } else {
+            Vec::new()
+        };
+        agents_by_id.insert(
+            agent.id.clone(),
+            AgentRuntimeConfig::from_config(agent, override_providers),
+        );
+    }
 
     let ui_dist_dir = resolve_ui_dist_dir(&workspace_root);
+    let telegram_runtime_bots = config.telegram_runtime_bots();
+    let telegram_bot_tokens = Arc::new(
+        telegram_runtime_bots
+            .iter()
+            .map(|bot| (bot.name.clone(), bot.bot_token.clone()))
+            .collect::<HashMap<_, _>>(),
+    );
+    let telegram_configured_bot_names = Arc::new(
+        telegram_runtime_bots
+            .iter()
+            .map(|bot| bot.name.clone())
+            .collect::<Vec<_>>(),
+    );
+    let bot_agent_ids = Arc::new(
+        telegram_runtime_bots
+            .iter()
+            .map(|bot| {
+                let agent_id = if agents_by_id.contains_key(bot.agent_id.as_str()) {
+                    bot.agent_id.clone()
+                } else {
+                    DEFAULT_AGENT_ID.to_string()
+                };
+                (bot.name.clone(), agent_id)
+            })
+            .collect::<HashMap<_, _>>(),
+    );
+    let telegram_bot_token = telegram_runtime_bots
+        .first()
+        .map(|bot| bot.bot_token.clone())
+        .unwrap_or_else(|| config.telegram.bot_token.clone());
     let whatsapp_cloud_enabled = config.whatsapp_cloud.enabled || config.whatsapp.enabled;
     let whatsapp_api_base = if config.whatsapp_cloud.api_base.trim().is_empty() {
         config.whatsapp.api_base.clone()
@@ -1521,6 +1680,8 @@ async fn main() -> anyhow::Result<()> {
         queue_limit: config.worker.queue_limit,
         db: Arc::new(Mutex::new(db)),
         llm_providers,
+        agents_by_id: Arc::new(agents_by_id),
+        bot_agent_ids,
         skill_timeout_seconds: config.skills.skill_timeout_seconds,
         skill_runner_path: effective_skill_runner_path,
         skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
@@ -1547,7 +1708,9 @@ async fn main() -> anyhow::Result<()> {
         persona_prompt,
         command_intent,
         schedule,
-        telegram_bot_token: config.telegram.bot_token.clone(),
+        telegram_bot_token,
+        telegram_bot_tokens,
+        telegram_configured_bot_names,
         telegram_crypto_confirm_ttl_seconds: (config.telegram.crypto_confirm_ttl_seconds.max(1))
             as i64,
         whatsapp_cloud_enabled,
@@ -1600,8 +1763,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/reload-skills", post(reload_skills_handler))
         .with_state(state.clone());
 
-    let ui_service =
-        get_service(ServeDir::new(&ui_dist_dir).not_found_service(ServeFile::new(ui_index_path)));
+    let ui_service = get_service(
+        ServeDir::new(&ui_dist_dir).not_found_service(ServeFile::new(ui_index_path)),
+    )
+    .layer(SetResponseHeaderLayer::if_not_present(
+        axum::http::header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, max-age=0"),
+    ));
 
     let app = Router::new()
         .nest("/v1", api)
@@ -3037,6 +3205,15 @@ fn task_external_chat_id(task: &ClaimedTask) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn task_telegram_bot_name(task: &ClaimedTask) -> Option<String> {
+    let payload = task_payload_value(task)?;
+    payload
+        .get("telegram_bot_name")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
 async fn send_task_channel_message(
     state: &AppState,
     task: &ClaimedTask,
@@ -3045,7 +3222,16 @@ async fn send_task_channel_message(
 ) -> Result<(), String> {
     match runtime_channel_from_payload(state, payload) {
         RuntimeChannel::Telegram => {
-            channel_send::send_telegram_message(state, task.chat_id, text).await
+            let chat_id = task_external_chat_id(task)
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap_or(task.chat_id);
+            channel_send::send_telegram_message(
+                state,
+                chat_id,
+                text,
+                task_telegram_bot_name(task).as_deref(),
+            )
+            .await
         }
         RuntimeChannel::Whatsapp => {
             let to = task_external_chat_id(task)
@@ -3146,6 +3332,13 @@ async fn run_skill_with_runner(
         .replace("{skill}", &skill_name)
         .replace("{enabled_skills}", &enabled);
         return Err(err_text);
+    }
+    if !state.task_allows_skill(task, &skill_name) {
+        return Err(format!(
+            "Skill is not enabled for agent {}: {}",
+            state.task_agent_id(task),
+            skill_name
+        ));
     }
 
     let kind = state.skill_kind_for_dispatch(&skill_name);
@@ -4168,16 +4361,16 @@ async fn run_skill_with_runner_once(
         ));
     }
 
-    let selected_openai_model = llm_gateway::selected_openai_model(state);
+    let selected_openai_model = llm_gateway::selected_openai_model(state, Some(task));
     let mut child = Command::new(&state.skill_runner_path)
         .env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env(
             "OPENAI_API_KEY",
-            llm_gateway::selected_openai_api_key(state),
+            llm_gateway::selected_openai_api_key(state, Some(task)),
         )
         .env(
             "OPENAI_BASE_URL",
-            llm_gateway::selected_openai_base_url(state),
+            llm_gateway::selected_openai_base_url(state, Some(task)),
         )
         .env("OPENAI_MODEL", selected_openai_model.clone())
         .env("CHAT_SKILL_MODEL", selected_openai_model)
@@ -4529,9 +4722,11 @@ pub(crate) fn extract_first_json_object_any(text: &str) -> Option<String> {
     None
 }
 
-fn selected_openai_api_key(state: &AppState) -> String {
-    if let Some(p) = state
-        .llm_providers
+fn selected_openai_api_key_for_task(state: &AppState, task: Option<&ClaimedTask>) -> String {
+    let providers = task
+        .map(|task| state.task_llm_providers(task))
+        .unwrap_or_else(|| state.llm_providers.clone());
+    if let Some(p) = providers
         .iter()
         .find(|p| p.config.provider_type == "openai_compat")
     {
@@ -4540,9 +4735,11 @@ fn selected_openai_api_key(state: &AppState) -> String {
     String::new()
 }
 
-fn selected_openai_base_url(state: &AppState) -> String {
-    if let Some(p) = state
-        .llm_providers
+fn selected_openai_base_url_for_task(state: &AppState, task: Option<&ClaimedTask>) -> String {
+    let providers = task
+        .map(|task| state.task_llm_providers(task))
+        .unwrap_or_else(|| state.llm_providers.clone());
+    if let Some(p) = providers
         .iter()
         .find(|p| p.config.provider_type == "openai_compat")
     {
@@ -4551,9 +4748,11 @@ fn selected_openai_base_url(state: &AppState) -> String {
     "https://api.openai.com/v1".to_string()
 }
 
-fn selected_openai_model(state: &AppState) -> String {
-    state
-        .llm_providers
+fn selected_openai_model_for_task(state: &AppState, task: Option<&ClaimedTask>) -> String {
+    let providers = task
+        .map(|task| state.task_llm_providers(task))
+        .unwrap_or_else(|| state.llm_providers.clone());
+    providers
         .iter()
         .find(|p| p.config.provider_type == "openai_compat")
         .map(|p| p.config.model.clone())
@@ -4617,13 +4816,14 @@ async fn run_llm_with_fallback_with_prompt_file(
     prompt_file: &str,
 ) -> Result<String, String> {
     let _prompt_debug_enabled = state.routing.debug_log_prompt;
-    if state.llm_providers.is_empty() {
+    let task_providers = state.task_llm_providers(task);
+    if task_providers.is_empty() {
         return Err("No available LLM provider configured".to_string());
     }
 
     let mut last_error = "unknown llm error".to_string();
 
-    for provider in &state.llm_providers {
+    for provider in &task_providers {
         let vendor = llm_vendor_name(provider);
         let model = provider.config.model.as_str();
         let model_kind = llm_model_kind(provider);
@@ -4642,8 +4842,9 @@ async fn run_llm_with_fallback_with_prompt_file(
         );
 
         match call_provider_with_retry(provider.clone(), prompt).await {
-            Ok(text) => {
-                let (cleaned_text, sanitized) = maybe_sanitize_llm_text_output(vendor, &text);
+            Ok(output) => {
+                let (cleaned_text, sanitized) =
+                    maybe_sanitize_llm_text_output(vendor, &output.text);
                 if sanitized {
                     warn!(
                         "{} [LLM_CALL] stage=cleanup task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} note=removed_think_block",
@@ -4676,9 +4877,12 @@ async fn run_llm_with_fallback_with_prompt_file(
                     task,
                     provider,
                     "ok",
+                    prompt_file,
                     prompt,
-                    Some(&text),
+                    &output.request_payload,
+                    Some(&output.raw_response),
                     Some(&cleaned_text),
+                    output.usage.as_ref(),
                     sanitized,
                     None,
                 );
@@ -4722,11 +4926,14 @@ async fn run_llm_with_fallback_with_prompt_file(
                     task,
                     provider,
                     "failed",
+                    prompt_file,
                     prompt,
+                    &err.request_payload,
+                    err.raw_response.as_deref(),
                     None,
-                    None,
+                    err.usage.as_ref(),
                     false,
-                    Some(&last_error),
+                    Some(&err.message),
                 );
                 let _ = insert_audit_log(
                     state,
@@ -4759,9 +4966,12 @@ fn append_model_io_log(
     task: &ClaimedTask,
     provider: &Arc<LlmProviderRuntime>,
     status: &str,
+    prompt_file: &str,
     prompt: &str,
+    request_payload: &Value,
     raw_response: Option<&str>,
     clean_response: Option<&str>,
+    usage: Option<&LlmUsageSnapshot>,
     sanitized: bool,
     error: Option<&str>,
 ) {
@@ -4795,10 +5005,13 @@ fn append_model_io_log(
         "model": provider.config.model,
         "model_kind": llm_model_kind(provider),
         "status": status,
+        "prompt_file": prompt_file,
         "prompt": truncate_for_log(prompt),
+        "request_payload": request_payload,
         "response": clean_response.map(truncate_for_log),
         "raw_response": raw_response.map(truncate_for_log),
         "clean_response": clean_response.map(truncate_for_log),
+        "usage": usage,
         "sanitized": sanitized,
         "error": error.map(truncate_for_log),
     })
@@ -4806,7 +5019,46 @@ fn append_model_io_log(
 
     if let Err(err) = writeln!(file, "{line}") {
         warn!("write model io log failed: {err}");
+        return;
     }
+    drop(file);
+    if let Err(err) = prune_model_io_log_to_today(&file_path) {
+        warn!("prune model io log failed: {err}");
+    }
+}
+
+fn prune_model_io_log_to_today(file_path: &Path) -> anyhow::Result<()> {
+    let raw = std::fs::read_to_string(file_path)?;
+    if raw.trim().is_empty() {
+        return Ok(());
+    }
+    let today = Local::now().date_naive();
+    let mut kept_lines = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+        let ts = value.get("ts").and_then(|item| item.as_i64()).filter(|v| *v > 0);
+        let Some(ts) = ts else {
+            continue;
+        };
+        let Some(dt) = Local.timestamp_opt(ts, 0).single() else {
+            continue;
+        };
+        if dt.date_naive() == today {
+            kept_lines.push(trimmed.to_string());
+        }
+    }
+    let mut rewritten = kept_lines.join("\n");
+    if !rewritten.is_empty() {
+        rewritten.push('\n');
+    }
+    std::fs::write(file_path, rewritten)?;
+    Ok(())
 }
 
 pub(crate) fn truncate_for_log(text: &str) -> String {
@@ -5030,10 +5282,11 @@ async fn execute_ask_routed(
                 &chat_prompt_file,
                 None,
             );
+            let task_persona_prompt = state.task_persona_prompt(task);
             let chat_prompt = render_prompt_template(
                 &chat_prompt_template,
                 &[
-                    ("__PERSONA_PROMPT__", &state.persona_prompt),
+                    ("__PERSONA_PROMPT__", &task_persona_prompt),
                     ("__CONTEXT__", chat_prompt_context),
                     ("__REQUEST__", resolved_prompt),
                 ],
@@ -6120,53 +6373,249 @@ async fn run_safe_command(
 async fn call_provider_with_retry(
     provider: Arc<LlmProviderRuntime>,
     prompt: &str,
-) -> Result<String, String> {
+) -> Result<LlmProviderResponse, ProviderError> {
     let mut attempts = 0usize;
 
     loop {
         attempts += 1;
         match call_provider(provider.clone(), prompt).await {
-            Ok(text) => return Ok(text),
-            Err(ProviderError::Retryable(err)) => {
+            Ok(output) => return Ok(output),
+            Err(err) if err.retryable => {
                 if attempts > LLM_RETRY_TIMES {
                     return Err(err);
                 }
                 tokio::time::sleep(Duration::from_millis(250 * attempts as u64)).await;
             }
-            Err(ProviderError::NonRetryable(err)) => return Err(err),
+            Err(err) => return Err(err),
         }
     }
 }
 
-enum ProviderError {
-    Retryable(String),
-    NonRetryable(String),
+#[derive(Debug, Clone, Serialize)]
+struct LlmUsageSnapshot {
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    total_tokens: Option<u64>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    cached_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct LlmProviderResponse {
+    text: String,
+    request_payload: Value,
+    raw_response: String,
+    usage: Option<LlmUsageSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+struct ProviderError {
+    retryable: bool,
+    message: String,
+    request_payload: Value,
+    raw_response: Option<String>,
+    usage: Option<LlmUsageSnapshot>,
+}
+
+impl std::fmt::Display for ProviderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl ProviderError {
+    fn retryable(message: String, request_payload: Value) -> Self {
+        Self {
+            retryable: true,
+            message,
+            request_payload,
+            raw_response: None,
+            usage: None,
+        }
+    }
+
+    fn retryable_with_response(
+        message: String,
+        request_payload: Value,
+        raw_response: String,
+        usage: Option<LlmUsageSnapshot>,
+    ) -> Self {
+        Self {
+            retryable: true,
+            message,
+            request_payload,
+            raw_response: Some(raw_response),
+            usage,
+        }
+    }
+
+    fn non_retryable(message: String, request_payload: Value) -> Self {
+        Self {
+            retryable: false,
+            message,
+            request_payload,
+            raw_response: None,
+            usage: None,
+        }
+    }
+
+    fn non_retryable_with_response(
+        message: String,
+        request_payload: Value,
+        raw_response: String,
+        usage: Option<LlmUsageSnapshot>,
+    ) -> Self {
+        Self {
+            retryable: false,
+            message,
+            request_payload,
+            raw_response: Some(raw_response),
+            usage,
+        }
+    }
+}
+
+fn value_as_u64(value: Option<&Value>) -> Option<u64> {
+    value.and_then(|v| {
+        v.as_u64()
+            .or_else(|| v.as_i64().and_then(|n| u64::try_from(n).ok()))
+    })
+}
+
+fn sum_u64(parts: &[Option<u64>]) -> Option<u64> {
+    let mut total = 0u64;
+    let mut seen = false;
+    for part in parts {
+        if let Some(value) = part {
+            total = total.saturating_add(*value);
+            seen = true;
+        }
+    }
+    seen.then_some(total)
+}
+
+fn openai_usage_snapshot(value: &Value) -> Option<LlmUsageSnapshot> {
+    let usage = value.get("usage")?;
+    let prompt_tokens = value_as_u64(usage.get("prompt_tokens"));
+    let completion_tokens = value_as_u64(usage.get("completion_tokens"));
+    let total_tokens = value_as_u64(usage.get("total_tokens"))
+        .or_else(|| sum_u64(&[prompt_tokens, completion_tokens]));
+    let reasoning_tokens = value_as_u64(
+        usage.get("completion_tokens_details")
+            .and_then(|details| details.get("reasoning_tokens")),
+    );
+    let cached_tokens = value_as_u64(
+        usage.get("prompt_tokens_details")
+            .and_then(|details| details.get("cached_tokens")),
+    );
+    if prompt_tokens.is_none()
+        && completion_tokens.is_none()
+        && total_tokens.is_none()
+        && reasoning_tokens.is_none()
+        && cached_tokens.is_none()
+    {
+        return None;
+    }
+    Some(LlmUsageSnapshot {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        input_tokens: None,
+        output_tokens: None,
+        reasoning_tokens,
+        cached_tokens,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: None,
+    })
+}
+
+fn gemini_usage_snapshot(value: &Value) -> Option<LlmUsageSnapshot> {
+    let usage = value.get("usageMetadata")?;
+    let prompt_tokens = value_as_u64(usage.get("promptTokenCount"));
+    let completion_tokens = value_as_u64(usage.get("candidatesTokenCount"));
+    let total_tokens = value_as_u64(usage.get("totalTokenCount"))
+        .or_else(|| sum_u64(&[prompt_tokens, completion_tokens]));
+    let reasoning_tokens = value_as_u64(usage.get("thoughtsTokenCount"));
+    let cached_tokens = value_as_u64(usage.get("cachedContentTokenCount"));
+    if prompt_tokens.is_none()
+        && completion_tokens.is_none()
+        && total_tokens.is_none()
+        && reasoning_tokens.is_none()
+        && cached_tokens.is_none()
+    {
+        return None;
+    }
+    Some(LlmUsageSnapshot {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        input_tokens: None,
+        output_tokens: None,
+        reasoning_tokens,
+        cached_tokens,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: None,
+    })
+}
+
+fn anthropic_usage_snapshot(value: &Value) -> Option<LlmUsageSnapshot> {
+    let usage = value.get("usage")?;
+    let input_tokens = value_as_u64(usage.get("input_tokens"));
+    let output_tokens = value_as_u64(usage.get("output_tokens"));
+    let cache_creation_input_tokens = value_as_u64(usage.get("cache_creation_input_tokens"));
+    let cache_read_input_tokens = value_as_u64(usage.get("cache_read_input_tokens"));
+    let total_tokens = sum_u64(&[input_tokens, output_tokens]);
+    if input_tokens.is_none()
+        && output_tokens.is_none()
+        && cache_creation_input_tokens.is_none()
+        && cache_read_input_tokens.is_none()
+    {
+        return None;
+    }
+    Some(LlmUsageSnapshot {
+        prompt_tokens: input_tokens,
+        completion_tokens: output_tokens,
+        total_tokens,
+        input_tokens,
+        output_tokens,
+        reasoning_tokens: None,
+        cached_tokens: None,
+        cache_creation_input_tokens,
+        cache_read_input_tokens,
+    })
 }
 
 async fn call_provider(
     provider: Arc<LlmProviderRuntime>,
     prompt: &str,
-) -> Result<String, ProviderError> {
+) -> Result<LlmProviderResponse, ProviderError> {
     match provider.config.provider_type.as_str() {
         "openai_compat" => call_openai_compat(provider, prompt).await,
         "google_gemini" => call_google_gemini(provider, prompt).await,
         "anthropic_claude" => call_anthropic_claude(provider, prompt).await,
-        other => Err(ProviderError::NonRetryable(format!(
-            "unsupported provider type: {other}"
-        ))),
+        other => Err(ProviderError::non_retryable(
+            format!("unsupported provider type: {other}"),
+            Value::Null,
+        )),
     }
 }
 
 async fn call_openai_compat(
     provider: Arc<LlmProviderRuntime>,
     prompt: &str,
-) -> Result<String, ProviderError> {
+) -> Result<LlmProviderResponse, ProviderError> {
     let _permit = provider
         .semaphore
         .clone()
         .acquire_owned()
         .await
-        .map_err(|err| ProviderError::NonRetryable(format!("semaphore closed: {err}")))?;
+        .map_err(|err| {
+            ProviderError::non_retryable(format!("semaphore closed: {err}"), Value::Null)
+        })?;
 
     let url = format!(
         "{}/chat/completions",
@@ -6190,9 +6639,9 @@ async fn call_openai_compat(
         .await
         .map_err(|err| {
             if err.is_timeout() {
-                ProviderError::Retryable(format!("timeout: {err}"))
+                ProviderError::retryable(format!("timeout: {err}"), req_body.clone())
             } else {
-                ProviderError::Retryable(format!("request failed: {err}"))
+                ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
             }
         })?;
 
@@ -6200,26 +6649,38 @@ async fn call_openai_compat(
     let body_text = resp
         .text()
         .await
-        .map_err(|err| ProviderError::Retryable(format!("read response failed: {err}")))?;
+        .map_err(|err| {
+            ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
+        })?;
 
     if status.as_u16() == 429 || status.is_server_error() {
-        return Err(ProviderError::Retryable(format!(
-            "http {}: {}",
-            status.as_u16(),
-            body_text
-        )));
+        return Err(ProviderError::retryable_with_response(
+            format!("http {}: {}", status.as_u16(), body_text),
+            req_body.clone(),
+            body_text,
+            None,
+        ));
     }
 
     if !status.is_success() {
-        return Err(ProviderError::NonRetryable(format!(
-            "http {}: {}",
-            status.as_u16(),
-            body_text
-        )));
+        return Err(ProviderError::non_retryable_with_response(
+            format!("http {}: {}", status.as_u16(), body_text),
+            req_body.clone(),
+            body_text,
+            None,
+        ));
     }
 
     let value: serde_json::Value = serde_json::from_str(&body_text)
-        .map_err(|err| ProviderError::NonRetryable(format!("parse response failed: {err}")))?;
+        .map_err(|err| {
+            ProviderError::non_retryable_with_response(
+                format!("parse response failed: {err}"),
+                req_body.clone(),
+                body_text.clone(),
+                None,
+            )
+        })?;
+    let usage = openai_usage_snapshot(&value);
 
     if let Some(reason) = value
         .get("choices")
@@ -6246,22 +6707,34 @@ async fn call_openai_compat(
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
-            ProviderError::NonRetryable("missing choices[0].message.content".to_string())
+            ProviderError::non_retryable_with_response(
+                "missing choices[0].message.content".to_string(),
+                req_body.clone(),
+                body_text.clone(),
+                usage.clone(),
+            )
         })?;
 
-    Ok(text)
+    Ok(LlmProviderResponse {
+        text,
+        request_payload: req_body,
+        raw_response: body_text,
+        usage,
+    })
 }
 
 async fn call_google_gemini(
     provider: Arc<LlmProviderRuntime>,
     prompt: &str,
-) -> Result<String, ProviderError> {
+) -> Result<LlmProviderResponse, ProviderError> {
     let _permit = provider
         .semaphore
         .clone()
         .acquire_owned()
         .await
-        .map_err(|err| ProviderError::NonRetryable(format!("semaphore closed: {err}")))?;
+        .map_err(|err| {
+            ProviderError::non_retryable(format!("semaphore closed: {err}"), Value::Null)
+        })?;
 
     let url = format!(
         "{}/models/{}:generateContent?key={}",
@@ -6284,9 +6757,9 @@ async fn call_google_gemini(
         .await
         .map_err(|err| {
             if err.is_timeout() {
-                ProviderError::Retryable(format!("timeout: {err}"))
+                ProviderError::retryable(format!("timeout: {err}"), req_body.clone())
             } else {
-                ProviderError::Retryable(format!("request failed: {err}"))
+                ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
             }
         })?;
 
@@ -6294,35 +6767,50 @@ async fn call_google_gemini(
     let body_text = resp
         .text()
         .await
-        .map_err(|err| ProviderError::Retryable(format!("read response failed: {err}")))?;
+        .map_err(|err| {
+            ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
+        })?;
 
     if status.as_u16() == 429 || status.is_server_error() {
-        return Err(ProviderError::Retryable(format!(
-            "http {}: {}",
-            status.as_u16(),
-            body_text
-        )));
+        return Err(ProviderError::retryable_with_response(
+            format!("http {}: {}", status.as_u16(), body_text),
+            req_body.clone(),
+            body_text,
+            None,
+        ));
     }
 
     if !status.is_success() {
-        return Err(ProviderError::NonRetryable(format!(
-            "http {}: {}",
-            status.as_u16(),
-            body_text
-        )));
+        return Err(ProviderError::non_retryable_with_response(
+            format!("http {}: {}", status.as_u16(), body_text),
+            req_body.clone(),
+            body_text,
+            None,
+        ));
     }
 
     let value: Value = serde_json::from_str(&body_text)
-        .map_err(|err| ProviderError::NonRetryable(format!("parse response failed: {err}")))?;
+        .map_err(|err| {
+            ProviderError::non_retryable_with_response(
+                format!("parse response failed: {err}"),
+                req_body.clone(),
+                body_text.clone(),
+                None,
+            )
+        })?;
+    let usage = gemini_usage_snapshot(&value);
 
     if let Some(block_reason) = value
         .get("promptFeedback")
         .and_then(|v| v.get("blockReason"))
         .and_then(|v| v.as_str())
     {
-        return Err(ProviderError::NonRetryable(format!(
-            "gemini prompt blocked: blockReason={block_reason}"
-        )));
+        return Err(ProviderError::non_retryable_with_response(
+            format!("gemini prompt blocked: blockReason={block_reason}"),
+            req_body.clone(),
+            body_text.clone(),
+            usage.clone(),
+        ));
     }
 
     if let Some(finish_reason) = value
@@ -6340,16 +6828,26 @@ async fn call_google_gemini(
                 );
             }
             "SAFETY" => {
-                return Err(ProviderError::NonRetryable(format!(
-                    "gemini response blocked by safety filter: finishReason=SAFETY model={}",
-                    provider.config.model
-                )));
+                return Err(ProviderError::non_retryable_with_response(
+                    format!(
+                        "gemini response blocked by safety filter: finishReason=SAFETY model={}",
+                        provider.config.model
+                    ),
+                    req_body.clone(),
+                    body_text.clone(),
+                    usage.clone(),
+                ));
             }
             "RECITATION" => {
-                return Err(ProviderError::NonRetryable(format!(
-                    "gemini response blocked: finishReason=RECITATION model={}",
-                    provider.config.model
-                )));
+                return Err(ProviderError::non_retryable_with_response(
+                    format!(
+                        "gemini response blocked: finishReason=RECITATION model={}",
+                        provider.config.model
+                    ),
+                    req_body.clone(),
+                    body_text.clone(),
+                    usage.clone(),
+                ));
             }
             _ => {}
         }
@@ -6376,22 +6874,34 @@ async fn call_google_gemini(
             }
         })
         .ok_or_else(|| {
-            ProviderError::NonRetryable("missing candidates[0].content.parts[*].text".to_string())
+            ProviderError::non_retryable_with_response(
+                "missing candidates[0].content.parts[*].text".to_string(),
+                req_body.clone(),
+                body_text.clone(),
+                usage.clone(),
+            )
         })?;
 
-    Ok(text)
+    Ok(LlmProviderResponse {
+        text,
+        request_payload: req_body,
+        raw_response: body_text,
+        usage,
+    })
 }
 
 async fn call_anthropic_claude(
     provider: Arc<LlmProviderRuntime>,
     prompt: &str,
-) -> Result<String, ProviderError> {
+) -> Result<LlmProviderResponse, ProviderError> {
     let _permit = provider
         .semaphore
         .clone()
         .acquire_owned()
         .await
-        .map_err(|err| ProviderError::NonRetryable(format!("semaphore closed: {err}")))?;
+        .map_err(|err| {
+            ProviderError::non_retryable(format!("semaphore closed: {err}"), Value::Null)
+        })?;
 
     let url = format!(
         "{}/messages",
@@ -6415,9 +6925,9 @@ async fn call_anthropic_claude(
         .await
         .map_err(|err| {
             if err.is_timeout() {
-                ProviderError::Retryable(format!("timeout: {err}"))
+                ProviderError::retryable(format!("timeout: {err}"), req_body.clone())
             } else {
-                ProviderError::Retryable(format!("request failed: {err}"))
+                ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
             }
         })?;
 
@@ -6425,26 +6935,38 @@ async fn call_anthropic_claude(
     let body_text = resp
         .text()
         .await
-        .map_err(|err| ProviderError::Retryable(format!("read response failed: {err}")))?;
+        .map_err(|err| {
+            ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
+        })?;
 
     if status.as_u16() == 429 || status.is_server_error() {
-        return Err(ProviderError::Retryable(format!(
-            "http {}: {}",
-            status.as_u16(),
-            body_text
-        )));
+        return Err(ProviderError::retryable_with_response(
+            format!("http {}: {}", status.as_u16(), body_text),
+            req_body.clone(),
+            body_text,
+            None,
+        ));
     }
 
     if !status.is_success() {
-        return Err(ProviderError::NonRetryable(format!(
-            "http {}: {}",
-            status.as_u16(),
-            body_text
-        )));
+        return Err(ProviderError::non_retryable_with_response(
+            format!("http {}: {}", status.as_u16(), body_text),
+            req_body.clone(),
+            body_text,
+            None,
+        ));
     }
 
     let value: Value = serde_json::from_str(&body_text)
-        .map_err(|err| ProviderError::NonRetryable(format!("parse response failed: {err}")))?;
+        .map_err(|err| {
+            ProviderError::non_retryable_with_response(
+                format!("parse response failed: {err}"),
+                req_body.clone(),
+                body_text.clone(),
+                None,
+            )
+        })?;
+    let usage = anthropic_usage_snapshot(&value);
 
     if let Some(stop_reason) = value.get("stop_reason").and_then(|v| v.as_str()) {
         if stop_reason == "max_tokens" {
@@ -6473,9 +6995,21 @@ async fn call_anthropic_claude(
                 Some(merged)
             }
         })
-        .ok_or_else(|| ProviderError::NonRetryable("missing content[*].text".to_string()))?;
+        .ok_or_else(|| {
+            ProviderError::non_retryable_with_response(
+                "missing content[*].text".to_string(),
+                req_body.clone(),
+                body_text.clone(),
+                usage.clone(),
+            )
+        })?;
 
-    Ok(text)
+    Ok(LlmProviderResponse {
+        text,
+        request_payload: req_body,
+        raw_response: body_text,
+        usage,
+    })
 }
 
 fn claim_next_task(state: &AppState) -> anyhow::Result<Option<ClaimedTask>> {
@@ -7552,6 +8086,21 @@ fn seed_channel_binding_rows(
 ) -> anyhow::Result<()> {
     let now = now_ts();
     for binding in bindings {
+        let scoped_channel = if channel == "telegram" {
+            binding
+                .telegram_bot_name
+                .trim()
+                .strip_prefix("telegram:")
+                .unwrap_or(binding.telegram_bot_name.trim())
+                .trim()
+                .split_whitespace()
+                .next()
+                .filter(|name| !name.is_empty())
+                .map(|name| format!("telegram:{name}"))
+                .unwrap_or_else(|| channel.to_string())
+        } else {
+            channel.to_string()
+        };
         let user_key = normalize_user_key(&binding.user_key);
         if user_key.is_empty() {
             continue;
@@ -7567,7 +8116,7 @@ fn seed_channel_binding_rows(
              VALUES (?1, ?2, ?3, ?4, ?5, ?5)
              ON CONFLICT(channel, external_user_id, external_chat_id)
              DO UPDATE SET user_key=excluded.user_key, updated_at=excluded.updated_at",
-            params![channel, external_user_id, external_chat_id, user_key, now],
+            params![scoped_channel, external_user_id, external_chat_id, user_key, now],
         )?;
     }
     Ok(())
@@ -7631,6 +8180,10 @@ fn current_rss_bytes_from_status(status_path: &str) -> Option<u64> {
 
 fn telegramd_process_stats() -> Option<(usize, u64)> {
     daemon_process_stats("telegramd")
+}
+
+fn channel_gateway_process_stats() -> Option<(usize, u64)> {
+    daemon_process_stats("channel-gateway")
 }
 
 fn whatsappd_process_stats() -> Option<(usize, u64)> {
@@ -8061,6 +8614,12 @@ async fn submit_task(
     State(state): State<AppState>,
     Json(req): Json<SubmitTaskRequest>,
 ) -> (StatusCode, Json<ApiResponse<SubmitTaskResponse>>) {
+    let telegram_bot_name = req
+        .payload
+        .get("telegram_bot_name")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let resolved_identity = match req.user_key.as_deref() {
         Some(user_key) => match resolve_auth_identity_by_key(&state, user_key) {
             Ok(v) => v,
@@ -8098,14 +8657,94 @@ async fn submit_task(
         .or(requested_user_id)
         .unwrap_or_default();
     let channel = req.channel.unwrap_or(ChannelKind::Telegram);
+    if matches!(channel, ChannelKind::Telegram) {
+        let Some(bot_name) = telegram_bot_name.as_deref() else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(
+                        "telegram strict mode: payload.telegram_bot_name is required"
+                            .to_string(),
+                    ),
+                }),
+            );
+        };
+        if !state.telegram_bot_tokens.contains_key(bot_name) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!(
+                        "telegram strict mode: unknown telegram_bot_name={bot_name}"
+                    )),
+                }),
+            );
+        }
+    }
+    let requested_agent_id = req
+        .payload
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let effective_agent_id = if let Some(agent_id) = requested_agent_id.as_deref() {
+        if let Some(normalized) = state.normalize_known_agent_id(Some(agent_id)) {
+            normalized
+        } else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("unknown agent_id={agent_id}")),
+                }),
+            );
+        }
+    } else if matches!(channel, ChannelKind::Telegram) {
+        telegram_bot_name
+            .as_deref()
+            .and_then(|name| state.bot_agent_ids.get(name).cloned())
+            .unwrap_or_else(|| DEFAULT_AGENT_ID.to_string())
+    } else {
+        DEFAULT_AGENT_ID.to_string()
+    };
+    let conversation_channel_scope = if matches!(channel, ChannelKind::Telegram) {
+        telegram_bot_name
+            .as_deref()
+            .map(|name| format!("telegram:{name}"))
+            .unwrap_or_else(|| channel_kind_name(channel).to_string())
+    } else {
+        channel_kind_name(channel).to_string()
+    };
     let normalized_external_user_id = normalize_external_id_opt(req.external_user_id.as_deref());
     let normalized_external_chat_id = normalize_external_id_opt(req.external_chat_id.as_deref());
+    let public_conversation_seed = format!(
+        "public:{}:{}",
+        requested_user_id
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "anon".to_string()),
+        requested_chat_id
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "chat".to_string())
+    );
     let effective_chat_id = if let Some(user_key) = effective_user_key.as_deref() {
         build_conversation_chat_id(
-            channel_kind_name(channel),
+            &conversation_channel_scope,
             normalized_external_user_id.as_deref(),
             normalized_external_chat_id.as_deref(),
             user_key,
+        )
+    } else if channel_allows_public_access(channel)
+        && (normalized_external_user_id.is_some() || normalized_external_chat_id.is_some())
+    {
+        build_conversation_chat_id(
+            &conversation_channel_scope,
+            normalized_external_user_id.as_deref(),
+            normalized_external_chat_id.as_deref(),
+            &public_conversation_seed,
         )
     } else if let Some(chat_id) = requested_chat_id {
         chat_id
@@ -8131,7 +8770,19 @@ async fn submit_task(
                 }),
             );
         };
-        if !is_user_allowed(&state, request_user_id) {
+        if channel_allows_public_access(channel) {
+            if let Err(err) = upsert_public_channel_user(&state, request_user_id) {
+                error!("upsert public channel user failed: {}", err);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some("Database error".to_string()),
+                    }),
+                );
+            }
+        } else if !is_user_allowed(&state, request_user_id) {
             let unauthorized = "Unauthorized user".to_string();
             let _ = insert_audit_log(
                 &state,
@@ -8278,6 +8929,16 @@ async fn submit_task(
         if let Some(user_key) = effective_user_key.as_ref() {
             obj.insert("user_key".to_string(), Value::String(user_key.clone()));
         }
+        if let Some(bot_name) = telegram_bot_name.as_ref() {
+            obj.insert(
+                "telegram_bot_name".to_string(),
+                Value::String(bot_name.clone()),
+            );
+        }
+        obj.insert(
+            "agent_id".to_string(),
+            Value::String(effective_agent_id.clone()),
+        );
         obj.insert("call_id".to_string(), Value::String(call_id.clone()));
     }
     let payload_text = payload.to_string();
@@ -8598,6 +9259,10 @@ pub(crate) fn resolve_auth_identity_by_key(
     Ok(row.map(|role| build_auth_identity(&user_key, &role, "ui", None, Some("console"))))
 }
 
+fn channel_allows_shared_ui_task_access(channel: &str) -> bool {
+    matches!(channel, "telegram" | "whatsapp" | "feishu" | "lark")
+}
+
 fn touch_auth_key_usage(db: &Connection, user_key: &str) -> anyhow::Result<()> {
     db.execute(
         "UPDATE auth_keys SET last_used_at = ?2 WHERE user_key = ?1",
@@ -8739,19 +9404,42 @@ fn is_user_allowed(state: &AppState, user_id: i64) -> bool {
     matches!(query, Ok(Some(v)) if v == 1)
 }
 
+fn channel_allows_public_access(channel: ChannelKind) -> bool {
+    matches!(
+        channel,
+        ChannelKind::Telegram | ChannelKind::Whatsapp | ChannelKind::Feishu | ChannelKind::Lark
+    )
+}
+
+fn upsert_public_channel_user(state: &AppState, user_id: i64) -> anyhow::Result<()> {
+    let now = now_ts();
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    db.execute(
+        "INSERT INTO users (user_id, role, is_allowed, created_at, last_seen)
+         VALUES (?1, 'user', 1, ?2, ?2)
+         ON CONFLICT(user_id) DO UPDATE SET is_allowed=1, last_seen=excluded.last_seen",
+        params![user_id, now],
+    )?;
+    Ok(())
+}
+
 async fn get_task(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxumPath(task_id): AxumPath<Uuid>,
 ) -> (StatusCode, Json<ApiResponse<TaskQueryResponse>>) {
-    let read_result = (|| -> anyhow::Result<Option<(TaskQueryResponse, Option<String>)>> {
+    let read_result =
+        (|| -> anyhow::Result<Option<(TaskQueryResponse, Option<String>, String)>> {
         let db = state
             .db
             .lock()
             .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
 
         let mut stmt = db.prepare(
-            "SELECT status, result_json, error_text, user_key
+            "SELECT status, result_json, error_text, user_key, channel
              FROM tasks
              WHERE task_id = ?1
              LIMIT 1",
@@ -8763,6 +9451,7 @@ async fn get_task(
                 let result_json_str: Option<String> = row.get(1)?;
                 let error_text: Option<String> = row.get(2)?;
                 let task_user_key: Option<String> = row.get(3)?;
+                let channel: String = row.get(4)?;
 
                 let status = parse_task_status_with_rules(main_flow_rules(&state), &status_str);
 
@@ -8778,6 +9467,7 @@ async fn get_task(
                         error_text,
                     },
                     task_user_key,
+                    channel,
                 ))
             })
             .optional()?;
@@ -8786,27 +9476,55 @@ async fn get_task(
     })();
 
     match read_result {
-        Ok(Some((task, task_user_key))) => {
+        Ok(Some((task, task_user_key, channel))) => {
             let expected_key = task_user_key
                 .as_deref()
                 .map(str::trim)
                 .filter(|v| !v.is_empty());
-            if let Some(expected_key) = expected_key {
-                let provided_key = headers
-                    .get("x-rustclaw-key")
-                    .and_then(|v| v.to_str().ok())
-                    .map(normalize_user_key)
-                    .filter(|v| !v.is_empty());
-                if provided_key.as_deref() != Some(expected_key) {
+            let provided_key = headers
+                .get("x-rustclaw-key")
+                .and_then(|v| v.to_str().ok())
+                .map(normalize_user_key)
+                .filter(|v| !v.is_empty());
+            let viewer_identity = match provided_key.as_deref() {
+                Some(key) => match resolve_auth_identity_by_key(&state, key) {
+                    Ok(identity) => identity,
+                    Err(err) => {
+                        error!("Resolve task viewer failed: {}", err);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ApiResponse {
+                                ok: false,
+                                data: None,
+                                error: Some("Auth lookup failed".to_string()),
+                            }),
+                        );
+                    }
+                },
+                None => None,
+            };
+            if !channel_allows_shared_ui_task_access(&channel) {
+                if let Some(expected_key) = expected_key {
+                    if provided_key.as_deref() != Some(expected_key) {
+                        return (
+                            StatusCode::UNAUTHORIZED,
+                            Json(ApiResponse {
+                                ok: false,
+                                data: None,
+                                error: Some("Task owner mismatch".to_string()),
+                            }),
+                        );
+                    }
+                }
+            } else if provided_key.is_some() && viewer_identity.is_none() {
                     return (
                         StatusCode::UNAUTHORIZED,
                         Json(ApiResponse {
                             ok: false,
                             data: None,
-                            error: Some("Task owner mismatch".to_string()),
+                            error: Some("Invalid user_key".to_string()),
                         }),
                     );
-                }
             }
             (
                 StatusCode::OK,

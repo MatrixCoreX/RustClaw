@@ -9,15 +9,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context};
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
-use claw_core::config::AppConfig;
+use claw_core::config::{AppConfig, ResolvedTelegramBotConfig};
 use claw_core::hard_rules::types::VoiceModeIntentAliases;
 use claw_core::hard_rules::voice_mode::{
     load_voice_mode_intent_aliases, parse_voice_mode_intent_decision,
 };
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ExchangeCredentialStatus,
-    HealthResponse, ResolveChannelBindingRequest, ResolveChannelBindingResponse, SubmitTaskRequest,
-    SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus, UpsertExchangeCredentialRequest,
+    GatewayInstanceRuntimeStatus, HealthResponse, ResolveChannelBindingRequest,
+    ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
+    TaskQueryResponse, TaskStatus, TelegramBotRuntimeStatus, UpsertExchangeCredentialRequest,
 };
 use reqwest::Client;
 use serde_json::{json, Value as JsonValue};
@@ -32,8 +33,12 @@ use tracing::{debug, info, warn};
 
 #[derive(Clone)]
 struct BotState {
+    bot_name: String,
+    agent_id: String,
     admins: Arc<HashSet<i64>>,
     allowlist: Arc<HashSet<i64>>,
+    access_mode: String,
+    allowed_usernames: Arc<HashSet<String>>,
     skills_list: Arc<Vec<String>>,
     agent_off_chats: Arc<Mutex<HashSet<i64>>>,
     clawd_base_url: String,
@@ -63,6 +68,8 @@ struct BotState {
     pending_key_bind_by_chat: Arc<Mutex<HashSet<i64>>>,
     bound_identity_by_chat: Arc<Mutex<HashMap<i64, AuthIdentity>>>,
     i18n: Arc<TextCatalog>,
+    status_file_path: PathBuf,
+    gateway_status_file_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +211,26 @@ fn bound_user_key_for_chat(state: &BotState, chat_id: i64) -> Option<String> {
         .and_then(|map| map.get(&chat_id).map(|identity| identity.user_key.clone()))
 }
 
+fn normalize_telegram_username(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_start_matches('@').trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_ascii_lowercase())
+}
+
+fn telegram_user_allowed(state: &BotState, user_id: i64, username: Option<&str>) -> bool {
+    if state.access_mode != "specified" {
+        return true;
+    }
+    if state.admins.contains(&user_id) || state.allowlist.contains(&user_id) {
+        return true;
+    }
+    username
+        .and_then(normalize_telegram_username)
+        .is_some_and(|name| state.allowed_usernames.contains(&name))
+}
+
 async fn resolve_telegram_identity(
     state: &BotState,
     platform_user_id: i64,
@@ -212,6 +239,7 @@ async fn resolve_telegram_identity(
     let url = format!("{}/v1/auth/channel/resolve", state.clawd_base_url);
     let req = ResolveChannelBindingRequest {
         channel: ChannelKind::Telegram,
+        telegram_bot_name: Some(state.bot_name.clone()),
         external_user_id: Some(platform_user_id.to_string()),
         external_chat_id: Some(platform_chat_id.to_string()),
     };
@@ -236,6 +264,7 @@ async fn bind_telegram_identity(
     let url = format!("{}/v1/auth/channel/bind", state.clawd_base_url);
     let req = BindChannelKeyRequest {
         channel: ChannelKind::Telegram,
+        telegram_bot_name: Some(state.bot_name.clone()),
         external_user_id: Some(platform_user_id.to_string()),
         external_chat_id: Some(platform_chat_id.to_string()),
         user_key: user_key.trim().to_string(),
@@ -531,39 +560,192 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = AppConfig::load("configs/config.toml")?;
-    let i18n_path = resolve_i18n_path(&config.telegram.language, &config.telegram.i18n_path);
-    let i18n = match TextCatalog::load(&i18n_path) {
-        Ok(v) => Arc::new(v),
-        Err(err) => {
-            warn!("load i18n file failed: path={} err={}", i18n_path, err);
-            Arc::new(TextCatalog::fallback())
-        }
-    };
-    let bot = Bot::new(config.telegram.bot_token.clone());
-    if let Err(err) =
-        register_telegram_commands_and_menu(&config.telegram.bot_token, i18n.as_ref()).await
-    {
-        warn!("register Telegram menu failed: {err}");
-    } else {
-        info!("registered Telegram menu commands");
-    }
-
-    let mut allowlist = HashSet::new();
-    for id in &config.telegram.allowlist {
-        allowlist.insert(*id);
-    }
-
-    let mut admins = HashSet::new();
-    for id in &config.telegram.admins {
-        admins.insert(*id);
-        allowlist.insert(*id);
-    }
-
     let client = Client::builder()
         .timeout(Duration::from_secs(config.server.request_timeout_seconds))
         .build()
         .context("build reqwest client failed")?;
-    let voice_mode_intent_aliases = load_voice_mode_intent_aliases(VOICE_MODE_INTENT_ALIASES_PATH);
+    let voice_mode_intent_aliases =
+        Arc::new(load_voice_mode_intent_aliases(VOICE_MODE_INTENT_ALIASES_PATH));
+    let workspace_root = workspace_root();
+    let prompt_vendor =
+        prompt_vendor_name_from_selected_vendor(config.llm.selected_vendor.as_deref());
+    let voice_chat_prompt_template = load_prompt_template(
+        &workspace_root,
+        &prompt_vendor,
+        VOICE_CHAT_PROMPT_PATH,
+        DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE,
+    );
+    let voice_mode_intent_prompt_template = load_prompt_template(
+        &workspace_root,
+        &prompt_vendor,
+        VOICE_MODE_INTENT_PROMPT_PATH,
+        DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE,
+    );
+    let telegram_runtime_bots = config.telegram_runtime_bots();
+    if telegram_runtime_bots.is_empty() {
+        return Err(anyhow!("no telegram bot configured"));
+    }
+    info!(
+        "telegram runtimes configured: count={} names={:?}",
+        telegram_runtime_bots.len(),
+        telegram_runtime_bots
+            .iter()
+            .map(|bot| bot.name.clone())
+            .collect::<Vec<_>>()
+    );
+
+    let mut join_set = tokio::task::JoinSet::new();
+    let mut remaining = 0usize;
+    for bot_config in telegram_runtime_bots {
+        let state = build_bot_state(
+            &config,
+            &bot_config,
+            client.clone(),
+            Arc::clone(&voice_mode_intent_aliases),
+            &workspace_root,
+            &voice_chat_prompt_template,
+            &voice_mode_intent_prompt_template,
+        );
+        join_set.spawn(run_telegram_bot_runtime(state));
+        remaining += 1;
+    }
+    let mut last_error: Option<String> = None;
+    while let Some(result) = join_set.join_next().await {
+        remaining = remaining.saturating_sub(1);
+        match result {
+            Ok(Ok(())) => {
+                warn!(
+                    "telegram bot runtime stopped: remaining_runtimes={}",
+                    remaining
+                );
+                if last_error.is_none() {
+                    last_error = Some("one telegram bot runtime stopped".to_string());
+                }
+            }
+            Ok(Err(err)) => {
+                warn!(
+                    "telegram bot runtime failed: remaining_runtimes={} err={}",
+                    remaining, err
+                );
+                last_error = Some(err.to_string());
+            }
+            Err(err) => {
+                warn!(
+                    "telegram bot runtime join failed: remaining_runtimes={} err={}",
+                    remaining, err
+                );
+                last_error = Some(format!("telegram bot runtime join failed: {err}"));
+            }
+        }
+        if remaining == 0 {
+            break;
+        }
+    }
+    Err(anyhow!(
+        "{}",
+        last_error.unwrap_or_else(|| "all telegram bot runtimes exited".to_string())
+    ))
+}
+
+fn build_bot_state(
+    config: &AppConfig,
+    bot_config: &ResolvedTelegramBotConfig,
+    client: Client,
+    voice_mode_intent_aliases: Arc<VoiceModeIntentAliases>,
+    workspace_root: &Path,
+    voice_chat_prompt_template: &str,
+    voice_mode_intent_prompt_template: &str,
+) -> BotState {
+    let i18n_path = resolve_i18n_path(&bot_config.language, &bot_config.i18n_path);
+    let i18n = match TextCatalog::load(&i18n_path) {
+        Ok(v) => Arc::new(v),
+        Err(err) => {
+            warn!(
+                "load i18n file failed: bot_name={} path={} err={}",
+                bot_config.name, i18n_path, err
+            );
+            Arc::new(TextCatalog::fallback())
+        }
+    };
+
+    let mut allowlist = HashSet::new();
+    for id in &bot_config.allowlist {
+        allowlist.insert(*id);
+    }
+
+    let mut admins = HashSet::new();
+    for id in &bot_config.admins {
+        admins.insert(*id);
+        allowlist.insert(*id);
+    }
+    let mut allowed_usernames = HashSet::new();
+    for username in &bot_config.allowed_usernames {
+        if let Some(normalized) = normalize_telegram_username(username) {
+            allowed_usernames.insert(normalized);
+        }
+    }
+
+    BotState {
+        bot_name: bot_config.name.clone(),
+        agent_id: bot_config.agent_id.clone(),
+        admins: Arc::new(admins),
+        allowlist: Arc::new(allowlist),
+        access_mode: match bot_config.access_mode.trim().to_ascii_lowercase().as_str() {
+            "specified" => "specified".to_string(),
+            _ => "public".to_string(),
+        },
+        allowed_usernames: Arc::new(allowed_usernames),
+        skills_list: Arc::new(config.skills.skills_list.clone()),
+        agent_off_chats: Arc::new(Mutex::new(HashSet::new())),
+        clawd_base_url: clawd_base_url_from_config(config),
+        client,
+        poll_interval_ms: config.worker.poll_interval_ms,
+        task_wait_seconds: config.worker.task_timeout_seconds,
+        queue_limit: config.worker.queue_limit,
+        auto_vision_on_image_only: config.telegram.auto_vision_on_image_only,
+        pending_image_by_chat: Arc::new(Mutex::new(HashMap::new())),
+        bot_token: bot_config.bot_token.clone(),
+        image_inbox_dir: "image/upload".to_string(),
+        audio_inbox_dir: config.telegram.audio_inbox_dir.clone(),
+        voice_reply_mode: config.telegram.voice_reply_mode.clone(),
+        voice_mode_nl_intent_enabled: config.telegram.voice_mode_nl_intent_enabled,
+        voice_reply_mode_by_chat: Arc::new(Mutex::new(load_voice_reply_mode_by_chat(config))),
+        voice_mode_intent_aliases,
+        max_audio_input_bytes: config.telegram.max_audio_input_bytes.max(1024),
+        sendfile_admin_only: config.telegram.sendfile.admin_only,
+        sendfile_full_access: config.telegram.sendfile.full_access,
+        sendfile_allowed_dirs: Arc::new(config.telegram.sendfile.allowed_dirs.clone()),
+        ephemeral_image_saved_seconds: config.telegram.ephemeral_image_saved_seconds,
+        crypto_confirm_ttl_seconds: config.telegram.crypto_confirm_ttl_seconds.max(1),
+        crypto_confirm_expiry_cancels: Arc::new(Mutex::new(HashMap::new())),
+        voice_chat_prompt_template: voice_chat_prompt_template.to_string(),
+        voice_mode_intent_prompt_template: voice_mode_intent_prompt_template.to_string(),
+        pending_resume_by_chat: Arc::new(Mutex::new(HashMap::new())),
+        pending_key_bind_by_chat: Arc::new(Mutex::new(HashSet::new())),
+        bound_identity_by_chat: Arc::new(Mutex::new(HashMap::new())),
+        i18n,
+        status_file_path: telegram_bot_status_file_path(workspace_root, &bot_config.name),
+        gateway_status_file_path: gateway_instance_status_file_path(
+            workspace_root,
+            "telegram",
+            &bot_config.name,
+        ),
+    }
+}
+
+fn clawd_base_url_from_config(config: &AppConfig) -> String {
+    config.server.clawd_base_url.clone().unwrap_or_else(|| {
+        let listen = config.server.listen.as_str();
+        let host = if listen.starts_with("0.0.0.0:") {
+            listen.replacen("0.0.0.0", "127.0.0.1", 1)
+        } else {
+            listen.to_string()
+        };
+        format!("http://{}", host)
+    })
+}
+
+fn load_voice_reply_mode_by_chat(config: &AppConfig) -> HashMap<i64, String> {
     let mut voice_reply_mode_by_chat = HashMap::new();
     for (chat_id_raw, mode_raw) in &config.telegram.voice_reply_mode_by_chat {
         if let (Ok(chat_id), Some(mode)) = (
@@ -573,97 +755,231 @@ async fn main() -> anyhow::Result<()> {
             voice_reply_mode_by_chat.insert(chat_id, mode);
         }
     }
+    voice_reply_mode_by_chat
+}
 
-    let workspace_root = workspace_root();
-    let prompt_vendor =
-        prompt_vendor_name_from_selected_vendor(config.llm.selected_vendor.as_deref());
+fn telegram_bot_status_file_path(workspace_root: &Path, bot_name: &str) -> PathBuf {
+    let safe_name = sanitize_status_name(bot_name);
+    workspace_root
+        .join("run")
+        .join("telegram-bot-status")
+        .join(format!("{}.json", if safe_name.is_empty() { "bot" } else { &safe_name }))
+}
 
-    let state = BotState {
-        admins: Arc::new(admins),
-        allowlist: Arc::new(allowlist),
-        skills_list: Arc::new(config.skills.skills_list.clone()),
-        agent_off_chats: Arc::new(Mutex::new(HashSet::new())),
-        clawd_base_url: config.server.clawd_base_url.clone().unwrap_or_else(|| {
-            let listen = config.server.listen.as_str();
-            let host = if listen.starts_with("0.0.0.0:") {
-                listen.replacen("0.0.0.0", "127.0.0.1", 1)
+fn gateway_instance_status_file_path(workspace_root: &Path, kind: &str, name: &str) -> PathBuf {
+    let safe_kind = sanitize_status_name(kind);
+    let safe_name = sanitize_status_name(name);
+    workspace_root
+        .join("run")
+        .join("gateway-instance-status")
+        .join(format!(
+            "{}__{}.json",
+            if safe_kind.is_empty() { "instance" } else { &safe_kind },
+            if safe_name.is_empty() { "primary" } else { &safe_name }
+        ))
+}
+
+fn sanitize_status_name(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
             } else {
-                listen.to_string()
-            };
-            format!("http://{}", host)
-        }),
-        client,
-        poll_interval_ms: config.worker.poll_interval_ms,
-        task_wait_seconds: config.worker.task_timeout_seconds,
-        queue_limit: config.worker.queue_limit,
-        auto_vision_on_image_only: config.telegram.auto_vision_on_image_only,
-        pending_image_by_chat: Arc::new(Mutex::new(HashMap::new())),
-        pending_resume_by_chat: Arc::new(Mutex::new(HashMap::new())),
-        pending_key_bind_by_chat: Arc::new(Mutex::new(HashSet::new())),
-        bound_identity_by_chat: Arc::new(Mutex::new(HashMap::new())),
-        bot_token: config.telegram.bot_token.clone(),
-        image_inbox_dir: "image/upload".to_string(),
-        audio_inbox_dir: config.telegram.audio_inbox_dir.clone(),
-        voice_reply_mode: config.telegram.voice_reply_mode.clone(),
-        voice_mode_nl_intent_enabled: config.telegram.voice_mode_nl_intent_enabled,
-        voice_reply_mode_by_chat: Arc::new(Mutex::new(voice_reply_mode_by_chat)),
-        voice_mode_intent_aliases: Arc::new(voice_mode_intent_aliases),
-        max_audio_input_bytes: config.telegram.max_audio_input_bytes.max(1024),
-        sendfile_admin_only: config.telegram.sendfile.admin_only,
-        sendfile_full_access: config.telegram.sendfile.full_access,
-        sendfile_allowed_dirs: Arc::new(config.telegram.sendfile.allowed_dirs.clone()),
-        ephemeral_image_saved_seconds: config.telegram.ephemeral_image_saved_seconds,
-        crypto_confirm_ttl_seconds: config.telegram.crypto_confirm_ttl_seconds.max(1),
-        crypto_confirm_expiry_cancels: Arc::new(Mutex::new(HashMap::new())),
-        voice_chat_prompt_template: load_prompt_template(
-            &workspace_root,
-            &prompt_vendor,
-            VOICE_CHAT_PROMPT_PATH,
-            DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE,
-        ),
-        voice_mode_intent_prompt_template: load_prompt_template(
-            &workspace_root,
-            &prompt_vendor,
-            VOICE_MODE_INTENT_PROMPT_PATH,
-            DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE,
-        ),
-        i18n,
+                '_'
+            }
+        })
+        .collect()
+}
+
+async fn write_bot_runtime_status(path: &Path, status: &TelegramBotRuntimeStatus) {
+    let Some(parent) = path.parent() else {
+        return;
     };
+    if let Err(err) = tokio::fs::create_dir_all(parent).await {
+        warn!("create telegram bot status dir failed: path={} err={}", parent.display(), err);
+        return;
+    }
+    let bytes = match serde_json::to_vec(status) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            warn!(
+                "serialize telegram bot status failed: bot_name={} err={}",
+                status.name, err
+            );
+            return;
+        }
+    };
+    if let Err(err) = tokio::fs::write(path, bytes).await {
+        warn!(
+            "write telegram bot status failed: bot_name={} path={} err={}",
+            status.name,
+            path.display(),
+            err
+        );
+    }
+}
+
+async fn write_gateway_instance_runtime_status(path: &Path, status: &GatewayInstanceRuntimeStatus) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if let Err(err) = tokio::fs::create_dir_all(parent).await {
+        warn!(
+            "create gateway instance status dir failed: path={} err={}",
+            parent.display(),
+            err
+        );
+        return;
+    }
+    let bytes = match serde_json::to_vec(status) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            warn!(
+                "serialize gateway instance status failed: scope={} err={}",
+                status.scope, err
+            );
+            return;
+        }
+    };
+    if let Err(err) = tokio::fs::write(path, bytes).await {
+        warn!(
+            "write gateway instance status failed: scope={} path={} err={}",
+            status.scope,
+            path.display(),
+            err
+        );
+    }
+}
+
+async fn write_runtime_statuses(
+    state: &BotState,
+    healthy: bool,
+    status: &str,
+    last_heartbeat_ts: Option<i64>,
+    last_error: Option<String>,
+) {
+    write_bot_runtime_status(
+        &state.status_file_path,
+        &TelegramBotRuntimeStatus {
+            name: state.bot_name.clone(),
+            healthy,
+            status: status.to_string(),
+            last_heartbeat_ts,
+            last_error: last_error.clone(),
+        },
+    )
+    .await;
+    write_gateway_instance_runtime_status(
+        &state.gateway_status_file_path,
+        &GatewayInstanceRuntimeStatus {
+            kind: "telegram".to_string(),
+            name: state.bot_name.clone(),
+            scope: format!("telegram:{}", state.bot_name),
+            healthy,
+            status: status.to_string(),
+            last_heartbeat_ts,
+            last_error,
+        },
+    )
+    .await;
+}
+
+async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
+    let bot = Bot::new(state.bot_token.clone());
+    write_runtime_statuses(
+        &state,
+        false,
+        "starting",
+        Some(unix_ts() as i64),
+        None,
+    )
+    .await;
+    let mut startup_error: Option<String> = None;
+    if let Err(err) = register_telegram_commands_and_menu(&state.bot_token, state.i18n.as_ref()).await
+    {
+        warn!(
+            "register Telegram menu failed: bot_name={} err={}",
+            state.bot_name, err
+        );
+        startup_error = Some(err.to_string());
+    } else {
+        info!("registered Telegram menu commands: bot_name={}", state.bot_name);
+    }
 
     let mut admins_list: Vec<i64> = state.admins.iter().copied().collect();
     admins_list.sort_unstable();
     let mut allowlist_list: Vec<i64> = state.allowlist.iter().copied().collect();
     allowlist_list.sort_unstable();
+    let mut allowed_usernames_list: Vec<String> = state.allowed_usernames.iter().cloned().collect();
+    allowed_usernames_list.sort_unstable();
 
     info!(
-        "{}",
+        "telegram bot [{}] {}",
+        state.bot_name,
         state.i18n.t_with(
             "telegram.log.started",
             &[
                 ("admins", &format!("{admins_list:?}")),
                 ("allowlist", &format!("{allowlist_list:?}")),
+                ("access_mode", &state.access_mode),
+                ("allowed_usernames", &format!("{allowed_usernames_list:?}")),
                 ("skills", &state.skills_list.join(",")),
             ],
         )
     );
     info!(
-        "{}",
+        "telegram bot [{}] {}",
+        state.bot_name,
         state.i18n.t_with(
             "telegram.log.startup_memory_rss",
             &[("bytes", &current_rss_bytes().unwrap_or(0).to_string())]
         )
     );
+    write_runtime_statuses(
+        &state,
+        true,
+        "running",
+        Some(unix_ts() as i64),
+        startup_error.clone(),
+    )
+    .await;
+    let heartbeat_state = state.clone();
+    let heartbeat_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(15));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            write_runtime_statuses(
+                &heartbeat_state,
+                true,
+                "running",
+                Some(unix_ts() as i64),
+                None,
+            )
+            .await;
+        }
+    });
 
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback_query));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![state])
+        .dependencies(dptree::deps![state.clone()])
         .build()
         .dispatch()
         .await;
 
+    heartbeat_task.abort();
+    write_runtime_statuses(
+        &state,
+        false,
+        "stopped",
+        Some(unix_ts() as i64),
+        startup_error,
+    )
+    .await;
+    warn!("telegram bot runtime exited: bot_name={}", state.bot_name);
     Ok(())
 }
 
@@ -686,11 +1002,8 @@ async fn register_telegram_commands_and_menu(
             { "command": "cancel", "description": i18n.t("telegram.menu.cancel_desc") },
             { "command": "skills", "description": i18n.t("telegram.menu.skills_desc") },
             { "command": "run", "description": i18n.t("telegram.menu.run_desc") },
-            { "command": "sendfile", "description": i18n.t("telegram.menu.sendfile_desc") },
             { "command": "voicemode", "description": i18n.t("telegram.menu.voicemode_desc") },
-            { "command": "rustclaw", "description": i18n.t("telegram.menu.openclaw_desc") },
             { "command": "crypto", "description": i18n.t("telegram.menu.crypto_desc") },
-            { "command": "cryptoapi", "description": i18n.t("telegram.menu.cryptoapi_desc") }
         ]
     });
 
@@ -773,19 +1086,38 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         .from()
         .map(|u| i64::try_from(u.id.0).unwrap_or_default())
         .unwrap_or_default();
+    let platform_username = msg
+        .from()
+        .and_then(|u| u.username.clone());
     let platform_chat_id = msg.chat.id.0;
     let text = msg.text().unwrap_or_default();
     info!(
-        "handle_message: chat_id={} user_id={} text={}",
-        platform_chat_id, platform_user_id, text
+        "handle_message: chat_id={} user_id={} username={} text={}",
+        platform_chat_id,
+        platform_user_id,
+        platform_username.as_deref().unwrap_or("-"),
+        text
     );
 
-    let identity = match resolve_telegram_identity(&state, platform_user_id, platform_chat_id)
+    if !telegram_user_allowed(&state, platform_user_id, platform_username.as_deref()) {
+        info!(
+            "telegram access denied: bot_name={} chat_id={} user_id={} username={} access_mode={}",
+            state.bot_name,
+            platform_chat_id,
+            platform_user_id,
+            platform_username.as_deref().unwrap_or("-"),
+            state.access_mode
+        );
+        return Ok(());
+    }
+
+    let bound_identity = match resolve_telegram_identity(&state, platform_user_id, platform_chat_id)
         .await?
     {
         Some(identity) => {
             set_expect_key_reply(&state, platform_chat_id, false);
-            identity
+            store_bound_identity(&state, platform_chat_id, &identity);
+            Some(identity)
         }
         None => {
             let trimmed = text.trim();
@@ -825,21 +1157,14 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                     .context("send invalid key failed")?;
                     return Ok(());
                 }
-            } else {
-                set_expect_key_reply(&state, platform_chat_id, true);
-                bot.send_message(
-                    msg.chat.id,
-                    "请先发送你的 key 进行绑定。\nPlease send your key first to bind this account.",
-                )
-                .await
-                .context("send key prompt failed")?;
-                return Ok(());
             }
+            None
         }
     };
-    store_bound_identity(&state, platform_chat_id, &identity);
-    let user_id = identity.user_id;
-    let is_admin = identity.role == "admin";
+    let user_id = bound_identity
+        .as_ref()
+        .map(|identity| identity.user_id)
+        .unwrap_or(platform_user_id);
 
     // If user sends an image without text:
     // - auto_vision_on_image_only=true: save + auto-run image_vision
@@ -872,67 +1197,16 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     }
 
     if text.starts_with("/rustclaw") || text.starts_with("/openclaw") {
-        if !is_admin {
-            bot.send_message(
-                msg.chat.id,
-                state.i18n.t("telegram.msg.openclaw_admin_only"),
-            )
+        bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.console_only_command"))
             .await
-            .context("send /rustclaw unauthorized failed")?;
-            return Ok(());
-        }
-
-        let state_for_cmd = state.clone();
-        let text_owned = text.to_string();
-        let openclaw_result = tokio::task::spawn_blocking(move || {
-            handle_openclaw_config_command(&state_for_cmd, &text_owned)
-        })
-        .await
-        .map_err(|err| anyhow!("join rustclaw config task failed: {err}"))?;
-
-        match openclaw_result {
-            Ok(reply) => {
-                bot.send_message(msg.chat.id, reply)
-                    .await
-                    .context("send /rustclaw reply failed")?;
-            }
-            Err(err) => {
-                bot.send_message(
-                    msg.chat.id,
-                    state
-                        .i18n
-                        .t_with("telegram.msg.config_failed", &[("error", &err.to_string())]),
-                )
-                .await
-                .context("send /rustclaw error failed")?;
-            }
-        }
+            .context("send /rustclaw console-only failed")?;
         return Ok(());
     }
 
     if text.starts_with("/cryptoapi") {
-        let raw = text.strip_prefix("/cryptoapi").unwrap_or_default().trim();
-        match handle_cryptoapi_command(&state, &identity, raw).await {
-            Ok(reply) => {
-                if raw.to_ascii_lowercase().starts_with("set ") {
-                    clear_pending_resume_for_chat(&state, msg.chat.id.0);
-                }
-                bot.send_message(msg.chat.id, reply)
-                    .await
-                    .context("send /cryptoapi reply failed")?;
-            }
-            Err(err) => {
-                bot.send_message(
-                    msg.chat.id,
-                    state.i18n.t_with(
-                        "telegram.msg.cryptoapi_config_failed",
-                        &[("error", &err.to_string())],
-                    ),
-                )
-                .await
-                .context("send /cryptoapi error failed")?;
-            }
-        }
+        bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.console_only_command"))
+            .await
+            .context("send /cryptoapi console-only failed")?;
         return Ok(());
     }
 
@@ -1113,33 +1387,9 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     if text.starts_with("/crypto") {
         let raw = text.strip_prefix("/crypto").unwrap_or_default().trim();
         if raw.to_ascii_lowercase().starts_with("add ") {
-            if !is_admin {
-                bot.send_message(
-                    msg.chat.id,
-                    state.i18n.t("telegram.msg.cryptoapi_admin_only"),
-                )
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.console_only_command"))
                 .await
-                .context("send /crypto add unauthorized failed")?;
-                return Ok(());
-            }
-            match handle_cryptoapi_command(&state, &identity, raw).await {
-                Ok(reply) => {
-                    bot.send_message(msg.chat.id, reply)
-                        .await
-                        .context("send /crypto add reply failed")?;
-                }
-                Err(err) => {
-                    bot.send_message(
-                        msg.chat.id,
-                        state.i18n.t_with(
-                            "telegram.msg.cryptoapi_config_failed",
-                            &[("error", &err.to_string())],
-                        ),
-                    )
-                    .await
-                    .context("send /crypto add error failed")?;
-                }
-            }
+                .context("send /crypto add console-only failed")?;
             return Ok(());
         }
         let payload = match build_crypto_skill_payload(raw) {
@@ -1294,78 +1544,9 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     }
 
     if text.starts_with("/sendfile") {
-        let raw = text.strip_prefix("/sendfile").unwrap_or_default().trim();
-        if raw.is_empty() {
-            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.sendfile_usage"))
-                .await
-                .context("send /sendfile usage failed")?;
-            return Ok(());
-        }
-
-        if state.sendfile_admin_only && !is_admin {
-            bot.send_message(
-                msg.chat.id,
-                state.i18n.t("telegram.msg.sendfile_admin_only"),
-            )
+        bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.console_only_command"))
             .await
-            .context("send /sendfile admin-only rejection failed")?;
-            return Ok(());
-        }
-
-        let path = normalize_path_token(raw);
-        let p = match resolve_sendfile_path(
-            path,
-            state.sendfile_full_access,
-            state.sendfile_allowed_dirs.as_ref(),
-        ) {
-            Ok(v) => v,
-            Err(err) => {
-                bot.send_message(
-                    msg.chat.id,
-                    state
-                        .i18n
-                        .t_with("telegram.msg.sendfile_invalid_path", &[("error", &err)]),
-                )
-                .await
-                .context("send /sendfile path rejection failed")?;
-                return Ok(());
-            }
-        };
-        if !p.exists() {
-            bot.send_message(
-                msg.chat.id,
-                state.i18n.t_with(
-                    "telegram.msg.file_not_found",
-                    &[("path", &p.display().to_string())],
-                ),
-            )
-            .await
-            .context("send /sendfile not found failed")?;
-            return Ok(());
-        }
-        if !p.is_file() {
-            bot.send_message(
-                msg.chat.id,
-                state.i18n.t_with(
-                    "telegram.msg.not_a_file",
-                    &[("path", &p.display().to_string())],
-                ),
-            )
-            .await
-            .context("send /sendfile not file failed")?;
-            return Ok(());
-        }
-
-        let path_s = p.display().to_string();
-        if is_image_file(&path_s) {
-            bot.send_photo(msg.chat.id, InputFile::file(path_s))
-                .await
-                .context("send /sendfile image failed")?;
-        } else {
-            bot.send_document(msg.chat.id, InputFile::file(path_s))
-                .await
-                .context("send /sendfile document failed")?;
-        }
+            .context("send /sendfile console-only failed")?;
         return Ok(());
     }
 
@@ -3617,13 +3798,20 @@ async fn submit_task_only(
     user_id: i64,
     chat_id: i64,
     kind: TaskKind,
-    payload: serde_json::Value,
+    mut payload: serde_json::Value,
 ) -> anyhow::Result<String> {
     let user_key = state
         .bound_identity_by_chat
         .lock()
         .ok()
         .and_then(|map| map.get(&chat_id).map(|identity| identity.user_key.clone()));
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "telegram_bot_name".to_string(),
+            JsonValue::String(state.bot_name.clone()),
+        );
+        obj.insert("agent_id".to_string(), JsonValue::String(state.agent_id.clone()));
+    }
     let payload_compact = payload.to_string();
     let payload_fp = text_fingerprint_hex(&payload_compact);
     let payload_preview = text_preview_for_log(&payload_compact, 180);
