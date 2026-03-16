@@ -171,7 +171,7 @@ fn parse_input(args: Value) -> Result<ChatInput, String> {
     let max_tokens = map
         .get("max_tokens")
         .and_then(|v| v.as_u64())
-        .unwrap_or(256);
+        .unwrap_or_else(|| default_chat_max_tokens(&style, &text));
     let temperature = map
         .get("temperature")
         .and_then(|v| v.as_f64())
@@ -214,6 +214,12 @@ async fn run_chat(input: ChatInput) -> Result<(String, Value), String> {
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
+        .or_else(|| {
+            std::env::var("SKILL_TIMEOUT_SECONDS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .filter(|v| *v > 0)
+        })
         .unwrap_or(60);
 
     let mut messages = vec![json!({"role":"system","content": input.system_prompt})];
@@ -299,6 +305,34 @@ fn strip_think_blocks(raw: &str) -> String {
         break;
     }
     out.trim().to_string()
+}
+
+fn default_chat_max_tokens(style: &str, text: &str) -> u64 {
+    if style == "joke" {
+        return 256;
+    }
+    let char_count = text.chars().count();
+    let report_like = [
+        "总结",
+        "分析",
+        "报告",
+        "方案",
+        "计划",
+        "research",
+        "summary",
+        "analysis",
+        "report",
+        "plan",
+    ]
+    .iter()
+    .any(|kw| text.contains(kw) || text.to_ascii_lowercase().contains(kw));
+    if report_like || char_count > 1200 {
+        4096
+    } else if char_count > 400 {
+        2048
+    } else {
+        1024
+    }
 }
 
 fn default_model_for_base_url(base_url: &str) -> &'static str {

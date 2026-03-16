@@ -164,6 +164,15 @@ Skill behavior notes (file/path):
 - required: `action`
 - optional: `url`, `feed_url`, `feed_urls`, `category`, `source_layer`, `limit`, `timeout_seconds`
 
+### stock
+- action: `quote|query`（查询 A 股行情）
+- required: `symbol` 或 `code` 或 `name`（股票代码，或 `configs/stock.toml` 中配置的公司名/简称/别名，如 600519、000001、sh600519、sz000001、中国移动、茅台）
+- optional: `action`（默认 quote）
+- 仅支持 A 股实时行情查询，数据来源新浪财经
+- only use this skill for quote/price/realtime market requests, not for general stock knowledge questions
+- if the user is asking for a stock code, company-code mapping, listing info, or "某公司股票代码是多少", prefer `chat`
+- for quote/price/realtime requests, a configured company name or alias such as `中国移动` may be passed to `stock`; for stock-code questions still prefer `chat`
+
 ### chat
 - required: `text`
 - optional: `style` (`chat|joke`), `system_prompt`, `max_tokens`, `temperature`
@@ -388,6 +397,23 @@ Skill behavior notes (file/path):
 - Use only supported service lifecycle actions.
 - Prefer status checks before/after mutating actions when useful.
 - Forbid unsupported bulk/global service operations.
+
+### task_control
+- action: `list|cancel_all|cancel_one`
+- required by action:
+  - `list`: none
+  - `cancel_all`: none
+  - `cancel_one`: `index` (1-based positive integer)
+- scope: only the current user's unfinished tasks in the current chat (`running` + `queued`)
+- use this skill when the user asks to查看当前任务、进行中的任务、队列里的任务，或 asks to cancel/end current tasks
+- use `cancel_one` when the user explicitly references a numbered task like “第2个任务” / “2号任务”
+- do not use `health_check` or `service_control` for chat task listing/canceling
+
+#### task_control JSON-schema style contract (strict)
+- Base shape: `{"type":"call_skill","skill":"task_control","args":{"action":"..."}}`
+- `cancel_one` requires `index >= 1`
+- Prefer `list` for readonly queries
+- For cancel requests without a specific number, prefer `cancel_all`
 
 ### system_basic (supplementary — system introspection only)
 - **File/command/dir 能力已全部收口为独立 base skill**：run_cmd, read_file, write_file, list_dir, make_dir, remove_file 均使用上方的独立 skill，不要用 system_basic。

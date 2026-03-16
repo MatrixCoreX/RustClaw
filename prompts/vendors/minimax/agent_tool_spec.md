@@ -158,6 +158,15 @@ Skill behavior notes (file/path):
 - required: `action`
 - optional: `url`, `feed_url`, `feed_urls`, `category`, `source_layer`, `limit`, `timeout_seconds`
 
+### stock
+- action: `quote|query`（查询 A 股行情）
+- required: `symbol` 或 `code` 或 `name`（股票代码，或 `configs/stock.toml` 中配置的公司名/简称/别名，如 600519、000001、sh600519、sz000001、中国移动、茅台）
+- optional: `action`（默认 quote）
+- 仅支持 A 股实时行情查询，数据来源新浪财经
+- only use this skill for quote/price/realtime market requests, not for general stock knowledge questions
+- if the user is asking for a stock code, company-code mapping, listing info, or "某公司股票代码是多少", prefer `chat`
+- for quote/price/realtime requests, a configured company name or alias such as `中国移动` may be passed to `stock`; for stock-code questions still prefer `chat`
+
 ### chat
 - required: `text`
 - optional: `style` (`chat|joke`), `system_prompt`, `max_tokens`, `temperature`

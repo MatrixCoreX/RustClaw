@@ -48,7 +48,9 @@ pub struct SkillRegistryEntry {
     pub output_kind: OutputKind,
 
     // ---------- Phase 5: 执行配置 ----------
-    /// Runner 技能：在 runner 侧的执行名/映射名；未设则用 name
+    /// Runner 技能：在 runner 侧的执行名；未设则用 name。
+    /// skill-runner 会将该值按约定解析为二进制名：
+    /// 例如 foo_bar -> foo-bar-skill，若已以 -skill 结尾则直接使用。
     #[serde(default)]
     pub runner_name: Option<String>,
     /// External 技能：执行方式，如 "http_json"

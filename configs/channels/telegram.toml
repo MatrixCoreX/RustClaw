@@ -23,7 +23,7 @@ audio_inbox_dir = "audio/upload"
 # 仅当收到纯图片消息时自动触发视觉能力
 auto_vision_on_image_only = false
 # Telegram Bot Token
-bot_token = "__RC_SECRET_0005__"
+bot_token = "__RC_SECRET_0003__"
 # Optional static bindings loaded into channel_bindings on clawd startup.
 # Use this only if you want to pre-bind a Telegram account to a key.
 # Example:

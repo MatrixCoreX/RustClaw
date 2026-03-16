@@ -128,32 +128,7 @@ fn execute_skill(req: SkillRequest) -> SkillResponse {
 }
 
 fn skill_binary_path(skill_name: &str) -> Result<String, String> {
-    let bin_name = match skill_name {
-        "x" => "x-skill",
-        "system_basic" => "system-basic-skill",
-        "http_basic" => "http-basic-skill",
-        "git_basic" => "git-basic-skill",
-        "install_module" => "install-module-skill",
-        "process_basic" => "process-basic-skill",
-        "package_manager" => "package-manager-skill",
-        "archive_basic" => "archive-basic-skill",
-        "db_basic" => "db-basic-skill",
-        "docker_basic" => "docker-basic-skill",
-        "fs_search" => "fs-search-skill",
-        "rss_fetch" => "rss-fetch-skill",
-        "image_vision" => "image-vision-skill",
-        "image_generate" => "image-generate-skill",
-        "image_edit" => "image-edit-skill",
-        "audio_transcribe" => "audio-transcribe-skill",
-        "audio_synthesize" => "audio-synthesize-skill",
-        "health_check" => "health-check-skill",
-        "log_analyze" => "log-analyze-skill",
-        "service_control" => "service-control-skill",
-        "config_guard" => "config-guard-skill",
-        "crypto" => "crypto-skill",
-        "chat" => "chat-skill",
-        _ => return Err(format!("unknown skill: {skill_name}")),
-    };
+    let bin_name = runner_bin_name(skill_name)?;
 
     let prefer_debug = prefer_debug_bins();
     let candidates = if prefer_debug {
@@ -176,6 +151,25 @@ fn skill_binary_path(skill_name: &str) -> Result<String, String> {
     Err(format!(
         "{skill_name} skill binary not found in target/debug or target/release, build it first"
     ))
+}
+
+fn runner_bin_name(skill_name: &str) -> Result<String, String> {
+    let raw = skill_name.trim();
+    if raw.is_empty() {
+        return Err("skill_name is empty".to_string());
+    }
+    if raw.contains('/') || raw.contains('\\') {
+        return Err(format!(
+            "invalid skill name `{raw}`: runner name must be a binary name, not a path"
+        ));
+    }
+
+    let normalized = raw.replace('_', "-");
+    if normalized.ends_with("-skill") {
+        Ok(normalized)
+    } else {
+        Ok(format!("{normalized}-skill"))
+    }
 }
 
 fn prefer_debug_bins() -> bool {

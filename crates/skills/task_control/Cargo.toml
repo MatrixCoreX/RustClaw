@@ -1,0 +1,15 @@
+[package]
+name = "task-control-skill"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "task-control-skill"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

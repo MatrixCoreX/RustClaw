@@ -7,57 +7,6 @@ use tracing::{debug, info, warn};
 
 use crate::{execution_adapters, llm_gateway, repo, AgentAction, AppState, AskReply, ClaimedTask};
 
-// --- Compatibility fallback only: used when registry has no prompt_file for a skill. Primary = registry. ---
-const SKILL_PROMPT_ARCHIVE_BASIC: &str =
-    include_str!("../../../prompts/vendors/default/skills/archive_basic.md");
-const SKILL_PROMPT_AUDIO_SYNTHESIZE: &str =
-    include_str!("../../../prompts/vendors/default/skills/audio_synthesize.md");
-const SKILL_PROMPT_AUDIO_TRANSCRIBE: &str =
-    include_str!("../../../prompts/vendors/default/skills/audio_transcribe.md");
-const SKILL_PROMPT_CONFIG_GUARD: &str =
-    include_str!("../../../prompts/vendors/default/skills/config_guard.md");
-const SKILL_PROMPT_CRYPTO: &str = include_str!("../../../prompts/vendors/default/skills/crypto.md");
-const SKILL_PROMPT_CHAT: &str = include_str!("../../../prompts/vendors/default/skills/chat.md");
-const SKILL_PROMPT_DB_BASIC: &str =
-    include_str!("../../../prompts/vendors/default/skills/db_basic.md");
-const SKILL_PROMPT_DOCKER_BASIC: &str =
-    include_str!("../../../prompts/vendors/default/skills/docker_basic.md");
-const SKILL_PROMPT_FS_SEARCH: &str =
-    include_str!("../../../prompts/vendors/default/skills/fs_search.md");
-const SKILL_PROMPT_GIT_BASIC: &str =
-    include_str!("../../../prompts/vendors/default/skills/git_basic.md");
-const SKILL_PROMPT_HEALTH_CHECK: &str =
-    include_str!("../../../prompts/vendors/default/skills/health_check.md");
-const SKILL_PROMPT_HTTP_BASIC: &str =
-    include_str!("../../../prompts/vendors/default/skills/http_basic.md");
-const SKILL_PROMPT_IMAGE_EDIT: &str =
-    include_str!("../../../prompts/vendors/default/skills/image_edit.md");
-const SKILL_PROMPT_IMAGE_GENERATE: &str =
-    include_str!("../../../prompts/vendors/default/skills/image_generate.md");
-const SKILL_PROMPT_IMAGE_VISION: &str =
-    include_str!("../../../prompts/vendors/default/skills/image_vision.md");
-const SKILL_PROMPT_INSTALL_MODULE: &str =
-    include_str!("../../../prompts/vendors/default/skills/install_module.md");
-const SKILL_PROMPT_LOG_ANALYZE: &str =
-    include_str!("../../../prompts/vendors/default/skills/log_analyze.md");
-const SKILL_PROMPT_PACKAGE_MANAGER: &str =
-    include_str!("../../../prompts/vendors/default/skills/package_manager.md");
-const SKILL_PROMPT_PROCESS_BASIC: &str =
-    include_str!("../../../prompts/vendors/default/skills/process_basic.md");
-const SKILL_PROMPT_RSS_FETCH: &str =
-    include_str!("../../../prompts/vendors/default/skills/rss_fetch.md");
-const SKILL_PROMPT_SERVICE_CONTROL: &str =
-    include_str!("../../../prompts/vendors/default/skills/service_control.md");
-const SKILL_PROMPT_SYSTEM_BASIC: &str =
-    include_str!("../../../prompts/vendors/default/skills/system_basic.md");
-const SKILL_PROMPT_X: &str = include_str!("../../../prompts/vendors/default/skills/x.md");
-// Standalone base skills (A scheme: independent from system_basic)
-const SKILL_PROMPT_RUN_CMD: &str = include_str!("../../../prompts/skills/run_cmd.md");
-const SKILL_PROMPT_READ_FILE: &str = include_str!("../../../prompts/skills/read_file.md");
-const SKILL_PROMPT_WRITE_FILE: &str = include_str!("../../../prompts/skills/write_file.md");
-const SKILL_PROMPT_LIST_DIR: &str = include_str!("../../../prompts/skills/list_dir.md");
-const SKILL_PROMPT_MAKE_DIR: &str = include_str!("../../../prompts/skills/make_dir.md");
-const SKILL_PROMPT_REMOVE_FILE: &str = include_str!("../../../prompts/skills/remove_file.md");
 const AGENT_TOOL_SPEC_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/agent_tool_spec.md");
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
@@ -67,149 +16,6 @@ const SINGLE_PLAN_EXECUTION_PROMPT_PATH: &str = "prompts/single_plan_execution_p
 const LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/loop_incremental_plan_prompt.md");
 const LOOP_INCREMENTAL_PLAN_PROMPT_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
-
-type SkillPlaybookDef = (&'static str, &'static str, &'static str);
-
-/// Compatibility fallback only. Primary path for planner is registry-driven: enabled skills + prompt_file per skill.
-const BUNDLED_SKILL_PLAYBOOKS: &[SkillPlaybookDef] = &[
-    ("run_cmd", "prompts/skills/run_cmd.md", SKILL_PROMPT_RUN_CMD),
-    (
-        "read_file",
-        "prompts/skills/read_file.md",
-        SKILL_PROMPT_READ_FILE,
-    ),
-    (
-        "write_file",
-        "prompts/skills/write_file.md",
-        SKILL_PROMPT_WRITE_FILE,
-    ),
-    (
-        "list_dir",
-        "prompts/skills/list_dir.md",
-        SKILL_PROMPT_LIST_DIR,
-    ),
-    (
-        "make_dir",
-        "prompts/skills/make_dir.md",
-        SKILL_PROMPT_MAKE_DIR,
-    ),
-    (
-        "remove_file",
-        "prompts/skills/remove_file.md",
-        SKILL_PROMPT_REMOVE_FILE,
-    ),
-    (
-        "archive_basic",
-        "prompts/skills/archive_basic.md",
-        SKILL_PROMPT_ARCHIVE_BASIC,
-    ),
-    (
-        "audio_synthesize",
-        "prompts/skills/audio_synthesize.md",
-        SKILL_PROMPT_AUDIO_SYNTHESIZE,
-    ),
-    (
-        "audio_transcribe",
-        "prompts/skills/audio_transcribe.md",
-        SKILL_PROMPT_AUDIO_TRANSCRIBE,
-    ),
-    (
-        "config_guard",
-        "prompts/skills/config_guard.md",
-        SKILL_PROMPT_CONFIG_GUARD,
-    ),
-    ("crypto", "prompts/skills/crypto.md", SKILL_PROMPT_CRYPTO),
-    ("chat", "prompts/skills/chat.md", SKILL_PROMPT_CHAT),
-    (
-        "db_basic",
-        "prompts/skills/db_basic.md",
-        SKILL_PROMPT_DB_BASIC,
-    ),
-    (
-        "docker_basic",
-        "prompts/skills/docker_basic.md",
-        SKILL_PROMPT_DOCKER_BASIC,
-    ),
-    (
-        "fs_search",
-        "prompts/skills/fs_search.md",
-        SKILL_PROMPT_FS_SEARCH,
-    ),
-    (
-        "git_basic",
-        "prompts/skills/git_basic.md",
-        SKILL_PROMPT_GIT_BASIC,
-    ),
-    (
-        "health_check",
-        "prompts/skills/health_check.md",
-        SKILL_PROMPT_HEALTH_CHECK,
-    ),
-    (
-        "http_basic",
-        "prompts/skills/http_basic.md",
-        SKILL_PROMPT_HTTP_BASIC,
-    ),
-    (
-        "image_edit",
-        "prompts/skills/image_edit.md",
-        SKILL_PROMPT_IMAGE_EDIT,
-    ),
-    (
-        "image_generate",
-        "prompts/skills/image_generate.md",
-        SKILL_PROMPT_IMAGE_GENERATE,
-    ),
-    (
-        "image_vision",
-        "prompts/skills/image_vision.md",
-        SKILL_PROMPT_IMAGE_VISION,
-    ),
-    (
-        "install_module",
-        "prompts/skills/install_module.md",
-        SKILL_PROMPT_INSTALL_MODULE,
-    ),
-    (
-        "log_analyze",
-        "prompts/skills/log_analyze.md",
-        SKILL_PROMPT_LOG_ANALYZE,
-    ),
-    (
-        "package_manager",
-        "prompts/skills/package_manager.md",
-        SKILL_PROMPT_PACKAGE_MANAGER,
-    ),
-    (
-        "process_basic",
-        "prompts/skills/process_basic.md",
-        SKILL_PROMPT_PROCESS_BASIC,
-    ),
-    (
-        "rss_fetch",
-        "prompts/skills/rss_fetch.md",
-        SKILL_PROMPT_RSS_FETCH,
-    ),
-    (
-        "service_control",
-        "prompts/skills/service_control.md",
-        SKILL_PROMPT_SERVICE_CONTROL,
-    ),
-    (
-        "system_basic",
-        "prompts/skills/system_basic.md",
-        SKILL_PROMPT_SYSTEM_BASIC,
-    ),
-    ("x", "prompts/skills/x.md", SKILL_PROMPT_X),
-];
-
-/// Returns (path, body) for compatibility fallback when registry has no prompt_file.
-fn get_bundled_playbook(skill: &str) -> Option<(&'static str, &'static str)> {
-    BUNDLED_SKILL_PLAYBOOKS
-        .iter()
-        .find(|(name, _, _)| *name == skill)
-        .map(|(_, path, body)| (*path, *body))
-}
 
 fn load_rss_categories_for_prompt(state: &AppState) -> Vec<String> {
     let path = state.workspace_root.join("configs/rss.toml");
@@ -242,7 +48,7 @@ fn build_rss_skill_prompt_with_categories(state: &AppState, base_prompt: &str) -
 }
 
 /// Phase 2: Primary path = registry-driven. Planner uses planner_visible_skills (registry-enabled view),
-/// not skills_list (execution floor with core_skills_always_enabled). Each skill uses prompt_file or bundled fallback.
+/// not skills_list (execution floor with core_skills_always_enabled). Each skill must provide prompt_file via registry.
 fn build_skill_playbooks_text(state: &AppState) -> String {
     let enabled = &*state.get_planner_visible_skills();
     let enabled_count = enabled.len();
@@ -256,36 +62,20 @@ fn build_skill_playbooks_text(state: &AppState) -> String {
     let mut skipped_no_prompt: Vec<String> = Vec::new();
 
     for skill in enabled {
-        // Primary: registry prompt_file
-        let registry_path = state.skill_prompt_file(skill);
-        // Compatibility fallback only: bundled path + body when registry has no prompt_file
-        let bundled = get_bundled_playbook(skill);
-        let fallback_body = bundled.map(|(_, b)| b).unwrap_or("");
-        let effective_path: &str = registry_path
-            .as_deref()
-            .or(bundled.map(|(p, _)| p))
-            .unwrap_or("");
-        let source = if registry_path.is_some() {
-            "registry"
-        } else {
-            "bundled_fallback"
-        };
-
-        if effective_path.is_empty() {
+        let Some(registry_path) = state.skill_prompt_file(skill) else {
             warn!(
-                "planner skill playbook: skill={} prompt_file missing in registry and no bundled fallback, skipping",
+                "planner skill playbook: skill={} prompt_file missing in registry, skipping",
                 skill
             );
             skipped_no_prompt.push(skill.clone());
             continue;
-        }
+        };
 
-        let prompt_body =
-            crate::load_prompt_template_for_state(state, effective_path, fallback_body).0;
+        let prompt_body = crate::load_prompt_template_for_state(state, &registry_path, "").0;
 
         debug!(
-            "planner skill playbook: skill={} prompt_file={} source={}",
-            skill, effective_path, source
+            "planner skill playbook: skill={} prompt_file={} source=registry",
+            skill, registry_path
         );
 
         let content = if skill == "rss_fetch" {

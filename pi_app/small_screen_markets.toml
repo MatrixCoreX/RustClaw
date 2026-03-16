@@ -1,0 +1,63 @@
+[crypto]
+# 小屏加密货币页自动刷新间隔（秒）
+refresh_seconds = 15
+
+[[crypto.items]]
+name = "BTC"
+symbol = "BTCUSDT"
+
+[[crypto.items]]
+name = "ETH"
+symbol = "ETHUSDT"
+
+[[crypto.items]]
+name = "BCH"
+symbol = "BCHUSDT"
+
+[[crypto.items]]
+name = "LTC"
+symbol = "LTCUSDT"
+
+[[crypto.items]]
+name = "SOL"
+symbol = "SOLUSDT"
+
+[[crypto.items]]
+name = "BNB"
+symbol = "BNBUSDT"
+
+[[crypto.items]]
+name = "XRP"
+symbol = "XRPUSDT"
+
+[[crypto.items]]
+name = "DOGE"
+symbol = "DOGEUSDT"
+
+[[crypto.items]]
+name = "PEPE"
+symbol = "PEPEUSDT"
+
+[[crypto.items]]
+name = "SHIB"
+symbol = "SHIBUSDT"
+
+[stocks]
+# 小屏 A 股页自动刷新间隔（秒）
+refresh_seconds = 15
+
+[[stocks.items]]
+name = "中国移动"
+code = "600941"
+
+[[stocks.items]]
+name = "贵州茅台"
+code = "600519"
+
+[[stocks.items]]
+name = "宁德时代"
+code = "300750"
+
+[[stocks.items]]
+name = "比亚迪"
+code = "002594"

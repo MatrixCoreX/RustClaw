@@ -249,6 +249,73 @@ def load_mapping(path: Path) -> list[MappingEntry]:
     return entries
 
 
+def restore_entry_in_line(raw_line: str, entry: MappingEntry) -> tuple[str, bool]:
+    if raw_line.lstrip().startswith("#"):
+        return raw_line, False
+
+    comment_at = find_comment_start(raw_line)
+    if comment_at is None:
+        code_part, comment_part = raw_line, ""
+    else:
+        code_part, comment_part = raw_line[:comment_at], raw_line[comment_at:]
+
+    matches = list(ASSIGN_RE.finditer(code_part))
+    if not matches:
+        return raw_line, False
+
+    updated = code_part
+    changed = False
+    for m in reversed(matches):
+        key = m.group("key")
+        literal = m.group("literal")
+        if key != entry.key or literal != entry.placeholder_literal:
+            continue
+        updated = (
+            updated[: m.start("literal")]
+            + entry.original_literal
+            + updated[m.end("literal") :]
+        )
+        changed = True
+        break
+
+    if not changed:
+        return raw_line, False
+    return updated + comment_part, True
+
+
+def restore_entry_in_lines(lines: list[str], entry: MappingEntry) -> bool:
+    # First try the original recorded line for the exact key.
+    if 1 <= entry.line <= len(lines):
+        idx = entry.line - 1
+        updated, changed = restore_entry_in_line(lines[idx], entry)
+        if changed:
+            lines[idx] = updated
+            return True
+
+    # Then search the file for a unique exact key+placeholder match.
+    candidates: list[int] = []
+    for idx, raw_line in enumerate(lines):
+        _, changed = restore_entry_in_line(raw_line, entry)
+        if changed:
+            candidates.append(idx)
+
+    if len(candidates) == 1:
+        idx = candidates[0]
+        updated, changed = restore_entry_in_line(lines[idx], entry)
+        if changed:
+            lines[idx] = updated
+            return True
+
+    # Last-resort fallback: restore by unique placeholder occurrence anywhere in file.
+    joined = "".join(lines)
+    if joined.count(entry.placeholder_literal) == 1:
+        joined = joined.replace(entry.placeholder_literal, entry.original_literal, 1)
+        lines[:] = joined.splitlines(keepends=True)
+        return True
+
+    return False
+
+
 def run_redact(config_dir: Path, secret_map: Path, dry_run: bool) -> int:
     files = iter_toml_files(config_dir)
     if not files:
@@ -310,16 +377,18 @@ def run_restore(config_dir: Path, secret_map: Path, dry_run: bool) -> int:
 
         text = path.read_text(encoding="utf-8")
         original_text = text
+        lines = text.splitlines(keepends=True)
 
         for e in file_entries:
-            if e.placeholder_literal in text:
-                text = text.replace(e.placeholder_literal, e.original_literal, 1)
+            if restore_entry_in_lines(lines, e):
                 restored_count += 1
             else:
                 missing_count += 1
                 print(
                     f"[warn] placeholder not found: {e.entry_id} ({e.file}:{e.line}, key={e.key})"
                 )
+
+        text = "".join(lines)
 
         if text != original_text:
             changed_files += 1
