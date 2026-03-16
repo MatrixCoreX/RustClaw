@@ -44,6 +44,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub persona: PersonaConfig,
     #[serde(default)]
+    pub agents: Vec<AgentConfig>,
+    #[serde(default)]
     pub schedule: ScheduleConfig,
 }
 
@@ -59,9 +61,17 @@ pub struct ServerConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TelegramConfig {
     pub bot_token: String,
+    #[serde(default = "default_agent_id")]
+    pub agent_id: String,
     pub admins: Vec<i64>,
     #[serde(default)]
     pub allowlist: Vec<i64>,
+    #[serde(default = "default_telegram_access_mode")]
+    pub access_mode: String,
+    #[serde(default)]
+    pub allowed_usernames: Vec<String>,
+    #[serde(default)]
+    pub bots: Vec<TelegramRuntimeBotConfig>,
     #[serde(default)]
     pub bindings: Vec<ChannelBindingConfig>,
     #[serde(default = "default_telegram_language")]
@@ -100,12 +110,86 @@ pub struct TelegramBotConfig {
     pub admins: Vec<i64>,
     #[serde(default)]
     pub allowlist: Vec<i64>,
+    #[serde(default = "default_telegram_access_mode")]
+    pub access_mode: String,
+    #[serde(default)]
+    pub allowed_usernames: Vec<String>,
     #[serde(default = "default_telegram_language")]
     pub language: String,
     #[serde(default = "default_telegram_i18n_path")]
     pub i18n_path: String,
     #[serde(default = "default_telegram_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct TelegramRuntimeBotConfig {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub bot_token: String,
+    #[serde(default = "default_agent_id")]
+    pub agent_id: String,
+    #[serde(default)]
+    pub admins: Vec<i64>,
+    #[serde(default)]
+    pub allowlist: Vec<i64>,
+    #[serde(default = "default_telegram_access_mode")]
+    pub access_mode: String,
+    #[serde(default)]
+    pub allowed_usernames: Vec<String>,
+    #[serde(default = "default_telegram_language")]
+    pub language: String,
+    #[serde(default = "default_telegram_i18n_path")]
+    pub i18n_path: String,
+    #[serde(default = "default_telegram_quick_result_wait_seconds")]
+    pub quick_result_wait_seconds: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedTelegramBotConfig {
+    pub name: String,
+    pub bot_token: String,
+    pub agent_id: String,
+    pub admins: Vec<i64>,
+    pub allowlist: Vec<i64>,
+    pub access_mode: String,
+    pub allowed_usernames: Vec<String>,
+    pub language: String,
+    pub i18n_path: String,
+    pub quick_result_wait_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentConfig {
+    #[serde(default = "default_agent_id")]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub persona_prompt: String,
+    #[serde(default)]
+    pub preferred_vendor: Option<String>,
+    #[serde(default)]
+    pub preferred_model: Option<String>,
+    #[serde(default)]
+    pub allowed_skills: Vec<String>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            id: default_agent_id(),
+            name: "Main".to_string(),
+            description: String::new(),
+            persona_prompt: String::new(),
+            preferred_vendor: None,
+            preferred_model: None,
+            allowed_skills: Vec::new(),
+        }
+    }
 }
 
 impl Default for TelegramBotConfig {
@@ -115,6 +199,8 @@ impl Default for TelegramBotConfig {
             bot_token: String::new(),
             admins: Vec::new(),
             allowlist: Vec::new(),
+            access_mode: default_telegram_access_mode(),
+            allowed_usernames: Vec::new(),
             language: default_telegram_language(),
             i18n_path: default_telegram_i18n_path(),
             quick_result_wait_seconds: default_telegram_quick_result_wait_seconds(),
@@ -256,6 +342,8 @@ pub struct ChannelBindingConfig {
     pub external_user_id: String,
     #[serde(default)]
     pub external_chat_id: String,
+    #[serde(default)]
+    pub telegram_bot_name: String,
     pub user_key: String,
 }
 
@@ -1286,6 +1374,10 @@ fn default_telegram_i18n_path() -> String {
     "configs/i18n/telegramd.zh-CN.toml".to_string()
 }
 
+fn default_telegram_access_mode() -> String {
+    "public".to_string()
+}
+
 fn default_telegram_language() -> String {
     "zh-CN".to_string()
 }
@@ -1441,4 +1533,231 @@ impl AppConfig {
 
         Ok(app)
     }
+
+    pub fn telegram_runtime_bots(&self) -> Vec<ResolvedTelegramBotConfig> {
+        let mut bots = Vec::new();
+
+        if !self.telegram.bot_token.trim().is_empty() {
+            bots.push(ResolvedTelegramBotConfig {
+                name: "primary".to_string(),
+                bot_token: self.telegram.bot_token.trim().to_string(),
+                agent_id: if self.telegram.agent_id.trim().is_empty() {
+                    default_agent_id().to_string()
+                } else {
+                    self.telegram.agent_id.trim().to_string()
+                },
+                admins: self.telegram.admins.clone(),
+                allowlist: self.telegram.allowlist.clone(),
+                access_mode: if self.telegram.access_mode.trim().is_empty() {
+                    default_telegram_access_mode()
+                } else {
+                    self.telegram.access_mode.trim().to_string()
+                },
+                allowed_usernames: self.telegram.allowed_usernames.clone(),
+                language: self.telegram.language.clone(),
+                i18n_path: self.telegram.i18n_path.clone(),
+                quick_result_wait_seconds: self.telegram.quick_result_wait_seconds,
+            });
+        }
+
+        for (index, bot) in self.telegram.bots.iter().enumerate() {
+            let token = bot.bot_token.trim();
+            if token.is_empty() {
+                continue;
+            }
+            let preferred_name = if bot.name.trim().is_empty() {
+                format!("bot-{}", index + 1)
+            } else {
+                bot.name.trim().to_string()
+            };
+            let name = unique_telegram_bot_name(&bots, &preferred_name, index + 1);
+            let preferred_agent_id = bot.agent_id.trim();
+            bots.push(ResolvedTelegramBotConfig {
+                name,
+                bot_token: token.to_string(),
+                agent_id: if preferred_agent_id.is_empty() {
+                    default_agent_id().to_string()
+                } else {
+                    preferred_agent_id.to_string()
+                },
+                admins: if bot.admins.is_empty() {
+                    self.telegram.admins.clone()
+                } else {
+                    bot.admins.clone()
+                },
+                allowlist: if bot.allowlist.is_empty() {
+                    self.telegram.allowlist.clone()
+                } else {
+                    bot.allowlist.clone()
+                },
+                access_mode: if bot.access_mode.trim().is_empty() {
+                    if self.telegram.access_mode.trim().is_empty() {
+                        default_telegram_access_mode()
+                    } else {
+                        self.telegram.access_mode.trim().to_string()
+                    }
+                } else {
+                    bot.access_mode.trim().to_string()
+                },
+                allowed_usernames: if bot.allowed_usernames.is_empty() {
+                    self.telegram.allowed_usernames.clone()
+                } else {
+                    bot.allowed_usernames.clone()
+                },
+                language: if bot.language.trim().is_empty() {
+                    self.telegram.language.clone()
+                } else {
+                    bot.language.trim().to_string()
+                },
+                i18n_path: if bot.i18n_path.trim().is_empty() {
+                    self.telegram.i18n_path.clone()
+                } else {
+                    bot.i18n_path.trim().to_string()
+                },
+                quick_result_wait_seconds: bot.quick_result_wait_seconds,
+            });
+        }
+
+        let compat_token = self.telegram_bot.bot_token.trim();
+        if self.telegram_bot.enabled
+            && !compat_token.is_empty()
+            && !bots.iter().any(|bot| bot.bot_token == compat_token)
+        {
+            bots.push(ResolvedTelegramBotConfig {
+                name: unique_telegram_bot_name(&bots, "telegram-bot", bots.len() + 1),
+                bot_token: compat_token.to_string(),
+                agent_id: default_agent_id().to_string(),
+                admins: if self.telegram_bot.admins.is_empty() {
+                    self.telegram.admins.clone()
+                } else {
+                    self.telegram_bot.admins.clone()
+                },
+                allowlist: if self.telegram_bot.allowlist.is_empty() {
+                    self.telegram.allowlist.clone()
+                } else {
+                    self.telegram_bot.allowlist.clone()
+                },
+                access_mode: if self.telegram_bot.access_mode.trim().is_empty() {
+                    if self.telegram.access_mode.trim().is_empty() {
+                        default_telegram_access_mode()
+                    } else {
+                        self.telegram.access_mode.trim().to_string()
+                    }
+                } else {
+                    self.telegram_bot.access_mode.trim().to_string()
+                },
+                allowed_usernames: if self.telegram_bot.allowed_usernames.is_empty() {
+                    self.telegram.allowed_usernames.clone()
+                } else {
+                    self.telegram_bot.allowed_usernames.clone()
+                },
+                language: if self.telegram_bot.language.trim().is_empty() {
+                    self.telegram.language.clone()
+                } else {
+                    self.telegram_bot.language.trim().to_string()
+                },
+                i18n_path: if self.telegram_bot.i18n_path.trim().is_empty() {
+                    self.telegram.i18n_path.clone()
+                } else {
+                    self.telegram_bot.i18n_path.trim().to_string()
+                },
+                quick_result_wait_seconds: self.telegram_bot.quick_result_wait_seconds,
+            });
+        }
+
+        bots
+    }
+
+    pub fn normalized_agents(&self) -> Vec<AgentConfig> {
+        let mut agents = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (index, agent) in self.agents.iter().enumerate() {
+            let preferred_id = if agent.id.trim().is_empty() {
+                if index == 0 {
+                    default_agent_id().to_string()
+                } else {
+                    format!("agent-{}", index + 1)
+                }
+            } else {
+                agent.id.trim().to_string()
+            };
+            if !seen.insert(preferred_id.clone()) {
+                continue;
+            }
+            agents.push(AgentConfig {
+                id: preferred_id.clone(),
+                name: if agent.name.trim().is_empty() {
+                    if preferred_id == default_agent_id() {
+                        "Main".to_string()
+                    } else {
+                        preferred_id.clone()
+                    }
+                } else {
+                    agent.name.trim().to_string()
+                },
+                description: agent.description.trim().to_string(),
+                persona_prompt: agent.persona_prompt.trim().to_string(),
+                preferred_vendor: agent
+                    .preferred_vendor
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(ToString::to_string),
+                preferred_model: agent
+                    .preferred_model
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(ToString::to_string),
+                allowed_skills: agent
+                    .allowed_skills
+                    .iter()
+                    .map(|skill| skill.trim())
+                    .filter(|skill| !skill.is_empty())
+                    .map(ToString::to_string)
+                    .collect(),
+            });
+        }
+
+        if !seen.contains(&default_agent_id()) {
+            agents.insert(
+                0,
+                AgentConfig {
+                    id: default_agent_id().to_string(),
+                    name: "Main".to_string(),
+                    ..AgentConfig::default()
+                },
+            );
+        }
+
+        agents
+    }
+}
+
+fn unique_telegram_bot_name(
+    existing: &[ResolvedTelegramBotConfig],
+    preferred: &str,
+    index_hint: usize,
+) -> String {
+    let trimmed = preferred.trim();
+    if !trimmed.is_empty() && !existing.iter().any(|bot| bot.name == trimmed) {
+        return trimmed.to_string();
+    }
+    let base = if trimmed.is_empty() {
+        "bot".to_string()
+    } else {
+        trimmed.to_string()
+    };
+    let mut suffix = index_hint.max(1);
+    loop {
+        let candidate = format!("{base}-{suffix}");
+        if !existing.iter().any(|bot| bot.name == candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn default_agent_id() -> String {
+    "main".to_string()
 }
