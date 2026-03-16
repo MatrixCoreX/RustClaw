@@ -158,6 +158,7 @@ async fn resolve_lark_identity(
         channel: ChannelKind::Lark,
         external_user_id: Some(open_id.to_string()),
         external_chat_id: Some(chat_id.to_string()),
+        telegram_bot_name: None,
     };
     let resp = client
         .post(&url)
@@ -188,6 +189,7 @@ async fn bind_lark_identity(
         channel: ChannelKind::Lark,
         external_user_id: Some(open_id.to_string()),
         external_chat_id: Some(chat_id.to_string()),
+        telegram_bot_name: None,
         user_key: user_key.trim().to_string(),
     };
     let resp = client
