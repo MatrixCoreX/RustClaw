@@ -30,7 +30,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::Semaphore;
+use tokio::sync::{oneshot, Semaphore};
 use toml::Value as TomlValue;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -241,6 +241,10 @@ struct AppState {
     allow_path_outside_workspace: bool,
     allow_sudo: bool,
     worker_task_timeout_seconds: u64,
+    worker_task_heartbeat_seconds: u64,
+    worker_running_no_progress_timeout_seconds: u64,
+    worker_running_recovery_check_interval_seconds: u64,
+    last_running_recovery_check_ts: Arc<Mutex<u64>>,
     routing: RoutingConfig,
     persona_prompt: String,
     command_intent: CommandIntentRuntime,
@@ -1704,6 +1708,16 @@ async fn main() -> anyhow::Result<()> {
         allow_path_outside_workspace: config.tools.allow_path_outside_workspace,
         allow_sudo: config.tools.allow_sudo,
         worker_task_timeout_seconds: config.worker.task_timeout_seconds.max(1),
+        worker_task_heartbeat_seconds: config.worker.task_heartbeat_seconds.max(5),
+        worker_running_no_progress_timeout_seconds: config
+            .worker
+            .running_no_progress_timeout_seconds
+            .max(60),
+        worker_running_recovery_check_interval_seconds: config
+            .worker
+            .running_recovery_check_interval_seconds
+            .max(10),
+        last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
         routing,
         persona_prompt,
         command_intent,
@@ -1911,6 +1925,109 @@ fn recover_stale_running_tasks_on_startup(
     }
 
     Ok(task_ids)
+}
+
+fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Result<Vec<String>> {
+    let timeout_secs = state.worker_running_no_progress_timeout_seconds.max(60);
+    let now = now_ts_u64() as i64;
+    let stale_before = now.saturating_sub(timeout_secs as i64);
+    let stale_note = format!(
+        "auto failed: no progress heartbeat for {}s while status=running",
+        timeout_secs
+    );
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+
+    let mut task_ids = Vec::new();
+    {
+        let mut stmt = db.prepare(
+            "SELECT task_id
+             FROM tasks
+             WHERE status = 'running'
+               AND CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?1
+             ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) ASC",
+        )?;
+        let rows = stmt.query_map(params![stale_before.to_string()], |row| {
+            row.get::<_, String>(0)
+        })?;
+        for row in rows {
+            task_ids.push(row?);
+        }
+    }
+
+    if task_ids.is_empty() {
+        return Ok(task_ids);
+    }
+
+    let changed = db.execute(
+        "UPDATE tasks
+         SET status = 'failed',
+             error_text = CASE
+                 WHEN error_text IS NULL OR TRIM(error_text) = '' THEN ?2
+                 ELSE error_text
+             END,
+             updated_at = ?3
+         WHERE status = 'running'
+           AND CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?1",
+        params![stale_before.to_string(), stale_note, now_ts()],
+    )?;
+    if changed != task_ids.len() {
+        warn!(
+            "runtime stale-running recovery count mismatch: selected={} updated={}",
+            task_ids.len(),
+            changed
+        );
+    }
+    Ok(task_ids)
+}
+
+fn maybe_recover_stale_running_tasks_runtime(state: &AppState) -> anyhow::Result<()> {
+    let now = now_ts_u64();
+    let interval = state.worker_running_recovery_check_interval_seconds.max(10);
+    {
+        let mut guard = state
+            .last_running_recovery_check_ts
+            .lock()
+            .map_err(|_| anyhow::anyhow!("running recovery lock poisoned"))?;
+        if now.saturating_sub(*guard) < interval {
+            return Ok(());
+        }
+        *guard = now;
+    }
+    let recovered = recover_stale_running_tasks_by_no_progress(state)?;
+    if !recovered.is_empty() {
+        warn!(
+            "runtime stale-running recovery applied: converted {} running tasks to failed (no_progress_timeout={}s)",
+            recovered.len(),
+            state.worker_running_no_progress_timeout_seconds
+        );
+    }
+    Ok(())
+}
+
+fn start_task_heartbeat(state: AppState, task_id: String) -> oneshot::Sender<()> {
+    let interval_secs = state.worker_task_heartbeat_seconds.max(5);
+    let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
+                    if let Err(err) = repo::touch_running_task(&state, &task_id) {
+                        warn!(
+                            "task heartbeat update failed: task_id={} interval_secs={} err={}",
+                            task_id, interval_secs, err
+                        );
+                    }
+                }
+                _ = &mut stop_rx => {
+                    break;
+                }
+            }
+        }
+    });
+    stop_tx
 }
 
 fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: usize) {
@@ -2156,6 +2273,8 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
 }
 
 async fn worker_once(state: &AppState) -> anyhow::Result<()> {
+    maybe_recover_stale_running_tasks_runtime(state)?;
+
     let Some(task) = repo::claim_next_task(state)? else {
         debug!("worker_once: no queued tasks, idle tick");
         return Ok(());
@@ -2188,6 +2307,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
 
         let task_kind_for_timeout_log = task.kind.clone();
         let worker_timeout_secs = state.worker_task_timeout_seconds.max(1);
+        let heartbeat_stop = start_task_heartbeat(state.clone(), task.task_id.clone());
         let task_result = tokio::time::timeout(Duration::from_secs(worker_timeout_secs), async {
         match task.kind.as_str() {
         "ask" => {
@@ -2966,6 +3086,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         Ok::<(), anyhow::Error>(())
         })
         .await;
+        let _ = heartbeat_stop.send(());
 
         match task_result {
             Ok(inner) => inner?,
@@ -7076,6 +7197,18 @@ fn update_task_success(state: &AppState, task_id: &str, result_json: &str) -> an
         params![task_id, result_json, now_ts()],
     )?;
     Ok(())
+}
+
+fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    let changed = db.execute(
+        "UPDATE tasks SET updated_at = ?2 WHERE task_id = ?1 AND status = 'running'",
+        params![task_id, now_ts()],
+    )?;
+    Ok(changed > 0)
 }
 
 fn update_task_progress_result(

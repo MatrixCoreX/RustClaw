@@ -270,7 +270,7 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = {}
+skill_switches = { stock = true }
 skill_max_concurrency = 1
 skill_timeout_seconds = 86400
 # 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):
@@ -377,5 +377,11 @@ concurrency = 3
 poll_interval_ms = 500
 # 队列上限 / Max queued tasks in memory.
 queue_limit = 128
+# 运行中心跳间隔（秒）：执行长任务时周期刷新 updated_at，避免误判“卡死”。
+task_heartbeat_seconds = 30
+# 运行中“无进展”超时（秒）：status=running 且 updated_at 长时间不变会自动收尾为 failed。
+running_no_progress_timeout_seconds = 1200
+# 无进展清理检查间隔（秒）。
+running_recovery_check_interval_seconds = 60
 # 单任务硬超时（秒） / Hard timeout per task in seconds.
 task_timeout_seconds = 86400

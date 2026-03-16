@@ -2403,7 +2403,10 @@ async fn send_text_or_image(
     const EPHEMERAL_IMAGE_SAVED_TOKEN: &str = "EPHEMERAL:IMAGE_SAVED";
 
     let mut image_paths = dedupe_preserve_order(extract_prefixed_paths(answer, PREFIX));
-    let mut file_paths = dedupe_preserve_order(extract_prefixed_paths(answer, FILE_PREFIX));
+    let explicit_file_tokens = dedupe_preserve_order(extract_prefixed_tokens(answer, FILE_PREFIX));
+    let (explicit_file_paths, missing_explicit_file_tokens) =
+        resolve_delivery_paths(&explicit_file_tokens);
+    let mut file_paths = explicit_file_paths.clone();
     let voice_paths = dedupe_preserve_order(extract_prefixed_paths(answer, VOICE_PREFIX));
     let inferred_write_paths = if file_paths.is_empty() {
         dedupe_preserve_order(extract_written_file_paths(answer))
@@ -2418,7 +2421,11 @@ async fn send_text_or_image(
     let file_set = file_paths.iter().cloned().collect::<HashSet<_>>();
     image_paths.retain(|p| !file_set.contains(p));
 
-    if !image_paths.is_empty() || !file_paths.is_empty() || !voice_paths.is_empty() {
+    if !image_paths.is_empty()
+        || !file_paths.is_empty()
+        || !voice_paths.is_empty()
+        || !missing_explicit_file_tokens.is_empty()
+    {
         debug!(
             "phase=deliver_media chat_id={} answer_fp={} image_count={} file_count={} voice_count={} preface_preview={}",
             chat_id.0,
@@ -2465,20 +2472,36 @@ async fn send_text_or_image(
                     let _ = bot_clone.delete_message(chat_id, msg_id).await;
                 });
             }
-        } else if let Some(inline_text) =
-            inline_single_small_text_file(&file_paths, &image_paths, &voice_paths)
+        } else if explicit_file_paths.is_empty()
+            && missing_explicit_file_tokens.is_empty()
+            && !inferred_write_paths.is_empty()
         {
-            let sent = send_telegram_text(bot, chat_id, &inline_text)
-                .await
-                .context("send inline text file body failed")?;
-            debug!(
-                "phase=deliver_inline_text_file chat_id={} answer_fp={} telegram_msg_id={} text_preview={}",
-                chat_id.0,
-                text_fingerprint_hex(&inline_text),
-                sent.id.0,
-                text_preview_for_log(&inline_text, 120)
+            if let Some(inline_text) =
+                inline_single_small_text_file(&file_paths, &image_paths, &voice_paths)
+            {
+                let sent = send_telegram_text(bot, chat_id, &inline_text)
+                    .await
+                    .context("send inline text file body failed")?;
+                debug!(
+                    "phase=deliver_inline_text_file chat_id={} answer_fp={} telegram_msg_id={} text_preview={}",
+                    chat_id.0,
+                    text_fingerprint_hex(&inline_text),
+                    sent.id.0,
+                    text_preview_for_log(&inline_text, 120)
+                );
+                return Ok(());
+            }
+        }
+        if !missing_explicit_file_tokens.is_empty() {
+            warn!(
+                "phase=deliver_media_missing_file chat_id={} missing_paths={:?}",
+                chat_id.0, missing_explicit_file_tokens
             );
-            return Ok(());
+            let missing_text = format!(
+                "文件发送失败：找不到以下路径，请先写入文件后再用 FILE: 发送。\n{}",
+                missing_explicit_file_tokens.join("\n")
+            );
+            let _ = send_telegram_text(bot, chat_id, &missing_text).await;
         }
 
         for path in image_paths {
@@ -3109,17 +3132,56 @@ fn is_crypto_trade_confirm_prompt(_text: &str, structured_hint: bool) -> bool {
 }
 
 fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
+    let tokens = extract_prefixed_tokens(answer, prefix);
+    let (resolved, _) = resolve_delivery_paths(&tokens);
+    resolved
+}
+
+fn extract_prefixed_tokens(answer: &str, prefix: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in answer.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix(prefix) {
             let cleaned = normalize_path_token(rest.trim());
-            if !cleaned.is_empty() && Path::new(cleaned).exists() && Path::new(cleaned).is_file() {
+            if !cleaned.is_empty() {
                 out.push(cleaned.to_string());
             }
         }
     }
     out
+}
+
+fn resolve_delivery_paths(tokens: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut found = Vec::new();
+    let mut missing = Vec::new();
+    for token in tokens {
+        if let Some(path) = resolve_delivery_token_path(token) {
+            found.push(path);
+        } else {
+            missing.push(token.clone());
+        }
+    }
+    (dedupe_preserve_order(found), dedupe_preserve_order(missing))
+}
+
+fn resolve_delivery_token_path(token: &str) -> Option<String> {
+    let cleaned = normalize_path_token(token);
+    if cleaned.is_empty() {
+        return None;
+    }
+    let candidate = if Path::new(cleaned).is_absolute() {
+        PathBuf::from(cleaned)
+    } else {
+        let cwd = std::env::current_dir().ok()?;
+        cwd.join(cleaned)
+    };
+    if candidate.is_file() {
+        return Some(candidate.to_string_lossy().to_string());
+    }
+    if Path::new(cleaned).is_file() {
+        return Some(cleaned.to_string());
+    }
+    None
 }
 
 fn is_written_file_confirmation_line(line: &str) -> bool {

@@ -415,6 +415,12 @@ pub struct WorkerConfig {
     pub task_timeout_seconds: u64,
     pub poll_interval_ms: u64,
     pub queue_limit: usize,
+    #[serde(default = "default_worker_task_heartbeat_seconds")]
+    pub task_heartbeat_seconds: u64,
+    #[serde(default = "default_worker_running_no_progress_timeout_seconds")]
+    pub running_no_progress_timeout_seconds: u64,
+    #[serde(default = "default_worker_running_recovery_check_interval_seconds")]
+    pub running_recovery_check_interval_seconds: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -1230,6 +1236,18 @@ fn default_memory_embedding_batch_size() -> usize {
 
 fn default_memory_reindex_on_startup() -> bool {
     false
+}
+
+fn default_worker_task_heartbeat_seconds() -> u64 {
+    30
+}
+
+fn default_worker_running_no_progress_timeout_seconds() -> u64 {
+    20 * 60
+}
+
+fn default_worker_running_recovery_check_interval_seconds() -> u64 {
+    60
 }
 
 fn default_memory_rule_assistant_ack_skip() -> Vec<String> {
