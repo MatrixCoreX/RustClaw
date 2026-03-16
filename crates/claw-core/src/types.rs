@@ -68,6 +68,8 @@ pub struct UiKeyVerifyRequest {
 pub struct ResolveChannelBindingRequest {
     pub channel: ChannelKind,
     #[serde(default)]
+    pub telegram_bot_name: Option<String>,
+    #[serde(default)]
     pub external_user_id: Option<String>,
     #[serde(default)]
     pub external_chat_id: Option<String>,
@@ -84,10 +86,36 @@ pub struct ResolveChannelBindingResponse {
 pub struct BindChannelKeyRequest {
     pub channel: ChannelKind,
     #[serde(default)]
+    pub telegram_bot_name: Option<String>,
+    #[serde(default)]
     pub external_user_id: Option<String>,
     #[serde(default)]
     pub external_chat_id: Option<String>,
     pub user_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelegramBotRuntimeStatus {
+    pub name: String,
+    pub healthy: bool,
+    pub status: String,
+    #[serde(default)]
+    pub last_heartbeat_ts: Option<i64>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayInstanceRuntimeStatus {
+    pub kind: String,
+    pub name: String,
+    pub scope: String,
+    pub healthy: bool,
+    pub status: String,
+    #[serde(default)]
+    pub last_heartbeat_ts: Option<i64>,
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +175,12 @@ pub struct HealthResponse {
     pub telegramd_process_count: Option<usize>,
     /// telegramd 进程 RSS 内存总和（字节，None 表示无法检测）
     pub telegramd_memory_rss_bytes: Option<u64>,
+    /// channel-gateway 进程健康状态（None 表示无法检测）
+    pub channel_gateway_healthy: Option<bool>,
+    /// 检测到的 channel-gateway 进程数量（None 表示无法检测）
+    pub channel_gateway_process_count: Option<usize>,
+    /// channel-gateway 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub channel_gateway_memory_rss_bytes: Option<u64>,
     /// whatsappd 进程健康状态（None 表示无法检测）
     pub whatsappd_healthy: Option<bool>,
     /// 检测到的 whatsappd 进程数量（None 表示无法检测）
@@ -159,6 +193,14 @@ pub struct HealthResponse {
     pub telegram_bot_process_count: Option<usize>,
     /// telegram bot adapter RSS 内存总和（字节，None 表示无法检测）
     pub telegram_bot_memory_rss_bytes: Option<u64>,
+    /// Telegram 当前配置的 bot 数量
+    pub telegram_configured_bot_count: usize,
+    /// Telegram 当前配置的 bot 名称列表
+    pub telegram_configured_bot_names: Vec<String>,
+    /// Telegram 每个 bot 的运行状态
+    pub telegram_bot_statuses: Vec<TelegramBotRuntimeStatus>,
+    /// Gateway 统一视角下的渠道实例运行状态
+    pub gateway_instance_statuses: Vec<GatewayInstanceRuntimeStatus>,
     /// whatsapp cloud adapter 健康状态（None 表示无法检测）
     pub whatsapp_cloud_healthy: Option<bool>,
     /// whatsapp cloud adapter 进程数量（None 表示无法检测）
