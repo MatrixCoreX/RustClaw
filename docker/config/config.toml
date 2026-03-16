@@ -42,15 +42,15 @@ user_rpm = 20
 # 风险/Risk: vendor/model 不匹配会导致调用失败.
 [llm]
 # 默认模型名 / Default selected model.
-selected_model = "GPT-5 Codex"
+selected_model = "qwen-max-latest"
 # 默认厂商标识 / Default selected vendor.
-selected_vendor = "custom"
+selected_vendor = "qwen"
 
 # 用途/Purpose: Anthropic 提供商连接与模型池.
 # 建议修改/Recommended change: 可改，需保证 key/base_url/model 对齐.
 # 风险/Risk: key 无效或 URL 错误会直接失败；并发过高可能触发限流.
 [llm.anthropic]
-api_key = "REDACTED_API_KEY"
+api_key = ""
 base_url = "https://api.anthropic.com/v1"
 # 该提供商最大并发 / Max concurrency for this provider.
 max_concurrency = 1
@@ -74,7 +74,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: 预览模型可能变更快，需关注兼容性与稳定性.
 [llm.google]
-api_key = "REDACTED_API_KEY"
+api_key = ""
 base_url = "https://generativelanguage.googleapis.com/v1beta"
 max_concurrency = 1
 model = "gemini-2.5-pro"
@@ -93,7 +93,7 @@ timeout_seconds = 90
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: 模型上下线较快，建议保留至少一个稳定回退模型.
 [llm.grok]
-api_key = "REDACTED_API_KEY"
+api_key = ""
 base_url = "https://api.x.ai/v1"
 max_concurrency = 1
 model = "grok-3"
@@ -116,7 +116,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改，适合补充高性价比推理/编码模型.
 # 风险/Risk: 模型名与官方上线节奏变化较快，建议保留一个稳态回退模型.
 [llm.deepseek]
-api_key = "REDACTED_API_KEY"
+api_key = ""
 base_url = "https://api.deepseek.com/v1"
 max_concurrency = 1
 model = "deepseek-chat"
@@ -130,7 +130,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: base_url 或鉴权不匹配会导致 401/404.
 [llm.qwen]
-api_key = "REDACTED_API_KEY"
+api_key = "sk-edb55ffba9f44173922a1a96cc16f9c1"
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 max_concurrency = 1
 model = "qwen-max-latest"
@@ -145,7 +145,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改，建议按官方最新兼容模型名维护.
 # 风险/Risk: 音频/图片相关能力与 OpenAI 兼容接口的覆盖范围可能有限，必要时需补原生适配.
 [llm.minimax]
-api_key = "REDACTED_API_KEY"
+api_key = ""
 base_url = "https://api.minimax.io/v1"
 max_concurrency = 1
 model = "MiniMax-M2.5"
@@ -160,10 +160,10 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改，适合接入私有网关.
 # 风险/Risk: 协议不兼容会出现模型列表可见但调用失败.
 [llm.custom]
-api_key = "sk-f953e5f838e5feaac64abe87595bbea356a9101c48c377d9cd99cdc214ff6b8a"
-base_url = "http://claude.myhuangye.com:8080/v1"
+api_key = "REPLACE_ME_CUSTOM_API_KEY"
+base_url = "https://api.example.com/v1"
 max_concurrency = 1
-model = "GPT-5 Codex"
+model = "custom-model"
 models = [
     "custom-model",
 ]
@@ -193,7 +193,7 @@ default_output_dir = "image/download"
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: 模型名下线会报错；并发与超时需与上游配额匹配.
 [llm.openai]
-api_key = "REDACTED_API_KEY"
+api_key = "REPLACE_ME"
 base_url = "https://api.openai.com/v1"
 max_concurrency = 1
 model = "gpt-4o-mini"
@@ -270,9 +270,9 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = {}
+skill_switches = { stock = true }
 skill_max_concurrency = 1
-skill_timeout_seconds = 30
+skill_timeout_seconds = 86400
 # 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):
 # - 设为 false: 强制关闭该技能（含 core-floor，不会进入二层路由提示词，也不可执行）/ Set false: force disable this skill (including core-floor).
 # - 设为 true : 强制开启该技能（会进入二层路由提示词，且可执行）/ Set true: force enable this skill.
@@ -308,6 +308,7 @@ skills_list = [
     "health_check",
     "log_analyze",
     "service_control",
+    "task_control",
     "config_guard",
     "crypto",
     "chat",
@@ -340,7 +341,7 @@ note = "placeholder"
 # 风险/Risk: 当前 `allow=*` + `allow_sudo=true` 权限非常高，误调用风险显著.
 [tools]
 allow = ["*"]
-allow_path_outside_workspace = 0
+allow_path_outside_workspace = true
 allow_sudo = true
 cmd_timeout_seconds = 60
 deny = []
@@ -377,4 +378,4 @@ poll_interval_ms = 500
 # 队列上限 / Max queued tasks in memory.
 queue_limit = 128
 # 单任务硬超时（秒） / Hard timeout per task in seconds.
-task_timeout_seconds = 600
+task_timeout_seconds = 86400

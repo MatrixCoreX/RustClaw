@@ -12,6 +12,10 @@ pub(crate) fn update_task_success(
     super::update_task_success(state, task_id, result_json)
 }
 
+pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
+    super::touch_running_task(state, task_id)
+}
+
 pub(crate) fn update_task_progress_result(
     state: &AppState,
     task_id: &str,
