@@ -1,3 +1,0 @@
-[2m2026-03-15T14:54:38.521017Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: mode=long_connection health check on 0.0.0.0:8789 (GET /health)
-[2m2026-03-15T14:54:38.521663Z[0m [32m INFO[0m [2mfeishud[0m[2m:[0m feishud: long connection starting (app_id=cli_a939d198c8ba1cc8)
-[2m2026-03-15T14:54:42.620504Z[0m [32m INFO[0m [2mopen_lark::client::ws_client::client[0m[2m:[0m connected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7617495885883083705&access_key=3705948084c2af934e8b69c5f66f4362&service_id=33554678&ticket=b81c2dad-202d-4d06-97a6-a5e2428a1073
