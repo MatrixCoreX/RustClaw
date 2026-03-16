@@ -18,16 +18,50 @@ crypto_confirm_ttl_seconds = 15
 # Legacy allowlist user IDs (integer).
 # Kept for compatibility; runtime access now depends on key binding.
 allowlist = []
+# 访问类型：public=所有 Telegram 用户都能问；specified=只允许下面名单里的账号提问
+access_mode = "public"
+# 当 access_mode = "specified" 时生效。填写 Telegram username，不区分大小写，支持带 @ 或不带 @。
+allowed_usernames = []
 # 音频落盘目录
 audio_inbox_dir = "audio/upload"
 # 仅当收到纯图片消息时自动触发视觉能力
 auto_vision_on_image_only = false
 # Telegram Bot Token
 bot_token = "__RC_SECRET_0003__"
+# Primary bot 对应哪个 agent；留空时默认 main
+agent_id = "main"
+# Optional multi-bot roster. Each entry runs inside the same telegramd process.
+# Keep [telegram].bot_token for the primary bot, then add extra bots below.
+# Example:
+# [[agents]]
+# id = "main"
+# name = "Main"
+# persona_prompt = "你是默认助手，回答清晰稳定。"
+#
+# [[agents]]
+# id = "sales"
+# name = "Sales"
+# persona_prompt = "你是销售助理，优先清晰、主动、推动下一步。"
+# preferred_vendor = "openai"
+# preferred_model = "gpt-4o-mini"
+# allowed_skills = ["http_basic", "image_generate"]
+#
+# [[telegram.bots]]
+# name = "sales"
+# bot_token = "123456:ABCDEF"
+# agent_id = "sales"
+# admins = [1985996990]
+# allowlist = []
+# access_mode = "specified"
+# allowed_usernames = ["alice", "@bob"]
+# language = "zh-CN"
+# i18n_path = "configs/i18n/telegramd.zh-CN.toml"
 # Optional static bindings loaded into channel_bindings on clawd startup.
 # Use this only if you want to pre-bind a Telegram account to a key.
 # Example:
 # bindings = [{ external_user_id = "1985996990", external_chat_id = "1985996990", user_key = "rk-REPLACE_ME" }]
+# Per-bot binding example:
+# bindings = [{ telegram_bot_name = "sales", external_user_id = "1985996990", external_chat_id = "1985996990", user_key = "rk-REPLACE_ME" }]
 bindings = []
 # i18n 文案路径
 i18n_path = "configs/i18n/telegramd.zh-CN.toml"
@@ -63,6 +97,10 @@ enabled = true
 admins = []
 # 兼容入口允许列表（通常留空，沿用 [telegram]）
 allowlist = []
+# 兼容入口访问类型（通常留空，沿用 [telegram]）
+access_mode = "public"
+# 兼容入口允许的 Telegram 用户名
+allowed_usernames = []
 # 兼容入口语言
 language = "zh-CN"
 # 兼容入口 i18n 路径
