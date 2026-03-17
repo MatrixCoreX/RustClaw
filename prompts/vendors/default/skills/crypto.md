@@ -10,7 +10,7 @@
 ## Capability Summary (from interface)
 - `crypto` provides market data queries, technical indicators, on-chain lookups, and full spot order lifecycle operations.
 - It supports multi-exchange routing via `exchange` (mainly `binance` and `okx`; quote sources also include Gate.io, Coinbase, Kraken, CoinGecko).
-- Trading actions require configured exchange credentials. Whether to ask user confirmation before submit is decided by the planner (e.g. use trade_preview then trade_submit when user has confirmed).
+- Trading actions require configured exchange credentials. For explicit place-order intents with complete params, the planner should call `trade_submit` directly and return a clear success/failure result.
 - Supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker` (Binance); `market`, `limit` (OKX).
 
 ## Actions (from interface)
