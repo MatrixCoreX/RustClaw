@@ -260,6 +260,8 @@ const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
   rss_fetch: { zh: "抓取和整理 RSS 资讯。", en: "Fetch and summarize RSS feeds." },
   run_cmd: { zh: "运行命令行命令。", en: "Run shell commands." },
   service_control: { zh: "启动、停止或重启服务。", en: "Start, stop, or restart services." },
+  stock: { zh: "股票市场技能。", en: "Stock market skill." },
+  task_control: { zh: "查看、取消当前会话未完成任务。", en: "List and cancel unfinished tasks in the current chat." },
   system_basic: { zh: "查看系统信息和基础环境。", en: "Inspect system information and environment basics." },
   write_file: { zh: "写入或修改文件内容。", en: "Write or update file contents." },
   x: { zh: "xurl调用技能。", en: "xurl invocation skill." },
@@ -2221,10 +2223,7 @@ export default function App() {
   const describeSkill = (name: string) =>
     SKILL_SUMMARY[name]
       ? t(SKILL_SUMMARY[name].zh, SKILL_SUMMARY[name].en)
-      : t(
-          "这是一个额外接入的技能。先在这里设定开关，保存后才会真正生效。",
-          "This is an additional integrated skill. Choose its switch here and save to apply it.",
-        );
+      : t("该技能无简短说明。", "No short description for this skill.");
   const applyLlmVendorDraft = (nextVendor: string) => {
     const vendorInfo = llmConfigData?.vendors.find((vendor) => vendor.name === nextVendor);
     setLlmDraftVendor(nextVendor);
