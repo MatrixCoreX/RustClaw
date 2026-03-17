@@ -16,6 +16,7 @@ pub(crate) fn prepare_prompt_with_memory(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
+    chat_memory_budget_chars: usize,
 ) -> PromptMemoryContext {
     let structured = recall_structured_memory_context(
         state,
@@ -39,9 +40,7 @@ pub(crate) fn prepare_prompt_with_memory(
     let chat_prompt_context = structured_memory_context_block(
         &structured,
         MemoryContextMode::Chat,
-        state
-            .memory
-            .chat_memory_budget_chars
+        chat_memory_budget_chars
             .max(384)
             .min(state.memory.prompt_max_chars.max(384)),
     );

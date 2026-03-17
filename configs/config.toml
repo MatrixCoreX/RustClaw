@@ -130,7 +130,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: base_url 或鉴权不匹配会导致 401/404.
 [llm.qwen]
-api_key = "__RC_SECRET_0004__"
+api_key = "sk-edb55ffba9f44173922a1a96cc16f9c1"
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 max_concurrency = 1
 model = "qwen-max-latest"

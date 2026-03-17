@@ -34,7 +34,6 @@ use tracing::{debug, info, warn};
 #[derive(Clone)]
 struct BotState {
     bot_name: String,
-    agent_id: String,
     admins: Arc<HashSet<i64>>,
     allowlist: Arc<HashSet<i64>>,
     access_mode: String,
@@ -239,7 +238,7 @@ async fn resolve_telegram_identity(
     let url = format!("{}/v1/auth/channel/resolve", state.clawd_base_url);
     let req = ResolveChannelBindingRequest {
         channel: ChannelKind::Telegram,
-        telegram_bot_name: Some(state.bot_name.clone()),
+        telegram_bot_name: None,
         external_user_id: Some(platform_user_id.to_string()),
         external_chat_id: Some(platform_chat_id.to_string()),
     };
@@ -264,7 +263,7 @@ async fn bind_telegram_identity(
     let url = format!("{}/v1/auth/channel/bind", state.clawd_base_url);
     let req = BindChannelKeyRequest {
         channel: ChannelKind::Telegram,
-        telegram_bot_name: Some(state.bot_name.clone()),
+        telegram_bot_name: None,
         external_user_id: Some(platform_user_id.to_string()),
         external_chat_id: Some(platform_chat_id.to_string()),
         user_key: user_key.trim().to_string(),
@@ -581,9 +580,15 @@ async fn main() -> anyhow::Result<()> {
         VOICE_MODE_INTENT_PROMPT_PATH,
         DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE,
     );
-    let telegram_runtime_bots = config.telegram_runtime_bots();
+    let mut telegram_runtime_bots = config.telegram_runtime_bots();
     if telegram_runtime_bots.is_empty() {
         return Err(anyhow!("no telegram bot configured"));
+    }
+    if telegram_runtime_bots.len() > 1 {
+        warn!(
+            "single-bot mode enabled: only the first configured bot will run; total_configured={}",
+            telegram_runtime_bots.len()
+        );
     }
     info!(
         "telegram runtimes configured: count={} names={:?}",
@@ -594,57 +599,17 @@ async fn main() -> anyhow::Result<()> {
             .collect::<Vec<_>>()
     );
 
-    let mut join_set = tokio::task::JoinSet::new();
-    let mut remaining = 0usize;
-    for bot_config in telegram_runtime_bots {
-        let state = build_bot_state(
-            &config,
-            &bot_config,
-            client.clone(),
-            Arc::clone(&voice_mode_intent_aliases),
-            &workspace_root,
-            &voice_chat_prompt_template,
-            &voice_mode_intent_prompt_template,
-        );
-        join_set.spawn(run_telegram_bot_runtime(state));
-        remaining += 1;
-    }
-    let mut last_error: Option<String> = None;
-    while let Some(result) = join_set.join_next().await {
-        remaining = remaining.saturating_sub(1);
-        match result {
-            Ok(Ok(())) => {
-                warn!(
-                    "telegram bot runtime stopped: remaining_runtimes={}",
-                    remaining
-                );
-                if last_error.is_none() {
-                    last_error = Some("one telegram bot runtime stopped".to_string());
-                }
-            }
-            Ok(Err(err)) => {
-                warn!(
-                    "telegram bot runtime failed: remaining_runtimes={} err={}",
-                    remaining, err
-                );
-                last_error = Some(err.to_string());
-            }
-            Err(err) => {
-                warn!(
-                    "telegram bot runtime join failed: remaining_runtimes={} err={}",
-                    remaining, err
-                );
-                last_error = Some(format!("telegram bot runtime join failed: {err}"));
-            }
-        }
-        if remaining == 0 {
-            break;
-        }
-    }
-    Err(anyhow!(
-        "{}",
-        last_error.unwrap_or_else(|| "all telegram bot runtimes exited".to_string())
-    ))
+    let selected_bot = telegram_runtime_bots.remove(0);
+    let state = build_bot_state(
+        &config,
+        &selected_bot,
+        client,
+        Arc::clone(&voice_mode_intent_aliases),
+        &workspace_root,
+        &voice_chat_prompt_template,
+        &voice_mode_intent_prompt_template,
+    );
+    run_telegram_bot_runtime(state).await
 }
 
 fn build_bot_state(
@@ -687,7 +652,6 @@ fn build_bot_state(
 
     BotState {
         bot_name: bot_config.name.clone(),
-        agent_id: bot_config.agent_id.clone(),
         admins: Arc::new(admins),
         allowlist: Arc::new(allowlist),
         access_mode: match bot_config.access_mode.trim().to_ascii_lowercase().as_str() {
@@ -1165,6 +1129,10 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         .as_ref()
         .map(|identity| identity.user_id)
         .unwrap_or(platform_user_id);
+    let is_admin = bound_identity
+        .as_ref()
+        .is_some_and(|identity| identity.role.eq_ignore_ascii_case("admin"))
+        || state.admins.contains(&platform_user_id);
 
     // If user sends an image without text:
     // - auto_vision_on_image_only=true: save + auto-run image_vision
@@ -1197,16 +1165,72 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     }
 
     if text.starts_with("/rustclaw") || text.starts_with("/openclaw") {
-        bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.console_only_command"))
-            .await
-            .context("send /rustclaw console-only failed")?;
+        if !is_admin {
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.openclaw_admin_only"))
+                .await
+                .context("send /rustclaw unauthorized failed")?;
+            return Ok(());
+        }
+        let state_for_cmd = state.clone();
+        let text_owned = text.to_string();
+        let openclaw_result = tokio::task::spawn_blocking(move || {
+            handle_openclaw_config_command(&state_for_cmd, &text_owned)
+        })
+        .await
+        .map_err(|err| anyhow!("join rustclaw config task failed: {err}"))?;
+        match openclaw_result {
+            Ok(reply) => {
+                bot.send_message(msg.chat.id, reply)
+                    .await
+                    .context("send /rustclaw reply failed")?;
+            }
+            Err(err) => {
+                bot.send_message(
+                    msg.chat.id,
+                    state
+                        .i18n
+                        .t_with("telegram.msg.config_failed", &[("error", &err.to_string())]),
+                )
+                .await
+                .context("send /rustclaw error failed")?;
+            }
+        }
         return Ok(());
     }
 
     if text.starts_with("/cryptoapi") {
-        bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.console_only_command"))
+        let Some(identity) = bound_identity.as_ref() else {
+            set_expect_key_reply(&state, platform_chat_id, true);
+            bot.send_message(
+                msg.chat.id,
+                "请先发送你的 key 进行绑定。\nPlease send your key first to bind this account.",
+            )
             .await
-            .context("send /cryptoapi console-only failed")?;
+            .context("send key prompt for /cryptoapi failed")?;
+            return Ok(());
+        };
+        let raw = text.strip_prefix("/cryptoapi").unwrap_or_default().trim();
+        match handle_cryptoapi_command(&state, identity, raw).await {
+            Ok(reply) => {
+                if raw.to_ascii_lowercase().starts_with("set ") {
+                    clear_pending_resume_for_chat(&state, msg.chat.id.0);
+                }
+                bot.send_message(msg.chat.id, reply)
+                    .await
+                    .context("send /cryptoapi reply failed")?;
+            }
+            Err(err) => {
+                bot.send_message(
+                    msg.chat.id,
+                    state.i18n.t_with(
+                        "telegram.msg.cryptoapi_config_failed",
+                        &[("error", &err.to_string())],
+                    ),
+                )
+                .await
+                .context("send /cryptoapi error failed")?;
+            }
+        }
         return Ok(());
     }
 
@@ -1387,9 +1411,40 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     if text.starts_with("/crypto") {
         let raw = text.strip_prefix("/crypto").unwrap_or_default().trim();
         if raw.to_ascii_lowercase().starts_with("add ") {
-            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.console_only_command"))
+            if !is_admin {
+                bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.cryptoapi_admin_only"))
+                    .await
+                    .context("send /crypto add unauthorized failed")?;
+                return Ok(());
+            }
+            let Some(identity) = bound_identity.as_ref() else {
+                set_expect_key_reply(&state, platform_chat_id, true);
+                bot.send_message(
+                    msg.chat.id,
+                    "请先发送你的 key 进行绑定。\nPlease send your key first to bind this account.",
+                )
                 .await
-                .context("send /crypto add console-only failed")?;
+                .context("send key prompt for /crypto add failed")?;
+                return Ok(());
+            };
+            match handle_cryptoapi_command(&state, identity, raw).await {
+                Ok(reply) => {
+                    bot.send_message(msg.chat.id, reply)
+                        .await
+                        .context("send /crypto add reply failed")?;
+                }
+                Err(err) => {
+                    bot.send_message(
+                        msg.chat.id,
+                        state.i18n.t_with(
+                            "telegram.msg.cryptoapi_config_failed",
+                            &[("error", &err.to_string())],
+                        ),
+                    )
+                    .await
+                    .context("send /crypto add error failed")?;
+                }
+            }
             return Ok(());
         }
         let payload = match build_crypto_skill_payload(raw) {
@@ -1544,9 +1599,72 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     }
 
     if text.starts_with("/sendfile") {
-        bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.console_only_command"))
+        let raw = text.strip_prefix("/sendfile").unwrap_or_default().trim();
+        if raw.is_empty() {
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.sendfile_usage"))
+                .await
+                .context("send /sendfile usage failed")?;
+            return Ok(());
+        }
+        if state.sendfile_admin_only && !is_admin {
+            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.sendfile_admin_only"))
+                .await
+                .context("send /sendfile admin-only rejection failed")?;
+            return Ok(());
+        }
+        let path = normalize_path_token(raw);
+        let p = match resolve_sendfile_path(
+            path,
+            state.sendfile_full_access,
+            state.sendfile_allowed_dirs.as_ref(),
+        ) {
+            Ok(v) => v,
+            Err(err) => {
+                bot.send_message(
+                    msg.chat.id,
+                    state
+                        .i18n
+                        .t_with("telegram.msg.sendfile_invalid_path", &[("error", &err)]),
+                )
+                .await
+                .context("send /sendfile path rejection failed")?;
+                return Ok(());
+            }
+        };
+        if !p.exists() {
+            bot.send_message(
+                msg.chat.id,
+                state.i18n.t_with(
+                    "telegram.msg.file_not_found",
+                    &[("path", &p.display().to_string())],
+                ),
+            )
             .await
-            .context("send /sendfile console-only failed")?;
+            .context("send /sendfile not found failed")?;
+            return Ok(());
+        }
+        if !p.is_file() {
+            bot.send_message(
+                msg.chat.id,
+                state.i18n.t_with(
+                    "telegram.msg.not_a_file",
+                    &[("path", &p.display().to_string())],
+                ),
+            )
+            .await
+            .context("send /sendfile not file failed")?;
+            return Ok(());
+        }
+        let path_s = p.display().to_string();
+        if is_image_file(&path_s) {
+            bot.send_photo(msg.chat.id, InputFile::file(path_s))
+                .await
+                .context("send /sendfile image failed")?;
+        } else {
+            bot.send_document(msg.chat.id, InputFile::file(path_s))
+                .await
+                .context("send /sendfile document failed")?;
+        }
         return Ok(());
     }
 
@@ -2646,10 +2764,14 @@ fn telegram_text_payload(text: &str) -> (String, Option<ParseMode>) {
             Some(ParseMode::Html),
         );
     }
-    if let Some(inline_html) = render_inline_code_html(text) {
+    let normalized = normalize_markdown_heading_markers(text);
+    if let Some(inline_html) = render_inline_code_html(&normalized) {
         return (inline_html, Some(ParseMode::Html));
     }
-    (text.to_string(), None)
+    if let Some(copyable_html) = render_copyable_tokens_html(&normalized) {
+        return (copyable_html, Some(ParseMode::Html));
+    }
+    (normalized, None)
 }
 
 async fn send_telegram_text(bot: &Bot, chat_id: ChatId, text: &str) -> anyhow::Result<Message> {
@@ -2680,14 +2802,21 @@ async fn send_telegram_text(bot: &Bot, chat_id: ChatId, text: &str) -> anyhow::R
     // Long text: send each chunk as plain text (no HTML/code) with segment hint.
     let mut last = None;
     for (i, chunk) in chunks.into_iter().enumerate() {
-        let body = format!("（{}/{}）\n{}", i + 1, n, chunk);
+        let segment_text = format!("（{}/{}）\n{}", i + 1, n, chunk);
+        let (body, parse_mode) = telegram_text_payload(&segment_text);
         info!(
             "send_chunk channel=telegram chat_id={:?} index={} total={}",
             chat_id,
             i + 1,
             n
         );
-        let msg = bot.send_message(chat_id, body).await?;
+        let req = bot.send_message(chat_id, body);
+        let req = if let Some(mode) = parse_mode {
+            req.parse_mode(mode)
+        } else {
+            req
+        };
+        let msg = req.await?;
         last = Some(msg);
     }
     Ok(last.expect("chunks non-empty"))
@@ -2726,7 +2855,8 @@ async fn send_telegram_text_with_markup(
     // Long text: send each chunk as plain text with segment hint; attach markup only to the last message.
     let mut last = None;
     for (i, chunk) in chunks.into_iter().enumerate() {
-        let body = format!("（{}/{}）\n{}", i + 1, n, chunk);
+        let segment_text = format!("（{}/{}）\n{}", i + 1, n, chunk);
+        let (body, parse_mode) = telegram_text_payload(&segment_text);
         info!(
             "send_chunk channel=telegram chat_id={:?} index={} total={}",
             chat_id,
@@ -2734,6 +2864,11 @@ async fn send_telegram_text_with_markup(
             n
         );
         let req = bot.send_message(chat_id, body);
+        let req = if let Some(mode) = parse_mode {
+            req.parse_mode(mode)
+        } else {
+            req
+        };
         let req = if i == n - 1 {
             req.reply_markup(reply_markup.clone())
         } else {
@@ -2790,6 +2925,323 @@ fn render_inline_code_html(text: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn normalize_markdown_heading_markers(text: &str) -> String {
+    text.lines()
+        .map(normalize_markdown_heading_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_markdown_heading_line(line: &str) -> String {
+    let indent_len = line.len().saturating_sub(line.trim_start().len());
+    let indent = &line[..indent_len];
+    let mut body = line[indent_len..].to_string();
+    let mut changed = false;
+
+    if let Some(stripped) = strip_markdown_heading_prefix(&body) {
+        body = stripped.to_string();
+        changed = true;
+    }
+
+    let (list_prefix, rest) = split_list_prefix(&body);
+    let rest_trimmed = rest.trim();
+    let unwrapped = strip_surrounding_emphasis(rest_trimmed);
+    if unwrapped != rest_trimmed && (changed || looks_like_heading_text(&unwrapped)) {
+        let rebuilt = if list_prefix.is_empty() {
+            unwrapped.to_string()
+        } else {
+            format!("{list_prefix}{unwrapped}")
+        };
+        return format!("{indent}{rebuilt}");
+    }
+
+    if changed {
+        return format!("{indent}{}", body.trim_start());
+    }
+
+    line.to_string()
+}
+
+fn strip_markdown_heading_prefix(input: &str) -> Option<&str> {
+    let mut idx = 0usize;
+    let bytes = input.as_bytes();
+    while idx < bytes.len() && bytes[idx] == b'#' {
+        idx += 1;
+    }
+    if idx == 0 || idx > 6 {
+        return None;
+    }
+    if idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        return Some(input[idx..].trim_start());
+    }
+    None
+}
+
+fn split_list_prefix(input: &str) -> (&str, &str) {
+    let trimmed = input.trim_start();
+    let leading_ws_len = input.len().saturating_sub(trimmed.len());
+    for marker in ["- ", "* ", "+ ", "• "] {
+        if let Some(rest) = trimmed.strip_prefix(marker) {
+            let prefix_len = leading_ws_len + marker.len();
+            return (&input[..prefix_len], rest);
+        }
+    }
+
+    let mut digit_count = 0usize;
+    for ch in trimmed.chars() {
+        if ch.is_ascii_digit() {
+            digit_count += 1;
+        } else {
+            break;
+        }
+    }
+    if digit_count > 0 {
+        let after_digits = &trimmed[digit_count..];
+        if let Some(rest) = after_digits.strip_prefix(". ") {
+            let prefix_len = leading_ws_len + digit_count + 2;
+            return (&input[..prefix_len], rest);
+        }
+        if let Some(rest) = after_digits.strip_prefix(") ") {
+            let prefix_len = leading_ws_len + digit_count + 2;
+            return (&input[..prefix_len], rest);
+        }
+    }
+
+    ("", input)
+}
+
+fn strip_surrounding_emphasis(input: &str) -> String {
+    let mut out = input.trim().to_string();
+    loop {
+        let next = if out.len() >= 4 && out.starts_with("**") && out.ends_with("**") {
+            Some(out[2..out.len().saturating_sub(2)].trim().to_string())
+        } else if out.len() >= 4 && out.starts_with("__") && out.ends_with("__") {
+            Some(out[2..out.len().saturating_sub(2)].trim().to_string())
+        } else if out.len() >= 2 && out.starts_with('*') && out.ends_with('*') {
+            Some(out[1..out.len().saturating_sub(1)].trim().to_string())
+        } else if out.len() >= 2 && out.starts_with('_') && out.ends_with('_') {
+            Some(out[1..out.len().saturating_sub(1)].trim().to_string())
+        } else {
+            None
+        };
+        match next {
+            Some(v) if !v.is_empty() => out = v,
+            _ => break,
+        }
+    }
+    out
+}
+
+fn looks_like_heading_text(input: &str) -> bool {
+    let len = input.chars().count();
+    len > 0 && len <= 80
+}
+
+fn render_copyable_tokens_html(text: &str) -> Option<String> {
+    if text.trim().is_empty()
+        || has_delivery_prefix(text.trim())
+        || text.contains("```")
+        || text.starts_with("<pre>")
+    {
+        return None;
+    }
+
+    let mut out = String::new();
+    let mut plain_start = 0usize;
+    let mut wrapped_any = false;
+    let mut token_start: Option<usize> = None;
+    let mut indices: Vec<(usize, char)> = text.char_indices().collect();
+    indices.push((text.len(), '\0'));
+
+    for (idx, ch) in &indices {
+        let is_token_char = is_copyable_token_char(*ch);
+        match (token_start, is_token_char) {
+            (None, true) => {
+                token_start = Some(*idx);
+            }
+            (Some(start), false) => {
+                if plain_start < start {
+                    out.push_str(&escape_telegram_html(&text[plain_start..start]));
+                }
+                let token = &text[start..*idx];
+                if let Some(html) = wrap_copyable_token_html(token) {
+                    out.push_str(&html);
+                    wrapped_any = true;
+                } else {
+                    out.push_str(&escape_telegram_html(token));
+                }
+                plain_start = *idx;
+                token_start = None;
+            }
+            _ => {}
+        }
+    }
+
+    if plain_start < text.len() {
+        out.push_str(&escape_telegram_html(&text[plain_start..]));
+    }
+
+    if wrapped_any {
+        Some(out)
+    } else {
+        None
+    }
+}
+
+fn is_copyable_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | ':' | '/' | '%' | '@' | '+')
+}
+
+fn wrap_copyable_token_html(token: &str) -> Option<String> {
+    let (prefix, core, suffix) = split_token_affixes(token);
+    if core.is_empty() || !is_copyable_token_core(core) {
+        return None;
+    }
+    Some(format!(
+        "{}<code>{}</code>{}",
+        escape_telegram_html(prefix),
+        escape_telegram_html(core),
+        escape_telegram_html(suffix)
+    ))
+}
+
+fn split_token_affixes(token: &str) -> (&str, &str, &str) {
+    let chars: Vec<(usize, char)> = token.char_indices().collect();
+    if chars.is_empty() {
+        return ("", "", "");
+    }
+    let mut left = 0usize;
+    while left < chars.len() && is_token_wrapper_prefix(chars[left].1) {
+        left += 1;
+    }
+    let mut right = chars.len();
+    while right > left && is_token_wrapper_suffix(chars[right - 1].1) {
+        right -= 1;
+    }
+    let core_start = if left < chars.len() {
+        chars[left].0
+    } else {
+        token.len()
+    };
+    let core_end = if right < chars.len() {
+        chars[right].0
+    } else {
+        token.len()
+    };
+    (&token[..core_start], &token[core_start..core_end], &token[core_end..])
+}
+
+fn is_token_wrapper_prefix(ch: char) -> bool {
+    matches!(ch, '"' | '\'' | '`' | '(' | '[' | '{' | '<' | '（' | '【' | '《')
+}
+
+fn is_token_wrapper_suffix(ch: char) -> bool {
+    matches!(
+        ch,
+        '"' | '\'' | '`' | ')' | ']' | '}' | '>' | ',' | ';' | '!' | '?' | ':' | '，' | '。'
+            | '；' | '！' | '？' | '：' | '）' | '】' | '》'
+    )
+}
+
+fn is_copyable_token_core(core: &str) -> bool {
+    looks_like_ip_or_endpoint(core)
+        || looks_like_number_value(core)
+        || looks_like_general_command_token(core)
+}
+
+fn looks_like_ip_or_endpoint(core: &str) -> bool {
+    is_ipv4_token(core) || is_ipv6_token(core) || is_host_port_token(core)
+}
+
+fn is_ipv4_token(core: &str) -> bool {
+    let parts: Vec<&str> = core.split('.').collect();
+    if parts.len() != 4 {
+        return false;
+    }
+    parts.iter().all(|part| {
+        !part.is_empty()
+            && part.chars().all(|c| c.is_ascii_digit())
+            && part.parse::<u16>().map(|v| v <= 255).unwrap_or(false)
+    })
+}
+
+fn is_ipv6_token(core: &str) -> bool {
+    let colon_count = core.chars().filter(|&c| c == ':').count();
+    if colon_count < 2 {
+        return false;
+    }
+    core.chars()
+        .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.')
+}
+
+fn is_host_port_token(core: &str) -> bool {
+    let Some((host, port)) = core.rsplit_once(':') else {
+        return false;
+    };
+    if host.is_empty() || port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    if host.eq_ignore_ascii_case("localhost") || is_ipv4_token(host) {
+        return true;
+    }
+    host.contains('.')
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+}
+
+fn looks_like_number_value(core: &str) -> bool {
+    let cleaned = core.replace(',', "").replace('_', "");
+    if cleaned.chars().all(|c| c.is_ascii_digit()) {
+        return cleaned.len() >= 4;
+    }
+    let Some((left, right)) = cleaned.split_once('.') else {
+        return false;
+    };
+    if left.is_empty()
+        || right.is_empty()
+        || !left.chars().all(|c| c.is_ascii_digit())
+        || !right.chars().all(|c| c.is_ascii_digit())
+    {
+        return false;
+    }
+    left.len() + right.len() >= 4
+}
+
+fn looks_like_general_command_token(core: &str) -> bool {
+    let lower = core.to_ascii_lowercase();
+    if lower.starts_with("--") && lower.len() > 2 {
+        return true;
+    }
+    if lower.starts_with('-') && lower.len() > 2 && lower[1..].chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return true;
+    }
+    matches!(
+        lower.as_str(),
+        "rustclaw"
+            | "openclaw"
+            | "cargo"
+            | "npm"
+            | "pnpm"
+            | "yarn"
+            | "python"
+            | "python3"
+            | "pip"
+            | "pip3"
+            | "git"
+            | "curl"
+            | "wget"
+            | "ssh"
+            | "systemctl"
+            | "docker"
+            | "kubectl"
+            | "node"
+            | "bash"
+            | "sh"
+            | "zsh"
+    )
 }
 
 fn code_or_command_block_body(text: &str) -> Option<String> {
@@ -3860,20 +4312,13 @@ async fn submit_task_only(
     user_id: i64,
     chat_id: i64,
     kind: TaskKind,
-    mut payload: serde_json::Value,
+    payload: serde_json::Value,
 ) -> anyhow::Result<String> {
     let user_key = state
         .bound_identity_by_chat
         .lock()
         .ok()
         .and_then(|map| map.get(&chat_id).map(|identity| identity.user_key.clone()));
-    if let Some(obj) = payload.as_object_mut() {
-        obj.insert(
-            "telegram_bot_name".to_string(),
-            JsonValue::String(state.bot_name.clone()),
-        );
-        obj.insert("agent_id".to_string(), JsonValue::String(state.agent_id.clone()));
-    }
     let payload_compact = payload.to_string();
     let payload_fp = text_fingerprint_hex(&payload_compact);
     let payload_preview = text_preview_for_log(&payload_compact, 180);
