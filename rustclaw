@@ -46,73 +46,83 @@ EOF
 
 usage() {
   cat <<'EOF'
-Usage:
+Usage / 用法:
   rustclaw -start [release|debug] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--with-ui]
+    # Start services / 启动服务（可选配置与通道）
   rustclaw -start [vendor] [model] [release|debug] [channels]
+    # Start with vendor/model / 按厂商与模型启动
   rustclaw -start --vendor <openai|google|anthropic|grok|qwen|custom> [--model <name>] [--profile <release|debug>] [--channels <...>] [--quick] [--skip-setup] [--with-ui] [--force-ui-rebuild]
+    # Full start options / 完整启动参数
   rustclaw -stop
+    # Stop all RustClaw processes / 停止所有 RustClaw 进程
   rustclaw -restart [release|debug] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--quick] [--skip-setup] [--with-ui]
-  rustclaw start -q            # 简化：免配置直接启动
-  rustclaw restart -q          # 简化：免配置直接重启
+    # Stop then start / 先停后启
+  rustclaw start -q
+    # Shortcut: quick start without setup / 简化：免配置直接启动
+  rustclaw restart -q
+    # Shortcut: quick restart / 简化：免配置直接重启
   rustclaw -status
+    # Show process status / 查看进程状态
   rustclaw -build [all|release|debug]
+    # Build workspace / 构建工作区
   rustclaw -logs [all|clawd|telegramd|whatsappd|whatsapp_webd|feishud] [lines] [--follow]
+    # Tail logs / 查看日志（可选行数与持续跟随）
   rustclaw -health
+    # HTTP health check / 健康检查
   rustclaw -key list
+    # List API keys / 列出 API 密钥
   rustclaw -key generate [admin|user]
+    # Generate new key / 生成新密钥（角色 admin 或 user）
   rustclaw -key add <user_key> [admin|user]
+    # Add existing key / 添加已有密钥并设角色
   rustclaw -key disable <user_key>
+    # Disable key / 禁用指定密钥
   rustclaw -key enable <user_key>
+    # Enable key / 启用指定密钥
   rustclaw -h | --help | help
+    # Show this help / 显示本帮助
 
-Quick start (免配置):
-  start -q    使用 release 配置、all 通道，跳过交互式配置，直接启动。
-  restart -q  先停止再以同上方式启动。等同 -restart release all --quick --skip-setup。
+Quick start / 免配置快速启动:
+  start -q    Use release profile + all channels, no interactive setup. / 使用 release、all 通道，跳过交互，直接启动。
+  restart -q  Stop then start as above. Same as -restart release all --quick --skip-setup. / 先停止再按上述方式启动。
 
-Parameters:
-  -start / -restart (或 start / restart):
-    vendor     : openai | google | anthropic | grok | qwen | custom
-    model      : model override string
-    profile    : release | debug (default: start-all.sh default)
-    channels   : telegram | whatsapp_web | both | whatsapp_cloud | all
-    -q         : 简写，= --quick --skip-setup，且默认 release all（免配置）
-    --quick    : quick start (maps to start-all.sh 5th arg)
-    --skip-setup : skip interactive setup
-    --with-ui  : enable UI build/start path
-    --force-ui-rebuild : force rebuild UI assets when --with-ui is enabled
+Parameters / 参数说明:
+  -start / -restart (or start / restart):
+    vendor     : openai | google | anthropic | grok | qwen | custom  (LLM vendor / 模型厂商)
+    model      : model override string  (模型名覆盖)
+    profile    : release | debug  (构建配置 / 默认由 start-all.sh 决定)
+    channels   : telegram | whatsapp_web | both | whatsapp_cloud | all  (通道)
+    -q         : short for --quick --skip-setup, default release all  / 简写，免配置
+    --quick    : quick start  / 快速启动
+    --skip-setup : skip interactive setup  / 跳过交互式配置
+    --with-ui  : enable UI build/start  / 启用 UI 构建与启动
+    --force-ui-rebuild : force rebuild UI when --with-ui  / 启用 UI 时强制重建前端
 
   -build:
-    profile    : all | release | debug (default: release)
+    profile    : all | release | debug (default: release)  / 构建类型
 
   -logs:
-    service    : all | clawd | telegramd | whatsappd | whatsapp_webd | feishud (default: all)
-    lines      : integer, number of tail lines (default: 80)
-    --follow   : follow log output continuously
+    service    : all | clawd | telegramd | whatsappd | whatsapp_webd | feishud (default: all)  / 服务名
+    lines      : tail line count (default: 80)  / 显示行数
+    --follow   : follow log stream  / 持续输出新日志
 
   -key:
-    list               : 列出当前数据库中的 user_key
-    generate <role>    : 生成新 key，role 可选 admin 或 user（默认 user）
-    add <key> <role>   : 添加现有 key 并设置角色
-    disable <key>      : 禁用指定 key
-    enable <key>       : 启用指定 key
+    list               : List user_key in DB  / 列出当前数据库中的 user_key
+    generate <role>    : Generate new key; role admin or user  / 生成新 key，角色 admin 或 user
+    add <key> <role>   : Add existing key with role  / 添加现有 key 并设置角色
+    disable <key>      : Disable key  / 禁用指定 key
+    enable <key>       : Enable key  / 启用指定 key
 
-Examples:
-  rustclaw start -q            # 免配置直接启动（最简）
-  rustclaw restart -q          # 免配置直接重启（最简）
-  rustclaw -start
-  rustclaw -start release all --quick --skip-setup   # 免配置直接启动（无交互）
-  rustclaw -start release all --with-ui
-  rustclaw -start release all
-  rustclaw -restart release all --quick --skip-setup  # 免配置直接重启（跳过所有配置）
-  rustclaw -restart debug telegram
-  rustclaw -restart release all --with-ui
-  rustclaw -logs clawd 200 --follow
-  rustclaw -logs telegramd --follow
-  rustclaw -health
+Examples / 示例:
+  rustclaw start -q                                    # Quick start / 免配置直接启动（最简）
+  rustclaw restart -q                                  # Quick restart / 免配置直接重启
+  rustclaw -start release all --quick --skip-setup     # Start without prompts / 免配置直接启动（无交互）
+  rustclaw -start release all --with-ui               # Start with UI / 启动并带 UI
+  rustclaw -restart release all --quick --skip-setup   # Quick restart (no setup) / 免配置直接重启
+  rustclaw -logs clawd 200 --follow                    # Tail clawd log 200 lines, follow / 跟随 clawd 日志 200 行
   rustclaw -key list
   rustclaw -key generate user
   rustclaw -key generate admin
-  rustclaw -key add rk-your-key user
   rustclaw -status
   rustclaw -stop
 EOF

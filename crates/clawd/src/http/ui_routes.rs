@@ -167,7 +167,6 @@ fn telegram_bots_from_config(config: &claw_core::config::AppConfig) -> Vec<Teleg
             } else {
                 config.telegram.agent_id.trim().to_string()
             },
-            admins: config.telegram.admins.clone(),
             allowlist: config.telegram.allowlist.clone(),
             access_mode: normalize_telegram_access_mode(&config.telegram.access_mode),
             allowed_telegram_usernames: normalize_telegram_username_list(&config.telegram.allowed_usernames),
@@ -182,7 +181,6 @@ fn telegram_bots_from_config(config: &claw_core::config::AppConfig) -> Vec<Teleg
         } else {
             bot.agent_id.trim().to_string()
         },
-        admins: bot.admins.clone(),
         allowlist: bot.allowlist.clone(),
         access_mode: if bot.access_mode.trim().is_empty() {
             normalize_telegram_access_mode(&config.telegram.access_mode)
@@ -320,8 +318,7 @@ fn normalize_telegram_bot_items(
             name,
             bot_token: bot.bot_token.trim().to_string(),
             agent_id,
-            admins: bot.admins.clone(),
-            allowlist: bot.allowlist.clone(),
+                allowlist: bot.allowlist.clone(),
             access_mode: normalize_telegram_access_mode(&bot.access_mode),
             allowed_telegram_usernames: normalize_telegram_username_list(&bot.allowed_telegram_usernames),
             is_primary,
@@ -913,19 +910,6 @@ async fn update_telegram_config(
         ),
     );
     telegram_table.insert(
-        "admins".to_string(),
-        toml::Value::Array(
-            primary
-                .as_ref()
-                .map(|bot| bot.admins.as_slice())
-                .unwrap_or(&[])
-                .iter()
-                .copied()
-                .map(|id| toml::Value::Integer(id))
-                .collect(),
-        ),
-    );
-    telegram_table.insert(
         "allowlist".to_string(),
         toml::Value::Array(
             primary
@@ -972,16 +956,6 @@ async fn update_telegram_config(
                 toml::Value::String(bot.bot_token.clone()),
             );
             table.insert("agent_id".to_string(), toml::Value::String(bot.agent_id.clone()));
-            table.insert(
-                "admins".to_string(),
-                toml::Value::Array(
-                    bot.admins
-                        .iter()
-                        .copied()
-                        .map(|id| toml::Value::Integer(id))
-                        .collect(),
-                ),
-            );
             table.insert(
                 "allowlist".to_string(),
                 toml::Value::Array(
@@ -3167,8 +3141,6 @@ struct TelegramBotConfigItem {
     bot_token: String,
     #[serde(default = "default_agent_id")]
     agent_id: String,
-    #[serde(default)]
-    admins: Vec<i64>,
     #[serde(default)]
     allowlist: Vec<i64>,
     #[serde(default = "default_telegram_access_mode")]

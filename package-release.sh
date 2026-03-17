@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# 打包「开盒即用」发布包：仅含预编译二进制、前端构建产物(UI/dist)、配置、脚本等；
+# 不含 UI 源码、不含主程序(Rust) 源码；解压即可运行，无需编译或构建。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,95 +10,17 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
-SANITIZED_CONFIG="$SCRIPT_DIR/configs/config.release.sanitized.toml"
-if [[ ! -f "$SANITIZED_CONFIG" ]]; then
-  echo "Missing sanitized config: $SANITIZED_CONFIG"
-  echo "Please create configs/config.release.sanitized.toml first."
+# 优先使用已脱敏的发布配置；若无则用 config.toml，打包时步骤 5.3 会再脱敏
+if [[ -f "$SCRIPT_DIR/configs/config.release.sanitized.toml" ]]; then
+  SANITIZED_CONFIG="$SCRIPT_DIR/configs/config.release.sanitized.toml"
+elif [[ -f "$SCRIPT_DIR/configs/config.toml" ]]; then
+  SANITIZED_CONFIG="$SCRIPT_DIR/configs/config.toml"
+else
+  echo "Missing config: need configs/config.toml or configs/config.release.sanitized.toml"
   exit 1
 fi
 
-echo "[1/6] Check whether release build is required..."
-BUILD_REQUIRED="$(
-python3 - <<'PY'
-import json
-import os
-import subprocess
-from pathlib import Path
-
-root = Path(".").resolve()
-release_dir = root / "target" / "release"
-
-def latest_source_mtime(base: Path) -> float:
-    latest = 0.0
-    tracked_ext = {".rs", ".toml", ".lock"}
-    tracked_names = {"Cargo.toml", "Cargo.lock"}
-    for current, dirs, files in os.walk(base):
-        p = Path(current)
-        if any(seg in {"target", ".git", "node_modules"} for seg in p.parts):
-            continue
-        for name in files:
-            fp = p / name
-            if fp.name in tracked_names or fp.suffix in tracked_ext:
-                try:
-                    latest = max(latest, fp.stat().st_mtime)
-                except OSError:
-                    pass
-    return latest
-
-meta_raw = subprocess.check_output(
-    ["cargo", "metadata", "--no-deps", "--format-version", "1"],
-    cwd=str(root),
-    text=True,
-)
-meta = json.loads(meta_raw)
-workspace_members = set(meta.get("workspace_members", []))
-bins = set()
-for pkg in meta.get("packages", []):
-    if pkg.get("id") not in workspace_members:
-        continue
-    for target in pkg.get("targets", []):
-        if "bin" in (target.get("kind", []) or []):
-            name = (target.get("name") or "").strip()
-            if name:
-                bins.add(name)
-
-if not bins:
-    print("1")
-    raise SystemExit(0)
-
-latest_src = latest_source_mtime(root)
-if latest_src <= 0:
-    print("1")
-    raise SystemExit(0)
-
-oldest_bin = None
-for name in sorted(bins):
-    bp = release_dir / name
-    if not bp.exists():
-        print("1")
-        raise SystemExit(0)
-    try:
-        m = bp.stat().st_mtime
-    except OSError:
-        print("1")
-        raise SystemExit(0)
-    oldest_bin = m if oldest_bin is None else min(oldest_bin, m)
-
-if oldest_bin is None or oldest_bin < latest_src:
-    print("1")
-else:
-    print("0")
-PY
-)"
-
-if [[ "$BUILD_REQUIRED" == "1" ]]; then
-  echo "Release binaries missing or outdated; building workspace..."
-  cargo build --workspace --release
-else
-  echo "Release binaries are up-to-date; skip rebuild."
-fi
-
-echo "[2/6] Discover and verify release binaries..."
+echo "[1/6] Pack only (no build); discover release binaries..."
 WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
 export RUSTCLAW_WORKSPACE_METADATA="$WORKSPACE_METADATA"
 
@@ -139,84 +63,14 @@ for bin in "${REQUIRED_BINS[@]}"; do
   fi
 done
 
-echo "[3/6] Check UI build freshness..."
-UI_DIR="$SCRIPT_DIR/UI"
-if [[ -d "$UI_DIR" ]]; then
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "npm is required to build UI, but not found."
-    exit 1
-  fi
-  if [[ ! -f "$UI_DIR/package.json" ]]; then
-    echo "UI package.json not found: $UI_DIR/package.json"
-    exit 1
-  fi
-  UI_BUILD_REASON="$(
-python3 - <<'PY'
-import os
-from pathlib import Path
-
-ui = Path("UI")
-dist = ui / "dist"
-
-if not ui.exists():
-    print("no_ui")
-    raise SystemExit(0)
-if not dist.exists() or not (dist / "index.html").exists():
-    print("missing_dist")
-    raise SystemExit(0)
-
-scan_paths = [
-    ui / "src",
-    ui / "public",
-    ui / "index.html",
-    ui / "package.json",
-    ui / "package-lock.json",
-    ui / "vite.config.ts",
-    ui / "vite.config.js",
-    ui / "tsconfig.json",
-]
-
-def latest_mtime(paths):
-    latest = 0.0
-    for p in paths:
-        if not p.exists():
-            continue
-        if p.is_file():
-            latest = max(latest, p.stat().st_mtime)
-            continue
-        for root, _, files in os.walk(p):
-            for name in files:
-                fp = Path(root) / name
-                try:
-                    latest = max(latest, fp.stat().st_mtime)
-                except OSError:
-                    pass
-    return latest
-
-src_latest = latest_mtime(scan_paths)
-dist_latest = latest_mtime([dist])
-if src_latest > dist_latest:
-    print("stale_dist")
-else:
-    print("up_to_date")
-PY
-)"
-  if [[ "$UI_BUILD_REASON" == "missing_dist" || "$UI_BUILD_REASON" == "stale_dist" ]]; then
-    echo "UI build required: $UI_BUILD_REASON"
-    if [[ ! -d "$UI_DIR/node_modules" ]]; then
-      echo "Installing UI dependencies..."
-      (cd "$UI_DIR" && npm install)
-    fi
-    echo "Building UI assets..."
-    (cd "$UI_DIR" && npm run build)
-  else
-    echo "UI assets are up-to-date."
-  fi
+echo "[2/6] UI: pack existing UI/dist if present (no build)..."
+if [[ -d "$SCRIPT_DIR/UI/dist" ]] && [[ -f "$SCRIPT_DIR/UI/dist/index.html" ]]; then
+  echo "UI/dist found, will include in package."
 else
-  echo "UI directory not found, skip UI build."
+  echo "UI/dist missing or incomplete; package will not include frontend assets."
 fi
 
-echo "[4/6] Prepare staging directory..."
+echo "[3/6] Prepare staging directory..."
 STAGE_ROOT="$(mktemp -d)"
 trap 'rm -rf "$STAGE_ROOT"' EXIT
 STAGE_PROJECT_DIR="$STAGE_ROOT/RustClaw"
@@ -262,6 +116,34 @@ for bin in "${REQUIRED_BINS[@]}"; do
   cp -a "$SCRIPT_DIR/target/release/$bin" "$STAGE_PROJECT_DIR/target/release/$bin"
 done
 
+echo "[4.5/6] Add usage note (开盒即用)..."
+cat > "$STAGE_PROJECT_DIR/使用说明.txt" <<'USAGE'
+RustClaw 运行时包 — 解压即用
+
+1) 解压后进入本目录。
+2) 首次运行前请根据 configs/ 配置渠道（如 Telegram/WhatsApp）与模型等。
+3) 启动方式任选其一：
+   - ./start-all.sh <vendor> <model> release [channels]
+     例：./start-all.sh openai gpt-4o release telegram
+   - ./rustclaw -start release all --quick
+   - 仅后端：./start-all-bin.sh release
+4) 停止：./stop-rustclaw.sh
+5) 数据与日志：data/（数据库）、logs/（运行日志）。
+USAGE
+cat > "$STAGE_PROJECT_DIR/USAGE.txt" <<'USAGE_EN'
+RustClaw runtime package — ready to run
+
+1) Extract the archive and cd into this directory.
+2) Before first run, configure channels (e.g. Telegram/WhatsApp) and models under configs/.
+3) Start with one of:
+   - ./start-all.sh <vendor> <model> release [channels]
+     e.g. ./start-all.sh openai gpt-4o release telegram
+   - ./rustclaw -start release all --quick
+   - Backend only: ./start-all-bin.sh release
+4) Stop: ./stop-rustclaw.sh
+5) Data and logs: data/ (database), logs/ (runtime logs).
+USAGE_EN
+
 echo "[5/6] Apply sanitized config as configs/config.toml..."
 cp -a "$SANITIZED_CONFIG" "$STAGE_PROJECT_DIR/configs/config.toml"
 rm -f "$STAGE_PROJECT_DIR/configs/config.release.sanitized.toml"
@@ -277,7 +159,7 @@ for required_dir in \
   fi
 done
 
-echo "[5.3/6] Sanitize sensitive fields in packaged configs..."
+echo "[5.3/6] Sanitize sensitive fields in packaged configs (all configs/*.toml)..."
 export STAGE_PROJECT_DIR
 python3 - <<'PY'
 from pathlib import Path
@@ -285,12 +167,8 @@ import re
 import os
 
 stage = Path(os.environ["STAGE_PROJECT_DIR"])
-
-targets = [
-    stage / "configs" / "config.toml",
-    stage / "configs" / "channels" / "telegram.toml",
-    stage / "configs" / "crypto.toml",
-]
+configs_dir = stage / "configs"
+targets = list(configs_dir.rglob("*.toml")) if configs_dir.exists() else []
 
 rules = [
     # Telegram bot token
