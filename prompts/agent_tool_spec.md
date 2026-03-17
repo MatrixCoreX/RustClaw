@@ -83,16 +83,17 @@ Skill behavior notes (file/path):
   - required: `action`, `side`, `order_type`, (`quote_qty_usd` OR `qty`)
   - optional: `price` (limit/stop orders), `stop_price` (stop_loss_limit/take_profit_limit), `time_in_force` (GTC/IOC/FOK), `confirm`
   - supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker`
-  - `trade_submit`: planner may call when user has confirmed; pass `confirm=true` when appropriate. No runtime gate.
+  - `trade_submit`: for explicit place-order intent with complete params, call directly and pass `confirm=true`. No runtime gate.
 - risk rule:
-  - Prefer `trade_preview` first when intent is ambiguous or high-value; then `trade_submit` when the user has confirmed (e.g. "确认"/"yes"). The planner decides; runtime does not block direct `trade_submit`.
+  - For explicit place-order intent with complete params, prefer direct `trade_submit` (`confirm=true`) instead of preview-only. Use `trade_preview` when user explicitly asks preview/estimate, or when key params are missing.
 
 #### crypto planner routing (intent → actions)
-- **Explicit place-order / 明确下单·挂单** (e.g. “在0.09挂单5U狗狗币”, “市价买10U BTC”, “限价卖1个ETH 3500”): when user clearly wants to place an order and params are complete, output **two steps in one plan**: step1 `trade_preview`, step2 `trade_submit` with **same** `exchange/symbol/side/order_type/quote_qty_usd|qty/price` and `confirm=true`. Do not output only preview when the user asked to place the order.
+- **Explicit place-order / 明确下单·挂单** (e.g. “在0.09挂单5U狗狗币”, “市价买10U BTC”, “限价卖1个ETH 3500”): when user clearly wants to place an order and params are complete, output `trade_submit` directly with `confirm=true`. Do not output only preview when the user asked to place the order.
 - **Preview-only / 仅预览·试算** (e.g. “预览一下”, “先帮我算算”, “如果买5U大概多少”): output **only** `trade_preview`; do **not** output `trade_submit`. User did not ask to execute.
 - **Cancel one order / 单笔撤单** (e.g. “撤掉这笔挂单”, “取消这个订单”, “撤销订单123456”, “把DOGE那个限价单撤掉”): use `cancel_order` with `order_id` or `client_order_id` and `symbol`. If user says “撤掉这笔” but **no** `order_id` and no unique context, do **not** guess; either call `open_orders` first (with `symbol` if given) then cancel by chosen order, or ask for the order id.
 - **Cancel all for symbol / 某交易对全部撤单** (e.g. “撤掉DOGE的挂单”, “取消DOGE所有挂单”, “把DOGEUSDT的挂单都撤了”): use `cancel_all_orders` with `symbol`. Use **only** when user clearly said “所有” or “全部” for that symbol.
 - **Query open orders / 查挂单** (e.g. “查询我的挂单”, “看下DOGE挂单”, “有哪些未成交订单”): use `open_orders`; optional `symbol` to filter. Do **not** route “查挂单” to cancel; do **not** route “撤单” to only `open_orders` without then cancelling when user asked to cancel.
+- **Submit result notification / 下单结果通知**: after `trade_submit`, always return a clear user-facing result. Success must include at least `order_id` or exchange status; failure must include the concrete error reason. Do not return ambiguous wording.
 - **Cancel safety**: Do not call `cancel_order` without at least one of `order_id` or `client_order_id` (or a prior step that supplies it). Do not call `cancel_all_orders` unless user explicitly requested to cancel “all” or “all for symbol”.
 
 #### crypto JSON-schema style contract (strict)

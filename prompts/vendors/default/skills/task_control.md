@@ -8,28 +8,27 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- `task_control` inspects unfinished tasks in the current chat for the current user.
-- It can cancel all unfinished tasks or cancel one task by numbered index.
+- `task_control` lets the current user inspect unfinished tasks in the current chat and cancel them safely.
+- Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
+- Supports natural-language task operations such as "看看我现在有哪些任务", "结束当前任务", and "结束第 2 个任务".
 
 ## Actions (from interface)
-- `list`
-- `cancel_all`
-- `cancel_one`
+- TODO: list supported `action` values.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| `list` | none | no | - | - | List current unfinished tasks. |
-| `cancel_all` | none | no | - | - | Cancel all unfinished tasks except the current control task itself. |
-| `cancel_one` | `index` | yes | number | - | 1-based task number from the active-task ordering. |
+| TODO | TODO | TODO | TODO | TODO | TODO |
 
-## Routing Hints
-- Use this skill when the user asks to check current/running/queued tasks.
-- Use this skill when the user asks to end/stop/cancel current tasks.
-- Use `cancel_one` when the user explicitly references a numbered task like "第2个任务" or "2号任务".
-- Do not use `health_check` or `service_control` for chat task listing/canceling.
+## Error Contract (from interface)
+- Unknown action -> readable error text.
+- `cancel_one` without valid `index` -> readable error text.
+- Invalid index -> readable error text telling the user to query tasks first.
+
+## Request/Response Examples (from interface)
+- TODO: add request/response examples.
 
 ## Output Contract
-- Output is human-readable text.
+- Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
-- On uncertainty, prefer safe readonly behavior first.
+- On uncertainty, prefer safe/readonly behavior first.
