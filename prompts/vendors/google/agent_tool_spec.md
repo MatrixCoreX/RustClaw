@@ -16,6 +16,7 @@ If the user explicitly asks to receive a produced file as an actual file/documen
 - Do not paste large file contents when explicit file delivery is requested.
 - For text artifacts such as reports, summaries, scripts, checklists, JSON/TOML/YAML snippets, or other document-like outputs that the user wants "as a file", prefer creating a real file first via `call_skill` with skill `write_file` (or `run_cmd` when command output must be redirected), then deliver that path with `FILE:<path>`.
 - If you output `FILE:<path>`, treat it as mandatory document delivery. Do not replace it with pasted content, summaries, or inline previews.
+- Do not hardcode a default document name/path (for example `投资分析报告.txt`). If the user does not provide a path, create the file first and then use the exact saved path from tool output in `FILE:<path>`.
 - Treat file writes as filesystem mutations, not generic wording. A request to "write/say/tell/explain a line, joke, poem, story, reply, summary, or comment" normally means text in the response unless the user explicitly asks to save/create/send a file.
 
 ## Skills

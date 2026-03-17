@@ -47,13 +47,16 @@ fn build_rss_skill_prompt_with_categories(state: &AppState, base_prompt: &str) -
     )
 }
 
-/// Phase 2: Primary path = registry-driven. Planner uses planner_visible_skills (registry-enabled view),
-/// not skills_list (execution floor with core_skills_always_enabled). Each skill must provide prompt_file via registry.
-fn build_skill_playbooks_text(state: &AppState) -> String {
-    let enabled = &*state.get_planner_visible_skills();
+/// Phase 2+: Planner 可见技能按 task/agent 动态收敛：
+/// （execution-enabled）∩（agent allowed_skills）。
+/// 每个可见技能需在 registry 中提供 prompt_file 才会注入 playbook。
+fn build_skill_playbooks_text(state: &AppState, task: &ClaimedTask) -> String {
+    let enabled = state.planner_visible_skills_for_task(task);
     let enabled_count = enabled.len();
+    let agent_id = state.task_agent_id(task);
     info!(
-        "planner skill playbooks: planner_visible_skills_count={} skills=[{}]",
+        "planner skill playbooks: agent_id={} planner_visible_skills_count={} skills=[{}]",
+        agent_id,
         enabled_count,
         enabled.join(", ")
     );
@@ -61,7 +64,7 @@ fn build_skill_playbooks_text(state: &AppState) -> String {
     let mut sections = Vec::new();
     let mut skipped_no_prompt: Vec<String> = Vec::new();
 
-    for skill in enabled {
+    for skill in &enabled {
         let Some(registry_path) = state.skill_prompt_file(skill) else {
             warn!(
                 "planner skill playbook: skill={} prompt_file missing in registry, skipping",
@@ -1300,7 +1303,7 @@ async fn plan_round_actions(
     policy: &AgentLoopGuardPolicy,
     loop_state: &LoopState,
 ) -> Result<Vec<AgentAction>, String> {
-    let skill_playbooks = build_skill_playbooks_text(state);
+    let skill_playbooks = build_skill_playbooks_text(state, task);
     let (tool_spec_template, _) = crate::load_prompt_template_for_state(
         state,
         AGENT_TOOL_SPEC_PATH,

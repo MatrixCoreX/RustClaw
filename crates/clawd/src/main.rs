@@ -95,7 +95,6 @@ struct SkillViews {
 pub(crate) struct SkillViewsSnapshot {
     pub registry: Option<Arc<SkillsRegistry>>,
     pub skills_list: Arc<HashSet<String>>,
-    pub planner_visible_skills: Arc<Vec<String>>,
 }
 
 /// Phase 4: 从 registry 路径 + skill_switches 重建 skill 视图。无 registry 时用 initial_skills_list（启动用）；reload 时 registry_path 必设。
@@ -195,7 +194,6 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
     let snapshot = SkillViewsSnapshot {
         registry: views.registry,
         skills_list: Arc::new(views.execution_skills),
-        planner_visible_skills: Arc::new(views.planner_visible),
     };
     *state.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
 
@@ -224,7 +222,6 @@ struct AppState {
     db: Arc<Mutex<Connection>>,
     llm_providers: Vec<Arc<LlmProviderRuntime>>,
     agents_by_id: Arc<HashMap<String, AgentRuntimeConfig>>,
-    bot_agent_ids: Arc<HashMap<String, String>>,
     skill_timeout_seconds: u64,
     skill_runner_path: PathBuf,
     /// 原子快照（可重载）。reload 时整体替换，读用 get_skill_views_snapshot()。
@@ -250,7 +247,6 @@ struct AppState {
     command_intent: CommandIntentRuntime,
     schedule: ScheduleRuntime,
     telegram_bot_token: String,
-    telegram_bot_tokens: Arc<HashMap<String, String>>,
     telegram_configured_bot_names: Arc<Vec<String>>,
     telegram_crypto_confirm_ttl_seconds: i64,
     whatsapp_cloud_enabled: bool,
@@ -286,8 +282,20 @@ impl AppState {
     pub(crate) fn get_skills_list(&self) -> Arc<HashSet<String>> {
         self.snapshot().skills_list.clone()
     }
-    pub(crate) fn get_planner_visible_skills(&self) -> Arc<Vec<String>> {
-        self.snapshot().planner_visible_skills.clone()
+
+    /// Planner 可见技能（按 task/agent 动态收敛）：
+    /// 全局执行可用集（skills_list + skill_switches + core floor）∩ agent allowed_skills。
+    /// 当 agent 未配置 allowed_skills 时，继承全量执行可用集。
+    pub(crate) fn planner_visible_skills_for_task(&self, task: &ClaimedTask) -> Vec<String> {
+        let execution_skills = self.get_skills_list();
+        let agent = self.task_agent(task);
+        let mut visible: Vec<String> = execution_skills
+            .iter()
+            .filter(|skill| agent.allows_skill(skill))
+            .cloned()
+            .collect();
+        visible.sort_unstable();
+        visible
     }
 
     fn normalize_known_agent_id(&self, agent_id: Option<&str>) -> Option<String> {
@@ -303,16 +311,6 @@ impl AppState {
                 self.normalize_known_agent_id(payload.get("agent_id").and_then(|v| v.as_str()))
             {
                 return agent_id;
-            }
-            if let Some(bot_name) = payload
-                .get("telegram_bot_name")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-            {
-                if let Some(agent_id) = self.bot_agent_ids.get(bot_name) {
-                    return agent_id.clone();
-                }
             }
         }
         DEFAULT_AGENT_ID.to_string()
@@ -339,19 +337,6 @@ impl AppState {
         } else {
             self.persona_prompt.clone()
         }
-    }
-
-    pub(crate) fn task_planner_visible_skills(&self, task: &ClaimedTask) -> Vec<String> {
-        let agent = self.task_agent(task);
-        let skills = self.get_planner_visible_skills();
-        if !agent.restrict_skills {
-            return skills.as_ref().clone();
-        }
-        skills
-            .iter()
-            .filter(|skill| agent.allows_skill(skill))
-            .cloned()
-            .collect()
     }
 
     pub(crate) fn task_allows_skill(&self, task: &ClaimedTask, canonical_skill: &str) -> bool {
@@ -1600,35 +1585,18 @@ async fn main() -> anyhow::Result<()> {
 
     let ui_dist_dir = resolve_ui_dist_dir(&workspace_root);
     let telegram_runtime_bots = config.telegram_runtime_bots();
-    let telegram_bot_tokens = Arc::new(
-        telegram_runtime_bots
-            .iter()
-            .map(|bot| (bot.name.clone(), bot.bot_token.clone()))
-            .collect::<HashMap<_, _>>(),
-    );
+    let telegram_bot_token = telegram_runtime_bots
+        .iter()
+        .map(|bot| bot.bot_token.trim())
+        .find(|token| !token.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| config.telegram.bot_token.clone());
     let telegram_configured_bot_names = Arc::new(
         telegram_runtime_bots
             .iter()
             .map(|bot| bot.name.clone())
             .collect::<Vec<_>>(),
     );
-    let bot_agent_ids = Arc::new(
-        telegram_runtime_bots
-            .iter()
-            .map(|bot| {
-                let agent_id = if agents_by_id.contains_key(bot.agent_id.as_str()) {
-                    bot.agent_id.clone()
-                } else {
-                    DEFAULT_AGENT_ID.to_string()
-                };
-                (bot.name.clone(), agent_id)
-            })
-            .collect::<HashMap<_, _>>(),
-    );
-    let telegram_bot_token = telegram_runtime_bots
-        .first()
-        .map(|bot| bot.bot_token.clone())
-        .unwrap_or_else(|| config.telegram.bot_token.clone());
     let whatsapp_cloud_enabled = config.whatsapp_cloud.enabled || config.whatsapp.enabled;
     let whatsapp_api_base = if config.whatsapp_cloud.api_base.trim().is_empty() {
         config.whatsapp.api_base.clone()
@@ -1685,13 +1653,11 @@ async fn main() -> anyhow::Result<()> {
         db: Arc::new(Mutex::new(db)),
         llm_providers,
         agents_by_id: Arc::new(agents_by_id),
-        bot_agent_ids,
         skill_timeout_seconds: config.skills.skill_timeout_seconds,
         skill_runner_path: effective_skill_runner_path,
         skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
             registry: views.registry,
             skills_list: Arc::new(views.execution_skills),
-            planner_visible_skills: Arc::new(views.planner_visible),
         }))),
         skill_semaphore: Arc::new(Semaphore::new(config.skills.skill_max_concurrency.max(1))),
         rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
@@ -1723,7 +1689,6 @@ async fn main() -> anyhow::Result<()> {
         command_intent,
         schedule,
         telegram_bot_token,
-        telegram_bot_tokens,
         telegram_configured_bot_names,
         telegram_crypto_confirm_ttl_seconds: (config.telegram.crypto_confirm_ttl_seconds.max(1))
             as i64,
@@ -2582,7 +2547,14 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 truncate_for_log(&context_resolution.reason),
                 truncate_for_log(&resolved_prompt)
             );
-            let memory_ctx = memory::service::prepare_prompt_with_memory(state, &task, &resolved_prompt);
+            let chat_memory_budget_chars =
+                dynamic_chat_memory_budget_chars(state, &task, &resolved_prompt);
+            let memory_ctx = memory::service::prepare_prompt_with_memory(
+                state,
+                &task,
+                &resolved_prompt,
+                chat_memory_budget_chars,
+            );
             let long_term_summary = memory_ctx.long_term_summary;
             let preferences = memory_ctx.preferences;
             let recalled = memory_ctx.recalled;
@@ -3326,15 +3298,6 @@ fn task_external_chat_id(task: &ClaimedTask) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-fn task_telegram_bot_name(task: &ClaimedTask) -> Option<String> {
-    let payload = task_payload_value(task)?;
-    payload
-        .get("telegram_bot_name")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 async fn send_task_channel_message(
     state: &AppState,
     task: &ClaimedTask,
@@ -3343,16 +3306,7 @@ async fn send_task_channel_message(
 ) -> Result<(), String> {
     match runtime_channel_from_payload(state, payload) {
         RuntimeChannel::Telegram => {
-            let chat_id = task_external_chat_id(task)
-                .and_then(|value| value.parse::<i64>().ok())
-                .unwrap_or(task.chat_id);
-            channel_send::send_telegram_message(
-                state,
-                chat_id,
-                text,
-                task_telegram_bot_name(task).as_deref(),
-            )
-            .await
+            channel_send::send_telegram_message(state, task.chat_id, text).await
         }
         RuntimeChannel::Whatsapp => {
             let to = task_external_chat_id(task)
@@ -4881,6 +4835,116 @@ fn selected_openai_model_for_task(state: &AppState, task: Option<&ClaimedTask>) 
         .unwrap_or_else(|| "gpt-4o-mini".to_string())
 }
 
+fn dynamic_chat_memory_budget_chars(state: &AppState, task: &ClaimedTask, request_text: &str) -> usize {
+    let configured_budget = state.memory.chat_memory_budget_chars.max(384);
+    let prompt_budget_cap = state.memory.prompt_max_chars.max(384);
+    let providers = state.task_llm_providers(task);
+    if providers.is_empty() {
+        return configured_budget.min(prompt_budget_cap);
+    }
+    let min_context_tokens = providers
+        .iter()
+        .map(|p| estimate_context_window_tokens(p))
+        .min()
+        .unwrap_or(32_000)
+        .max(8_000);
+    // Reserve output and control prompt overhead to keep headroom for provider formatting.
+    let output_reserve_tokens = 4_096usize.min(min_context_tokens / 3).max(768);
+    let fixed_overhead_tokens = 1_200usize;
+    let request_tokens = estimate_text_tokens(request_text);
+    let available_tokens = min_context_tokens
+        .saturating_sub(output_reserve_tokens)
+        .saturating_sub(fixed_overhead_tokens)
+        .saturating_sub(request_tokens);
+    // Keep memory context as a bounded fraction of remaining context.
+    let dynamic_tokens = (available_tokens / 4).clamp(192, 8_000);
+    let dynamic_chars = dynamic_tokens.saturating_mul(2);
+    let dynamic_budget = dynamic_chars.clamp(384, prompt_budget_cap);
+    info!(
+        "{} dynamic_chat_memory_budget task_id={} configured={} computed={} cap={} min_ctx_tokens={} request_tokens={}",
+        highlight_tag("memory"),
+        task.task_id,
+        configured_budget,
+        dynamic_budget,
+        prompt_budget_cap,
+        min_context_tokens,
+        request_tokens
+    );
+    dynamic_budget
+}
+
+fn estimate_context_window_tokens(provider: &LlmProviderRuntime) -> usize {
+    let model = provider.config.model.trim().to_ascii_lowercase();
+    if let Some(explicit) = extract_model_k_or_m_capacity_tokens(&model) {
+        return explicit.max(8_000);
+    }
+    match provider.config.provider_type.as_str() {
+        "anthropic_claude" => 200_000,
+        "google_gemini" => 256_000,
+        "openai_compat" => {
+            if model.contains("gpt-4.1")
+                || model.contains("gpt-4o")
+                || model.contains("o3")
+                || model.contains("o4")
+            {
+                128_000
+            } else if model.contains("gpt-3.5") {
+                16_000
+            } else if model.contains("deepseek") {
+                64_000
+            } else if model.contains("qwen") {
+                32_000
+            } else {
+                64_000
+            }
+        }
+        _ => 64_000,
+    }
+}
+
+fn extract_model_k_or_m_capacity_tokens(model_lower: &str) -> Option<usize> {
+    let bytes = model_lower.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if !bytes[idx].is_ascii_digit() {
+            idx += 1;
+            continue;
+        }
+        let start = idx;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        if idx >= bytes.len() {
+            break;
+        }
+        let number = model_lower[start..idx].parse::<usize>().ok()?;
+        let unit = bytes[idx];
+        if unit == b'k' {
+            return Some(number.saturating_mul(1_000));
+        }
+        if unit == b'm' {
+            return Some(number.saturating_mul(1_000_000));
+        }
+        idx += 1;
+    }
+    None
+}
+
+fn estimate_text_tokens(text: &str) -> usize {
+    let chars = text.chars().count();
+    let mut cjk_count = 0usize;
+    for ch in text.chars() {
+        if ('\u{4e00}'..='\u{9fff}').contains(&ch) {
+            cjk_count += 1;
+        }
+    }
+    if cjk_count * 2 >= chars.max(1) {
+        chars.max(1)
+    } else {
+        chars.div_ceil(3).max(1)
+    }
+}
+
 fn strip_think_blocks(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut rest = raw;
@@ -6163,7 +6227,7 @@ pub(crate) fn ensure_default_file_path(workspace_root: &Path, input: &str) -> St
     let default_dir = resolve_file_default_output_dir_from_config(workspace_root);
     let p = input.trim();
     if p.is_empty() {
-        return format!("{default_dir}/untitled.txt");
+        return format!("{default_dir}/artifact-{}.txt", now_ts_u64());
     }
     if Path::new(p).is_absolute()
         || p.contains('/')
@@ -8219,21 +8283,6 @@ fn seed_channel_binding_rows(
 ) -> anyhow::Result<()> {
     let now = now_ts();
     for binding in bindings {
-        let scoped_channel = if channel == "telegram" {
-            binding
-                .telegram_bot_name
-                .trim()
-                .strip_prefix("telegram:")
-                .unwrap_or(binding.telegram_bot_name.trim())
-                .trim()
-                .split_whitespace()
-                .next()
-                .filter(|name| !name.is_empty())
-                .map(|name| format!("telegram:{name}"))
-                .unwrap_or_else(|| channel.to_string())
-        } else {
-            channel.to_string()
-        };
         let user_key = normalize_user_key(&binding.user_key);
         if user_key.is_empty() {
             continue;
@@ -8249,7 +8298,7 @@ fn seed_channel_binding_rows(
              VALUES (?1, ?2, ?3, ?4, ?5, ?5)
              ON CONFLICT(channel, external_user_id, external_chat_id)
              DO UPDATE SET user_key=excluded.user_key, updated_at=excluded.updated_at",
-            params![scoped_channel, external_user_id, external_chat_id, user_key, now],
+            params![channel, external_user_id, external_chat_id, user_key, now],
         )?;
     }
     Ok(())
@@ -8747,12 +8796,6 @@ async fn submit_task(
     State(state): State<AppState>,
     Json(req): Json<SubmitTaskRequest>,
 ) -> (StatusCode, Json<ApiResponse<SubmitTaskResponse>>) {
-    let telegram_bot_name = req
-        .payload
-        .get("telegram_bot_name")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
     let resolved_identity = match req.user_key.as_deref() {
         Some(user_key) => match resolve_auth_identity_by_key(&state, user_key) {
             Ok(v) => v,
@@ -8790,33 +8833,6 @@ async fn submit_task(
         .or(requested_user_id)
         .unwrap_or_default();
     let channel = req.channel.unwrap_or(ChannelKind::Telegram);
-    if matches!(channel, ChannelKind::Telegram) {
-        let Some(bot_name) = telegram_bot_name.as_deref() else {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(
-                        "telegram strict mode: payload.telegram_bot_name is required"
-                            .to_string(),
-                    ),
-                }),
-            );
-        };
-        if !state.telegram_bot_tokens.contains_key(bot_name) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!(
-                        "telegram strict mode: unknown telegram_bot_name={bot_name}"
-                    )),
-                }),
-            );
-        }
-    }
     let requested_agent_id = req
         .payload
         .get("agent_id")
@@ -8836,21 +8852,8 @@ async fn submit_task(
                 }),
             );
         }
-    } else if matches!(channel, ChannelKind::Telegram) {
-        telegram_bot_name
-            .as_deref()
-            .and_then(|name| state.bot_agent_ids.get(name).cloned())
-            .unwrap_or_else(|| DEFAULT_AGENT_ID.to_string())
     } else {
         DEFAULT_AGENT_ID.to_string()
-    };
-    let conversation_channel_scope = if matches!(channel, ChannelKind::Telegram) {
-        telegram_bot_name
-            .as_deref()
-            .map(|name| format!("telegram:{name}"))
-            .unwrap_or_else(|| channel_kind_name(channel).to_string())
-    } else {
-        channel_kind_name(channel).to_string()
     };
     let normalized_external_user_id = normalize_external_id_opt(req.external_user_id.as_deref());
     let normalized_external_chat_id = normalize_external_id_opt(req.external_chat_id.as_deref());
@@ -8865,7 +8868,7 @@ async fn submit_task(
     );
     let effective_chat_id = if let Some(user_key) = effective_user_key.as_deref() {
         build_conversation_chat_id(
-            &conversation_channel_scope,
+            channel_kind_name(channel),
             normalized_external_user_id.as_deref(),
             normalized_external_chat_id.as_deref(),
             user_key,
@@ -8874,7 +8877,7 @@ async fn submit_task(
         && (normalized_external_user_id.is_some() || normalized_external_chat_id.is_some())
     {
         build_conversation_chat_id(
-            &conversation_channel_scope,
+            channel_kind_name(channel),
             normalized_external_user_id.as_deref(),
             normalized_external_chat_id.as_deref(),
             &public_conversation_seed,
@@ -9061,12 +9064,6 @@ async fn submit_task(
         }
         if let Some(user_key) = effective_user_key.as_ref() {
             obj.insert("user_key".to_string(), Value::String(user_key.clone()));
-        }
-        if let Some(bot_name) = telegram_bot_name.as_ref() {
-            obj.insert(
-                "telegram_bot_name".to_string(),
-                Value::String(bot_name.clone()),
-            );
         }
         obj.insert(
             "agent_id".to_string(),
