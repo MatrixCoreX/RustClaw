@@ -9073,14 +9073,7 @@ async fn submit_task(
         task_id, task_id, kind, effective_user_id, effective_chat_id
     );
 
-    (
-        StatusCode::OK,
-        Json(ApiResponse {
-            ok: true,
-            data: Some(SubmitTaskResponse { task_id }),
-            error: None,
-        }),
-    )
+    api_ok(SubmitTaskResponse { task_id })
 }
 
 fn stable_i64_from_key(input: &str) -> i64 {
@@ -9845,24 +9838,10 @@ async fn reload_skills_handler(
         return (status, json);
     }
     match reload_skill_views(&state) {
-        Ok(result) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(serde_json::to_value(&result).unwrap_or_default()),
-                error: None,
-            }),
-        ),
+        Ok(result) => api_ok(serde_json::to_value(&result).unwrap_or_default()),
         Err(e) => {
             warn!("reload_skill_views failed: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("reload failed: {}", e)),
-                }),
-            )
+            api_err::<serde_json::Value>(StatusCode::INTERNAL_SERVER_ERROR, format!("reload failed: {}", e))
         }
     }
 }
