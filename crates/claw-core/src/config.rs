@@ -63,7 +63,6 @@ pub struct TelegramConfig {
     pub bot_token: String,
     #[serde(default = "default_agent_id")]
     pub agent_id: String,
-    pub admins: Vec<i64>,
     #[serde(default)]
     pub allowlist: Vec<i64>,
     #[serde(default = "default_telegram_access_mode")]
@@ -107,8 +106,6 @@ pub struct TelegramBotConfig {
     #[serde(default)]
     pub bot_token: String,
     #[serde(default)]
-    pub admins: Vec<i64>,
-    #[serde(default)]
     pub allowlist: Vec<i64>,
     #[serde(default = "default_telegram_access_mode")]
     pub access_mode: String,
@@ -131,8 +128,6 @@ pub struct TelegramRuntimeBotConfig {
     #[serde(default = "default_agent_id")]
     pub agent_id: String,
     #[serde(default)]
-    pub admins: Vec<i64>,
-    #[serde(default)]
     pub allowlist: Vec<i64>,
     #[serde(default = "default_telegram_access_mode")]
     pub access_mode: String,
@@ -151,7 +146,6 @@ pub struct ResolvedTelegramBotConfig {
     pub name: String,
     pub bot_token: String,
     pub agent_id: String,
-    pub admins: Vec<i64>,
     pub allowlist: Vec<i64>,
     pub access_mode: String,
     pub allowed_usernames: Vec<String>,
@@ -197,7 +191,6 @@ impl Default for TelegramBotConfig {
         Self {
             enabled: true,
             bot_token: String::new(),
-            admins: Vec::new(),
             allowlist: Vec::new(),
             access_mode: default_telegram_access_mode(),
             allowed_usernames: Vec::new(),
@@ -1564,7 +1557,6 @@ impl AppConfig {
                 } else {
                     self.telegram.agent_id.trim().to_string()
                 },
-                admins: self.telegram.admins.clone(),
                 allowlist: self.telegram.allowlist.clone(),
                 access_mode: if self.telegram.access_mode.trim().is_empty() {
                     default_telegram_access_mode()
@@ -1597,11 +1589,6 @@ impl AppConfig {
                     default_agent_id().to_string()
                 } else {
                     preferred_agent_id.to_string()
-                },
-                admins: if bot.admins.is_empty() {
-                    self.telegram.admins.clone()
-                } else {
-                    bot.admins.clone()
                 },
                 allowlist: if bot.allowlist.is_empty() {
                     self.telegram.allowlist.clone()
@@ -1645,11 +1632,6 @@ impl AppConfig {
                 name: unique_telegram_bot_name(&bots, "telegram-bot", bots.len() + 1),
                 bot_token: compat_token.to_string(),
                 agent_id: default_agent_id().to_string(),
-                admins: if self.telegram_bot.admins.is_empty() {
-                    self.telegram.admins.clone()
-                } else {
-                    self.telegram_bot.admins.clone()
-                },
                 allowlist: if self.telegram_bot.allowlist.is_empty() {
                     self.telegram.allowlist.clone()
                 } else {
