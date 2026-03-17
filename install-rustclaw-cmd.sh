@@ -27,7 +27,7 @@ Options:
   --force-build    Force rebuild before install (implies --build)
   --user           Install to ~/.local/bin (no sudo)
   --dir <path>     Install to custom directory
-  --deploy-ui-nginx [path]   Build UI and copy to path for nginx (default: /var/www/html/rustclaw); static only, set clawd API URL in UI
+  --deploy-ui-nginx [path]   Build UI, auto-install/configure nginx, and deploy to path (default: /var/www/html/rustclaw)
   -h, --help       Show this help
 
 Default: no build. Only install launcher if target/release/clawd exists.
@@ -137,6 +137,47 @@ ensure_npm() {
     exit 1
   fi
   echo "Node.js/npm ready."
+}
+
+# ----- 确保 nginx 已安装并启动（用于 --deploy-ui-nginx） -----
+ensure_nginx() {
+  if command -v nginx >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "nginx not found. Attempting to install nginx..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq && sudo apt-get install -y nginx
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y nginx
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y nginx
+  else
+    echo "Unsupported package manager. Please install nginx manually, then rerun."
+    exit 1
+  fi
+
+  if ! command -v nginx >/dev/null 2>&1; then
+    echo "nginx still not found after install attempt."
+    exit 1
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl enable nginx >/dev/null 2>&1 || true
+    sudo systemctl start nginx >/dev/null 2>&1 || true
+  fi
+  echo "nginx is installed."
+}
+
+nginx_ui_config_matches() {
+  local conf_path="$1"
+  local ui_root="$2"
+  [[ -f "$conf_path" ]] || return 1
+  grep -Fq "root $ui_root;" "$conf_path" || return 1
+  grep -Fq "server_name _;" "$conf_path" || return 1
+  grep -Fq "try_files \$uri \$uri/ /index.html;" "$conf_path" || return 1
+  grep -Fq "listen 0.0.0.0:80;" "$conf_path" || return 1
+  return 0
 }
 
 # 判断是否需要构建 release（源码更新或二进制缺失/过期）
@@ -400,10 +441,14 @@ if [[ -n "$DEPLOY_UI_NGINX" ]]; then
     sudo cp -r "$SCRIPT_DIR/UI/dist/"* "$DEPLOY_UI_NGINX/"
     echo "Copied UI to $DEPLOY_UI_NGINX (sudo)."
   fi
+  ensure_nginx
   NGINX_CONF="/etc/nginx/conf.d/rustclaw-ui.conf"
-  if command -v nginx >/dev/null 2>&1 && [[ -d /etc/nginx/conf.d ]]; then
-    if [[ -w /etc/nginx/conf.d ]]; then
-      cat > "$NGINX_CONF" << NGX
+  NGINX_CONFIG_CHANGED=0
+  if nginx_ui_config_matches "$NGINX_CONF" "$DEPLOY_UI_NGINX"; then
+    echo "Nginx config already up-to-date, skip configure: $NGINX_CONF"
+  elif [[ -w /etc/nginx/conf.d ]]; then
+    mkdir -p /etc/nginx/conf.d
+    cat > "$NGINX_CONF" << NGX
 # RustClaw UI 仅静态托管，root 指向部署目录；API 地址在 UI 中填写。
 # 监听所有接口以便外网用 IP 访问；server_name _ 匹配任意 Host（含 IP）。
 server {
@@ -417,9 +462,11 @@ server {
     }
 }
 NGX
-      echo "Wrote nginx config: $NGINX_CONF"
-    else
-      sudo tee "$NGINX_CONF" >/dev/null << NGX
+    echo "Wrote nginx config: $NGINX_CONF"
+    NGINX_CONFIG_CHANGED=1
+  else
+    sudo mkdir -p /etc/nginx/conf.d
+    sudo tee "$NGINX_CONF" >/dev/null << NGX
 # RustClaw UI 仅静态托管，root 指向部署目录；API 地址在 UI 中填写。
 # 监听所有接口以便外网用 IP 访问；server_name _ 匹配任意 Host（含 IP）。
 server {
@@ -433,20 +480,29 @@ server {
     }
 }
 NGX
-      echo "Wrote nginx config: $NGINX_CONF (sudo)."
-    fi
-    if [[ -f /etc/nginx/sites-enabled/default ]]; then
-      echo "检测到 /etc/nginx/sites-enabled/default 与当前配置的 server_name _ 冲突，RustClaw UI 会被忽略。"
-      echo "请禁用 default 后重载：sudo rm /etc/nginx/sites-enabled/default && sudo nginx -t && sudo systemctl reload nginx"
-    fi
-    if nginx -t 2>/dev/null; then
-      echo "Nginx config OK. Reload: sudo systemctl reload nginx 或 sudo nginx -s reload"
+    echo "Wrote nginx config: $NGINX_CONF (sudo)."
+    NGINX_CONFIG_CHANGED=1
+  fi
+  if [[ -f /etc/nginx/sites-enabled/default ]]; then
+    echo "检测到 /etc/nginx/sites-enabled/default 与当前配置的 server_name _ 可能冲突。"
+    echo "如首页未生效，可执行：sudo rm /etc/nginx/sites-enabled/default"
+  fi
+  if [[ "$NGINX_CONFIG_CHANGED" == "1" ]]; then
+    if sudo nginx -t; then
+      if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl reload nginx
+        echo "Nginx config OK and reloaded via systemctl."
+      else
+        sudo nginx -s reload
+        echo "Nginx config OK and reloaded via nginx -s reload."
+      fi
       echo "若外网用 IP 无法访问，请检查：1) 防火墙放行 80 端口（如 sudo ufw allow 80）；2) 云安全组/入站规则放行 80。"
     else
       echo "Nginx test failed. Check $NGINX_CONF and run: sudo nginx -t"
+      exit 1
     fi
   else
-    echo "Nginx not found or no /etc/nginx/conf.d. Manually set nginx root to: $DEPLOY_UI_NGINX"
+    echo "Skip nginx reload (no config changes)."
   fi
   echo "UI 仅静态；用户在页面中填写 clawd 公网地址访问 API。"
 fi
