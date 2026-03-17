@@ -83,12 +83,12 @@ Skill behavior notes (file/path):
   - required: `action`, `side`, `order_type`, (`quote_qty_usd` OR `qty`)
   - optional: `price` (limit/stop orders), `stop_price` (stop_loss_limit/take_profit_limit), `time_in_force` (GTC/IOC/FOK), `confirm`
   - supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker`
-  - `trade_submit`: planner may call when user has confirmed; pass `confirm=true` when appropriate. No runtime gate.
+  - `trade_submit`: for explicit place-order intent with complete params, call directly and pass `confirm=true`. No runtime gate.
 - risk rule:
-  - Prefer `trade_preview` first when intent is ambiguous or high-value; then `trade_submit` when the user has confirmed (e.g. "确认"/"yes"). The planner decides; runtime does not block direct `trade_submit`.
+  - For explicit place-order intent with complete params, prefer direct `trade_submit` (`confirm=true`) instead of preview-only. Use `trade_preview` when user explicitly asks preview/estimate, or when key params are missing.
 
 #### crypto planner routing (intent → actions)
-- **Explicit place-order**: step1 `trade_preview`, step2 `trade_submit` same params + `confirm=true`. **Preview-only**: only `trade_preview`. **Cancel one**: `cancel_order` (order_id or open_orders first). **Cancel all for symbol**: `cancel_all_orders` only when user said "所有"/"全部". **Query**: `open_orders`. Do not cancel without order_id; do not cancel_all unless user said all for symbol.
+- **Explicit place-order**: `trade_submit` directly with `confirm=true`; do not output preview-only when user asked to execute. **Preview-only**: only `trade_preview`. **Cancel one**: `cancel_order` (order_id or open_orders first). **Cancel all for symbol**: `cancel_all_orders` only when user said "所有"/"全部". **Query**: `open_orders`. Do not cancel without order_id; do not cancel_all unless user said all for symbol. **Submit result notification**: after `trade_submit`, always return a clear result (success includes `order_id` or exchange status; failure includes concrete reason).
 
 #### crypto JSON-schema style contract (strict)
 - Base shape:

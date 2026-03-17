@@ -9,9 +9,8 @@
 
 ## Capability Summary (from interface)
 - 查询 A 股（沪/深）实时行情：现价、今开、昨收、涨跌幅、成交量等。
-- 支持股票代码，也支持 `configs/stock.toml` 中配置的公司名/简称/别名。
+- 支持股票代码查询，也支持通过配置的公司名/简称/别名查询后再取行情。
 - 仅读、不涉及交易或下单。
-- 这是“行情查询”能力，不是“股票代码知识问答”能力。
 
 ## Actions (from interface)
 - `quote`（默认）/ `query`：按股票代码，或按已配置的公司名/别名，查询单只 A 股行情。
@@ -26,6 +25,7 @@
 - 缺少 symbol/code 时返回明确提示。
 - 接口失败或响应格式异常时返回 status=error 与可读 error_text。
 - 无效代码或非 A 股时返回「未获取到行情」类提示。
+- 名称未命中映射时返回明确提示，并建议补充 `configs/stock.toml`。
 
 ## Request/Response Examples (from interface)
 ### Example 1：查询贵州茅台
@@ -48,19 +48,27 @@ Response:
 {"request_id":"demo-2","status":"ok","text":"【SZ000001】平安银行\n...","error_text":null}
 ```
 
-### Example 3：缺少参数
+### Example 3：使用公司名
 Request:
 ```json
-{"request_id":"demo-3","args":{}}
+{"request_id":"demo-3","args":{"name":"中国移动"}}
 ```
 Response:
 ```json
-{"request_id":"demo-3","status":"error","text":"","error_text":"args.symbol 或 args.code 必填，例如 600519、000001、sh600519、sz000001"}
+{"request_id":"demo-3","status":"ok","text":"已按“中国移动”匹配查询。\n【SH600941】中国移动\n...","error_text":null}
+```
+
+### Example 4：缺少参数
+Request:
+```json
+{"request_id":"demo-4","args":{}}
+```
+Response:
+```json
+{"request_id":"demo-4","status":"error","text":"","error_text":"args.symbol 或 args.code 或 args.name 必填，例如 600519、000001、sh600519、sz000001、中国移动"}
 ```
 
 ## Output Contract
 - Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
 - On uncertainty, prefer safe/readonly behavior first.
-- If the user is asking "股票代码是多少 / 是什么代码 / 公司名对应什么代码", this is outside this skill's direct quote scope; prefer `chat` or a clarification upstream.
-- A configured company name or alias like `中国移动` is valid for direct quote intents, but not for stock-code knowledge questions.
