@@ -2683,6 +2683,74 @@ fn fetch_binance_lot_size_filter(
     Ok((min_qty, max_qty, step_size))
 }
 
+/// Fetch PRICE_FILTER (tickSize, minPrice, maxPrice) for a symbol from Binance exchangeInfo.
+fn fetch_binance_price_filter(
+    client: &Client,
+    cfg: &RootConfig,
+    symbol: &str,
+) -> Result<(f64, f64, f64), String> {
+    let base = cfg.binance.base_url.trim_end_matches('/');
+    let normalized_symbol = normalize_symbol(symbol);
+    let url = format!("{base}/api/v3/exchangeInfo?symbol={}", encode(&normalized_symbol));
+    let v: Value = client
+        .get(url)
+        .send()
+        .map_err(|err| format!("binance exchangeInfo request failed: {err}"))?
+        .json()
+        .map_err(|err| format!("binance exchangeInfo parse failed: {err}"))?;
+    if let Some(code) = v.get("code").and_then(|x| x.as_i64()) {
+        if code != 0 {
+            let msg = v.get("msg").and_then(|x| x.as_str()).unwrap_or("unknown");
+            return Err(format!("binance exchangeInfo api error code={code}: {msg}"));
+        }
+    }
+    let symbol_obj = v
+        .get("symbols")
+        .and_then(|x| x.as_array())
+        .and_then(|arr| arr.first())
+        .ok_or_else(|| "binance exchangeInfo missing symbols".to_string())?;
+    let price_filter = symbol_obj
+        .get("filters")
+        .and_then(|x| x.as_array())
+        .and_then(|arr| {
+            arr.iter().find(|f| {
+                f.get("filterType")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.eq_ignore_ascii_case("PRICE_FILTER"))
+                    .unwrap_or(false)
+            })
+        })
+        .ok_or_else(|| "binance exchangeInfo missing PRICE_FILTER".to_string())?;
+    let tick_size = price_filter
+        .get("tickSize")
+        .and_then(value_to_f64)
+        .ok_or_else(|| "binance PRICE_FILTER tickSize missing".to_string())?;
+    let min_price = price_filter.get("minPrice").and_then(value_to_f64).unwrap_or(0.0);
+    let max_price = price_filter.get("maxPrice").and_then(value_to_f64).unwrap_or(0.0);
+    Ok((tick_size, min_price, max_price))
+}
+
+/// Round price to Binance tickSize (price must satisfy price % tickSize == 0).
+fn adjust_price_to_tick(price: f64, tick_size: f64) -> f64 {
+    if tick_size <= 0.0 {
+        return price;
+    }
+    (price / tick_size).round() * tick_size
+}
+
+/// Format price for Binance API with decimal places matching tickSize (avoids PRICE_FILTER/PERCENT_PRICE format issues).
+fn fmt_price_for_binance(price: f64, tick_size: f64) -> String {
+    if tick_size <= 0.0 {
+        return fmt_num(price);
+    }
+    let tick_str = format!("{:.10}", tick_size).trim_end_matches('0').to_string();
+    let decimals = tick_str
+        .find('.')
+        .map(|i| (tick_str.len().saturating_sub(i).saturating_sub(1)).min(8))
+        .unwrap_or(0);
+    format!("{:.prec$}", price, prec = decimals)
+}
+
 fn normalize_binance_order_qty(client: &Client, cfg: &RootConfig, symbol: &str, raw_qty: f64) -> Result<f64, String> {
     let (min_qty, max_qty, step_size) = fetch_binance_lot_size_filter(client, cfg, symbol)?;
     let adjusted = adjust_qty_to_step_floor(raw_qty, step_size);
@@ -2754,6 +2822,11 @@ fn submit_binance_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -
     } else {
         params.push(("quantity", fmt_num(final_qty)));
     }
+    let price_filter_opt = (matches!(
+        trade.order_type.as_str(),
+        "limit" | "stop_loss_limit" | "take_profit_limit" | "limit_maker"
+    ) || trade.stop_price.is_some())
+    .then(|| fetch_binance_price_filter(client, cfg, &trade.symbol));
     if matches!(trade.order_type.as_str(), "limit" | "stop_loss_limit" | "take_profit_limit") {
         let tif = trade
             .time_in_force
@@ -2764,16 +2837,28 @@ fn submit_binance_order(client: &Client, cfg: &RootConfig, trade: &TradeInput) -
         let limit_price = trade
             .price
             .ok_or_else(|| tr("crypto.err.price_required_for_limit"))?;
-        params.push(("price", fmt_num(limit_price)));
+        let price_str = match &price_filter_opt {
+            Some(Ok((tick, _, _))) => fmt_price_for_binance(adjust_price_to_tick(limit_price, *tick), *tick),
+            _ => fmt_num(limit_price),
+        };
+        params.push(("price", price_str));
     }
     if trade.order_type == "limit_maker" {
         let limit_price = trade
             .price
             .ok_or_else(|| tr("crypto.err.price_required_for_limit"))?;
-        params.push(("price", fmt_num(limit_price)));
+        let price_str = match &price_filter_opt {
+            Some(Ok((tick, _, _))) => fmt_price_for_binance(adjust_price_to_tick(limit_price, *tick), *tick),
+            _ => fmt_num(limit_price),
+        };
+        params.push(("price", price_str));
     }
     if let Some(sp) = trade.stop_price {
-        params.push(("stopPrice", fmt_num(sp)));
+        let stop_str = match &price_filter_opt {
+            Some(Ok((tick, _, _))) => fmt_price_for_binance(adjust_price_to_tick(sp, *tick), *tick),
+            _ => fmt_num(sp),
+        };
+        params.push(("stopPrice", stop_str));
     }
     if let Some(cid) = &trade.client_order_id {
         params.push(("newClientOrderId", cid.clone()));
