@@ -2704,25 +2704,94 @@ async fn health(
     let telegramd_process_count = telegramd_stats.map(|(count, _)| count);
     let telegramd_memory_rss_bytes = telegramd_stats.map(|(_, rss_bytes)| rss_bytes);
     let telegramd_healthy = telegramd_process_count.map(|count| count > 0);
-    let whatsappd_process_count = whatsappd_stats.map(|(count, _)| count);
-    let whatsappd_memory_rss_bytes = whatsappd_stats.map(|(_, rss_bytes)| rss_bytes);
-    let whatsappd_healthy = whatsappd_process_count.map(|count| count > 0);
-    let wa_webd_process_count = wa_webd_stats.map(|(count, _)| count);
-    let wa_webd_memory_rss_bytes = wa_webd_stats.map(|(_, rss_bytes)| rss_bytes);
-    let wa_webd_healthy = wa_webd_process_count.map(|count| count > 0);
+    let whatsappd_process_count_raw = whatsappd_stats.map(|(count, _)| count);
+    let whatsappd_memory_rss_bytes_raw = whatsappd_stats.map(|(_, rss_bytes)| rss_bytes);
+    let wa_webd_process_count_raw = wa_webd_stats.map(|(count, _)| count);
+    let wa_webd_memory_rss_bytes_raw = wa_webd_stats.map(|(_, rss_bytes)| rss_bytes);
     let feishud_stats = feishud_process_stats();
-    let feishud_process_count = feishud_stats.map(|(count, _)| count);
-    let feishud_memory_rss_bytes = feishud_stats.map(|(_, rss_bytes)| rss_bytes);
-    let feishud_healthy = feishud_process_count.map(|count| count > 0);
+    let feishud_process_count_raw = feishud_stats.map(|(count, _)| count);
+    let feishud_memory_rss_bytes_raw = feishud_stats.map(|(_, rss_bytes)| rss_bytes);
     let larkd_stats = larkd_process_stats();
-    let larkd_process_count = larkd_stats.map(|(count, _)| count);
-    let larkd_memory_rss_bytes = larkd_stats.map(|(_, rss_bytes)| rss_bytes);
-    let larkd_healthy = larkd_process_count.map(|count| count > 0);
+    let larkd_process_count_raw = larkd_stats.map(|(count, _)| count);
+    let larkd_memory_rss_bytes_raw = larkd_stats.map(|(_, rss_bytes)| rss_bytes);
     let (user_count, bound_channel_count) = auth_user_summary_counts(&state).unwrap_or_default();
     let telegram_configured_bot_names = state.telegram_configured_bot_names.as_ref().clone();
     let telegram_bot_statuses =
         read_telegram_bot_statuses(&state.workspace_root, &telegram_configured_bot_names);
     let mut gateway_instance_statuses_by_scope = read_gateway_instance_statuses(&state.workspace_root);
+    let whatsapp_cloud_gateway_healthy = gateway_instance_statuses_by_scope
+        .get("whatsapp_cloud:primary")
+        .map(|s| s.healthy);
+    let whatsapp_web_gateway_healthy = gateway_instance_statuses_by_scope
+        .get("whatsapp_web:primary")
+        .map(|s| s.healthy);
+    let feishu_gateway_healthy = gateway_instance_statuses_by_scope
+        .get("feishu:primary")
+        .map(|s| s.healthy);
+    let lark_gateway_healthy = gateway_instance_statuses_by_scope
+        .get("lark:primary")
+        .map(|s| s.healthy);
+
+    // 其他通信端也增加“网关状态回退”，防止独立进程未启用时 UI 误判未启动。
+    let whatsappd_process_count = match whatsappd_process_count_raw {
+        Some(count) if count > 0 => Some(count),
+        _ if whatsapp_cloud_gateway_healthy == Some(true) => channel_gateway_process_count,
+        _ => whatsappd_process_count_raw,
+    };
+    let whatsappd_memory_rss_bytes = match whatsappd_process_count_raw {
+        Some(count) if count > 0 => whatsappd_memory_rss_bytes_raw,
+        _ if whatsapp_cloud_gateway_healthy == Some(true) => channel_gateway_memory_rss_bytes,
+        _ => whatsappd_memory_rss_bytes_raw,
+    };
+    let whatsappd_healthy = match whatsappd_process_count_raw {
+        Some(count) if count > 0 => Some(true),
+        _ => whatsapp_cloud_gateway_healthy.or_else(|| whatsappd_process_count_raw.map(|count| count > 0)),
+    };
+
+    let wa_webd_process_count = match wa_webd_process_count_raw {
+        Some(count) if count > 0 => Some(count),
+        _ if whatsapp_web_gateway_healthy == Some(true) => channel_gateway_process_count,
+        _ => wa_webd_process_count_raw,
+    };
+    let wa_webd_memory_rss_bytes = match wa_webd_process_count_raw {
+        Some(count) if count > 0 => wa_webd_memory_rss_bytes_raw,
+        _ if whatsapp_web_gateway_healthy == Some(true) => channel_gateway_memory_rss_bytes,
+        _ => wa_webd_memory_rss_bytes_raw,
+    };
+    let wa_webd_healthy = match wa_webd_process_count_raw {
+        Some(count) if count > 0 => Some(true),
+        _ => whatsapp_web_gateway_healthy.or_else(|| wa_webd_process_count_raw.map(|count| count > 0)),
+    };
+
+    let feishud_process_count = match feishud_process_count_raw {
+        Some(count) if count > 0 => Some(count),
+        _ if feishu_gateway_healthy == Some(true) => channel_gateway_process_count,
+        _ => feishud_process_count_raw,
+    };
+    let feishud_memory_rss_bytes = match feishud_process_count_raw {
+        Some(count) if count > 0 => feishud_memory_rss_bytes_raw,
+        _ if feishu_gateway_healthy == Some(true) => channel_gateway_memory_rss_bytes,
+        _ => feishud_memory_rss_bytes_raw,
+    };
+    let feishud_healthy = match feishud_process_count_raw {
+        Some(count) if count > 0 => Some(true),
+        _ => feishu_gateway_healthy.or_else(|| feishud_process_count_raw.map(|count| count > 0)),
+    };
+
+    let larkd_process_count = match larkd_process_count_raw {
+        Some(count) if count > 0 => Some(count),
+        _ if lark_gateway_healthy == Some(true) => channel_gateway_process_count,
+        _ => larkd_process_count_raw,
+    };
+    let larkd_memory_rss_bytes = match larkd_process_count_raw {
+        Some(count) if count > 0 => larkd_memory_rss_bytes_raw,
+        _ if lark_gateway_healthy == Some(true) => channel_gateway_memory_rss_bytes,
+        _ => larkd_memory_rss_bytes_raw,
+    };
+    let larkd_healthy = match larkd_process_count_raw {
+        Some(count) if count > 0 => Some(true),
+        _ => lark_gateway_healthy.or_else(|| larkd_process_count_raw.map(|count| count > 0)),
+    };
     let mut gateway_instance_statuses = Vec::new();
     for bot_status in &telegram_bot_statuses {
         let scope = format!("telegram:{}", bot_status.name);
