@@ -221,7 +221,6 @@ def to_int_or_none(v):
 telegram_enabled = str(os.environ.get("RUSTCLAW_ENABLE_TG", "0")).strip() == "1"
 # 仅使用 [telegram].bot_token 作为唯一 token 配置，与 clawd/telegramd 一致
 telegram_token = str(get_nested(telegram_cfg, "telegram", "bot_token", default="") or get_nested(cfg, "telegram", "bot_token", default="") or "")
-admins = get_nested(telegram_cfg, "telegram", "admins", default=get_nested(cfg, "telegram", "admins", default=[]))
 selected_vendor = ""
 selected_model = ""
 
@@ -246,17 +245,7 @@ if force or is_empty_or_placeholder(telegram_token) or (telegram_enabled and is_
                 telegram_changed = True
                 break
 
-if force or (not isinstance(admins, list) or len(admins) == 0):
-    admin_raw = ask("Enter admin Telegram user_id (empty to skip): ").strip()
-    if admin_raw:
-        while not re.fullmatch(r"-?\d+", admin_raw):
-            admin_raw = ask("Invalid format, enter numeric user_id (empty to skip): ").strip()
-            if not admin_raw:
-                break
-        if admin_raw:
-            telegram_text = set_key_in_section(telegram_text, "telegram", "admins", f"[{admin_raw}]")
-            telegram_changed = True
-
+# admins 现仅通过 configs/channels/telegram.toml 或控制台 UI 配置，此处不再交互询问
 vendors = ["openai", "google", "anthropic", "grok", "qwen", "custom"]
 available_vendors = [v for v in vendors if isinstance(get_nested(cfg, "llm", v, default=None), dict)]
 if not available_vendors:
@@ -421,8 +410,7 @@ PY
 		echo "python3 not found."
 		exit 1
 	fi
-	echo "Syncing skill docs (INTERFACE.md + prompts/vendors/default/skills/*.md)..."
-	python3 "$SCRIPT_DIR/scripts/sync_skill_docs.py"
+	# 不再在启动/保存配置时自动执行 sync_skill_docs，避免部署包（无 crates/skills）误删 prompts 文件
 
 	CONFIG_META="$(
 		python3 - <<'PY'
