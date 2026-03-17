@@ -34,9 +34,12 @@ case "$PROFILE" in
     ;;
 esac
 
-CARGO_PROFILE_FLAG=()
-if [[ "$PROFILE" == "release" ]]; then
-  CARGO_PROFILE_FLAG=(--release)
+# Ensure clawd binary exists.
+CLAWD_BIN="$SCRIPT_DIR/target/$PROFILE/clawd"
+if [[ ! -x "$CLAWD_BIN" ]]; then
+  echo "clawd binary missing: $CLAWD_BIN"
+  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p clawd ${PROFILE:+--release}"
+  exit 1
 fi
 
 # Ensure skill-runner binary exists before starting clawd.
@@ -243,4 +246,4 @@ PY
   fi
 fi
 
-exec cargo run "${CARGO_PROFILE_FLAG[@]}" -p clawd
+exec "$CLAWD_BIN"
