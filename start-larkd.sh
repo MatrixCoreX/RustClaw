@@ -22,9 +22,12 @@ case "$PROFILE" in
     ;;
 esac
 
-CARGO_PROFILE_FLAG=()
-if [[ "$PROFILE" == "release" ]]; then
-  CARGO_PROFILE_FLAG=(--release)
+BIN_NAME="larkd"
+BIN_PATH="$SCRIPT_DIR/target/$PROFILE/$BIN_NAME"
+if [[ ! -x "$BIN_PATH" ]]; then
+  echo "Binary missing: $BIN_PATH"
+  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p $BIN_NAME ${PROFILE:+--release}"
+  exit 1
 fi
 
 # Config path: Lark international, separate from feishu.toml
@@ -61,4 +64,4 @@ if pgrep -f 'target/(debug|release)/larkd|cargo run -p larkd' >/dev/null 2>&1; t
   exit 1
 fi
 
-exec cargo run "${CARGO_PROFILE_FLAG[@]}" -p larkd
+exec "$BIN_PATH"
