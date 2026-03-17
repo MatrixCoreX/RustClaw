@@ -179,9 +179,8 @@ nginx_ui_config_matches() {
   local ui_root="$2"
   [[ -f "$conf_path" ]] || return 1
   grep -Fq "root $ui_root;" "$conf_path" || return 1
-  grep -Fq "server_name _;" "$conf_path" || return 1
   grep -Fq "try_files \$uri \$uri/ /index.html;" "$conf_path" || return 1
-  grep -Fq "listen 0.0.0.0:80;" "$conf_path" || return 1
+  grep -qE "listen[[:space:]]+.*80[[:space:]]*(default_server)?;" "$conf_path" || return 1
   return 0
 }
 
@@ -455,11 +454,10 @@ if [[ -n "$DEPLOY_UI_NGINX" ]]; then
     mkdir -p /etc/nginx/conf.d
     cat > "$NGINX_CONF" << NGX
 # RustClaw UI 仅静态托管，root 指向部署目录；API 地址在 UI 中填写。
-# 监听所有接口以便外网用 IP 访问；server_name _ 匹配任意 Host（含 IP）。
+# default_server 使本虚拟主机处理 80 端口所有未匹配请求；不用 server_name _ 避免与其它配置冲突。
 server {
-    listen 0.0.0.0:80;
-    listen [::]:80;
-    server_name _;
+    listen 0.0.0.0:80 default_server;
+    listen [::]:80 default_server;
     root $DEPLOY_UI_NGINX;
     index index.html;
     location / {
@@ -473,11 +471,10 @@ NGX
     sudo mkdir -p /etc/nginx/conf.d
     sudo tee "$NGINX_CONF" >/dev/null << NGX
 # RustClaw UI 仅静态托管，root 指向部署目录；API 地址在 UI 中填写。
-# 监听所有接口以便外网用 IP 访问；server_name _ 匹配任意 Host（含 IP）。
+# default_server 使本虚拟主机处理 80 端口所有未匹配请求；不用 server_name _ 避免与其它配置冲突。
 server {
-    listen 0.0.0.0:80;
-    listen [::]:80;
-    server_name _;
+    listen 0.0.0.0:80 default_server;
+    listen [::]:80 default_server;
     root $DEPLOY_UI_NGINX;
     index index.html;
     location / {
@@ -488,9 +485,16 @@ NGX
     echo "Wrote nginx config: $NGINX_CONF (sudo)."
     NGINX_CONFIG_CHANGED=1
   fi
-  if [[ -f /etc/nginx/sites-enabled/default ]]; then
-    echo "检测到 /etc/nginx/sites-enabled/default 与当前配置的 server_name _ 可能冲突。"
-    echo "如首页未生效，可执行：sudo rm /etc/nginx/sites-enabled/default"
+  # 禁用 nginx 自带默认页，否则 80 端口会优先显示 default 页面
+  if [[ -f /etc/nginx/sites-enabled/default ]] || [[ -L /etc/nginx/sites-enabled/default ]]; then
+    if [[ -w /etc/nginx/sites-enabled ]]; then
+      rm -f /etc/nginx/sites-enabled/default
+      echo "Disabled nginx default site: removed /etc/nginx/sites-enabled/default"
+    else
+      sudo rm -f /etc/nginx/sites-enabled/default
+      echo "Disabled nginx default site: removed /etc/nginx/sites-enabled/default (sudo)."
+    fi
+    NGINX_CONFIG_CHANGED=1
   fi
   if [[ "$NGINX_CONFIG_CHANGED" == "1" ]]; then
     if sudo nginx -t; then
