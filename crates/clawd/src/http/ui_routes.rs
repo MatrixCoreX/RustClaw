@@ -2695,10 +2695,14 @@ async fn health(
     let channel_gateway_process_count = channel_gateway_stats.map(|(count, _)| count);
     let channel_gateway_memory_rss_bytes = channel_gateway_stats.map(|(_, rss_bytes)| rss_bytes);
     let channel_gateway_healthy = channel_gateway_process_count.map(|count| count > 0);
-    let telegramd_process_count =
-        channel_gateway_process_count.or_else(|| legacy_telegramd_stats.map(|(count, _)| count));
-    let telegramd_memory_rss_bytes = channel_gateway_memory_rss_bytes
-        .or_else(|| legacy_telegramd_stats.map(|(_, rss_bytes)| rss_bytes));
+    // Telegram 健康状态优先看 channel-gateway（新架构），
+    // 但仅在其进程数 > 0 时才覆盖 legacy telegramd；否则回退到 legacy 进程统计。
+    let telegramd_stats = match (channel_gateway_stats, legacy_telegramd_stats) {
+        (Some((count, rss_bytes)), _) if count > 0 => Some((count, rss_bytes)),
+        (_, legacy) => legacy,
+    };
+    let telegramd_process_count = telegramd_stats.map(|(count, _)| count);
+    let telegramd_memory_rss_bytes = telegramd_stats.map(|(_, rss_bytes)| rss_bytes);
     let telegramd_healthy = telegramd_process_count.map(|count| count > 0);
     let whatsappd_process_count = whatsappd_stats.map(|(count, _)| count);
     let whatsappd_memory_rss_bytes = whatsappd_stats.map(|(_, rss_bytes)| rss_bytes);
