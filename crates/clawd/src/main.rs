@@ -84,6 +84,30 @@ const SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT: &str =
 const SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT: &str =
     include_str!("../../../prompts/vendors/default/schedule_intent_rules.md");
 
+/// 统一错误响应，避免重复手写 (StatusCode, Json(ApiResponse)).
+fn api_err<T: Serialize>(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<ApiResponse<T>>) {
+    (
+        status,
+        Json(ApiResponse {
+            ok: false,
+            data: None,
+            error: Some(message.into()),
+        }),
+    )
+}
+
+/// 统一成功响应 (200 OK).
+fn api_ok<T: Serialize>(data: T) -> (StatusCode, Json<ApiResponse<T>>) {
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(data),
+            error: None,
+        }),
+    )
+}
+
 /// Phase 4: 统一 skill 视图重建结果，供启动与 reload 复用。
 struct SkillViews {
     registry: Option<Arc<SkillsRegistry>>,
@@ -700,20 +724,33 @@ impl RateLimiter {
             self.global.pop_front();
         }
 
-        let user_q = self.per_user.entry(user_id).or_default();
-        while user_q.front().is_some_and(|v| *v < min_ts) {
-            user_q.pop_front();
-        }
+        let (limit_ok, user_q_empty_after_pop) = {
+            let user_q = self.per_user.entry(user_id).or_default();
+            while user_q.front().is_some_and(|v| *v < min_ts) {
+                user_q.pop_front();
+            }
+            let empty = user_q.is_empty();
+            if self.global.len() >= self.global_rpm {
+                (Err("global_rpm"), empty)
+            } else if user_q.len() >= self.user_rpm {
+                (Err("user_rpm"), false)
+            } else {
+                (Ok(()), empty)
+            }
+        };
 
-        if self.global.len() >= self.global_rpm {
+        if let Err("global_rpm") = limit_ok {
+            if user_q_empty_after_pop {
+                self.per_user.remove(&user_id);
+            }
             return Err("global_rpm");
         }
-        if user_q.len() >= self.user_rpm {
-            return Err("user_rpm");
+        if limit_ok.is_err() {
+            return limit_ok;
         }
 
         self.global.push_back(now);
-        user_q.push_back(now);
+        self.per_user.entry(user_id).or_default().push_back(now);
         Ok(())
     }
 }
@@ -8793,28 +8830,14 @@ async fn submit_task(
             Ok(v) => v,
             Err(err) => {
                 error!("resolve auth key failed: {}", err);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("Auth lookup failed".to_string()),
-                    }),
-                );
+                return api_err::<SubmitTaskResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Auth lookup failed");
             }
         },
         None => None,
     };
     // Key-only: if client sent user_key but it is invalid, reject immediately (no fallback to user_id/chat_id)
     if req.user_key.is_some() && resolved_identity.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("Invalid user_key".to_string()),
-            }),
-        );
+        return api_err::<SubmitTaskResponse>(StatusCode::UNAUTHORIZED, "Invalid user_key");
     }
     let effective_user_key = resolved_identity.as_ref().map(|v| v.user_key.clone());
     let requested_user_id = req.user_id;
@@ -8835,14 +8858,7 @@ async fn submit_task(
         if let Some(normalized) = state.normalize_known_agent_id(Some(agent_id)) {
             normalized
         } else {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("unknown agent_id={agent_id}")),
-                }),
-            );
+            return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, format!("unknown agent_id={agent_id}"));
         }
     } else {
         DEFAULT_AGENT_ID.to_string()
@@ -8877,38 +8893,17 @@ async fn submit_task(
     } else if let Some(chat_id) = requested_chat_id {
         chat_id
     } else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("chat_id is required when user_key is absent".to_string()),
-            }),
-        );
+        return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, "chat_id is required when user_key is absent");
     };
 
     if resolved_identity.is_none() {
         let Some(request_user_id) = requested_user_id else {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("user_id is required when user_key is absent".to_string()),
-                }),
-            );
+            return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, "user_id is required when user_key is absent");
         };
         if channel_allows_public_access(channel) {
             if let Err(err) = upsert_public_channel_user(&state, request_user_id) {
                 error!("upsert public channel user failed: {}", err);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("Database error".to_string()),
-                    }),
-                );
+                return api_err::<SubmitTaskResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
             }
         } else if !is_user_allowed(&state, request_user_id) {
             let unauthorized = "Unauthorized user".to_string();
@@ -8926,30 +8921,14 @@ async fn submit_task(
                 ),
                 Some(&unauthorized),
             );
-            return (
-                StatusCode::FORBIDDEN,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(unauthorized),
-                }),
-            );
+            return api_err::<SubmitTaskResponse>(StatusCode::FORBIDDEN, unauthorized);
         }
     }
 
     let limit_result = {
         let mut limiter = match state.rate_limiter.lock() {
             Ok(v) => v,
-            Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("Rate limiter lock poisoned".to_string()),
-                    }),
-                )
-            }
+            Err(_) => return api_err::<SubmitTaskResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Rate limiter lock poisoned"),
         };
         limiter.check_and_record(effective_user_id)
     };
@@ -8963,14 +8942,7 @@ async fn submit_task(
             Some(&json!({ "limit": kind, "chat_id": effective_chat_id }).to_string()),
             Some(&limit_exceeded),
         );
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(limit_exceeded),
-            }),
-        );
+        return api_err::<SubmitTaskResponse>(StatusCode::TOO_MANY_REQUESTS, limit_exceeded);
     }
 
     let queued_count =
@@ -8978,14 +8950,7 @@ async fn submit_task(
             Ok(v) => v,
             Err(err) => {
                 error!("Count queued tasks failed: {}", err);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("Database error".to_string()),
-                    }),
-                );
+                return api_err::<SubmitTaskResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
             }
         };
 
@@ -8998,14 +8963,7 @@ async fn submit_task(
             Some(&json!({ "limit": "queue_limit", "chat_id": effective_chat_id }).to_string()),
             Some(&queue_full),
         );
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(queue_full),
-            }),
-        );
+        return api_err::<SubmitTaskResponse>(StatusCode::TOO_MANY_REQUESTS, queue_full);
     }
 
     let is_ask_task = matches!(&req.kind, claw_core::types::TaskKind::Ask);
@@ -9025,16 +8983,9 @@ async fn submit_task(
                     effective_chat_id,
                     truncate_for_log(text)
                 );
-                return (
-                    StatusCode::OK,
-                    Json(ApiResponse {
-                        ok: true,
-                        data: Some(SubmitTaskResponse {
-                            task_id: existing_id,
-                        }),
-                        error: None,
-                    }),
-                );
+                return api_ok(SubmitTaskResponse {
+                    task_id: existing_id,
+                });
             }
         }
     }
@@ -9098,14 +9049,7 @@ async fn submit_task(
 
     if let Err(err) = write_result {
         error!("Insert task failed: {}", err);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("Database error".to_string()),
-            }),
-        );
+        return api_err::<SubmitTaskResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
     }
 
     let _ = insert_audit_log(
@@ -9613,14 +9557,7 @@ async fn get_task(
                     Ok(identity) => identity,
                     Err(err) => {
                         error!("Resolve task viewer failed: {}", err);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(ApiResponse {
-                                ok: false,
-                                data: None,
-                                error: Some("Auth lookup failed".to_string()),
-                            }),
-                        );
+                        return api_err::<TaskQueryResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Auth lookup failed");
                     }
                 },
                 None => None,
@@ -9628,53 +9565,18 @@ async fn get_task(
             if !channel_allows_shared_ui_task_access(&channel) {
                 if let Some(expected_key) = expected_key {
                     if provided_key.as_deref() != Some(expected_key) {
-                        return (
-                            StatusCode::UNAUTHORIZED,
-                            Json(ApiResponse {
-                                ok: false,
-                                data: None,
-                                error: Some("Task owner mismatch".to_string()),
-                            }),
-                        );
+                        return api_err::<TaskQueryResponse>(StatusCode::UNAUTHORIZED, "Task owner mismatch");
                     }
                 }
             } else if provided_key.is_some() && viewer_identity.is_none() {
-                    return (
-                        StatusCode::UNAUTHORIZED,
-                        Json(ApiResponse {
-                            ok: false,
-                            data: None,
-                            error: Some("Invalid user_key".to_string()),
-                        }),
-                    );
+                    return api_err::<TaskQueryResponse>(StatusCode::UNAUTHORIZED, "Invalid user_key");
             }
-            (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    ok: true,
-                    data: Some(task),
-                    error: None,
-                }),
-            )
+            api_ok(task)
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("Task not found".to_string()),
-            }),
-        ),
+        Ok(None) => api_err::<TaskQueryResponse>(StatusCode::NOT_FOUND, "Task not found"),
         Err(err) => {
             error!("Read task failed: {}", err);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("Database error".to_string()),
-                }),
-            )
+            api_err::<TaskQueryResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
         }
     }
 }
@@ -9809,14 +9711,7 @@ async fn list_active_tasks(
     Json(req): Json<ActiveTasksRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
     if !is_user_allowed(&state, req.user_id) {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("Unauthorized user".to_string()),
-            }),
-        );
+        return api_err::<serde_json::Value>(StatusCode::FORBIDDEN, "Unauthorized user");
     }
     match list_active_tasks_internal(
         &state,
@@ -9824,27 +9719,13 @@ async fn list_active_tasks(
         req.chat_id,
         req.exclude_task_id.as_deref(),
     ) {
-        Ok(tasks) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(json!({
-                    "count": tasks.len(),
-                    "tasks": tasks,
-                })),
-                error: None,
-            }),
-        ),
+        Ok(tasks) => api_ok(json!({
+            "count": tasks.len(),
+            "tasks": tasks,
+        })),
         Err(err) => {
             error!("List active tasks failed: {}", err);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("List active tasks failed".to_string()),
-                }),
-            )
+            api_err::<serde_json::Value>(StatusCode::INTERNAL_SERVER_ERROR, "List active tasks failed")
         }
     }
 }
@@ -9854,14 +9735,7 @@ async fn cancel_tasks(
     Json(req): Json<CancelTasksRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
     if !is_user_allowed(&state, req.user_id) {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("Unauthorized user".to_string()),
-            }),
-        );
+        return api_err::<serde_json::Value>(StatusCode::FORBIDDEN, "Unauthorized user");
     }
 
     let now = now_ts();
@@ -9893,25 +9767,11 @@ async fn cancel_tasks(
                 "cancel_tasks: user_id={} chat_id={} canceled={}",
                 req.user_id, req.chat_id, count
             );
-            (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    ok: true,
-                    data: Some(json!({ "canceled": count })),
-                    error: None,
-                }),
-            )
+            api_ok(json!({ "canceled": count }))
         }
         Err(err) => {
             error!("Cancel tasks failed: {}", err);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("Cancel tasks failed".to_string()),
-                }),
-            )
+            api_err::<serde_json::Value>(StatusCode::INTERNAL_SERVER_ERROR, "Cancel tasks failed")
         }
     }
 }
@@ -9921,24 +9781,10 @@ async fn cancel_one_task(
     Json(req): Json<CancelOneTaskRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
     if !is_user_allowed(&state, req.user_id) {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("Unauthorized user".to_string()),
-            }),
-        );
+        return api_err::<serde_json::Value>(StatusCode::FORBIDDEN, "Unauthorized user");
     }
     if req.index == 0 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("index must be >= 1".to_string()),
-            }),
-        );
+        return api_err::<serde_json::Value>(StatusCode::BAD_REQUEST, "index must be >= 1");
     }
     let tasks = match list_active_tasks_internal(
         &state,
@@ -9949,24 +9795,13 @@ async fn cancel_one_task(
         Ok(tasks) => tasks,
         Err(err) => {
             error!("Cancel one task list failed: {}", err);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("Cancel one task failed".to_string()),
-                }),
-            );
+            return api_err::<serde_json::Value>(StatusCode::INTERNAL_SERVER_ERROR, "Cancel one task failed");
         }
     };
     let Some(target) = tasks.into_iter().find(|t| t.index == req.index) else {
-        return (
+        return api_err::<serde_json::Value>(
             StatusCode::NOT_FOUND,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("Active task index {} not found", req.index)),
-            }),
+            format!("Active task index {} not found", req.index),
         );
     };
     let now = now_ts();
@@ -9989,35 +9824,14 @@ async fn cancel_one_task(
         Ok(affected as i64)
     })();
     match result {
-        Ok(count) if count > 0 => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(json!({
-                    "canceled": count,
-                    "task": target,
-                })),
-                error: None,
-            }),
-        ),
-        Ok(_) => (
-            StatusCode::NOT_FOUND,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("Target task is no longer active".to_string()),
-            }),
-        ),
+        Ok(count) if count > 0 => api_ok(json!({
+            "canceled": count,
+            "task": target,
+        })),
+        Ok(_) => api_err::<serde_json::Value>(StatusCode::NOT_FOUND, "Target task is no longer active"),
         Err(err) => {
             error!("Cancel one task failed: {}", err);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("Cancel one task failed".to_string()),
-                }),
-            )
+            api_err::<serde_json::Value>(StatusCode::INTERNAL_SERVER_ERROR, "Cancel one task failed")
         }
     }
 }
