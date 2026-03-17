@@ -4147,7 +4147,8 @@ fn task_success_messages_from_offset(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| state.i18n.t("telegram.msg.task_done_no_text"));
-    let text = wrap_single_step_skill_message(task, &text).unwrap_or(text);
+    // Keep ask/run_skill success output as plain text to unify delivery format.
+    let text = text;
     debug!(
         "phase=success_source task_id={} source=text_only offset={} text_fp={} text_len={}",
         task_id,
@@ -4158,41 +4159,6 @@ fn task_success_messages_from_offset(
     vec![text]
 }
 
-fn wrap_single_step_skill_message(task: &TaskQueryResponse, text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty()
-        || trimmed.starts_with("subtask#")
-        || contains_delivery_tokens(trimmed)
-        || trimmed.starts_with("<pre>")
-    {
-        return None;
-    }
-    let meta = task.result_json.as_ref()?.get("delivery_meta")?;
-    if meta.get("mode").and_then(|v| v.as_str()) != Some("single_step_skill") {
-        return None;
-    }
-    let label = meta
-        .get("label")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("step");
-    let skill_name = meta
-        .get("skill_name")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let header = if let Some(skill_name) = skill_name {
-        format!("{label} · skill({skill_name})")
-    } else {
-        label.to_string()
-    };
-    Some(format!("subtask#1 {header}: success\n{trimmed}"))
-}
-
-fn contains_delivery_tokens(text: &str) -> bool {
-    text.lines().map(str::trim).any(has_delivery_prefix)
-}
 
 fn task_progress_messages(task: &TaskQueryResponse) -> Vec<String> {
     let out = task

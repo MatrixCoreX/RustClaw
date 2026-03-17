@@ -2193,7 +2193,7 @@ fn fallback_finalize_from_raw(subtask_results: &[String]) -> String {
     let filtered: Vec<String> = slice
         .iter()
         .filter_map(|s| {
-            let t = s.trim();
+            let t = normalize_user_visible_text(s);
             if t.is_empty() {
                 None
             } else if is_publishable_raw(t) {
@@ -2204,6 +2204,22 @@ fn fallback_finalize_from_raw(subtask_results: &[String]) -> String {
         })
         .collect();
     filtered.join("\n\n")
+}
+
+/// Normalize raw loop text to user-visible plain body.
+/// If a legacy `subtask#...` header exists, keep only its body.
+fn normalize_user_visible_text(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with("subtask#") {
+        return trimmed;
+    }
+    if let Some((_, body)) = trimmed.split_once('\n') {
+        let body = body.trim();
+        if !body.is_empty() {
+            return body;
+        }
+    }
+    trimmed
 }
 
 async fn synthesize_final_response(
