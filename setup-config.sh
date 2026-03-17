@@ -94,7 +94,6 @@ def to_int_or_none(v):
         return None
 
 telegram_token = str(get_nested(telegram_cfg, "telegram", "bot_token", default="") or get_nested(cfg, "telegram", "bot_token", default="") or "")
-admins = get_nested(telegram_cfg, "telegram", "admins", default=get_nested(cfg, "telegram", "admins", default=[]))
 selected_vendor = str(get_nested(cfg, "llm", "selected_vendor", default="") or "")
 selected_model = str(get_nested(cfg, "llm", "selected_model", default="") or "")
 
@@ -105,12 +104,7 @@ if force or is_empty_or_placeholder(telegram_token):
     telegram_text = set_key_in_section(telegram_text, "telegram", "bot_token", quote_toml_string(token))
     telegram_changed = True
 
-if force or (not isinstance(admins, list) or len(admins) == 0):
-    admin_raw = ask("Enter admin Telegram user_id (number): ").strip()  # zh: 请输入管理员 Telegram user_id（数字）:
-    while (not admin_raw) or (not re.fullmatch(r"-?\d+", admin_raw)):
-        admin_raw = ask("Invalid format, enter numeric user_id: ").strip()  # zh: 格式不正确，请输入数字 user_id:
-    telegram_text = set_key_in_section(telegram_text, "telegram", "admins", f"[{admin_raw}]")
-    telegram_changed = True
+# admins 仅通过 configs/channels/telegram.toml 或控制台 UI 配置，此处不再交互询问
 
 vendors = ["openai", "google", "anthropic", "grok"]
 available_vendors = [v for v in vendors if isinstance(get_nested(cfg, "llm", v, default=None), dict)]

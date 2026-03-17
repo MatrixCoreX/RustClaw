@@ -7635,15 +7635,7 @@ fn init_db(config: &AppConfig) -> anyhow::Result<Connection> {
 fn seed_users(db: &Connection, config: &AppConfig) -> anyhow::Result<()> {
     let now = now_ts();
 
-    for admin_id in &config.telegram.admins {
-        db.execute(
-            "INSERT INTO users (user_id, role, is_allowed, created_at, last_seen)
-             VALUES (?1, 'admin', 1, ?2, ?2)
-             ON CONFLICT(user_id) DO UPDATE SET role='admin', is_allowed=1, last_seen=excluded.last_seen",
-            params![admin_id, now],
-        )?;
-    }
-
+    // 已改为靠 key 绑定用户，admin 由 auth_keys.role 决定，不再从 config.telegram.admins 写入 users
     for user_id in &config.telegram.allowlist {
         db.execute(
             "INSERT INTO users (user_id, role, is_allowed, created_at, last_seen)

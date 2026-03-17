@@ -34,7 +34,6 @@ use tracing::{debug, info, warn};
 #[derive(Clone)]
 struct BotState {
     bot_name: String,
-    admins: Arc<HashSet<i64>>,
     allowlist: Arc<HashSet<i64>>,
     access_mode: String,
     allowed_usernames: Arc<HashSet<String>>,
@@ -222,7 +221,8 @@ fn telegram_user_allowed(state: &BotState, user_id: i64, username: Option<&str>)
     if state.access_mode != "specified" {
         return true;
     }
-    if state.admins.contains(&user_id) || state.allowlist.contains(&user_id) {
+    // 已改为靠 key 绑定用户；仅保留 allowlist / allowed_usernames，不再使用 admins 列表
+    if state.allowlist.contains(&user_id) {
         return true;
     }
     username
@@ -638,11 +638,6 @@ fn build_bot_state(
         allowlist.insert(*id);
     }
 
-    let mut admins = HashSet::new();
-    for id in &bot_config.admins {
-        admins.insert(*id);
-        allowlist.insert(*id);
-    }
     let mut allowed_usernames = HashSet::new();
     for username in &bot_config.allowed_usernames {
         if let Some(normalized) = normalize_telegram_username(username) {
@@ -652,7 +647,6 @@ fn build_bot_state(
 
     BotState {
         bot_name: bot_config.name.clone(),
-        admins: Arc::new(admins),
         allowlist: Arc::new(allowlist),
         access_mode: match bot_config.access_mode.trim().to_ascii_lowercase().as_str() {
             "specified" => "specified".to_string(),
@@ -870,8 +864,6 @@ async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
         info!("registered Telegram menu commands: bot_name={}", state.bot_name);
     }
 
-    let mut admins_list: Vec<i64> = state.admins.iter().copied().collect();
-    admins_list.sort_unstable();
     let mut allowlist_list: Vec<i64> = state.allowlist.iter().copied().collect();
     allowlist_list.sort_unstable();
     let mut allowed_usernames_list: Vec<String> = state.allowed_usernames.iter().cloned().collect();
@@ -883,7 +875,6 @@ async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
         state.i18n.t_with(
             "telegram.log.started",
             &[
-                ("admins", &format!("{admins_list:?}")),
                 ("allowlist", &format!("{allowlist_list:?}")),
                 ("access_mode", &state.access_mode),
                 ("allowed_usernames", &format!("{allowed_usernames_list:?}")),
@@ -1129,10 +1120,10 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         .as_ref()
         .map(|identity| identity.user_id)
         .unwrap_or(platform_user_id);
+    // 管理员仅由绑定 key 的 role 决定，不再使用 config 中的 admins 列表
     let is_admin = bound_identity
         .as_ref()
-        .is_some_and(|identity| identity.role.eq_ignore_ascii_case("admin"))
-        || state.admins.contains(&platform_user_id);
+        .is_some_and(|identity| identity.role.eq_ignore_ascii_case("admin"));
 
     // If user sends an image without text:
     // - auto_vision_on_image_only=true: save + auto-run image_vision
