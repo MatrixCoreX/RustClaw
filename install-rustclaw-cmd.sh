@@ -9,7 +9,8 @@ FORCE_BUILD=0
 DO_BUILD=0
 USE_USER_DIR=0
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
-DEPLOY_UI_NGINX=""
+# 默认部署 UI 到 nginx：配置 nginx、复制 UI、重启 nginx；--no-deploy-ui 可跳过
+DEPLOY_UI_NGINX="/var/www/html/rustclaw"
 
 # 无构建模式要求至少存在此 bin（默认不构建，适合已交叉编译好 bin 的场景）
 REQUIRED_BIN="$SCRIPT_DIR/target/release/clawd"
@@ -27,10 +28,12 @@ Options:
   --force-build    Force rebuild before install (implies --build)
   --user           Install to ~/.local/bin (no sudo)
   --dir <path>     Install to custom directory
-  --deploy-ui-nginx [path]   Build UI, auto-install/configure nginx, and deploy to path (default: /var/www/html/rustclaw)
+  --deploy-ui-nginx [path]   Deploy UI to path (default: /var/www/html/rustclaw), configure nginx, reload nginx
+  --no-deploy-ui   Skip nginx config and UI deploy (launcher only)
   -h, --help       Show this help
 
-Default: no build. Only install launcher if target/release/clawd exists.
+Default: install launcher and deploy UI to nginx (config nginx, copy UI, reload nginx). Use --no-deploy-ui to skip UI/nginx.
+No build unless --build/--force-build; requires target/release/clawd to exist.
 Use --build or --force-build when building from source.
 
 Verify after install:
@@ -66,12 +69,14 @@ while [[ $# -gt 0 ]]; do
       fi
       INSTALL_DIR="$1"
       ;;
+    --no-deploy-ui)
+      DEPLOY_UI_NGINX=""
+      ;;
     --deploy-ui-nginx)
       shift
       if [[ $# -ge 1 && "$1" != --* ]]; then
         DEPLOY_UI_NGINX="$1"
         shift
-        # 已消耗 --deploy-ui-nginx 与 path，跳过末尾 shift
         continue
       else
         DEPLOY_UI_NGINX="/var/www/html/rustclaw"
