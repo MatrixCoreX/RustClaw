@@ -27,41 +27,15 @@ audio_inbox_dir = "audio/upload"
 # 仅当收到纯图片消息时自动触发视觉能力
 auto_vision_on_image_only = false
 # Telegram Bot Token
-bot_token = "__RC_SECRET_0003__"
+bot_token = "8641836756:AAFreJ_1Bk2n17QPiIRJDvSa2hkcDOUS-yY"
 # Primary bot 对应哪个 agent；留空时默认 main
 agent_id = "main"
-# Optional multi-bot roster. Each entry runs inside the same telegramd process.
-# Keep [telegram].bot_token for the primary bot, then add extra bots below.
-# Example:
-# [[agents]]
-# id = "main"
-# name = "Main"
-# persona_prompt = "你是默认助手，回答清晰稳定。"
-#
-# [[agents]]
-# id = "sales"
-# name = "Sales"
-# persona_prompt = "你是销售助理，优先清晰、主动、推动下一步。"
-# preferred_vendor = "openai"
-# preferred_model = "gpt-4o-mini"
-# allowed_skills = ["http_basic", "image_generate"]
-#
-# [[telegram.bots]]
-# name = "sales"
-# bot_token = "123456:ABCDEF"
-# agent_id = "sales"
-# admins = [1985996990]
-# allowlist = []
-# access_mode = "specified"
-# allowed_usernames = ["alice", "@bob"]
-# language = "zh-CN"
-# i18n_path = "configs/i18n/telegramd.zh-CN.toml"
+# 单客户端模式：每个渠道类型仅保留一个 Telegram 客户端实例。
+# 请仅维护 [telegram] 这一组参数，不再配置多 bot 列表。
 # Optional static bindings loaded into channel_bindings on clawd startup.
 # Use this only if you want to pre-bind a Telegram account to a key.
 # Example:
 # bindings = [{ external_user_id = "1985996990", external_chat_id = "1985996990", user_key = "rk-REPLACE_ME" }]
-# Per-bot binding example:
-# bindings = [{ telegram_bot_name = "sales", external_user_id = "1985996990", external_chat_id = "1985996990", user_key = "rk-REPLACE_ME" }]
 bindings = []
 # i18n 文案路径
 i18n_path = "configs/i18n/telegramd.zh-CN.toml"
@@ -89,7 +63,7 @@ full_access = true
 # 按 chat_id 覆盖语音回复模式，例如 text / voice
 1985996990 = "text"
 
-# Shares the same runtime with [telegram]; bot_token usually only needs to be set in [telegram].
+# 兼容入口（与 [telegram] 共用同一个客户端运行时）。
 [telegram_bot]
 # 是否启用 telegram_bot 兼容入口
 enabled = true
