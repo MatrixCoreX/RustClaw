@@ -281,6 +281,15 @@ timeout_seconds = 15
 prompt_file = "prompts/skills/stock.md"
 output_kind = "text"
 
+[[skills]]
+name = "weather"
+enabled = true
+kind = "runner"
+aliases = ["天气", "weather_query", "查天气"]
+timeout_seconds = 15
+prompt_file = "prompts/skills/weather.md"
+output_kind = "text"
+
 # Phase 5 示例（可选）：
 # - runner 技能可配置 runner_name，未配则用 name 作为执行名。
 # - external 技能需配置 external_kind（如 "http_json"）、external_endpoint；可选 external_timeout_seconds、external_auth_ref。
