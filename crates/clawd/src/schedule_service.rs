@@ -301,6 +301,9 @@ struct CryptoPriceAlertProfile {
 #[derive(Debug, Clone)]
 struct ExistingCryptoPriceAlertJob {
     job_id: String,
+    channel: String,
+    external_user_id: Option<String>,
+    external_chat_id: Option<String>,
     schedule_type: String,
     run_at: Option<i64>,
     time_of_day: Option<String>,
@@ -407,6 +410,12 @@ fn schedule_content_matches(
         && existing.timezone.trim() == timezone.trim()
 }
 
+fn schedule_channel_binding_matches(existing: &ExistingCryptoPriceAlertJob, task: &ClaimedTask) -> bool {
+    existing.channel.trim().eq_ignore_ascii_case(task.channel.trim())
+        && existing.external_user_id == task.external_user_id
+        && existing.external_chat_id == task.external_chat_id
+}
+
 fn load_existing_crypto_price_alert_jobs(
     db: &Connection,
     user_id: i64,
@@ -414,7 +423,7 @@ fn load_existing_crypto_price_alert_jobs(
 ) -> Result<Vec<ExistingCryptoPriceAlertJob>, String> {
     let mut stmt = db
         .prepare(
-            "SELECT job_id, schedule_type, run_at, time_of_day, weekday, every_minutes, timezone, next_run_at, task_payload_json
+            "SELECT job_id, channel, external_user_id, external_chat_id, schedule_type, run_at, time_of_day, weekday, every_minutes, timezone, next_run_at, task_payload_json
              FROM scheduled_jobs
              WHERE user_id = ?1 AND chat_id = ?2 AND task_kind = 'run_skill'
              ORDER BY enabled DESC, id DESC
@@ -426,13 +435,16 @@ fn load_existing_crypto_price_alert_jobs(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, Option<String>>(2)?,
                 row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, String>(4)?,
                 row.get::<_, Option<i64>>(5)?,
-                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(6)?,
                 row.get::<_, Option<i64>>(7)?,
-                row.get::<_, String>(8)?,
+                row.get::<_, Option<i64>>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, Option<i64>>(10)?,
+                row.get::<_, String>(11)?,
             ))
         })
         .map_err(|e| e.to_string())?;
@@ -441,6 +453,9 @@ fn load_existing_crypto_price_alert_jobs(
     for row in rows {
         let (
             job_id,
+            channel,
+            external_user_id,
+            external_chat_id,
             schedule_type,
             run_at,
             time_of_day,
@@ -457,6 +472,9 @@ fn load_existing_crypto_price_alert_jobs(
         };
         out.push(ExistingCryptoPriceAlertJob {
             job_id,
+            channel,
+            external_user_id,
+            external_chat_id,
             schedule_type,
             run_at,
             time_of_day,
@@ -795,6 +813,7 @@ pub(crate) async fn try_handle_schedule_request(
                                 every_minutes,
                                 &timezone,
                             )
+                            && schedule_channel_binding_matches(v, task)
                     }) {
                         let effective_next_run = existing.next_run_at.unwrap_or(next_run_at);
                         let next_run_human = humanize_next_run_at(effective_next_run, &timezone);
@@ -826,9 +845,12 @@ pub(crate) async fn try_handle_schedule_request(
                                  every_minutes = ?8,
                                  timezone = ?9,
                                  task_payload_json = ?10,
+                                 channel = ?11,
+                                 external_user_id = ?12,
+                                 external_chat_id = ?13,
                                  enabled = 1,
-                                 next_run_at = ?11,
-                                 updated_at = ?12
+                                 next_run_at = ?14,
+                                 updated_at = ?15
                              WHERE job_id = ?1 AND user_id = ?2 AND chat_id = ?3",
                             params![
                                 existing.job_id,
@@ -841,8 +863,11 @@ pub(crate) async fn try_handle_schedule_request(
                                 every_minutes,
                                 timezone,
                                 payload.to_string(),
+                                task.channel,
+                                task.external_user_id,
+                                task.external_chat_id,
                                 next_run_at,
-                                updated_at
+                                updated_at,
                             ],
                         )
                         .map_err(|e| e.to_string())?;
@@ -871,14 +896,17 @@ pub(crate) async fn try_handle_schedule_request(
                 .map_err(|_| "db lock poisoned".to_string())?;
             db.execute(
                 "INSERT INTO scheduled_jobs (
-                    job_id, user_id, chat_id, user_key, schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr,
+                    job_id, user_id, chat_id, channel, external_user_id, external_chat_id, user_key, schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr,
                     timezone, task_kind, task_payload_json, enabled, notify_on_success, notify_on_failure,
                     last_run_at, next_run_at, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, 1, 1, 1, NULL, ?13, ?14, ?14)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, ?13, ?14, ?15, 1, 1, 1, NULL, ?16, ?17, ?17)",
                 params![
                     job_id,
                     task.user_id,
                     task.chat_id,
+                    task.channel,
+                    task.external_user_id,
+                    task.external_chat_id,
                     task.user_key,
                     schedule_type,
                     run_at,
