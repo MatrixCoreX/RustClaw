@@ -116,6 +116,44 @@ fn build_skill_playbooks_text(state: &AppState, task: &ClaimedTask) -> String {
     }
 }
 
+fn first_non_heading_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| {
+            !line.is_empty()
+                && !line.starts_with('#')
+                && !line.starts_with("```")
+                && !line.starts_with("<!--")
+        })
+        .map(|line| {
+            let mut out = line.to_string();
+            if out.chars().count() > 90 {
+                out = out.chars().take(90).collect::<String>() + "...";
+            }
+            out
+        })
+}
+
+/// 首轮路由提示：给 LLM 一份“技能速览”，降低误判成纯 chat 的概率。
+fn build_skill_quick_index_text(state: &AppState, task: &ClaimedTask) -> String {
+    let enabled = state.planner_visible_skills_for_task(task);
+    if enabled.is_empty() {
+        return "- (no enabled skills)".to_string();
+    }
+    let mut lines = Vec::new();
+    for skill in &enabled {
+        let summary = if let Some(registry_path) = state.skill_prompt_file(skill) {
+            let prompt_body = crate::load_prompt_template_for_state(state, &registry_path, "").0;
+            first_non_heading_line(&prompt_body)
+                .unwrap_or_else(|| "use this skill when user intent matches its capability".to_string())
+        } else {
+            "skill enabled but registry prompt_file missing".to_string()
+        };
+        lines.push(format!("- {skill}: {summary}"));
+    }
+    lines.join("\n")
+}
+
 #[derive(Debug, Clone)]
 struct AgentLoopGuardPolicy {
     max_steps: usize,
@@ -1304,6 +1342,7 @@ async fn plan_round_actions(
     loop_state: &LoopState,
 ) -> Result<Vec<AgentAction>, String> {
     let skill_playbooks = build_skill_playbooks_text(state, task);
+    let skill_quick_index = build_skill_quick_index_text(state, task);
     let (tool_spec_template, _) = crate::load_prompt_template_for_state(
         state,
         AGENT_TOOL_SPEC_PATH,
@@ -1318,12 +1357,16 @@ async fn plan_round_actions(
         (
             "single_plan_execution_prompt",
             prompt_file,
-            build_single_plan_prompt(
-                &prompt_template,
-                user_text,
-                goal,
-                &tool_spec_template,
-                &skill_playbooks,
+            format!(
+                "{}\n\n## Skill Quick Index (first-round routing hint)\nGoal: reduce misclassification and move into a second round when needed.\n- Do NOT end round-1 with a generic chat-style final answer when a skill might be relevant.\n- In round-1, prioritize intent classification + missing-slot check (what skill, what key args are missing).\n- If intent seems skill-related but confidence/args are incomplete, use `respond` to ask one concise clarifying question, then continue next round.\n- Only use immediate `call_skill` in round-1 when intent and required args are already clear.\n{}\n",
+                build_single_plan_prompt(
+                    &prompt_template,
+                    user_text,
+                    goal,
+                    &tool_spec_template,
+                    &skill_playbooks,
+                ),
+                skill_quick_index
             ),
         )
     } else {
