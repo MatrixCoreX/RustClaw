@@ -1300,6 +1300,12 @@ struct UsageHistoryPage {
     total_pages: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct SkillListItem {
+    name: String,
+    description: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TaskDebugUsage {
     prompt_tokens: Option<u64>,
@@ -2952,17 +2958,61 @@ async fn list_skills(
     let mut skills: Vec<String> = state.get_skills_list().iter().cloned().collect();
     skills.retain(|s| !hide_skill_in_ui(&state, s));
     skills.sort_unstable();
+    let skill_items = skills
+        .iter()
+        .map(|name| SkillListItem {
+            name: name.clone(),
+            description: ui_skill_description(&state, name),
+        })
+        .collect::<Vec<_>>();
     (
         StatusCode::OK,
         Json(ApiResponse {
             ok: true,
             data: Some(json!({
                 "skills": skills,
+                "skill_items": skill_items,
                 "skill_runner_path": state.skill_runner_path.display().to_string(),
             })),
             error: None,
         }),
     )
+}
+
+fn ui_skill_description(state: &AppState, skill_name: &str) -> Option<String> {
+    let prompt_rel = state.skill_prompt_file(skill_name)?;
+    let prompt_path = if Path::new(&prompt_rel).is_absolute() {
+        PathBuf::from(&prompt_rel)
+    } else {
+        state.workspace_root.join(&prompt_rel)
+    };
+    let raw = std::fs::read_to_string(prompt_path).ok()?;
+    extract_skill_description_from_prompt(&raw)
+}
+
+fn extract_skill_description_from_prompt(raw: &str) -> Option<String> {
+    let frontmatter = parse_skill_frontmatter(raw);
+    if !frontmatter.description.trim().is_empty() {
+        return Some(frontmatter.description.trim().to_string());
+    }
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("- Description:") {
+            let value = rest.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+        if let Some(rest) = trimmed.strip_prefix("description:") {
+            let value = rest.trim().trim_matches('"').trim_matches('\'');
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 async fn import_external_skill(

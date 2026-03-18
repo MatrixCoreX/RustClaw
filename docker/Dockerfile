@@ -33,12 +33,13 @@ RUN cargo build --release \
     -p process-basic-skill \
     -p rss-fetch-skill \
     -p service-control-skill \
+    -p stock-skill \
     -p system-basic-skill \
     -p x-skill
 
 FROM alpine:3.21
 
-RUN apk add --no-cache bash ca-certificates curl jq openssl python3
+RUN apk add --no-cache bash ca-certificates curl jq openssl py3-pip python3
 
 WORKDIR /app
 
