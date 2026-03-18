@@ -1,0 +1,20 @@
+[package]
+name = "clawcli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Terminal CLI to interact with clawd (RustClaw)"
+
+[[bin]]
+name = "clawcli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+rustyline = "16"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
