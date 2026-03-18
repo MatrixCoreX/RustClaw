@@ -16,8 +16,6 @@ use urlencoding::encode;
 
 type HmacSha256 = Hmac<Sha256>;
 static I18N: OnceLock<TextCatalog> = OnceLock::new();
-const PRICE_ALERT_TRIGGERED_TAG: &str = "[PRICE_ALERT_TRIGGERED]";
-const PRICE_ALERT_NOT_TRIGGERED_TAG: &str = "[PRICE_ALERT_NOT_TRIGGERED]";
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -1400,13 +1398,8 @@ fn handle_price_alert_check(
             ],
         )
     };
-    let tagged_text = if triggered {
-        format!("{PRICE_ALERT_TRIGGERED_TAG} {text_body}")
-    } else {
-        format!("{PRICE_ALERT_NOT_TRIGGERED_TAG} {text_body}")
-    };
     Ok((
-        tagged_text,
+        text_body,
         json!({
             "action":"price_alert_check",
             "symbol":symbol,
@@ -1419,7 +1412,8 @@ fn handle_price_alert_check(
             "start_price":start_price,
             "current_price":current_price,
             "change_pct":change_pct,
-            "candles":closes.len()
+            "candles":closes.len(),
+            "notify": triggered
         }),
     ))
 }
