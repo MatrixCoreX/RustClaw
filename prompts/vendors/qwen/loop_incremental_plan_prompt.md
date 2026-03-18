@@ -42,6 +42,7 @@ AgentAction JSON must use one of:
 Rules:
 - Output only steps that are still needed after the previous round.
 - Keep steps minimal, executable, and sufficient to finish the remaining work.
+- Treat any `RECENT_EXECUTION_CONTEXT` anchor inside `Goal/context` as higher priority than old memory. If the follow-up request does not explicitly switch target/domain, continue from that recent anchor.
 - For "run command then save output to file" intents, prefer one `call_skill` with `skill="run_cmd"` and shell redirection (`>`/`>>`) instead of placeholder text.
 - Never fabricate placeholder literals such as `<CMD_OUTPUT>` or `{joke_content}` as final file content.
 - If a later step must use the immediately previous step output, use `{{last_output}}` in that argument string.

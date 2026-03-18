@@ -28,8 +28,12 @@ pub(crate) fn prepare_prompt_with_memory(
         true,
         true,
     );
+    let mut agent_structured = structured.clone();
+    // Keep long-term memory available for logs/refresh, but do not pin it into planner context.
+    // Planner should rely on current request + recent execution context first.
+    agent_structured.long_term_summary = None;
     let prompt_with_memory = structured_memory_context_block(
-        &structured,
+        &agent_structured,
         MemoryContextMode::Agent,
         state
             .memory
