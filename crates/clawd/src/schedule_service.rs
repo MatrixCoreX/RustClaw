@@ -493,9 +493,23 @@ pub(crate) async fn try_handle_schedule_request(
     task: &ClaimedTask,
     prompt: &str,
 ) -> Result<Option<String>, String> {
-    let Some(intent) = parse_schedule_intent(state, task, prompt).await else {
-        return Ok(None);
+    let compile_args = json!({
+        "action": "compile",
+        "text": prompt
+    });
+    let compiled_text =
+        match execution_adapters::run_skill(state, task, "schedule", compile_args).await {
+            Ok(v) => v,
+            Err(_) => return Ok(None),
+        };
+    let intent = match serde_json::from_str::<ScheduleIntentOutput>(&compiled_text) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
     };
+    let kind_preview = clean_schedule_kind(&intent.kind);
+    if kind_preview.is_empty() || kind_preview == "none" {
+        return Ok(None);
+    }
 
     let kind = clean_schedule_kind(&intent.kind);
     debug!(
@@ -775,9 +789,24 @@ pub(crate) async fn try_handle_schedule_request(
                     if !has_text {
                         map.insert("text".to_string(), Value::String(prompt.to_string()));
                     }
+                    if map
+                        .get("schedule_task_mode")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.trim().is_empty())
+                        .unwrap_or(true)
+                    {
+                        // 定时 ask 默认按“原文提醒”发送，避免触发时二次意图误判。
+                        map.insert(
+                            "schedule_task_mode".to_string(),
+                            Value::String("direct_text".to_string()),
+                        );
+                    }
                     v
                 } else {
-                    json!({ "text": prompt })
+                    json!({
+                        "text": prompt,
+                        "schedule_task_mode": "direct_text"
+                    })
                 }
             } else {
                 intent.task.payload.clone()

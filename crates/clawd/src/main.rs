@@ -648,7 +648,7 @@ struct MemoryConfigFileWrapper {
     memory: MemoryConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub(crate) struct ScheduleIntentOutput {
     #[serde(default)]
     pub(crate) kind: String,
@@ -664,7 +664,7 @@ pub(crate) struct ScheduleIntentOutput {
     pub(crate) confidence: f64,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub(crate) struct ScheduleIntentSchedule {
     #[serde(default)]
     pub(crate) r#type: String,
@@ -680,7 +680,7 @@ pub(crate) struct ScheduleIntentSchedule {
     pub(crate) cron: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub(crate) struct ScheduleIntentTask {
     #[serde(default)]
     pub(crate) kind: String,
@@ -2333,6 +2333,65 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .get("source")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
+            let is_schedule_triggered = payload
+                .get("schedule_triggered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let schedule_task_mode = payload
+                .get("schedule_task_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            let schedule_force_agent = payload
+                .get("schedule_force_agent")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            // 定时 ask：默认按原文提醒直发，避免被普通问答路由误判成其它意图（如股票查询）。
+            // 若后续需要“定时让 AI 执行”，可在 payload 显式加 schedule_force_agent=true。
+            let schedule_direct_text_mode = is_schedule_triggered
+                && !schedule_force_agent
+                && (schedule_task_mode.is_empty() || schedule_task_mode == "direct_text");
+            if schedule_direct_text_mode {
+                let direct_text = prompt.trim();
+                if !direct_text.is_empty() {
+                    let answer_text = intercept_response_text_for_delivery(direct_text);
+                    let result = json!({ "text": answer_text.clone() });
+                    repo::update_task_success(state, &task.task_id, &result.to_string())?;
+                    maybe_notify_schedule_result(state, &task, &payload, true, &answer_text).await;
+                    let _ = memory::service::insert_memory(
+                        state,
+                        task.user_id,
+                        task.chat_id,
+                        task.user_key.as_deref(),
+                        &task.channel,
+                        task.external_chat_id.as_deref(),
+                        "user",
+                        prompt,
+                        state.memory.item_max_chars.max(256),
+                    );
+                    let _ = memory::service::insert_memory(
+                        state,
+                        task.user_id,
+                        task.chat_id,
+                        task.user_key.as_deref(),
+                        &task.channel,
+                        task.external_chat_id.as_deref(),
+                        "assistant",
+                        &answer_text,
+                        state.memory.item_max_chars.max(256),
+                    );
+                    info!("{}", LOG_CALL_WRAP);
+                    info!(
+                        "task_call_end task_id={} kind=ask status=success path=schedule_direct_text result={}",
+                        task.task_id,
+                        truncate_for_log(&answer_text)
+                    );
+                    info!("{}", LOG_CALL_WRAP);
+                    return Ok(());
+                }
+            }
             let main_rules = main_flow_rules(state);
             let is_resume_continue = is_resume_continue_source(main_rules, source);
             // Unified intent normalizer: one LLM call for resume + context resolution + schedule classification (replaces resume_followup_intent -> context_resolver -> schedule_intent).
@@ -2954,18 +3013,6 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
             let args = payload.get("args").cloned().unwrap_or_else(|| json!(""));
-            let _action = args
-                .as_object()
-                .and_then(|m| m.get("action"))
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .trim()
-                .to_ascii_lowercase();
-            let is_price_alert_action = is_crypto_price_alert_action(state, skill_name, &args);
-            let schedule_triggered = payload
-                .get("schedule_triggered")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
 
             info!(
                 "worker_once: processing run_skill task_id={} user_id={} chat_id={} skill_name={} args={}",
@@ -2978,17 +3025,9 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
 
             // Whether to require user confirmation before crypto trade_submit is decided by the planner; no hard block here.
 
-            match execution_adapters::run_skill(state, &task, skill_name, args).await {
-                Ok(text) => {
-                    let price_alert_rules = main_flow_rules(state);
-                    let no_trigger = text
-                        .trim_start()
-                        .starts_with(&price_alert_rules.crypto_price_alert_not_triggered_tag);
-                    let clean_text = if is_price_alert_action {
-                        strip_price_alert_tag(&text, price_alert_rules)
-                    } else {
-                        text.clone()
-                    };
+            match run_skill_with_runner_outcome(state, &task, skill_name, args).await {
+                Ok(outcome) => {
+                    let clean_text = outcome.text;
                     let clean_text = intercept_response_text_for_delivery(&clean_text);
                     let result = json!({
                         "text": clean_text,
@@ -2999,7 +3038,7 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                         }
                     });
                     repo::update_task_success(state, &task.task_id, &result.to_string())?;
-                    if !(schedule_triggered && is_price_alert_action && no_trigger) {
+                    if outcome.notify.unwrap_or(true) {
                         maybe_notify_schedule_result(state, &task, &payload, true, &clean_text).await;
                     }
                     let _ = memory::service::insert_memory(
@@ -3275,30 +3314,10 @@ fn task_payload_value(task: &ClaimedTask) -> Option<Value> {
     serde_json::from_str::<Value>(&task.payload_json).ok()
 }
 
-fn is_crypto_price_alert_action(state: &AppState, skill_name: &str, args: &Value) -> bool {
-    // Route crypto alert-action aliases via hard_rules instead of inline literals.
-    if state.resolve_canonical_skill_name(skill_name) != "crypto" {
-        return false;
-    }
-    let rules = main_flow_rules(state);
-    let action = args
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    rules
-        .crypto_price_alert_actions
-        .iter()
-        .any(|a| a == &action)
-}
-
-fn strip_price_alert_tag(text: &str, rules: &MainFlowRules) -> String {
-    text.trim()
-        .trim_start_matches(&rules.crypto_price_alert_triggered_tag)
-        .trim_start_matches(&rules.crypto_price_alert_not_triggered_tag)
-        .trim()
-        .to_string()
+#[derive(Debug, Clone)]
+struct SkillRunOutcome {
+    text: String,
+    notify: Option<bool>,
 }
 
 fn task_runtime_channel(state: &AppState, task: &ClaimedTask) -> RuntimeChannel {
@@ -3343,7 +3362,19 @@ async fn send_task_channel_message(
 ) -> Result<(), String> {
     match runtime_channel_from_payload(state, payload) {
         RuntimeChannel::Telegram => {
-            channel_send::send_telegram_message(state, task.chat_id, text).await
+            // Telegram runtime task.chat_id may be an internal conversation id.
+            // Prefer external_chat_id (real telegram chat id) when available.
+            let target_chat_id = task_external_chat_id(task)
+                .or_else(|| {
+                    payload
+                        .get("external_chat_id")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                })
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(task.chat_id);
+            channel_send::send_telegram_message(state, target_chat_id, text).await
         }
         RuntimeChannel::Whatsapp => {
             let to = task_external_chat_id(task)
@@ -3413,12 +3444,12 @@ fn resolve_whatsapp_delivery_route(state: &AppState, payload: &Value) -> Whatsap
 }
 
 /// Phase 3: 统一 skill 执行入口。按 registry.kind 分发：builtin -> 进程内；runner -> skill-runner；external -> external_kind。
-async fn run_skill_with_runner(
+async fn run_skill_with_runner_outcome(
     state: &AppState,
     task: &ClaimedTask,
     skill_name: &str,
     args: serde_json::Value,
-) -> Result<String, String> {
+) -> Result<SkillRunOutcome, String> {
     let skill_name = state.resolve_canonical_skill_name(skill_name);
     if skill_name.is_empty() {
         return Err("skill_name is empty".to_string());
@@ -3466,7 +3497,9 @@ async fn run_skill_with_runner(
 
     match kind {
         SkillKind::Builtin => {
-            return execute_builtin_skill(state, &skill_name, &args).await;
+            return execute_builtin_skill_for_task(state, task, &skill_name, &args)
+                .await
+                .map(|text| SkillRunOutcome { text, notify: None });
         }
         SkillKind::External | SkillKind::Runner => {}
     }
@@ -3635,6 +3668,11 @@ async fn run_skill_with_runner(
         );
     }
 
+    let notify = value
+        .get("extra")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get("notify"))
+        .and_then(|v| v.as_bool());
     let mut text = value
         .get("text")
         .and_then(|v| v.as_str())
@@ -3676,7 +3714,18 @@ async fn run_skill_with_runner(
             }
         }
     }
-    Ok(text)
+    Ok(SkillRunOutcome { text, notify })
+}
+
+async fn run_skill_with_runner(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
+    args: serde_json::Value,
+) -> Result<String, String> {
+    run_skill_with_runner_outcome(state, task, skill_name, args)
+        .await
+        .map(|r| r.text)
 }
 
 async fn execute_external_skill(
@@ -6224,7 +6273,7 @@ pub(crate) fn canonical_skill_name(name: &str) -> &str {
 pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
     matches!(
         name,
-        "run_cmd" | "read_file" | "write_file" | "list_dir" | "make_dir" | "remove_file"
+        "run_cmd" | "read_file" | "write_file" | "list_dir" | "make_dir" | "remove_file" | "schedule"
     )
 }
 
@@ -6446,6 +6495,28 @@ async fn execute_builtin_skill(
         }
         _ => Err(format!("unknown skill: {skill_name}")),
     }
+}
+
+async fn execute_builtin_skill_for_task(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
+    args: &Value,
+) -> Result<String, String> {
+    if skill_name != "schedule" {
+        return execute_builtin_skill(state, skill_name, args).await;
+    }
+    let map = ensure_args_object(args)?;
+    ensure_only_keys(map, &["action", "text"])?;
+    let action = required_string(map, "action")?.trim().to_ascii_lowercase();
+    if action != "compile" {
+        return Err("schedule.action must be compile".to_string());
+    }
+    let text = required_string(map, "text")?;
+    let intent = crate::schedule_service::parse_schedule_intent(state, task, text)
+        .await
+        .ok_or_else(|| "schedule intent not detected".to_string())?;
+    serde_json::to_string(&intent).map_err(|e| format!("serialize schedule intent failed: {e}"))
 }
 
 fn ensure_args_object(args: &Value) -> Result<&serde_json::Map<String, Value>, String> {
