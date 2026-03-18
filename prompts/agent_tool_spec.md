@@ -176,6 +176,14 @@ Skill behavior notes (file/path):
 - if the user is asking for a stock code, company-code mapping, listing info, or "某公司股票代码是多少", prefer `chat`
 - for quote/price/realtime requests, a configured company name or alias such as `中国移动` may be passed to `stock`; for stock-code questions still prefer `chat`
 
+### weather
+- 查询当前天气；数据来源 Open-Meteo，无需 API Key。
+- required（二选一）：
+  - 城市/地名：`city` 或 `location` 或 `place` 或 `q`（如 北京、Shanghai）
+  - 经纬度：`latitude` + `longitude`
+- optional: `action`（默认 query，可省略）
+- 仅用于“当前天气/气温/今天天气”等查询；不用于天气预报讨论、气候知识等，此类用 `chat`。
+
 ### chat
 - required: `text`
 - optional: `style` (`chat|joke`), `system_prompt`, `max_tokens`, `temperature`

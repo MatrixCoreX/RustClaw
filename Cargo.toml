@@ -34,6 +34,7 @@ members = [
     "crates/skills/task_control",
     "crates/skills/system_basic",
     "crates/skills/stock",
+    "crates/skills/weather",
     "crates/skills/x",
 ]
 
