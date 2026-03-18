@@ -11,6 +11,8 @@ USE_USER_DIR=0
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
 # 默认部署 UI 到 nginx：配置 nginx、复制 UI、重启 nginx；--no-deploy-ui 可跳过
 DEPLOY_UI_NGINX="/var/www/html/rustclaw"
+# --pi-app：配置 Pi App 桌面快捷方式 + 开机自启（小屏）
+CONFIGURE_PI_APP=0
 
 # 无构建模式要求至少存在此 bin（默认不构建，适合已交叉编译好 bin 的场景）
 REQUIRED_BIN="$SCRIPT_DIR/target/release/clawd"
@@ -30,6 +32,7 @@ Options:
   --dir <path>     Install to custom directory
   --deploy-ui-nginx [path]   Deploy UI to path (default: /var/www/html/rustclaw), configure nginx, reload nginx
   --no-deploy-ui   Skip nginx config and UI deploy (launcher only)
+  --pi-app         Configure Pi App: desktop shortcut + autostart on login (RustClaw 小屏)
   -h, --help       Show this help
 
 Default: install launcher and deploy UI to nginx (config nginx, copy UI, reload nginx). Use --no-deploy-ui to skip UI/nginx.
@@ -71,6 +74,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-deploy-ui)
       DEPLOY_UI_NGINX=""
+      ;;
+    --pi-app)
+      CONFIGURE_PI_APP=1
       ;;
     --deploy-ui-nginx)
       shift
@@ -435,6 +441,18 @@ echo "  bash install-rustclaw-cmd.sh --build     # build from source then instal
 echo "  bash install-rustclaw-cmd.sh --force-build   # force rebuild then install"
 echo "Uninstall (removes command only, does not touch configs):"
 echo "  bash uninstall-rustclaw-cmd.sh [--user|--dir <path>]"
+if [[ "$CONFIGURE_PI_APP" == "1" ]]; then
+  PI_APP_DIR="$SCRIPT_DIR/pi_app"
+  if [[ -d "$PI_APP_DIR" && -x "$PI_APP_DIR/install-desktop.sh" && -x "$PI_APP_DIR/enable-autostart.sh" ]]; then
+    echo
+    echo "Configuring Pi App: desktop shortcut + autostart..."
+    (cd "$PI_APP_DIR" && bash install-desktop.sh)
+    (cd "$PI_APP_DIR" && bash enable-autostart.sh)
+    echo "Pi App: 桌面快捷方式已创建，开机自启已启用。"
+  else
+    echo "Skip Pi App: $PI_APP_DIR not found or scripts not executable."
+  fi
+fi
 if [[ -n "$DEPLOY_UI_NGINX" ]]; then
   echo
   echo "Deploying UI to nginx directory: $DEPLOY_UI_NGINX"
