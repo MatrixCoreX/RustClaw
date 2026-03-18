@@ -33,6 +33,7 @@ AgentAction JSON must use one of:
 Rules:
 - Plan all required steps in strict order for the user request.
 - Keep steps minimal, executable, and sufficient to actually finish the request.
+- Treat any `RECENT_EXECUTION_CONTEXT` anchor inside `Goal/context` as higher priority than old memory. If the current request is a short follow-up and does not explicitly name a new target, continue from that recent anchor instead of switching subject/domain.
 - Prefer actions that can complete in this planning round; if uncertain, return the minimum next executable steps.
 - For "run command then save output to file" intents, prefer one `call_skill` with `skill="run_cmd"` and shell redirection (`>`/`>>`) instead of placeholder text.
 - Never fabricate placeholder literals such as `<CMD_OUTPUT>` or `{joke_content}` as final file content.

@@ -39,6 +39,7 @@ use tracing::{debug, error, info, info_span, warn, Instrument};
 use uuid::Uuid;
 
 mod agent_engine;
+mod capability_map;
 mod channel_send;
 mod execution_adapters;
 mod http;
@@ -2661,6 +2662,15 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             let chat_prompt_context = memory_ctx.chat_prompt_context;
             let mut resolved_prompt_for_execution = resolved_prompt.clone();
             let mut prompt_with_memory_for_execution = prompt_with_memory.clone();
+            let recent_execution_anchor_context =
+                routing_context::build_recent_execution_anchor_context(state, &task);
+            if recent_execution_anchor_context != "<none>" {
+                prompt_with_memory_for_execution.push_str(
+                    "\n\n### RECENT_EXECUTION_CONTEXT\n\
+Use this block as the primary anchor for short follow-up requests. If the current request does not explicitly name a new target, continue from this latest successful subject/domain instead of switching to older memory.\n",
+                );
+                prompt_with_memory_for_execution.push_str(&recent_execution_anchor_context);
+            }
             if let Some(image_context) =
                 analyze_attached_images_for_ask(state, &task, &payload, &resolved_prompt).await?
             {

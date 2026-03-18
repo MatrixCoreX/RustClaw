@@ -146,6 +146,7 @@ pub(crate) async fn run_intent_normalizer(
         .filter(|s| !s.is_empty() && s != "{}")
         .unwrap_or_else(|| "<none>".to_string());
     let recent_execution_context = routing_context::build_recent_execution_context(state, task, 8);
+    let capability_map = crate::capability_map::build_capability_map_for_task(state, task);
     let memory_context = if state.memory.route_memory_enabled {
         let structured = memory::service::recall_structured_memory_context(
             state,
@@ -177,6 +178,7 @@ pub(crate) async fn run_intent_normalizer(
         &prompt_template,
         &[
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
+            ("__CAPABILITY_MAP__", &capability_map),
             ("__RESUME_CONTEXT__", &resume_context_str),
             ("__BINDING_CONTEXT__", &binding_context_str),
             ("__RECENT_EXECUTION_CONTEXT__", &recent_execution_context),
