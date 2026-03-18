@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/claw-core",
     "crates/clawd",
+    "crates/clawcli",
     "crates/skill-runner",
     "crates/telegramd",
     "crates/feishud",

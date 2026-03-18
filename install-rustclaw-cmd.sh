@@ -384,6 +384,24 @@ else
 fi
 
 echo "Installed: $LINK_PATH -> $TARGET"
+
+# Install clawcli if present (terminal CLI to talk to clawd)
+CLAWCLI_BIN="$SCRIPT_DIR/target/release/clawcli"
+CLAWCLI_LINK="$INSTALL_DIR/clawcli"
+if [[ -x "$CLAWCLI_BIN" ]]; then
+  if [[ "$USE_USER_DIR" == "1" ]] || [[ -w "$INSTALL_DIR" ]]; then
+    rm -f "$CLAWCLI_LINK"
+    ln -s "$CLAWCLI_BIN" "$CLAWCLI_LINK"
+    echo "Installed: $CLAWCLI_LINK -> $CLAWCLI_BIN"
+  else
+    sudo rm -f "$CLAWCLI_LINK"
+    sudo ln -s "$CLAWCLI_BIN" "$CLAWCLI_LINK"
+    echo "Installed: $CLAWCLI_LINK -> $CLAWCLI_BIN (sudo)"
+  fi
+else
+  echo "Note: clawcli not found ($CLAWCLI_BIN). Run with --build to build workspace including clawcli."
+fi
+
 if [[ "$LINK_PATH" == "$USER_INSTALL_DIR/rustclaw" ]]; then
   case ":$PATH:" in
     *":$USER_INSTALL_DIR:"*) ;;
@@ -398,6 +416,7 @@ echo "Check install:"
 echo "  command -v rustclaw"
 echo "  rustclaw -h"
 echo "  rustclaw -status"
+echo "  command -v clawcli && clawcli --help   # terminal chat CLI (if installed)"
 echo
 echo "Key management:"
 echo "  rustclaw -key list"
