@@ -57,6 +57,15 @@ prompt_file = "prompts/skills/remove_file.md"
 output_kind = "text"
 
 [[skills]]
+name = "schedule"
+enabled = true
+kind = "builtin"
+aliases = ["schedule_compile", "timer_compile"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/schedule.md"
+output_kind = "text"
+
+[[skills]]
 name = "x"
 enabled = true
 kind = "runner"

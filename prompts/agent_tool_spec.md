@@ -184,6 +184,12 @@ Skill behavior notes (file/path):
 - optional: `action`（默认 query，可省略）
 - 仅用于“当前天气/气温/今天天气”等查询；不用于天气预报讨论、气候知识等，此类用 `chat`。
 
+### schedule
+- action: `compile`
+- required: `action="compile"`, `text`
+- 用于把“人类定时描述”编译为结构化定时计划；此技能只负责语义编译，不直接执行调度。
+- 结果为 JSON 字符串，字段契约对齐 `ScheduleIntentOutput`（kind/timezone/schedule/task/target_job_id/confidence）。
+
 ### chat
 - required: `text`
 - optional: `style` (`chat|joke`), `system_prompt`, `max_tokens`, `temperature`
