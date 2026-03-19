@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -12,6 +13,9 @@ use serde_json::{json, Map, Value};
 struct Req {
     request_id: String,
     args: Value,
+    /// Generic runner context from `clawd` / `skill-runner` (not `args._memory`).
+    #[serde(default)]
+    context: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,7 +151,7 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(&cfg, &workspace_root, req.args) {
+            Ok(req) => match execute(&cfg, &workspace_root, req.args, req.context.as_ref()) {
                 Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
@@ -181,6 +185,7 @@ fn execute(
     cfg: &RootConfig,
     workspace_root: &Path,
     args: Value,
+    runner_context: Option<&Value>,
 ) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
@@ -206,12 +211,19 @@ fn execute(
         .get("detail_level")
         .and_then(|v| v.as_str())
         .unwrap_or("normal");
-    let response_language = obj
-        .get("response_language")
-        .or_else(|| obj.get("language"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty());
+    let timeout_seconds = obj
+        .get("timeout_seconds")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_else(|| cfg.image_vision.timeout_seconds.unwrap_or(90))
+        .max(5)
+        .min(300);
+    let response_language = resolve_effective_response_language(
+        cfg,
+        workspace_root,
+        obj,
+        runner_context,
+        timeout_seconds,
+    );
     let schema = obj.get("schema").cloned();
     let user_instruction = obj
         .get("instruction")
@@ -220,12 +232,6 @@ fn execute(
         .and_then(|v| v.as_str())
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
-    let timeout_seconds = obj
-        .get("timeout_seconds")
-        .and_then(|v| v.as_u64())
-        .unwrap_or_else(|| cfg.image_vision.timeout_seconds.unwrap_or(90))
-        .max(5)
-        .min(300);
     let max_input_bytes = cfg.image_vision.max_input_bytes.unwrap_or(10 * 1024 * 1024);
 
     let requested_vendor = obj.get("vendor").and_then(|v| v.as_str());
@@ -247,7 +253,7 @@ fn execute(
             &action,
             detail_level,
             schema.as_ref(),
-            response_language,
+            response_language.as_deref(),
             user_instruction,
         );
         let config_default_model = first_model_candidate(
@@ -265,6 +271,14 @@ fn execute(
             max_input_bytes,
         ) {
             Ok((text, model, model_kind)) => {
+                let text = maybe_rewrite_image_vision_text_for_target_language(
+                    cfg,
+                    workspace_root,
+                    action.as_str(),
+                    response_language.as_deref(),
+                    text,
+                    timeout_seconds,
+                );
                 let extra = json!({
                     "provider": vendor_name(vendor),
                     "model": model,
@@ -384,6 +398,143 @@ fn to_workspace_path(workspace_root: &Path, input: &str) -> Result<PathBuf, Stri
     Ok(joined)
 }
 
+fn non_empty_str_from_value(v: Option<&Value>) -> Option<String> {
+    v.and_then(|x| x.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+/// Matches `clawd` `preferred_response_language` ordering: last matching preference wins.
+fn language_from_memory_preferences_map(prefs: &Map<String, Value>) -> Option<String> {
+    let pairs: Vec<_> = prefs.iter().collect();
+    for (k, v) in pairs.into_iter().rev() {
+        let kt = k.trim();
+        if kt == "response_language" || kt == "language" {
+            if let Some(s) = v.as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn language_from_json_value(v: &Value) -> Option<String> {
+    v.get("language")
+        .and_then(|x| x.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s.to_ascii_lowercase() != "unknown")
+}
+
+fn parse_language_choice_from_llm(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if let Ok(v) = serde_json::from_str::<Value>(t) {
+        return language_from_json_value(&v);
+    }
+    let start = t.find('{')?;
+    let end = t.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    let slice = &t[start..=end];
+    let v: Value = serde_json::from_str(slice).ok()?;
+    language_from_json_value(&v)
+}
+
+fn load_language_infer_prompt_template(workspace_root: &Path) -> String {
+    let primary = workspace_root.join("prompts/language_infer_prompt.md");
+    if let Ok(s) = fs::read_to_string(&primary) {
+        if !s.trim().is_empty() {
+            return s;
+        }
+    }
+    let fallback = workspace_root.join("prompts/vendors/default/language_infer_prompt.md");
+    if let Ok(s) = fs::read_to_string(&fallback) {
+        if !s.trim().is_empty() {
+            return s;
+        }
+    }
+    DEFAULT_LANGUAGE_INFER_PROMPT_TEMPLATE.to_string()
+}
+
+/// When explicit language args are absent, derive target language from generic runner `context`,
+/// injected `args._memory`, and (last resort) an OpenAI-compatible chat pass over `_memory.context`.
+fn resolve_effective_response_language(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    args_obj: &Map<String, Value>,
+    runner_context: Option<&Value>,
+    task_timeout_seconds: u64,
+) -> Option<String> {
+    if let Some(s) = non_empty_str_from_value(args_obj.get("response_language")) {
+        return Some(s);
+    }
+    if let Some(s) = non_empty_str_from_value(args_obj.get("language")) {
+        return Some(s);
+    }
+    if let Some(ctx) = runner_context.and_then(|c| c.as_object()) {
+        if let Some(s) = non_empty_str_from_value(ctx.get("response_language"))
+            .or_else(|| non_empty_str_from_value(ctx.get("language")))
+        {
+            return Some(s);
+        }
+    }
+    let Some(mem_obj) = args_obj.get("_memory").and_then(|m| m.as_object()) else {
+        return None;
+    };
+    if let Some(s) = non_empty_str_from_value(mem_obj.get("lang_hint")) {
+        return Some(s);
+    }
+    if let Some(prefs) = mem_obj.get("preferences").and_then(|p| p.as_object()) {
+        if let Some(s) = language_from_memory_preferences_map(prefs) {
+            return Some(s);
+        }
+    }
+    let snippets = mem_obj
+        .get("context")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim();
+    if snippets.is_empty() || snippets == "<none>" {
+        return None;
+    }
+    let infer_timeout = task_timeout_seconds.clamp(10, 90).min(30);
+    infer_language_from_memory_snippets_llm(cfg, workspace_root, snippets, infer_timeout)
+}
+
+fn infer_language_from_memory_snippets_llm(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    memory_snippets: &str,
+    infer_timeout_secs: u64,
+) -> Option<String> {
+    let template = load_language_infer_prompt_template(workspace_root);
+    let prompt = template.replace("__MEMORY_SNIPPETS__", memory_snippets);
+    let t = infer_timeout_secs.clamp(5, 45).min(25);
+    for vk in vendor_order(
+        None,
+        cfg.image_vision.default_vendor.as_deref(),
+        cfg.llm.selected_vendor.as_deref(),
+    ) {
+        let Ok((vname, vcfg)) = resolve_vendor_config(cfg, vk) else {
+            continue;
+        };
+        if check_api_key(vname, &vcfg.api_key).is_err() {
+            continue;
+        }
+        let model = vcfg.model.trim();
+        if model.is_empty() {
+            continue;
+        }
+        if let Ok(out) = openai_compat_chat_rewrite(vcfg, model, &prompt, t) {
+            if let Some(lang) = parse_language_choice_from_llm(&out) {
+                return Some(lang);
+            }
+        }
+    }
+    None
+}
+
 fn build_prompt(
     workspace_root: &Path,
     prompt_vendor: &str,
@@ -427,6 +578,111 @@ fn build_prompt(
         .replace("__TASK_INSTRUCTION__", &task_instruction)
         .replace("__SCHEMA_HINT__", &schema_hint)
         .replace("__LANGUAGE_HINT__", &language_hint)
+}
+
+fn load_image_output_rewrite_prompt_template(workspace_root: &Path) -> String {
+    let primary = workspace_root.join("prompts/image_output_rewrite_prompt.md");
+    if let Ok(s) = fs::read_to_string(&primary) {
+        return s;
+    }
+    let fallback = workspace_root.join("prompts/vendors/default/image_output_rewrite_prompt.md");
+    if let Ok(s) = fs::read_to_string(&fallback) {
+        return s;
+    }
+    include_str!("../../../../prompts/vendors/default/image_output_rewrite_prompt.md").to_string()
+}
+
+fn openai_compat_chat_rewrite(
+    vcfg: &VendorConfig,
+    model: &str,
+    user_prompt: &str,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(timeout_secs.clamp(5, 120)))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let base = vcfg.base_url.trim_end_matches('/');
+    let url = format!("{base}/v1/chat/completions");
+    let body = json!({
+        "model": model,
+        "messages": [{"role": "user", "content": user_prompt}],
+        "temperature": 0.0
+    });
+    let resp = client
+        .post(&url)
+        .bearer_auth(vcfg.api_key.trim())
+        .json(&body)
+        .send()
+        .map_err(|e| format!("chat completion request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let t = resp.text().unwrap_or_default();
+        return Err(format!("chat completion HTTP error: {t}"));
+    }
+    let v: Value = resp
+        .json()
+        .map_err(|e| format!("parse chat response: {e}"))?;
+    Ok(v
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string())
+}
+
+/// Same-turn alignment pass formerly done in `clawd`: rewrite vision text to `response_language`
+/// for narrative actions. On failure, returns `vision_output` unchanged.
+fn maybe_rewrite_image_vision_text_for_target_language(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    action: &str,
+    target_language: Option<&str>,
+    vision_output: String,
+    task_timeout_seconds: u64,
+) -> String {
+    let Some(lang) = target_language.map(str::trim).filter(|s| !s.is_empty()) else {
+        return vision_output;
+    };
+    if !matches!(
+        action,
+        "describe" | "compare" | "screenshot_summary"
+    ) {
+        return vision_output;
+    }
+    if vision_output.trim().is_empty() {
+        return vision_output;
+    }
+    let template = load_image_output_rewrite_prompt_template(workspace_root);
+    let prompt = template
+        .replace("__TARGET_LANGUAGE__", lang)
+        .replace("__ORIGINAL_OUTPUT__", &vision_output);
+    let rewrite_timeout = task_timeout_seconds.clamp(10, 90).min(45);
+    for vk in vendor_order(
+        None,
+        cfg.image_vision.default_vendor.as_deref(),
+        cfg.llm.selected_vendor.as_deref(),
+    ) {
+        let Ok((vname, vcfg)) = resolve_vendor_config(cfg, vk) else {
+            continue;
+        };
+        if check_api_key(vname, &vcfg.api_key).is_err() {
+            continue;
+        }
+        let model = vcfg.model.trim();
+        if model.is_empty() {
+            continue;
+        }
+        if let Ok(out) = openai_compat_chat_rewrite(vcfg, model, &prompt, rewrite_timeout) {
+            let t = out.trim();
+            if !t.is_empty() {
+                return t.to_string();
+            }
+        }
+    }
+    vision_output
 }
 
 fn action_instruction(
@@ -570,6 +826,8 @@ const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_DEFAULT_TEMPLATE: &str =
     include_str!("../../../../prompts/vendors/default/image_vision_action_extract_default.md");
 const DEFAULT_IMAGE_VISION_ACTION_FALLBACK_TEMPLATE: &str =
     include_str!("../../../../prompts/vendors/default/image_vision_action_fallback.md");
+const DEFAULT_LANGUAGE_INFER_PROMPT_TEMPLATE: &str =
+    include_str!("../../../../prompts/vendors/default/language_infer_prompt.md");
 
 fn call_vendor_vision(
     vendor: VendorKind,
