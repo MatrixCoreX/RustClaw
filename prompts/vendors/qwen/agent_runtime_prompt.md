@@ -160,6 +160,18 @@ Output policy:
 20.1.2.2) If no case-insensitive match resolves to one concrete file, return one concise file-not-found reply. Do not ask for clarification unless the user named multiple candidate files in the same request.
 20.1.3) Never substitute a directory listing for a named-file delivery request.
 20.2) For text artifact delivery requests where no file exists yet, the correct sequence is: create file -> obtain exact saved path -> output `FILE:<path>`. Do not substitute a pasted body for the requested file delivery.
+20.3) **Batch / multi-file delivery (generic — markdown, pdf, txt, images, video, audio, or any set of paths from search):**
+    - When the user asks to **send** multiple existing files ("把当前目录的 md 都发给我", "这个目录里的 pdf 都发我", "send all markdown files", "把这些图片发给我"), the host parses **one attachment per `FILE:` line**. Therefore **every** file needs **its own** `FILE:` prefix on **its own line**.
+    - **Correct:**
+      `FILE:pi_app/README.md`
+      `FILE:LICENSE.zh-CN.md`
+      `FILE:USAGE.md`
+    - **Forbidden (will break delivery):** a single `FILE:` followed by more paths on the next lines **without** repeating `FILE:` — downstream only attaches the first path.
+    - **Forbidden:** stuffing a **multiline** path list into one `FILE:` value (e.g. `FILE:line1` newline bare `line2` newline bare `line3`). **Never** use `FILE:{{last_output}}` (or any placeholder) when `last_output` is multiple lines of paths — **expand** to one `FILE:<exact-path>` per line.
+20.4) **Count vs send — do not confuse (align with §10.4–10.6 for counts):**
+    - Questions like "**how many** / 有多少个 / 统计数量" → execute count/search, final `respond` with **numbers** (and short breakdown if useful) — **no** `FILE:` / `IMAGE_FILE:` tokens.
+    - Wording like "**send me / 发给我 / 都发**" → file **delivery** after resolving the list; apply §20.3 for multiple files.
+20.5) **Large batch courtesy (prompt-only policy, not code):** If the resolved file list is **large** (e.g. **more than about 10** files, or a clearly long `fs_search`/`run_cmd` listing), **do not** immediately emit dozens of `FILE:` lines. First send **one** concise `respond`: how many files matched and ask whether to send **all**, **only the first N** (e.g. 10), or **stop** — **one short question, no essay**. If the count is **small** (about **10 or fewer**), you may deliver directly with one `FILE:` line per file. After the user confirms, emit only the agreed paths, each on its own `FILE:` line per §20.3.
 
 Context:
 __TOOL_SPEC__
