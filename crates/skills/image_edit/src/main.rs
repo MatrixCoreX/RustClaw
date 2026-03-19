@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -15,6 +16,8 @@ use sha1::Sha1;
 struct Req {
     request_id: String,
     args: Value,
+    #[serde(default)]
+    context: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -223,7 +226,7 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(&cfg, &workspace_root, req.args) {
+            Ok(req) => match execute(&cfg, &workspace_root, req.args, req.context.as_ref()) {
                 Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
@@ -254,10 +257,256 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(String, Value), String> {
-    let obj = args
+fn first_image_path_from_images_array(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    let arr = obj.get("images")?.as_array()?;
+    for it in arr {
+        if let Some(p) = it
+            .as_object()
+            .and_then(|m| m.get("path"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            return Some(p);
+        }
+        if let Some(p) = it
+            .as_str()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn image_edit_args_has_image(obj: &serde_json::Map<String, Value>) -> bool {
+    let image_obj_has_path = obj
+        .get("image")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get("path"))
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let image_str = obj
+        .get("image")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let images_array_has_path = obj
+        .get("images")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter().any(|it| {
+                it.as_object()
+                    .and_then(|m| m.get("path"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false)
+                    || it.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    image_obj_has_path || image_str || images_array_has_path
+}
+
+fn recent_image_paths_from_context(ctx: Option<&Value>) -> Vec<String> {
+    let Some(ctx) = ctx else {
+        return Vec::new();
+    };
+    let Some(arr) = ctx.get("recent_image_paths").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn memory_snippet_for_resolver(obj: &serde_json::Map<String, Value>) -> String {
+    obj.get("_memory")
+        .and_then(|m| m.get("context"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("<none>")
+        .to_string()
+}
+
+fn load_image_reference_resolver_prompt(workspace_root: &Path) -> String {
+    let primary = workspace_root.join("prompts/image_reference_resolver_prompt.md");
+    if let Ok(s) = fs::read_to_string(&primary) {
+        return s;
+    }
+    let fallback = workspace_root.join("prompts/vendors/default/image_reference_resolver_prompt.md");
+    if let Ok(s) = fs::read_to_string(&fallback) {
+        return s;
+    }
+    include_str!("../../../../prompts/vendors/default/image_reference_resolver_prompt.md").to_string()
+}
+
+fn render_image_reference_prompt(template: &str, memory: &str, goal: &str, candidates: &[String]) -> String {
+    let lines = candidates
+        .iter()
+        .enumerate()
+        .map(|(i, p)| format!("{i}: {p}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    template
+        .replace("__MEMORY_TEXT__", memory)
+        .replace("__GOAL__", goal)
+        .replace("__CANDIDATES__", &lines)
+}
+
+fn parse_llm_selected_index(raw: &str) -> Option<i64> {
+    let t = raw.trim();
+    if let Ok(v) = serde_json::from_str::<Value>(t) {
+        return v.get("selected_index").and_then(|x| x.as_i64());
+    }
+    let start = t.find('{')?;
+    let end = t.rfind('}')?;
+    if end > start {
+        let slice = t.get(start..=end)?;
+        let v: Value = serde_json::from_str(slice).ok()?;
+        return v.get("selected_index").and_then(|x| x.as_i64());
+    }
+    None
+}
+
+fn openai_compat_chat_completion(
+    vcfg: &VendorConfig,
+    model: &str,
+    user_prompt: &str,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(timeout_secs.clamp(5, 120)))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let url = format!(
+        "{}/v1/chat/completions",
+        trim_trailing_slash(&vcfg.base_url)
+    );
+    let body = json!({
+        "model": model,
+        "messages": [{"role": "user", "content": user_prompt}],
+        "temperature": 0.0
+    });
+    let resp = client
+        .post(&url)
+        .bearer_auth(&vcfg.api_key.trim())
+        .json(&body)
+        .send()
+        .map_err(|e| format!("chat completion request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let t = resp.text().unwrap_or_default();
+        return Err(format!("chat completion HTTP error: {t}"));
+    }
+    let v: Value = resp
+        .json()
+        .map_err(|e| format!("parse chat response: {e}"))?;
+    Ok(v
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string())
+}
+
+fn resolve_image_path_from_context(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    instruction: &str,
+    obj: &serde_json::Map<String, Value>,
+    ctx: Option<&Value>,
+) -> Result<String, String> {
+    let candidates = recent_image_paths_from_context(ctx);
+    if candidates.is_empty() {
+        return Err(
+            "Could not determine which image to edit: no recent image paths in context. \
+             Upload an image, set image.path/url, or name the file explicitly."
+                .to_string(),
+        );
+    }
+    if candidates.len() == 1 {
+        return Ok(candidates[0].clone());
+    }
+    let memory = memory_snippet_for_resolver(obj);
+    let template = load_image_reference_resolver_prompt(workspace_root);
+    let prompt = render_image_reference_prompt(&template, &memory, instruction, &candidates);
+    let timeout = 30u64;
+    let mut last_err: Option<String> = None;
+    for vk in vendor_order(
+        None,
+        cfg.image_edit.default_vendor.as_deref(),
+        cfg.llm.selected_vendor.as_deref(),
+    ) {
+        let Ok((vname, vcfg)) = resolve_vendor_config(cfg, vk) else {
+            continue;
+        };
+        if check_api_key(vname, &vcfg.api_key).is_err() {
+            continue;
+        }
+        let model = vcfg.model.trim();
+        if model.is_empty() {
+            continue;
+        }
+        match openai_compat_chat_completion(vcfg, model, &prompt, timeout) {
+            Ok(out) => {
+                if let Some(idx) = parse_llm_selected_index(&out) {
+                    if idx >= 0 {
+                        let u = idx as usize;
+                        if let Some(p) = candidates.get(u) {
+                            return Ok(p.clone());
+                        }
+                    }
+                }
+                last_err = Some(format!(
+                    "resolver model returned no usable selected_index (output truncated): {}",
+                    truncate(out.trim(), 200)
+                ));
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    let preview = candidates
+        .iter()
+        .take(8)
+        .enumerate()
+        .map(|(i, p)| format!("  [{i}] {p}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let hint = last_err.unwrap_or_else(|| "LLM resolver unavailable".to_string());
+    Err(format!(
+        "Multiple recent images ({}); could not pick one automatically ({hint}). \
+         Set image.path to the file you want, or reply with an index 0..{}.\n{}",
+        candidates.len(),
+        candidates.len().saturating_sub(1),
+        preview
+    ))
+}
+
+fn execute(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    args: Value,
+    context: Option<&Value>,
+) -> Result<(String, Value), String> {
+    let mut obj = args
         .as_object()
+        .cloned()
         .ok_or_else(|| "args must be object".to_string())?;
+
+    let action_empty = obj
+        .get("action")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().is_empty())
+        .unwrap_or(true);
+    if !obj.contains_key("action") || action_empty {
+        obj.insert("action".to_string(), Value::String("edit".to_string()));
+    }
+
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
@@ -272,7 +521,17 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .and_then(|v| v.as_str())
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| "instruction is required".to_string())?;
+        .ok_or_else(|| "instruction is required".to_string())?
+        .to_string();
+
+    if !image_edit_args_has_image(&obj) {
+        let path = resolve_image_path_from_context(cfg, workspace_root, &instruction, &obj, context)?;
+        obj.insert("image".to_string(), json!({ "path": path }));
+    } else if obj.get("image").is_none() {
+        if let Some(p) = first_image_path_from_images_array(&obj) {
+            obj.insert("image".to_string(), json!({ "path": p }));
+        }
+    }
 
     let image_source = obj
         .get("image")
@@ -306,10 +565,10 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         cfg.image_edit.default_output_dir.as_deref().unwrap_or("image"),
         obj.get("output_path").and_then(|v| v.as_str()),
     )?;
-    let output_lang = resolve_output_language(cfg, obj);
+    let output_lang = resolve_output_language(cfg, &obj);
     let i18n = TextCatalog::for_lang(workspace_root, &cfg.image_edit, &output_lang);
 
-    let effective_instruction = rewrite_instruction(&action, instruction);
+    let effective_instruction = rewrite_instruction(&action, instruction.as_str());
     let size = obj
         .get("size")
         .and_then(|v| v.as_str())

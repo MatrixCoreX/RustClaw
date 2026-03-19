@@ -72,12 +72,6 @@ const RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE: &str =
 const RESUME_FOLLOWUP_DISCUSSION_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/resume_followup_discussion_prompt.md");
 const RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH: &str = "prompts/resume_followup_discussion_prompt.md";
-const IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/image_output_rewrite_prompt.md");
-const LANGUAGE_INFER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/language_infer_prompt.md");
-const IMAGE_REFERENCE_RESOLVER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/image_reference_resolver_prompt.md");
 const LONG_TERM_SUMMARY_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/long_term_summary_prompt.md");
 const SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT: &str =
@@ -3349,7 +3343,6 @@ pub(crate) async fn run_skill_with_runner_outcome(
         .await
         .map_err(|err| format!("skill semaphore closed: {err}"))?;
 
-    let args = enrich_skill_args_with_memory(state, task, &skill_name, args).await;
     let args = inject_skill_memory_context(state, task, &skill_name, args);
     let args = ensure_default_output_dir_for_skill_args(&state.workspace_root, &skill_name, args);
     let source = match task_runtime_channel(state, task) {
@@ -3437,47 +3430,11 @@ pub(crate) async fn run_skill_with_runner_outcome(
         .and_then(|v| v.as_object())
         .and_then(|m| m.get("notify"))
         .and_then(|v| v.as_bool());
-    let mut text = value
+    let text = value
         .get("text")
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    if canonical_skill_name(&skill_name) == "image_vision" {
-        let action = args
-            .as_object()
-            .and_then(|m| m.get("action"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("describe")
-            .to_ascii_lowercase();
-        let target_language = args
-            .as_object()
-            .and_then(|m| m.get("response_language").or_else(|| m.get("language")))
-            .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        if let Some(lang) = target_language {
-            if matches!(
-                action.as_str(),
-                "describe" | "compare" | "screenshot_summary"
-            ) {
-                match rewrite_image_vision_output_language(state, task, &text, &lang).await {
-                    Ok(rewritten) => {
-                        info!(
-                            "rewrite_image_vision_output_language: task_id={} lang={} action={} status=ok",
-                            task.task_id, lang, action
-                        );
-                        text = rewritten;
-                    }
-                    Err(err) => {
-                        warn!(
-                            "rewrite_image_vision_output_language: task_id={} lang={} action={} status=failed err={}",
-                            task.task_id, lang, action, err
-                        );
-                    }
-                }
-            }
-        }
-    }
     Ok(SkillRunOutcome {
         text,
         notify,
@@ -4243,6 +4200,7 @@ async fn execute_external_http_json(
 /// Merges schedule invocation fields from the task payload into the JSON object passed to skills as `context`.
 /// Scheduled jobs inject `schedule_job_id`, `invocation_source`, `scheduled`, `schedule_triggered` at payload top level.
 fn build_runner_skill_context(
+    state: &AppState,
     task: &ClaimedTask,
     source: &str,
     llm_skill: bool,
@@ -4263,6 +4221,24 @@ fn build_runner_skill_context(
         },
     );
     ctx.insert("exchange_credentials".to_string(), credential_context);
+
+    // Generic: recent image paths from this chat (newest-first order). Skills may use or ignore.
+    let recent_images = collect_recent_image_candidates(
+        state,
+        task.user_key.as_deref(),
+        task.user_id,
+        task.chat_id,
+        200,
+    );
+    ctx.insert(
+        "recent_image_paths".to_string(),
+        Value::Array(
+            recent_images
+                .into_iter()
+                .map(Value::String)
+                .collect::<Vec<_>>(),
+        ),
+    );
 
     if let Ok(payload) = serde_json::from_str::<Value>(&task.payload_json) {
         if let Some(p) = payload.as_object() {
@@ -4304,7 +4280,7 @@ async fn run_skill_with_runner_once(
             .map(Value::String)
             .unwrap_or(Value::Null)
     };
-    let skill_context = build_runner_skill_context(task, source, llm_skill, credential_context);
+    let skill_context = build_runner_skill_context(state, task, source, llm_skill, credential_context);
     let req_line = json!({
         "request_id": task.task_id,
         "user_id": task.user_id,
@@ -4398,41 +4374,6 @@ async fn run_skill_with_runner_once(
     serde_json::from_str(out_line.trim()).map_err(|err| format!("invalid skill-runner json: {err}"))
 }
 
-async fn rewrite_image_vision_output_language(
-    state: &AppState,
-    task: &ClaimedTask,
-    original_text: &str,
-    target_language: &str,
-) -> Result<String, String> {
-    if original_text.trim().is_empty() {
-        return Ok(original_text.to_string());
-    }
-    let (prompt_template, prompt_file) = load_prompt_template_for_state(
-        state,
-        "prompts/image_output_rewrite_prompt.md",
-        IMAGE_OUTPUT_REWRITE_PROMPT_TEMPLATE,
-    );
-    let prompt = render_prompt_template(
-        &prompt_template,
-        &[
-            ("__TARGET_LANGUAGE__", target_language),
-            ("__ORIGINAL_OUTPUT__", original_text),
-        ],
-    );
-    log_prompt_render(
-        &task.task_id,
-        "image_output_rewrite_prompt",
-        &prompt_file,
-        None,
-    );
-    let out = run_llm_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file).await?;
-    let trimmed = out.trim();
-    if trimmed.is_empty() {
-        return Err("empty rewrite output".to_string());
-    }
-    Ok(trimmed.to_string())
-}
-
 fn inject_skill_memory_context(
     state: &AppState,
     task: &ClaimedTask,
@@ -4506,143 +4447,6 @@ fn skill_memory_anchor(skill_name: &str, args_obj: &serde_json::Map<String, Valu
         }
     }
     parts.join(" | ")
-}
-
-async fn enrich_skill_args_with_memory(
-    state: &AppState,
-    task: &ClaimedTask,
-    skill_name: &str,
-    args: Value,
-) -> Value {
-    let canonical = canonical_skill_name(skill_name);
-    if canonical == "image_edit" {
-        let obj = args.as_object().cloned().unwrap_or_default();
-        if image_edit_args_has_image(&obj) {
-            return Value::Object(obj);
-        }
-        let ref_goal = obj
-            .get("instruction")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        if let Some(path) = resolve_image_for_edit_from_context_llm(state, task, &ref_goal).await {
-            info!(
-                "image_edit_auto_resolve: task_id={} user_id={} chat_id={} selected_path={} instruction={}",
-                task.task_id,
-                task.user_id,
-                task.chat_id,
-                path,
-                truncate_for_log(&ref_goal)
-            );
-            return normalize_image_edit_args(Value::Object(obj), &ref_goal, &path);
-        }
-        return Value::Object(obj);
-    }
-    if canonical != "image_vision" {
-        return args;
-    }
-    let mut obj = args.as_object().cloned().unwrap_or_default();
-    let has_lang = obj
-        .get("response_language")
-        .and_then(|v| v.as_str())
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false)
-        || obj
-            .get("language")
-            .and_then(|v| v.as_str())
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false);
-    if has_lang {
-        return Value::Object(obj);
-    }
-    if let Some(lang) = infer_language_preference_from_memory_llm(state, task).await {
-        obj.insert("response_language".to_string(), Value::String(lang));
-    }
-    Value::Object(obj)
-}
-
-async fn infer_language_preference_from_memory_llm(
-    state: &AppState,
-    task: &ClaimedTask,
-) -> Option<String> {
-    let preferences = recall_user_preferences(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        state.memory.preference_recall_limit.max(1),
-    )
-    .ok()?;
-    if let Some(lang) = memory::service::preferred_response_language(&preferences) {
-        info!(
-            "infer_language_preference_from_memory_llm: task_id={} user_id={} chat_id={} source=structured_preferences language={}",
-            task.task_id, task.user_id, task.chat_id, lang
-        );
-        return Some(lang);
-    }
-    let structured = memory::service::recall_structured_memory_context(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        "infer language preference",
-        state.memory.recall_limit.max(1),
-        state.memory.image_memory_include_long_term,
-        state.memory.image_memory_include_preferences,
-    );
-    let memory_context = memory::service::structured_memory_context_block(
-        &structured,
-        memory::retrieval::MemoryContextMode::Image,
-        state.memory.image_memory_max_chars.max(384),
-    );
-    if memory_context == "<none>" {
-        return None;
-    }
-    let (prompt_template, prompt_file) = load_prompt_template_for_state(
-        state,
-        "prompts/language_infer_prompt.md",
-        LANGUAGE_INFER_PROMPT_TEMPLATE,
-    );
-    let prompt = render_prompt_template(
-        &prompt_template,
-        &[("__MEMORY_SNIPPETS__", &memory_context)],
-    );
-    log_prompt_render(&task.task_id, "language_infer_prompt", &prompt_file, None);
-    let out = match run_llm_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file).await
-    {
-        Ok(v) => v,
-        Err(err) => {
-            warn!(
-                "infer_language_preference_from_memory_llm failed: task_id={} user_id={} chat_id={} err={}",
-                task.task_id, task.user_id, task.chat_id, err
-            );
-            return None;
-        }
-    };
-    let parsed = parse_language_from_llm_output(&out);
-    info!(
-        "infer_language_preference_from_memory_llm: task_id={} user_id={} chat_id={} memory_items={} parsed_language={} llm_out={}",
-        task.task_id,
-        task.user_id,
-        task.chat_id,
-        structured.recalled_recent.len()
-            + structured.similar_triggers.len()
-            + structured.relevant_facts.len()
-            + structured.recent_related_events.len(),
-        parsed.as_deref().unwrap_or("unknown"),
-        truncate_for_log(&out)
-    );
-    parsed
-}
-
-fn parse_language_from_llm_output(raw: &str) -> Option<String> {
-    parse_llm_json_raw_or_any::<Value>(raw)
-        .and_then(|v| {
-            v.get("language")
-                .and_then(|x| x.as_str())
-                .map(|s| s.trim().to_string())
-        })
-        .filter(|s| !s.is_empty() && s.to_ascii_lowercase() != "unknown")
 }
 
 pub(crate) fn extract_first_json_object_any(text: &str) -> Option<String> {
@@ -5507,53 +5311,6 @@ pub(crate) fn truncate_for_agent_trace(text: &str) -> String {
     out
 }
 
-fn normalize_image_edit_args(args: Value, fallback_instruction: &str, image_path: &str) -> Value {
-    let mut obj = args.as_object().cloned().unwrap_or_default();
-    if !obj.contains_key("action") {
-        obj.insert("action".to_string(), Value::String("edit".to_string()));
-    }
-    if !obj.contains_key("instruction") {
-        obj.insert(
-            "instruction".to_string(),
-            Value::String(fallback_instruction.trim().to_string()),
-        );
-    }
-    if !obj.contains_key("image") {
-        obj.insert("image".to_string(), json!({"path": image_path}));
-    }
-    Value::Object(obj)
-}
-
-fn image_edit_args_has_image(obj: &serde_json::Map<String, Value>) -> bool {
-    let image_obj_has_path = obj
-        .get("image")
-        .and_then(|v| v.as_object())
-        .and_then(|m| m.get("path"))
-        .and_then(|v| v.as_str())
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false);
-    let image_str = obj
-        .get("image")
-        .and_then(|v| v.as_str())
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false);
-    let images_array_has_path = obj
-        .get("images")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter().any(|it| {
-                it.as_object()
-                    .and_then(|m| m.get("path"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| !s.trim().is_empty())
-                    .unwrap_or(false)
-                    || it.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false)
-            })
-        })
-        .unwrap_or(false);
-    image_obj_has_path || image_str || images_array_has_path
-}
-
 pub(crate) fn extract_delivery_file_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -5615,85 +5372,6 @@ fn is_image_file_path(path: &str) -> bool {
         || lower.ends_with(".webp")
         || lower.ends_with(".gif")
         || lower.ends_with(".bmp")
-}
-
-async fn resolve_image_for_edit_from_context_llm(
-    state: &AppState,
-    task: &ClaimedTask,
-    goal: &str,
-) -> Option<String> {
-    let candidates = collect_recent_image_candidates(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        200,
-    );
-    if candidates.is_empty() {
-        return None;
-    }
-    let structured = memory::service::recall_structured_memory_context(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        goal,
-        state.memory.recall_limit.max(1),
-        state.memory.image_memory_include_long_term,
-        state.memory.image_memory_include_preferences,
-    );
-    let memory_text = memory::service::structured_memory_context_block(
-        &structured,
-        memory::retrieval::MemoryContextMode::Image,
-        state.memory.image_memory_max_chars.max(384),
-    );
-    let candidate_lines = candidates
-        .iter()
-        .enumerate()
-        .map(|(i, p)| format!("{i}: {p}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let (prompt_template, prompt_file) = load_prompt_template_for_state(
-        state,
-        "prompts/image_reference_resolver_prompt.md",
-        IMAGE_REFERENCE_RESOLVER_PROMPT_TEMPLATE,
-    );
-    let prompt = render_prompt_template(
-        &prompt_template,
-        &[
-            ("__MEMORY_TEXT__", &memory_text),
-            ("__GOAL__", goal),
-            ("__CANDIDATES__", &candidate_lines),
-        ],
-    );
-    log_prompt_render(
-        &task.task_id,
-        "image_reference_resolver_prompt",
-        &prompt_file,
-        None,
-    );
-    let llm_out = run_llm_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file)
-        .await
-        .ok()?;
-    let idx = parse_image_reference_index_from_llm_output(&llm_out)?;
-    if idx < 0 {
-        return None;
-    }
-    let idx = idx as usize;
-    let selected = candidates.get(idx).cloned();
-    info!(
-        "resolve_image_for_edit_from_context_llm: task_id={} selected_index={} selected_path={} llm_out={}",
-        task.task_id,
-        idx,
-        selected.as_deref().unwrap_or("<none>"),
-        truncate_for_log(&llm_out)
-    );
-    selected
-}
-
-fn parse_image_reference_index_from_llm_output(raw: &str) -> Option<i64> {
-    parse_llm_json_raw_or_any::<Value>(raw)
-        .and_then(|v| v.get("selected_index").and_then(|x| x.as_i64()))
 }
 
 fn collect_recent_image_candidates(
@@ -5776,58 +5454,57 @@ fn collect_recent_image_candidates(
     out
 }
 
+/// Pulls workspace-relative image paths from a past `run_skill` payload's `args` using only
+/// generic JSON shapes (`images[]`, `image`, `output_path`). No per-skill name branching.
+fn merge_image_candidate_paths_from_args(
+    args: &serde_json::Map<String, Value>,
+    out: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
+    if let Some(images) = args.get("images").and_then(|v| v.as_array()) {
+        for item in images {
+            let path = item
+                .as_object()
+                .and_then(|m| m.get("path"))
+                .and_then(|v| v.as_str())
+                .or_else(|| item.as_str());
+            if let Some(path) = path {
+                let p = path.trim().to_string();
+                if is_image_file_path(&p) && seen.insert(p.clone()) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    let path = args
+        .get("image")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get("path"))
+        .and_then(|v| v.as_str())
+        .or_else(|| args.get("image").and_then(|v| v.as_str()));
+    if let Some(path) = path {
+        let p = path.trim().to_string();
+        if is_image_file_path(&p) && seen.insert(p.clone()) {
+            out.push(p);
+        }
+    }
+    if let Some(path) = args.get("output_path").and_then(|v| v.as_str()) {
+        let p = path.trim().to_string();
+        if is_image_file_path(&p) && seen.insert(p.clone()) {
+            out.push(p);
+        }
+    }
+}
+
 fn collect_image_paths_from_task_payload(
     payload: &Value,
     out: &mut Vec<String>,
     seen: &mut HashSet<String>,
 ) {
-    let skill = payload
-        .get("skill_name")
-        .and_then(|v| v.as_str())
-        .map(canonical_skill_name)
-        .unwrap_or_default();
-    let args = payload.get("args").and_then(|v| v.as_object());
-    if args.is_none() {
+    let Some(args) = payload.get("args").and_then(|v| v.as_object()) else {
         return;
-    }
-    let args = args.unwrap();
-    if skill == "image_vision" {
-        if let Some(images) = args.get("images").and_then(|v| v.as_array()) {
-            for item in images {
-                let path = item
-                    .as_object()
-                    .and_then(|m| m.get("path"))
-                    .and_then(|v| v.as_str())
-                    .or_else(|| item.as_str());
-                if let Some(path) = path {
-                    let p = path.trim().to_string();
-                    if is_image_file_path(&p) && seen.insert(p.clone()) {
-                        out.push(p);
-                    }
-                }
-            }
-        }
-    } else if skill == "image_edit" {
-        let path = args
-            .get("image")
-            .and_then(|v| v.as_object())
-            .and_then(|m| m.get("path"))
-            .and_then(|v| v.as_str())
-            .or_else(|| args.get("image").and_then(|v| v.as_str()));
-        if let Some(path) = path {
-            let p = path.trim().to_string();
-            if is_image_file_path(&p) && seen.insert(p.clone()) {
-                out.push(p);
-            }
-        }
-    } else if skill == "image_generate" {
-        if let Some(path) = args.get("output_path").and_then(|v| v.as_str()) {
-            let p = path.trim().to_string();
-            if is_image_file_path(&p) && seen.insert(p.clone()) {
-                out.push(p);
-            }
-        }
-    }
+    };
+    merge_image_candidate_paths_from_args(args, out, seen);
 }
 
 pub(crate) fn extract_json_object(text: &str) -> Option<String> {
