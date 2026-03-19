@@ -30,7 +30,10 @@
 | all | `schema` | no | JSON | - | For `extract`, optional extraction schema hint. |
 
 ### Language behavior (skill-side only)
-1. **Host does not shape language args:** The host (`clawd`) does **not** inject `response_language` (or similar) into `image_vision` args before execution. Language selection is entirely this skill’s responsibility.
+1. **Host vs skill (target language):**
+   - The host (`clawd`) does **not** infer or inject a **default** target language for `image_vision` (no image_vision-specific language shaping on the platform).
+   - Explicit user-provided `response_language` / `language` in the request are still **forwarded unchanged** to the skill when present.
+   - **Fallback** target-language selection and **final** output-language behavior (prompt + optional rewrite) are owned by this skill; the host does not rewrite skill result text.
 2. **Priority (target language for prompts + optional rewrite):**
    - Non-empty `args.response_language`
    - Else non-empty `args.language`
