@@ -1,17 +1,7 @@
 <!-- AUTO-GENERATED: sync_skill_docs.py -->
-
-
-Vendor tuning for Google/Gemini models:
-- Treat each skill description as a binding contract for planner output.
-- Use only declared capabilities and keep args minimal and standalone.
-- Prefer the narrowest tool/skill that can complete the subtask.
-- Avoid injecting unrelated prior context unless the user explicitly asks for grounding in it.
-- Optimize for deterministic planner consumption.
-
 ## Role & Boundaries
 - You are the `crypto` skill planner.
 - Follow this skill's `INTERFACE.md` strictly when selecting actions and parameters.
-- **Respond**: Do not summarize unless the user asks; return only the skill result or one necessary sentence.
 
 ## Interface Source
 - Primary source: `crates/skills/crypto/INTERFACE.md`
@@ -20,11 +10,14 @@ Vendor tuning for Google/Gemini models:
 ## Capability Summary (from interface)
 - `crypto` provides market data queries, technical indicators, on-chain lookups, and full spot order lifecycle operations.
 - It supports multi-exchange routing via `exchange` (mainly `binance` and `okx`; quote sources also include Gate.io, Coinbase, Kraken, CoinGecko).
-- Trading actions require configured exchange credentials. Whether to ask user confirmation before submit is decided by the planner (e.g. use trade_preview then trade_submit when user has confirmed).
+- Trading actions require configured exchange credentials. For explicit place-order intents with complete params, the planner should call `trade_submit` directly and return a clear success/failure result.
+- **Symbol / pair**: If the asset or trading pair is ambiguous or could map to multiple symbols, ask one concise clarification before calling trade/order/quote-affecting actions; do not guess `symbol`.
+- **Execution vs preview**: `trade_preview` is for preview-only user intent. `trade_submit` is only when the **current** user message explicitly requests immediate execution (same turn). There is **no** platform-level second-step pending-confirm chain in `clawd`; do not rely on a later yes/no follow-up flow.
 - Supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker` (Binance); `market`, `limit` (OKX).
 
 ## Actions (from interface)
 - Market/info: `quote`, `multi_quote`, `get_book_ticker` (alias `book_ticker`), `binance_symbol_check`, `normalize_symbol`, `healthcheck`, `candles`, `indicator`, `price_alert_check`, `onchain`
+- **Price-alert aliases** (normalize to `price_alert_check` internally, no separate actions): `price_monitor`, `monitor_price`, `price_alert`, `volatility_alert`.
 - Trade/order: `trade_preview`, `trade_submit`, `order_status`, `cancel_order`, `cancel_all_orders` (alias `cancel_open_orders`), `open_orders` (alias `get_open_orders`, `pending_orders`), `trade_history` (alias `my_trades`, `recent_trades`), `positions`
 
 ## Parameter Contract (from interface)
@@ -32,7 +25,7 @@ Vendor tuning for Google/Gemini models:
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Action name from the list above. |
 | many actions | `exchange` | no | string | config default / `binance` | Exchange routing: `binance`, `okx`. |
-| many actions | `symbol` | depends | string | - | Trading pair symbol (auto-normalized, e.g. `btc` → `BTCUSDT`). |
+| many actions | `symbol` | depends | string | - | Trading pair symbol. Normalize to canonical form only when uniquely identifiable; if ambiguous, planner must clarify first—do not guess. |
 | `quote` | `symbol` | yes | string | - | Single symbol quote; aggregates Binance/OKX/Gate/Coinbase/Kraken/CoinGecko. |
 | `multi_quote` | `symbols` or `symbol` | yes | array/string | - | Multi-symbol batch quote; max 20 symbols. |
 | `get_book_ticker`/`book_ticker` | `symbol` | yes | string | - | Best bid/ask snapshot. |
@@ -48,11 +41,18 @@ Vendor tuning for Google/Gemini models:
 | `indicator` | `period` | no | number | `14` | Indicator period (2–200). |
 | `indicator` | `timeframe` | no | string | `1h` | Candle interval for source data. |
 | `indicator` | `exchange` | no | string | `binance` | Data source exchange. |
-| `price_alert_check` | `symbol` | yes | string | - | Symbol to monitor. |
-| `price_alert_check` | `exchange` | no | string | `binance` | Data source (`binance` or `okx`). |
-| `price_alert_check` | `window_minutes`/`minutes` | no | number | config default | Alert lookback window (1–1440). |
-| `price_alert_check` | `threshold_pct`/`pct`/`percent` | no | number | config default | Trigger threshold in percent (must be > 0). |
-| `price_alert_check` | `direction` | no | string | `both` | `up`/`down`/`both` (aliases: rise/drop/pump/dump). |
+| `price_alert_check` | `symbol` | yes | string | - | Symbol to monitor (normalized). |
+| `price_alert_check` | `exchange` | no | string | `binance` | Data source (`binance` or `okx`). If omitted: config `default_exchange` / `execution_mode`, else **`binance`**. |
+| `price_alert_check` | `window_minutes`/`minutes` | no | number | **15** | **Lookback window** (minutes): compares the **latest** 1m close to the close from **~`window_minutes` ago** (not merely a poll interval). After `crypto.alert_default_window_minutes` in config, else **15**. Clamped to **`[5, alert_max_window_minutes]`** (minimum **5**; values `1`–`4` are raised to **5**). |
+| `price_alert_check` | `threshold_pct`/`pct`/`percent` | no | number | **5** | After `crypto.alert_default_threshold_pct` in config, else **5** (must be > 0). |
+| `price_alert_check` | `direction` | no | string | **`both`** | `up`/`down`/`both` (aliases: rise/drop/pump/dump). |
+| `price_alert_check` | listing validation | — | — | — | **Inside this action only:** for non-OKX path, validates symbol against Binance listings (same effect as `binance_symbol_check`). Schedule and other layers must not pre-call `binance_symbol_check` for scheduled jobs. |
+| `price_alert_check` | (schedule) | no | — | — | When `clawd` runs a scheduled `run_skill`, request **`context`** may include `schedule_job_id`, `invocation_source` (`schedule`), `scheduled`, `schedule_triggered`; skill echoes into response `extra` when set (`args` may duplicate for tests). |
+
+### `price_alert_check` — semantics & response `extra`
+- **Semantics:** Each run fetches **1m** candles covering the lookback span; **reference/base** price is the **oldest** close in that span (window start), **current** price is the **newest** close. Change % is \((current - reference) / reference × 100\). Threshold and `direction` (`up` / `down` / `both`) apply to that percentage.
+- **User-visible text** states the lookback window, **reference/base** and **current** prices, change %, threshold, and direction (wording follows `configs/i18n/crypto.*.toml` / built-in defaults).
+- **Structured `extra` (success):** includes at least `action`, `symbol`, `exchange`, `window_minutes`, `threshold_pct`, `direction`, `triggered`, `trend`, `change_pct`, **`reference_price`** (same numeric as window-start close), **`current_price`**, **`start_price`** (alias of `reference_price`, kept for backward compatibility), `candles` (count fetched), `notify` (same as `triggered`), plus optional schedule echo fields when present.
 | `onchain` | `chain` | no | string | `bitcoin` | `bitcoin`/`btc` or `ethereum`/`eth`. |
 | `onchain` (eth address mode) | `address` | no | string | - | If provided, returns address balance + recent txs. |
 | `onchain` (eth address mode) | `token` | no | string | `eth` | Native or configured ERC20 token symbol. |
@@ -66,7 +66,7 @@ Vendor tuning for Google/Gemini models:
 | `trade_preview`/`trade_submit` | `stop_price` | required for stop orders | number | - | Trigger price for `stop_loss_limit` / `take_profit_limit`. Alias: `stopPrice`. |
 | `trade_preview`/`trade_submit` | `time_in_force` | no | string | `GTC` | `GTC`/`IOC`/`FOK` for limit/stop orders (Binance). |
 | `trade_preview`/`trade_submit` | `client_order_id` | no | string | - | Client correlation id. |
-| `trade_submit` | `confirm` | no | boolean | `false` | Optional. Set to true when the planner has inferred user confirmation; no runtime enforcement. |
+| `trade_submit` | `confirm` | no | boolean | `false` | Set `true` only when the **current** user message explicitly indicates immediate / confirmed execution (same turn). Not for inferring confirmation from a prior preview turn or any deprecated yes/no host flow; no runtime enforcement. |
 | `order_status` | `order_id` or `client_order_id` | yes | string | - | At least one order identifier. |
 | `order_status` | `symbol` | conditional | string | - | Required by Binance/OKX query APIs. |
 | `cancel_order` | `order_id` or `client_order_id` | yes | string | - | At least one order identifier. |
@@ -133,6 +133,13 @@ Response:
 {"request_id":"demo-3","status":"ok","text":"BTCUSDT RSI14=58.23 last=104500.0 signal=neutral","error_text":null}
 ```
 
+### Example 3b — Price alert / monitor (`price_alert_check`, lookback window)
+Request (30-minute lookback, 5% threshold, both directions):
+```json
+{"request_id":"demo-3b","args":{"action":"price_alert_check","symbol":"BTCUSDT","window_minutes":30,"threshold_pct":5,"direction":"both","exchange":"binance"}}
+```
+Response `text` includes the lookback window, **reference/base** price, **current** price, change %, threshold, and direction. Response `extra` includes numeric `reference_price`, `current_price`, `change_pct`, `window_minutes`, `start_price` (same as `reference_price`), `triggered`, `trend`, `candles`, etc.
+
 ### Example 4 — Stop-loss limit order preview
 Request:
 ```json
@@ -164,7 +171,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-8","status":"ok","text":"trade_preview binance DOGEUSDT buy est_qty=53.2468 quote_usd=10.0000 notional_usd=10.0000 checks=5","error_text":null}
+{"request_id":"demo-8","status":"ok","text":"trade_preview binance DOGEUSDT buy est_qty=53.2468 quote_usd=10.0000 notional_usd=10.0000 checks=5","error_text":null,"extra":{"action":"trade_preview","order":{"exchange":"binance","symbol":"DOGEUSDT","side":"buy","order_type":"market","quote_qty_usd":10,"qty":53.2468},"effective_qty":53.2468,"notional_usd":10.0,"decision":"preview_only"}}
 ```
 
 ## Output Contract
