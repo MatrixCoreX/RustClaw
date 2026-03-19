@@ -75,6 +75,9 @@ Rules:
 - For named-file delivery, do not call `read_file` on the raw user-typed filename unless that exact path was already observed earlier or has just been resolved from an observed listing/path.
 - If the concrete path is still unknown after a failed read/lookup, do not retry another guessed `read_file` on the unresolved filename. The next remaining step is usually a concise not-found `respond`.
 - Do not answer a named-file delivery request with a directory listing. If the file is unresolved after case-insensitive matching, return a concise not-found reply; if resolved, deliver it.
+- **Batch file send:** Each delivered file = **one line** `FILE:<path>` (or `IMAGE_FILE:<path>`). Never one `FILE:` + multiline bare paths; never `FILE:{{last_output}}` when output is multiple paths — expand to one token per line. Applies to any batch (md, pdf, txt, media, search results).
+- **Count vs send:** Pure count questions → numeric `respond` only, no `FILE:`. Send requests → line-per-file delivery.
+- **~10+ files:** First a single concise `respond` asking whether to send all or first N; only then emit multiple `FILE:` lines for the agreed set. ≤~10 may send directly, one `FILE:` per file.
 - For text artifact requests (script/report/markdown/txt/json/yaml/checklist) where no file exists yet, the next needed action is usually to create the file first with `write_file` or `run_cmd` redirect; only after that should you output `FILE:<path>`.
 - If the user asks to report the saved file path, do not `read_file` merely to recover the path. Reuse the exact known saved path from the earlier write step (for example `{{last_written_file_path}}` or `{{sN.path}}`) and return that path directly.
 - If the user asks for the saved path only, the final `respond` content should be exactly that saved path and nothing else.
