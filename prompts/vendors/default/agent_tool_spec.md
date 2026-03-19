@@ -110,11 +110,11 @@ Skill behavior notes (file/path):
   - forbid: `confirm=true` (preview phase should not submit)
 
 - `trade_submit`:
-  - Planner may call when user has clearly confirmed (e.g. "确认"/"yes"); pass `confirm=true` then. No runtime block.
+  - Use when the **current** user message explicitly requests immediate execution with complete params (same turn); pass `confirm=true`. Do not infer from an earlier `trade_preview` turn alone or any deprecated yes/no follow-up; `clawd` has no second-step pending confirm. No runtime block.
   - required: `action="trade_submit"`, `symbol`, `side`, `order_type`
   - quantity rule: exactly one of `quote_qty_usd` or `qty`
-  - optional: `confirm` (set true when planner has inferred user confirmation), `exchange`, `price`, `stop_price`, `time_in_force`
-  - prefer including `exchange` when known to match preview.
+  - optional: `confirm` (true only with same-turn explicit execution intent), `exchange`, `price`, `stop_price`, `time_in_force`
+  - prefer including `exchange` when known for routing consistency.
 
 - `order_status`:
   - required: `action="order_status"`

@@ -1,7 +1,7 @@
 <!--
 Purpose: conversational schedule intent parsing prompt (natural language -> structured schedule plan)
 Component: clawd (crates/clawd/src/main.rs) ScheduleRuntime
-Placeholders: __NOW__, __TIMEZONE__, __RULES__, __MEMORY_CONTEXT__, __REQUEST__
+Placeholders: __NOW__, __TIMEZONE__, __RULES__, __SKILL_CATALOG__, __SKILLS_CATALOG__ (same content), __MEMORY_CONTEXT__, __REQUEST__
 -->
 
 Vendor tuning for OpenAI-compatible models:
@@ -32,6 +32,11 @@ Task:
 - Resolve relative expressions like "明天", "后天", and "下周一" using current time and timezone.
 - Use memory context (recent snippets + stable preferences + long-term summary) only to resolve references like "这些/这些任务/刚才那些/全部禁用".
 - Follow detailed mapping/normalization rules from `Rules` section below.
+- **Skill list:** `__SKILL_CATALOG__` is built from the live registry. For `task.kind=run_skill`, choose only a canonical name or alias from the catalog; do not invent skill names. Prefer canonical name in output; server will canonicalize on save. Action and parameter semantics belong to each skill, not to schedule.
+- If no catalog skill fits the intent, use `kind=none` or `task.kind=ask` and lower `confidence`; do not fabricate a `skill_name`.
+
+Skill catalog (registry — use ONLY these for run_skill):
+__SKILL_CATALOG__
 
 Output JSON only. Never output <think> tags, code fences, or extra explanation before/after the JSON:
 {
@@ -79,14 +84,6 @@ Output:
 User: 删除定时任务 job_9e289b4c73
 Output:
 {"kind":"delete","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"job_9e289b4c73","raw":"删除定时任务 job_9e289b4c73","confidence":0.93,"reason":"single job delete with explicit id"}
-
-User: 监控BTC，如果5分钟内涨跌超过2%通知我
-Output:
-{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"interval","run_at":"","time":"","weekday":1,"every_minutes":1,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"crypto","args":{"action":"price_alert_check","symbol":"BTCUSDT","window_minutes":5,"threshold_pct":2,"direction":"both"}}},"target_job_id":"","raw":"监控BTC，如果5分钟内涨跌超过2%通知我","confidence":0.92,"reason":"crypto monitor intent mapped to interval run_skill with default 1-minute cadence"}
-
-User: 监控BTC价格
-Output:
-{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"interval","run_at":"","time":"","weekday":1,"every_minutes":1,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"crypto","args":{"action":"price_alert_check","symbol":"BTCUSDT","window_minutes":15,"threshold_pct":5,"direction":"both"}}},"target_job_id":"","raw":"监控BTC价格","confidence":0.88,"reason":"crypto monitor shorthand with default 15-minute window and 5% threshold"}
 
 Rules:
 __RULES__

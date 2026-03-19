@@ -50,6 +50,15 @@ struct SkillContext {
     user_key: Option<String>,
     #[serde(default)]
     exchange_credentials: HashMap<String, ExchangeCredentialInput>,
+    /// Present when the skill is invoked from a scheduled job (injected by `clawd` into `context`).
+    #[serde(default)]
+    schedule_job_id: Option<String>,
+    #[serde(default)]
+    invocation_source: Option<String>,
+    #[serde(default)]
+    scheduled: Option<bool>,
+    #[serde(default)]
+    schedule_triggered: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -422,11 +431,11 @@ fn default_crypto_catalog(lang: &str) -> TextCatalog {
     );
     current.insert(
         "crypto.msg.price_alert_triggered".to_string(),
-        "ALERT {symbol}: {window_minutes}m change {change_pct}% reached threshold {threshold_pct}% (start={start_price}, now={current_price}, direction={direction})".to_string(),
+        "ALERT {symbol}: {window_minutes}m lookback change {change_pct}% reached threshold {threshold_pct}%. Reference/base price: {reference_price}. Current price: {current_price}. Direction: {direction}.".to_string(),
     );
     current.insert(
         "crypto.msg.price_alert_not_triggered".to_string(),
-        "{symbol} monitor: {window_minutes}m change {change_pct}% has not reached threshold {threshold_pct}% (start={start_price}, now={current_price}, direction={direction})".to_string(),
+        "{symbol} monitor: {window_minutes}m lookback change {change_pct}% below threshold {threshold_pct}%. Reference/base price: {reference_price}. Current price: {current_price}. Direction: {direction}.".to_string(),
     );
     current.insert(
         "crypto.msg.trade_submitted_pending_suffix".to_string(),
@@ -560,6 +569,93 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Normalizes legacy / alias action names to the dispatch name used in `match` below.
+fn normalize_crypto_dispatch_action(raw: &str) -> String {
+    let action = raw.trim().to_ascii_lowercase();
+    match action.as_str() {
+        "get_price" => "quote".to_string(),
+        "get_multi_price" => "multi_quote".to_string(),
+        "price_monitor" | "monitor_price" | "price_alert" | "volatility_alert" => {
+            "price_alert_check".to_string()
+        }
+        other => other.to_string(),
+    }
+}
+
+/// Minimum lookback window for `price_alert_check` (minutes). Values below this are clamped up.
+const PRICE_ALERT_MIN_WINDOW_MINUTES: u64 = 5;
+
+fn value_to_u64_non_negative_window(v: &Value) -> Option<u64> {
+    if let Some(u) = v.as_u64() {
+        return Some(u);
+    }
+    if let Some(i) = v.as_i64() {
+        return (i >= 0).then_some(i as u64);
+    }
+    if let Some(f) = v.as_f64() {
+        if f.is_finite() && f >= 0.0 {
+            return Some(f.round() as u64);
+        }
+    }
+    v.as_str()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|f| f.is_finite() && *f >= 0.0)
+        .map(|f| f.round() as u64)
+}
+
+fn resolve_price_alert_window_minutes(obj: &serde_json::Map<String, Value>, cfg: &RootConfig) -> u64 {
+    let max_window = cfg.crypto.alert_max_window_minutes.unwrap_or(240).clamp(1, 1440);
+    let raw = obj
+        .get("window_minutes")
+        .or_else(|| obj.get("minutes"))
+        .and_then(value_to_u64_non_negative_window)
+        .unwrap_or_else(|| cfg.crypto.alert_default_window_minutes.unwrap_or(15));
+    let floor = PRICE_ALERT_MIN_WINDOW_MINUTES.min(max_window);
+    raw.max(floor).min(max_window)
+}
+
+fn resolve_price_alert_threshold_pct(obj: &serde_json::Map<String, Value>, cfg: &RootConfig) -> f64 {
+    obj.get("threshold_pct")
+        .or_else(|| obj.get("pct"))
+        .or_else(|| obj.get("percent"))
+        .and_then(value_to_f64)
+        .unwrap_or_else(|| cfg.crypto.alert_default_threshold_pct.unwrap_or(5.0))
+}
+
+/// `true` when `price_alert_check` should validate the symbol against Binance listings before candles (non-OKX path).
+fn price_alert_needs_binance_listing_precheck(exchange: &str) -> bool {
+    !exchange.trim().eq_ignore_ascii_case("okx")
+}
+
+/// Listing validation for `price_alert_check` (same Binance filter path as action `binance_symbol_check`).
+/// Schedule / other layers must not pre-call `binance_symbol_check`; only this skill path runs it when needed.
+fn preflight_price_alert_symbol_listing(
+    client: &Client,
+    cfg: &RootConfig,
+    exchange: &str,
+    symbol: &str,
+) -> Result<(), String> {
+    if price_alert_needs_binance_listing_precheck(exchange) {
+        ensure_symbol_supported_on_binance(client, cfg, symbol)
+    } else {
+        Ok(())
+    }
+}
+
+fn resolve_price_alert_direction_normalized(obj: &serde_json::Map<String, Value>) -> &'static str {
+    let raw = obj
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .unwrap_or("both")
+        .trim()
+        .to_ascii_lowercase();
+    match raw.as_str() {
+        "up" | "rise" | "pump" => "up",
+        "down" | "drop" | "dump" => "down",
+        _ => "both",
+    }
+}
+
 fn execute(cfg: &RootConfig, args: Value, context: Option<Value>) -> Result<(String, Value), String> {
     let context = context
         .and_then(|v| serde_json::from_value::<SkillContext>(v).ok())
@@ -571,17 +667,8 @@ fn execute(cfg: &RootConfig, args: Value, context: Option<Value>) -> Result<(Str
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
-        .unwrap_or("quote")
-        .trim()
-        .to_ascii_lowercase();
-    let action = match action.as_str() {
-        "get_price" => "quote".to_string(),
-        "get_multi_price" => "multi_quote".to_string(),
-        "price_monitor" | "monitor_price" | "price_alert" | "volatility_alert" => {
-            "price_alert_check".to_string()
-        }
-        other => other.to_string(),
-    };
+        .unwrap_or("quote");
+    let action = normalize_crypto_dispatch_action(action);
     if cfg
         .crypto
         .blocked_actions
@@ -609,7 +696,7 @@ fn execute(cfg: &RootConfig, args: Value, context: Option<Value>) -> Result<(Str
         "healthcheck" => handle_healthcheck(&client, &cfg, obj),
         "candles" => handle_candles(&client, &cfg, obj),
         "indicator" => handle_indicator(&client, &cfg, obj),
-        "price_alert_check" => handle_price_alert_check(&client, &cfg, obj),
+        "price_alert_check" => handle_price_alert_check(&client, &cfg, obj, &context),
         "onchain" => handle_onchain(&client, &cfg, obj),
         "trade_preview" => handle_trade_preview(&client, &cfg, obj),
         "trade_submit" => handle_trade_submit(&client, &cfg, obj),
@@ -1298,48 +1385,59 @@ fn handle_binance_symbol_check(
     ))
 }
 
+fn schedule_invocation_extra_fields(
+    ctx: &SkillContext,
+    obj: &serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    let mut m = serde_json::Map::new();
+    let job_id = ctx
+        .schedule_job_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .or_else(|| obj.get("schedule_job_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()));
+    if let Some(s) = job_id {
+        m.insert("schedule_job_id".to_string(), json!(s));
+    }
+    let src = ctx
+        .invocation_source
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .or_else(|| obj.get("invocation_source").and_then(|v| v.as_str()).filter(|s| !s.is_empty()));
+    if let Some(s) = src {
+        m.insert("invocation_source".to_string(), json!(s));
+    }
+    if let Some(b) = ctx.scheduled.or_else(|| obj.get("scheduled").and_then(|v| v.as_bool())) {
+        m.insert("scheduled".to_string(), json!(b));
+    }
+    if let Some(b) = ctx
+        .schedule_triggered
+        .or_else(|| obj.get("schedule_triggered").and_then(|v| v.as_bool()))
+    {
+        m.insert("schedule_triggered".to_string(), json!(b));
+    }
+    m
+}
+
 fn handle_price_alert_check(
     client: &Client,
     cfg: &RootConfig,
     obj: &serde_json::Map<String, Value>,
+    ctx: &SkillContext,
 ) -> Result<(String, Value), String> {
     let symbol = normalize_symbol(
         obj.get("symbol")
             .and_then(|v| v.as_str())
             .ok_or_else(|| tr("crypto.err.symbol_required"))?,
     );
-    let max_window = cfg.crypto.alert_max_window_minutes.unwrap_or(240).clamp(1, 1440);
-    let window_minutes = obj
-        .get("window_minutes")
-        .or_else(|| obj.get("minutes"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or_else(|| cfg.crypto.alert_default_window_minutes.unwrap_or(15))
-        .clamp(1, max_window);
-    let threshold_pct = obj
-        .get("threshold_pct")
-        .or_else(|| obj.get("pct"))
-        .or_else(|| obj.get("percent"))
-        .and_then(value_to_f64)
-        .unwrap_or_else(|| cfg.crypto.alert_default_threshold_pct.unwrap_or(5.0));
+    let window_minutes = resolve_price_alert_window_minutes(obj, cfg);
+    let threshold_pct = resolve_price_alert_threshold_pct(obj, cfg);
     if threshold_pct <= 0.0 {
         return Err(tr("crypto.err.threshold_pct_must_gt_zero"));
     }
-    let direction = obj
-        .get("direction")
-        .and_then(|v| v.as_str())
-        .unwrap_or("both")
-        .trim()
-        .to_ascii_lowercase();
-    let direction = match direction.as_str() {
-        "up" | "rise" | "pump" => "up",
-        "down" | "drop" | "dump" => "down",
-        _ => "both",
-    };
+    let direction = resolve_price_alert_direction_normalized(obj);
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg);
-    // Always validate symbol availability; OKX falls back to Binance check if okx not configured
-    if exchange != "okx" {
-        ensure_symbol_supported_on_binance(client, cfg, &symbol)?;
-    }
+    preflight_price_alert_symbol_listing(client, cfg, &exchange, &symbol)?;
+    // Lookback window: `window_minutes` of 1m candles; first close ≈ price at window start, last close = latest.
     let closes = if exchange == "okx" {
         fetch_candles_okx(client, cfg, &symbol, "1m", window_minutes.saturating_add(1))?
     } else {
@@ -1369,7 +1467,7 @@ fn handle_price_alert_check(
     };
     let change_text = format!("{:+.2}", change_pct);
     let threshold_text = format!("{:.2}", threshold_pct);
-    let start_text = format!("{:.6}", start_price);
+    let reference_text = format!("{:.6}", start_price);
     let current_text = format!("{:.6}", current_price);
     let text_body = if triggered {
         tr_with(
@@ -1379,7 +1477,7 @@ fn handle_price_alert_check(
                 ("window_minutes", &window_minutes.to_string()),
                 ("change_pct", &change_text),
                 ("threshold_pct", &threshold_text),
-                ("start_price", &start_text),
+                ("reference_price", &reference_text),
                 ("current_price", &current_text),
                 ("direction", direction),
             ],
@@ -1392,30 +1490,31 @@ fn handle_price_alert_check(
                 ("window_minutes", &window_minutes.to_string()),
                 ("change_pct", &change_text),
                 ("threshold_pct", &threshold_text),
-                ("start_price", &start_text),
+                ("reference_price", &reference_text),
                 ("current_price", &current_text),
                 ("direction", direction),
             ],
         )
     };
-    Ok((
-        text_body,
-        json!({
-            "action":"price_alert_check",
-            "symbol":symbol,
-            "exchange":exchange,
-            "window_minutes":window_minutes,
-            "threshold_pct":threshold_pct,
-            "direction":direction,
-            "triggered":triggered,
-            "trend":trend,
-            "start_price":start_price,
-            "current_price":current_price,
-            "change_pct":change_pct,
-            "candles":closes.len(),
-            "notify": triggered
-        }),
-    ))
+    let mut extra = serde_json::Map::new();
+    extra.insert("action".to_string(), json!("price_alert_check"));
+    extra.insert("symbol".to_string(), json!(symbol));
+    extra.insert("exchange".to_string(), json!(exchange));
+    extra.insert("window_minutes".to_string(), json!(window_minutes));
+    extra.insert("threshold_pct".to_string(), json!(threshold_pct));
+    extra.insert("direction".to_string(), json!(direction));
+    extra.insert("triggered".to_string(), json!(triggered));
+    extra.insert("trend".to_string(), json!(trend));
+    extra.insert("start_price".to_string(), json!(start_price));
+    extra.insert("reference_price".to_string(), json!(start_price));
+    extra.insert("current_price".to_string(), json!(current_price));
+    extra.insert("change_pct".to_string(), json!(change_pct));
+    extra.insert("candles".to_string(), json!(closes.len()));
+    extra.insert("notify".to_string(), json!(triggered));
+    for (k, v) in schedule_invocation_extra_fields(ctx, obj) {
+        extra.insert(k, v);
+    }
+    Ok((text_body, Value::Object(extra)))
 }
 
 
@@ -1633,7 +1732,7 @@ fn handle_trade_preview(
     } else {
         ("qty", String::new())
     };
-    // Include order_type and price so the confirm-route can reconstruct the exact order.
+    // Include order_type and price in the summary line for human-readable preview output.
     // For market orders we omit order_type (defaults to market in parse).
     let order_type_part = if trade.order_type != "market" {
         format!(" order_type={}", trade.order_type)
@@ -4308,5 +4407,145 @@ mod tests {
         assert!(down <= -threshold);
         assert!(up.abs() >= threshold);
         assert!(down.abs() >= threshold);
+    }
+
+    #[test]
+    fn normalize_crypto_dispatch_action_maps_monitor_aliases() {
+        assert_eq!(
+            normalize_crypto_dispatch_action("price_monitor"),
+            "price_alert_check"
+        );
+        assert_eq!(
+            normalize_crypto_dispatch_action("MONITOR_PRICE"),
+            "price_alert_check"
+        );
+        assert_eq!(
+            normalize_crypto_dispatch_action("volatility_alert"),
+            "price_alert_check"
+        );
+        assert_eq!(
+            normalize_crypto_dispatch_action("price_alert_check"),
+            "price_alert_check"
+        );
+        assert_eq!(normalize_crypto_dispatch_action("quote"), "quote");
+    }
+
+    #[test]
+    fn price_alert_defaults_when_args_omit_window_and_threshold() {
+        let cfg = RootConfig::default();
+        let m = serde_json::Map::new();
+        assert_eq!(resolve_price_alert_window_minutes(&m, &cfg), 15);
+        assert_eq!(resolve_price_alert_threshold_pct(&m, &cfg), 5.0);
+    }
+
+    #[test]
+    fn price_alert_window_minutes_clamps_1_through_4_to_5() {
+        let cfg = RootConfig::default();
+        for w in [1u64, 2, 3, 4] {
+            let mut m = serde_json::Map::new();
+            m.insert("window_minutes".to_string(), json!(w));
+            assert_eq!(
+                resolve_price_alert_window_minutes(&m, &cfg),
+                5,
+                "window_minutes={w} should clamp to 5"
+            );
+        }
+    }
+
+    #[test]
+    fn price_alert_window_minutes_30_unchanged() {
+        let cfg = RootConfig::default();
+        let mut m = serde_json::Map::new();
+        m.insert("window_minutes".to_string(), json!(30));
+        assert_eq!(resolve_price_alert_window_minutes(&m, &cfg), 30);
+    }
+
+    #[test]
+    fn price_alert_window_accepts_i64_and_float_json() {
+        let cfg = RootConfig::default();
+        let mut m = serde_json::Map::new();
+        m.insert("window_minutes".to_string(), json!(3));
+        assert_eq!(resolve_price_alert_window_minutes(&m, &cfg), 5);
+        let mut m2 = serde_json::Map::new();
+        m2.insert("minutes".to_string(), json!(3.7));
+        assert_eq!(resolve_price_alert_window_minutes(&m2, &cfg), 5);
+    }
+
+    #[test]
+    fn price_alert_config_default_below_5_clamps_to_5() {
+        let mut cfg = RootConfig::default();
+        cfg.crypto.alert_default_window_minutes = Some(2);
+        let m = serde_json::Map::new();
+        assert_eq!(resolve_price_alert_window_minutes(&m, &cfg), 5);
+    }
+
+    #[test]
+    fn price_alert_direction_defaults_to_both_and_normalizes_aliases() {
+        let empty = serde_json::Map::new();
+        assert_eq!(resolve_price_alert_direction_normalized(&empty), "both");
+        let mut up = serde_json::Map::new();
+        up.insert("direction".to_string(), json!("RISE"));
+        assert_eq!(resolve_price_alert_direction_normalized(&up), "up");
+        let mut down = serde_json::Map::new();
+        down.insert("direction".to_string(), json!("dump"));
+        assert_eq!(resolve_price_alert_direction_normalized(&down), "down");
+    }
+
+    #[test]
+    fn price_alert_binance_listing_precheck_skipped_for_okx_only() {
+        assert!(price_alert_needs_binance_listing_precheck("binance"));
+        assert!(price_alert_needs_binance_listing_precheck("BINANCE"));
+        assert!(!price_alert_needs_binance_listing_precheck("okx"));
+        assert!(!price_alert_needs_binance_listing_precheck(" OKX "));
+    }
+
+    #[test]
+    fn preflight_price_alert_symbol_listing_okx_skips_binance_listing_call() {
+        let cfg = RootConfig::default();
+        let client = Client::builder()
+            .timeout(Duration::from_secs(1))
+            .build()
+            .unwrap();
+        assert!(preflight_price_alert_symbol_listing(&client, &cfg, "okx", "BTCUSDT").is_ok());
+    }
+
+    #[test]
+    fn resolve_exchange_defaults_to_binance_for_price_alert_path() {
+        let cfg = RootConfig::default();
+        assert_eq!(resolve_exchange(None, &cfg), "binance");
+    }
+
+    #[test]
+    fn skill_context_parses_schedule_metadata() {
+        let raw = json!({
+            "exchange_credentials": {},
+            "schedule_job_id": "job_x",
+            "invocation_source": "schedule",
+            "scheduled": true,
+            "schedule_triggered": true
+        });
+        let ctx: SkillContext = serde_json::from_value(raw).unwrap();
+        assert_eq!(ctx.schedule_job_id.as_deref(), Some("job_x"));
+        assert_eq!(ctx.invocation_source.as_deref(), Some("schedule"));
+        assert_eq!(ctx.scheduled, Some(true));
+        assert_eq!(ctx.schedule_triggered, Some(true));
+    }
+
+    #[test]
+    fn schedule_invocation_extra_prefers_context_over_args() {
+        let ctx = SkillContext {
+            schedule_job_id: Some("from_ctx".to_string()),
+            invocation_source: Some("schedule".to_string()),
+            scheduled: Some(true),
+            schedule_triggered: Some(true),
+            ..Default::default()
+        };
+        let mut obj = serde_json::Map::new();
+        obj.insert("schedule_job_id".to_string(), json!("from_args"));
+        let m = schedule_invocation_extra_fields(&ctx, &obj);
+        assert_eq!(
+            m.get("schedule_job_id").and_then(|v| v.as_str()),
+            Some("from_ctx")
+        );
     }
 }

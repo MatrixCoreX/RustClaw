@@ -93,8 +93,6 @@ pub struct TelegramConfig {
     pub max_audio_input_bytes: usize,
     #[serde(default = "default_telegram_ephemeral_image_saved_seconds")]
     pub ephemeral_image_saved_seconds: u64,
-    #[serde(default = "default_telegram_crypto_confirm_ttl_seconds")]
-    pub crypto_confirm_ttl_seconds: u64,
     #[serde(default)]
     pub sendfile: SendfileConfig,
 }
@@ -1414,10 +1412,6 @@ fn default_telegram_max_audio_input_bytes() -> usize {
 }
 
 fn default_telegram_ephemeral_image_saved_seconds() -> u64 {
-    15
-}
-
-fn default_telegram_crypto_confirm_ttl_seconds() -> u64 {
     15
 }
 

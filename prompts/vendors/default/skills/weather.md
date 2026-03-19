@@ -62,5 +62,4 @@ Response:
 ## Output Contract
 - Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
-- When the user provides a Chinese city/place name, normalize it to a commonly used English place name before filling `city/location/place/q` (e.g. 北京 -> Beijing, 上海 -> Shanghai), so Open-Meteo geocoding can resolve it reliably.
 - On uncertainty, prefer safe/readonly behavior first.
