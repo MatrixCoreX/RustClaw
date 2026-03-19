@@ -165,7 +165,8 @@ Skill behavior notes (file/path):
 ### rss_fetch
 - action: `fetch|latest|news`
 - required: `action`
-- optional: `url`, `feed_url`, `feed_urls`, `category`, `source_layer`, `limit`, `timeout_seconds`
+- optional: `url`, `feed_url`, `feed_urls`, `category`, `limit`, `timeout_seconds`
+- category 默认抓取该 category 下配置的全部 sources；单源失败不导致整体失败，仅当全部失败或无条目时才报错。
 
 ### stock
 - action: `quote|query`（查询 A 股行情）
@@ -182,6 +183,7 @@ Skill behavior notes (file/path):
   - 城市/地名：`city` 或 `location` 或 `place` 或 `q`（如 北京、Shanghai）
   - 经纬度：`latitude` + `longitude`
 - optional: `action`（默认 query，可省略）
+- 参数规范化：当用户输入中文城市/地名时，在调用 `weather` 前先转换为对应英文地名再写入 `city/location/place/q`（例如 北京 -> Beijing、上海 -> Shanghai），避免地理编码接口因中文命中失败。
 - 仅用于“当前天气/气温/今天天气”等查询；不用于天气预报讨论、气候知识等，此类用 `chat`。
 
 ### schedule
@@ -210,12 +212,12 @@ Skill behavior notes (file/path):
 
 - `latest`:
   - required: `action="latest"`
-  - optional: `category`, `limit`, `source_layer`, `timeout_seconds`
+  - optional: `category`, `limit`, `timeout_seconds`
   - when user asks crypto news, prefer `category="crypto"` unless user specified another category
 
 - `news`:
   - required: `action="news"`
-  - optional: `category`, `limit`, `source_layer`, `timeout_seconds`
+  - optional: `category`, `limit`, `timeout_seconds`
   - if category is missing and intent unclear, default to `general`
 
 - normalization rules:
