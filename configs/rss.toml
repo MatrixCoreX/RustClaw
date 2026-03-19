@@ -4,13 +4,26 @@ default_limit = 10
 timeout_seconds = 20
 deprecate_after_failures = 3
 
-[rss.categories.business]
+[rss.categories.aggregator]
 sources = [
-    "https://feeds.bloomberg.com/markets/news.rss",
-    "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
-    "https://feeds.marketwatch.com/marketwatch/topstories/",
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-    "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+    "https://news.google.com/rss/search?q=crypto&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=web3&hl=en-US&gl=US&ceid=US:en",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+
+[rss.categories.web3]
+sources = [
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://cointelegraph.com/rss",
+    "https://www.theblock.co/rss.xml",
+    "https://decrypt.co/feed",
+    "https://messari.io/rss",
 ]
 primary = []
 secondary = []
@@ -18,21 +31,49 @@ fallback = []
 output_language = "en-US"
 bilingual_summary = true
 
-[rss.categories.international]
+[rss.categories.crypto]
 sources = [
-    "https://www.reuters.com/world/rss",
-    "https://feeds.apnews.com/apnews/topnews",
-    "https://feeds.bbci.co.uk/news/rss.xml",
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "https://www.ft.com/rss/home",
-    "https://www.economist.com/the-world-this-week/rss.xml",
-    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://cointelegraph.com/rss",
+    "https://decrypt.co/feed",
+    "https://www.theblock.co/rss.xml",
+    "https://www.newsbtc.com/feed/",
 ]
 primary = []
 secondary = []
 fallback = []
-output_language = "en-US"
-bilingual_summary = true
+output_language = "zh-CN"
+bilingual_summary = false
+
+[[rss.categories.crypto.source_entries]]
+url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://cointelegraph.com/rss"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://decrypt.co/feed"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://www.theblock.co/rss.xml"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://www.newsbtc.com/feed/"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
 
 [rss.categories.tech]
 sources = [
@@ -85,28 +126,15 @@ failure_count = 0
 last_error = ""
 last_failed_at = ""
 
-[rss.categories.china]
+[rss.categories.international]
 sources = [
-    "https://www.caixinglobal.com/feed/",
-    "https://www.thepaper.cn/rss_news.jsp",
-    "https://www.jiemian.com/rss",
-    "https://www.yicai.com/rss",
-    "https://36kr.com/feed",
-    "https://news.google.com/rss/search?q=%E4%B8%AD%E5%9B%BD+%E8%B4%A2%E7%BB%8F&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-]
-primary = []
-secondary = []
-fallback = []
-output_language = "zh-CN"
-bilingual_summary = false
-
-[rss.categories.web3]
-sources = [
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss",
-    "https://www.theblock.co/rss.xml",
-    "https://decrypt.co/feed",
-    "https://messari.io/rss",
+    "https://www.reuters.com/world/rss",
+    "https://feeds.apnews.com/apnews/topnews",
+    "https://feeds.bbci.co.uk/news/rss.xml",
+    "https://www.aljazeera.com/xml/rss/all.xml",
+    "https://www.ft.com/rss/home",
+    "https://www.economist.com/the-world-this-week/rss.xml",
+    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
 ]
 primary = []
 secondary = []
@@ -114,32 +142,19 @@ fallback = []
 output_language = "en-US"
 bilingual_summary = true
 
-[rss.categories.aggregator]
+[rss.categories.business]
 sources = [
-    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-    "https://news.google.com/rss/search?q=crypto&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search?q=web3&hl=en-US&gl=US&ceid=US:en",
+    "https://feeds.bloomberg.com/markets/news.rss",
+    "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+    "https://feeds.marketwatch.com/marketwatch/topstories/",
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en",
 ]
 primary = []
 secondary = []
 fallback = []
-output_language = "zh-CN"
-bilingual_summary = false
-
-[rss.categories.crypto]
-sources = [
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss",
-    "https://decrypt.co/feed",
-    "https://www.theblock.co/rss.xml",
-    "https://www.newsbtc.com/feed/",
-]
-primary = []
-secondary = []
-fallback = []
-output_language = "zh-CN"
-bilingual_summary = false
+output_language = "en-US"
+bilingual_summary = true
 
 [rss.categories.general]
 sources = [
@@ -170,6 +185,21 @@ url = "https://www.reuters.com/world/rss"
 failure_count = 2
 last_error = "http status is 401 Unauthorized"
 last_failed_at = "1773896430"
+
+[rss.categories.china]
+sources = [
+    "https://www.caixinglobal.com/feed/",
+    "https://www.thepaper.cn/rss_news.jsp",
+    "https://www.jiemian.com/rss",
+    "https://www.yicai.com/rss",
+    "https://36kr.com/feed",
+    "https://news.google.com/rss/search?q=%E4%B8%AD%E5%9B%BD+%E8%B4%A2%E7%BB%8F&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
 
 [rss.deprecated]
 sources = []

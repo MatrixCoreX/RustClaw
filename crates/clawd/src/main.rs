@@ -273,7 +273,6 @@ struct AppState {
     schedule: ScheduleRuntime,
     telegram_bot_token: String,
     telegram_configured_bot_names: Arc<Vec<String>>,
-    telegram_crypto_confirm_ttl_seconds: i64,
     whatsapp_cloud_enabled: bool,
     whatsapp_api_base: String,
     whatsapp_access_token: String,
@@ -568,6 +567,7 @@ impl AskReply {
         self.messages = messages;
         self
     }
+
 }
 
 struct RateLimiter {
@@ -1728,8 +1728,6 @@ async fn main() -> anyhow::Result<()> {
         schedule,
         telegram_bot_token,
         telegram_configured_bot_names,
-        telegram_crypto_confirm_ttl_seconds: (config.telegram.crypto_confirm_ttl_seconds.max(1))
-            as i64,
         whatsapp_cloud_enabled,
         whatsapp_api_base,
         whatsapp_access_token,
@@ -2142,11 +2140,9 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         let mut payload =
             serde_json::from_str::<Value>(&job.task_payload_json).unwrap_or_else(|_| json!({}));
         if let Value::Object(map) = &mut payload {
-            map.insert("schedule_triggered".to_string(), Value::Bool(true));
-            map.insert(
-                "schedule_job_id".to_string(),
-                Value::String(job.job_id.clone()),
-            );
+            for (k, v) in schedule_service::schedule_invocation_metadata(&job.job_id) {
+                map.insert(k, v);
+            }
             map.insert("channel".to_string(), Value::String(job.channel.clone()));
             if let Some(v) = job.external_user_id.as_ref() {
                 map.insert("external_user_id".to_string(), Value::String(v.clone()));
@@ -2449,182 +2445,6 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .get("agent_mode")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let trimmed_request = runtime_prompt.trim();
-            let is_yes = is_affirmation_click_text(state, trimmed_request);
-            let is_no = is_negative_confirmation_click_text(state, trimmed_request);
-            let mut auto_cancel_notice: Option<String> = None;
-            if !is_resume_continue && agent_mode {
-                // Use hard_rules-driven windows to avoid hardcoded timing behavior
-                // in the main confirmation routing flow.
-                let hard_rules = main_flow_rules(state);
-                let effective_window_secs = effective_trade_confirm_window_secs(state, &task.channel);
-                let effective_preview_ctx = find_recent_trade_preview_context(
-                    state,
-                    task.user_id,
-                    task.chat_id,
-                    effective_window_secs,
-                );
-                let stale_preview_ctx = if effective_window_secs < hard_rules.recent_trade_preview_window_secs
-                    && (is_yes || is_no)
-                {
-                    find_recent_trade_preview_context(
-                        state,
-                        task.user_id,
-                        task.chat_id,
-                        hard_rules.recent_trade_preview_window_secs,
-                    )
-                } else {
-                    None
-                };
-                if let Some(preview_ctx) = effective_preview_ctx {
-                    info!(
-                        "worker_once: ask task_id={} hard_trade_confirm_route input={} exchange={} symbol={} side={} qty={}",
-                        task.task_id,
-                        truncate_for_log(trimmed_request),
-                        preview_ctx.exchange,
-                        preview_ctx.symbol,
-                        preview_ctx.side,
-                        preview_ctx.qty
-                    );
-                    if is_yes || is_no {
-                        let hard_text = if is_no {
-                            build_trade_confirm_cancelled_text(state, &preview_ctx)
-                        } else {
-                            let mut submit_args = if let Some(quote_usd) = preview_ctx.quote_qty_usd {
-                                json!({
-                                    "action": "trade_submit",
-                                    "exchange": preview_ctx.exchange,
-                                    "symbol": preview_ctx.symbol,
-                                    "side": preview_ctx.side,
-                                    "order_type": preview_ctx.order_type,
-                                    "quote_qty_usd": quote_usd,
-                                    "confirm": true
-                                })
-                            } else {
-                                json!({
-                                    "action": "trade_submit",
-                                    "exchange": preview_ctx.exchange,
-                                    "symbol": preview_ctx.symbol,
-                                    "side": preview_ctx.side,
-                                    "order_type": preview_ctx.order_type,
-                                    "qty": preview_ctx.qty,
-                                    "confirm": true
-                                })
-                            };
-                            // Restore limit/stop order parameters from preview context
-                            if let Some(p) = preview_ctx.price {
-                                submit_args["price"] = serde_json::Value::from(p);
-                            }
-                            if let Some(sp) = preview_ctx.stop_price {
-                                submit_args["stop_price"] = serde_json::Value::from(sp);
-                            }
-                            if let Some(tif) = &preview_ctx.time_in_force {
-                                submit_args["time_in_force"] = serde_json::Value::from(tif.as_str());
-                            }
-                            match run_skill_with_runner(state, &task, "crypto", submit_args).await {
-                                Ok(text) => text,
-                                Err(err) => {
-                                    error!(
-                                        "hard_trade_confirm: trade_submit skill failed task_id={} err={}",
-                                        task.task_id, err
-                                    );
-                                    repo::update_task_failure(state, &task.task_id, &err)?;
-                                    maybe_notify_schedule_result(state, &task, &payload, false, &err).await;
-                                    info!("{}", LOG_CALL_WRAP);
-                                    info!(
-                                        "task_call_end task_id={} kind=ask status=failed path=hard_trade_confirm_submit error={}",
-                                        task.task_id,
-                                        truncate_for_log(&err)
-                                    );
-                                    info!("{}", LOG_CALL_WRAP);
-                                    return Ok(());
-                                }
-                            }
-                        };
-                        let hard_text = intercept_response_text_for_delivery(&hard_text);
-                        let result = json!({ "text": hard_text.clone() });
-                        repo::update_task_success(state, &task.task_id, &result.to_string())?;
-                        let _ = memory::service::insert_memory(
-                            state,
-                            task.user_id,
-                            task.chat_id,
-                            task.user_key.as_deref(),
-                            &task.channel,
-                            task.external_chat_id.as_deref(),
-                            "user",
-                            prompt,
-                            state.memory.item_max_chars.max(256),
-                        );
-                        let _ = memory::service::insert_memory(
-                            state,
-                            task.user_id,
-                            task.chat_id,
-                            task.user_key.as_deref(),
-                            &task.channel,
-                            task.external_chat_id.as_deref(),
-                            "assistant",
-                            &hard_text,
-                            state.memory.item_max_chars.max(256),
-                        );
-                        if let Err(err) = memory::service::maybe_refresh_long_term_summary(state, &task).await {
-                            warn!("refresh long-term memory summary failed: {err}");
-                        }
-                        info!("{}", LOG_CALL_WRAP);
-                        info!(
-                            "task_call_end task_id={} kind=ask status=success path=hard_trade_confirm result={}",
-                            task.task_id,
-                            truncate_for_log(&hard_text)
-                        );
-                        info!("{}", LOG_CALL_WRAP);
-                        return Ok(());
-                    }
-                    // Any non-confirm command while a preview is pending should
-                    // cancel that preview and continue executing the new command.
-                    auto_cancel_notice = Some(build_trade_confirm_cancelled_text(state, &preview_ctx));
-                    info!(
-                        "worker_once: ask task_id={} hard_trade_auto_cancel_then_continue input={}",
-                        task.task_id,
-                        truncate_for_log(trimmed_request)
-                    );
-                } else if let Some(stale_ctx) = stale_preview_ctx {
-                    let hard_text = intercept_response_text_for_delivery(&build_trade_confirm_cancelled_text(state, &stale_ctx));
-                    let result = json!({ "text": hard_text.clone() });
-                    repo::update_task_success(state, &task.task_id, &result.to_string())?;
-                    let _ = memory::service::insert_memory(
-                        state,
-                        task.user_id,
-                        task.chat_id,
-                        task.user_key.as_deref(),
-                        &task.channel,
-                        task.external_chat_id.as_deref(),
-                        "user",
-                        prompt,
-                        state.memory.item_max_chars.max(256),
-                    );
-                    let _ = memory::service::insert_memory(
-                        state,
-                        task.user_id,
-                        task.chat_id,
-                        task.user_key.as_deref(),
-                        &task.channel,
-                        task.external_chat_id.as_deref(),
-                        "assistant",
-                        &hard_text,
-                        state.memory.item_max_chars.max(256),
-                    );
-                    if let Err(err) = memory::service::maybe_refresh_long_term_summary(state, &task).await {
-                        warn!("refresh long-term memory summary failed: {err}");
-                    }
-                    info!("{}", LOG_CALL_WRAP);
-                    info!(
-                        "task_call_end task_id={} kind=ask status=success path=hard_trade_confirm_expired result={}",
-                        task.task_id,
-                        truncate_for_log(&hard_text)
-                    );
-                    info!("{}", LOG_CALL_WRAP);
-                    return Ok(());
-                }
-            }
             let direct_resume_execution = is_resume_continue && resume_should_apply_context;
             let direct_resume_discussion = is_resume_continue && resume_should_discuss_context;
             // context_resolution from normalizer output (no second LLM for context_resolver).
@@ -2909,21 +2729,7 @@ Use this block as the primary anchor for short follow-up requests. If the curren
             };
 
             match result {
-                Ok(mut answer) => {
-                    if let Some(cancel_notice) = auto_cancel_notice.take() {
-                        let prefixed_text = if answer.text.trim().is_empty() {
-                            cancel_notice.clone()
-                        } else {
-                            format!("{cancel_notice}\n{}", answer.text)
-                        };
-                        answer.text = prefixed_text;
-                        if !answer.messages.is_empty() {
-                            let mut merged_messages = Vec::with_capacity(answer.messages.len() + 1);
-                            merged_messages.push(cancel_notice);
-                            merged_messages.extend(answer.messages);
-                            answer.messages = merged_messages;
-                        }
-                    }
+                Ok(answer) => {
                     let (answer_text, answer_messages) = intercept_response_payload_for_delivery(
                         answer.text,
                         answer.messages,
@@ -3032,8 +2838,7 @@ Use this block as the primary anchor for short follow-up requests. If the curren
                 skill_name,
                 truncate_for_log(&args.to_string())
             );
-
-            // Whether to require user confirmation before crypto trade_submit is decided by the planner; no hard block here.
+            // No platform-level pending trade-confirm flow; `trade_submit`/`confirm` usage follows planner + user message semantics only.
 
             match run_skill_with_runner_outcome(state, &task, skill_name, args).await {
                 Ok(outcome) => {
@@ -3325,9 +3130,9 @@ fn task_payload_value(task: &ClaimedTask) -> Option<Value> {
 }
 
 #[derive(Debug, Clone)]
-struct SkillRunOutcome {
-    text: String,
-    notify: Option<bool>,
+pub(crate) struct SkillRunOutcome {
+    pub(crate) text: String,
+    pub(crate) notify: Option<bool>,
 }
 
 fn task_runtime_channel(state: &AppState, task: &ClaimedTask) -> RuntimeChannel {
@@ -3454,7 +3259,7 @@ fn resolve_whatsapp_delivery_route(state: &AppState, payload: &Value) -> Whatsap
 }
 
 /// Phase 3: 统一 skill 执行入口。按 registry.kind 分发：builtin -> 进程内；runner -> skill-runner；external -> external_kind。
-async fn run_skill_with_runner_outcome(
+pub(crate) async fn run_skill_with_runner_outcome(
     state: &AppState,
     task: &ClaimedTask,
     skill_name: &str,
@@ -3509,7 +3314,10 @@ async fn run_skill_with_runner_outcome(
         SkillKind::Builtin => {
             return execute_builtin_skill_for_task(state, task, &skill_name, &args)
                 .await
-                .map(|text| SkillRunOutcome { text, notify: None });
+                .map(|text| SkillRunOutcome {
+                    text,
+                    notify: None,
+                });
         }
         SkillKind::External | SkillKind::Runner => {}
     }
@@ -3551,7 +3359,7 @@ async fn run_skill_with_runner_outcome(
         RuntimeChannel::Lark => "lark",
     };
 
-    let mut value = match kind {
+    let value = match kind {
         SkillKind::External => {
             execute_external_skill(state, task, &skill_name, &args, &source).await?
         }
@@ -3574,65 +3382,11 @@ async fn run_skill_with_runner_outcome(
         }
         SkillKind::Builtin => unreachable!(),
     };
-    let mut status = value
+    let status = value
         .get("status")
         .and_then(|v| v.as_str())
         .unwrap_or("error")
         .to_string();
-
-    if status != "ok" && canonical_skill_name(&skill_name) == "crypto" {
-        let main_rules = main_flow_rules(state);
-        let action = args
-            .as_object()
-            .and_then(|m| m.get("action"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase();
-        let err_text = value
-            .get("error_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("skill execution failed")
-            .to_ascii_lowercase();
-        let unsupported = main_rules
-            .crypto_unsupported_error_keywords
-            .iter()
-            .any(|k| err_text.contains(k));
-        if action == main_rules.crypto_price_alert_primary_action.as_str() && unsupported {
-            for legacy_action in &main_rules.crypto_price_alert_fallback_actions {
-                let mut retry_args = args.clone();
-                if let Some(map) = retry_args.as_object_mut() {
-                    map.insert("action".to_string(), Value::String(legacy_action.clone()));
-                } else {
-                    break;
-                }
-                let runner_name = state.runner_name_for_skill(&skill_name);
-                let retry_value = run_skill_with_runner_once(
-                    state,
-                    task,
-                    &skill_name,
-                    &runner_name,
-                    &retry_args,
-                    &source,
-                    skill_timeout_secs,
-                )
-                .await?;
-                let retry_status = retry_value
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("error");
-                if retry_status == "ok" {
-                    info!(
-                        "run_skill_with_runner: fallback action used for crypto task_id={} from={} to={}",
-                        task.task_id, main_rules.crypto_price_alert_primary_action, legacy_action
-                    );
-                    value = retry_value;
-                    status = "ok".to_string();
-                    break;
-                }
-            }
-        }
-    }
 
     if status != "ok" {
         return Err(value
@@ -3724,7 +3478,10 @@ async fn run_skill_with_runner_outcome(
             }
         }
     }
-    Ok(SkillRunOutcome { text, notify })
+    Ok(SkillRunOutcome {
+        text,
+        notify,
+    })
 }
 
 async fn run_skill_with_runner(
@@ -4483,6 +4240,47 @@ async fn execute_external_http_json(
     Ok(value)
 }
 
+/// Merges schedule invocation fields from the task payload into the JSON object passed to skills as `context`.
+/// Scheduled jobs inject `schedule_job_id`, `invocation_source`, `scheduled`, `schedule_triggered` at payload top level.
+fn build_runner_skill_context(
+    task: &ClaimedTask,
+    source: &str,
+    llm_skill: bool,
+    credential_context: Value,
+) -> Value {
+    let mut ctx = serde_json::Map::new();
+    ctx.insert("source".to_string(), Value::String(source.to_string()));
+    ctx.insert("kind".to_string(), Value::String("run_skill".to_string()));
+    ctx.insert(
+        "user_key".to_string(),
+        if llm_skill {
+            Value::Null
+        } else {
+            task.user_key
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null)
+        },
+    );
+    ctx.insert("exchange_credentials".to_string(), credential_context);
+
+    if let Ok(payload) = serde_json::from_str::<Value>(&task.payload_json) {
+        if let Some(p) = payload.as_object() {
+            for key in [
+                "schedule_job_id",
+                "invocation_source",
+                "scheduled",
+                "schedule_triggered",
+            ] {
+                if let Some(v) = p.get(key) {
+                    ctx.insert(key.to_string(), v.clone());
+                }
+            }
+        }
+    }
+    Value::Object(ctx)
+}
+
 async fn run_skill_with_runner_once(
     state: &AppState,
     task: &ClaimedTask,
@@ -4506,6 +4304,7 @@ async fn run_skill_with_runner_once(
             .map(Value::String)
             .unwrap_or(Value::Null)
     };
+    let skill_context = build_runner_skill_context(task, source, llm_skill, credential_context);
     let req_line = json!({
         "request_id": task.task_id,
         "user_id": task.user_id,
@@ -4515,12 +4314,7 @@ async fn run_skill_with_runner_once(
         "external_chat_id": task_external_chat_id(task),
         "skill_name": runner_name,
         "args": args,
-        "context": {
-            "source": source,
-            "kind": "run_skill",
-            "user_key": if llm_skill { Value::Null } else { task.user_key.clone().map(Value::String).unwrap_or(Value::Null) },
-                "exchange_credentials": credential_context
-        }
+        "context": skill_context
     })
     .to_string();
 
@@ -5794,7 +5588,7 @@ fn trim_path_token(token: &str) -> String {
         .to_string()
 }
 
-fn intercept_response_text_for_delivery(text: &str) -> String {
+pub(crate) fn intercept_response_text_for_delivery(text: &str) -> String {
     text.trim().to_string()
 }
 
@@ -8622,172 +8416,6 @@ fn normalize_affirmation_text(text: &str) -> String {
 
 fn is_affirmation_click_text(state: &AppState, text: &str) -> bool {
     hard_trade::is_yes_confirmation(text, confirmation_rules(state))
-}
-
-fn is_negative_confirmation_click_text(state: &AppState, text: &str) -> bool {
-    hard_trade::is_no_confirmation(text, confirmation_rules(state))
-}
-
-fn effective_trade_confirm_window_secs(state: &AppState, channel: &str) -> i64 {
-    let base_window = main_flow_rules(state)
-        .recent_trade_preview_window_secs
-        .max(1);
-    if is_whatsapp_channel_value(main_flow_rules(state), channel) {
-        return base_window;
-    }
-    base_window
-        .min(state.telegram_crypto_confirm_ttl_seconds.max(1))
-        .max(1)
-}
-
-#[derive(Debug, Clone)]
-struct TradePreviewContext {
-    exchange: String,
-    symbol: String,
-    side: String,
-    order_type: String,
-    qty: f64,
-    quote_qty_usd: Option<f64>,
-    price: Option<f64>,
-    stop_price: Option<f64>,
-    time_in_force: Option<String>,
-}
-
-fn build_trade_confirm_cancelled_text(
-    state: &AppState,
-    preview_ctx: &TradePreviewContext,
-) -> String {
-    i18n_t_with_default(
-        state,
-        "clawd.msg.trade_confirm_cancelled",
-        "Trade confirmation cancelled: {exchange} {symbol} {side} qty={qty}",
-    )
-    .replace("{exchange}", &preview_ctx.exchange)
-    .replace("{symbol}", &preview_ctx.symbol)
-    .replace("{side}", &preview_ctx.side)
-    .replace("{qty}", &preview_ctx.qty.to_string())
-}
-
-fn parse_trade_preview_line(line: &str, rules: &MainFlowRules) -> Option<TradePreviewContext> {
-    let trimmed = line.trim();
-    if !trimmed.starts_with(&rules.trade_preview_line_prefix) {
-        return None;
-    }
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
-    if parts.len() < 5 {
-        return None;
-    }
-    let qty = parts.iter().find_map(|p| {
-        p.strip_prefix("qty=")
-            .or_else(|| p.strip_prefix("est_qty="))
-            .and_then(|v| v.parse::<f64>().ok())
-    })?;
-    let quote_qty_usd = parts.iter().find_map(|p| {
-        p.strip_prefix("quote_usd=")
-            .and_then(|v| v.parse::<f64>().ok())
-    });
-    let order_type = parts
-        .iter()
-        .find_map(|p| {
-            p.strip_prefix("order_type=")
-                .map(|v| v.to_ascii_lowercase())
-        })
-        .unwrap_or_else(|| rules.trade_preview_default_order_type.clone());
-    let price = parts
-        .iter()
-        .find_map(|p| p.strip_prefix("price=").and_then(|v| v.parse::<f64>().ok()));
-    let stop_price = parts.iter().find_map(|p| {
-        p.strip_prefix("stop_price=")
-            .and_then(|v| v.parse::<f64>().ok())
-    });
-    let time_in_force = parts
-        .iter()
-        .find_map(|p| p.strip_prefix("tif=").map(|v| v.to_ascii_uppercase()));
-    Some(TradePreviewContext {
-        exchange: parts[1].trim().to_ascii_lowercase(),
-        symbol: parts[2].trim().to_ascii_uppercase(),
-        side: parts[3].trim().to_ascii_lowercase(),
-        order_type,
-        qty,
-        quote_qty_usd,
-        price,
-        stop_price,
-        time_in_force,
-    })
-}
-
-fn extract_trade_preview_context_from_result_json(
-    result_json: &str,
-    rules: &MainFlowRules,
-) -> Option<TradePreviewContext> {
-    let v: Value = serde_json::from_str(result_json).ok()?;
-    let mut candidates = Vec::new();
-    if let Some(text) = v.get("text").and_then(|x| x.as_str()) {
-        candidates.push(text.to_string());
-    }
-    if let Some(messages) = v.get("messages").and_then(|x| x.as_array()) {
-        for msg in messages {
-            if let Some(s) = msg.as_str() {
-                candidates.push(s.to_string());
-            }
-        }
-    }
-    for text in candidates.into_iter().rev() {
-        for line in text.lines().rev() {
-            if let Some(ctx) = parse_trade_preview_line(line, rules) {
-                return Some(ctx);
-            }
-        }
-    }
-    None
-}
-
-fn find_recent_trade_preview_context(
-    state: &AppState,
-    user_id: i64,
-    chat_id: i64,
-    window_secs: i64,
-) -> Option<TradePreviewContext> {
-    let rules = main_flow_rules(state);
-    let now = now_ts_u64() as i64;
-    let db = state.db.lock().ok()?;
-    let mut stmt = db
-        .prepare(
-            "SELECT result_json, CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) AS ts
-             FROM tasks
-             WHERE user_id = ?1 AND chat_id = ?2 AND kind = 'ask' AND status = 'succeeded'
-             ORDER BY ts DESC
-             LIMIT ?3",
-        )
-        .ok()?;
-    let rows = stmt
-        .query_map(
-            params![
-                user_id,
-                chat_id,
-                rules.recent_trade_preview_scan_limit as i64
-            ],
-            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
-        )
-        .ok()?;
-    for row in rows.flatten() {
-        let (result_json_opt, ts) = row;
-        if now.saturating_sub(ts) > window_secs {
-            continue;
-        }
-        let Some(result_json) = result_json_opt else {
-            // A newer successful ask exists but does not carry preview text,
-            // so treat previous preview as no longer pending.
-            return None;
-        };
-        if let Some(ctx) = extract_trade_preview_context_from_result_json(&result_json, rules) {
-            return Some(ctx);
-        }
-        // The latest successful ask is not a trade preview; pending confirmation
-        // should be considered cleared by subsequent conversation turns.
-        return None;
-    }
-    None
 }
 
 fn find_recent_duplicate_affirmation_task(

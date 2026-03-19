@@ -245,32 +245,140 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Legacy / mistaken `action` names from older callers or schedules; normalized before dispatch.
+/// Canonical actions remain `fetch`, `latest`, `news` (see INTERFACE.md).
+fn normalize_rss_legacy_actions(args: &mut serde_json::Map<String, Value>) -> Result<(), String> {
+    let action_raw = match args.get("action").and_then(|v| v.as_str()) {
+        Some(s) => s.trim().to_ascii_lowercase(),
+        None => return Ok(()),
+    };
+    if action_raw.is_empty() {
+        return Ok(());
+    }
+    match action_raw.as_str() {
+        "fetch_crypto_news" => {
+            args.insert("action".to_string(), Value::String("latest".to_string()));
+            if !args.contains_key("category") {
+                args.insert("category".to_string(), Value::String("crypto".to_string()));
+            }
+            Ok(())
+        }
+        "fetch_tech_news" => {
+            args.insert("action".to_string(), Value::String("latest".to_string()));
+            if !args.contains_key("category") {
+                args.insert("category".to_string(), Value::String("tech".to_string()));
+            }
+            Ok(())
+        }
+        "fetch_news" => {
+            args.insert("action".to_string(), Value::String("latest".to_string()));
+            Ok(())
+        }
+        "fetch_feed" => {
+            if direct_feed_selector_present(args) {
+                args.insert("action".to_string(), Value::String("fetch".to_string()));
+            } else {
+                return Err(
+                    "fetch_feed requires url, feed_url, or feed_urls (direct feed only); use action=latest or action=news for category feeds"
+                        .to_string(),
+                );
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// True if args carry a non-empty direct URL selector (same intent as `fetch`).
+fn direct_feed_selector_present(obj: &serde_json::Map<String, Value>) -> bool {
+    if let Some(v) = obj.get("url").or_else(|| obj.get("feed_url")) {
+        if let Some(s) = v.as_str() {
+            if !s.trim().is_empty() {
+                return true;
+            }
+        }
+    }
+    if let Some(arr) = obj.get("feed_urls").and_then(|v| v.as_array()) {
+        return arr.iter().any(|v| v.as_str().is_some_and(|s| !s.trim().is_empty()));
+    }
+    false
+}
+
 fn execute(cfg: &mut RootConfig, args: Value) -> Result<String, String> {
-    let obj = args
+    let mut obj = args
         .as_object()
+        .cloned()
         .ok_or_else(|| "args must be object".to_string())?;
+    normalize_rss_legacy_actions(&mut obj)?;
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
-        .unwrap_or("fetch")
+        .unwrap_or("latest")
         .trim()
         .to_ascii_lowercase();
 
     match action.as_str() {
-        "fetch" => {
-            if let Some(url) = obj
-                .get("url")
-                .or_else(|| obj.get("feed_url"))
-                .and_then(|v| v.as_str())
-            {
-                fetch_single_feed(obj, url)
-            } else {
-                fetch_layered_news(cfg, obj)
-            }
-        }
-        "latest" | "news" => fetch_layered_news(cfg, obj),
+        "fetch" => fetch_direct_feeds(&obj),
+        "latest" | "news" => fetch_layered_news(cfg, &obj),
         _ => Err("unsupported action; use fetch|latest|news".to_string()),
     }
+}
+
+/// Direct-feed only: requires `url`, `feed_url`, or non-empty `feed_urls` (http/https). No category fallback.
+fn resolve_direct_feed_urls(obj: &serde_json::Map<String, Value>) -> Result<Vec<String>, String> {
+    if let Some(v) = obj.get("url").or_else(|| obj.get("feed_url")) {
+        let s = v
+            .as_str()
+            .ok_or_else(|| "url and feed_url must be strings".to_string())?
+            .trim();
+        if s.is_empty() {
+            return Err("fetch requires a non-empty url or feed_url".to_string());
+        }
+        if !is_safe_feed_url(s) {
+            return Err("url must start with http:// or https://".to_string());
+        }
+        return Ok(vec![s.to_string()]);
+    }
+    if let Some(arr) = obj.get("feed_urls").and_then(|v| v.as_array()) {
+        if arr.is_empty() {
+            return Err("fetch requires a non-empty feed_urls array or url/feed_url".to_string());
+        }
+        let mut out = Vec::new();
+        for v in arr {
+            let s = v
+                .as_str()
+                .ok_or_else(|| "feed_urls entries must be strings".to_string())?
+                .trim();
+            if s.is_empty() {
+                continue;
+            }
+            if !is_safe_feed_url(s) {
+                return Err(format!(
+                    "invalid feed URL (must start with http:// or https://): {s}"
+                ));
+            }
+            out.push(s.to_string());
+        }
+        if out.is_empty() {
+            return Err(
+                "fetch requires at least one non-empty http(s) URL in feed_urls".to_string(),
+            );
+        }
+        return Ok(out);
+    }
+    Err("fetch requires url, feed_url, or feed_urls".to_string())
+}
+
+fn fetch_direct_feeds(obj: &serde_json::Map<String, Value>) -> Result<String, String> {
+    let urls = resolve_direct_feed_urls(obj)?;
+    if urls.len() == 1 {
+        return fetch_single_feed(obj, &urls[0]);
+    }
+    let mut parts = Vec::new();
+    for url in &urls {
+        parts.push(fetch_single_feed(obj, url)?);
+    }
+    Ok(parts.join("\n\n"))
 }
 
 fn fetch_single_feed(obj: &serde_json::Map<String, Value>, url: &str) -> Result<String, String> {
@@ -1215,6 +1323,233 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("no feed items") || err.contains("all") || err.contains("failed"));
+    }
+
+    #[test]
+    fn legacy_fetch_crypto_news_matches_latest_crypto_category() {
+        let mut cfg_a = make_cfg_with_sources(
+            "crypto",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
+        let a = serde_json::json!({
+            "action": "fetch_crypto_news",
+            "timeout_seconds": 1,
+            "limit": 3
+        });
+        let ra = execute(
+            &mut cfg_a,
+            serde_json::Value::Object(a.as_object().unwrap().clone()),
+        );
+        let mut cfg_b = make_cfg_with_sources(
+            "crypto",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
+        let b = serde_json::json!({
+            "action": "latest",
+            "category": "crypto",
+            "timeout_seconds": 1,
+            "limit": 3
+        });
+        let rb = execute(
+            &mut cfg_b,
+            serde_json::Value::Object(b.as_object().unwrap().clone()),
+        );
+        assert_eq!(ra.is_err(), rb.is_err());
+        let ea = ra.unwrap_err();
+        let eb = rb.unwrap_err();
+        assert!(ea.contains("no feed items") || ea.contains("failed") || ea.contains("all"));
+        assert!(eb.contains("no feed items") || eb.contains("failed") || eb.contains("all"));
+    }
+
+    #[test]
+    fn legacy_fetch_tech_news_sets_tech_category() {
+        let mut cfg_a = make_cfg_with_sources(
+            "tech",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
+        let a = serde_json::json!({
+            "action": "fetch_tech_news",
+            "timeout_seconds": 1,
+            "limit": 3
+        });
+        let ra = execute(
+            &mut cfg_a,
+            serde_json::Value::Object(a.as_object().unwrap().clone()),
+        );
+        let mut cfg_b = make_cfg_with_sources(
+            "tech",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
+        let b = serde_json::json!({
+            "action": "latest",
+            "category": "tech",
+            "timeout_seconds": 1,
+            "limit": 3
+        });
+        let rb = execute(
+            &mut cfg_b,
+            serde_json::Value::Object(b.as_object().unwrap().clone()),
+        );
+        assert_eq!(ra.is_err(), rb.is_err());
+    }
+
+    #[test]
+    fn legacy_fetch_news_matches_latest_same_category() {
+        let mut cfg_a = make_cfg_with_sources(
+            "general",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
+        let a = serde_json::json!({
+            "action": "fetch_news",
+            "timeout_seconds": 1,
+            "limit": 3
+        });
+        let ra = execute(
+            &mut cfg_a,
+            serde_json::Value::Object(a.as_object().unwrap().clone()),
+        );
+        let mut cfg_b = make_cfg_with_sources(
+            "general",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
+        let b = serde_json::json!({
+            "action": "latest",
+            "category": "general",
+            "timeout_seconds": 1,
+            "limit": 3
+        });
+        let rb = execute(
+            &mut cfg_b,
+            serde_json::Value::Object(b.as_object().unwrap().clone()),
+        );
+        assert_eq!(ra.is_err(), rb.is_err());
+    }
+
+    #[test]
+    fn legacy_fetch_feed_without_url_errors() {
+        let mut cfg = make_cfg_with_sources("g", vec!["https://example.com/f".to_string()]);
+        let args = serde_json::json!({ "action": "fetch_feed" });
+        let r = execute(&mut cfg, args);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("fetch_feed"));
+    }
+
+    #[test]
+    fn legacy_fetch_feed_with_url_uses_direct_fetch_path() {
+        let mut cfg = make_cfg_with_sources("unused", vec![]);
+        let args = serde_json::json!({
+            "action": "fetch_feed",
+            "url": "https://nonexistent.invalid.example/feed.xml",
+            "timeout_seconds": 1
+        });
+        let r = execute(&mut cfg, serde_json::Value::Object(args.as_object().unwrap().clone()));
+        assert!(r.is_err());
+        let err = r.unwrap_err();
+        assert!(
+            !err.contains("unsupported action"),
+            "should normalize to fetch, not reject action: {err}"
+        );
+    }
+
+    #[test]
+    fn fetch_without_url_returns_err() {
+        let mut cfg = make_cfg_with_sources("g", vec!["https://example.com/feed".to_string()]);
+        let args = serde_json::json!({ "action": "fetch" });
+        let result = execute(&mut cfg, args);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("fetch requires url") || err.contains("feed_urls"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn fetch_with_empty_feed_urls_returns_err() {
+        let mut cfg = make_cfg_with_sources("g", vec![]);
+        let args = serde_json::json!({ "action": "fetch", "feed_urls": [] });
+        let result = execute(&mut cfg, args);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("feed_urls") || err.contains("fetch requires"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn fetch_rejects_non_http_url() {
+        let mut cfg = make_cfg_with_sources("g", vec![]);
+        let args = serde_json::json!({ "action": "fetch", "url": "ftp://example.com/x" });
+        let result = execute(&mut cfg, args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("http"));
+    }
+
+    /// Omitted `action` defaults to category `latest`, not direct `fetch`.
+    #[test]
+    fn omitted_action_uses_latest_category_mode() {
+        let mut cfg = make_cfg_with_sources("omitted_cat", vec!["https://nonexistent.invalid.example/feed".to_string()]);
+        let args = serde_json::json!({
+            "category": "omitted_cat",
+            "limit": 5,
+            "timeout_seconds": 1
+        });
+        let result = execute(&mut cfg, serde_json::Value::Object(args.as_object().unwrap().clone()));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("no feed items") || err.contains("all") || err.contains("failed"),
+            "expected layered-news failure, got: {err}"
+        );
+    }
+
+    #[test]
+    fn news_action_same_error_shape_as_latest_for_failed_sources() {
+        let mut cfg_latest = make_cfg_with_sources("cat", vec!["https://nonexistent.invalid.example/feed".to_string()]);
+        let latest_args = serde_json::json!({"action": "latest", "category": "cat", "timeout_seconds": 1, "limit": 3});
+        let r_latest = execute(
+            &mut cfg_latest,
+            serde_json::Value::Object(latest_args.as_object().unwrap().clone()),
+        );
+        let mut cfg_news = make_cfg_with_sources("cat", vec!["https://nonexistent.invalid.example/feed".to_string()]);
+        let news_args = serde_json::json!({"action": "news", "category": "cat", "timeout_seconds": 1, "limit": 3});
+        let r_news = execute(
+            &mut cfg_news,
+            serde_json::Value::Object(news_args.as_object().unwrap().clone()),
+        );
+        assert_eq!(r_latest.is_err(), r_news.is_err());
+    }
+
+    #[test]
+    fn registry_prompt_file_rss_fetch_md_exists() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let p = repo.join("prompts/skills/rss_fetch.md");
+        assert!(
+            p.is_file(),
+            "skills_registry prompt_file should exist: {}",
+            p.display()
+        );
+    }
+
+    /// Needs network: direct `fetch` with a public RSS URL.
+    #[test]
+    #[ignore]
+    fn fetch_with_url_succeeds_direct_feed() {
+        let mut cfg = make_cfg_with_sources("unused", vec![]);
+        let args = serde_json::json!({
+            "action": "fetch",
+            "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+            "limit": 2,
+            "timeout_seconds": 15
+        });
+        let result = execute(
+            &mut cfg,
+            serde_json::Value::Object(args.as_object().unwrap().clone()),
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let text = result.unwrap();
+        assert!(!text.trim().is_empty());
     }
 
     #[test]

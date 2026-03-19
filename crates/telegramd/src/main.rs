@@ -23,10 +23,7 @@ use claw_core::types::{
 use reqwest::Client;
 use serde_json::{json, Value as JsonValue};
 use teloxide::prelude::*;
-use teloxide::types::{
-    CallbackQuery, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, MediaKind,
-    MessageKind, ParseMode,
-};
+use teloxide::types::{CallbackQuery, ChatAction, InputFile, MediaKind, MessageKind, ParseMode};
 use tokio::sync::oneshot;
 use toml::Value as TomlValue;
 use tracing::{debug, info, warn};
@@ -58,8 +55,6 @@ struct BotState {
     sendfile_full_access: bool,
     sendfile_allowed_dirs: Arc<Vec<String>>,
     ephemeral_image_saved_seconds: u64,
-    crypto_confirm_ttl_seconds: u64,
-    crypto_confirm_expiry_cancels: Arc<Mutex<HashMap<(i64, i32), oneshot::Sender<()>>>>,
     voice_chat_prompt_template: String,
     voice_mode_intent_prompt_template: String,
     pending_resume_by_chat: Arc<Mutex<HashMap<i64, PendingResumeContext>>>,
@@ -117,43 +112,6 @@ fn transport_highlight_tag(kind: &str) -> String {
         _ => "1",
     };
     format!("\x1b[{code}m[{upper}]\x1b[0m")
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CryptoConfirmCallbackAction {
-    Yes,
-    No,
-    DoneNoop,
-    ExpiredNoop,
-}
-
-fn parse_crypto_confirm_callback(data: &str) -> Option<(CryptoConfirmCallbackAction, Option<u64>)> {
-    if data == "crypto_confirm_done_noop" {
-        return Some((CryptoConfirmCallbackAction::DoneNoop, None));
-    }
-    if data == "crypto_confirm_expired_noop" {
-        return Some((CryptoConfirmCallbackAction::ExpiredNoop, None));
-    }
-    let (action, prefix) = if data.starts_with("crypto_confirm_yes") {
-        (CryptoConfirmCallbackAction::Yes, "crypto_confirm_yes")
-    } else if data.starts_with("crypto_confirm_no") {
-        (CryptoConfirmCallbackAction::No, "crypto_confirm_no")
-    } else {
-        return None;
-    };
-    let expiry = data
-        .strip_prefix(prefix)
-        .and_then(|rest| rest.strip_prefix(':'))
-        .and_then(|v| v.parse::<u64>().ok());
-    Some((action, expiry))
-}
-
-fn cancel_crypto_confirm_expiry(state: &BotState, chat_id: i64, message_id: i32) {
-    if let Ok(mut pending) = state.crypto_confirm_expiry_cancels.lock() {
-        if let Some(cancel_tx) = pending.remove(&(chat_id, message_id)) {
-            let _ = cancel_tx.send(());
-        }
-    }
 }
 
 fn parse_voice_reply_mode(raw: &str) -> VoiceReplyMode {
@@ -674,8 +632,6 @@ fn build_bot_state(
         sendfile_full_access: config.telegram.sendfile.full_access,
         sendfile_allowed_dirs: Arc::new(config.telegram.sendfile.allowed_dirs.clone()),
         ephemeral_image_saved_seconds: config.telegram.ephemeral_image_saved_seconds,
-        crypto_confirm_ttl_seconds: config.telegram.crypto_confirm_ttl_seconds.max(1),
-        crypto_confirm_expiry_cancels: Arc::new(Mutex::new(HashMap::new())),
         voice_chat_prompt_template: voice_chat_prompt_template.to_string(),
         voice_mode_intent_prompt_template: voice_mode_intent_prompt_template.to_string(),
         pending_resume_by_chat: Arc::new(Mutex::new(HashMap::new())),
@@ -1822,156 +1778,10 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     Ok(())
 }
 
-async fn handle_callback_query(bot: Bot, q: CallbackQuery, state: BotState) -> anyhow::Result<()> {
-    let Some(data) = q.data.as_deref() else {
-        return Ok(());
-    };
-    let Some((callback_action, expires_at_secs)) = parse_crypto_confirm_callback(data) else {
-        return Ok(());
-    };
-    debug!(
-        "phase=callback callback_id={} from_user_id={} data={}",
-        q.id, q.from.id.0, data
-    );
-    if callback_action == CryptoConfirmCallbackAction::DoneNoop {
-        if let Err(err) = bot
-            .answer_callback_query(q.id.clone())
-            .text(
-                state
-                    .i18n
-                    .t("telegram.msg.crypto_confirm_callback_done_ack"),
-            )
-            .await
-        {
-            warn!("answer done callback query failed: {}", err);
-        }
-        return Ok(());
-    }
-    if callback_action == CryptoConfirmCallbackAction::ExpiredNoop {
-        if let Err(err) = bot
-            .answer_callback_query(q.id.clone())
-            .text(
-                state
-                    .i18n
-                    .t("telegram.msg.crypto_confirm_callback_expired_ack"),
-            )
-            .await
-        {
-            warn!("answer expired callback query failed: {}", err);
-        }
-        return Ok(());
-    }
-    let is_yes = callback_action == CryptoConfirmCallbackAction::Yes;
-
-    let Some(message) = q.message.as_ref() else {
-        return Ok(());
-    };
-    let chat_id = message.chat.id;
-    let message_id = message.id;
-    cancel_crypto_confirm_expiry(&state, chat_id.0, message_id.0);
-    debug!(
-        "phase=callback_ack chat_id={} message_id={} data={}",
-        chat_id.0, message_id.0, data
-    );
-    let now_secs = unix_ts();
-    if expires_at_secs.map(|v| now_secs > v).unwrap_or(false) {
-        let expired_hint = state.i18n.t("telegram.msg.crypto_confirm_hint_expired");
-        let msg_text = message.text();
-        if let Some(original_text) = msg_text {
-            let expired_text = build_expired_trade_text(original_text, &expired_hint);
-            if let Err(err) = bot
-                .edit_message_text(chat_id, message_id, expired_text)
-                .await
-            {
-                warn!("edit expired callback message text failed: {}", err);
-            }
-        }
-        if let Err(err) = bot
-            .edit_message_reply_markup(chat_id, message_id)
-            .reply_markup(InlineKeyboardMarkup::new(
-                Vec::<Vec<InlineKeyboardButton>>::new(),
-            ))
-            .await
-        {
-            warn!("edit expired callback message markup failed: {}", err);
-        }
-        if let Err(err) = bot
-            .answer_callback_query(q.id.clone())
-            .text(
-                state
-                    .i18n
-                    .t("telegram.msg.crypto_confirm_callback_expired_ack"),
-            )
-            .await
-        {
-            warn!("answer expired callback query failed: {}", err);
-        }
-        return Ok(());
-    }
-    if let Err(err) = bot
-        .answer_callback_query(q.id.clone())
-        .text(if is_yes {
-            state.i18n.t("telegram.msg.crypto_confirm_callback_yes_ack")
-        } else {
-            state.i18n.t("telegram.msg.crypto_confirm_callback_no_ack")
-        })
-        .await
-    {
-        warn!("answer callback query failed: {}", err);
-    }
-
-    if let Err(err) = bot
-        .edit_message_reply_markup(chat_id, message_id)
-        .reply_markup(InlineKeyboardMarkup::new(
-            Vec::<Vec<InlineKeyboardButton>>::new(),
-        ))
-        .await
-    {
-        warn!("edit callback message markup failed: {}", err);
-    }
-    let user_id = match i64::try_from(q.from.id.0) {
-        Ok(v) => v,
-        Err(_) => {
-            warn!("callback user id out of range: {}", q.from.id.0);
-            return Ok(());
-        }
-    };
-
-    // Use stable semantic tokens for downstream confirmation parsing.
-    let prompt = if is_yes { "yes" } else { "no" };
-    let agent_enabled = state
-        .agent_off_chats
-        .lock()
-        .map(|set| !set.contains(&chat_id.0))
-        .unwrap_or(true);
-    let payload = json!({
-        "text": prompt,
-        "agent_mode": agent_enabled
-    });
-
-    match submit_task_only(&state, user_id, chat_id.0, TaskKind::Ask, payload).await {
-        Ok(task_id) => {
-            spawn_task_result_delivery(
-                bot.clone(),
-                state.clone(),
-                chat_id,
-                user_id,
-                task_id,
-                None,
-                state.i18n.t("telegram.msg.process_failed"),
-            );
-        }
-        Err(err) => {
-            bot.send_message(
-                chat_id,
-                state.i18n.t_with(
-                    "telegram.msg.process_failed",
-                    &[("error", &err.to_string())],
-                ),
-            )
-            .await
-            .context("send callback submit error failed")?;
-        }
+async fn handle_callback_query(bot: Bot, q: CallbackQuery, _state: BotState) -> anyhow::Result<()> {
+    // Inline keyboards for crypto trade confirmation were removed; dismiss loading state for stray taps.
+    if q.data.is_some() {
+        let _ = bot.answer_callback_query(q.id).await;
     }
     Ok(())
 }
@@ -2193,7 +2003,7 @@ async fn handle_audio_message(
     let mode = parse_voice_reply_mode(&effective_voice_reply_mode_for_chat(state, msg.chat.id.0));
     if matches!(mode, VoiceReplyMode::Text | VoiceReplyMode::Both) {
         for answer in &answers {
-            send_text_or_image(bot, state, msg.chat.id, answer, false).await?;
+            send_text_or_image(bot, state, msg.chat.id, answer).await?;
         }
     }
 
@@ -2227,7 +2037,7 @@ async fn handle_audio_message(
                     Ok(tts_answer) => {
                         for msg_text in tts_answer {
                             let _ =
-                                send_text_or_image(bot, state, msg.chat.id, &msg_text, false).await;
+                                send_text_or_image(bot, state, msg.chat.id, &msg_text).await;
                         }
                     }
                     Err(err) => {
@@ -2241,7 +2051,7 @@ async fn handle_audio_message(
         } else if matches!(mode, VoiceReplyMode::Voice) {
             // Voice-only mode but no speakable text: fallback to original answer.
             for answer in &answers {
-                send_text_or_image(bot, state, msg.chat.id, answer, false).await?;
+                send_text_or_image(bot, state, msg.chat.id, answer).await?;
             }
         }
     }
@@ -2503,7 +2313,6 @@ async fn send_text_or_image(
     state: &BotState,
     chat_id: ChatId,
     answer: &str,
-    requires_confirmation: bool,
 ) -> anyhow::Result<()> {
     const PREFIX: &str = "IMAGE_FILE:";
     const FILE_PREFIX: &str = "FILE:";
@@ -2637,72 +2446,16 @@ async fn send_text_or_image(
         return Ok(());
     }
 
-    if is_crypto_trade_confirm_prompt(answer, requires_confirmation) {
-        let expires_at_secs = unix_ts().saturating_add(state.crypto_confirm_ttl_seconds);
-        let yes_callback = format!("crypto_confirm_yes:{expires_at_secs}");
-        let no_callback = format!("crypto_confirm_no:{expires_at_secs}");
-        let keyboard = InlineKeyboardMarkup::new(vec![vec![
-            InlineKeyboardButton::callback(
-                state.i18n.t("telegram.msg.crypto_confirm_button_yes"),
-                yes_callback,
-            ),
-            InlineKeyboardButton::callback(
-                state.i18n.t("telegram.msg.crypto_confirm_button_no"),
-                no_callback,
-            ),
-        ]]);
-        let sent = send_telegram_text_with_markup(bot, chat_id, answer, keyboard)
-            .await
-            .context("send text message with confirm keyboard failed")?;
-        debug!(
-            "phase=deliver_text_confirm chat_id={} answer_fp={} telegram_msg_id={} answer_preview={}",
-            chat_id.0,
-            text_fingerprint_hex(answer),
-            sent.id.0,
-            text_preview_for_log(answer, 120)
-        );
-        let bot_clone = bot.clone();
-        let state_clone = state.clone();
-        let sent_msg_id = sent.id;
-        let confirm_msg_key = (chat_id.0, sent_msg_id.0);
-        let original_text = answer.to_string();
-        let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
-        if let Ok(mut pending) = state.crypto_confirm_expiry_cancels.lock() {
-            if let Some(prev) = pending.insert(confirm_msg_key, cancel_tx) {
-                let _ = prev.send(());
-            }
-        }
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(state_clone.crypto_confirm_ttl_seconds)) => {
-                    if let Ok(mut pending) = state_clone.crypto_confirm_expiry_cancels.lock() {
-                        pending.remove(&confirm_msg_key);
-                    }
-                    let expired_hint = state_clone.i18n.t("telegram.msg.crypto_confirm_hint_expired");
-                    let expired_text = build_expired_trade_text(&original_text, &expired_hint);
-                    let _ = bot_clone
-                        .edit_message_text(chat_id, sent_msg_id, expired_text)
-                        .await;
-                    let _ = bot_clone
-                        .edit_message_reply_markup(chat_id, sent_msg_id)
-                        .reply_markup(InlineKeyboardMarkup::new(Vec::<Vec<InlineKeyboardButton>>::new()))
-                        .await;
-                }
-                _ = &mut cancel_rx => {}
-            }
-        });
-    } else {
-        let sent = send_telegram_text(bot, chat_id, answer)
-            .await
-            .context("send text message failed")?;
-        debug!(
-            "phase=deliver_text chat_id={} answer_fp={} telegram_msg_id={} answer_preview={}",
-            chat_id.0,
-            text_fingerprint_hex(answer),
-            sent.id.0,
-            text_preview_for_log(answer, 120)
-        );
-    }
+    let sent = send_telegram_text(bot, chat_id, answer)
+        .await
+        .context("send text message failed")?;
+    debug!(
+        "phase=deliver_text chat_id={} answer_fp={} telegram_msg_id={} answer_preview={}",
+        chat_id.0,
+        text_fingerprint_hex(answer),
+        sent.id.0,
+        text_preview_for_log(answer, 120)
+    );
     Ok(())
 }
 
@@ -2804,64 +2557,6 @@ async fn send_telegram_text(bot: &Bot, chat_id: ChatId, text: &str) -> anyhow::R
         let req = bot.send_message(chat_id, body);
         let req = if let Some(mode) = parse_mode {
             req.parse_mode(mode)
-        } else {
-            req
-        };
-        let msg = req.await?;
-        last = Some(msg);
-    }
-    Ok(last.expect("chunks non-empty"))
-}
-
-async fn send_telegram_text_with_markup(
-    bot: &Bot,
-    chat_id: ChatId,
-    text: &str,
-    reply_markup: InlineKeyboardMarkup,
-) -> anyhow::Result<Message> {
-    let chunks = chunk_text_for_channel(
-        text,
-        TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
-    );
-    if chunks.is_empty() {
-        return Err(anyhow::anyhow!("empty text"));
-    }
-    if chunks.len() == 1 {
-        let (body, parse_mode) = telegram_text_payload(&chunks[0]);
-        let req = bot.send_message(chat_id, body);
-        let req = if let Some(mode) = parse_mode {
-            req.parse_mode(mode)
-        } else {
-            req
-        };
-        return Ok(req.reply_markup(reply_markup).await?);
-    }
-    let n = chunks.len();
-    info!(
-        "send_chunks channel=telegram chat_id={:?} original_len={} chunk_count={} with_markup=true",
-        chat_id,
-        text.len(),
-        n
-    );
-    // Long text: send each chunk as plain text with segment hint; attach markup only to the last message.
-    let mut last = None;
-    for (i, chunk) in chunks.into_iter().enumerate() {
-        let segment_text = format!("（{}/{}）\n{}", i + 1, n, chunk);
-        let (body, parse_mode) = telegram_text_payload(&segment_text);
-        info!(
-            "send_chunk channel=telegram chat_id={:?} index={} total={}",
-            chat_id,
-            i + 1,
-            n
-        );
-        let req = bot.send_message(chat_id, body);
-        let req = if let Some(mode) = parse_mode {
-            req.parse_mode(mode)
-        } else {
-            req
-        };
-        let req = if i == n - 1 {
-            req.reply_markup(reply_markup.clone())
         } else {
             req
         };
@@ -3607,29 +3302,6 @@ fn looks_like_multiline_code(text: &str) -> bool {
     score >= 4
 }
 
-/// Replace the confirm-hint line at the end of a trade preview message with the expired hint.
-fn build_expired_trade_text(original: &str, expired_hint: &str) -> String {
-    if let Some(idx) = original.rfind('\n') {
-        format!("{}\n{}", &original[..idx], expired_hint)
-    } else {
-        format!("{}\n{}", original, expired_hint)
-    }
-}
-
-/// No longer used: confirmation UI for crypto trade_preview has been removed; planner decides flow.
-fn is_crypto_trade_confirm_prompt(_text: &str, structured_hint: bool) -> bool {
-    if structured_hint {
-        return true;
-    }
-    // Do not attach confirm keyboard for trade_preview; confirmation is planner-decided.
-    let decision = false;
-    debug!(
-        "phase=confirm_detect structured_hint={} decision={} (confirm UI disabled)",
-        structured_hint, decision
-    );
-    decision
-}
-
 fn extract_prefixed_paths(answer: &str, prefix: &str) -> Vec<String> {
     let tokens = extract_prefixed_tokens(answer, prefix);
     let (resolved, _) = resolve_delivery_paths(&tokens);
@@ -3945,31 +3617,24 @@ fn spawn_task_result_delivery(
                         } else if sent_progress_count > 0 || has_structured_messages {
                             clear_pending_resume_for_chat(&state, chat_id.0);
                         }
-                        let requires_confirmation = task_requires_crypto_confirmation(&task);
                         debug!(
-                            "phase=deliver_success task_id={} chat_id={} sent_progress_count={} success_count={} requires_confirmation={}",
+                            "phase=deliver_success task_id={} chat_id={} sent_progress_count={} success_count={}",
                             task_id,
                             chat_id.0,
                             sent_progress_count,
                             answers.len(),
-                            requires_confirmation
                         );
                         for answer in answers {
                             debug!(
-                                "phase=deliver_success_item task_id={} chat_id={} msg_fp={} msg_len={} requires_confirmation={} msg_preview={}",
+                                "phase=deliver_success_item task_id={} chat_id={} msg_fp={} msg_len={} msg_preview={}",
                                 task_id,
                                 chat_id.0,
                                 text_fingerprint_hex(&answer),
                                 answer.len(),
-                                requires_confirmation,
                                 text_preview_for_log(&answer, 160)
                             );
                             let _ = send_success_message_for_telegram(
-                                &bot,
-                                &state,
-                                chat_id,
-                                &answer,
-                                requires_confirmation,
+                                &bot, &state, chat_id, &answer,
                             )
                             .await;
                         }
@@ -4030,7 +3695,6 @@ async fn send_success_message_for_telegram(
     state: &BotState,
     chat_id: ChatId,
     answer: &str,
-    requires_confirmation: bool,
 ) -> anyhow::Result<()> {
     if let Some(blocks) = split_subtask_success_messages(answer) {
         for (header, body) in blocks {
@@ -4043,7 +3707,7 @@ async fn send_success_message_for_telegram(
             if should_send_subtask_body_as_file(&header, &body) {
                 let file_path = write_subtask_body_to_temp_file(&header, &body)?;
                 let answer_with_file = format!("{header}\nFILE:{file_path}");
-                send_text_or_image(bot, state, chat_id, &answer_with_file, false).await?;
+                send_text_or_image(bot, state, chat_id, &answer_with_file).await?;
                 continue;
             }
             let html = format!(
@@ -4058,7 +3722,7 @@ async fn send_success_message_for_telegram(
         }
         return Ok(());
     }
-    send_text_or_image(bot, state, chat_id, answer, requires_confirmation).await
+    send_text_or_image(bot, state, chat_id, answer).await
 }
 
 fn split_subtask_success_messages(text: &str) -> Option<Vec<(String, String)>> {
@@ -4232,15 +3896,6 @@ fn task_progress_messages(task: &TaskQueryResponse) -> Vec<String> {
         })
         .unwrap_or_default();
     dedupe_preserve_order(out)
-}
-
-fn task_requires_crypto_confirmation(task: &TaskQueryResponse) -> bool {
-    task.result_json
-        .as_ref()
-        .and_then(|v| v.get("requires_confirmation"))
-        .and_then(|v| v.as_str())
-        .map(|v| v.eq_ignore_ascii_case("crypto_trade"))
-        .unwrap_or(false)
 }
 
 fn task_terminal_error_text(state: &BotState, task: &TaskQueryResponse) -> String {

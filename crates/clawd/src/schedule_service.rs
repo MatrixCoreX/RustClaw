@@ -1,11 +1,123 @@
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDateTime, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
-use rusqlite::{params, Connection};
+use rusqlite::params;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 use crate::{execution_adapters, llm_gateway, memory, AppState, ClaimedTask, ScheduleIntentOutput};
+
+// ---------- Schedule skill catalog & validation (dynamic from registry) ----------
+// `create` persists jobs generically; no per-skill subprocess preflight or merge-on-create paths live here.
+
+/// Generic one-line hint for catalog (no business semantics; skill owns its own contract).
+fn schedule_skill_catalog_hint(entry: &claw_core::skill_registry::SkillRegistryEntry) -> &'static str {
+    match entry.kind {
+        SkillKind::Builtin => "builtin",
+        SkillKind::Runner => "runner",
+        _ => "external",
+    }
+}
+
+/// Build a short skill catalog for schedule intent prompt from the loaded registry (same source as runtime).
+/// Injects into `__SKILL_CATALOG__` and `__SKILLS_CATALOG__` (both identical for compatibility).
+pub(crate) fn build_schedule_skill_catalog_from_registry(registry: &SkillsRegistry) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for name in registry.enabled_names() {
+        let Some(entry) = registry.get(&name) else {
+            continue;
+        };
+        let aliases_str = if entry.aliases.is_empty() {
+            String::new()
+        } else {
+            format!(" (aliases: {})", entry.aliases.join(", "))
+        };
+        let hint = schedule_skill_catalog_hint(entry);
+        lines.push(format!(
+            "- {name}{aliases_str} [enabled] — {hint}"
+        ));
+    }
+    let mut disabled: Vec<String> = registry
+        .all_names()
+        .into_iter()
+        .filter(|n| registry.get(n).map(|e| !e.enabled).unwrap_or(false))
+        .collect();
+    disabled.sort();
+    if !disabled.is_empty() {
+        lines.push(format!(
+            "- Note: registered but disabled — do NOT schedule run_skill for: {}",
+            disabled.join(", ")
+        ));
+    }
+    lines.join("\n")
+}
+
+/// Build schedule skill catalog from app state (`state.get_skills_registry()`).
+pub(crate) fn build_schedule_skill_catalog(state: &AppState) -> String {
+    state
+        .get_skills_registry()
+        .as_ref()
+        .map(|arc| build_schedule_skill_catalog_from_registry(arc.as_ref()))
+        .unwrap_or_default()
+}
+
+/// Same string as [`build_schedule_skill_catalog`]; name matches prompt assembly wording.
+pub(crate) fn render_schedule_skill_catalog(state: &AppState) -> String {
+    build_schedule_skill_catalog(state)
+}
+
+/// Minimal validation for `run_skill` before persisting: skill exists, enabled, canonical name;
+/// `args` if present must be an object. No per-skill business logic and **no skill subprocess** (no symbol preflight).
+pub(crate) fn validate_schedule_run_skill(
+    state: &AppState,
+    payload: &Value,
+) -> Result<Value, String> {
+    let registry_arc = state.get_skills_registry().ok_or_else(|| {
+        "skills registry not available".to_string()
+    })?;
+    validate_schedule_run_skill_with_registry(registry_arc.as_ref(), payload)
+}
+
+/// Core validation/normalization using a registry reference. Used by validate_schedule_run_skill and by tests.
+// TODO: Per-action / schema checks belong in skill runtime or registry metadata, not here.
+pub(crate) fn validate_schedule_run_skill_with_registry(
+    registry: &SkillsRegistry,
+    payload: &Value,
+) -> Result<Value, String> {
+    let obj = payload
+        .as_object()
+        .ok_or_else(|| "run_skill payload must be an object".to_string())?;
+    let raw_skill = obj
+        .get("skill_name")
+        .or_else(|| obj.get("skill"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if raw_skill.is_empty() {
+        return Err("run_skill payload must contain skill_name".to_string());
+    }
+
+    let canonical = registry
+        .resolve_canonical(raw_skill)
+        .ok_or_else(|| format!("unknown skill: {raw_skill}"))?;
+
+    let entry = registry
+        .get(canonical)
+        .ok_or_else(|| format!("unknown skill: {raw_skill}"))?;
+    if !entry.enabled {
+        return Err(format!("skill is disabled: {canonical}"));
+    }
+
+    let args = obj.get("args").cloned().unwrap_or(Value::Object(serde_json::Map::new()));
+    if !args.is_object() {
+        return Err("run_skill payload args must be an object".to_string());
+    }
+    let mut out = serde_json::Map::new();
+    out.insert("skill_name".to_string(), Value::String(canonical.to_string()));
+    out.insert("args".to_string(), args);
+    Ok(Value::Object(out))
+}
 
 pub(crate) async fn parse_schedule_intent(
     state: &AppState,
@@ -29,6 +141,7 @@ pub(crate) async fn parse_schedule_intent(
         memory::retrieval::MemoryContextMode::Schedule,
         state.memory.schedule_memory_max_chars.max(384),
     );
+    let skill_catalog = render_schedule_skill_catalog(state);
     let prompt = crate::render_prompt_template(
         &state.schedule.intent_prompt_template,
         &[
@@ -38,6 +151,8 @@ pub(crate) async fn parse_schedule_intent(
             ),
             ("__TIMEZONE__", &state.schedule.timezone),
             ("__RULES__", &state.schedule.intent_rules_template),
+            ("__SKILL_CATALOG__", &skill_catalog),
+            ("__SKILLS_CATALOG__", &skill_catalog),
             ("__MEMORY_CONTEXT__", &memory_context),
             ("__REQUEST__", request),
         ],
@@ -290,202 +405,15 @@ fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &st
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct CryptoPriceAlertProfile {
-    symbol: String,
-    direction: String,
-    window_minutes: u64,
-    threshold_pct: f64,
-}
-
-#[derive(Debug, Clone)]
-struct ExistingCryptoPriceAlertJob {
-    job_id: String,
-    channel: String,
-    external_user_id: Option<String>,
-    external_chat_id: Option<String>,
-    schedule_type: String,
-    run_at: Option<i64>,
-    time_of_day: Option<String>,
-    weekday: Option<i64>,
-    every_minutes: Option<i64>,
-    timezone: String,
-    next_run_at: Option<i64>,
-    profile: CryptoPriceAlertProfile,
-}
-
-fn normalize_direction(raw: &str) -> String {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "up" | "long" | "rise" => "up".to_string(),
-        "down" | "short" | "fall" => "down".to_string(),
-        _ => "both".to_string(),
-    }
-}
-
-fn normalize_threshold_pct(v: f64) -> f64 {
-    (v * 10000.0).round() / 10000.0
-}
-
-fn extract_crypto_price_alert_profile(payload: &Value) -> Option<CryptoPriceAlertProfile> {
-    let obj = payload.as_object()?;
-    let skill_name = obj
-        .get("skill_name")
-        .or_else(|| obj.get("skill"))
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    if skill_name != "crypto" {
-        return None;
-    }
-    let args = obj.get("args")?.as_object()?;
-    let action = args
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    if !matches!(
-        action.as_str(),
-        "price_alert_check"
-            | "price_monitor"
-            | "monitor_price"
-            | "price_alert"
-            | "volatility_alert"
-    ) {
-        return None;
-    }
-    let symbol = args
-        .get("symbol")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())?
-        .to_ascii_uppercase();
-    let direction = normalize_direction(
-        args.get("direction")
-            .and_then(|v| v.as_str())
-            .unwrap_or("both"),
-    );
-    let window_minutes = args
-        .get("window_minutes")
-        .or_else(|| args.get("minutes"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(15)
-        .max(1);
-    let threshold_pct = normalize_threshold_pct(
-        args.get("threshold_pct")
-            .or_else(|| args.get("pct"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(5.0)
-            .abs(),
-    );
-    Some(CryptoPriceAlertProfile {
-        symbol,
-        direction,
-        window_minutes,
-        threshold_pct,
-    })
-}
-
-fn schedule_content_matches(
-    existing: &ExistingCryptoPriceAlertJob,
-    schedule_type: &str,
-    run_at: Option<i64>,
-    time_of_day: Option<&str>,
-    weekday: Option<i64>,
-    every_minutes: Option<i64>,
-    timezone: &str,
-) -> bool {
-    let existing_time = existing
-        .time_of_day
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let input_time = time_of_day.map(str::trim).filter(|v| !v.is_empty());
-    existing.schedule_type == schedule_type
-        && existing.run_at == run_at
-        && existing_time == input_time
-        && existing.weekday == weekday
-        && existing.every_minutes == every_minutes
-        && existing.timezone.trim() == timezone.trim()
-}
-
-fn schedule_channel_binding_matches(existing: &ExistingCryptoPriceAlertJob, task: &ClaimedTask) -> bool {
-    existing.channel.trim().eq_ignore_ascii_case(task.channel.trim())
-        && existing.external_user_id == task.external_user_id
-        && existing.external_chat_id == task.external_chat_id
-}
-
-fn load_existing_crypto_price_alert_jobs(
-    db: &Connection,
-    user_id: i64,
-    chat_id: i64,
-) -> Result<Vec<ExistingCryptoPriceAlertJob>, String> {
-    let mut stmt = db
-        .prepare(
-            "SELECT job_id, channel, external_user_id, external_chat_id, schedule_type, run_at, time_of_day, weekday, every_minutes, timezone, next_run_at, task_payload_json
-             FROM scheduled_jobs
-             WHERE user_id = ?1 AND chat_id = ?2 AND task_kind = 'run_skill'
-             ORDER BY enabled DESC, id DESC
-             LIMIT 100",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![user_id, chat_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<i64>>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, Option<i64>>(7)?,
-                row.get::<_, Option<i64>>(8)?,
-                row.get::<_, String>(9)?,
-                row.get::<_, Option<i64>>(10)?,
-                row.get::<_, String>(11)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        let (
-            job_id,
-            channel,
-            external_user_id,
-            external_chat_id,
-            schedule_type,
-            run_at,
-            time_of_day,
-            weekday,
-            every_minutes,
-            timezone,
-            next_run_at,
-            task_payload_json,
-        ) = row.map_err(|e| e.to_string())?;
-        let payload =
-            serde_json::from_str::<Value>(&task_payload_json).unwrap_or_else(|_| json!({}));
-        let Some(profile) = extract_crypto_price_alert_profile(&payload) else {
-            continue;
-        };
-        out.push(ExistingCryptoPriceAlertJob {
-            job_id,
-            channel,
-            external_user_id,
-            external_chat_id,
-            schedule_type,
-            run_at,
-            time_of_day,
-            weekday,
-            every_minutes,
-            timezone,
-            next_run_at,
-            profile,
-        });
-    }
-    Ok(out)
+/// Key-value pairs to inject into task payload when schedule triggers execution.
+/// Skills can read `invocation_source`, `schedule_job_id`, `scheduled` to know they were invoked by schedule.
+pub(crate) fn schedule_invocation_metadata(job_id: &str) -> Vec<(String, Value)> {
+    vec![
+        ("schedule_triggered".to_string(), Value::Bool(true)),
+        ("schedule_job_id".to_string(), Value::String(job_id.to_string())),
+        ("invocation_source".to_string(), Value::String("schedule".to_string())),
+        ("scheduled".to_string(), Value::Bool(true)),
+    ]
 }
 
 pub(crate) async fn try_handle_schedule_request(
@@ -812,110 +740,14 @@ pub(crate) async fn try_handle_schedule_request(
                 intent.task.payload.clone()
             };
 
-            if task_kind == "run_skill" {
-                if let Some(profile) = extract_crypto_price_alert_profile(&payload) {
-                    let check_args = json!({
-                        "action": "binance_symbol_check",
-                        "symbol": profile.symbol
-                    });
-                    if let Err(err) =
-                        execution_adapters::run_skill(state, task, "crypto", check_args).await
-                    {
-                        return Ok(Some(err));
-                    }
-
-                    let db = state
-                        .db
-                        .lock()
-                        .map_err(|_| "db lock poisoned".to_string())?;
-                    let existing_jobs =
-                        load_existing_crypto_price_alert_jobs(&db, task.user_id, task.chat_id)?;
-
-                    if let Some(existing) = existing_jobs.iter().find(|v| {
-                        v.profile == profile
-                            && schedule_content_matches(
-                                v,
-                                &schedule_type,
-                                run_at,
-                                time_of_day.as_deref(),
-                                weekday,
-                                every_minutes,
-                                &timezone,
-                            )
-                            && schedule_channel_binding_matches(v, task)
-                    }) {
-                        let effective_next_run = existing.next_run_at.unwrap_or(next_run_at);
-                        let next_run_human = humanize_next_run_at(effective_next_run, &timezone);
-                        let task_content = summarize_task_content(&task_kind, &payload, prompt);
-                        return Ok(Some(schedule_t_with(
-                            state,
-                            "schedule.msg.create_exists_same",
-                            &[
-                                ("job_id", &existing.job_id),
-                                ("type", &intent.schedule.r#type),
-                                ("timezone", &timezone),
-                                ("next_run_human", &next_run_human),
-                                ("task_content", &task_content),
-                            ],
-                        )));
-                    }
-
-                    if let Some(existing) = existing_jobs
-                        .iter()
-                        .find(|v| v.profile.symbol == profile.symbol)
-                    {
-                        let updated_at = crate::now_ts();
-                        db.execute(
-                            "UPDATE scheduled_jobs
-                             SET schedule_type = ?4,
-                                 run_at = ?5,
-                                 time_of_day = ?6,
-                                 weekday = ?7,
-                                 every_minutes = ?8,
-                                 timezone = ?9,
-                                 task_payload_json = ?10,
-                                 channel = ?11,
-                                 external_user_id = ?12,
-                                 external_chat_id = ?13,
-                                 enabled = 1,
-                                 next_run_at = ?14,
-                                 updated_at = ?15
-                             WHERE job_id = ?1 AND user_id = ?2 AND chat_id = ?3",
-                            params![
-                                existing.job_id,
-                                task.user_id,
-                                task.chat_id,
-                                schedule_type,
-                                run_at,
-                                time_of_day,
-                                weekday,
-                                every_minutes,
-                                timezone,
-                                payload.to_string(),
-                                task.channel,
-                                task.external_user_id,
-                                task.external_chat_id,
-                                next_run_at,
-                                updated_at,
-                            ],
-                        )
-                        .map_err(|e| e.to_string())?;
-                        let next_run_human = humanize_next_run_at(next_run_at, &timezone);
-                        let task_content = summarize_task_content(&task_kind, &payload, prompt);
-                        return Ok(Some(schedule_t_with(
-                            state,
-                            "schedule.msg.update_existing_ok",
-                            &[
-                                ("job_id", &existing.job_id),
-                                ("type", &intent.schedule.r#type),
-                                ("timezone", &timezone),
-                                ("next_run_human", &next_run_human),
-                                ("task_content", &task_content),
-                            ],
-                        )));
-                    }
+            let payload = if task_kind == "run_skill" {
+                match validate_schedule_run_skill(state, &payload) {
+                    Ok(normalized) => normalized,
+                    Err(err) => return Ok(Some(err)),
                 }
-            }
+            } else {
+                payload
+            };
 
             let job_id = format!("job_{}", &Uuid::new_v4().simple().to_string()[..10]);
             let created_at = crate::now_ts();
@@ -966,5 +798,372 @@ pub(crate) async fn try_handle_schedule_request(
             )))
         }
         _ => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod schedule_skill_tests {
+    use super::*;
+
+    fn test_registry() -> SkillsRegistry {
+        let toml = r#"
+[[skills]]
+name = "rss_fetch"
+enabled = true
+kind = "runner"
+aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/rss_fetch.md"
+output_kind = "text"
+
+[[skills]]
+name = "crypto"
+enabled = true
+kind = "runner"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/crypto.md"
+output_kind = "text"
+
+[[skills]]
+name = "demo_runner"
+enabled = true
+kind = "runner"
+aliases = ["demo"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/rss_fetch.md"
+output_kind = "text"
+
+[[skills]]
+name = "health_check"
+enabled = false
+kind = "runner"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/health_check.md"
+output_kind = "text"
+"#;
+        let path = std::env::temp_dir().join("schedule_skill_test_registry.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path).unwrap();
+        let _ = std::fs::remove_file(path);
+        reg
+    }
+
+    #[test]
+    fn build_schedule_skill_catalog_from_registry_includes_enabled_skills() {
+        let reg = test_registry();
+        let catalog = build_schedule_skill_catalog_from_registry(&reg);
+        assert!(catalog.contains("rss_fetch"));
+        assert!(catalog.contains("demo_runner"));
+        assert!(catalog.contains("rss") || catalog.contains("aliases"));
+        assert!(catalog.contains("[enabled]"));
+        assert!(catalog.contains("health_check"));
+        assert!(catalog.contains("do NOT schedule") || catalog.contains("disabled"));
+    }
+
+    #[test]
+    fn schedule_prompt_template_substitutes_skill_catalog_placeholders() {
+        let cat = "- rss_fetch (aliases: rss) [enabled] — runner";
+        let tpl = "SKILL=__SKILL_CATALOG__\nLEGACY=__SKILLS_CATALOG__";
+        let out = crate::render_prompt_template(tpl, &[
+            ("__SKILL_CATALOG__", cat),
+            ("__SKILLS_CATALOG__", cat),
+        ]);
+        assert!(!out.contains("__SKILL_CATALOG__"));
+        assert!(!out.contains("__SKILLS_CATALOG__"));
+        assert!(out.contains("rss_fetch"));
+    }
+
+    #[test]
+    fn validate_schedule_run_skill_news_fetcher_alias_resolves_to_rss_fetch() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "news_fetcher",
+            "args": { "action": "latest", "category": "world" }
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
+        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("rss_fetch"));
+    }
+
+    #[test]
+    fn validate_schedule_run_skill_unknown_skill_fails() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "totally_fake_skill_xyz",
+            "args": { "action": "latest", "category": "tech" }
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload);
+        assert!(out.is_err());
+        assert!(out.unwrap_err().contains("unknown skill"));
+    }
+
+    #[test]
+    fn validate_schedule_run_skill_alias_resolved_to_canonical() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "rss",
+            "args": { "action": "latest", "category": "tech" }
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
+        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("rss_fetch"));
+    }
+
+    /// Schedule does not rewrite `rss_fetch` args; `fetch_feed` is handled inside the skill.
+    #[test]
+    fn validate_schedule_run_skill_rss_fetch_fetch_feed_passes_through() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "rss_fetch",
+            "args": { "action": "fetch_feed", "category": "tech" }
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
+        let args = out.get("args").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(args.get("action").and_then(|v| v.as_str()), Some("fetch_feed"));
+        assert_eq!(args.get("category").and_then(|v| v.as_str()), Some("tech"));
+    }
+
+    #[test]
+    fn validate_schedule_run_skill_args_must_be_object() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "rss_fetch",
+            "args": "not_an_object"
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload);
+        assert!(out.is_err());
+        assert!(out.unwrap_err().contains("args"));
+    }
+
+    #[test]
+    fn validate_schedule_run_skill_disabled_skill_fails() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "health_check",
+            "args": {}
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload);
+        assert!(out.is_err());
+        assert!(out.unwrap_err().contains("disabled"));
+    }
+
+    #[test]
+    fn validate_schedule_run_skill_valid_rss_fetch_kept() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "rss_fetch",
+            "args": { "action": "latest", "category": "science" }
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
+        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("rss_fetch"));
+        let args = out.get("args").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(args.get("action").and_then(|v| v.as_str()), Some("latest"));
+        assert_eq!(args.get("category").and_then(|v| v.as_str()), Some("science"));
+    }
+
+    #[test]
+    fn validate_schedule_run_skill_rss_fetch_legacy_action_not_rewritten() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "rss_fetch",
+            "args": { "action": "fetch_crypto_news" }
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
+        let args = out.get("args").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(args.get("action").and_then(|v| v.as_str()), Some("fetch_crypto_news"));
+        assert!(!args.contains_key("category"));
+    }
+
+    #[test]
+    fn validate_schedule_run_skill_rss_fetch_unknown_action_passes_through() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "rss_fetch",
+            "args": { "action": "totally_fake_action" }
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
+        assert_eq!(
+            out.get("args")
+                .and_then(|v| v.as_object())
+                .and_then(|a| a.get("action"))
+                .and_then(|v| v.as_str()),
+            Some("totally_fake_action")
+        );
+    }
+
+    /// Schedule does not validate `crypto` actions; bogus actions pass through for the skill to reject at runtime.
+    #[test]
+    fn validate_schedule_run_skill_crypto_action_passes_through_unvalidated() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "crypto",
+            "args": { "action": "totally_bogus_crypto_action_xyz", "symbol": "BTCUSDT" }
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
+        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("crypto"));
+        let args = out.get("args").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(
+            args.get("action").and_then(|v| v.as_str()),
+            Some("totally_bogus_crypto_action_xyz")
+        );
+    }
+
+    /// Production must not embed rss_fetch legacy action normalization (skill owns aliases).
+    #[test]
+    fn schedule_production_has_no_rss_legacy_action_strings_in_validation() {
+        const SRC: &str = include_str!("schedule_service.rs");
+        let prod = SRC.split("#[cfg(test)]").next().unwrap_or(SRC);
+        for needle in ["fetch_crypto_news", "fetch_tech_news", "fetch_news"] {
+            assert!(
+                !prod.contains(needle),
+                "schedule layer must not embed rss legacy alias `{needle}` (handled in rss_fetch skill)"
+            );
+        }
+    }
+
+    /// Generic `run_skill` validation must not rewrite args (no per-skill merge paths or symbol subprocesses).
+    #[test]
+    fn validate_schedule_run_skill_args_pass_through_for_any_enabled_skill() {
+        let reg = test_registry();
+        let payload = json!({
+            "skill_name": "demo_runner",
+            "args": { "action": "noop", "symbol": "TEST" }
+        });
+        let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
+        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("demo_runner"));
+        let args = out.get("args").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(args.get("action").and_then(|v| v.as_str()), Some("noop"));
+        assert_eq!(args.get("symbol").and_then(|v| v.as_str()), Some("TEST"));
+        assert!(!args.contains_key("window_minutes"));
+    }
+
+    /// Schedule layer must not invoke arbitrary skills (only `schedule` compile via adapter).
+    #[test]
+    fn schedule_service_only_uses_adapter_for_schedule_compile_skill() {
+        const SRC: &str = include_str!("schedule_service.rs");
+        let n = SRC.matches("execution_adapters::run_skill").count();
+        assert_eq!(
+            n, 1,
+            "schedule_service must only call execution_adapters::run_skill for schedule intent compile"
+        );
+        assert!(
+            SRC.contains("run_skill(state, task, \"schedule\", compile_args)"),
+            "adapter target must remain the schedule skill only"
+        );
+    }
+
+    /// Production must stay free of legacy coin-monitoring business logic (profiles, merge, extract).
+    #[test]
+    fn schedule_service_production_source_has_no_legacy_coin_markers() {
+        const SRC: &str = include_str!("schedule_service.rs");
+        let prod = SRC.split("#[cfg(test)]").next().unwrap_or(SRC);
+        let markers = [
+            concat!("Cr", "ypto", "Price", "Alert", "Profile"),
+            concat!("Existing", "Cr", "ypto", "Price", "Alert", "Job"),
+            concat!("extract_", "cryp", "to", "_price", "_alert", "_profile"),
+            concat!("load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"),
+            concat!("schedule_", "content", "_matches"),
+            concat!("normalize_", "direction"),
+            concat!("normalize_", "threshold", "_pct"),
+            concat!("create_", "exists", "_same"),
+            concat!("update_", "existing", "_ok"),
+        ];
+        for m in markers {
+            assert!(
+                !prod.contains(m),
+                "production source must not contain legacy coin-monitoring marker `{m}`"
+            );
+        }
+    }
+
+    fn try_handle_schedule_create_arm_source() -> &'static str {
+        const SRC: &str = include_str!("schedule_service.rs");
+        let start = SRC
+            .find("\"create\" => {")
+            .expect("schedule match arm create");
+        let tail = &SRC[start..];
+        let end_rel = tail
+            .find("\n        _ => Ok(None),")
+            .expect("end of schedule match (before catch-all arm)");
+        &tail[..end_rel]
+    }
+
+    /// `create` arm: generic job insert only — no removed coin-monitoring helpers, preflight, or VIP update paths.
+    #[test]
+    fn schedule_create_arm_inserts_job_without_coin_business_branches() {
+        let create_arm = try_handle_schedule_create_arm_source();
+        assert!(
+            create_arm.contains("INSERT INTO scheduled_jobs"),
+            "create must persist via scheduled_jobs insert"
+        );
+        assert_eq!(
+            create_arm.matches("INSERT INTO scheduled_jobs").count(),
+            1,
+            "create must perform a single insert (no alternate merge/update path)"
+        );
+        assert!(
+            create_arm.contains("schedule.msg.create_ok"),
+            "create success path must still use generic create_ok message key"
+        );
+
+        let forbidden = [
+            concat!("cryp", "to"),
+            concat!("price_", "alert", "_check"),
+            concat!("price_", "monitor"),
+            concat!("monitor_", "price"),
+            concat!("volatility", "_alert"),
+            concat!("binance", "_symbol", "_check"),
+            concat!("de", "dupe"),
+            concat!("Pro", "file"),
+            concat!("Cr", "ypto", "Price", "Alert", "Profile"),
+            concat!("Existing", "Cr", "ypto", "Price", "Alert", "Job"),
+            concat!("extract_", "cryp", "to", "_price", "_alert", "_profile"),
+            concat!("schedule_", "content", "_matches"),
+            concat!("load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"),
+            concat!("normalize_", "direction"),
+            concat!("normalize_", "threshold", "_pct"),
+        ];
+        for needle in forbidden {
+            assert!(
+                !create_arm.contains(needle),
+                "create arm must not contain coin-specific marker `{needle}`"
+            );
+        }
+    }
+
+    /// Root schedule intent few-shots must not embed built-in monitoring defaults (belong in target skills).
+    #[test]
+    fn schedule_intent_prompt_root_avoids_builtin_monitoring_defaults_in_examples() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("prompts/schedule_intent_prompt.md");
+        let s = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        assert!(
+            !s.contains("\"window_minutes\":15"),
+            "schedule_intent_prompt must not spell default window 15 in examples"
+        );
+        assert!(
+            !s.contains("\"threshold_pct\":5"),
+            "schedule_intent_prompt must not spell default threshold 5 in examples"
+        );
+        assert!(
+            !s.contains("\"direction\":\"both\""),
+            "schedule_intent_prompt must not spell default direction both in examples"
+        );
+    }
+
+    #[test]
+    fn schedule_invocation_metadata_contains_required_keys() {
+        let meta = schedule_invocation_metadata("job_abc123");
+        let keys: std::collections::HashSet<_> = meta.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(keys.contains("schedule_triggered"));
+        assert!(keys.contains("schedule_job_id"));
+        assert!(keys.contains("invocation_source"));
+        assert!(keys.contains("scheduled"));
+        let job_id = meta.iter().find(|(k, _)| *k == "schedule_job_id").map(|(_, v)| v);
+        assert_eq!(job_id.and_then(|v| v.as_str()), Some("job_abc123"));
+        let src = meta.iter().find(|(k, _)| *k == "invocation_source").map(|(_, v)| v);
+        assert_eq!(src.and_then(|v| v.as_str()), Some("schedule"));
     }
 }

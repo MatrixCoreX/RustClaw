@@ -12,8 +12,6 @@ struct MainFlowRulesToml {
     #[serde(default)]
     duplicate_affirmation: DuplicateAffirmationSection,
     #[serde(default)]
-    crypto_price_alert: CryptoPriceAlertSection,
-    #[serde(default)]
     runtime_channel: RuntimeChannelSection,
     #[serde(default)]
     classifier: ClassifierSection,
@@ -51,19 +49,6 @@ struct DuplicateAffirmationSection {
     scan_limit: Option<i64>,
     #[serde(default)]
     statuses: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-struct CryptoPriceAlertSection {
-    primary_action: Option<String>,
-    #[serde(default)]
-    actions: Vec<String>,
-    #[serde(default)]
-    fallback_actions: Vec<String>,
-    #[serde(default)]
-    unsupported_error_keywords: Vec<String>,
-    triggered_tag: Option<String>,
-    not_triggered_tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -195,36 +180,6 @@ pub fn load_main_flow_rules(path: &str) -> MainFlowRules {
         merged.duplicate_affirmation_statuses = statuses;
     }
 
-    if let Some(primary) = parsed.crypto_price_alert.primary_action {
-        let v = primary.trim().to_ascii_lowercase();
-        if !v.is_empty() {
-            merged.crypto_price_alert_primary_action = v;
-        }
-    }
-    let actions = normalize_list(parsed.crypto_price_alert.actions);
-    if !actions.is_empty() {
-        merged.crypto_price_alert_actions = actions;
-    }
-    let fallback_actions = normalize_list(parsed.crypto_price_alert.fallback_actions);
-    if !fallback_actions.is_empty() {
-        merged.crypto_price_alert_fallback_actions = fallback_actions;
-    }
-    let unsupported_keywords = normalize_list(parsed.crypto_price_alert.unsupported_error_keywords);
-    if !unsupported_keywords.is_empty() {
-        merged.crypto_unsupported_error_keywords = unsupported_keywords;
-    }
-    if let Some(tag) = parsed.crypto_price_alert.triggered_tag {
-        let v = tag.trim().to_string();
-        if !v.is_empty() {
-            merged.crypto_price_alert_triggered_tag = v;
-        }
-    }
-    if let Some(tag) = parsed.crypto_price_alert.not_triggered_tag {
-        let v = tag.trim().to_string();
-        if !v.is_empty() {
-            merged.crypto_price_alert_not_triggered_tag = v;
-        }
-    }
     let whatsapp_aliases = normalize_list(parsed.runtime_channel.whatsapp_aliases);
     if !whatsapp_aliases.is_empty() {
         merged.runtime_whatsapp_channel_aliases = whatsapp_aliases;
