@@ -8,9 +8,7 @@
 # [telegram_bot] is kept as a compatibility/extension section.
 
 [telegram]
-# Legacy bootstrap admin IDs (integer).
 # Kept for compatibility/old users table seeding; runtime auth now depends on key binding.
-admins = [1985996990]
 # 图片保存类回复（如 "Image saved: ..."/"Generated successfully and saved: ..."/"图片生成成功并已保存：..."）在 N 秒后自动删除，0 表示不删除
 ephemeral_image_saved_seconds = 15
 # 原交易确认按钮 TTL（确认按钮已移除，保留配置兼容）
@@ -67,8 +65,6 @@ full_access = true
 [telegram_bot]
 # 是否启用 telegram_bot 兼容入口
 enabled = true
-# 兼容入口管理员列表（通常留空，沿用 [telegram]）
-admins = []
 # 兼容入口允许列表（通常留空，沿用 [telegram]）
 allowlist = []
 # 兼容入口访问类型（通常留空，沿用 [telegram]）

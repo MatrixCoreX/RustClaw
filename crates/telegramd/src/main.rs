@@ -3235,12 +3235,57 @@ fn looks_like_general_command_token(core: &str) -> bool {
     )
 }
 
+/// 新闻摘要、RSS 列表、报告式多行说明等不应被当作代码块发送。
+fn should_never_format_as_code(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() {
+        return true;
+    }
+    if t.starts_with("sources_ok=") || t.starts_with("sources_failed=") {
+        return true;
+    }
+    let lines: Vec<&str> = t.lines().map(str::trim).filter(|s| !s.is_empty()).collect();
+    if lines.len() < 2 {
+        return false;
+    }
+    let mut numbered_list_lines = 0usize;
+    let mut summary_marker_lines = 0usize;
+    for line in &lines {
+        let after_digits = line.trim_start_matches(|c: char| c.is_ascii_digit());
+        if line.len() > after_digits.len()
+            && (after_digits.starts_with(". ") || after_digits.starts_with("."))
+        {
+            numbered_list_lines += 1;
+        }
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("summary:")
+            || lower.contains("topic:")
+            || lower.contains("time:")
+            || (lower.starts_with("from ") && line.len() < 80)
+            || line.contains("🔗")
+            || line.contains("🧾")
+        {
+            summary_marker_lines += 1;
+        }
+    }
+    if numbered_list_lines >= 2 {
+        return true;
+    }
+    if summary_marker_lines >= 1 && lines.len() <= 30 {
+        return true;
+    }
+    false
+}
+
 fn code_or_command_block_body(text: &str) -> Option<String> {
     if text.is_empty()
         || text.len() > 3600
         || has_delivery_prefix(text)
         || text.starts_with("<pre>")
     {
+        return None;
+    }
+    if should_never_format_as_code(text) {
         return None;
     }
     if let Some((lang, unfenced)) = strip_markdown_code_fence(text) {
@@ -3505,6 +3550,9 @@ fn looks_like_multiline_code(text: &str) -> bool {
     if text.is_empty() || !text.contains('\n') || text.len() > 3600 {
         return false;
     }
+    if should_never_format_as_code(text) {
+        return false;
+    }
     let lines = text
         .lines()
         .map(str::trim)
@@ -3525,10 +3573,18 @@ fn looks_like_multiline_code(text: &str) -> bool {
         if looks_like_shell_command_line(line) || looks_like_single_line_code(line) {
             score += 1;
         }
+        let looks_like_label_colon = line.ends_with(':')
+            && (line.len() < 40
+                || lower.contains("summary")
+                || lower.contains("topic")
+                || lower.contains("time:")
+                || lower.starts_with("from ")
+                || line.contains("🔗")
+                || line.contains("🧾"));
         if line.ends_with('{')
             || line.ends_with('}')
             || line.ends_with(';')
-            || line.ends_with(':')
+            || (line.ends_with(':') && !looks_like_label_colon)
             || line.starts_with("```")
         {
             score += 1;
@@ -3548,7 +3604,7 @@ fn looks_like_multiline_code(text: &str) -> bool {
             score += 1;
         }
     }
-    score >= 3
+    score >= 4
 }
 
 /// Replace the confirm-hint line at the end of a trade preview message with the expired hint.
@@ -5214,6 +5270,77 @@ fn set_model_config(state: &BotState, vendor: &str, model: &str) -> anyhow::Resu
         "telegram.msg.openclaw_set_ok",
         &[("vendor", vendor), ("model", model)],
     ))
+}
+
+#[cfg(test)]
+mod telegram_text_payload_tests {
+    use super::*;
+
+    fn payload_uses_code_block(text: &str) -> bool {
+        let (body, _) = telegram_text_payload(text);
+        body.contains("<pre>") && body.contains("<code>")
+    }
+
+    #[test]
+    fn news_list_text_not_wrapped_as_code() {
+        let text = r#"sources_ok=3 sources_failed=0 items=5
+1. [techcrunch] 标题A
+   🧾 Summary:
+   From techcrunch.com.
+   Topic: Tech & Ecosystem.
+   🔗 https://example.com/a
+
+2. [theverge] 标题B
+   🧾 Summary:
+   From theverge.com.
+   🔗 https://example.com/b"#;
+        assert!(!payload_uses_code_block(text), "新闻列表不应被包成 <pre><code>");
+    }
+
+    #[test]
+    fn rss_summary_not_multiline_code() {
+        let text = r#"1. [feed][host] Some headline
+   🧾 Summary:
+   From host.
+   Topic: Other.
+   🔗 https://link"#;
+        assert!(!looks_like_multiline_code(text), "RSS 摘要不应被判成 multiline code");
+    }
+
+    #[test]
+    fn shell_command_block_still_wrapped_as_code() {
+        let text = r#"$ cargo build --release
+$ ./target/release/bin"#;
+        assert!(payload_uses_code_block(text), "真正的 shell 命令块仍应包成 code block");
+    }
+
+    #[test]
+    fn fenced_code_block_still_wrapped_as_code() {
+        let text = r#"```rust
+fn main() {
+    println!("hello");
+}
+```"#;
+        assert!(payload_uses_code_block(text), "真正的 fenced code block 仍应包成 code block");
+    }
+
+    #[test]
+    fn natural_language_summary_not_code() {
+        let text = r#"这是一段普通自然语言多行摘要。
+第二行说明。
+第三行。"#;
+        assert!(!payload_uses_code_block(text), "普通自然语言多行摘要应按普通文本发送");
+    }
+
+    #[test]
+    fn should_never_format_as_code_detects_rss_header() {
+        assert!(should_never_format_as_code("sources_ok=2 sources_failed=1 items=3\n1. a\n2. b"));
+    }
+
+    #[test]
+    fn should_never_format_as_code_detects_numbered_list() {
+        assert!(should_never_format_as_code("1. First\n2. Second\n3. Third"));
+    }
 }
 
 #[cfg(test)]

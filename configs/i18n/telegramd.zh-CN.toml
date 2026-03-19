@@ -2,7 +2,7 @@ locale = "zh-CN"
 
 [dict]
 "common.unknown_error" = "未知错误"
-"telegram.log.started" = "telegramd 已启动，admins={admins}，allowlist={allowlist}，skills={skills}"
+"telegram.log.started" = "telegramd 已启动，allowlist={allowlist}，skills={skills}"
 "telegram.log.startup_memory_rss" = "启动内存 RSS bytes={bytes}"
 "telegram.log.unauthorized_user" = "未授权 Telegram 用户: {user_id}"
 "telegram.msg.unauthorized" = "未授权：请联系管理员加入 allowlist。"

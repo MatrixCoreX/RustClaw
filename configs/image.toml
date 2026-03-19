@@ -106,12 +106,15 @@ timeout_seconds = 120
 [image_generation]
 # Routing & mode / 路由与模式
 default_vendor = "minimax"
-adapter_mode = "auto"
-allow_compat_adapters = true
-qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
-
 # Default model / 默认模型
 default_model = "image-01"
+
+
+adapter_mode = "auto"
+allow_compat_adapters = true
+
+qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
+
 
 # Vendor models / 按厂商模型
 openai_models = ["gpt-image-1"]
