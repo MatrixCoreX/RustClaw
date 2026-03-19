@@ -42,8 +42,8 @@ AgentAction JSON must use one of:
 Rules:
 - Output only steps that are still needed after the previous round.
 - Keep steps minimal, executable, and sufficient to finish the remaining work.
-- Treat any `RECENT_EXECUTION_CONTEXT` anchor inside `Goal/context` as higher priority than old memory. If the follow-up request does not explicitly switch target/domain, continue from that recent anchor.
 - For "run command then save output to file" intents, prefer one `call_skill` with `skill="run_cmd"` and shell redirection (`>`/`>>`) instead of placeholder text.
+- **Filesystem statistics in follow-up rounds:** If the **original user request** was a full directory count (not continuation-only), follow the same **four-step** pattern as single-plan: (1) directory — `当前目录`/`这里`/`current directory`/`this directory`/… → **`.`**; never drift to `./image`/`./download`/`./photos` without user text; (2) object mapping — 文件 vs 文件夹 vs 东西(files+dirs) vs image/video/audio/doc sets (full extension lists, not jpg+png only for photos); (3) `run_cmd` count; (4) numeric `respond`. Do **not** keep retrying a wrong path from history because a prior round failed there.
 - Never fabricate placeholder literals such as `<CMD_OUTPUT>` or `{joke_content}` as final file content.
 - If a later step must use the immediately previous step output, use `{{last_output}}` in that argument string.
 - If a later step must use a specific earlier step output from this round's planned sequence, use `{{s1.output}}`, `{{s2.output}}`, etc.
