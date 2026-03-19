@@ -2,7 +2,7 @@ locale = "en-US"
 
 [dict]
 "common.unknown_error" = "Unknown error"
-"telegram.log.started" = "telegramd started, admins={admins}, allowlist={allowlist}, skills={skills}"
+"telegram.log.started" = "telegramd started, allowlist={allowlist}, skills={skills}"
 "telegram.log.startup_memory_rss" = "Startup memory RSS bytes={bytes}"
 "telegram.log.unauthorized_user" = "Unauthorized Telegram user: {user_id}"
 "telegram.msg.unauthorized" = "Unauthorized: contact admin to be added to allowlist."
