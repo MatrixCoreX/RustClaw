@@ -158,7 +158,8 @@ Skill behavior notes (file/path):
 ### rss_fetch
 - action: `fetch|latest|news`
 - required: `action`
-- optional: `url`, `feed_url`, `feed_urls`, `category`, `source_layer`, `limit`, `timeout_seconds`
+- optional: `url`, `feed_url`, `feed_urls`, `category`, `limit`, `timeout_seconds`
+- category 默认抓取该 category 下配置的全部 sources；单源失败不导致整体失败，仅当全部失败或无条目时才报错。
 
 ### stock
 - action: `quote|query`（查询 A 股行情）
@@ -168,6 +169,21 @@ Skill behavior notes (file/path):
 - only use this skill for quote/price/realtime market requests, not for general stock knowledge questions
 - if the user is asking for a stock code, company-code mapping, listing info, or "某公司股票代码是多少", prefer `chat`
 - for quote/price/realtime requests, a configured company name or alias such as `中国移动` may be passed to `stock`; for stock-code questions still prefer `chat`
+
+### weather
+- 查询当前天气；数据来源 Open-Meteo，无需 API Key。
+- required（二选一）：
+  - 城市/地名：`city` 或 `location` 或 `place` 或 `q`（如 北京、Shanghai）
+  - 经纬度：`latitude` + `longitude`
+- optional: `action`（默认 query，可省略）
+- 参数规范化：当用户输入中文城市/地名时，在调用 `weather` 前先转换为对应英文地名再写入 `city/location/place/q`（例如 北京 -> Beijing、上海 -> Shanghai），避免地理编码接口因中文命中失败。
+- 仅用于“当前天气/气温/今天天气”等查询；不用于天气预报讨论、气候知识等，此类用 `chat`。
+
+### schedule
+- action: `compile`
+- required: `action="compile"`, `text`
+- 用于把“人类定时描述”编译为结构化定时计划；此技能只负责语义编译，不直接执行调度。
+- 结果为 JSON 字符串，字段契约对齐 `ScheduleIntentOutput`（kind/timezone/schedule/task/target_job_id/confidence）。
 
 ### chat
 - required: `text`
@@ -189,12 +205,12 @@ Skill behavior notes (file/path):
 
 - `latest`:
   - required: `action="latest"`
-  - optional: `category`, `limit`, `source_layer`, `timeout_seconds`
+  - optional: `category`, `limit`, `timeout_seconds`
   - when user asks crypto news, prefer `category="crypto"` unless user specified another category
 
 - `news`:
   - required: `action="news"`
-  - optional: `category`, `limit`, `source_layer`, `timeout_seconds`
+  - optional: `category`, `limit`, `timeout_seconds`
   - if category is missing and intent unclear, default to `general`
 
 - normalization rules:
