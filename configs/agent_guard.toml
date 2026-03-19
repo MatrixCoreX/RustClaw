@@ -123,10 +123,6 @@ trade_submit_once = "A trade_submit already succeeded in this task. Do NOT call 
 # 建议修改/Recommended change: 谨慎修改 / Change cautiously.
 # 风险/Risk: 弱化会导致重复预览刷屏.
 trade_preview_once = "A trade_preview already succeeded in this task. Do NOT call trade_preview again in this task (even with changed params such as adding exchange). Output type=respond."
-# 用途/Purpose: 等待用户确认阶段禁止继续调用工具.
-# 建议修改/Recommended change: 不建议改语义 / Keep strict.
-# 风险/Risk: 改坏会在等待确认时继续执行危险动作.
-waiting_trade_confirmation = "A trade preview is already delivered and now waiting for user confirmation. Do not call more skills/tools. Output type=respond with empty content."
 
 [agent.messages]
 # 说明/Description: 运行时/用户可见错误文案（配置可覆盖，代码有默认回退）.
