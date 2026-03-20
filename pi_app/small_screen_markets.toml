@@ -61,3 +61,67 @@ code = "300750"
 [[stocks.items]]
 name = "比亚迪"
 code = "002594"
+
+[[stocks.items]]
+name = "五粮液"
+code = "000858"
+
+[[stocks.items]]
+name = "招商银行"
+code = "600036"
+
+[[stocks.items]]
+name = "中国平安"
+code = "601318"
+
+[[stocks.items]]
+name = "美的集团"
+code = "000333"
+
+[[stocks.items]]
+name = "东方财富"
+code = "300059"
+
+[[stocks.items]]
+name = "中国中免"
+code = "601888"
+
+[[stocks.items]]
+name = "药明康德"
+code = "603259"
+
+[[stocks.items]]
+name = "紫金矿业"
+code = "601899"
+
+[[stocks.items]]
+name = "长江电力"
+code = "600900"
+
+[[stocks.items]]
+name = "海康威视"
+code = "002415"
+
+[[stocks.items]]
+name = "泸州老窖"
+code = "000568"
+
+[[stocks.items]]
+name = "工商银行"
+code = "601398"
+
+[[stocks.items]]
+name = "中信证券"
+code = "600030"
+
+[[stocks.items]]
+name = "立讯精密"
+code = "002475"
+
+[[stocks.items]]
+name = "迈瑞医疗"
+code = "300760"
+
+[[stocks.items]]
+name = "隆基绿能"
+code = "601012"

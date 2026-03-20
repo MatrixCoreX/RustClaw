@@ -4271,7 +4271,7 @@ fn detect_import_plan(
     } else {
         "Imported external skill".to_string()
     };
-    let prompt_rel_path = format!("prompts/skills/{canonical_name}.md");
+    let prompt_rel_path = format!("prompts/vendors/default/skills/{canonical_name}.md");
     Ok(ImportedSkillPlan {
         canonical_name,
         display_name,
