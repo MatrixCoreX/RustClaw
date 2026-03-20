@@ -169,6 +169,14 @@ pub(crate) async fn run_intent_normalizer(
     } else {
         "<none>".to_string()
     };
+    let last_turn_full_context = memory::build_last_turn_full_context(
+        state,
+        task.user_key.as_deref(),
+        task.user_id,
+        task.chat_id,
+        1200, // max_segment_chars
+        2400, // max_total_chars
+    );
     let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
         state,
         INTENT_NORMALIZER_PROMPT_PATH,
@@ -183,6 +191,7 @@ pub(crate) async fn run_intent_normalizer(
             ("__BINDING_CONTEXT__", &binding_context_str),
             ("__RECENT_EXECUTION_CONTEXT__", &recent_execution_context),
             ("__MEMORY_CONTEXT__", &memory_context),
+            ("__LAST_TURN_FULL__", &last_turn_full_context),
             ("__NOW__", now_iso),
             ("__TIMEZONE__", timezone),
             ("__SCHEDULE_RULES__", schedule_rules),
