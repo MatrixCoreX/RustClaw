@@ -1,0 +1,31 @@
+{
+  "open_extract_urls": [
+    "https://github.com/microsoft/playwright",
+    "https://developer.mozilla.org/en-US/docs/Web/JavaScript",
+    "https://www.rust-lang.org/",
+    "https://www.bbc.com/news",
+    "https://news.ycombinator.com/",
+    "https://en.wikipedia.org/wiki/Web_scraping",
+    "https://blog.cloudflare.com/",
+    "https://stackoverflow.blog/",
+    "https://openai.com/news/",
+    "https://www.nytimes.com/"
+  ],
+  "search_queries": [
+    {
+      "query": "Playwright browser automation",
+      "lang": "en",
+      "region": "us"
+    },
+    {
+      "query": "Rust async programming guide",
+      "lang": "en",
+      "region": "us"
+    },
+    {
+      "query": "latest web scraping techniques",
+      "lang": "en",
+      "region": "us"
+    }
+  ]
+}
