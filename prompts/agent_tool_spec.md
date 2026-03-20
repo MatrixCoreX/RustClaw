@@ -165,23 +165,32 @@ Skill behavior notes (file/path):
 ### reference_resolver
 - action: `resolve_reference`
 - required: `request_text`, `recent_turns`
-- optional: `recent_results`, `target_type`
+- optional: `recent_results`, `target_type`, `language_hint`, `max_candidates`, `include_trace`
 - use when the user refers to a previous reply/result/file/dependency ambiguously
-- return `ambiguous` rather than guessing if uncertain
+- output includes candidate scores and overall confidence
+- return `ambiguous` with `top_candidates` + `clarify_question` rather than guessing if uncertain
+- return `not_found` explicitly when no reliable binding exists
+- low confidence must not be forced to resolved
 - do not use for installation, file mutation, or business execution
 
 ### doc_parse
 - action: `parse_doc`
 - required: `path`
-- optional: `mode`, `max_chars`
+- optional: `mode`, `max_chars`, `include_metadata`, `page_range`, `table_mode`
 - use when the user needs structured document extraction from md/txt/html files
+- supports md/txt/html/pdf/docx
+- for pdf page slicing, use `page_range`
+- for strict table shape validation, use `table_mode=strict`
 - prefer `doc_parse` over `read_file` when sections/tables/HTML parsing matter
 - do not use as `transform` or `kb.search`
 
 ### transform
 - action: `transform_data`
 - required: `data` (JSON array), `ops`
-- optional: `output_format` (`json|md_table|csv`)
+- optional: `output_format` (`json|md_table|csv`), `strict`, `null_policy`
+- supports nested field path (`a.b.c`) in filter/sort/project/group
+- supports `group` and `aggregate` with `aggregations` (`count|sum|avg|min|max`)
+- supports project rename via `mappings` (`from` -> `to`)
 - use for structured data transformation tasks
 - prefer `transform` over `chat` when input is already structured
 - do not use for raw document parsing or business execution
@@ -189,15 +198,19 @@ Skill behavior notes (file/path):
 ### web_search_extract
 - action: `search|search_extract`
 - required: `query`
-- optional: `top_k`, `lang`, `time_range`, `domains_allow`, `domains_deny`
+- optional: `top_k`, `lang`, `time_range`, `domains_allow`, `domains_deny`, `backend`, `include_snippet`
 - use for generic web-search intents when a search backend exists
-- current MVP may return explicit backend-not-connected empty results
+- search-only boundary: do not use for page正文 extraction; use `browser_web` for that
+- output includes normalized result URLs and `extract_urls` for downstream `browser_web.open_extract`
+- if backend unavailable, return explicit error rather than fake empty success
 - `rss_fetch` is for RSS/Atom sources; `web_search_extract` is for generic web search
 
 ### kb
 - action: `ingest|search`
-- `ingest` required: `paths`, `namespace`; optional `chunk_size`, `overwrite`
-- `search` required: `query`, `namespace`; optional `top_k`
+- `ingest` required: `paths`, `namespace`; optional `chunk_size`, `overwrite`, `file_types`, `max_file_size`
+- `search` required: `query`, `namespace`; optional `top_k`, `filters`, `min_score`
+- `filters` supports `path_prefix`, `file_type`, `time_from`, `time_to`
+- search returns traceable chunk metadata + hit_terms + score_reason
 - use `kb.ingest` to store local docs and `kb.search` to query a namespace later
 - this is a lightweight local knowledge base with keyword matching
 - do not use `kb.ingest` as `doc_parse`
@@ -207,6 +220,12 @@ Skill behavior notes (file/path):
 - use `open_extract` for URL-based page extraction
 - use `search_page` for browser-based search
 - use `search_extract` to search first and then extract result pages
+- default policy: keep `capture_images=true` for archive, keep `save_screenshot=false` unless user explicitly asks for screenshot
+- for generic summary/analysis tasks, feed text content to LLM by default; only switch to image-based reasoning when user asks
+- `open_extract` optional: `save_screenshot`, `capture_images`, `max_capture_images`, `content_mode(clean|raw)`, `max_text_chars`, `fail_fast`, `wait_map_path`
+- `search_page` optional: `region`, `lang`
+- `search_extract` optional: `summarize`, `content_mode`, `max_text_chars`, `fail_fast`, `region`, `lang`
+- helper-standard error codes: `NAV_TIMEOUT|BOT_BLOCKED|SELECTOR_MISS|EMPTY_CONTENT|DEPENDENCY_MISSING`
 - requires Node.js + Playwright/Chromium; do not pretend success if browser dependencies are unavailable
 
 ### rss_fetch
@@ -503,7 +522,5 @@ Skill behavior notes (file/path):
 
 ### browser_web
 - browser-layer web skill for URL extraction and browser-based search
-- actions: `open_extract` / `search_page` / `search_extract`
-- use for `go to Google and search ...`, browser search, dynamic web extraction
+- see the canonical `browser_web` section above for full args/policies; keep this note only for execution-stage reminder
 - after extraction, produce a readable user-facing summary from extracted text (key points + links), instead of returning raw JSON/HTML dump
-- do not use for local document parsing (`doc_parse`) or structured table transform (`transform`)

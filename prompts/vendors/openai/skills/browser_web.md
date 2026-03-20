@@ -27,5 +27,6 @@
 - Requires Node.js plus Playwright/Chromium in the `crates/skills/browser_web` directory.
 - If dependencies are missing, return a clear failure; do not pretend the browser run succeeded.
 - Only `google` is supported for browser search in the current MVP.
-- `open_extract` can save page screenshots under `image/browser_web` by default; use `save_screenshot=false` to disable or set `screenshot_dir` to customize.
+- Default policy: keep `capture_images=true` for archive, keep `save_screenshot=false` unless user explicitly asks for screenshot.
+- For generic summary/analysis requests, use extracted text as primary model input; images are archival unless image-based reasoning is requested.
 - After `open_extract`/`search_extract`, summarize extracted page text into a readable final reply (high-level points + source links) instead of dumping raw payloads.
