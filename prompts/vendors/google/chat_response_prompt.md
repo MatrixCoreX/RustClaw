@@ -47,5 +47,7 @@ Rules:
 Context:
 __CONTEXT__
 
+Note: If context includes [LAST_TURN_FULL] showing a previous question, and the current request looks like a short answer/continuation (e.g. "可以/不行/那就这样/安装它"), interpret it as continuing the previous question unless it clearly conflicts with a new goal stated in the current request. When uncertain, ask a brief clarification.
+
 Current user request:
 __REQUEST__

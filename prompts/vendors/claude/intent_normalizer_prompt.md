@@ -39,6 +39,7 @@ You are a unified intent normalizer for a tool-using assistant. In a single pass
 
 2) **Intent completion**: Rewrite the current user message into a complete, context-grounded intent.
    - Use __RECENT_EXECUTION_CONTEXT__ and __MEMORY_CONTEXT__ to resolve short/follow-up messages (pronouns, "继续", "就这个", numbers, yes/no).
+   - **Last turn full context priority**: If __LAST_TURN_FULL__ shows the previous turn was a question, and the current input looks like a short answer/continuation (e.g. "可以/不行/那就这样/安装它"), prioritize interpreting it as "continuing the previous question". If it conflicts with a clear new goal in the current message, the current goal takes priority. When uncertain, ask a brief clarification instead of forcing an answer.
    - **Ordinal reply reference (上个/上上个/上上上个回复 — hard rule):** If the user says any of: 上个回复 / 上一条回复 / 上上个回复 / 上上条回复 / 上上上个回复 / previous reply / previous response / reply before that, you **must** bind by **assistant turn index** first (use __RECENT_ASSISTANT_REPLIES__ when provided):
      - 上个回复 / 上一条回复 / previous reply / previous response → **assistant[-1]** (most recent assistant turn).
      - 上上个回复 / 上上条回复 / reply before that → **assistant[-2]**.
@@ -96,6 +97,9 @@ __RECENT_EXECUTION_CONTEXT__
 
 Memory context:
 __MEMORY_CONTEXT__
+
+Last turn full context (recent 1 complete Q&A turn):
+__LAST_TURN_FULL__
 
 Current time (for schedule intent):
 __NOW__
