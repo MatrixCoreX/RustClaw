@@ -47,6 +47,14 @@ struct OpenExtractArgs {
     save_screenshot: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     screenshot_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_text_chars: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fail_fast: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wait_map_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -57,6 +65,10 @@ struct SearchPageArgs {
     engine: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lang: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -71,6 +83,18 @@ struct SearchExtractArgs {
     extract_top_n: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     wait_until: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summarize: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_text_chars: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fail_fast: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lang: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -232,6 +256,38 @@ fn parse_open_extract_args(obj: &serde_json::Map<String, Value>) -> Result<OpenE
         .filter(|s| !s.is_empty())
         .unwrap_or("image/browser_web")
         .to_string();
+    let content_mode = obj
+        .get("content_mode")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "clean".to_string());
+    if !matches!(content_mode.as_str(), "clean" | "raw") {
+        return Err("content_mode must be one of: clean, raw".to_string());
+    }
+    let max_text_chars = if let Some(v) = obj.get("max_text_chars") {
+        let val = v
+            .as_u64()
+            .ok_or_else(|| "max_text_chars must be an integer".to_string())?;
+        if val < 100 || val > 200_000 {
+            return Err(format!(
+                "max_text_chars must be between 100 and 200000, got {}",
+                val
+            ));
+        }
+        val as u32
+    } else {
+        12_000
+    };
+    let fail_fast = obj
+        .get("fail_fast")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let wait_map_path = obj
+        .get("wait_map_path")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
 
     Ok(OpenExtractArgs {
         action,
@@ -241,6 +297,10 @@ fn parse_open_extract_args(obj: &serde_json::Map<String, Value>) -> Result<OpenE
         wait_until: Some(wait_until),
         save_screenshot: Some(save_screenshot),
         screenshot_dir: Some(screenshot_dir),
+        content_mode: Some(content_mode),
+        max_text_chars: Some(max_text_chars),
+        fail_fast: Some(fail_fast),
+        wait_map_path,
     })
 }
 
@@ -281,12 +341,27 @@ fn parse_search_page_args(obj: &serde_json::Map<String, Value>) -> Result<Search
     } else {
         5
     };
+    let region = obj
+        .get("region")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let lang = obj
+        .get("lang")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| Some("en".to_string()));
 
     Ok(SearchPageArgs {
         action,
         query,
         engine: Some(engine),
         top_k: Some(top_k),
+        region,
+        lang,
     })
 }
 
@@ -347,6 +422,46 @@ fn parse_search_extract_args(obj: &serde_json::Map<String, Value>) -> Result<Sea
     if !matches!(wait_until.as_str(), "domcontentloaded" | "load" | "networkidle") {
         return Err(format!("wait_until must be one of: domcontentloaded, load, networkidle"));
     }
+    let summarize = obj.get("summarize").and_then(|v| v.as_bool()).unwrap_or(true);
+    let content_mode = obj
+        .get("content_mode")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "clean".to_string());
+    if !matches!(content_mode.as_str(), "clean" | "raw") {
+        return Err("content_mode must be one of: clean, raw".to_string());
+    }
+    let max_text_chars = if let Some(v) = obj.get("max_text_chars") {
+        let val = v
+            .as_u64()
+            .ok_or_else(|| "max_text_chars must be an integer".to_string())?;
+        if val < 100 || val > 200_000 {
+            return Err(format!(
+                "max_text_chars must be between 100 and 200000, got {}",
+                val
+            ));
+        }
+        val as u32
+    } else {
+        12_000
+    };
+    let fail_fast = obj
+        .get("fail_fast")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let region = obj
+        .get("region")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let lang = obj
+        .get("lang")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| Some("en".to_string()));
 
     Ok(SearchExtractArgs {
         action,
@@ -355,6 +470,12 @@ fn parse_search_extract_args(obj: &serde_json::Map<String, Value>) -> Result<Sea
         top_k: Some(top_k),
         extract_top_n: Some(extract_top_n),
         wait_until: Some(wait_until),
+        summarize: Some(summarize),
+        content_mode: Some(content_mode),
+        max_text_chars: Some(max_text_chars),
+        fail_fast: Some(fail_fast),
+        region,
+        lang,
     })
 }
 
@@ -389,6 +510,10 @@ fn open_extract_action(workspace_root: &PathBuf, args: OpenExtractArgs) -> Resul
         "waitUntil": args.wait_until.unwrap_or_else(|| "domcontentloaded".to_string()),
         "saveScreenshot": args.save_screenshot.unwrap_or(true),
         "screenshotDir": args.screenshot_dir.unwrap_or_else(|| "image/browser_web".to_string()),
+        "contentMode": args.content_mode.unwrap_or_else(|| "clean".to_string()),
+        "maxTextChars": args.max_text_chars.unwrap_or(12_000),
+        "failFast": args.fail_fast.unwrap_or(false),
+        "waitMapPath": args.wait_map_path,
     });
 
     call_browser_helper(workspace_root, helper_input)
@@ -400,6 +525,8 @@ fn search_page_action(workspace_root: &PathBuf, args: SearchPageArgs) -> Result<
         "query": args.query,
         "engine": args.engine.unwrap_or_else(|| "google".to_string()),
         "topK": args.top_k.unwrap_or(5),
+        "region": args.region,
+        "lang": args.lang.unwrap_or_else(|| "en".to_string()),
     });
 
     call_browser_helper(workspace_root, helper_input)
@@ -413,6 +540,12 @@ fn search_extract_action(workspace_root: &PathBuf, args: SearchExtractArgs) -> R
         "topK": args.top_k.unwrap_or(5),
         "extractTopN": args.extract_top_n.unwrap_or(3),
         "waitUntil": args.wait_until.unwrap_or_else(|| "domcontentloaded".to_string()),
+        "summarize": args.summarize.unwrap_or(true),
+        "contentMode": args.content_mode.unwrap_or_else(|| "clean".to_string()),
+        "maxTextChars": args.max_text_chars.unwrap_or(12_000),
+        "failFast": args.fail_fast.unwrap_or(false),
+        "region": args.region,
+        "lang": args.lang.unwrap_or_else(|| "en".to_string()),
     });
 
     call_browser_helper(workspace_root, helper_input)
@@ -468,10 +601,19 @@ fn call_browser_helper(workspace_root: &PathBuf, input: Value) -> Result<String,
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_trimmed = stderr.trim();
+        let parsed_code = stderr_trimmed
+            .split_whitespace()
+            .next()
+            .and_then(|tok| tok.strip_prefix('['))
+            .and_then(|tok| tok.strip_suffix(']'))
+            .filter(|tok| !tok.is_empty())
+            .unwrap_or("HELPER_ERROR");
         return Err(format!(
-            "browser helper failed (exit code {}): {}; ensure Playwright is installed (run 'npm install' in skill directory)",
+            "browser helper failed (code={}, exit={}): {}; ensure Playwright is installed (run 'npm install' in skill directory)",
+            parsed_code,
             output.status.code().unwrap_or(-1),
-            stderr.trim()
+            stderr_trimmed
         ));
     }
 
@@ -777,5 +919,83 @@ mod tests {
             assert!(args.is_ok(), "extract_top_n={} should be valid", val);
             assert_eq!(args.unwrap().extract_top_n, Some(val as u32));
         }
+    }
+
+    #[test]
+    fn test_parse_open_extract_args_new_options() {
+        let obj = json!({
+            "action": "open_extract",
+            "url": "https://example.com",
+            "content_mode": "raw",
+            "max_text_chars": 4096,
+            "fail_fast": true,
+            "wait_map_path": "configs/browser_web_wait_map.json"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let args = parse_open_extract_args(&obj).unwrap();
+        assert_eq!(args.content_mode, Some("raw".to_string()));
+        assert_eq!(args.max_text_chars, Some(4096));
+        assert_eq!(args.fail_fast, Some(true));
+        assert_eq!(
+            args.wait_map_path,
+            Some("configs/browser_web_wait_map.json".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_open_extract_args_invalid_content_mode() {
+        let obj = json!({
+            "action": "open_extract",
+            "url": "https://example.com",
+            "content_mode": "debug"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let args = parse_open_extract_args(&obj);
+        assert!(args.is_err());
+        assert!(args.unwrap_err().contains("content_mode must be one of"));
+    }
+
+    #[test]
+    fn test_parse_search_page_args_region_lang() {
+        let obj = json!({
+            "action": "search_page",
+            "query": "test",
+            "region": "us",
+            "lang": "en"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let args = parse_search_page_args(&obj).unwrap();
+        assert_eq!(args.region, Some("us".to_string()));
+        assert_eq!(args.lang, Some("en".to_string()));
+    }
+
+    #[test]
+    fn test_parse_search_extract_args_summarize_and_mode() {
+        let obj = json!({
+            "action": "search_extract",
+            "query": "test",
+            "summarize": false,
+            "content_mode": "raw",
+            "max_text_chars": 1600,
+            "fail_fast": true
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let args = parse_search_extract_args(&obj).unwrap();
+        assert_eq!(args.summarize, Some(false));
+        assert_eq!(args.content_mode, Some("raw".to_string()));
+        assert_eq!(args.max_text_chars, Some(1600));
+        assert_eq!(args.fail_fast, Some(true));
     }
 }
