@@ -29,6 +29,9 @@ __TOOL_SPEC__
 Skill playbooks:
 __SKILL_PLAYBOOKS__
 
+Recent assistant replies (optional; for ordinal 上个/上上个/上上上个 — turn_id, relative_index -1/-2/-3, short_preview, has_code_block):
+__RECENT_ASSISTANT_REPLIES__
+
 Task:
 Return a single JSON object with this exact schema:
 {
@@ -40,6 +43,9 @@ AgentAction JSON must use one of:
 2) {"type":"respond","content":"<text>"}
 
 Rules:
+- **Skill-match guardrail:** Before planning tool/skill calls, verify that the requested capability is covered by an available skill in the contract. If not covered, do not fabricate a skill plan. Return a concise `respond` step explaining the limitation, or one clarification question if the request might map to a supported skill after clarification. Do not invent skills, actions, capabilities, or arguments to force an execution path. Do not disguise "not supported" as a multi-step execution plan.
+- **Ordinal reply (上个/上上个/上上上个回复) — execution rule:** When the remaining goal is to save/send/use "上个回复/上上个回复/上上上个回复" content, plan steps that use the **bound assistant turn's original text** (assistant[-1], assistant[-2], assistant[-3] per __RECENT_ASSISTANT_REPLIES__ or __HISTORY_COMPACT__). Do **not** plan steps that substitute memory summary or an unrelated recent execution result for that reply content.
+- **Follow-up reference and dependency install:** Resolve "上个回复/那个代码/安装依赖库/帮我安装依赖" from __GOAL__, __USER_REQUEST__, and __LAST_ROUND_OUTPUT__ (and __HISTORY_COMPACT__, __RECENT_ASSISTANT_REPLIES__ when present). "上个回复/那个代码" → most recent assistant output; "上上个" → second-most-recent (assistant[-2]). For "安装依赖库" without package names: infer dependencies from __LAST_ROUND_OUTPUT__ or prior round output (e.g. Python imports, pip package names); plan install steps. Only add a clarification `respond` when no candidate or multiple conflicting candidates (e.g. "要安装 Python 示例里的 `feedparser` 吗？" not "你要安装哪些依赖？"). Do not ignore __LAST_ROUND_OUTPUT__ and plan a generic ask first.
 - Output only steps that are still needed after the previous round.
 - Keep steps minimal, executable, and sufficient to finish the remaining work.
 - For "run command then save output to file" intents, prefer one `call_skill` with `skill="run_cmd"` and shell redirection (`>`/`>>`) instead of placeholder text.

@@ -20,6 +20,9 @@ __TOOL_SPEC__
 Skill playbooks:
 __SKILL_PLAYBOOKS__
 
+Recent assistant replies (optional; for ordinal 上个/上上个/上上上个 — turn_id, relative_index -1/-2/-3, short_preview, has_code_block):
+__RECENT_ASSISTANT_REPLIES__
+
 Task:
 Return a single JSON object with this exact schema:
 {
@@ -31,6 +34,9 @@ AgentAction JSON must use one of:
 2) {"type":"respond","content":"<text>"}
 
 Rules:
+- **Skill-match guardrail:** Before planning tool/skill calls, verify that the requested capability is covered by an available skill in the contract. If not covered, do not fabricate a skill plan; return a single `respond` step with a concise explanation of the limitation, or one clarification question if the request might map to a supported skill after clarification. Do not disguise "not supported" as an execution plan.
+- **Ordinal reply (上个/上上个/上上上个回复) — execution rule:** When the goal is to save/send/use "上个回复/上上个回复/上上上个回复" content, plan steps that use the **bound assistant turn's original text** (assistant[-1], assistant[-2], assistant[-3] per __RECENT_ASSISTANT_REPLIES__ or History). Do **not** plan steps that substitute memory summary or an unrelated recent execution result for that reply content.
+- **Follow-up reference and dependency install:** Resolve "上个回复/上文/那个代码/安装依赖库/帮我安装依赖" from __GOAL__, __USER_REQUEST__, and __RECENT_ASSISTANT_REPLIES__ when present (e.g. prior assistant code in context). For "安装依赖库" without package names: first infer dependency set from recent assistant code (imports, pip/package names); plan install steps (e.g. `run_cmd` with pip install or `install_module`). Only add a `respond` clarification step when no candidate or multiple conflicting candidates (prefer one targeted question e.g. "要安装 Python 示例里的 `feedparser` 吗？" over "你要安装哪些依赖？"). Do not ignore context and plan a generic "ask user for package list" first.
 - Plan all required steps in strict order for the user request.
 - Keep steps minimal, executable, and sufficient to actually finish the request.
 - Prefer actions that can complete in this planning round; if uncertain, return the minimum next executable steps.

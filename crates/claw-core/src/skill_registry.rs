@@ -298,6 +298,8 @@ fn to_canonical_key(s: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Registry stores prompt_file as a logical path (e.g. prompts/skills/run_cmd.md).
+    /// Runtime in clawd resolves to prompts/vendors/<vendor>/skills/ or prompts/vendors/default/skills/ only.
     #[test]
     fn test_registry_resolve_and_timeout() {
         let toml = r#"

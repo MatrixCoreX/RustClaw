@@ -1318,7 +1318,11 @@ pub(crate) fn resolve_prompt_rel_path_for_vendor(
         return vendor_candidate;
     }
     let default_candidate = format!("prompts/vendors/default/{suffix}");
-    if vendor != "default" && workspace_root.join(&default_candidate).is_file() {
+    if workspace_root.join(&default_candidate).is_file() {
+        return default_candidate;
+    }
+    // Skill prompts: never fall back to main directory (prompts/skills/). Only vendor layers.
+    if suffix.starts_with("skills/") {
         return default_candidate;
     }
     trimmed.to_string()
@@ -5917,25 +5921,60 @@ async fn execute_builtin_skill(
             Ok(items.join("\n"))
         }
         "run_cmd" => {
-            ensure_only_keys(map, &["command", "cwd"])?;
-            let command = required_string(map, "command")?;
-            let sanitized_command = sanitize_command_before_execute(&state.command_intent, command);
-            if sanitized_command.is_empty() {
-                return Err("empty command after sanitize".to_string());
-            }
-            if sanitized_command != command.trim() {
-                info!(
-                    "run_cmd sanitized command: before={} after={}",
-                    truncate_for_log(command),
-                    truncate_for_log(&sanitized_command)
-                );
-            }
+            ensure_only_keys(
+                map,
+                &[
+                    "command",
+                    "cwd",
+                    "request_text",
+                    "suggested_params",
+                    "suggest_once",
+                    "llm_suggest_once",
+                ],
+            )?;
             let cwd = optional_string(map, "cwd").unwrap_or(".");
             let cwd_path = resolve_workspace_path(
                 &state.workspace_root,
                 cwd,
                 state.allow_path_outside_workspace,
             )?;
+            let request_text = optional_string(map, "request_text")
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let _suggest_once = map
+                .get("suggest_once")
+                .and_then(|v| v.as_bool())
+                .or_else(|| map.get("llm_suggest_once").and_then(|v| v.as_bool()))
+                .unwrap_or(true);
+            let mut command = optional_string(map, "command")
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .or_else(|| suggested_command_from_args(map))
+                .unwrap_or_default();
+            if command.trim().is_empty() {
+                if let Some(ref natural_request) = request_text {
+                    command =
+                        suggest_command_for_run_cmd(state, natural_request, &cwd_path, None, None)
+                            .await?;
+                } else {
+                    return Err(
+                        "command must be string (or provide request_text for NL2CMD)".to_string(),
+                    );
+                }
+            }
+            let sanitized_command = sanitize_command_before_execute(&state.command_intent, &command);
+            if sanitized_command.is_empty() {
+                return Err("empty command after sanitize".to_string());
+            }
+            if sanitized_command != command.trim() {
+                info!(
+                    "run_cmd sanitized command: before={} after={}",
+                    truncate_for_log(&command),
+                    truncate_for_log(&sanitized_command)
+                );
+            }
             run_safe_command(
                 &cwd_path,
                 &sanitized_command,
@@ -6025,6 +6064,85 @@ fn required_string<'a>(
 
 fn optional_string<'a>(map: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a str> {
     map.get(key).and_then(|v| v.as_str())
+}
+
+#[derive(Debug, Deserialize)]
+struct RunCmdSuggestionPayload {
+    command: String,
+    confidence: Option<f64>,
+    reason: Option<String>,
+}
+
+fn suggested_command_from_args(map: &serde_json::Map<String, Value>) -> Option<String> {
+    map.get("suggested_params")
+        .and_then(|v| v.as_object())
+        .and_then(|obj| {
+            obj.get("command")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+}
+
+fn build_run_cmd_nl_prompt(
+    request_text: &str,
+    cwd: &Path,
+    previous_command: Option<&str>,
+    previous_error: Option<&str>,
+) -> String {
+    let mut prompt = String::new();
+    prompt.push_str("You map a natural-language request to ONE executable bash command for Linux.\n");
+    prompt.push_str("Return strict JSON only: {\"command\":\"...\",\"confidence\":0.0-1.0,\"reason\":\"...\"}\n");
+    prompt.push_str("Rules:\n");
+    prompt.push_str("- Prefer read-only and low-risk commands.\n");
+    prompt.push_str("- Do not use sudo by default.\n");
+    prompt.push_str("- Avoid destructive commands (rm -rf, mkfs, reboot, shutdown, kill -9).\n");
+    prompt.push_str("- If one command may be missing, use shell fallback in ONE line (e.g. cmd1 || cmd2).\n");
+    prompt.push_str("- Output only a single-line command.\n\n");
+    prompt.push_str(&format!("cwd: {}\n", cwd.display()));
+    prompt.push_str(&format!("request_text: {}\n", request_text.trim()));
+    if let Some(prev) = previous_command {
+        prompt.push_str(&format!("previous_command: {}\n", prev.trim()));
+    }
+    if let Some(err) = previous_error {
+        prompt.push_str(&format!("previous_error: {}\n", truncate_for_log(err)));
+    }
+    prompt
+}
+
+async fn suggest_command_for_run_cmd(
+    state: &AppState,
+    request_text: &str,
+    cwd: &Path,
+    previous_command: Option<&str>,
+    previous_error: Option<&str>,
+) -> Result<String, String> {
+    let provider = state
+        .llm_providers
+        .first()
+        .cloned()
+        .ok_or_else(|| "run_cmd NL2CMD unavailable: no llm provider configured".to_string())?;
+    let prompt = build_run_cmd_nl_prompt(request_text, cwd, previous_command, previous_error);
+    let resp = call_provider_with_retry(provider, &prompt)
+        .await
+        .map_err(|e| format!("run_cmd NL2CMD provider failed: {e}"))?;
+    let parsed = parse_llm_json_extract_or_any::<RunCmdSuggestionPayload>(&resp.text)
+        .ok_or_else(|| format!("run_cmd NL2CMD invalid json: {}", truncate_for_log(&resp.text)))?;
+    let mut command = parsed.command.trim().to_string();
+    if command.contains('\n') {
+        command = command.lines().next().unwrap_or_default().trim().to_string();
+    }
+    if command.is_empty() {
+        return Err("run_cmd NL2CMD returned empty command".to_string());
+    }
+    if let Some(conf) = parsed.confidence {
+        info!("run_cmd NL2CMD confidence={:.2}", conf);
+    }
+    if let Some(reason) = parsed.reason {
+        info!("run_cmd NL2CMD reason={}", truncate_for_log(&reason));
+    }
+    Ok(command)
 }
 
 fn resolve_workspace_path(
