@@ -1,0 +1,9 @@
+{
+  "name": "browser-web-skill-helper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright helper for browser_web skill",
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}
