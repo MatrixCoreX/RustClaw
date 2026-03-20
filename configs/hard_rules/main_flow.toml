@@ -40,37 +40,8 @@ scan_limit = 30
 # 风险/Risk: 缺少关键状态会降低去重效果；加入过多状态会误去重.
 statuses = ["queued", "running", "succeeded"]
 
-[crypto_price_alert]
-# 用途/Purpose: 运行时首选的价格提醒 action 名.
-# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
-# 风险/Risk: 与技能实现不一致会导致首发调用失败.
-primary_action = "price_alert_check"
-# 用途/Purpose: 被识别为“价格提醒类”的 action 别名集合.
-# 建议修改/Recommended change: 可改 / Editable.
-# 风险/Risk: 漏项会识别失败；误加会把非提醒 action 误判为提醒.
-actions = [
-  "price_alert_check",
-  "price_monitor",
-  "monitor_price",
-  "price_alert",
-  "volatility_alert",
-]
-# 用途/Purpose: 主 action 不支持时的回退顺序.
-# 建议修改/Recommended change: 可改 / Editable.
-# 风险/Risk: 顺序不当会增加重试次数或命中兼容性更差的 action.
-fallback_actions = ["price_monitor", "monitor_price", "price_alert", "volatility_alert"]
-# 用途/Purpose: 从技能错误文本中识别“action 不支持”的关键词.
-# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
-# 风险/Risk: 关键词过宽会误触发回退；过窄会漏触发回退.
-unsupported_error_keywords = ["unsupported action", "不支持"]
-# 用途/Purpose: 触发态标签（用于清洗输出和调度判定）.
-# 建议修改/Recommended change: 不建议修改 / Usually keep default.
-# 风险/Risk: 与技能输出标签不一致会导致文本清洗与触发判定失真.
-triggered_tag = "[PRICE_ALERT_TRIGGERED]"
-# 用途/Purpose: 未触发态标签（用于抑制无效推送和清洗输出）.
-# 建议修改/Recommended change: 不建议修改 / Usually keep default.
-# 风险/Risk: 不一致会导致“未触发”仍推送，或清洗失败.
-not_triggered_tag = "[PRICE_ALERT_NOT_TRIGGERED]"
+# Price-alert action aliases (price_monitor / monitor_price / price_alert / volatility_alert -> price_alert_check)
+# are normalized inside the `crypto` skill; clawd does not retry with alternate actions.
 
 [runtime_channel]
 # 用途/Purpose: 被视为 WhatsApp 的 channel 别名.
