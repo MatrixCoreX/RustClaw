@@ -2227,7 +2227,7 @@ fn build_resume_context_error(
         "hint": "LLM should infer continuation from resume context and user follow-up."
     });
     let user_error = if resume_context
-        .get("remaining_steps")
+        .get("remaining_actions")
         .and_then(|v| v.as_array())
         .map(|v| !v.is_empty())
         .unwrap_or(false)

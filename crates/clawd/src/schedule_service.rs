@@ -6,10 +6,11 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use claw_core::skill_registry::{SkillKind, SkillsRegistry};
-use crate::{execution_adapters, llm_gateway, memory, AppState, ClaimedTask, ScheduleIntentOutput};
+use crate::{llm_gateway, memory, AppState, ClaimedTask, ScheduleIntentOutput};
 
 // ---------- Schedule skill catalog & validation (dynamic from registry) ----------
 // `create` persists jobs generically; no per-skill subprocess preflight or merge-on-create paths live here.
+const SCHEDULE_INTENT_MIN_CONFIDENCE: f64 = 0.5;
 
 /// Generic one-line hint for catalog (no business semantics; skill owns its own contract).
 fn schedule_skill_catalog_hint(entry: &claw_core::skill_registry::SkillRegistryEntry) -> &'static str {
@@ -80,7 +81,7 @@ pub(crate) fn validate_schedule_run_skill(
 }
 
 /// Core validation/normalization using a registry reference. Used by validate_schedule_run_skill and by tests.
-// TODO: Per-action / schema checks belong in skill runtime or registry metadata, not here.
+/// Per-action/schema checks remain in skill runtime (or future registry metadata), not in schedule layer.
 pub(crate) fn validate_schedule_run_skill_with_registry(
     registry: &SkillsRegistry,
     payload: &Value,
@@ -187,7 +188,7 @@ pub(crate) async fn parse_schedule_intent(
     if kind.is_empty() || kind == "none" {
         return None;
     }
-    if parsed.confidence > 0.0 && parsed.confidence < 0.5 {
+    if parsed.confidence > 0.0 && parsed.confidence < SCHEDULE_INTENT_MIN_CONFIDENCE {
         return None;
     }
     Some(parsed)
@@ -370,6 +371,10 @@ fn humanize_next_run_at(next_run_at: i64, timezone: &str) -> String {
         .unwrap_or_else(|| next_run_at.to_string())
 }
 
+fn is_supported_schedule_type(schedule_type: &str) -> bool {
+    matches!(schedule_type, "once" | "interval" | "daily" | "weekly" | "cron")
+}
+
 fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &str) -> String {
     if task_kind == "ask" {
         if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
@@ -426,7 +431,7 @@ pub(crate) async fn try_handle_schedule_request(
         "text": prompt
     });
     let compiled_text =
-        match execution_adapters::run_skill(state, task, "schedule", compile_args).await {
+        match crate::execution_adapters::run_skill(state, task, "schedule", compile_args).await {
             Ok(v) => v,
             Err(_) => return Ok(None),
         };
@@ -434,12 +439,10 @@ pub(crate) async fn try_handle_schedule_request(
         Ok(v) => v,
         Err(_) => return Ok(None),
     };
-    let kind_preview = clean_schedule_kind(&intent.kind);
-    if kind_preview.is_empty() || kind_preview == "none" {
+    let kind = clean_schedule_kind(&intent.kind);
+    if kind.is_empty() || kind == "none" {
         return Ok(None);
     }
-
-    let kind = clean_schedule_kind(&intent.kind);
     debug!(
         "schedule intent parsed: task_id={} kind={} confidence={}",
         task.task_id, kind, intent.confidence
@@ -498,7 +501,7 @@ pub(crate) async fn try_handle_schedule_request(
                     schedule_t(state, "schedule.status.paused")
                 };
                 let next = next_run_at
-                    .map(|v| v.to_string())
+                    .map(|v| humanize_next_run_at(v, &timezone))
                     .unwrap_or_else(|| "-".to_string());
                 let payload =
                     serde_json::from_str::<Value>(&task_payload_json).unwrap_or_else(|_| json!({}));
@@ -634,6 +637,12 @@ pub(crate) async fn try_handle_schedule_request(
         "create" => {
             let timezone = schedule_timezone_from_intent(state, &intent.timezone);
             let schedule_type = clean_schedule_kind(&intent.schedule.r#type);
+            if !is_supported_schedule_type(&schedule_type) {
+                return Ok(Some(schedule_t(
+                    state,
+                    "schedule.msg.create_fail_cannot_compute_next_run",
+                )));
+            }
             let task_kind = clean_schedule_kind(&intent.task.kind);
             if !matches!(task_kind.as_str(), "ask" | "run_skill") {
                 return Ok(Some(schedule_t(

@@ -38,7 +38,9 @@
 | `allow_risky` | no       | bool   | false   | If true, allow stop/restart even when target is ambiguous (not recommended). |
 
 - **Target missing**: Required for all actions except `status` without target; returns structured error with `failure_reason` and `next_step`.
-- **Ambiguous target**: Values like "后端", "服务们", "all", "*" block high-risk actions unless `allow_risky` is true.
+- **Target aliases (skill-internal)**: The skill normalizes common names before discovery: e.g. `mysql`/`mysqld` → `mysql`, `redis`/`redis-server` → `redis`, `postgres`/`postgresql` → `postgresql`, `docker`/`dockerd` → `docker`, `ssh`/`sshd` → `sshd`, `cron`/`crond` → `cron`, `nginx` → `nginx`, `caddy` → `caddy`. Trailing "服务" / " service" suffix is stripped for lookup. Only the target name is affected; `action` is unchanged.
+- **Service discovery**: Before executing control (when manager is not explicitly set), the skill discovers candidates via systemd and `service --status-all`. Exact match > prefix > contains; candidate count is limited. If **0 candidates**: returns error with `next_step` suggesting "请提供更具体服务名" (do not invent a service name). If **>1 candidates**: returns error with `failure_reason` "ambiguous: multiple matching services" and `next_step` listing the candidates so the user can pick one. Only when exactly **1 candidate** is the control command executed. When `manager_type` is explicitly set, discovery is skipped and the normalized target is used as given.
+- **Ambiguous target (vague wording)**: Values like "后端", "服务们", "all", "*" block high-risk actions unless `allow_risky` is true.
 
 ## Output Contract (structured JSON in `text`)
 
@@ -65,10 +67,13 @@ Failure responses must include `failure_reason`; when logs were inspected, key e
 ## Error Contract
 
 - Missing or invalid `action` / unknown `target` → clear `failure_reason`.
+- **No matching service** (0 candidates after discovery) → `failure_reason` and `next_step` "请提供更具体服务名，或确认该服务已在当前主机安装并可用。" Do not invent or guess service names.
+- **Ambiguous match** (>1 candidates) → `failure_reason` "ambiguous: multiple matching services", `next_step` lists candidates for user to choose. Do not execute until exactly one target is specified.
 - `clawd` → start/stop/restart return error (main daemon).
-- Ambiguous target + stop/restart without `allow_risky` → refuse with `failure_reason` and `next_step`.
+- Ambiguous target (vague wording) + stop/restart without `allow_risky` → refuse with `failure_reason` and `next_step`.
 - Manager not implemented for the action → `failure_reason` and optional `next_step`.
 - API 401 (rustclaw) → suggest RUSTCLAW_UI_KEY.
+- **Permission denied**: On systemd/service, if the control command fails due to permission, the skill may retry with `sudo`. Success is returned without mentioning sudo. If sudo also fails, `failure_reason` is "无法通过 sudo 执行" and `next_step` suggests using a privileged account or configuring passwordless sudo.
 
 ## Request/Response Examples
 
@@ -104,3 +109,14 @@ Request:
 ```
 
 Response (concept): skill returns `{"request_id":"...","status":"ok","text":"{...structured output...}","error_text":null}` where `text` is the JSON output contract above.
+
+## Addendum (2026-03)
+
+- Optional input: `suggest_once` (bool, default true). Legacy `llm_suggest_once` is still accepted.
+- Optional input: `suggested_params` (object). Generic suggestion payload for cross-skill reuse.
+- `service_control` reads suggestion target from `suggested_params.target` / `service` / `service_name` / `candidate_target`.
+- Legacy `llm_suggested_target` is still accepted for compatibility.
+- Suggestions are advisory only: the skill still requires discovery to resolve exactly one candidate before execution.
+- Permission handling for `systemd`/`service`: first try normal command; on permission-like failure, retry with `sudo`.
+- If `sudo` succeeds, return success and do not emit sudo-failure messages.
+- If `sudo` fails, return failure with clear privileged-account guidance in `next_step`.
