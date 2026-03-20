@@ -130,7 +130,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: base_url 或鉴权不匹配会导致 401/404.
 [llm.qwen]
-api_key = "sk-8088709bb27e49128faa8049ab8d0799"
+api_key = ""
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 max_concurrency = 1
 model = "qwen-max-latest"
@@ -145,7 +145,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改，建议按官方最新兼容模型名维护.
 # 风险/Risk: 音频/图片相关能力与 OpenAI 兼容接口的覆盖范围可能有限，必要时需补原生适配.
 [llm.minimax]
-api_key = "sk-api-HBsHwqQBntjGPTi8JggYaTTalZM246NRtfrgJyRgXUVaQoHw3CfhyYbtL5vx-5mt7ZTJepMEKGoakQf-0_8vOFRwD_cKHGhhoP2fgO0B2J7ZQ6I9yY2rKsc"
+api_key = ""
 base_url = "https://api.minimax.io/v1"
 max_concurrency = 1
 model = "MiniMax-M2.5"
@@ -160,7 +160,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改，适合接入私有网关.
 # 风险/Risk: 协议不兼容会出现模型列表可见但调用失败.
 [llm.custom]
-api_key = "REPLACE_ME_CUSTOM_API_KEY"
+api_key = ""
 base_url = "https://api.example.com/v1"
 max_concurrency = 1
 model = "custom-model"
@@ -193,7 +193,7 @@ default_output_dir = "image/download"
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: 模型名下线会报错；并发与超时需与上游配额匹配.
 [llm.openai]
-api_key = "REPLACE_ME"
+api_key = ""
 base_url = "https://api.openai.com/v1"
 max_concurrency = 1
 model = "gpt-4o-mini"

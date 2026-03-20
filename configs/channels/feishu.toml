@@ -6,7 +6,7 @@
 
 [feishu]
 # 是否启用
-enabled = true
+enabled = false
 # 入站模式：webhook | long_connection
 #   webhook：有公网回调地址时使用；飞书将事件 POST 到本服务，需配置 listen 并保证请求地址可达
 #   long_connection：无公网时使用；本服务主动连飞书收事件，仅需出口能访问公网
@@ -18,10 +18,10 @@ clawd_base_url = "http://127.0.0.1:8787"
 # 飞书应用 App ID
 app_id = "cli_a939d198c8ba1cc8"
 # 飞书应用 App Secret（日志不打印）
-app_secret = "bRA1ucAzJIgwPwVLJ3zFgcT3EVV4YRkL"
+app_secret = ""
 # 事件订阅 Verification Token（webhook 时校验请求来自飞书）
 # webhook 模式下 verification_token 与 encrypt_key 至少配置一个，否则启动失败；生产环境建议两者都配置
-verification_token = "Ex12JdRun1Ok3ui8qEy6tdkAtbhQs2cz"
+verification_token = ""
 # 事件加密密钥（webhook 时用于签名校验；Phase 1 不解密请求体）
 # webhook 模式下与 verification_token 至少配置一个；生产环境建议两者都配置
 encrypt_key = ""
