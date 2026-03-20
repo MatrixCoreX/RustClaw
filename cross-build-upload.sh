@@ -7,6 +7,7 @@
 set -e
 SKIP_REMOTE_ENV="${SKIP_REMOTE_ENV:-}"
 CROSS_PULL_ALL_ARTIFACTS="${CROSS_PULL_ALL_ARTIFACTS:-}"
+CLEAN_REMOTE_TMP_FIRST="${CLEAN_REMOTE_TMP_FIRST:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REMOTE_USER="${REMOTE_USER:-root}"
@@ -220,7 +221,12 @@ do_upload() {
 }
 
 case "$MODE" in
-all | skill | crate)
+all | skill | crate | dir)
+	if [[ "${CLEAN_REMOTE_TMP_FIRST}" != "0" ]]; then
+		echo "[$(date)] 清理远端临时构建目录: ${REMOTE_DIR}/target"
+		ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" \
+			"mkdir -p '${REMOTE_DIR}' && rm -rf '${REMOTE_DIR}/target' '${REMOTE_DIR}/tmp' '${REMOTE_DIR}/.cargo-lock' '${REMOTE_DIR}/.rustc_info.json'"
+	fi
 	do_upload
 	ensure_remote_env
 	;;
@@ -281,8 +287,6 @@ dir)
 		echo "错误: dir 模式必须设置 BUILD_CMD"
 		usage
 	}
-	do_upload
-	ensure_remote_env
 	echo "[$(date)] 远程执行: ${BUILD_CMD}"
 	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}cd ${REMOTE_DIR} && ${BUILD_CMD}"
 	if [[ -n "${PULL_REMOTE}" ]]; then
