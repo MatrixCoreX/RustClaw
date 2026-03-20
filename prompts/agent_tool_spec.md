@@ -61,7 +61,7 @@ Skill behavior notes (file/path):
 - `{{s1.path}}`, `{{s2.path}}`, ...: the concrete saved/read path recorded for an earlier step when available.
 - `{{last_written_file_path}}`: the most recent concrete file path produced by a write step when available.
 - When a later step depends on more than one earlier result, prefer step-specific placeholders over reusing `{{last_output}}` everywhere.
-- Do not invent derived placeholders or object fields such as `{{last_output.foo}}`, `{{last_output.hidden_entries}}`, or similar unsupported forms. If you need to transform/filter a previous output, add an explicit `call_skill(chat)` step to do that transformation.
+- Do not invent derived placeholders or object fields such as `{{last_output.foo}}`, `{{last_output.hidden_entries}}`, or similar unsupported forms. If you need to transform structured data (filter, sort, deduplicate, project, group, convert to table/CSV), use `call_skill(transform)`. For natural-language rewriting/explanation/summary only, use `call_skill(chat)`.
 
 ### image_generate
 - required: `prompt`
@@ -161,6 +161,53 @@ Skill behavior notes (file/path):
   - use `multi_quote` only when user explicitly requests multiple symbols/comparison.
   - do not add `exchanges`/extra scope fields unless user explicitly asks to constrain/re-scope sources.
   - after one successful crypto market query in the same task, do not call another market query; return `respond`.
+
+### reference_resolver
+- action: `resolve_reference`
+- required: `request_text`, `recent_turns`
+- optional: `recent_results`, `target_type`
+- use when the user refers to a previous reply/result/file/dependency ambiguously
+- return `ambiguous` rather than guessing if uncertain
+- do not use for installation, file mutation, or business execution
+
+### doc_parse
+- action: `parse_doc`
+- required: `path`
+- optional: `mode`, `max_chars`
+- use when the user needs structured document extraction from md/txt/html files
+- prefer `doc_parse` over `read_file` when sections/tables/HTML parsing matter
+- do not use as `transform` or `kb.search`
+
+### transform
+- action: `transform_data`
+- required: `data` (JSON array), `ops`
+- optional: `output_format` (`json|md_table|csv`)
+- use for structured data transformation tasks
+- prefer `transform` over `chat` when input is already structured
+- do not use for raw document parsing or business execution
+
+### web_search_extract
+- action: `search|search_extract`
+- required: `query`
+- optional: `top_k`, `lang`, `time_range`, `domains_allow`, `domains_deny`
+- use for generic web-search intents when a search backend exists
+- current MVP may return explicit backend-not-connected empty results
+- `rss_fetch` is for RSS/Atom sources; `web_search_extract` is for generic web search
+
+### kb
+- action: `ingest|search`
+- `ingest` required: `paths`, `namespace`; optional `chunk_size`, `overwrite`
+- `search` required: `query`, `namespace`; optional `top_k`
+- use `kb.ingest` to store local docs and `kb.search` to query a namespace later
+- this is a lightweight local knowledge base with keyword matching
+- do not use `kb.ingest` as `doc_parse`
+
+### browser_web
+- action: `open_extract|search_page|search_extract`
+- use `open_extract` for URL-based page extraction
+- use `search_page` for browser-based search
+- use `search_extract` to search first and then extract result pages
+- requires Node.js + Playwright/Chromium; do not pretend success if browser dependencies are unavailable
 
 ### rss_fetch
 - action: `fetch|latest|news`
@@ -453,3 +500,10 @@ Skill behavior notes (file/path):
 - For image generation requests, prefer `call_skill image_generate`.
 - For image edit requests referencing prior image without explicit path, still call `image_edit` first.
 - Never output manual GUI tutorial steps when a listed tool/skill can execute the task directly.
+
+### browser_web
+- browser-layer web skill for URL extraction and browser-based search
+- actions: `open_extract` / `search_page` / `search_extract`
+- use for `go to Google and search ...`, browser search, dynamic web extraction
+- after extraction, produce a readable user-facing summary from extracted text (key points + links), instead of returning raw JSON/HTML dump
+- do not use for local document parsing (`doc_parse`) or structured table transform (`transform`)

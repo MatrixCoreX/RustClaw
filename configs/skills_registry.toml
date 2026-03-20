@@ -311,3 +311,57 @@ output_kind = "text"
 # external_timeout_seconds = 60
 # prompt_file = "prompts/skills/my_external.md"
 # output_kind = "text"
+
+[[skills]]
+name = "reference_resolver"
+enabled = true
+kind = "runner"
+aliases = ["resolve_reference", "reference", "context_reference"]
+timeout_seconds = 15
+prompt_file = "prompts/skills/reference_resolver.md"
+output_kind = "text"
+
+[[skills]]
+name = "doc_parse"
+enabled = true
+kind = "runner"
+aliases = ["parse_doc", "document_parse", "doc_reader"]
+timeout_seconds = 20
+prompt_file = "prompts/skills/doc_parse.md"
+output_kind = "text"
+
+[[skills]]
+name = "transform"
+enabled = true
+kind = "runner"
+aliases = ["transform_data", "data_transform", "table_transform"]
+timeout_seconds = 20
+prompt_file = "prompts/skills/transform.md"
+output_kind = "text"
+
+[[skills]]
+name = "web_search_extract"
+enabled = true
+kind = "runner"
+aliases = ["search_extract", "web_search", "web_extract"]
+timeout_seconds = 25
+prompt_file = "prompts/skills/web_search_extract.md"
+output_kind = "text"
+
+[[skills]]
+name = "kb"
+enabled = true
+kind = "runner"
+aliases = ["knowledge_base", "kb_ingest", "kb_search"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/kb.md"
+output_kind = "text"
+
+[[skills]]
+name = "browser_web"
+enabled = true
+kind = "runner"
+aliases = ["browser_fetch", "page_extract", "browser_search"]
+timeout_seconds = 45
+prompt_file = "prompts/skills/browser_web.md"
+output_kind = "text"
