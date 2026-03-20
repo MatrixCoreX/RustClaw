@@ -457,6 +457,86 @@ pub(crate) fn recall_memories_since_id(
     Ok(out)
 }
 
+/// Build last turn full context: query the most recent user+assistant pair (one complete Q&A turn).
+/// Returns formatted string with [LAST_TURN_FULL] tags, or "<none>" if not available.
+/// Truncates each segment to max_segment_chars (default 1200) and total to max_total_chars (default 2400).
+pub(crate) fn build_last_turn_full_context(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    max_segment_chars: usize,
+    max_total_chars: usize,
+) -> String {
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = match state.db.lock() {
+        Ok(db) => db,
+        Err(_) => return "<none>".to_string(),
+    };
+    // Query recent memories, ordered by id DESC (most recent first)
+    let recent = match query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, 10) {
+        Ok(v) => v,
+        Err(_) => return "<none>".to_string(),
+    };
+    // Find the most recent assistant reply, then find the user message that precedes it
+    // In DESC order (newest first): assistant comes first, then the user it replies to comes later in list
+    let mut found_assistant: Option<(String, String)> = None; // (content, safety_flag)
+    let mut found_user: Option<(String, String)> = None;
+    for (role, content, safety_flag) in &recent {
+        // First, find the most recent assistant reply
+        if found_assistant.is_none() && role == "assistant" {
+            found_assistant = Some((content.clone(), safety_flag.clone()));
+            continue;
+        }
+        // After finding assistant, look for the user message that precedes it (comes later in DESC list = older)
+        if found_assistant.is_some() && found_user.is_none() && role == "user" {
+            found_user = Some((content.clone(), safety_flag.clone()));
+            break;
+        }
+    }
+    // Need both user and assistant to form a complete turn
+    let (user_content, user_safety) = match found_user {
+        Some(v) => v,
+        None => return "<none>".to_string(),
+    };
+    let (assistant_content, assistant_safety) = match found_assistant {
+        Some(v) => v,
+        None => return "<none>".to_string(),
+    };
+    // Apply safety filter
+    let user_text = if state.memory.safety_filter_enabled && user_safety == "injection_like" {
+        "[safety_signal content omitted]".to_string()
+    } else {
+        utf8_safe_prefix(&user_content, max_segment_chars).to_string()
+    };
+    let assistant_text = if state.memory.safety_filter_enabled && assistant_safety == "injection_like" {
+        "[safety_signal content omitted]".to_string()
+    } else {
+        utf8_safe_prefix(&assistant_content, max_segment_chars).to_string()
+    };
+    // Build formatted output
+    let formatted = format!(
+        "[LAST_TURN_FULL]\nUser: {}\nAssistant: {}\n[/LAST_TURN_FULL]",
+        user_text, assistant_text
+    );
+    // Truncate total if needed
+    if formatted.len() > max_total_chars {
+        let truncated = utf8_safe_prefix(&formatted, max_total_chars).to_string();
+        // Try to keep the closing tag
+        if !truncated.ends_with("[/LAST_TURN_FULL]") {
+            let mut out = truncated;
+            if out.len() + 18 <= max_total_chars {
+                out.push_str("[/LAST_TURN_FULL]");
+            }
+            out
+        } else {
+            truncated
+        }
+    } else {
+        formatted
+    }
+}
+
 pub(crate) fn read_long_term_source_memory_id(
     state: &AppState,
     user_key: Option<&str>,

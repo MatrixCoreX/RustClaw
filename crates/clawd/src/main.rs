@@ -2477,9 +2477,24 @@ async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             let relevant_facts = memory_ctx.relevant_facts;
             let recent_related_events = memory_ctx.recent_related_events;
             let prompt_with_memory = memory_ctx.prompt_with_memory;
-            let chat_prompt_context = memory_ctx.chat_prompt_context;
+            let mut chat_prompt_context = memory_ctx.chat_prompt_context;
             let mut resolved_prompt_for_execution = resolved_prompt.clone();
             let mut prompt_with_memory_for_execution = prompt_with_memory.clone();
+            // Build last turn full context (recent 1 complete Q&A turn)
+            let last_turn_full_context = memory::build_last_turn_full_context(
+                state,
+                task.user_key.as_deref(),
+                task.user_id,
+                task.chat_id,
+                1200, // max_segment_chars
+                2400, // max_total_chars
+            );
+            if last_turn_full_context != "<none>" {
+                prompt_with_memory_for_execution.push_str("\n\n");
+                prompt_with_memory_for_execution.push_str(&last_turn_full_context);
+                chat_prompt_context.push_str("\n\n");
+                chat_prompt_context.push_str(&last_turn_full_context);
+            }
             let recent_execution_anchor_context =
                 routing_context::build_recent_execution_anchor_context(state, &task);
             if recent_execution_anchor_context != "<none>" {
