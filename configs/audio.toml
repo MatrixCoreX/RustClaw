@@ -75,21 +75,21 @@ timeout_seconds = 60
 # Optional dedicated override for TTS / 可选：TTS 单独 key
 # [audio_synthesize.providers.qwen]
 # base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-# api_key = "REPLACE_ME_QWEN_API_KEY"
+# api_key = ""
 # model = "qwen3-tts-flash"
 # timeout_seconds = 60
 #
 # Other provider examples / 其它厂商示例
 # [audio_synthesize.providers.openai]
 # base_url = "https://api.openai.com/v1"
-# api_key = "REPLACE_ME_OPENAI_API_KEY"
+# api_key = ""
 # model = "gpt-4o-mini-tts"
 # timeout_seconds = 60
 #
 # Historical MiniMax example (commented keep) / 历史 MiniMax 示例（注释保留）
 # [audio_synthesize.providers.minimax]
 # base_url = "https://api.minimax.io/v1"
-# api_key = "sk-api-IOdPwbp2BpNhBQiE1FINIezXrGeGLWZmjHpKYKvqEd5cZOmNS4r1JFcSDsZW4uvGhbV9-cM4E6ADQXuETabzVeIwl_CP_KkrBSmWh925tq_H5Rwt7JXqPMM"
+# api_key = ""
 # model = "speech-2.8-turbo"
 # timeout_seconds = 60
 
@@ -176,14 +176,14 @@ oss_url_ttl_seconds = 3600
 # Optional dedicated override for STT / 可选：STT 单独 key
 # [audio_transcribe.providers.qwen]
 # base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-# api_key = "REPLACE_ME_QWEN_API_KEY"
+# api_key = ""
 # model = "qwen3-asr-flash"
 # timeout_seconds = 90
 #
 # Historical MiniMax example (commented keep) / 历史 MiniMax 示例（注释保留）
 # [audio_transcribe.providers.minimax]
 # base_url = "https://api.minimax.io/v1"
-# api_key = "sk-api-IOdPwbp2BpNhBQiE1FINIezXrGeGLWZmjHpKYKvqEd5cZOmNS4r1JFcSDsZW4uvGhbV9-cM4E6ADQXuETabzVeIwl_CP_KkrBSmWh925tq_H5Rwt7JXqPMM"
+# api_key = ""
 # model = "speech-01"
 # timeout_seconds = 90
 
