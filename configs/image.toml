@@ -71,17 +71,17 @@ oss_url_ttl_seconds = 3600
 #   / 图片编辑推荐 Qwen `qwen-image-edit-max`，当前编辑效果和原生支持更合适
 # [image_edit.providers.openai]
 # base_url = "https://api.openai.com/v1"
-# api_key = "REPLACE_ME_OPENAI_API_KEY"
+# api_key = ""
 # model = "gpt-image-1"
 # timeout_seconds = 120
 [image_edit.providers.minimax]
 base_url = "https://api.minimax.io/v1"
-api_key = "sk-api-IOdPwbp2BpNhBQiE1FINIezXrGeGLWZmjHpKYKvqEd5cZOmNS4r1JFcSDsZW4uvGhbV9-cM4E6ADQXuETabzVeIwl_CP_KkrBSmWh925tq_H5Rwt7JXqPMM"
+api_key = ""
 model = "image-01"
 timeout_seconds = 120
 # [image_edit.providers.qwen]
 # base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-# api_key = "sk-0f59ace4739a4fa897b0f3fa0a7b5ff2"
+# api_key = ""
 # model = "qwen-image-edit-max"
 # timeout_seconds = 120
 
@@ -139,17 +139,17 @@ timeout_seconds = 120
 #   / 文生图推荐 Qwen `wan2.6-image`，和当前默认生成链路最匹配
 # [image_generation.providers.qwen]
 # base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-# api_key = "REPLACE_ME_QWEN_API_KEY"
+# api_key = ""
 # model = "wan2.6-image"
 # timeout_seconds = 120
 [image_generation.providers.minimax]
 base_url = "https://api.minimax.io/v1"
-api_key = "sk-api-IOdPwbp2BpNhBQiE1FINIezXrGeGLWZmjHpKYKvqEd5cZOmNS4r1JFcSDsZW4uvGhbV9-cM4E6ADQXuETabzVeIwl_CP_KkrBSmWh925tq_H5Rwt7JXqPMM"
+api_key = ""
 model = "image-01"
 timeout_seconds = 120
 # [image_generation.providers.qwen]
 # base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-# api_key = "sk-0f59ace4739a4fa897b0f3fa0a7b5ff2"
+# api_key = ""
 # model = "wan2.6-image"
 # timeout_seconds = 120
 
@@ -193,17 +193,17 @@ timeout_seconds = 90
 #   / 图片理解推荐 OpenAI `gpt-4o-mini`，兼容性更广、输出更稳
 # [image_vision.providers.google]
 # base_url = "https://generativelanguage.googleapis.com/v1beta"
-# api_key = "REPLACE_ME_GOOGLE_API_KEY"
+# api_key = ""
 # model = "gemini-2.5-flash"
 # timeout_seconds = 90
 [image_vision.providers.minimax]
 base_url = "https://api.minimax.io/v1"
-api_key = "sk-api-IOdPwbp2BpNhBQiE1FINIezXrGeGLWZmjHpKYKvqEd5cZOmNS4r1JFcSDsZW4uvGhbV9-cM4E6ADQXuETabzVeIwl_CP_KkrBSmWh925tq_H5Rwt7JXqPMM"
+api_key = ""
 model = "MiniMax-VL-01"
 timeout_seconds = 90
 # [image_vision.providers.openai]
 # base_url = "https://api.openai.com/v1"
-# api_key = "sk-proj-..."
+# api_key = ""
 # model = "gpt-4o-mini"
 # timeout_seconds = 90
 

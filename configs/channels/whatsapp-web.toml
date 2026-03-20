@@ -27,5 +27,5 @@ admins = []
 allowlist = []
 # Optional static bindings loaded into channel_bindings on clawd startup.
 # Example:
-# bindings = [{ external_user_id = "8613800138000", external_chat_id = "8613800138000", user_key = "rk-REPLACE_ME" }]
+# bindings = [{ external_user_id = "8613800138000", external_chat_id = "8613800138000", user_key = "" }]
 bindings = []
