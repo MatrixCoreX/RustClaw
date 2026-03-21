@@ -1,0 +1,8 @@
+run_dir=/home/guagua/git_upload/scripts/task_termination_logs/20260321_220147
+base_url=http://127.0.0.1:8787
+user_id=1985996990
+chat_id=1985996990
+using_user_key=rk-a08...
+[case_cancel] verifying canceled status is not overwritten
+[case_cancel] FAIL
+[case_timeout] verifying long task ends as timeout

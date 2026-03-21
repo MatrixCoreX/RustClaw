@@ -1,0 +1,4 @@
+index=20
+chat_id=1985997010
+task_id=fdfaa9f3-b3bb-4f98-b953-cf30cf6eb7d9
+prompt=列出 document 目录下有哪些文件，只输出文件名列表

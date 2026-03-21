@@ -1,0 +1,4 @@
+index=35
+chat_id=1985997025
+task_id=0dc6833c-50d0-4ac3-a5b8-8c6d8bfbcac0
+prompt=生成一个 JSON 文件 document/manual_meta.json，内容包含 app=RustClaw 和 test=nl，然后把文件发给我

@@ -5,15 +5,17 @@ use serde_json::{json, Value};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 use crate::{llm_gateway, memory, AppState, ClaimedTask, ScheduleIntentOutput};
+use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 
 // ---------- Schedule skill catalog & validation (dynamic from registry) ----------
 // `create` persists jobs generically; no per-skill subprocess preflight or merge-on-create paths live here.
 const SCHEDULE_INTENT_MIN_CONFIDENCE: f64 = 0.5;
 
 /// Generic one-line hint for catalog (no business semantics; skill owns its own contract).
-fn schedule_skill_catalog_hint(entry: &claw_core::skill_registry::SkillRegistryEntry) -> &'static str {
+fn schedule_skill_catalog_hint(
+    entry: &claw_core::skill_registry::SkillRegistryEntry,
+) -> &'static str {
     match entry.kind {
         SkillKind::Builtin => "builtin",
         SkillKind::Runner => "runner",
@@ -35,9 +37,7 @@ pub(crate) fn build_schedule_skill_catalog_from_registry(registry: &SkillsRegist
             format!(" (aliases: {})", entry.aliases.join(", "))
         };
         let hint = schedule_skill_catalog_hint(entry);
-        lines.push(format!(
-            "- {name}{aliases_str} [enabled] — {hint}"
-        ));
+        lines.push(format!("- {name}{aliases_str} [enabled] — {hint}"));
     }
     let mut disabled: Vec<String> = registry
         .all_names()
@@ -74,9 +74,9 @@ pub(crate) fn validate_schedule_run_skill(
     state: &AppState,
     payload: &Value,
 ) -> Result<Value, String> {
-    let registry_arc = state.get_skills_registry().ok_or_else(|| {
-        "skills registry not available".to_string()
-    })?;
+    let registry_arc = state
+        .get_skills_registry()
+        .ok_or_else(|| "skills registry not available".to_string())?;
     validate_schedule_run_skill_with_registry(registry_arc.as_ref(), payload)
 }
 
@@ -110,12 +110,18 @@ pub(crate) fn validate_schedule_run_skill_with_registry(
         return Err(format!("skill is disabled: {canonical}"));
     }
 
-    let args = obj.get("args").cloned().unwrap_or(Value::Object(serde_json::Map::new()));
+    let args = obj
+        .get("args")
+        .cloned()
+        .unwrap_or(Value::Object(serde_json::Map::new()));
     if !args.is_object() {
         return Err("run_skill payload args must be an object".to_string());
     }
     let mut out = serde_json::Map::new();
-    out.insert("skill_name".to_string(), Value::String(canonical.to_string()));
+    out.insert(
+        "skill_name".to_string(),
+        Value::String(canonical.to_string()),
+    );
     out.insert("args".to_string(), args);
     Ok(Value::Object(out))
 }
@@ -372,7 +378,10 @@ fn humanize_next_run_at(next_run_at: i64, timezone: &str) -> String {
 }
 
 fn is_supported_schedule_type(schedule_type: &str) -> bool {
-    matches!(schedule_type, "once" | "interval" | "daily" | "weekly" | "cron")
+    matches!(
+        schedule_type,
+        "once" | "interval" | "daily" | "weekly" | "cron"
+    )
 }
 
 fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &str) -> String {
@@ -415,8 +424,14 @@ fn summarize_task_content(task_kind: &str, payload: &Value, fallback_prompt: &st
 pub(crate) fn schedule_invocation_metadata(job_id: &str) -> Vec<(String, Value)> {
     vec![
         ("schedule_triggered".to_string(), Value::Bool(true)),
-        ("schedule_job_id".to_string(), Value::String(job_id.to_string())),
-        ("invocation_source".to_string(), Value::String("schedule".to_string())),
+        (
+            "schedule_job_id".to_string(),
+            Value::String(job_id.to_string()),
+        ),
+        (
+            "invocation_source".to_string(),
+            Value::String("schedule".to_string()),
+        ),
         ("scheduled".to_string(), Value::Bool(true)),
     ]
 }
@@ -875,10 +890,10 @@ output_kind = "text"
     fn schedule_prompt_template_substitutes_skill_catalog_placeholders() {
         let cat = "- rss_fetch (aliases: rss) [enabled] — runner";
         let tpl = "SKILL=__SKILL_CATALOG__\nLEGACY=__SKILLS_CATALOG__";
-        let out = crate::render_prompt_template(tpl, &[
-            ("__SKILL_CATALOG__", cat),
-            ("__SKILLS_CATALOG__", cat),
-        ]);
+        let out = crate::render_prompt_template(
+            tpl,
+            &[("__SKILL_CATALOG__", cat), ("__SKILLS_CATALOG__", cat)],
+        );
         assert!(!out.contains("__SKILL_CATALOG__"));
         assert!(!out.contains("__SKILLS_CATALOG__"));
         assert!(out.contains("rss_fetch"));
@@ -892,7 +907,10 @@ output_kind = "text"
             "args": { "action": "latest", "category": "world" }
         });
         let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
-        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("rss_fetch"));
+        assert_eq!(
+            out.get("skill_name").and_then(|v| v.as_str()),
+            Some("rss_fetch")
+        );
     }
 
     #[test]
@@ -915,7 +933,10 @@ output_kind = "text"
             "args": { "action": "latest", "category": "tech" }
         });
         let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
-        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("rss_fetch"));
+        assert_eq!(
+            out.get("skill_name").and_then(|v| v.as_str()),
+            Some("rss_fetch")
+        );
     }
 
     /// Schedule does not rewrite `rss_fetch` args; `fetch_feed` is handled inside the skill.
@@ -928,7 +949,10 @@ output_kind = "text"
         });
         let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
         let args = out.get("args").and_then(|v| v.as_object()).unwrap();
-        assert_eq!(args.get("action").and_then(|v| v.as_str()), Some("fetch_feed"));
+        assert_eq!(
+            args.get("action").and_then(|v| v.as_str()),
+            Some("fetch_feed")
+        );
         assert_eq!(args.get("category").and_then(|v| v.as_str()), Some("tech"));
     }
 
@@ -964,10 +988,16 @@ output_kind = "text"
             "args": { "action": "latest", "category": "science" }
         });
         let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
-        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("rss_fetch"));
+        assert_eq!(
+            out.get("skill_name").and_then(|v| v.as_str()),
+            Some("rss_fetch")
+        );
         let args = out.get("args").and_then(|v| v.as_object()).unwrap();
         assert_eq!(args.get("action").and_then(|v| v.as_str()), Some("latest"));
-        assert_eq!(args.get("category").and_then(|v| v.as_str()), Some("science"));
+        assert_eq!(
+            args.get("category").and_then(|v| v.as_str()),
+            Some("science")
+        );
     }
 
     #[test]
@@ -979,7 +1009,10 @@ output_kind = "text"
         });
         let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
         let args = out.get("args").and_then(|v| v.as_object()).unwrap();
-        assert_eq!(args.get("action").and_then(|v| v.as_str()), Some("fetch_crypto_news"));
+        assert_eq!(
+            args.get("action").and_then(|v| v.as_str()),
+            Some("fetch_crypto_news")
+        );
         assert!(!args.contains_key("category"));
     }
 
@@ -1009,7 +1042,10 @@ output_kind = "text"
             "args": { "action": "totally_bogus_crypto_action_xyz", "symbol": "BTCUSDT" }
         });
         let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
-        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("crypto"));
+        assert_eq!(
+            out.get("skill_name").and_then(|v| v.as_str()),
+            Some("crypto")
+        );
         let args = out.get("args").and_then(|v| v.as_object()).unwrap();
         assert_eq!(
             args.get("action").and_then(|v| v.as_str()),
@@ -1039,7 +1075,10 @@ output_kind = "text"
             "args": { "action": "noop", "symbol": "TEST" }
         });
         let out = validate_schedule_run_skill_with_registry(&reg, &payload).unwrap();
-        assert_eq!(out.get("skill_name").and_then(|v| v.as_str()), Some("demo_runner"));
+        assert_eq!(
+            out.get("skill_name").and_then(|v| v.as_str()),
+            Some("demo_runner")
+        );
         let args = out.get("args").and_then(|v| v.as_object()).unwrap();
         assert_eq!(args.get("action").and_then(|v| v.as_str()), Some("noop"));
         assert_eq!(args.get("symbol").and_then(|v| v.as_str()), Some("TEST"));
@@ -1170,9 +1209,15 @@ output_kind = "text"
         assert!(keys.contains("schedule_job_id"));
         assert!(keys.contains("invocation_source"));
         assert!(keys.contains("scheduled"));
-        let job_id = meta.iter().find(|(k, _)| *k == "schedule_job_id").map(|(_, v)| v);
+        let job_id = meta
+            .iter()
+            .find(|(k, _)| *k == "schedule_job_id")
+            .map(|(_, v)| v);
         assert_eq!(job_id.and_then(|v| v.as_str()), Some("job_abc123"));
-        let src = meta.iter().find(|(k, _)| *k == "invocation_source").map(|(_, v)| v);
+        let src = meta
+            .iter()
+            .find(|(k, _)| *k == "invocation_source")
+            .map(|(_, v)| v);
         assert_eq!(src.and_then(|v| v.as_str()), Some("schedule"));
     }
 }

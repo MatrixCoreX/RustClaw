@@ -52,6 +52,8 @@ struct OpenExtractArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_text_chars: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    min_content_chars: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     fail_fast: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     wait_map_path: Option<String>,
@@ -89,6 +91,8 @@ struct SearchExtractArgs {
     content_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_text_chars: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_content_chars: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     fail_fast: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,7 +258,7 @@ fn parse_open_extract_args(obj: &serde_json::Map<String, Value>) -> Result<OpenE
         .and_then(|v| v.as_str())
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .unwrap_or("image/browser_web")
+        .unwrap_or("skills_output/browser_web/screenshots")
         .to_string();
     let content_mode = obj
         .get("content_mode")
@@ -278,6 +282,20 @@ fn parse_open_extract_args(obj: &serde_json::Map<String, Value>) -> Result<OpenE
     } else {
         12_000
     };
+    let min_content_chars = if let Some(v) = obj.get("min_content_chars") {
+        let val = v
+            .as_u64()
+            .ok_or_else(|| "min_content_chars must be an integer".to_string())?;
+        if val < 20 || val > 10_000 {
+            return Err(format!(
+                "min_content_chars must be between 20 and 10000, got {}",
+                val
+            ));
+        }
+        val as u32
+    } else {
+        200
+    };
     let fail_fast = obj
         .get("fail_fast")
         .and_then(|v| v.as_bool())
@@ -299,6 +317,7 @@ fn parse_open_extract_args(obj: &serde_json::Map<String, Value>) -> Result<OpenE
         screenshot_dir: Some(screenshot_dir),
         content_mode: Some(content_mode),
         max_text_chars: Some(max_text_chars),
+        min_content_chars: Some(min_content_chars),
         fail_fast: Some(fail_fast),
         wait_map_path,
     })
@@ -445,6 +464,20 @@ fn parse_search_extract_args(obj: &serde_json::Map<String, Value>) -> Result<Sea
     } else {
         12_000
     };
+    let min_content_chars = if let Some(v) = obj.get("min_content_chars") {
+        let val = v
+            .as_u64()
+            .ok_or_else(|| "min_content_chars must be an integer".to_string())?;
+        if val < 20 || val > 10_000 {
+            return Err(format!(
+                "min_content_chars must be between 20 and 10000, got {}",
+                val
+            ));
+        }
+        val as u32
+    } else {
+        200
+    };
     let fail_fast = obj
         .get("fail_fast")
         .and_then(|v| v.as_bool())
@@ -473,6 +506,7 @@ fn parse_search_extract_args(obj: &serde_json::Map<String, Value>) -> Result<Sea
         summarize: Some(summarize),
         content_mode: Some(content_mode),
         max_text_chars: Some(max_text_chars),
+        min_content_chars: Some(min_content_chars),
         fail_fast: Some(fail_fast),
         region,
         lang,
@@ -509,9 +543,12 @@ fn open_extract_action(workspace_root: &PathBuf, args: OpenExtractArgs) -> Resul
         "urls": urls,
         "waitUntil": args.wait_until.unwrap_or_else(|| "domcontentloaded".to_string()),
         "saveScreenshot": args.save_screenshot.unwrap_or(true),
-        "screenshotDir": args.screenshot_dir.unwrap_or_else(|| "image/browser_web".to_string()),
+        "screenshotDir": args
+            .screenshot_dir
+            .unwrap_or_else(|| "skills_output/browser_web/screenshots".to_string()),
         "contentMode": args.content_mode.unwrap_or_else(|| "clean".to_string()),
         "maxTextChars": args.max_text_chars.unwrap_or(12_000),
+        "minContentChars": args.min_content_chars.unwrap_or(200),
         "failFast": args.fail_fast.unwrap_or(false),
         "waitMapPath": args.wait_map_path,
     });
@@ -543,6 +580,7 @@ fn search_extract_action(workspace_root: &PathBuf, args: SearchExtractArgs) -> R
         "summarize": args.summarize.unwrap_or(true),
         "contentMode": args.content_mode.unwrap_or_else(|| "clean".to_string()),
         "maxTextChars": args.max_text_chars.unwrap_or(12_000),
+        "minContentChars": args.min_content_chars.unwrap_or(200),
         "failFast": args.fail_fast.unwrap_or(false),
         "region": args.region,
         "lang": args.lang.unwrap_or_else(|| "en".to_string()),
@@ -928,6 +966,7 @@ mod tests {
             "url": "https://example.com",
             "content_mode": "raw",
             "max_text_chars": 4096,
+            "min_content_chars": 120,
             "fail_fast": true,
             "wait_map_path": "configs/browser_web_wait_map.json"
         })
@@ -938,6 +977,7 @@ mod tests {
         let args = parse_open_extract_args(&obj).unwrap();
         assert_eq!(args.content_mode, Some("raw".to_string()));
         assert_eq!(args.max_text_chars, Some(4096));
+        assert_eq!(args.min_content_chars, Some(120));
         assert_eq!(args.fail_fast, Some(true));
         assert_eq!(
             args.wait_map_path,
@@ -986,6 +1026,7 @@ mod tests {
             "summarize": false,
             "content_mode": "raw",
             "max_text_chars": 1600,
+            "min_content_chars": 90,
             "fail_fast": true
         })
         .as_object()
@@ -996,6 +1037,7 @@ mod tests {
         assert_eq!(args.summarize, Some(false));
         assert_eq!(args.content_mode, Some("raw".to_string()));
         assert_eq!(args.max_text_chars, Some(1600));
+        assert_eq!(args.min_content_chars, Some(90));
         assert_eq!(args.fail_fast, Some(true));
     }
 }

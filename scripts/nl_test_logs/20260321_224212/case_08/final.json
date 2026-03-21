@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"1a115bd5-c5ef-4046-b90c-1e5ff69f0abf","status":"succeeded","result_json":{"text":"无法发送：文件 `definitely_missing_named_file_rustclaw_001.txt` 不存在。\n\n请确认：\n1. 文件名是否正确\n2. 该文件是否需要先创建"},"error_text":null},"error":null}

@@ -1,0 +1,4 @@
+index=8
+chat_id=1985996998
+task_id=044ac913-ca4d-480f-8849-02abe09391c3
+prompt=去 package.json 里找 name，只把值给我

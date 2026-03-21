@@ -1,0 +1,4 @@
+index=2
+chat_id=1985996992
+task_id=55aba132-5edd-4e2f-8e97-455c267a8afd
+prompt=检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子

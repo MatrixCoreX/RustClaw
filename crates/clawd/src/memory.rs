@@ -509,11 +509,12 @@ pub(crate) fn build_last_turn_full_context(
     } else {
         utf8_safe_prefix(&user_content, max_segment_chars).to_string()
     };
-    let assistant_text = if state.memory.safety_filter_enabled && assistant_safety == "injection_like" {
-        "[safety_signal content omitted]".to_string()
-    } else {
-        utf8_safe_prefix(&assistant_content, max_segment_chars).to_string()
-    };
+    let assistant_text =
+        if state.memory.safety_filter_enabled && assistant_safety == "injection_like" {
+            "[safety_signal content omitted]".to_string()
+        } else {
+            utf8_safe_prefix(&assistant_content, max_segment_chars).to_string()
+        };
     // Build formatted output
     let formatted = format!(
         "[LAST_TURN_FULL]\nUser: {}\nAssistant: {}\n[/LAST_TURN_FULL]",

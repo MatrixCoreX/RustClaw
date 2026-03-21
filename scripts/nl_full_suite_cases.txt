@@ -1,0 +1,85 @@
+# suite|name|tags|prompt
+# Comprehensive natural-language instruction regression set.
+# Focus:
+# - pure chat
+# - local filesystem / workspace execution
+# - execution + explanation / summary / comparison
+# - file write + delivery
+# - missing-file graceful handling
+# - semantic NL->run_cmd style requests
+# - CN + EN phrasing variants
+
+# Chat only
+chat|chat_weather_joke||今天天气先别查，给我讲一个简短冷笑话
+chat|chat_poem_short||写一首两句的打工人短诗
+chat|chat_translate_simple||把这句话翻成英文：现在服务已经恢复了
+chat|plain_chat_no_execution_cn||别执行任何命令，直接讲一个很短的冷笑话
+chat|plain_chat_no_execution_en||do not run anything, just tell me a very short joke
+
+# Simple local execution
+act|act_pwd_only||只输出当前工作目录的绝对路径，不要解释
+act|act_hidden_files||检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+act|act_precise_file_count||精确统计当前目录下有多少个直接子项，只输出数字
+act|act_list_logs||列出 logs 目录下的前 10 个文件名，不要读内容
+act|act_count_md_files||统计当前仓库顶层一共有多少个 .md 文件，只输出数字
+act|act_find_service_file||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+act|act_check_document_dir||列出 document 目录下有哪些文件，只输出文件名列表
+act|act_count_document_items||统计 document 目录下直接子项数量，只输出数字
+act|act_check_scripts_hidden||检查 scripts 目录里有没有隐藏文件，只回答有或没有
+act|act_find_recent_logs||列出 logs 目录最近修改的 5 个文件，按新到旧输出
+act|act_count_rs_files||统计 crates/clawd/src 下有多少个 .rs 文件，只输出数字
+act|act_find_restart_script||检查 scripts 目录里有没有 restart_clawd_latest.sh，有就给路径
+act|followup_count_scripts_items_semantic||统计 scripts 目录下有多少个直接子项，只输出数字
+
+# Extraction / scalar answers
+act|act_show_package_json_name||读取 package.json 里的 name 字段，只输出值
+act|act_show_cargo_package_name||读取 Cargo.toml 的 package.name，只输出值
+act|act_whoami_only||只输出当前用户名，不要解释
+act|act_hostname_only||只输出当前机器 hostname
+act|fs_package_name_scalar_semantic||去 package.json 里找 name，只把值给我
+chat_act|followup_extract_username_semantic||只输出当前用户名，不要解释
+chat_act|followup_extract_hostname_semantic||只输出当前机器 hostname，不要解释
+
+# Read + summarize / explain
+act|act_read_readme_head||读取 README 的前 20 行并做 3 句话总结
+act|act_read_service_head||读取 rustclaw.service 前 15 行，并用一句话说明它是干什么的
+act|act_read_agents_head||读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
+act|fs_readme_head_summary_semantic||看看 README.md 开头讲了什么，读前 20 行后用三句话总结
+chat_act|chat_act_show_readme_then_summary||读取 README 开头内容，再用非技术用户能听懂的话做一句总结
+chat_act|chat_act_list_then_explain_docs||列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+chat_act|chat_explain_repo_briefly||用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+chat|chat_repo_pitch_plain||用大白话介绍一下 RustClaw，控制在 80 个字以内
+chat_act|mixed_request_cn_semantic||先看看当前目录有哪些顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么组织
+chat_act|mixed_request_en_semantic||inspect the top-level folders in this repo and then explain in one plain sentence how this project is organized
+
+# Compare / conclude
+chat_act|chat_act_compare_sizes||比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+chat_act|chat_act_disk_usage_brief||查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
+chat_act|chat_act_compare_readmes||比较 README.md 和 README.zh-CN.md 哪个更大，并顺手解释为什么可能不同
+chat_act|fs_compare_readmes_semantic||比较 README.md 和 README.zh-CN.md 哪个更大，再解释为什么可能不同
+chat_act|followup_logs_then_conclusion||列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物
+
+# Hidden files / list-based reasoning
+chat_act|chat_act_hidden_files_brief||检查当前目录隐藏文件是否存在，再用一句话解释隐藏文件通常是干什么的
+act|fs_hidden_files_bool_semantic||帮我判断一下当前目录有没有隐藏文件，只回答有或没有，并举两个例子
+
+# File write + delivery
+file|write_and_deliver_hello|write_and_deliver|写一个 hello world shell 脚本，保存成 document/hello_from_manual_test.sh，然后把文件发给我
+file|write_and_deliver_note|write_and_deliver|写一个文本文件到 document/manual_note.txt，内容是 RustClaw manual test note，然后把文件发给我
+file|write_and_deliver_json|write_and_deliver|生成一个 JSON 文件 document/manual_meta.json，内容包含 app=RustClaw 和 test=nl，然后把文件发给我
+file|file_write_and_deliver_semantic_cn||写一个文本文件到 document/text_match_regression_note.txt，内容是 semantic routing regression note，然后把文件发给我
+file|file_write_and_deliver_semantic_en||create a text file at document/text_match_regression_en.txt with content semantic command regression and send me the file
+
+# Missing file graceful handling
+failure|missing_file_graceful|missing_file_graceful|把 definitely_missing_named_file_rustclaw_001.txt 发给我
+failure|missing_readme_variant|missing_file_graceful|把 definitely_missing_named_file_rustclaw_user_ops_24686.md 发给我
+failure|missing_shell_script|missing_file_graceful|把 document/definitely_missing_shell_001.sh 发给我
+failure|missing_file_graceful_cn_semantic||把 document/definitely_missing_text_match_case_001.txt 发给我
+failure|missing_file_graceful_en_semantic||please send me document/definitely_missing_text_match_case_002.txt
+
+# Semantic run_cmd-style NL requests
+chat_act|run_cmd_pwd_with_result_tail||执行 pwd，然后告诉我结果
+chat_act|run_cmd_uname_with_result_tail_en||please run uname -a and tell me the result
+chat_act|run_cmd_ls_then_explain||执行 ls scripts，然后用一句话告诉我这个目录大概放的是什么
+chat_act|run_cmd_df_then_brief||执行 df -h，然后用大白话告诉我最需要关注哪一项
+chat_act|run_cmd_whoami_scalar||执行 whoami，只输出结果，不要解释

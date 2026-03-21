@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
 
 use crate::{AppState, ClaimedTask};
 use claw_core::skill_registry::SkillRegistryEntry;
@@ -72,8 +71,8 @@ fn classify_skill(state: &AppState, skill: &str) -> CapabilityDomain {
         }
         "run_cmd" | "system_basic" | "http_basic" | "git_basic" | "install_module"
         | "package_manager" | "archive_basic" | "db_basic" => CapabilityDomain::System,
-        "process_basic" | "docker_basic" | "health_check" | "log_analyze"
-        | "service_control" | "task_control" | "config_guard" => CapabilityDomain::OpsStatus,
+        "process_basic" | "docker_basic" | "health_check" | "log_analyze" | "service_control"
+        | "task_control" | "config_guard" => CapabilityDomain::OpsStatus,
         "stock" | "crypto" => CapabilityDomain::MarketData,
         "rss_fetch" => CapabilityDomain::NewsContent,
         "image_vision" | "image_generate" | "image_edit" => CapabilityDomain::ImageMedia,
@@ -85,183 +84,33 @@ fn classify_skill(state: &AppState, skill: &str) -> CapabilityDomain {
 }
 
 fn infer_domain_from_skill_metadata(state: &AppState, skill: &str) -> Option<CapabilityDomain> {
-    let mut snippets = vec![skill.to_string()];
-    if let Some(registry) = state.get_skills_registry() {
-        if let Some(entry) = registry.get(skill) {
-            if !entry.aliases.is_empty() {
-                snippets.push(entry.aliases.join(" "));
-            }
-            if let Some(prompt_text) = load_skill_prompt_text(state, entry) {
-                snippets.push(prompt_text);
-            }
+    let registry = state.get_skills_registry()?;
+    let entry = registry.get(skill)?;
+    infer_domain_from_registry_entry(entry)
+}
+
+fn infer_domain_from_registry_entry(entry: &SkillRegistryEntry) -> Option<CapabilityDomain> {
+    let canonical = entry.name.trim();
+    if canonical.is_empty() {
+        return None;
+    }
+    let lower = canonical.to_ascii_lowercase();
+    match lower.as_str() {
+        "stock" | "crypto" => Some(CapabilityDomain::MarketData),
+        "rss_fetch" | "web_search_extract" | "browser_web" => Some(CapabilityDomain::NewsContent),
+        "image_vision" | "image_generate" | "image_edit" => Some(CapabilityDomain::ImageMedia),
+        "audio_transcribe" | "audio_synthesize" => Some(CapabilityDomain::AudioMedia),
+        "x" => Some(CapabilityDomain::Publishing),
+        "chat" => Some(CapabilityDomain::GeneralChat),
+        "read_file" | "write_file" | "list_dir" | "make_dir" | "remove_file" | "fs_search" => {
+            Some(CapabilityDomain::Filesystem)
         }
+        "process_basic" | "docker_basic" | "health_check" | "log_analyze" | "service_control"
+        | "task_control" | "config_guard" => Some(CapabilityDomain::OpsStatus),
+        "run_cmd" | "system_basic" | "http_basic" | "git_basic" | "install_module"
+        | "package_manager" | "archive_basic" | "db_basic" => Some(CapabilityDomain::System),
+        _ => None,
     }
-
-    let haystack = snippets.join("\n").to_lowercase();
-    infer_domain_from_text(&haystack)
-}
-
-fn load_skill_prompt_text(state: &AppState, entry: &SkillRegistryEntry) -> Option<String> {
-    let prompt_file = entry.prompt_file.trim();
-    if prompt_file.is_empty() {
-        return None;
-    }
-    let prompt_path = resolve_prompt_path(&state.workspace_root, prompt_file)?;
-    if !prompt_path.starts_with(&state.workspace_root) {
-        return None;
-    }
-    std::fs::read_to_string(prompt_path).ok()
-}
-
-fn resolve_prompt_path(workspace_root: &Path, prompt_file: &str) -> Option<PathBuf> {
-    let path = Path::new(prompt_file);
-    if path.is_absolute() {
-        Some(path.to_path_buf())
-    } else {
-        Some(workspace_root.join(path))
-    }
-}
-
-fn infer_domain_from_text(haystack: &str) -> Option<CapabilityDomain> {
-    let matches_any = |terms: &[&str]| terms.iter().any(|term| haystack.contains(term));
-
-    if matches_any(&[
-        "a股",
-        "股票",
-        "stock",
-        "crypto",
-        "coin",
-        "token",
-        "market",
-        "quote",
-        "行情",
-        "个股",
-        "板块",
-        "k线",
-        "candles",
-        "portfolio",
-        "position",
-        "order status",
-        "交易策略",
-        "trading-related",
-    ]) {
-        return Some(CapabilityDomain::MarketData);
-    }
-
-    if matches_any(&[
-        "rss",
-        "news",
-        "headline",
-        "feed",
-        "web content",
-        "资讯",
-        "新闻",
-        "网页",
-    ]) {
-        return Some(CapabilityDomain::NewsContent);
-    }
-
-    if matches_any(&[
-        "image",
-        "ocr",
-        "vision",
-        "photo",
-        "图片",
-        "图像",
-        "视觉",
-        "生成图片",
-    ]) {
-        return Some(CapabilityDomain::ImageMedia);
-    }
-
-    if matches_any(&[
-        "audio",
-        "speech",
-        "voice",
-        "tts",
-        "transcribe",
-        "音频",
-        "语音",
-        "转写",
-        "朗读",
-    ]) {
-        return Some(CapabilityDomain::AudioMedia);
-    }
-
-    if matches_any(&[
-        "twitter",
-        "x.com",
-        "tweet",
-        "publish",
-        "post to x",
-        "社交发布",
-        "发帖",
-        "推文",
-    ]) {
-        return Some(CapabilityDomain::Publishing);
-    }
-
-    if matches_any(&[
-        "log",
-        "service",
-        "process",
-        "docker",
-        "health",
-        "task status",
-        "配置",
-        "进程",
-        "服务状态",
-        "日志",
-    ]) {
-        return Some(CapabilityDomain::OpsStatus);
-    }
-
-    if matches_any(&[
-        "file",
-        "directory",
-        "filesystem",
-        "path",
-        "read_file",
-        "write_file",
-        "目录",
-        "文件",
-        "路径",
-    ]) {
-        return Some(CapabilityDomain::Filesystem);
-    }
-
-    if matches_any(&[
-        "chat",
-        "smalltalk",
-        "conversation",
-        "rewrite",
-        "summarize",
-        "闲聊",
-        "改写",
-        "对话",
-    ]) {
-        return Some(CapabilityDomain::GeneralChat);
-    }
-
-    if matches_any(&[
-        "shell",
-        "command",
-        "http",
-        "database",
-        "sql",
-        "git",
-        "archive",
-        "package",
-        "system",
-        "命令",
-        "系统",
-        "数据库",
-        "压缩",
-    ]) {
-        return Some(CapabilityDomain::System);
-    }
-
-    None
 }
 
 pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask) -> String {

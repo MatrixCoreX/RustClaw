@@ -1,0 +1,4 @@
+index=27
+chat_id=1985997017
+task_id=2b5feee6-93c8-4f54-97fa-c4674f937aac
+prompt=统计 crates/clawd/src 下有多少个 .rs 文件，只输出数字

@@ -1,0 +1,4 @@
+index=7
+chat_id=1985996997
+task_id=abbca70f-19cb-4eec-be41-9e1d2ee58383
+prompt=比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因

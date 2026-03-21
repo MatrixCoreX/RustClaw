@@ -1,0 +1,4 @@
+index=28
+chat_id=1985997018
+task_id=023e32a9-b834-470c-816e-5bf4d12a9632
+prompt=检查 scripts 目录里有没有 restart_clawd_latest.sh，有就给路径
