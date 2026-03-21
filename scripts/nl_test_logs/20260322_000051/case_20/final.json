@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"fdfaa9f3-b3bb-4f98-b953-cf30cf6eb7d9","status":"succeeded","result_json":{"messages":["hello_from_manual_test.sh\nhello_world.sh\nmanual_meta.json\nmanual_note.txt\nregression_llm_first/"],"text":"hello_from_manual_test.sh\nhello_world.sh\nmanual_meta.json\nmanual_note.txt\nregression_llm_first/"},"error_text":null},"error":null}

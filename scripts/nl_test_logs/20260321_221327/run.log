@@ -1,0 +1,13 @@
+Simple NL test run
+  run_dir:  /home/guagua/git_upload/scripts/nl_test_logs/20260321_221327
+  base_url: http://127.0.0.1:8787
+  user_id:  1985996990
+  chat_id:  1985996990
+  prompts:  37
+
+============================================================
+[CASE] 1
+[CHAT] 1985996991
+[PROMPT] 今天天气先别查，给我讲一个简短冷笑话
+[TASK] de03c02b-d693-4f40-8563-86935ce0964b
+  [status] <none> -> queued

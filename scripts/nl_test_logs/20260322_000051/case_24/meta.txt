@@ -1,0 +1,4 @@
+index=24
+chat_id=1985997014
+task_id=b4fd6666-581c-4f10-bced-810077847f8d
+prompt=列出 logs 目录最近修改的 5 个文件，按新到旧输出

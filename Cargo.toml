@@ -36,6 +36,12 @@ members = [
     "crates/skills/stock",
     "crates/skills/weather",
     "crates/skills/x",
+    "crates/skills/reference_resolver",
+    "crates/skills/doc_parse",
+    "crates/skills/transform",
+    "crates/skills/web_search_extract",
+    "crates/skills/kb",
+    "crates/skills/browser_web",
 ]
 
 [workspace.package]

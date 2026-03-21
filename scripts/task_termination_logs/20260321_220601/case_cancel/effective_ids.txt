@@ -1,0 +1,2 @@
+effective_user_id=5088723672833677236
+effective_chat_id=6068998584841919712

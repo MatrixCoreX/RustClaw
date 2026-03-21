@@ -1,0 +1,4 @@
+index=32
+chat_id=1985997022
+task_id=23a39209-02ac-48ff-b97d-e0ea813a622e
+prompt=比较 README.md 和 README.zh-CN.md 哪个更大，并顺手解释为什么可能不同

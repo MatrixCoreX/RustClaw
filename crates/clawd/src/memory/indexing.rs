@@ -43,8 +43,9 @@ pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
 }
 
 pub(crate) fn retrieval_index_is_empty(db: &Connection) -> anyhow::Result<bool> {
-    let count: i64 =
-        db.query_row("SELECT COUNT(*) FROM memory_retrieval_index", [], |row| row.get(0))?;
+    let count: i64 = db.query_row("SELECT COUNT(*) FROM memory_retrieval_index", [], |row| {
+        row.get(0)
+    })?;
     Ok(count <= 0)
 }
 
@@ -100,8 +101,18 @@ pub(crate) fn rebuild_retrieval_index(db: &Connection, _cfg: &MemoryConfig) -> a
         ))
     })?;
     for row in mem_rows {
-        let (memory_id, user_id, chat_id, user_key, role, content, memory_type, salience, is_instructional, ts) =
-            row?;
+        let (
+            memory_id,
+            user_id,
+            chat_id,
+            user_key,
+            role,
+            content,
+            memory_type,
+            salience,
+            is_instructional,
+            ts,
+        ) = row?;
         index_memory_row(
             db,
             user_id,

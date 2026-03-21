@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"451e781e-ca22-4d76-b984-0f8f23ed6faa","status":"succeeded","result_json":{"messages":["该 Cargo.toml 为 workspace 根配置，不包含 `[package]` 段，无 `package.name` 值。"],"text":"该 Cargo.toml 为 workspace 根配置，不包含 `[package]` 段，无 `package.name` 值。"},"error_text":null},"error":null}

@@ -1,0 +1,4 @@
+index=23
+chat_id=1985997013
+task_id=a7f0a524-bdad-4a59-8ae7-54b25319138d
+prompt=do not run anything, just tell me a very short joke

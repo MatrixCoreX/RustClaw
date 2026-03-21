@@ -1,0 +1,4 @@
+index=1
+chat_id=1985996991
+task_id=58e3d4ef-b4fd-4b18-a438-17a9de68671f
+prompt=今天天气先别查，给我讲一个简短冷笑话

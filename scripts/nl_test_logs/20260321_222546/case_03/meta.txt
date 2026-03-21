@@ -1,0 +1,4 @@
+index=3
+chat_id=1985996993
+task_id=056ee417-ae10-4d60-8b2f-535dffb0a713
+prompt=列出当前仓库顶层目录和文件，简单分组展示
