@@ -1,0 +1,4 @@
+index=15
+chat_id=1985997005
+task_id=57fe612b-b8ac-44f9-96be-5c9ee9782472
+prompt=只输出当前机器 hostname

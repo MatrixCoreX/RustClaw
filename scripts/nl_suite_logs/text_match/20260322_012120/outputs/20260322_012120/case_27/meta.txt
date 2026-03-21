@@ -1,0 +1,4 @@
+index=27
+chat_id=1985997017
+task_id=9a607293-c571-4770-adda-34a3d88aa762
+prompt=please execute pwd and reply with the result

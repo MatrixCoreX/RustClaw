@@ -1,0 +1,4 @@
+index=3
+chat_id=1985996993
+task_id=297e65a4-ac11-4853-8d0d-4344f3f666de
+prompt=读取 package.json 里的 name 字段，只输出值

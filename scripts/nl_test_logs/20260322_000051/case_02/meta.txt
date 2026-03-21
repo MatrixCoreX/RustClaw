@@ -1,0 +1,4 @@
+index=2
+chat_id=1985996992
+task_id=fa2945a1-5dfc-4b12-a85c-61e46fe49624
+prompt=只输出当前工作目录的绝对路径，不要解释

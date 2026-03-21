@@ -19,6 +19,15 @@ const SINGLE_PLAN_EXECUTION_PROMPT_PATH: &str = "prompts/single_plan_execution_p
 const LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/loop_incremental_plan_prompt.md");
 const LOOP_INCREMENTAL_PLAN_PROMPT_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
+pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
+
+fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), String> {
+    match repo::is_task_still_running(state, &task.task_id) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(TASK_CANCELED_ERR.to_string()),
+        Err(err) => Err(format!("check task running state failed: {err}")),
+    }
+}
 
 /// Phase 2+: Planner 可见技能按 task/agent 动态收敛：
 /// （execution-enabled）∩（agent allowed_skills）。
@@ -112,8 +121,9 @@ fn build_skill_quick_index_text(state: &AppState, task: &ClaimedTask) -> String 
     for skill in &enabled {
         let summary = if let Some(registry_path) = state.skill_prompt_file(skill) {
             let prompt_body = crate::load_prompt_template_for_state(state, &registry_path, "").0;
-            first_non_heading_line(&prompt_body)
-                .unwrap_or_else(|| "use this skill when user intent matches its capability".to_string())
+            first_non_heading_line(&prompt_body).unwrap_or_else(|| {
+                "use this skill when user intent matches its capability".to_string()
+            })
         } else {
             "skill enabled but registry prompt_file missing".to_string()
         };
@@ -437,9 +447,15 @@ fn parse_single_plan_actions(raw: &str, state: &AppState) -> Option<Vec<AgentAct
     }
     let mut actions = Vec::new();
     for step in env.steps {
-        let raw_step = serde_json::to_string(&step).ok()?;
-        let normalized = crate::parse_agent_action_json_with_repair(&raw_step, state).ok()?;
-        let action = serde_json::from_value::<AgentAction>(normalized).ok()?;
+        let Ok(raw_step) = serde_json::to_string(&step) else {
+            continue;
+        };
+        let Ok(normalized) = crate::parse_agent_action_json_with_repair(&raw_step, state) else {
+            continue;
+        };
+        let Ok(action) = serde_json::from_value::<AgentAction>(normalized) else {
+            continue;
+        };
         match action {
             AgentAction::Think { .. } => {}
             AgentAction::Respond { content }
@@ -476,6 +492,7 @@ struct LoopState {
     last_output: Option<String>,
     output_vars: HashMap<String, String>,
     has_tool_or_skill_output: bool,
+    has_recoverable_failure_context: bool,
     written_file_aliases: HashMap<String, String>,
     last_written_file_path: Option<String>,
     /// Last user-visible respond text (final or publishable). Used when delivery_messages was not filled so we do not fall back to subtask summary.
@@ -764,6 +781,7 @@ fn register_failed_step_output(
     failed_action: &str,
     err: &str,
 ) {
+    loop_state.has_recoverable_failure_context = true;
     let trimmed = err.trim();
     if !trimmed.is_empty() {
         loop_state.last_output = Some(trimmed.to_string());
@@ -868,6 +886,26 @@ fn remaining_actions_are_discussion_only(
         })
 }
 
+fn classify_skill_failure_recovery(
+    state: &AppState,
+    actions: &[AgentAction],
+    current_idx: usize,
+    max_steps: usize,
+    normalized_skill: &str,
+    err: &str,
+) -> Option<&'static str> {
+    if crate::skills::is_recoverable_skill_error(normalized_skill, err) {
+        if has_remaining_action_after(actions, current_idx, max_steps) {
+            return Some("recoverable_failure_continue_round");
+        }
+        return Some("recoverable_failure_finalize");
+    }
+    if remaining_actions_are_discussion_only(state, actions, current_idx, max_steps) {
+        return Some("recoverable_failure_continue_round");
+    }
+    None
+}
+
 fn rewrite_run_cmd_with_written_aliases(command: &str, loop_state: &LoopState) -> String {
     if loop_state.written_file_aliases.is_empty() {
         return command.to_string();
@@ -941,6 +979,32 @@ fn attach_recent_execution_context_to_chat_args(args: &mut Value, loop_state: &L
             "latest_raw_output:\n{}",
             crate::truncate_for_agent_trace(last_output)
         ));
+    }
+    if let Some(path) = loop_state
+        .last_written_file_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        context_lines.push(format!("last_written_file_path: {path}"));
+    }
+    if let Some(path) = loop_state
+        .output_vars
+        .get("last_file_path")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        context_lines.push(format!("last_observed_file_path: {path}"));
+    }
+    if let Some(last_error) = loop_state
+        .output_vars
+        .get("last_error")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        context_lines.push(format!("latest_error: {last_error}"));
     }
     if context_lines.is_empty() {
         return;
@@ -1170,95 +1234,9 @@ async fn plan_round_actions(
     Ok(plan_actions)
 }
 
-fn is_numbered_subtask_summary(text: &str) -> bool {
-    let lines = text
-        .lines()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>();
-    if lines.len() < 2 {
-        return false;
-    }
-    let mut matched = 0usize;
-    for (idx, line) in lines.iter().take(6).enumerate() {
-        let no = idx + 1;
-        let numbered_prefixes = [
-            format!("{no}."),
-            format!("{no})"),
-            format!("{no}、"),
-            format!("{no}："),
-            format!("{no}:"),
-        ];
-        if numbered_prefixes
-            .iter()
-            .any(|prefix| line.starts_with(prefix))
-        {
-            matched += 1;
-        }
-    }
-    matched >= 2
-}
-
-fn is_summary_like_response(state: &AppState, text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if is_numbered_subtask_summary(trimmed) {
-        return true;
-    }
-    let lines = trimmed
-        .lines()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>();
-    if lines.len() < 2 {
-        return false;
-    }
-    let first_line = lines.first().copied().unwrap_or("");
-    let lower = first_line.to_ascii_lowercase();
-    crate::main_flow_rules(state)
-        .summary_like_response_markers
-        .iter()
-        .any(|marker| {
-            let marker = marker.trim();
-            !marker.is_empty()
-                && if marker.is_ascii() {
-                    lower.contains(&marker.to_ascii_lowercase())
-                } else {
-                    first_line.contains(marker)
-                }
-        })
-}
-
-fn has_explicit_summary_request(state: &AppState, user_text: &str) -> bool {
-    let trimmed = user_text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    crate::main_flow_rules(state)
-        .explicit_summary_markers
-        .iter()
-        .any(|marker| {
-            let marker = marker.trim();
-            !marker.is_empty()
-                && if marker.is_ascii() {
-                    lower.contains(&marker.to_ascii_lowercase())
-                } else {
-                    trimmed.contains(marker)
-                }
-        })
-}
-
 /// Decide if this respond should enter delivery. Avoid duplicate: do not publish when respond
 /// merely repeats the last delivery or the last raw step output.
-fn should_publish_respond_message(
-    state: &AppState,
-    loop_state: &LoopState,
-    user_text: &str,
-    text: &str,
-) -> bool {
+fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return false;
@@ -1281,7 +1259,7 @@ fn should_publish_respond_message(
     {
         return false;
     }
-    !is_summary_like_response(state, trimmed) || has_explicit_summary_request(state, user_text)
+    true
 }
 
 async fn execute_actions_once(
@@ -1293,6 +1271,7 @@ async fn execute_actions_once(
     loop_state: &mut LoopState,
     policy: &AgentLoopGuardPolicy,
 ) -> Result<RoundOutcome, String> {
+    ensure_task_running(state, task)?;
     let mut executed_actions = 0usize;
     let mut stop_signal: Option<String> = None;
     let actionable_count = actions.iter().take(policy.max_steps.max(1)).count();
@@ -1302,6 +1281,7 @@ async fn execute_actions_once(
     let mut ended_with_user_visible_output = false;
     let round_steps: Vec<String> = actions.iter().map(plan_step_label).collect();
     for (idx, action) in actions.iter().take(policy.max_steps.max(1)).enumerate() {
+        ensure_task_running(state, task)?;
         let step_in_round = idx + 1;
         let global_step = loop_state.total_steps_executed + 1;
         let fingerprint = action_fingerprint(state, action);
@@ -1414,6 +1394,7 @@ async fn execute_actions_once(
                 .await
                 {
                     Ok(outcome) => {
+                        ensure_task_running(state, task)?;
                         let out = outcome.text.clone();
                         if let Some((original_path, _effective_path, user_visible_path)) =
                             &write_file_effective_path
@@ -1496,25 +1477,32 @@ async fn execute_actions_once(
                         ));
                     }
                     Err(err) => {
+                        if !repo::is_task_still_running(state, &task.task_id).unwrap_or(true) {
+                            return Err(TASK_CANCELED_ERR.to_string());
+                        }
+                        let user_visible_err =
+                            crate::skills::normalize_skill_error_for_user(&normalized_skill, &err);
                         crate::append_subtask_result(
                             &mut loop_state.subtask_results,
                             global_step,
                             &format!("skill({normalized_skill})"),
                             false,
-                            &err,
+                            &user_visible_err,
                         );
                         info!(
                             "executor_result_error task_id={} round={} step={} type=call_skill(legacy_tool) error={}",
                             task.task_id,
                             loop_state.round_no,
                             step_in_round,
-                            crate::truncate_for_log(&err)
+                            crate::truncate_for_log(&user_visible_err)
                         );
-                        if remaining_actions_are_discussion_only(
+                        if let Some(stop_reason) = classify_skill_failure_recovery(
                             state,
                             actions,
                             idx,
                             policy.max_steps,
+                            &normalized_skill,
+                            &err,
                         ) {
                             register_failed_step_output(
                                 loop_state,
@@ -1522,18 +1510,18 @@ async fn execute_actions_once(
                                 step_in_round,
                                 &format!("skill.{normalized_skill}"),
                                 &format!("skill({normalized_skill})"),
-                                &err,
+                                &user_visible_err,
                             );
                             loop_state.history_compact.push(format!(
                                 "round={} step={} skill={} failed error={}",
                                 loop_state.round_no,
                                 step_in_round,
                                 normalized_skill,
-                                crate::truncate_for_agent_trace(&err)
+                                crate::truncate_for_agent_trace(&user_visible_err)
                             ));
                             executed_actions += 1;
                             loop_state.total_steps_executed += 1;
-                            stop_signal = Some("recoverable_failure_continue_round".to_string());
+                            stop_signal = Some(stop_reason.to_string());
                             break;
                         }
                         let resume_err = build_resume_context_error(
@@ -1545,7 +1533,7 @@ async fn execute_actions_once(
                             &loop_state.delivery_messages,
                             step_in_round,
                             &format!("skill({normalized_skill})"),
-                            &err,
+                            &user_visible_err,
                         );
                         return Err(resume_err);
                     }
@@ -1555,6 +1543,14 @@ async fn execute_actions_once(
                 let mut resolved_args = resolve_arg_value(args, loop_state);
                 loop_state.tool_calls_total += 1;
                 let normalized_skill = state.resolve_canonical_skill_name(skill);
+                let read_file_requested_path = if normalized_skill == "read_file" {
+                    resolved_args
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .map(|path| path.to_string())
+                } else {
+                    None
+                };
                 let write_file_effective_path = if normalized_skill == "write_file" {
                     resolved_args
                         .get("path")
@@ -1590,6 +1586,7 @@ async fn execute_actions_once(
                     .await
                 {
                     Ok(outcome) => {
+                        ensure_task_running(state, task)?;
                         let out = outcome.text.clone();
                         if let Some((original_path, _effective_path, user_visible_path)) =
                             &write_file_effective_path
@@ -1606,6 +1603,16 @@ async fn execute_actions_once(
                                 &format!("skill.{normalized_skill}"),
                                 user_visible_path,
                             );
+                        } else if normalized_skill == "read_file" {
+                            if let Some(path) = read_file_requested_path.as_deref() {
+                                register_file_path_output(
+                                    loop_state,
+                                    global_step,
+                                    step_in_round,
+                                    &format!("skill.{normalized_skill}"),
+                                    path,
+                                );
+                            }
                         }
                         crate::append_subtask_result(
                             &mut loop_state.subtask_results,
@@ -1662,20 +1669,53 @@ async fn execute_actions_once(
                         ));
                     }
                     Err(err) => {
+                        if !repo::is_task_still_running(state, &task.task_id).unwrap_or(true) {
+                            return Err(TASK_CANCELED_ERR.to_string());
+                        }
+                        let user_visible_err =
+                            crate::skills::normalize_skill_error_for_user(&normalized_skill, &err);
                         crate::append_subtask_result(
                             &mut loop_state.subtask_results,
                             global_step,
                             &format!("skill({normalized_skill})"),
                             false,
-                            &err,
+                            &user_visible_err,
                         );
                         info!(
                             "executor_result_error task_id={} round={} step={} type=call_skill error={}",
                             task.task_id,
                             loop_state.round_no,
                             step_in_round,
-                            crate::truncate_for_log(&err)
+                            crate::truncate_for_log(&user_visible_err)
                         );
+                        if let Some(stop_reason) = classify_skill_failure_recovery(
+                            state,
+                            actions,
+                            idx,
+                            policy.max_steps,
+                            &normalized_skill,
+                            &err,
+                        ) {
+                            register_failed_step_output(
+                                loop_state,
+                                global_step,
+                                step_in_round,
+                                &format!("skill.{normalized_skill}"),
+                                &format!("skill({normalized_skill})"),
+                                &user_visible_err,
+                            );
+                            loop_state.history_compact.push(format!(
+                                "round={} step={} skill={} failed error={}",
+                                loop_state.round_no,
+                                step_in_round,
+                                normalized_skill,
+                                crate::truncate_for_agent_trace(&user_visible_err)
+                            ));
+                            executed_actions += 1;
+                            loop_state.total_steps_executed += 1;
+                            stop_signal = Some(stop_reason.to_string());
+                            break;
+                        }
                         let resume_err = build_resume_context_error(
                             actions,
                             &round_steps,
@@ -1685,7 +1725,7 @@ async fn execute_actions_once(
                             &loop_state.delivery_messages,
                             step_in_round,
                             &format!("skill({normalized_skill})"),
-                            &err,
+                            &user_visible_err,
                         );
                         return Err(resume_err);
                     }
@@ -1699,11 +1739,9 @@ async fn execute_actions_once(
                 .trim()
                 .to_string();
 
-
                 let has_remaining_actions =
                     has_remaining_action_after(actions, idx, policy.max_steps);
-                let publish_respond =
-                    should_publish_respond_message(state, loop_state, user_text, &text);
+                let publish_respond = should_publish_respond_message(loop_state, &text);
                 if !text.is_empty() && (publish_respond || !has_remaining_actions) {
                     loop_state.last_user_visible_respond = Some(text.clone());
                 }
@@ -1795,9 +1833,11 @@ async fn execute_actions_once(
     })
 }
 
-/// Only synthesize (chat) when we have raw output but no delivery yet. Prefer raw finalizer first.
+/// Synthesize a final user-facing answer when execution produced raw outputs but no explicit
+/// publishable respond was emitted by the plan itself.
 fn should_synthesize_final_response(loop_state: &LoopState) -> bool {
-    loop_state.has_tool_or_skill_output && loop_state.delivery_messages.is_empty()
+    (loop_state.has_tool_or_skill_output || loop_state.has_recoverable_failure_context)
+        && loop_state.last_user_visible_respond.is_none()
 }
 
 /// Minimal filter: only allow raw outputs that look like publishable user-facing content.
@@ -1922,7 +1962,7 @@ async fn synthesize_final_response(
     }
     let mut args = json!({
         "text": format!(
-            "Original user request:\n{}\n\nWrite the final user-facing answer now. Use the recent execution context above. Complete any still-pending lightweight conclusion requested by the user, but do not invent unseen files, paths, lines, or command results. Keep the reply concise and direct.",
+            "Original user request:\n{}\n\nWrite the final user-facing answer now. Use the recent execution context above. Complete any still-pending lightweight conclusion requested by the user, but do not invent unseen files, paths, lines, or command results. If the observed raw result already exactly satisfies the user request, return it unchanged. If the user asked for a boolean / scalar / path / filename / FILE token only, keep that exact compact format and do not wrap it in extra prose. If execution already produced one concrete saved file path and the user asked to receive the file itself, return exactly FILE:<that-path>. If the observed execution context shows a requested file/path was not found, answer concisely that it was not found instead of asking the user to re-provide contents that were already attempted. Do not claim that you lack file access or cannot access files when the execution context already shows that file-access steps were attempted; in that case stay grounded in the observed file-not-found result. Keep the reply concise and direct.",
             user_text
         )
     });
@@ -2014,6 +2054,7 @@ async fn run_agent_with_loop(
     let policy = load_agent_loop_guard_policy(state);
     let mut loop_state = LoopState::new(policy.max_rounds.max(1));
     for round in 1..=loop_state.max_rounds {
+        ensure_task_running(state, task)?;
         loop_state.round_no = round;
         info!(
             "loop_round_start task_id={} round={} max_rounds={} total_steps={} tool_calls_total={}",
@@ -2066,20 +2107,8 @@ async fn run_agent_with_loop(
         }
     }
 
-    // Fallback finalizer: only when we still have no delivery.
-    if loop_state.delivery_messages.is_empty() && !loop_state.subtask_results.is_empty() {
-        let fallback = fallback_finalize_from_raw(loop_state.subtask_results.as_slice());
-        if !fallback.trim().is_empty() {
-            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, fallback);
-            info!(
-                "final_result_fallback_from_raw task_id={} subtask_count={}",
-                task.task_id,
-                loop_state.subtask_results.len()
-            );
-        }
-    }
-
-    // Last resort: synthesize via chat when still no delivery (e.g. raw was empty or finalizer skipped).
+    // Finalizer: when execution produced raw outputs but the plan never emitted an explicit
+    // publishable respond, synthesize the final user-facing answer from observed results.
     if loop_state.delivery_messages.is_empty() && should_synthesize_final_response(&loop_state) {
         if let Some(synthesized) =
             synthesize_final_response(state, task, user_text, &loop_state).await?
@@ -2100,6 +2129,19 @@ async fn run_agent_with_loop(
             loop_state
                 .history_compact
                 .push("finalize respond".to_string());
+        }
+    }
+
+    // Raw fallback: only when synthesis did not yield anything usable.
+    if loop_state.delivery_messages.is_empty() && !loop_state.subtask_results.is_empty() {
+        let fallback = fallback_finalize_from_raw(loop_state.subtask_results.as_slice());
+        if !fallback.trim().is_empty() {
+            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, fallback);
+            info!(
+                "final_result_fallback_from_raw task_id={} subtask_count={}",
+                task.task_id,
+                loop_state.subtask_results.len()
+            );
         }
     }
 
@@ -2147,9 +2189,7 @@ async fn run_agent_with_loop(
             loop_state.consecutive_no_progress
         ),
     );
-    Ok(
-        AskReply::non_llm(final_text).with_messages(delivery_deduped),
-    )
+    Ok(AskReply::non_llm(final_text).with_messages(delivery_deduped))
 }
 
 fn plan_step_label(action: &AgentAction) -> String {

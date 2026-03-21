@@ -1,0 +1,420 @@
+Simple NL test run
+  run_dir:  /home/guagua/git_upload/scripts/nl_test_logs/20260322_000051
+  base_url: http://127.0.0.1:8787
+  user_id:  1985996990
+  chat_id:  1985996990
+  prompts:  37
+
+============================================================
+[CASE] 1
+[CHAT] 1985996991
+[PROMPT] 今天天气先别查，给我讲一个简短冷笑话
+[TASK] 58e3d4ef-b4fd-4b18-a438-17a9de68671f
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=程序员的表白：你是我的异常捕获，没有你我就崩了。
+
+============================================================
+[CASE] 2
+[CHAT] 1985996992
+[PROMPT] 只输出当前工作目录的绝对路径，不要解释
+[TASK] fa2945a1-5dfc-4b12-a85c-61e46fe49624
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=/home/guagua/git_upload
+
+============================================================
+[CASE] 3
+[CHAT] 1985996993
+[PROMPT] 列出当前仓库顶层目录和文件，简单分组展示
+[TASK] 2106c833-4fad-4f31-a123-0f2e7e950985
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=## 仓库顶层结构\n\n### 目录\n\n| 分类 | 目录 |\n|---|---|\n| **Rust 项目** | `crates/` · `target/` · `.cargo/` |\n| **配置 & 数据** | `configs/` · `data/` · `migrations/` |\n| **UI & 前端** | `UI/` |\n| **脚本** | `scripts/` · `run/` · `services/` · `patches/` |\n| **文档** | `docs/` · `document/` |\n| **平台集成** | `pi_app/` (树莓派) |\n| **依赖** | `node_modules/` |\n| **构建产物** | `image/` · `logs/` |\n| **版本控制** | `.git/` |\n| **系统服务** | `systemd/` |\n| **技能开发** | `external_skills/` · `skills_output/` · `skill_develop/` |\n| **计划** | `plans/` · `prompts/` |\n| **Docker** | `docker/` |\n\n### 关键文件\n\n| 分类 | 文件 |\n|---|---|\n| **Rust 项目** | `Cargo.toml` · `Cargo.lock` · `rustclaw` (二进制) |\n| **Node.js** | `package.json` · `package-lock.json` |\n| **说明文档** | `README.md` · `README.zh-CN.md` · `USAGE.md` · `AGENTS.md` |\n| **许可** | `LICENSE` · `LICENSE.zh-CN.md` |\n| **服务** | `rustclaw.service` |\n| **Docker** | `docker-compose.yml` |\n| **示例** | `.env.example` |\n\n### Shell 脚本\n\n| 角色 | 脚本 |\n|---|---|\n| **启动** | `start-*.sh` (clawd, clawd-ui, telegramd, whatsappd, larkd, feishud …) · `stop-rustclaw.sh` · `start-all.sh` |\n| **构建** | `build-all.sh` · `build-ui-nginx.sh` · `cross-build-upload.sh` |\n| **发布** | `package-release.sh` · `pack-to-parent.sh` |\n| **工具** | `check-logs.sh` · `setup-config.sh` · `system_report.sh` · `install-rustclaw-cmd.sh` · `uninstall-rustclaw-cmd.sh` |\n\n> 这是一个 Rust + Node.js 混合项目，主程序为 `rustclaw`，集成了 Telegram / WhatsApp / 飞书 / Lark 等多个消息平台的桥接能力。
+
+============================================================
+[CASE] 4
+[CHAT] 1985996994
+[PROMPT] 检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+[TASK] 92ca458c-178d-4bd4-81e1-5be7f64f1189
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=有\n例子：.git/、.cargo/、.env.example
+
+============================================================
+[CASE] 5
+[CHAT] 1985996995
+[PROMPT] 精确统计当前目录下有多少个直接子项，只输出数字
+[TASK] 2b59841a-69ef-4ab1-8ab4-2b980bdc30da
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=76
+
+============================================================
+[CASE] 6
+[CHAT] 1985996996
+[PROMPT] 读取 README 的前 20 行并做 3 句话总结
+[TASK] 3244fd5c-8c2f-4238-b3aa-d651d36cb743
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=**README 前 20 行摘要：**\n\nRustClaw 是一个开源的即时通讯聚合平台，能够同时桥接多个消息平台（如 Telegram、WhatsApp、Lark/Feishu 等），实现统一的聊天管理体验。它支持通过 Docker 一键部署，提供 Web UI 界面和命令行工具，方便用户在不同 IM 系统之间收发消息并集中管理联系人与对话。该项目采用 Rust 语言编写核心服务，注重性能与跨平台兼容性，适合个人或团队搭建私有消息中继方案。
+
+============================================================
+[CASE] 7
+[CHAT] 1985996997
+[PROMPT] 比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+[TASK] 7d5ca1bf-76d0-495a-a5d4-11cf1c84ed45
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=Cargo.lock 通常更大。\n\nCargo.toml 只记录你声明的直接依赖，Cargo.lock 记录了直接依赖 + 所有传递依赖的精确版本，依赖链一长就膨胀得很快。
+
+============================================================
+[CASE] 8
+[CHAT] 1985996998
+[PROMPT] 把 definitely_missing_named_file_rustclaw_001.txt 发给我
+[TASK] c7b0b667-80e5-4ae2-a14f-8e19b229d76c
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=文件 `definitely_missing_named_file_rustclaw_001.txt` 不存在，无法发送。\n\n建议：\n\n1. 确认文件名拼写是否正确\n2. 如果需要该文件，先创建它
+
+============================================================
+[CASE] 9
+[CHAT] 1985996999
+[PROMPT] 写一个 hello world shell 脚本，保存成 document/hello_from_manual_test.sh，然后把文件发给我
+[TASK] aa9abb0f-9c77-4ae2-a9b2-d9365db84034
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=FILE:/home/guagua/git_upload/document/hello_from_manual_test.sh
+
+============================================================
+[CASE] 10
+[CHAT] 1985997000
+[PROMPT] 用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+[TASK] 376e6db6-0df3-4e37-8dea-4e929c6af333
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=这个仓库是一个叫 **clawd** 的后台程序。\n\n简单来说，它就是一个“隐形助手”，在电脑或服务器后台安静运行，随时等待指令并自动完成任务，比如响应请求或监控事件。
+
+============================================================
+[CASE] 11
+[CHAT] 1985997001
+[PROMPT] 写一首两句的打工人短诗
+[TASK] d601751a-4568-40ee-9980-fa51c46e50fa
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=日出而作日落未归，薪水到手已见底。
+
+============================================================
+[CASE] 12
+[CHAT] 1985997002
+[PROMPT] 用大白话介绍一下 RustClaw，控制在 80 个字以内
+[TASK] b1353b3e-5ac1-446f-aea5-09586e2e5f22
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=RustClaw 是一个 Rust 库，用于开发抓娃娃机或类似抓取游戏，提供碰撞检测、物理模拟等核心功能，方便快速搭建游戏原型。
+
+============================================================
+[CASE] 13
+[CHAT] 1985997003
+[PROMPT] 把这句话翻成英文：现在服务已经恢复了
+[TASK] 2aca21d2-49f8-41e9-a18c-1a6349d53a11
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=The service has been restored now.
+
+============================================================
+[CASE] 14
+[CHAT] 1985997004
+[PROMPT] 只输出当前用户名，不要解释
+[TASK] d2b73028-f041-4794-9596-b3d0cd2f6a26
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=我没有能力获取当前会话用户的系统用户名。
+
+============================================================
+[CASE] 15
+[CHAT] 1985997005
+[PROMPT] 只输出当前机器 hostname
+[TASK] a2e11574-5e35-4ac9-8560-22818ea8416a
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=```bash\nhostname\n```
+
+============================================================
+[CASE] 16
+[CHAT] 1985997006
+[PROMPT] 列出 logs 目录下的前 10 个文件名，不要读内容
+[TASK] 05b0dc15-28ae-437e-a1fe-92a80a237f07
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=act_plan.log\nclawd.log\nfeishud.log\nmodel_io.log\nregression_skills_upgrade_20260321_031137.md\nregression_skills_upgrade_20260321_031610.md\nregression_user_instruction_20260321_194720\nregression_user_instruction_20260321_195039\nregression_user_instruction_20260321_200856\nregression_user_instruction_20260321_203105
+
+============================================================
+[CASE] 17
+[CHAT] 1985997007
+[PROMPT] 统计当前仓库顶层一共有多少个 .md 文件，只输出数字
+[TASK] 6d1fea72-974a-47a1-8f3c-2a81dd2d412d
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=9
+
+============================================================
+[CASE] 18
+[CHAT] 1985997008
+[PROMPT] 检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+[TASK] 17cef133-ae71-4b8a-83fa-40cc8b593571
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=有，路径：rustclaw.service
+
+============================================================
+[CASE] 19
+[CHAT] 1985997009
+[PROMPT] 读取 rustclaw.service 前 15 行，并用一句话说明它是干什么的
+[TASK] 1fd4cfe1-26cc-4a3d-b3da-eac3cd8fd709
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=这是 rustclaw.service 文件的前 15 行内容：\n[Unit]\nDescription=RustClaw Service (start-all-bin with singbox proxy)\nAfter=network.target sing-box.service\nWants=sing-box.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nUser=guagua\nGroup=guagua\nWorkingDirectory=/home/guagua/git_upload\n\n一句话说明：这是一个 systemd 服务单元，用于以 guagua 用户身份启动 RustClaw 服务，并配置通过本地 2080 端口的 singbox 代理进行网络通信。
+
+============================================================
+[CASE] 20
+[CHAT] 1985997010
+[PROMPT] 列出 document 目录下有哪些文件，只输出文件名列表
+[TASK] fdfaa9f3-b3bb-4f98-b953-cf30cf6eb7d9
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=hello_from_manual_test.sh\nhello_world.sh\nmanual_meta.json\nmanual_note.txt\nregression_llm_first/
+
+============================================================
+[CASE] 21
+[CHAT] 1985997011
+[PROMPT] 统计 document 目录下直接子项数量，只输出数字
+[TASK] 67bc6dc6-8524-4e01-9f4c-e1ead88af3fc
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=5
+
+============================================================
+[CASE] 22
+[CHAT] 1985997012
+[PROMPT] 检查 scripts 目录里有没有隐藏文件，只回答有或没有
+[TASK] 3a6fe0a1-166d-4dff-bc2e-ea172f70e953
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=有
+
+============================================================
+[CASE] 23
+[CHAT] 1985997013
+[PROMPT] 读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
+[TASK] 9f995b4b-8a24-40c4-89f8-acc907916237
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=根据 AGENTS.md 前 30 行，提炼的 3 条最重要规则：\n\n1. **统一技能接入标准**：所有参与仓库的 agent 必须遵循统一的技能接入流程，目标是"代码上传后编译通过即可允许启用"——即技能代码通过编译后即可被视为已允许/已启用。\n\n2. **优先面向非技术用户设计**：主要用户是"不懂技术的普通小白"，他们希望通过可视化界面完成日常使用、状态查看、渠道接入和基础排障，而非阅读日志、编辑配置文件或依赖命令行。\n\n3. **UI 应优先降低认知门槛**：UI 设计的首要目标是让用户建立"我看得懂、我敢点、我不会弄坏"的信心，而不是功能堆砌或技术化呈现。
+
+============================================================
+[CASE] 24
+[CHAT] 1985997014
+[PROMPT] 列出 logs 目录最近修改的 5 个文件，按新到旧输出
+[TASK] b4fd6666-581c-4f10-bced-810077847f8d
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=clawd.log model_io.log act_plan.log feishud.log telegramd.log
+
+============================================================
+[CASE] 25
+[CHAT] 1985997015
+[PROMPT] 读取 package.json 里的 name 字段，只输出值
+[TASK] 52b81b33-b99d-4e85-8ecc-ac0c93dcdf60
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=无法确定 `name` 字段的值，因为未提供 `package.json` 文件内容。
+
+============================================================
+[CASE] 26
+[CHAT] 1985997016
+[PROMPT] 读取 Cargo.toml 的 package.name，只输出值
+[TASK] 451e781e-ca22-4d76-b984-0f8f23ed6faa
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=该 Cargo.toml 为 workspace 根配置，不包含 `[package]` 段，无 `package.name` 值。
+
+============================================================
+[CASE] 27
+[CHAT] 1985997017
+[PROMPT] 统计 crates/clawd/src 下有多少个 .rs 文件，只输出数字
+[TASK] 2b5feee6-93c8-4f54-97fa-c4674f937aac
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=41
+
+============================================================
+[CASE] 28
+[CHAT] 1985997018
+[PROMPT] 检查 scripts 目录里有没有 restart_clawd_latest.sh，有就给路径
+[TASK] e50d9dac-3336-436c-8b58-10fe5215e463
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=scripts/restart_clawd_latest.sh
+
+============================================================
+[CASE] 29
+[CHAT] 1985997019
+[PROMPT] 查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
+[TASK] 6272ba48-a579-4a30-b4c0-087e11d4f2d1
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=根目录 `/` 已经用了77%，只剩6.3G可用，这是唯一需要操心的——再继续涨下去系统可能要出问题了。其他分区都很空闲，不用管。
+
+============================================================
+[CASE] 30
+[CHAT] 1985997020
+[PROMPT] 列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+[TASK] 58ee65ae-f663-44ba-bbb6-c5f863c9692c
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=**docs 目录文件列表及说明：**\n\n| 文件 | 一句话说明 |\n|------|-----------|\n| `你用Claw能做什么.md` | 介绍 Claw 助手支持的各类能力：查系统/跑命令、搜文件、看图生成图、语音互转、行情下单、RSS 抓取、Git/Docker/数据库操作，以及多步任务失败后继续执行等。 |\n\n> 如果 docs 目录下还有其他文件，请告诉我完整路径，我可以继续读取并补充说明。
+
+============================================================
+[CASE] 31
+[CHAT] 1985997021
+[PROMPT] 读取 README 开头内容，再用非技术用户能听懂的话做一句总结
+[TASK] c84fcb66-d9f1-4743-a960-1dfdf747de31
+  [status] <none> -> running
+  [status] running -> failed
+[FINAL]
+status=failed
+text=step 2 failed (skill(chat)): chat skill llm returned empty content
+error=step 2 failed (skill(chat)): chat skill llm returned empty content
+
+============================================================
+[CASE] 32
+[CHAT] 1985997022
+[PROMPT] 比较 README.md 和 README.zh-CN.md 哪个更大，并顺手解释为什么可能不同
+[TASK] 15e430a9-de98-4750-ad95-e5c0bb93f9a5
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=**README.md 更大**（5928 字节 > 5689 字节，多出约 239 字节）。\n\n两者大小不同的常见原因：\n1. **英文原文更冗长** — 英文技术文档常包含更多介词、连接词和解释性从句，中文翻译时可以用更简洁的方式表达相同意思。\n2. **中文字符编码效率更高** — UTF-8 下中文一般占 3 字节，而同等信息的英文 ASCII 只占 1 字节，但中文能用更少的字符传递相同含义，整体反而更紧凑。\n3. **内容并非严格一一对应** — 两个文件可能面向不同读者，英文版可能包含更多安装细节、贡献指南或示例代码，而中文版可能做了本地化精简或省略了部分内容。\n4. **更新时间不同** — 可能在不同时间修改了其中一个文件，导致内容行数或注释量出现差异。
+
+============================================================
+[CASE] 33
+[CHAT] 1985997023
+[PROMPT] 检查当前目录隐藏文件是否存在，再用一句话解释隐藏文件通常是干什么的
+[TASK] 095a8624-0b5a-413c-a903-e2d1e5d8f367
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=当前目录存在以下隐藏文件：.cargo/、.dockerignore、.env.example、.git/、.gitignore、.pids/。\n\n隐藏文件（以点号开头的文件/目录）通常用于存储配置信息、运行环境参数、版本控制等对用户日常操作透明但程序运行时需要读取的元数据。
+
+============================================================
+[CASE] 34
+[CHAT] 1985997024
+[PROMPT] 写一个文本文件到 document/manual_note.txt，内容是 RustClaw manual test note，然后把文件发给我
+[TASK] 2e348488-1920-47fb-bdb8-376af36570aa
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=FILE:/home/guagua/git_upload/document/manual_note.txt
+
+============================================================
+[CASE] 35
+[CHAT] 1985997025
+[PROMPT] 生成一个 JSON 文件 document/manual_meta.json，内容包含 app=RustClaw 和 test=nl，然后把文件发给我
+[TASK] 0dc6833c-50d0-4ac3-a5b8-8c6d8bfbcac0
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=FILE:/home/guagua/git_upload/document/manual_meta.json
+
+============================================================
+[CASE] 36
+[CHAT] 1985997026
+[PROMPT] 把 definitely_missing_named_file_rustclaw_user_ops_24686.md 发给我
+[TASK] 5d8f191b-0fd8-465e-b497-7d2ff1434d14
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=请提供该文件的路径或内容。
+
+============================================================
+[CASE] 37
+[CHAT] 1985997027
+[PROMPT] 把 document/definitely_missing_shell_001.sh 发给我
+[TASK] bf4cf511-5018-45c8-90f9-f2c2de7f1fbb
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=文件 document/definitely_missing_shell_001.sh 不存在（No such file or directory）
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_test_logs/20260322_000051/run.log
+  - /home/guagua/git_upload/scripts/nl_test_logs/20260322_000051/summary.jsonl

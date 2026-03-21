@@ -61,7 +61,10 @@ pub(crate) fn build_recent_execution_context(
     render_recent_execution_context(&rows, limit)
 }
 
-pub(crate) fn build_recent_execution_anchor_context(state: &AppState, task: &ClaimedTask) -> String {
+pub(crate) fn build_recent_execution_anchor_context(
+    state: &AppState,
+    task: &ClaimedTask,
+) -> String {
     let rows = load_recent_execution_rows(state, task, 4);
     if rows.is_empty() {
         return "<none>".to_string();
@@ -102,7 +105,10 @@ fn load_recent_execution_rows(
     Vec::new()
 }
 
-fn render_recent_execution_context(rows: &[(String, String, String, String)], limit: usize) -> String {
+fn render_recent_execution_context(
+    rows: &[(String, String, String, String)],
+    limit: usize,
+) -> String {
     let mut sections = Vec::new();
     let anchor_block = render_recent_execution_anchor_context(rows);
     if anchor_block != "<none>" {
@@ -120,10 +126,7 @@ fn render_recent_execution_context(rows: &[(String, String, String, String)], li
         ));
     }
     if !items.is_empty() {
-        sections.push(format!(
-            "### RECENT_EXECUTION_EVENTS\n{}",
-            items.join("\n")
-        ));
+        sections.push(format!("### RECENT_EXECUTION_EVENTS\n{}", items.join("\n")));
     }
 
     if sections.is_empty() {
@@ -187,11 +190,12 @@ fn extract_execution_anchor(
     let skill_from_result = extract_skill_from_result(&result);
     let skill = skill_from_payload
         .or(skill_from_result)
-        .unwrap_or_else(|| infer_skill_from_text(&request, &result));
+        .unwrap_or_else(|| "unknown".to_string());
 
-    let symbol = extract_symbol_from_payload(payload.as_ref()).or_else(|| extract_symbol_from_text(&result));
-    let subject = extract_subject_from_result(&result).or_else(|| extract_subject_from_request(&request));
-    let domain = infer_domain(&skill, symbol.as_deref(), subject.as_deref(), &request, &result);
+    let symbol =
+        extract_symbol_from_payload(payload.as_ref()).or_else(|| extract_symbol_from_text(&result));
+    let subject = extract_subject_from_result(&result);
+    let domain = infer_domain(&skill, symbol.as_deref());
 
     if skill == "unknown" && symbol.is_none() && subject.is_none() {
         return None;
@@ -214,29 +218,6 @@ fn extract_skill_from_result(result: &str) -> Option<String> {
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().trim().to_string())
         .filter(|v| !v.is_empty())
-}
-
-fn infer_skill_from_text(request: &str, result: &str) -> String {
-    let combined = format!("{request}\n{result}").to_ascii_lowercase();
-    if combined.contains("btcusdt")
-        || combined.contains("ethusdt")
-        || combined.contains("crypto")
-        || combined.contains("加密")
-        || combined.contains("币圈")
-    {
-        "crypto".to_string()
-    } else if combined.contains("股票")
-        || combined.contains("a股")
-        || combined.contains("上证")
-        || combined.contains("深证")
-        || Regex::new(r"\b[036]\d{5}\b")
-            .ok()
-            .is_some_and(|re| re.is_match(&combined))
-    {
-        "stock".to_string()
-    } else {
-        "unknown".to_string()
-    }
 }
 
 fn extract_symbol_from_payload(payload: Option<&Value>) -> Option<String> {
@@ -268,9 +249,10 @@ fn extract_symbol_from_text(text: &str) -> Option<String> {
 }
 
 fn extract_subject_from_result(result: &str) -> Option<String> {
-    let stock_re =
-        Regex::new(r"\[(?:SH|SZ)?\d{6}\]\s*([^\s\[]+?)\s+(?:现价|今开|昨收|涨跌幅|最高|最低|成交量|日期)")
-            .ok()?;
+    let stock_re = Regex::new(
+        r"\[(?:SH|SZ)?\d{6}\]\s*([^\s\[]+?)\s+(?:现价|今开|昨收|涨跌幅|最高|最低|成交量|日期)",
+    )
+    .ok()?;
     if let Some(subject) = stock_re
         .captures(result)
         .and_then(|caps| caps.get(1))
@@ -282,50 +264,14 @@ fn extract_subject_from_result(result: &str) -> Option<String> {
     None
 }
 
-fn extract_subject_from_request(request: &str) -> Option<String> {
-    let trimmed = request.trim();
-    let markers = ["查询", "分析", "看看", "查看", "帮我看", "帮我查"];
-    let suffixes = [
-        "今天", "今日", "涨跌", "行情", "走势", "情况", "后面", "后续", "现在", "当前", "一下",
-    ];
-    for marker in markers {
-        if let Some(idx) = trimmed.find(marker) {
-            let mut candidate = trimmed[idx + marker.len()..].trim().to_string();
-            for suffix in suffixes {
-                if let Some(end) = candidate.find(suffix) {
-                    candidate = candidate[..end].trim().to_string();
-                    break;
-                }
-            }
-            if !candidate.is_empty() && candidate.chars().count() <= 16 {
-                return Some(candidate);
-            }
-        }
-    }
-    None
-}
-
-fn infer_domain(
-    skill: &str,
-    symbol: Option<&str>,
-    subject: Option<&str>,
-    request: &str,
-    result: &str,
-) -> String {
+fn infer_domain(skill: &str, symbol: Option<&str>) -> String {
     let skill_lower = skill.to_ascii_lowercase();
-    let combined = format!("{request}\n{result}").to_ascii_lowercase();
     if skill_lower.contains("crypto")
         || symbol.is_some_and(|v| v.ends_with("USDT") || v.ends_with("USD"))
-        || combined.contains("btcusdt")
-        || combined.contains("ethusdt")
     {
         "crypto".to_string()
     } else if skill_lower.contains("stock")
         || skill_lower.contains("a_stock")
-        || subject.is_some_and(|v| v.contains('股'))
-        || combined.contains("a股")
-        || combined.contains("上证")
-        || combined.contains("深证")
         || symbol.is_some_and(|v| v.len() == 6 && v.chars().all(|ch| ch.is_ascii_digit()))
     {
         "cn_stock".to_string()
@@ -372,21 +318,7 @@ fn task_result_summary(result_json: &str) -> String {
 }
 
 fn sanitize_result_summary(text: &str) -> String {
-    let lower = text.to_ascii_lowercase();
-    let refusal_markers = [
-        "no code generation",
-        "all executable code is forbidden",
-        "不能提供可执行代码",
-        "禁止生成任何可执行代码",
-        "当前策略明确禁止",
-        "不提供java代码示例",
-        "不提供可执行的java",
-    ];
-    if refusal_markers.iter().any(|m| lower.contains(m)) {
-        "<assistant policy-style refusal omitted from routing context>".to_string()
-    } else {
-        text.to_string()
-    }
+    text.to_string()
 }
 
 fn truncate_snippet(text: &str, max_chars: usize) -> String {

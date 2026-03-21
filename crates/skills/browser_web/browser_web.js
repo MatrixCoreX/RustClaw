@@ -12,7 +12,8 @@ const DEFAULT_MIN_CONTENT_CHARS = 200;
 const DEFAULT_MAX_TEXT_CHARS = 12000;
 const DEFAULT_WAIT_MAP_PATH = path.join(process.cwd(), 'configs', 'browser_web_wait_map.json');
 const DEFAULT_SYSTEM_CHROMIUM_PATHS = ['/usr/bin/chromium', '/usr/bin/chromium-browser'];
-const DEFAULT_CAPTURE_ROOT = path.join(process.cwd(), 'data', 'web_capture');
+const DEFAULT_CAPTURE_ROOT = path.join(process.cwd(), 'skills_output');
+const DEFAULT_SCREENSHOT_ROOT = path.join(process.cwd(), 'skills_output', 'browser_web', 'screenshots');
 const DEFAULT_CHUNK_CHARS = 3000;
 const DEFAULT_MAX_CAPTURE_IMAGES = 12;
 const DEFAULT_IMAGE_FETCH_TIMEOUT_MS = 15000;
@@ -530,9 +531,34 @@ async function extractPage(page, url, waitUntil, options = {}) {
             })
             .filter((x) => /^https?:\/\//i.test(x.src));
 
+        const fallbackTitle = norm(
+            title
+                || (document.querySelector('meta[property="og:title"]')?.getAttribute('content') || '')
+                || (document.querySelector('meta[name="twitter:title"]')?.getAttribute('content') || '')
+                || (document.querySelector('h1')?.innerText || '')
+        );
+
+        const fallbackDescription = norm(
+            (document.querySelector('meta[name="description"]')?.getAttribute('content') || '')
+            || (document.querySelector('meta[property="og:description"]')?.getAttribute('content') || '')
+            || (document.querySelector('meta[name="twitter:description"]')?.getAttribute('content') || '')
+        );
+
+        const fallbackNodes = Array.from(
+            document.querySelectorAll('h1, h2, h3, p, li, blockquote, pre, code, [role="heading"]')
+        ).slice(0, 160);
+        const fallbackBody = norm(
+            fallbackNodes
+                .map((node) => (node && typeof node.innerText === 'string' ? node.innerText : ''))
+                .join('\n')
+        );
+        const fallbackText = norm([fallbackTitle, fallbackDescription, fallbackBody].filter(Boolean).join('\n'));
+
         return {
             title,
             text: useMain ? bestText : bodyText,
+            fallback_title: fallbackTitle,
+            fallback_text: fallbackText,
             image_candidates: imageCandidates,
             extraction_trace: {
                 used_main: useMain,
@@ -540,6 +566,7 @@ async function extractPage(page, url, waitUntil, options = {}) {
                 selector_diagnostics: selectorDiagnostics,
                 body_chars: bodyChars,
                 selected_chars: useMain ? bestChars : bodyChars,
+                fallback_chars: fallbackText.length,
             },
         };
     });
@@ -548,9 +575,21 @@ async function extractPage(page, url, waitUntil, options = {}) {
     const rawText = normalizeWhitespace(extracted.text || '');
     const contentMode = options.contentMode === 'raw' ? 'raw' : 'clean';
     const cleaned = contentMode === 'raw' ? rawText : sanitizeExtractedText(rawText);
-    const finalText = truncateText(cleaned, options.maxTextChars || DEFAULT_MAX_TEXT_CHARS);
+    let finalText = truncateText(cleaned, options.maxTextChars || DEFAULT_MAX_TEXT_CHARS);
+    let finalTitle = normalizeWhitespace(extracted.title || extracted.fallback_title || '');
 
-    if (detectBotBlock(extracted.title, finalText)) {
+    const fallbackRaw = normalizeWhitespace(extracted.fallback_text || '');
+    const fallbackClean = contentMode === 'raw' ? fallbackRaw : sanitizeExtractedText(fallbackRaw);
+    const fallbackText = truncateText(fallbackClean, options.maxTextChars || DEFAULT_MAX_TEXT_CHARS);
+
+    if ((!finalTitle || finalText.length < 80) && fallbackText.length > finalText.length) {
+        finalText = fallbackText;
+    }
+    if (!finalTitle) {
+        finalTitle = parseDomain(finalUrl || url);
+    }
+
+    if (detectBotBlock(finalTitle, finalText)) {
         throw new SkillError('BOT_BLOCKED', 'page appears blocked by anti-bot challenge', {
             nav_trace: nav.trace,
             final_url: finalUrl,
@@ -558,12 +597,13 @@ async function extractPage(page, url, waitUntil, options = {}) {
     }
 
     const minChars = options.minContentChars || DEFAULT_MIN_CONTENT_CHARS;
-    if (!normalizeWhitespace(extracted.title) || finalText.length < minChars) {
+    if (finalText.length < minChars) {
         const code = extracted.extraction_trace && extracted.extraction_trace.used_main ? 'EMPTY_CONTENT' : 'SELECTOR_MISS';
         throw new SkillError(code, `page readability below threshold (title/text) with ${finalText.length} chars`, {
             nav_trace: nav.trace,
             extraction_trace: extracted.extraction_trace,
             final_url: finalUrl,
+            min_content_chars: minChars,
         });
     }
 
@@ -577,7 +617,7 @@ async function extractPage(page, url, waitUntil, options = {}) {
     return {
         url,
         final_url: finalUrl,
-        title: normalizeWhitespace(extracted.title),
+        title: finalTitle,
         text: finalText,
         content_excerpt: buildExcerpt(finalText),
         source: parseDomain(finalUrl || url),
@@ -632,7 +672,7 @@ async function openExtract(input) {
     });
     const effectiveScreenshotDir = screenshotDir
         ? (path.isAbsolute(screenshotDir) ? screenshotDir : path.join(process.cwd(), screenshotDir))
-        : (capture.enabled ? capture.dirs.images : path.join(process.cwd(), 'image', 'browser_web'));
+        : (capture.enabled ? capture.dirs.images : DEFAULT_SCREENSHOT_ROOT);
     const { browser, context, runtimeCheck, executablePath } = await createBrowserContext();
     const items = [];
 

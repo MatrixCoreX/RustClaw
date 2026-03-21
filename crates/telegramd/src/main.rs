@@ -521,8 +521,9 @@ async fn main() -> anyhow::Result<()> {
         .timeout(Duration::from_secs(config.server.request_timeout_seconds))
         .build()
         .context("build reqwest client failed")?;
-    let voice_mode_intent_aliases =
-        Arc::new(load_voice_mode_intent_aliases(VOICE_MODE_INTENT_ALIASES_PATH));
+    let voice_mode_intent_aliases = Arc::new(load_voice_mode_intent_aliases(
+        VOICE_MODE_INTENT_ALIASES_PATH,
+    ));
     let workspace_root = workspace_root();
     let prompt_vendor =
         prompt_vendor_name_from_selected_vendor(config.llm.selected_vendor.as_deref());
@@ -677,7 +678,14 @@ fn telegram_bot_status_file_path(workspace_root: &Path, bot_name: &str) -> PathB
     workspace_root
         .join("run")
         .join("telegram-bot-status")
-        .join(format!("{}.json", if safe_name.is_empty() { "bot" } else { &safe_name }))
+        .join(format!(
+            "{}.json",
+            if safe_name.is_empty() {
+                "bot"
+            } else {
+                &safe_name
+            }
+        ))
 }
 
 fn gateway_instance_status_file_path(workspace_root: &Path, kind: &str, name: &str) -> PathBuf {
@@ -688,8 +696,16 @@ fn gateway_instance_status_file_path(workspace_root: &Path, kind: &str, name: &s
         .join("gateway-instance-status")
         .join(format!(
             "{}__{}.json",
-            if safe_kind.is_empty() { "instance" } else { &safe_kind },
-            if safe_name.is_empty() { "primary" } else { &safe_name }
+            if safe_kind.is_empty() {
+                "instance"
+            } else {
+                &safe_kind
+            },
+            if safe_name.is_empty() {
+                "primary"
+            } else {
+                &safe_name
+            }
         ))
 }
 
@@ -710,7 +726,11 @@ async fn write_bot_runtime_status(path: &Path, status: &TelegramBotRuntimeStatus
         return;
     };
     if let Err(err) = tokio::fs::create_dir_all(parent).await {
-        warn!("create telegram bot status dir failed: path={} err={}", parent.display(), err);
+        warn!(
+            "create telegram bot status dir failed: path={} err={}",
+            parent.display(),
+            err
+        );
         return;
     }
     let bytes = match serde_json::to_vec(status) {
@@ -800,16 +820,10 @@ async fn write_runtime_statuses(
 
 async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
     let bot = Bot::new(state.bot_token.clone());
-    write_runtime_statuses(
-        &state,
-        false,
-        "starting",
-        Some(unix_ts() as i64),
-        None,
-    )
-    .await;
+    write_runtime_statuses(&state, false, "starting", Some(unix_ts() as i64), None).await;
     let mut startup_error: Option<String> = None;
-    if let Err(err) = register_telegram_commands_and_menu(&state.bot_token, state.i18n.as_ref()).await
+    if let Err(err) =
+        register_telegram_commands_and_menu(&state.bot_token, state.i18n.as_ref()).await
     {
         warn!(
             "register Telegram menu failed: bot_name={} err={}",
@@ -817,7 +831,10 @@ async fn run_telegram_bot_runtime(state: BotState) -> anyhow::Result<()> {
         );
         startup_error = Some(err.to_string());
     } else {
-        info!("registered Telegram menu commands: bot_name={}", state.bot_name);
+        info!(
+            "registered Telegram menu commands: bot_name={}",
+            state.bot_name
+        );
     }
 
     let mut allowlist_list: Vec<i64> = state.allowlist.iter().copied().collect();
@@ -997,9 +1014,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         .from()
         .map(|u| i64::try_from(u.id.0).unwrap_or_default())
         .unwrap_or_default();
-    let platform_username = msg
-        .from()
-        .and_then(|u| u.username.clone());
+    let platform_username = msg.from().and_then(|u| u.username.clone());
     let platform_chat_id = msg.chat.id.0;
     let text = msg.text().unwrap_or_default();
     info!(
@@ -1113,9 +1128,12 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
 
     if text.starts_with("/rustclaw") || text.starts_with("/openclaw") {
         if !is_admin {
-            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.openclaw_admin_only"))
-                .await
-                .context("send /rustclaw unauthorized failed")?;
+            bot.send_message(
+                msg.chat.id,
+                state.i18n.t("telegram.msg.openclaw_admin_only"),
+            )
+            .await
+            .context("send /rustclaw unauthorized failed")?;
             return Ok(());
         }
         let state_for_cmd = state.clone();
@@ -1359,9 +1377,12 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         let raw = text.strip_prefix("/crypto").unwrap_or_default().trim();
         if raw.to_ascii_lowercase().starts_with("add ") {
             if !is_admin {
-                bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.cryptoapi_admin_only"))
-                    .await
-                    .context("send /crypto add unauthorized failed")?;
+                bot.send_message(
+                    msg.chat.id,
+                    state.i18n.t("telegram.msg.cryptoapi_admin_only"),
+                )
+                .await
+                .context("send /crypto add unauthorized failed")?;
                 return Ok(());
             }
             let Some(identity) = bound_identity.as_ref() else {
@@ -1554,9 +1575,12 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             return Ok(());
         }
         if state.sendfile_admin_only && !is_admin {
-            bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.sendfile_admin_only"))
-                .await
-                .context("send /sendfile admin-only rejection failed")?;
+            bot.send_message(
+                msg.chat.id,
+                state.i18n.t("telegram.msg.sendfile_admin_only"),
+            )
+            .await
+            .context("send /sendfile admin-only rejection failed")?;
             return Ok(());
         }
         let path = normalize_path_token(raw);
@@ -2036,8 +2060,7 @@ async fn handle_audio_message(
                 {
                     Ok(tts_answer) => {
                         for msg_text in tts_answer {
-                            let _ =
-                                send_text_or_image(bot, state, msg.chat.id, &msg_text).await;
+                            let _ = send_text_or_image(bot, state, msg.chat.id, &msg_text).await;
                         }
                     }
                     Err(err) => {
@@ -2509,6 +2532,9 @@ fn telegram_text_payload(text: &str) -> (String, Option<ParseMode>) {
         );
     }
     let normalized = normalize_markdown_heading_markers(text);
+    if let Some(structured_html) = render_structured_message_html(&normalized) {
+        return (structured_html, Some(ParseMode::Html));
+    }
     if let Some(inline_html) = render_inline_code_html(&normalized) {
         return (inline_html, Some(ParseMode::Html));
     }
@@ -2611,6 +2637,51 @@ fn render_inline_code_html(text: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn render_structured_message_html(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || has_delivery_prefix(trimmed)
+        || trimmed.contains("```")
+        || trimmed.starts_with("<pre>")
+    {
+        return None;
+    }
+
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() < 2 {
+        return None;
+    }
+
+    let mut structured_score = 0usize;
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if split_bullet_marker(trimmed).is_some() {
+            structured_score += 1;
+            continue;
+        }
+        if parse_structured_key_value(trimmed).is_some() {
+            structured_score += 1;
+            continue;
+        }
+        if looks_like_command_example_line(trimmed) || looks_like_section_header_line(trimmed) {
+            structured_score += 1;
+        }
+    }
+
+    if structured_score < 2 {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(lines.len());
+    for line in lines {
+        out.push(render_structured_line_html(line));
+    }
+    Some(out.join("\n"))
 }
 
 fn normalize_markdown_heading_markers(text: &str) -> String {
@@ -2725,6 +2796,121 @@ fn looks_like_heading_text(input: &str) -> bool {
     len > 0 && len <= 80
 }
 
+fn render_structured_line_html(line: &str) -> String {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if looks_like_command_example_line(trimmed) {
+        return format!("<code>{}</code>", escape_telegram_html(trimmed));
+    }
+
+    if let Some((marker, rest)) = split_bullet_marker(trimmed) {
+        if looks_like_command_example_line(rest) {
+            return format!(
+                "{} <code>{}</code>",
+                escape_telegram_html(marker),
+                escape_telegram_html(rest)
+            );
+        }
+        if let Some((key, sep, value)) = parse_structured_key_value(rest) {
+            return format!(
+                "{} <b>{}{}</b> {}",
+                escape_telegram_html(marker),
+                escape_telegram_html(key),
+                escape_telegram_html(sep),
+                render_inline_copyable_fragment_html(value)
+            );
+        }
+        return format!(
+            "{} {}",
+            escape_telegram_html(marker),
+            render_inline_copyable_fragment_html(rest)
+        );
+    }
+
+    if let Some((key, sep, value)) = parse_structured_key_value(trimmed) {
+        return format!(
+            "<b>{}{}</b> {}",
+            escape_telegram_html(key),
+            escape_telegram_html(sep),
+            render_inline_copyable_fragment_html(value)
+        );
+    }
+
+    if looks_like_section_header_line(trimmed) {
+        return format!("<b>{}</b>", escape_telegram_html(trimmed));
+    }
+
+    render_inline_copyable_fragment_html(trimmed)
+}
+
+fn render_inline_copyable_fragment_html(text: &str) -> String {
+    if let Some(rendered) = render_inline_code_html(text) {
+        return rendered;
+    }
+    if let Some(rendered) = render_copyable_tokens_html(text) {
+        return rendered;
+    }
+    escape_telegram_html(text)
+}
+
+fn split_bullet_marker(input: &str) -> Option<(&str, &str)> {
+    for marker in ["- ", "* ", "+ ", "• "] {
+        if let Some(rest) = input.strip_prefix(marker) {
+            return Some((marker.trim_end(), rest.trim_start()));
+        }
+    }
+
+    let digit_count = input.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digit_count > 0 {
+        let after_digits = &input[digit_count..];
+        if let Some(rest) = after_digits.strip_prefix(". ") {
+            return Some((&input[..digit_count + 1], rest.trim_start()));
+        }
+        if let Some(rest) = after_digits.strip_prefix(") ") {
+            return Some((&input[..digit_count + 1], rest.trim_start()));
+        }
+    }
+
+    None
+}
+
+fn parse_structured_key_value(input: &str) -> Option<(&str, &str, &str)> {
+    for sep in ["：", ": ", "=", "＝"] {
+        if let Some((left, right)) = input.split_once(sep) {
+            let key = left.trim();
+            let value = right.trim();
+            if key.is_empty() || value.is_empty() {
+                continue;
+            }
+            let key_len = key.chars().count();
+            if key_len > 36 || key.contains('\n') || value.contains('\n') {
+                continue;
+            }
+            return Some((key, sep, value));
+        }
+    }
+    None
+}
+
+fn looks_like_command_example_line(input: &str) -> bool {
+    input.starts_with('/')
+        || input.starts_with("示例：/")
+        || input.starts_with("example: /")
+        || input.starts_with("Example: /")
+}
+
+fn looks_like_section_header_line(input: &str) -> bool {
+    let len = input.chars().count();
+    len > 0
+        && len <= 48
+        && !input.contains('\n')
+        && (input.ends_with('：') || input.ends_with(':'))
+        && parse_structured_key_value(input).is_none()
+}
+
 fn render_copyable_tokens_html(text: &str) -> Option<String> {
     if text.trim().is_empty()
         || has_delivery_prefix(text.trim())
@@ -2816,18 +3002,43 @@ fn split_token_affixes(token: &str) -> (&str, &str, &str) {
     } else {
         token.len()
     };
-    (&token[..core_start], &token[core_start..core_end], &token[core_end..])
+    (
+        &token[..core_start],
+        &token[core_start..core_end],
+        &token[core_end..],
+    )
 }
 
 fn is_token_wrapper_prefix(ch: char) -> bool {
-    matches!(ch, '"' | '\'' | '`' | '(' | '[' | '{' | '<' | '（' | '【' | '《')
+    matches!(
+        ch,
+        '"' | '\'' | '`' | '(' | '[' | '{' | '<' | '（' | '【' | '《'
+    )
 }
 
 fn is_token_wrapper_suffix(ch: char) -> bool {
     matches!(
         ch,
-        '"' | '\'' | '`' | ')' | ']' | '}' | '>' | ',' | ';' | '!' | '?' | ':' | '，' | '。'
-            | '；' | '！' | '？' | '：' | '）' | '】' | '》'
+        '"' | '\''
+            | '`'
+            | ')'
+            | ']'
+            | '}'
+            | '>'
+            | ','
+            | ';'
+            | '!'
+            | '?'
+            | ':'
+            | '，'
+            | '。'
+            | '；'
+            | '！'
+            | '？'
+            | '：'
+            | '）'
+            | '】'
+            | '》'
     )
 }
 
@@ -2901,7 +3112,12 @@ fn looks_like_general_command_token(core: &str) -> bool {
     if lower.starts_with("--") && lower.len() > 2 {
         return true;
     }
-    if lower.starts_with('-') && lower.len() > 2 && lower[1..].chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if lower.starts_with('-')
+        && lower.len() > 2
+        && lower[1..]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
         return true;
     }
     matches!(
@@ -3633,10 +3849,9 @@ fn spawn_task_result_delivery(
                                 answer.len(),
                                 text_preview_for_log(&answer, 160)
                             );
-                            let _ = send_success_message_for_telegram(
-                                &bot, &state, chat_id, &answer,
-                            )
-                            .await;
+                            let _ =
+                                send_success_message_for_telegram(&bot, &state, chat_id, &answer)
+                                    .await;
                         }
                         break;
                     }
@@ -3794,7 +4009,8 @@ fn write_subtask_body_to_temp_file(header: &str, body: &str) -> anyhow::Result<S
         .as_millis();
     let sanitized = sanitize_filename_fragment(header);
     let path = std::env::temp_dir().join(format!("rustclaw-{sanitized}-{millis}.txt"));
-    fs::write(&path, body).with_context(|| format!("write subtask temp file failed: {}", path.display()))?;
+    fs::write(&path, body)
+        .with_context(|| format!("write subtask temp file failed: {}", path.display()))?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -3878,7 +4094,6 @@ fn task_success_messages_from_offset(
     );
     vec![text]
 }
-
 
 fn task_progress_messages(task: &TaskQueryResponse) -> Vec<String> {
     let out = task
@@ -4949,7 +5164,10 @@ mod telegram_text_payload_tests {
    🧾 Summary:
    From theverge.com.
    🔗 https://example.com/b"#;
-        assert!(!payload_uses_code_block(text), "新闻列表不应被包成 <pre><code>");
+        assert!(
+            !payload_uses_code_block(text),
+            "新闻列表不应被包成 <pre><code>"
+        );
     }
 
     #[test]
@@ -4959,14 +5177,20 @@ mod telegram_text_payload_tests {
    From host.
    Topic: Other.
    🔗 https://link"#;
-        assert!(!looks_like_multiline_code(text), "RSS 摘要不应被判成 multiline code");
+        assert!(
+            !looks_like_multiline_code(text),
+            "RSS 摘要不应被判成 multiline code"
+        );
     }
 
     #[test]
     fn shell_command_block_still_wrapped_as_code() {
         let text = r#"$ cargo build --release
 $ ./target/release/bin"#;
-        assert!(payload_uses_code_block(text), "真正的 shell 命令块仍应包成 code block");
+        assert!(
+            payload_uses_code_block(text),
+            "真正的 shell 命令块仍应包成 code block"
+        );
     }
 
     #[test]
@@ -4976,7 +5200,10 @@ fn main() {
     println!("hello");
 }
 ```"#;
-        assert!(payload_uses_code_block(text), "真正的 fenced code block 仍应包成 code block");
+        assert!(
+            payload_uses_code_block(text),
+            "真正的 fenced code block 仍应包成 code block"
+        );
     }
 
     #[test]
@@ -4984,12 +5211,17 @@ fn main() {
         let text = r#"这是一段普通自然语言多行摘要。
 第二行说明。
 第三行。"#;
-        assert!(!payload_uses_code_block(text), "普通自然语言多行摘要应按普通文本发送");
+        assert!(
+            !payload_uses_code_block(text),
+            "普通自然语言多行摘要应按普通文本发送"
+        );
     }
 
     #[test]
     fn should_never_format_as_code_detects_rss_header() {
-        assert!(should_never_format_as_code("sources_ok=2 sources_failed=1 items=3\n1. a\n2. b"));
+        assert!(should_never_format_as_code(
+            "sources_ok=2 sources_failed=1 items=3\n1. a\n2. b"
+        ));
     }
 
     #[test]

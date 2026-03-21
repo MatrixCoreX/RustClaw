@@ -1,0 +1,4 @@
+index=9
+chat_id=1985996999
+task_id=26b2a987-35cd-4b81-8698-507fd604f7d2
+prompt=检查仓库里有没有 rustclaw.service；如果有，给路径并顺手解释它是干什么的

@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=/dev/null
-source "${ROOT_DIR}/document/regression_llm_first/lib.sh"
+source "${ROOT_DIR}/scripts/lib.sh"
 
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-1}"
 MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-180}"

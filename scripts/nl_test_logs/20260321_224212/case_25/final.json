@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"d4e1e59a-a5f4-416d-8c6e-7f5d5ccd9fc4","status":"succeeded","result_json":{"messages":["{\n  \"dependencies\": {\n    \"@xdevplatform/xurl\": \"^1.0.3\",\n    \"playwright\": \"^1.58.2\"\n  }\n}"],"text":"{\n  \"dependencies\": {\n    \"@xdevplatform/xurl\": \"^1.0.3\",\n    \"playwright\": \"^1.58.2\"\n  }\n}"},"error_text":null},"error":null}

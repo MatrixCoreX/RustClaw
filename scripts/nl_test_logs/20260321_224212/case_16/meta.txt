@@ -1,0 +1,4 @@
+index=16
+chat_id=1985997006
+task_id=4fb21834-ec10-4f3c-a7eb-bda038eebab7
+prompt=列出 logs 目录下的前 10 个文件名，不要读内容

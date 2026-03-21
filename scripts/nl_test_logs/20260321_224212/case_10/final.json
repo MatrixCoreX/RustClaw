@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"d919c0bd-3364-40b4-968c-5cbcb7b89283","status":"succeeded","result_json":{"text":"这个仓库是一个叫 **clawd** 的后台服务程序（“d”代表 daemon，即持续在后台运行的程序）。\n\n它的作用是：\n- 在服务器或电脑上安静地运行\n- 接收外部请求或监控特定事件\n- 自动执行预定的任务\n\n简单说，就是一个“隐形助手”，在后台待命，随时准备响应和处理工作。如果需要知道更具体的功能，可以查看项目里的 README 文件。"},"error_text":null},"error":null}

@@ -1,0 +1,4 @@
+index=37
+chat_id=1985997027
+task_id=0a8e1689-c22c-4ae9-99f2-50e483c1098c
+prompt=把 document/definitely_missing_shell_001.sh 发给我

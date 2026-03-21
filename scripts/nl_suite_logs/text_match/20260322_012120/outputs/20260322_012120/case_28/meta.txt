@@ -1,0 +1,4 @@
+index=28
+chat_id=1985997018
+task_id=ac8e2377-b1c0-4d10-9449-23059cf3fd90
+prompt=执行 hostname，只给结果不要解释

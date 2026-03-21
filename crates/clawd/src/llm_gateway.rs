@@ -288,19 +288,188 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
     prompt: &str,
     prompt_file: &str,
 ) -> Result<String, String> {
-    super::run_llm_with_fallback_with_prompt_file(state, task, prompt, prompt_file).await
+    let _prompt_debug_enabled = state.routing.debug_log_prompt;
+    let task_providers = state.task_llm_providers(task);
+    if task_providers.is_empty() {
+        return Err("No available LLM provider configured".to_string());
+    }
+
+    let mut last_error = "unknown llm error".to_string();
+
+    for provider in &task_providers {
+        let vendor = crate::llm_vendor_name(provider);
+        let model = provider.config.model.as_str();
+        let model_kind = crate::llm_model_kind(provider);
+        let provider_name = format!("{}:{}", provider.config.name, provider.config.model);
+        info!(
+            "{} [LLM_CALL] stage=request task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={}",
+            crate::highlight_tag("llm"),
+            task.task_id,
+            task.user_id,
+            task.chat_id,
+            vendor,
+            model,
+            model_kind,
+            provider_name,
+            prompt_file
+        );
+
+        match crate::call_provider_with_retry(provider.clone(), prompt).await {
+            Ok(output) => {
+                let (cleaned_text, sanitized) =
+                    crate::maybe_sanitize_llm_text_output(vendor, &output.text);
+                if sanitized {
+                    warn!(
+                        "{} [LLM_CALL] stage=cleanup task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} note=removed_think_block",
+                        crate::highlight_tag("llm"),
+                        task.task_id,
+                        task.user_id,
+                        task.chat_id,
+                        vendor,
+                        model,
+                        model_kind,
+                        provider_name,
+                        prompt_file
+                    );
+                }
+                info!(
+                    "{} [LLM_CALL] stage=response task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} response={}",
+                    crate::highlight_tag("llm"),
+                    task.task_id,
+                    task.user_id,
+                    task.chat_id,
+                    vendor,
+                    model,
+                    model_kind,
+                    provider_name,
+                    prompt_file,
+                    crate::truncate_for_log(&cleaned_text)
+                );
+                crate::append_model_io_log(
+                    state,
+                    task,
+                    provider,
+                    "ok",
+                    prompt_file,
+                    prompt,
+                    &output.request_payload,
+                    Some(&output.raw_response),
+                    Some(&cleaned_text),
+                    output.usage.as_ref(),
+                    sanitized,
+                    None,
+                );
+                let _ = crate::insert_audit_log(
+                    state,
+                    Some(task.user_id),
+                    "run_llm",
+                    Some(
+                        &serde_json::json!({
+                            "task_id": task.task_id,
+                            "chat_id": task.chat_id,
+                            "vendor": vendor,
+                            "provider": provider.config.name,
+                            "model": provider.config.model,
+                            "model_kind": model_kind,
+                            "status": "ok"
+                        })
+                        .to_string(),
+                    ),
+                    None,
+                );
+                return Ok(cleaned_text);
+            }
+            Err(err) => {
+                last_error = format!("provider={provider_name} failed: {err}");
+                warn!(
+                    "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} error={}",
+                    crate::highlight_tag("llm"),
+                    task.task_id,
+                    task.user_id,
+                    task.chat_id,
+                    vendor,
+                    model,
+                    model_kind,
+                    provider_name,
+                    prompt_file,
+                    crate::truncate_for_log(&last_error)
+                );
+                crate::append_model_io_log(
+                    state,
+                    task,
+                    provider,
+                    "failed",
+                    prompt_file,
+                    prompt,
+                    &err.request_payload,
+                    err.raw_response.as_deref(),
+                    None,
+                    err.usage.as_ref(),
+                    false,
+                    Some(&err.message),
+                );
+                let _ = crate::insert_audit_log(
+                    state,
+                    Some(task.user_id),
+                    "run_llm",
+                    Some(
+                        &serde_json::json!({
+                            "task_id": task.task_id,
+                            "chat_id": task.chat_id,
+                            "vendor": vendor,
+                            "provider": provider.config.name,
+                            "model": provider.config.model,
+                            "model_kind": model_kind,
+                            "status": "failed"
+                        })
+                        .to_string(),
+                    ),
+                    Some(&last_error),
+                );
+                warn!("{last_error}");
+            }
+        }
+    }
+
+    Err(last_error)
 }
 
 pub(crate) fn selected_openai_api_key(state: &AppState, task: Option<&ClaimedTask>) -> String {
-    super::selected_openai_api_key_for_task(state, task)
+    let providers = task
+        .map(|task| state.task_llm_providers(task))
+        .unwrap_or_else(|| state.llm_providers.clone());
+    if let Some(p) = providers
+        .iter()
+        .find(|p| p.config.provider_type == "openai_compat")
+    {
+        return p.config.api_key.clone();
+    }
+    String::new()
 }
 
 pub(crate) fn selected_openai_base_url(state: &AppState, task: Option<&ClaimedTask>) -> String {
-    super::selected_openai_base_url_for_task(state, task)
+    let providers = task
+        .map(|task| state.task_llm_providers(task))
+        .unwrap_or_else(|| state.llm_providers.clone());
+    if let Some(p) = providers
+        .iter()
+        .find(|p| p.config.provider_type == "openai_compat")
+    {
+        return p.config.base_url.clone();
+    }
+    "https://api.openai.com/v1".to_string()
 }
 
 pub(crate) fn selected_openai_model(state: &AppState, task: Option<&ClaimedTask>) -> String {
-    super::selected_openai_model_for_task(state, task)
+    let providers = task
+        .map(|task| state.task_llm_providers(task))
+        .unwrap_or_else(|| state.llm_providers.clone());
+    providers
+        .iter()
+        .find(|p| p.config.provider_type == "openai_compat")
+        .map(|p| p.config.model.clone())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "gpt-4o-mini".to_string())
 }
 
 #[cfg(test)]

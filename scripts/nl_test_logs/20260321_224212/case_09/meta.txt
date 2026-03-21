@@ -1,0 +1,4 @@
+index=9
+chat_id=1985996999
+task_id=c0ff4e59-4dec-4663-8cb3-e7481940ec71
+prompt=写一个 hello world shell 脚本，保存成 document/hello_from_manual_test.sh，然后把文件发给我

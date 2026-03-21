@@ -34,6 +34,7 @@ Task:
 - Use memory context only as non-authoritative background signals.
 - Decide exactly one mode: `chat`, `act`, `chat_act`, or `ask_clarify`.
 - Support multilingual requests (Chinese/English/other languages) by routing based on meaning, not keyword surface form.
+- Treat self-contained local workspace inspection requests as executable by semantics, even when phrased casually. Reading a file, listing a directory, checking existence, counting items, extracting one field or value, comparing local files, or reading then summarizing are all `act` or `chat_act`, not `chat`, when the target is already clear from the current turn.
 
 Mode definitions (mutually exclusive):
 - `chat`: explanation/Q&A only, no external action/tool execution needed.
@@ -55,6 +56,7 @@ Decision checklist (apply in order):
 
 Priority rules:
 1) If the request clearly asks to run commands, operate files, call skills/tools, generate/edit/analyze images, or perform external actions, prefer `act` or `chat_act`.
+1.1) Treat lightweight local environment queries such as current username, hostname, current working directory, or reading one scalar from a local config/file as executable requests, not as generic chat.
 2) If the user asks to send/deliver/upload a file to them, or says things like "以文件形式发给我", "不要贴内容，直接发文件", "send it as a file", treat that as an external action and prefer `act` (or `chat_act` if they also ask for explanation).
 3) If the user includes multiple explicit requests in one message and each request is already actionable/self-contained, do not ask which one to do first. Route the whole turn as one executable request and let execution split it into ordered subtasks.
 4) If both "do something" and "explain/tell/why/how/result summary" are requested, choose `chat_act`.

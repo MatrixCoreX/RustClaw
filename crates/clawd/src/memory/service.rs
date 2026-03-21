@@ -1,5 +1,5 @@
-use crate::{AppState, ClaimedTask};
 use crate::memory::retrieval::{MemoryContextMode, RetrievedMemoryItem, StructuredMemoryContext};
+use crate::{AppState, ClaimedTask};
 
 pub(crate) struct PromptMemoryContext {
     pub(crate) prompt_with_memory: String,
@@ -71,14 +71,14 @@ pub(crate) fn recall_structured_memory_context(
     include_preferences: bool,
 ) -> StructuredMemoryContext {
     let long_term_summary = if include_long_term && state.memory.long_term_enabled {
-        crate::recall_long_term_summary(state, user_key, user_id, chat_id)
+        crate::memory::recall_long_term_summary(state, user_key, user_id, chat_id)
             .unwrap_or(None)
             .map(|s| crate::truncate_text(&s, state.memory.long_term_recall_max_chars.max(256)))
     } else {
         None
     };
     let preferences = if include_preferences {
-        crate::recall_user_preferences(
+        crate::memory::recall_user_preferences(
             state,
             user_key,
             user_id,
@@ -89,14 +89,15 @@ pub(crate) fn recall_structured_memory_context(
     } else {
         Vec::new()
     };
-    let recalled_recent = crate::recall_recent_memories(state, user_key, user_id, chat_id, recent_limit)
-        .unwrap_or_default();
-    let recalled_recent = crate::filter_memories_for_prompt_recall(
+    let recalled_recent =
+        crate::memory::recall_recent_memories(state, user_key, user_id, chat_id, recent_limit)
+            .unwrap_or_default();
+    let recalled_recent = crate::memory::filter_memories_for_prompt_recall(
         recalled_recent,
         state.memory.prefer_llm_assistant_memory,
     );
     let recalled_recent = if state.memory.recent_relevance_enabled {
-        crate::select_relevant_memories_for_prompt(
+        crate::memory::select_relevant_memories_for_prompt(
             recalled_recent,
             anchor_prompt,
             state.memory.recent_relevance_min_score.clamp(0.0, 1.0),
@@ -154,7 +155,7 @@ pub(crate) fn insert_memory(
     content: &str,
     max_chars: usize,
 ) -> anyhow::Result<()> {
-    crate::insert_memory(
+    crate::memory::insert_memory(
         state,
         user_id,
         chat_id,

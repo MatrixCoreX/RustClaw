@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=/dev/null
-source "${ROOT_DIR}/document/regression_llm_first/lib.sh"
+source "${ROOT_DIR}/scripts/lib.sh"
 
 DEFAULT_CASE_FILE="${SCRIPT_DIR}/regression_user_instruction_cases.txt"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-1}"
@@ -95,7 +95,7 @@ for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1
     suite, name, tags, prompt = parts
     if not suite or not name or not prompt:
         raise SystemExit(f"invalid case line {idx}: suite/name/prompt required")
-    print(f"{suite}\t{name}\t{tags}\t{prompt}")
+    print(f"{suite}\x1f{name}\x1f{tags}\x1f{prompt}")
 PY
 }
 
@@ -105,7 +105,7 @@ load_default_cases() {
     exit 2
   fi
   local suite name tags prompt
-  while IFS=$'\t' read -r suite name tags prompt; do
+  while IFS=$'\x1f' read -r suite name tags prompt; do
     add_case "$suite" "$name" "$tags" "$prompt"
   done < <(load_case_file "$DEFAULT_CASE_FILE")
 }
@@ -796,7 +796,7 @@ main() {
 
   if [[ -n "$case_file" ]]; then
     local suite name tags prompt
-    while IFS=$'\t' read -r suite name tags prompt; do
+    while IFS=$'\x1f' read -r suite name tags prompt; do
       add_case "$suite" "$name" "$tags" "$prompt"
     done < <(load_case_file "$case_file")
   fi

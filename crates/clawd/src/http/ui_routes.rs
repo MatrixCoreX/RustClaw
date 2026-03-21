@@ -2,9 +2,9 @@ use axum::extract::{Multipart, Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use rusqlite::OptionalExtension;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom};
@@ -14,13 +14,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 
 use super::super::{
-    bind_channel_identity, create_auth_key, current_rss_bytes, delete_auth_key_by_id,
-    exchange_credential_status_for_user_key, feishud_process_stats, larkd_process_stats,
-    list_auth_keys, mask_secret, oldest_running_task_age_seconds, reload_skill_views,
-    resolve_auth_identity_by_key, resolve_channel_binding_identity, task_count_by_status,
-    telegramd_process_stats, update_auth_key_by_id, upsert_exchange_credential_for_user_key,
-    wa_webd_process_stats, whatsappd_process_stats, ApiResponse, AppState, HealthResponse,
-    LocalInteractionContext, channel_gateway_process_stats,
+    bind_channel_identity, channel_gateway_process_stats, create_auth_key, current_rss_bytes,
+    delete_auth_key_by_id, exchange_credential_status_for_user_key, feishud_process_stats,
+    larkd_process_stats, list_auth_keys, mask_secret, oldest_running_task_age_seconds,
+    reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
+    task_count_by_status, telegramd_process_stats, update_auth_key_by_id,
+    upsert_exchange_credential_for_user_key, wa_webd_process_stats, whatsappd_process_stats,
+    ApiResponse, AppState, HealthResponse, LocalInteractionContext,
 };
 use claw_core::skill_registry::SkillKind;
 use claw_core::types::{
@@ -70,13 +70,15 @@ fn read_telegram_bot_statuses(
     configured_names
         .iter()
         .map(|name| {
-            by_name.remove(name).unwrap_or_else(|| TelegramBotRuntimeStatus {
-                name: name.clone(),
-                healthy: false,
-                status: "missing".to_string(),
-                last_heartbeat_ts: None,
-                last_error: None,
-            })
+            by_name
+                .remove(name)
+                .unwrap_or_else(|| TelegramBotRuntimeStatus {
+                    name: name.clone(),
+                    healthy: false,
+                    status: "missing".to_string(),
+                    last_heartbeat_ts: None,
+                    last_error: None,
+                })
         })
         .collect()
 }
@@ -169,31 +171,39 @@ fn telegram_bots_from_config(config: &claw_core::config::AppConfig) -> Vec<Teleg
             },
             allowlist: config.telegram.allowlist.clone(),
             access_mode: normalize_telegram_access_mode(&config.telegram.access_mode),
-            allowed_telegram_usernames: normalize_telegram_username_list(&config.telegram.allowed_usernames),
+            allowed_telegram_usernames: normalize_telegram_username_list(
+                &config.telegram.allowed_usernames,
+            ),
             is_primary: true,
         });
     }
-    bots.extend(config.telegram.bots.iter().map(|bot| TelegramBotConfigItem {
-        name: bot.name.clone(),
-        bot_token: bot.bot_token.clone(),
-        agent_id: if bot.agent_id.trim().is_empty() {
-            "main".to_string()
-        } else {
-            bot.agent_id.trim().to_string()
-        },
-        allowlist: bot.allowlist.clone(),
-        access_mode: if bot.access_mode.trim().is_empty() {
-            normalize_telegram_access_mode(&config.telegram.access_mode)
-        } else {
-            normalize_telegram_access_mode(&bot.access_mode)
-        },
-        allowed_telegram_usernames: if bot.allowed_usernames.is_empty() {
-            normalize_telegram_username_list(&config.telegram.allowed_usernames)
-        } else {
-            normalize_telegram_username_list(&bot.allowed_usernames)
-        },
-        is_primary: false,
-    }));
+    bots.extend(
+        config
+            .telegram
+            .bots
+            .iter()
+            .map(|bot| TelegramBotConfigItem {
+                name: bot.name.clone(),
+                bot_token: bot.bot_token.clone(),
+                agent_id: if bot.agent_id.trim().is_empty() {
+                    "main".to_string()
+                } else {
+                    bot.agent_id.trim().to_string()
+                },
+                allowlist: bot.allowlist.clone(),
+                access_mode: if bot.access_mode.trim().is_empty() {
+                    normalize_telegram_access_mode(&config.telegram.access_mode)
+                } else {
+                    normalize_telegram_access_mode(&bot.access_mode)
+                },
+                allowed_telegram_usernames: if bot.allowed_usernames.is_empty() {
+                    normalize_telegram_username_list(&config.telegram.allowed_usernames)
+                } else {
+                    normalize_telegram_username_list(&bot.allowed_usernames)
+                },
+                is_primary: false,
+            }),
+    );
     bots
 }
 
@@ -312,15 +322,19 @@ fn normalize_telegram_bot_items(
             bot.agent_id.trim().to_string()
         };
         if !known_agent_ids.contains(&agent_id) {
-            return Err(anyhow::anyhow!("unknown agent id for telegram bot {name}: {agent_id}"));
+            return Err(anyhow::anyhow!(
+                "unknown agent id for telegram bot {name}: {agent_id}"
+            ));
         }
         normalized.push(TelegramBotConfigItem {
             name,
             bot_token: bot.bot_token.trim().to_string(),
             agent_id,
-                allowlist: bot.allowlist.clone(),
+            allowlist: bot.allowlist.clone(),
             access_mode: normalize_telegram_access_mode(&bot.access_mode),
-            allowed_telegram_usernames: normalize_telegram_username_list(&bot.allowed_telegram_usernames),
+            allowed_telegram_usernames: normalize_telegram_username_list(
+                &bot.allowed_telegram_usernames,
+            ),
             is_primary,
         });
     }
@@ -405,7 +419,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_provider_keys).post(update_provider_keys),
         )
         .route("/admin/restart-clawd", post(restart_clawd))
-        .route("/admin/auth-keys", get(get_auth_keys).post(create_auth_key_handler))
+        .route(
+            "/admin/auth-keys",
+            get(get_auth_keys).post(create_auth_key_handler),
+        )
         .route(
             "/admin/auth-keys/:key_id",
             put(update_auth_key_handler).delete(delete_auth_key_handler),
@@ -446,16 +463,18 @@ async fn get_auth_keys(
         Ok(rows) => {
             let list: Vec<Value> = rows
                 .into_iter()
-                .map(|(key_id, user_key_masked, role, enabled, created_at, last_used_at)| {
-                    json!({
-                        "key_id": key_id,
-                        "user_key_masked": user_key_masked,
-                        "role": role,
-                        "enabled": enabled != 0,
-                        "created_at": created_at,
-                        "last_used_at": last_used_at,
-                    })
-                })
+                .map(
+                    |(key_id, user_key_masked, role, enabled, created_at, last_used_at)| {
+                        json!({
+                            "key_id": key_id,
+                            "user_key_masked": user_key_masked,
+                            "role": role,
+                            "enabled": enabled != 0,
+                            "created_at": created_at,
+                            "last_used_at": last_used_at,
+                        })
+                    },
+                )
                 .collect();
             (
                 StatusCode::OK,
@@ -898,7 +917,12 @@ async fn update_telegram_config(
     let primary = normalized.iter().find(|bot| bot.is_primary).cloned();
     telegram_table.insert(
         "bot_token".to_string(),
-        toml::Value::String(primary.as_ref().map(|bot| bot.bot_token.clone()).unwrap_or_default()),
+        toml::Value::String(
+            primary
+                .as_ref()
+                .map(|bot| bot.bot_token.clone())
+                .unwrap_or_default(),
+        ),
     );
     telegram_table.insert(
         "agent_id".to_string(),
@@ -955,7 +979,10 @@ async fn update_telegram_config(
                 "bot_token".to_string(),
                 toml::Value::String(bot.bot_token.clone()),
             );
-            table.insert("agent_id".to_string(), toml::Value::String(bot.agent_id.clone()));
+            table.insert(
+                "agent_id".to_string(),
+                toml::Value::String(bot.agent_id.clone()),
+            );
             table.insert(
                 "allowlist".to_string(),
                 toml::Value::Array(
@@ -1019,7 +1046,8 @@ async fn update_telegram_config(
                         table.insert(
                             "allowed_skills".to_string(),
                             toml::Value::Array(
-                                agent.allowed_skills
+                                agent
+                                    .allowed_skills
                                     .iter()
                                     .map(|skill| toml::Value::String(skill.clone()))
                                     .collect(),
@@ -1585,9 +1613,9 @@ fn summarize_usage_task(
         let chain_entry = usage_chain_entry_from_entry(entry);
         prompt_tokens += chain_entry.prompt_tokens.unwrap_or(0);
         completion_tokens += chain_entry.completion_tokens.unwrap_or(0);
-        total_tokens += chain_entry
-            .total_tokens
-            .unwrap_or_else(|| chain_entry.prompt_tokens.unwrap_or(0) + chain_entry.completion_tokens.unwrap_or(0));
+        total_tokens += chain_entry.total_tokens.unwrap_or_else(|| {
+            chain_entry.prompt_tokens.unwrap_or(0) + chain_entry.completion_tokens.unwrap_or(0)
+        });
         let replace = latest_entry
             .map(|current| entry.ts.unwrap_or(0) >= current.ts.unwrap_or(0))
             .unwrap_or(true);
@@ -1649,20 +1677,26 @@ fn usage_stats_add(stats: &mut UsageHistoryStats, record: &UsageHistoryRecordSum
     }
     stats.prompt_tokens += record.prompt_tokens.unwrap_or(0);
     stats.completion_tokens += record.completion_tokens.unwrap_or(0);
-    stats.total_tokens += record
-        .total_tokens
-        .unwrap_or_else(|| record.prompt_tokens.unwrap_or(0) + record.completion_tokens.unwrap_or(0));
+    stats.total_tokens += record.total_tokens.unwrap_or_else(|| {
+        record.prompt_tokens.unwrap_or(0) + record.completion_tokens.unwrap_or(0)
+    });
 }
 
 fn usage_channel_matches(query_channel: Option<&str>, record: &UsageHistoryRecordSummary) -> bool {
-    let Some(query_channel) = query_channel.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(query_channel) = query_channel
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return true;
     };
     record.channel.as_deref().unwrap_or_default() == query_channel
 }
 
 fn usage_status_matches(query_status: Option<&str>, record: &UsageHistoryRecordSummary) -> bool {
-    let Some(query_status) = query_status.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(query_status) = query_status
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return true;
     };
     match query_status {
@@ -1696,10 +1730,7 @@ fn usage_search_matches(query: Option<&str>, record: &UsageHistoryRecordSummary)
     haystack.contains(&query)
 }
 
-fn task_usage_meta(
-    state: &AppState,
-    task_id: &str,
-) -> anyhow::Result<Option<UsageTaskMeta>> {
+fn task_usage_meta(state: &AppState, task_id: &str) -> anyhow::Result<Option<UsageTaskMeta>> {
     let db = state
         .db
         .lock()
@@ -1933,8 +1964,16 @@ async fn usage_records(
     }
     matched_records.sort_by(|a, b| (b.ts.unwrap_or(0)).cmp(&a.ts.unwrap_or(0)));
     let total_records = matched_records.len();
-    let total_pages = if total_records == 0 { 0 } else { total_records.div_ceil(page_size) };
-    let safe_page = if total_pages == 0 { 1 } else { page.min(total_pages) };
+    let total_pages = if total_records == 0 {
+        0
+    } else {
+        total_records.div_ceil(page_size)
+    };
+    let safe_page = if total_pages == 0 {
+        1
+    } else {
+        page.min(total_pages)
+    };
     let start = (safe_page.saturating_sub(1)) * page_size;
     let records = matched_records
         .into_iter()
@@ -2101,19 +2140,21 @@ async fn task_debug_detail(
             }),
         );
     }
-    let Some((task_user_key, channel)) = (match task_access_meta_for_debug(&state, normalized_task_id) {
-        Ok(value) => value,
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read task owner failed: {err}")),
-                }),
-            );
-        }
-    }) else {
+    let Some((task_user_key, channel)) =
+        (match task_access_meta_for_debug(&state, normalized_task_id) {
+            Ok(value) => value,
+            Err(err) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!("read task owner failed: {err}")),
+                    }),
+                );
+            }
+        })
+    else {
         return (
             StatusCode::NOT_FOUND,
             Json(ApiResponse {
@@ -2724,7 +2765,8 @@ async fn health(
     let telegram_configured_bot_names = state.telegram_configured_bot_names.as_ref().clone();
     let telegram_bot_statuses =
         read_telegram_bot_statuses(&state.workspace_root, &telegram_configured_bot_names);
-    let mut gateway_instance_statuses_by_scope = read_gateway_instance_statuses(&state.workspace_root);
+    let mut gateway_instance_statuses_by_scope =
+        read_gateway_instance_statuses(&state.workspace_root);
     let whatsapp_cloud_gateway_healthy = gateway_instance_statuses_by_scope
         .get("whatsapp_cloud:primary")
         .map(|s| s.healthy);
@@ -2751,7 +2793,8 @@ async fn health(
     };
     let whatsappd_healthy = match whatsappd_process_count_raw {
         Some(count) if count > 0 => Some(true),
-        _ => whatsapp_cloud_gateway_healthy.or_else(|| whatsappd_process_count_raw.map(|count| count > 0)),
+        _ => whatsapp_cloud_gateway_healthy
+            .or_else(|| whatsappd_process_count_raw.map(|count| count > 0)),
     };
 
     let wa_webd_process_count = match wa_webd_process_count_raw {
@@ -2766,7 +2809,8 @@ async fn health(
     };
     let wa_webd_healthy = match wa_webd_process_count_raw {
         Some(count) if count > 0 => Some(true),
-        _ => whatsapp_web_gateway_healthy.or_else(|| wa_webd_process_count_raw.map(|count| count > 0)),
+        _ => whatsapp_web_gateway_healthy
+            .or_else(|| wa_webd_process_count_raw.map(|count| count > 0)),
     };
 
     let feishud_process_count = match feishud_process_count_raw {
@@ -3066,7 +3110,14 @@ async fn import_external_skill(
             );
         }
     };
-    finalize_imported_bundle(&state, &bundle_dir, &bundle_rel_dir, source, enabled, &skill_md)
+    finalize_imported_bundle(
+        &state,
+        &bundle_dir,
+        &bundle_rel_dir,
+        source,
+        enabled,
+        &skill_md,
+    )
 }
 
 async fn import_external_skill_upload(
@@ -3219,7 +3270,9 @@ async fn import_external_skill_upload(
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("uploaded bundle is missing readable SKILL.md: {err}")),
+                    error: Some(format!(
+                        "uploaded bundle is missing readable SKILL.md: {err}"
+                    )),
                 }),
             );
         }
@@ -3935,9 +3988,8 @@ async fn restart_clawd(
     }
     let workspace = state.workspace_root.to_string_lossy();
     let pid = std::process::id();
-    let script = format!(
-        "sleep 2; kill {pid} 2>/dev/null; sleep 1; cd {workspace} && ./start-clawd.sh"
-    );
+    let script =
+        format!("sleep 2; kill {pid} 2>/dev/null; sleep 1; cd {workspace} && ./start-clawd.sh");
     let mut cmd = StdCommand::new("nohup");
     cmd.arg("bash")
         .arg("-c")
@@ -4379,9 +4431,7 @@ fn render_imported_skill_prompt(plan: &ImportedSkillPlan, skill_md: &str) -> Str
             );
         }
         "local_shell_recipe" => {
-            out.push_str(
-                "- This skill runs shell recipes inside its bundle directory.\n",
-            );
+            out.push_str("- This skill runs shell recipes inside its bundle directory.\n");
             out.push_str(
                 "- Keep the command close to the examples shown in the original `SKILL.md`.\n",
             );
@@ -4478,7 +4528,8 @@ fn remove_managed_prompt_file(path: &Path) -> std::io::Result<bool> {
 }
 
 fn remove_runtime_skill_switch(raw: &str, state: &AppState, skill_name: &str) -> String {
-    let parsed = toml::from_str::<toml::Value>(raw).unwrap_or_else(|_| toml::Value::Table(Default::default()));
+    let parsed = toml::from_str::<toml::Value>(raw)
+        .unwrap_or_else(|_| toml::Value::Table(Default::default()));
     let mut switches = collect_skill_switches(&parsed, state);
     switches.remove(skill_name);
     let rendered = render_switches_inline_table(&switches);
@@ -5440,7 +5491,8 @@ async fn uninstall_external_skill(
             );
         }
     };
-    let (updated_registry, removed_from_registry) = remove_skill_registry_block(&registry_raw, &skill_name);
+    let (updated_registry, removed_from_registry) =
+        remove_skill_registry_block(&registry_raw, &skill_name);
     if !removed_from_registry {
         return (
             StatusCode::NOT_FOUND,

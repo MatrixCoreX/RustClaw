@@ -1,0 +1,4 @@
+index=26
+chat_id=1985997016
+task_id=ca7ceda6-0d01-44e2-8343-11bfffbe2d7c
+prompt=读取 Cargo.toml 的 package.name，只输出值
