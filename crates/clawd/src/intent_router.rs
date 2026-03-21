@@ -29,6 +29,9 @@ const CLARIFY_QUESTION_PROMPT_PATH: &str = "prompts/clarify_question_prompt.md";
 const INTENT_NORMALIZER_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/intent_normalizer_prompt.md");
 const INTENT_NORMALIZER_PROMPT_PATH: &str = "prompts/intent_normalizer_prompt.md";
+const RESUME_FOLLOWUP_INTENT_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/vendors/default/resume_followup_intent_prompt.md");
+const RESUME_FOLLOWUP_INTENT_PROMPT_PATH: &str = "prompts/resume_followup_intent_prompt.md";
 const ROUTING_POLICY_PERSONA_PROMPT: &str =
     "Neutral routing policy classifier. Ignore style/persona preferences and optimize for correct intent resolution, clarification, and guard decisions.";
 // --- End fallback-only constants ---
@@ -81,6 +84,21 @@ pub(crate) enum ResumeBehavior {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResumeFollowupDecision {
+    Resume,
+    Abandon,
+    Defer,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResumeFollowupIntent {
+    pub(crate) decision: ResumeFollowupDecision,
+    pub(crate) bind_resume_context: bool,
+    pub(crate) reason: String,
+    pub(crate) confidence: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScheduleKind {
     None,
     Create,
@@ -107,11 +125,31 @@ struct IntentNormalizerOut {
     mode: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ResumeFollowupIntentOut {
+    #[serde(default)]
+    decision: String,
+    #[serde(default)]
+    bind_resume_context: bool,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    confidence: f64,
+}
+
 fn parse_resume_behavior(s: &str) -> ResumeBehavior {
     match s.trim().to_ascii_lowercase().as_str() {
         "resume_execute" | "resume" => ResumeBehavior::ResumeExecute,
         "resume_discuss" | "defer" => ResumeBehavior::ResumeDiscuss,
         _ => ResumeBehavior::None,
+    }
+}
+
+fn parse_resume_followup_decision(s: &str) -> ResumeFollowupDecision {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "resume" => ResumeFollowupDecision::Resume,
+        "abandon" => ResumeFollowupDecision::Abandon,
+        _ => ResumeFollowupDecision::Defer,
     }
 }
 
@@ -161,7 +199,8 @@ pub(crate) async fn run_intent_normalizer(
         memory::service::structured_memory_context_block(
             &structured,
             memory::retrieval::MemoryContextMode::Route,
-            state.memory
+            state
+                .memory
                 .route_trigger_budget_chars
                 .max(384)
                 .min(state.memory.route_memory_max_chars.max(384)),
@@ -334,6 +373,99 @@ pub(crate) async fn generate_clarify_question(
                 "I need to clarify: what task is this message about? Please provide the target or context.",
             )
         }
+    }
+}
+
+pub(crate) async fn classify_resume_followup_intent(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_request: &str,
+    resume_context: &Value,
+    binding_context: &Value,
+) -> ResumeFollowupIntent {
+    let resume_context_str =
+        serde_json::to_string_pretty(resume_context).unwrap_or_else(|_| resume_context.to_string());
+    let binding_context_str = serde_json::to_string_pretty(binding_context)
+        .unwrap_or_else(|_| binding_context.to_string());
+    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+        state,
+        RESUME_FOLLOWUP_INTENT_PROMPT_PATH,
+        RESUME_FOLLOWUP_INTENT_PROMPT_TEMPLATE,
+    );
+    let prompt = crate::render_prompt_template(
+        &prompt_template,
+        &[
+            ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
+            ("__RESUME_CONTEXT__", &resume_context_str),
+            ("__BINDING_CONTEXT__", &binding_context_str),
+            ("__REQUEST__", user_request.trim()),
+        ],
+    );
+    crate::log_prompt_render(
+        &task.task_id,
+        "resume_followup_intent_prompt",
+        &prompt_file,
+        None,
+    );
+    let llm_out =
+        match llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file)
+            .await
+        {
+            Ok(v) => v,
+            Err(err) => {
+                warn!(
+                    "resume_followup_intent llm failed, conservative no-bind: task_id={} err={}",
+                    task.task_id, err
+                );
+                return ResumeFollowupIntent {
+                    decision: ResumeFollowupDecision::Defer,
+                    bind_resume_context: false,
+                    reason: "llm_failed".to_string(),
+                    confidence: 0.0,
+                };
+            }
+        };
+    let trimmed = llm_out.trim();
+    let parsed_raw = serde_json::from_str::<ResumeFollowupIntentOut>(trimmed).ok();
+    let raw_parse_ok = parsed_raw.is_some();
+    let parsed = parsed_raw.or_else(|| {
+        crate::extract_first_json_object_any(&llm_out)
+            .and_then(|json| serde_json::from_str::<ResumeFollowupIntentOut>(&json).ok())
+    });
+    if let Some(out) = parsed {
+        let intent = ResumeFollowupIntent {
+            decision: parse_resume_followup_decision(&out.decision),
+            bind_resume_context: out.bind_resume_context,
+            reason: out.reason,
+            confidence: out.confidence,
+        };
+        info!(
+            "{} resume_followup_intent task_id={} decision={:?} bind_resume_context={} confidence={} reason={}{} llm_out={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            intent.decision,
+            intent.bind_resume_context,
+            intent.confidence,
+            crate::truncate_for_log(&intent.reason),
+            if raw_parse_ok {
+                ""
+            } else {
+                " parse_recovery=fenced_json"
+            },
+            crate::truncate_for_log(&llm_out)
+        );
+        return intent;
+    }
+    warn!(
+        "resume_followup_intent parse failed, conservative no-bind: task_id={} llm_out={}",
+        task.task_id,
+        crate::truncate_for_log(&llm_out)
+    );
+    ResumeFollowupIntent {
+        decision: ResumeFollowupDecision::Defer,
+        bind_resume_context: false,
+        reason: "parse_failed".to_string(),
+        confidence: 0.0,
     }
 }
 

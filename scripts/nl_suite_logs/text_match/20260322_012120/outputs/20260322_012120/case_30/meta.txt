@@ -1,0 +1,4 @@
+index=30
+chat_id=1985997020
+task_id=b5893baf-e776-44dd-a16c-e751cc756b0b
+prompt=看看这里有没有点开头的隐藏项，只给结论和两个例子

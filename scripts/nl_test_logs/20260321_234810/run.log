@@ -1,0 +1,55 @@
+Simple NL test run
+  run_dir:  /home/guagua/git_upload/scripts/nl_test_logs/20260321_234810
+  base_url: http://127.0.0.1:8787
+  user_id:  1985996990
+  chat_id:  1985996990
+  prompts:  4
+
+============================================================
+[CASE] 1
+[CHAT] 1985996991
+[PROMPT] 读取 README 的前 20 行并做 3 句话总结
+[TASK] 6e489fd6-c986-42e6-8413-7e5cebd6fa37
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=## README.md 前 20 行总结\n\nRustClaw 是一个基于 Rust 的本地智能体运行时，支持通过 Telegram、WhatsApp、飞书/Lark 和浏览器 UI 进行日常操作。它整合了任务路由、工具执行、记忆、调度、多模态技能和基于 `user_key` 的身份验证功能。该工具允许用户从多个渠道与智能体对话，运行文件、HTTP、加密、图片等内置技能，并通过本地 UI 管理用户权限、监控状态和对话记忆。
+
+============================================================
+[CASE] 2
+[CHAT] 1985996992
+[PROMPT] 检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+[TASK] 61c4dd04-d65a-4181-861a-2f9f3ebdd2bc
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=有，例如：.cargo/、.dockerignore、.env.example
+
+============================================================
+[CASE] 3
+[CHAT] 1985996993
+[PROMPT] 读取 package.json 里的 name 字段，只输出值
+[TASK] 297e65a4-ac11-4853-8d0d-4344f3f666de
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=该 package.json 中没有 name 字段。
+
+============================================================
+[CASE] 4
+[CHAT] 1985996994
+[PROMPT] 写一个 hello world shell 脚本...然后把文件发给我
+[TASK] 9a6def0b-338f-40d9-b4ee-7e37dc93a551
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=FILE:/home/guagua/git_upload/document/hello_world.sh
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_test_logs/20260321_234810/run.log
+  - /home/guagua/git_upload/scripts/nl_test_logs/20260321_234810/summary.jsonl

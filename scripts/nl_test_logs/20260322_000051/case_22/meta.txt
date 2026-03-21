@@ -1,0 +1,4 @@
+index=22
+chat_id=1985997012
+task_id=3a6fe0a1-166d-4dff-bc2e-ea172f70e953
+prompt=检查 scripts 目录里有没有隐藏文件，只回答有或没有

@@ -15,5 +15,5 @@ pub(crate) async fn run_skill(
 #[doc(hidden)]
 #[allow(dead_code)]
 pub(crate) async fn run_tool(state: &AppState, tool: &str, args: &Value) -> Result<String, String> {
-    super::execute_builtin_skill(state, tool, args).await
+    crate::skills::execute_builtin_skill(state, tool, args).await
 }

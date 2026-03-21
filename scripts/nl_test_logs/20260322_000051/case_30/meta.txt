@@ -1,0 +1,4 @@
+index=30
+chat_id=1985997020
+task_id=58ee65ae-f663-44ba-bbb6-c5f863c9692c
+prompt=列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的

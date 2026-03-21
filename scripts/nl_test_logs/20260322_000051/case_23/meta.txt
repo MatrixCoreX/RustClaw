@@ -1,0 +1,4 @@
+index=23
+chat_id=1985997013
+task_id=9f995b4b-8a24-40c4-89f8-acc907916237
+prompt=读取 AGENTS.md 前 30 行，提炼 3 条最重要规则

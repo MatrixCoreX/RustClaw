@@ -1,0 +1,4 @@
+index=3
+chat_id=1985996993
+task_id=878e838d-a43a-4c9e-b1de-ea9e9aa96ba2
+prompt=执行 ls scripts，然后用一句话告诉我这个目录大概放的是什么

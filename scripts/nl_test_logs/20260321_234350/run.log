@@ -1,0 +1,36 @@
+Simple NL test run
+  run_dir:  /home/guagua/git_upload/scripts/nl_test_logs/20260321_234350
+  base_url: http://127.0.0.1:8787
+  user_id:  1985996990
+  chat_id:  1985996990
+  prompts:  4
+
+============================================================
+[CASE] 1
+[CHAT] 1985996991
+[PROMPT] 读取 README 的前 20 行并做 3 句话总结
+[TASK] 3807884f-0a2f-4382-ac77-7418d5b75176
+  [status] <none> -> running
+  [status] running -> failed
+[FINAL]
+status=failed
+text=step 3 failed (skill(read_file)): read file failed: No such file or directory (os error 2)
+error=step 3 failed (skill(read_file)): read file failed: No such file or directory (os error 2)
+
+============================================================
+[CASE] 2
+[CHAT] 1985996992
+[PROMPT] 检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+[TASK] 55aba132-5edd-4e2f-8e97-455c267a8afd
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=.cargo/\n.dockerignore\n.env.example\n.git/\n.gitignore\n.pids/\nAGENTS.md\nCargo.lock\nCargo.toml\nLICENSE\nLICENSE.zh-CN.md\nREADME.md\nREADME.zh-CN.md\nREADME_cn.md\nRUSTCLAW_SERVICE_README.md\nRustClaw.png\nRustClaw480X320.png\nUI/\nUSAGE.md\nbuild-all.sh\nbuild-ui-nginx.sh\ncheck-logs.sh\nconfigs/\ncrates/\ncross-build-upload.sh\ndata/\ndocker-compose.yml\ndocker/\ndocs/\ndocument/\nexternal_skills/\nfailed-routing-cases.md\ngit-add-exclude.sh\nimage/\ninstall-rustclaw-cmd.sh\nlogs/\nlongxia.png\nmemory-usage-plan.md\nmigrations/\nnode_modules/\npack-to-parent.sh\npackage-lock.json\npackage-release.sh\npackage.json\npatches/\npath_note.txt\npi_app/\nplans/\nprompts/\npush-sanitized-configs.sh\npwd_report.txt\nrun/\nrustclaw\nrustclaw.service\nscripts/\nservices/\nsetup-config.sh\nsimulate-telegramd.sh\nskill_develop/\nskills_output/\nstart-all-bin.sh\nstart-all.sh\nstart-clawd-ui.sh\nstart-clawd.sh\nstart-feishud.sh\nstart-future-adapters.sh\nstart-larkd.sh\nstart-telegramd.sh\nstart-wa-web-bridge.sh\nstart-whatsapp-webd.sh\nstart-whatsappd.sh\nstop-rustclaw.sh\nsystem_report.sh\nsystemd/\ntarget/\nuninstall-rustclaw-cmd.sh
+
+============================================================
+[CASE] 3
+[CHAT] 1985996993
+[PROMPT] 读取 package.json 里的 name 字段，只输出值
+[TASK] ca24af4c-42ed-4a08-9fec-bf80a13304bb
+  [status] <none> -> running

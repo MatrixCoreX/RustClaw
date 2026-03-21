@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"b5893baf-e776-44dd-a16c-e751cc756b0b","status":"succeeded","result_json":{"messages":["**有**隐藏文件/目录。\n\n例子：\n1. `.cargo/` - 隐藏目录\n2. `.git/` - 隐藏目录"],"text":"**有**隐藏文件/目录。\n\n例子：\n1. `.cargo/` - 隐藏目录\n2. `.git/` - 隐藏目录"},"error_text":null},"error":null}

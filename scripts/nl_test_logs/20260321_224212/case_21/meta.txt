@@ -1,0 +1,4 @@
+index=21
+chat_id=1985997011
+task_id=143c231f-f96c-4bb9-89f4-4ab8cad9c3b9
+prompt=统计 document 目录下直接子项数量，只输出数字

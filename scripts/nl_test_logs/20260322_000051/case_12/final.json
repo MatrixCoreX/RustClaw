@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"b1353b3e-5ac1-446f-aea5-09586e2e5f22","status":"succeeded","result_json":{"text":"RustClaw 是一个 Rust 库，用于开发抓娃娃机或类似抓取游戏，提供碰撞检测、物理模拟等核心功能，方便快速搭建游戏原型。"},"error_text":null},"error":null}

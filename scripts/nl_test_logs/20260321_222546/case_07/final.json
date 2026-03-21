@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"abbca70f-19cb-4eec-be41-9e1d2ee58383","status":"succeeded","result_json":{"text":"**Cargo.lock 通常更大。**\n\n`Cargo.toml` 只写你声明的直接依赖，而 `Cargo.lock` 记录了所有直接依赖 + 间接依赖（传递依赖）的精确版本，所以项目依赖一多，lock 文件就膨胀得很快。"},"error_text":null},"error":null}

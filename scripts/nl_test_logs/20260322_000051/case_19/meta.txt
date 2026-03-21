@@ -1,0 +1,4 @@
+index=19
+chat_id=1985997009
+task_id=1fd4cfe1-26cc-4a3d-b3da-eac3cd8fd709
+prompt=读取 rustclaw.service 前 15 行，并用一句话说明它是干什么的

@@ -1,52 +1,25 @@
-use crate::{AppState, ClaimedTask};
+pub(crate) mod audit;
+pub(crate) mod auth;
+pub(crate) mod submit;
+pub(crate) mod tasks;
 
-pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<ClaimedTask>> {
-    super::claim_next_task(state)
-}
-
-pub(crate) fn update_task_success(
-    state: &AppState,
-    task_id: &str,
-    result_json: &str,
-) -> anyhow::Result<()> {
-    super::update_task_success(state, task_id, result_json)
-}
-
-pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
-    super::touch_running_task(state, task_id)
-}
-
-pub(crate) fn update_task_progress_result(
-    state: &AppState,
-    task_id: &str,
-    result_json: &str,
-) -> anyhow::Result<()> {
-    super::update_task_progress_result(state, task_id, result_json)
-}
-
-pub(crate) fn update_task_failure(
-    state: &AppState,
-    task_id: &str,
-    error_text: &str,
-) -> anyhow::Result<()> {
-    super::update_task_failure(state, task_id, error_text)
-}
-
-pub(crate) fn update_task_failure_with_result(
-    state: &AppState,
-    task_id: &str,
-    result_json: &str,
-    error_text: &str,
-) -> anyhow::Result<()> {
-    super::update_task_failure_with_result(state, task_id, result_json, error_text)
-}
-
-pub(crate) fn insert_audit_log(
-    state: &AppState,
-    user_id: Option<i64>,
-    action: &str,
-    detail_json: Option<&str>,
-    error_text: Option<&str>,
-) -> anyhow::Result<()> {
-    super::insert_audit_log(state, user_id, action, detail_json, error_text)
-}
+pub(crate) use audit::{insert_audit_log, insert_audit_log_raw};
+pub(crate) use auth::{
+    bind_channel_identity, create_auth_key, delete_auth_key_by_id, ensure_bootstrap_admin_key,
+    ensure_key_auth_schema, exchange_credential_status_for_user_key, list_auth_keys,
+    normalize_user_key, resolve_auth_identity_by_key, resolve_channel_binding_identity,
+    seed_channel_bindings, update_auth_key_by_id, upsert_exchange_credential_for_user_key,
+};
+pub(crate) use submit::{
+    build_conversation_chat_id, build_submit_task_payload, check_submit_task_access,
+    check_submit_task_limits, find_recent_failed_resume_context, insert_submitted_task,
+    is_user_allowed, maybe_find_submit_task_dedup, resolve_submit_task_context,
+    stable_i64_from_key, submit_task_audit_detail, task_count_by_status, task_kind_name,
+    SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError,
+};
+pub(crate) use tasks::{
+    cancel_one_task_for_user_chat, cancel_tasks_for_user_chat, check_task_view_access,
+    claim_next_task, get_task_query_record, is_task_still_running, list_active_tasks_internal,
+    touch_running_task, update_task_failure, update_task_failure_with_result,
+    update_task_progress_result, update_task_success, update_task_timeout, TaskViewerAccessError,
+};
