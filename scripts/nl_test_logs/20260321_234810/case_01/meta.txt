@@ -1,0 +1,4 @@
+index=1
+chat_id=1985996991
+task_id=6e489fd6-c986-42e6-8413-7e5cebd6fa37
+prompt=读取 README 的前 20 行并做 3 句话总结

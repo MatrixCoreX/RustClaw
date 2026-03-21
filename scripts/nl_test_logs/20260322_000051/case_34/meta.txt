@@ -1,0 +1,4 @@
+index=34
+chat_id=1985997024
+task_id=2e348488-1920-47fb-bdb8-376af36570aa
+prompt=写一个文本文件到 document/manual_note.txt，内容是 RustClaw manual test note，然后把文件发给我

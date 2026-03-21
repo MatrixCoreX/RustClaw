@@ -14,7 +14,7 @@ Runtime behavior notes:
 - Browser launch prefers system Chromium (`/usr/bin/chromium`, `/usr/bin/chromium-browser`) when available.
 - If system Chromium is unavailable, fallback is Playwright-managed Chromium.
 - Browser runs in forced headless mode and clears `DISPLAY/WAYLAND_DISPLAY/XAUTHORITY` in child runtime to avoid X11 popup requests.
-- `open_extract` writes capture artifacts by default under `data/web_capture/...` with raw HTML, cleaned text, images, and JSONL indexes.
+- `open_extract` writes capture artifacts by default under `skills_output/browser_web/...` with raw HTML, cleaned text, images, and JSONL indexes.
 
 ## Actions
 
@@ -29,13 +29,14 @@ Open one or more URLs in a browser, apply readability checks, and return extract
 - `max_pages` (optional, integer, default `3`, range `1..10`)
 - `wait_until` (optional, string, default `domcontentloaded`): `domcontentloaded|load|networkidle`
 - `save_screenshot` (optional, bool, default `false`)
-- `screenshot_dir` (optional, string, default `image/browser_web`)
+- `screenshot_dir` (optional, string, default `skills_output/browser_web/screenshots`)
 - `content_mode` (optional, string, default `clean`): `clean|raw`
 - `max_text_chars` (optional, integer, default `12000`, range `100..200000`)
+- `min_content_chars` (optional, integer, default `200`, range `20..10000`): readability threshold for extracted text
 - `fail_fast` (optional, bool, default `false`): if true, stop on first page failure
 - `wait_map_path` (optional, string): optional wait strategy mapping file
 - `enable_capture` (optional, bool, default `true`): whether to persist capture artifacts
-- `capture_root` (optional, string, default `data/web_capture`): root directory for capture runs
+- `capture_root` (optional, string, default `skills_output`): root directory for capture runs
 - `capture_source` (optional, string, default `browser_web`): source namespace folder name
 - `run_id` (optional, string): custom run id for output folder
 - `chunk_chars` (optional, integer, default `3000`): chunk size for `index/chunks.jsonl`
@@ -111,6 +112,7 @@ Search first (`search_page`), then extract top result pages (`open_extract`).
 - `summarize` (optional, bool, default `true`): include short summary per extracted item
 - `content_mode` (optional, string, default `clean`): `clean|raw`
 - `max_text_chars` (optional, integer, default `12000`, range `100..200000`)
+- `min_content_chars` (optional, integer, default `200`, range `20..10000`)
 - `fail_fast` (optional, bool, default `false`)
 - `region` (optional, string)
 - `lang` (optional, string, default `en`)
@@ -134,6 +136,7 @@ Search first (`search_page`), then extract top result pages (`open_extract`).
 | open_extract | max_capture_images | no | integer | 12 | image download cap per page |
 | open_extract | content_mode | no | string | clean | clean or raw text mode |
 | open_extract | max_text_chars | no | integer | 12000 | max returned text chars |
+| open_extract | min_content_chars | no | integer | 200 | readability threshold for extracted text |
 | open_extract | fail_fast | no | bool | false | stop on first page failure |
 | open_extract | wait_map_path | no | string | null | domain-based wait strategy map |
 | search_page | action | yes | string | - | `search_page` |
@@ -147,6 +150,7 @@ Search first (`search_page`), then extract top result pages (`open_extract`).
 | search_extract | summarize | no | bool | true | include short summary field |
 | search_extract | content_mode | no | string | clean | clean or raw mode |
 | search_extract | max_text_chars | no | integer | 12000 | max returned text chars |
+| search_extract | min_content_chars | no | integer | 200 | readability threshold for extracted text |
 
 ## Error Contract
 

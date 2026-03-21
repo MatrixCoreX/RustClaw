@@ -1,0 +1,4 @@
+index=4
+chat_id=1985996994
+task_id=9a6def0b-338f-40d9-b4ee-7e37dc93a551
+prompt=写一个 hello world shell 脚本...然后把文件发给我

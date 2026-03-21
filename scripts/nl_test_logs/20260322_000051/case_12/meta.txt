@@ -1,0 +1,4 @@
+index=12
+chat_id=1985997002
+task_id=b1353b3e-5ac1-446f-aea5-09586e2e5f22
+prompt=用大白话介绍一下 RustClaw，控制在 80 个字以内

@@ -1,0 +1,18 @@
+# Canonical alias for focused NL trace cases.
+# Format: name|prompt
+
+trace_hidden_files|帮我看看当前目录有没有隐藏文件
+trace_readme_summary|读取 README 的前 20 行并做 3 句话总结
+trace_package_name|读取 package.json 里的 name 字段，只输出值
+trace_whoami|只输出当前用户名，不要解释
+trace_hostname|只输出当前机器 hostname
+trace_run_cmd_tail_cn|执行 pwd，然后告诉我结果
+trace_run_cmd_tail_en|please run uname -a and tell me the result
+trace_docs_explain|列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+trace_file_delivery|写一个文本文件到 document/full_suite_trace_note.txt，内容是 full suite trace note，然后把文件发给我
+trace_missing_file|把 document/definitely_missing_full_suite_trace_001.txt 发给我
+trace_hidden_files_variant|看看这里有没有点开头的隐藏项，只给结论和例子
+trace_package_name_variant|帮我从 package.json 里把 name 那个值抠出来，别带别的
+trace_readme_plain_variant|先看看 README 开头，再用一句不技术的话告诉我这是干什么的
+trace_run_cmd_df_variant|跑一下 df -h，然后用一句人话告诉我哪个盘最该盯着
+trace_missing_file_variant|send me document/definitely_missing_full_suite_trace_002.txt

@@ -1,0 +1,4 @@
+index=11
+chat_id=1985997001
+task_id=d601751a-4568-40ee-9980-fa51c46e50fa
+prompt=写一首两句的打工人短诗

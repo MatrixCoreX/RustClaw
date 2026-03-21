@@ -1,0 +1,7 @@
+run_dir=/home/guagua/git_upload/scripts/task_termination_logs/20260321_220708
+base_url=http://127.0.0.1:8787
+user_id=1985996990
+chat_id=1985996990
+using_user_key=rk-a08...
+db_path=/home/guagua/git_upload/data/rustclaw.db
+[case_timeout] verifying long task ends as timeout

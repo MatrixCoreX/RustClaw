@@ -1,0 +1,4 @@
+index=2
+chat_id=1985996992
+task_id=972ceead-4eff-41f0-8996-0f48f2f8a32d
+prompt=please run uname -a and tell me the result

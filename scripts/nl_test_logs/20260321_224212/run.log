@@ -1,0 +1,425 @@
+Simple NL test run
+  run_dir:  /home/guagua/git_upload/scripts/nl_test_logs/20260321_224212
+  base_url: http://127.0.0.1:8787
+  user_id:  1985996990
+  chat_id:  1985996990
+  prompts:  37
+
+============================================================
+[CASE] 1
+[CHAT] 1985996991
+[PROMPT] 今天天气先别查，给我讲一个简短冷笑话
+[TASK] 499834db-e49d-43bf-bcaf-d2d78aba3bf7
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=问：为什么程序员分不清万圣节和圣诞节？\n\n答：因为 Oct 31 = Dec 25。
+
+============================================================
+[CASE] 2
+[CHAT] 1985996992
+[PROMPT] 只输出当前工作目录的绝对路径，不要解释
+[TASK] 29bbc721-5205-4ca1-a710-98672118b49c
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=/home/guagua/git_upload
+
+============================================================
+[CASE] 3
+[CHAT] 1985996993
+[PROMPT] 列出当前仓库顶层目录和文件，简单分组展示
+[TASK] de887c0e-2760-468f-85e3-e460fa3cb9ab
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=.cargo/\n.dockerignore\n.env.example\n.git/\n.gitignore\n.pids/\nAGENTS.md\nCargo.lock\nCargo.toml\nLICENSE\nLICENSE.zh-CN.md\nREADME.md\nREADME.zh-CN.md\nREADME_cn.md\nRUSTCLAW_SERVICE_README.md\nRustClaw.png\nRustClaw480X320.png\nUI/\nUSAGE.md\nbuild-all.sh\nbuild-ui-nginx.sh\ncheck-logs.sh\nconfigs/\ncrates/\ncross-build-upload.sh\ndata/\ndocker-compose.yml\ndocker/\ndocs/\ndocument/\nexternal_skills/\nfailed-routing-cases.md\ngit-add-exclude.sh\nimage/\ninstall-rustclaw-cmd.sh\nlogs/\nlongxia.png\nmemory-usage-plan.md\nmigrations/\nnode_modules/\npack-to-parent.sh\npackage-lock.json\npackage-release.sh\npackage.json\npatches/\npath_note.txt\npi_app/\nplans/\nprompts/\npush-sanitized-configs.sh\npwd_report.txt\nrun/\nrustclaw\nrustclaw.service\nscripts/\nservices/\nsetup-config.sh\nsimulate-telegramd.sh\nskill_develop/\nskills_output/\nstart-all-bin.sh\nstart-all.sh\nstart-clawd-ui.sh\nstart-clawd.sh\nstart-feishud.sh\nstart-future-adapters.sh\nstart-larkd.sh\nstart-telegramd.sh\nstart-wa-web-bridge.sh\nstart-whatsapp-webd.sh\nstart-whatsappd.sh\nstop-rustclaw.sh\nsystem_report.sh\nsystemd/\ntarget/\nuninstall-rustclaw-cmd.sh
+
+============================================================
+[CASE] 4
+[CHAT] 1985996994
+[PROMPT] 检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+[TASK] 38ef055a-ca29-4df9-bc79-4dd00b6bb59c
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=.cargo/\n.dockerignore\n.env.example\n.git/\n.gitignore\n.pids/\nAGENTS.md\nCargo.lock\nCargo.toml\nLICENSE\nLICENSE.zh-CN.md\nREADME.md\nREADME.zh-CN.md\nREADME_cn.md\nRUSTCLAW_SERVICE_README.md\nRustClaw.png\nRustClaw480X320.png\nUI/\nUSAGE.md\nbuild-all.sh\nbuild-ui-nginx.sh\ncheck-logs.sh\nconfigs/\ncrates/\ncross-build-upload.sh\ndata/\ndocker-compose.yml\ndocker/\ndocs/\ndocument/\nexternal_skills/\nfailed-routing-cases.md\ngit-add-exclude.sh\nimage/\ninstall-rustclaw-cmd.sh\nlogs/\nlongxia.png\nmemory-usage-plan.md\nmigrations/\nnode_modules/\npack-to-parent.sh\npackage-lock.json\npackage-release.sh\npackage.json\npatches/\npath_note.txt\npi_app/\nplans/\nprompts/\npush-sanitized-configs.sh\npwd_report.txt\nrun/\nrustclaw\nrustclaw.service\nscripts/\nservices/\nsetup-config.sh\nsimulate-telegramd.sh\nskill_develop/\nskills_output/\nstart-all-bin.sh\nstart-all.sh\nstart-clawd-ui.sh\nstart-clawd.sh\nstart-feishud.sh\nstart-future-adapters.sh\nstart-larkd.sh\nstart-telegramd.sh\nstart-wa-web-bridge.sh\nstart-whatsapp-webd.sh\nstart-whatsappd.sh\nstop-rustclaw.sh\nsystem_report.sh\nsystemd/\ntarget/\nuninstall-rustclaw-cmd.sh
+
+============================================================
+[CASE] 5
+[CHAT] 1985996995
+[PROMPT] 精确统计当前目录下有多少个直接子项，只输出数字
+[TASK] a2d8dc77-ea02-4925-bc35-fd72682276f3
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=70
+
+============================================================
+[CASE] 6
+[CHAT] 1985996996
+[PROMPT] 读取 README 的前 20 行并做 3 句话总结
+[TASK] 026c31ca-24bc-48df-83ff-5122f32c7587
+  [status] <none> -> running
+  [status] running -> failed
+[FINAL]
+status=failed
+error=single plan parser failed: no executable steps
+
+============================================================
+[CASE] 7
+[CHAT] 1985996997
+[PROMPT] 比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+[TASK] 9f4980b7-6b2c-46f3-9e85-252f7ffb8b7e
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=**Cargo.lock 通常更大。**\n\nCargo.toml 只记录你显式声明的直接依赖，而 Cargo.lock 记录了所有直接依赖加上它们的传递依赖（间接依赖）的精确版本信息，项目依赖链一长，lock 文件就膨胀得很快。
+
+============================================================
+[CASE] 8
+[CHAT] 1985996998
+[PROMPT] 把 definitely_missing_named_file_rustclaw_001.txt 发给我
+[TASK] 1a115bd5-c5ef-4046-b90c-1e5ff69f0abf
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=无法发送：文件 `definitely_missing_named_file_rustclaw_001.txt` 不存在。\n\n请确认：\n1. 文件名是否正确\n2. 该文件是否需要先创建
+
+============================================================
+[CASE] 9
+[CHAT] 1985996999
+[PROMPT] 写一个 hello world shell 脚本，保存成 document/hello_from_manual_test.sh，然后把文件发给我
+[TASK] c0ff4e59-4dec-4663-8cb3-e7481940ec71
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=written 33 bytes to /home/guagua/git_upload/document/hello_from_manual_test.sh
+
+============================================================
+[CASE] 10
+[CHAT] 1985997000
+[PROMPT] 用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+[TASK] d919c0bd-3364-40b4-968c-5cbcb7b89283
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=这个仓库是一个叫 **clawd** 的后台服务程序（“d”代表 daemon，即持续在后台运行的程序）。\n\n它的作用是：\n- 在服务器或电脑上安静地运行\n- 接收外部请求或监控特定事件\n- 自动执行预定的任务\n\n简单说，就是一个“隐形助手”，在后台待命，随时准备响应和处理工作。如果需要知道更具体的功能，可以查看项目里的 README 文件。
+
+============================================================
+[CASE] 11
+[CHAT] 1985997001
+[PROMPT] 写一首两句的打工人短诗
+[TASK] 042bc3a9-c96e-4091-82ff-76823d05990d
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=加班灯光照白昼，卡里余额仍清瘦。
+
+============================================================
+[CASE] 12
+[CHAT] 1985997002
+[PROMPT] 用大白话介绍一下 RustClaw，控制在 80 个字以内
+[TASK] 38042c38-6b5e-47f2-914c-14451e1f0f57
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=RustClaw 是一个 Rust 库，用来开发抓娃娃机或类似抓取游戏。它提供碰撞检测、物理模拟等核心功能，方便快速搭建游戏原型。
+
+============================================================
+[CASE] 13
+[CHAT] 1985997003
+[PROMPT] 把这句话翻成英文：现在服务已经恢复了
+[TASK] 4ffc2ab7-290f-40e8-83ce-0dd4c4c2c30d
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=The service has been restored now.
+
+============================================================
+[CASE] 14
+[CHAT] 1985997004
+[PROMPT] 只输出当前用户名，不要解释
+[TASK] b96135d6-d7b7-4d68-9014-c1949b9625ec
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=我没有能力获取当前会话用户的系统用户名。\n\n如果你指的是某个特定系统或平台的用户名，请告诉我具体是哪个系统。
+
+============================================================
+[CASE] 15
+[CHAT] 1985997005
+[PROMPT] 只输出当前机器 hostname
+[TASK] 57fe612b-b8ac-44f9-96be-5c9ee9782472
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=rustclaw
+
+============================================================
+[CASE] 16
+[CHAT] 1985997006
+[PROMPT] 列出 logs 目录下的前 10 个文件名，不要读内容
+[TASK] 4fb21834-ec10-4f3c-a7eb-bda038eebab7
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=act_plan.log\nclawd.log\nfeishud.log\nmodel_io.log\nregression_skills_upgrade_20260321_031137.md\nregression_skills_upgrade_20260321_031610.md\nregression_user_instruction_20260321_194720\nregression_user_instruction_20260321_195039\nregression_user_instruction_20260321_200856\nregression_user_instruction_20260321_203105
+
+============================================================
+[CASE] 17
+[CHAT] 1985997007
+[PROMPT] 统计当前仓库顶层一共有多少个 .md 文件，只输出数字
+[TASK] 30e68627-9620-4186-b97a-94ef9ec5b714
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=9
+
+============================================================
+[CASE] 18
+[CHAT] 1985997008
+[PROMPT] 检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+[TASK] 22828b5f-dd00-425d-80c8-38d599dcca66
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=rustclaw.service
+
+============================================================
+[CASE] 19
+[CHAT] 1985997009
+[PROMPT] 读取 rustclaw.service 前 15 行，并用一句话说明它是干什么的
+[TASK] cde37db4-21f8-4de8-a7fc-95776659cd06
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=[Unit]\nDescription=RustClaw Service (start-all-bin with singbox proxy)\nAfter=network.target sing-box.service\nWants=sing-box.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nUser=guagua\nGroup=guagua\nWorkingDirectory=/home/guagua/git_upload\n\n# 使用 singbox 代理\n# 如果您的 singbox mixed_port 不是 2080，请修改下面的端口号\n# 可以通过查看 singbox 配置文件确认端口，或使用: ss -tlnp | grep sing-box\nEnvironment="HTTP_PROXY=http://127.0.0.1:2080"\nEnvironment="HTTPS_PROXY=http://127.0.0.1:2080"\nEnvironment="ALL_PROXY=socks5://127.0.0.1:2080"\nEnvironment="http_proxy=http://127.0.0.1:2080"\nEnvironment="https_proxy=http://127.0.0.1:2080"\nEnvironment="all_proxy=socks5://127.0.0.1:2080"\n\n# 保留其他环境变量\nEnvironment="RUSTCLAW_LOG_COLOR=1"\n\n# 执行启动脚本（免配置直接启动，默认使用 release profile）\nExecStart=/bin/bash /home/guagua/git_upload/start-all-bin.sh\n\n# 停止时执行停止脚本\nExecStop=/bin/bash /home/guagua/git_upload/stop-rustclaw.sh\n\n# 重启策略\nRestart=on-failure\nRestartSec=10\n\n# 日志设置\nStandardOutput=journal\nStandardError=journal\nSyslogIdentifier=rustclaw\n\n[Install]\nWantedBy=multi-user.target\n\nThis systemd service manages the RustClaw application by starting it via a script with all network traffic routed through a local sing-box proxy (port 2080), running as the `guagua` user, logging to the system journal, and automatically restarting on failure.
+
+============================================================
+[CASE] 20
+[CHAT] 1985997010
+[PROMPT] 列出 document 目录下有哪些文件，只输出文件名列表
+[TASK] ff496695-a4b5-4651-860f-84463c2bbbe0
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=hello_from_manual_test.sh\nhello_world.sh\nregression_llm_first/
+
+============================================================
+[CASE] 21
+[CHAT] 1985997011
+[PROMPT] 统计 document 目录下直接子项数量，只输出数字
+[TASK] 143c231f-f96c-4bb9-89f4-4ab8cad9c3b9
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=3
+
+============================================================
+[CASE] 22
+[CHAT] 1985997012
+[PROMPT] 检查 scripts 目录里有没有隐藏文件，只回答有或没有
+[TASK] a80889b0-6208-4b0d-a3f5-a88f0ac8a19a
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=__pycache__/\nauth-key.sh\ncheck-secrets.sh\ncheck_browser_runtime.sh\ncheck_skill_prompts.py\ncodex_autofix_from_log.sh\ncodex_autofix_prompt_from_log.sh\ncodex_fix.sh\ncount_lines.sh\ncrypto-cli.sh\ndb_schema_and_content.py\ndb_schema_and_content.sh\nimport-crypto-credentials.sh\nlib.sh\nnl_manual_cases.txt\nnl_test_logs/\nredact_configs.py\nregression_clawd_crypto_trigger.sh\nregression_crypto_skill.sh\nregression_generated_crypto_safe_cases.txt\nregression_generated_mixed_cases.txt\nregression_resume_continue.sh\nregression_skills_upgrade_suite.sh\nregression_trace_ask.sh\nregression_trace_ask_cases_minimax_think.txt\nregression_trace_ask_cases_real.txt\nregression_trace_ask_full.log\nregression_trace_ask_full_analysis.md\nregression_user_instruction.sh\nregression_user_instruction_cases.txt\nresize_images_240.py\nrestart_clawd_latest.sh\nrouting_replay_metrics.py\nrun_nl_manual_test.sh\nsimple_nl_test.sh\nskill_calls/\nswitch-main-llm.sh\nsync_skill_docs.py\ntask_termination_logs/\ntest_audio_all.sh\ntest_binance_buy_once.py\ntest_crypto_apis.sh\ntest_image_all.sh\ntest_image_module.sh\ntest_qwen_5_channels.py\ntest_qwen_api.sh\nverify_task_termination.sh
+
+============================================================
+[CASE] 23
+[CHAT] 1985997013
+[PROMPT] 读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
+[TASK] 3c2712a4-f2ba-40a8-aaee-e1e661a5d12f
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=# RustClaw Skill Development Rules / RustClaw 技能开发规则\n\n本文件给所有参与本仓库的 agent 使用。目标是统一技能接入流程，确保“代码上传后编译通过即可允许启用”。  \nThis file is for all agents working in this repository. The goal is to standardize skill integration so that “once code is pushed and compilation passes, the skill can be considered allowed/enabled”.\n\n## Design Context\n\n### Users\n- 主要用户是“不懂技术的普通小白”。  \n  The primary user is a non-technical beginner.\n- 他们希望通过可视化界面完成部署后的日常使用、状态查看、渠道接入和基础排障，而不是阅读日志、编辑配置文件或依赖命令行。  \n  They want to operate RustClaw through a visual console for daily use, status checks, channel setup, and basic troubleshooting instead of reading logs, editing config files, or using the command line.\n- UI 应优先降低理解门槛，让用户先建立“我看得懂、我敢点、我不会弄坏”的信心。  \n  The UI should reduce cognitive load first and build the feeling of “I understand this, I can click this, and I probably will not break it.”\n\n### Brand Personality\n- 气质关键词：可靠、克制、简洁简单。  \n  Personality keywords: reliable, restrained, simple.\n- 产品语气应稳定、直接、友好，不卖弄技术感，不制造压迫感。  \n  The product voice should feel steady, direct, and friendly without showing off technical complexity or creating intimidation.\n- 即使底层是 agent runtime / multi-channel / task orchestration，前端表达也应尽量像“清晰的控制面板”，而不是“工程师调试工具”。  \n  Even though the backend is an agent runtime with multi-channel orchestration, the frontend should feel like a clear control console rather than an engineer-only debugging tool.\n\n### Aesthetic Direction\n- 采用双主题。  \n  Support both light and dark themes.\n- 默认设计判断优先服务非技术用户的可读性、层级清晰度和表单易用性，而不是追求“酷炫”或“黑客感”。  \n  Design decisions should prioritize readability, hierarchy clarity, and approachable forms over “coolness” or “hacker vibes.”\n- 避免高饱和霓虹色、大面积纯黑终端风、过强攻击性的红绿对比，以及会让用户联想到复杂运维工具的视觉语言。  \n  Avoid neon saturation, large pure-black terminal aesthetics, overly aggressive red/green contrast, and visual language that feels like an intimidating ops-only tool.\n- 可以保留适度的专业感与系统感，但必须通过明确的分区、卡片层级、状态标签、说明文字来化解技术门槛。  \n  A measured sense of professionalism and system control is good, but it must be softened through clear sections, card hierarchy, status labels, and supportive copy.\n\n### Design Principles\n- 先解释，再操作：重要动作、状态、渠道概念都要先让用户看懂，再让用户点击。  \n  Explain before action: users should understand important actions, states, and channel concepts before being asked to interact.\n- 默认安全且可恢复：危险操作要弱化，关键操作要有明确反馈，失败时要告诉用户下一步。  \n  Default to safe and recoverable flows: de-emphasize dangerous actions, provide clear feedback for key actions, and always tell the user what to do next when something fails.\n- 面向任务，而不是面向实现：页面结构应围绕“我要登录”“我要绑定渠道”“我要看服务是否正常”来组织，而不是围绕底层模块名。  \n  Organize around user tasks, not implementation details: structure pages around “I want to log in,” “I want to bind a channel,” and “I want to check service health,” not backend module names.\n- 渐进披露复杂度：默认只展示最必要的信息，把日志、原始 JSON、底层细节放在第二层。  \n  Use progressive disclosure: show only the most necessary information by default, with logs, raw JSON, and low-level details in secondary layers.\n- 任何新增 UI 改动都要自查：一个从未接触过 RustClaw 的普通用户，第一次打开时能否理解这个页面在做什么、能做什么、下一步该做什么。  \n  Every new UI change should be checked against this question: can a first-time, non-technical RustClaw user understand what this page does, what it is for, and what to do next?\n\n## 1) Communication Flow / 通讯链路（技能、路由、主程序）\n\n1. 用户请求进入 `clawd`：`POST /v1/tasks`，`kind=ask|run_skill`。  \n   User requests enter `clawd` via `POST /v1/tasks`, with `kind=ask|run_skill`.\n2. `ask` 任务在 `crates/clawd/src/main.rs` 的 `worker_once()` 中执行：  \n   `ask` tasks are handled in `worker_once()` in `crates/clawd/src/main.rs`:\n   - 先做上下文解析与路由（`intent_router`）。  \n     First resolve context and route mode (`intent_router`).\n   - `RoutedMode::Act|ChatAct` 时进入 `agent_engine::run_agent_with_tools()`。  \n     For `RoutedMode::Act|ChatAct`, execution enters `agent_engine::run_agent_with_tools()`.\n3. `agent_engine` 输出动作 JSON（`call_skill/call_tool/respond`）。  \n   `agent_engine` emits action JSON (`call_skill/call_tool/respond`).\n4. `call_skill` 通过 `execution_adapters::run_skill()` -> `run_skill_with_runner()`。  \n   `call_skill` goes through `execution_adapters::run_skill()` -> `run_skill_with_runner()`.\n5. `run_skill_with_runner()` 启动 `skill-runner` 子进程，STDIN/STDOUT 传一行 JSON。  \n   `run_skill_with_runner()` launches `skill-runner`, passing one-line JSON over STDIN/STDOUT.\n6. `skill-runner` 根据 `skill_name` 按约定推导具体技能二进制（默认 `foo_bar` -> `target/debug|release/foo-bar-skill`；若 registry 配了 `runner_name` 则优先用它）。  \n   `skill-runner` derives the concrete skill binary from `skill_name` by convention (default `foo_bar` -> `target/debug|release/foo-bar-skill`; if registry sets `runner_name`, that takes precedence).\n7. 技能进程读取请求 JSON，输出响应 JSON，回传 `clawd` 汇总为任务结果。  \n   The skill process reads request JSON, writes response JSON, and returns it to `clawd` for task result aggregation.\n\n## 2) Skill Process Protocol (Required) / 技能进程协议（必须遵守）\n\n技能二进制是“单行 JSON stdin -> 单行 JSON stdout”模式。  \nSkill binaries must use “single-line JSON stdin -> single-line JSON stdout”.\n\n- 输入（来自 `skill-runner`）最小字段 / Minimum input fields (from `skill-runner`):\n  - `request_id: string`\n  - `args: object`\n  - `context: object|null`\n  - `user_id: i64`\n  - `chat_id: i64`\n- 输出最小字段 / Minimum output fields:\n  - `request_id: string`\n  - `status: "ok" | "error"`\n  - `text: string`\n  - `error_text: string|null`\n  - 可选 / optional: `buttons`, `extra`\n\n要求 / Requirements:\n\n- 不允许输出多行或非 JSON。  \n  Do not output multi-line content or non-JSON.\n- 失败必须返回 `status=error` 和可读 `error_text`。  \n  On failure, return `status=error` and a readable `error_text`.\n- 不得阻塞不退出（遵循 `SKILL_TIMEOUT_SECONDS` 预期）。  \n  Do not hang indefinitely; respect `SKILL_TIMEOUT_SECONDS` expectations.\n\n## 3) New Skill Integration Checklist / 新技能接入清单（全部完成才算可用）\n\n新增技能 `foo_bar` 时，必须同时改这些点：  \nWhen adding a new skill `foo_bar`, all of the following are required:\n\n1. 新建 crate：`crates/skills/foo_bar`（二进制名建议 `foo-bar-skill`）。  \n   Create crate: `crates/skills/foo_bar` (binary name recommended: `foo-bar-skill`).\n2. 加入工作区：`Cargo.toml` 的 `[workspace].members`。  \n   Add to workspace: `[workspace].members` in `Cargo.toml`.\n3. 使用约定式 runner 二进制名：默认将 `foo_bar` 编译为 `foo-bar-skill`；只有当二进制名不符合约定时，才在 `configs/skills_registry.toml` 中配置 `runner_name`。  \n   Use the conventional runner binary name: by default `foo_bar` should compile to `foo-bar-skill`; only configure `runner_name` in `configs/skills_registry.toml` when the binary name does not follow the convention.\n4. 注册执行别名（可选但建议）：优先在 `configs/skills_registry.toml` 的 `aliases` 中配置；`crates/clawd/src/main.rs` 的 `canonical_skill_name()` 仅作无 registry 的兼容回退。  \n   Register aliases (optional but recommended): prefer `aliases` in `configs/skills_registry.toml`; `canonical_skill_name()` in `crates/clawd/src/main.rs` is compatibility fallback only when no registry is used.\n5. 加入 agent 技能认知 / Add agent skill awareness:\n - `crates/skills/foo_bar/INTERFACE.md`\n - 运行 `python3 scripts/sync_skill_docs.py`，生成/更新 `prompts/vendors/default/skills/foo_bar.md`\n - 在 `configs/skills_registry.toml` 中为该技能配置 `prompt_file = "prompts/skills/foo_bar.md"`\n - `prompts/agent_tool_spec.md` 增加该技能参数契约\n6. 配置基线 / Config baseline:\n   - `crates/claw-core/src/config.rs` 的默认 `skills_list`（按需要）  \n     Default `skills_list` in `crates/claw-core/src/config.rs` (as needed)\n   - `configs/config.toml` / `configs/config_copy/*.toml`（按现有规范）  \n     `configs/config.toml` / `configs/config_copy/*.toml` (follow current conventions)\n7. 如果技能需独立配置，补 `configs/*.toml` 与 README 说明。  \n   If the skill needs dedicated config, add `configs/*.toml` and README docs.\n8. 新技能必须附带接口说明文档，便于生成给 LLM 判断/路由用的技能 md。  \n   New skills must include an interface spec document so that skill markdown for LLM judgment/routing can be generated reliably.\n   - 建议路径 / Recommended path: `crates/skills/<skill>/INTERFACE.md`\n   - 最小内容 / Minimum content:\n     - 功能概述 / Capability summary\n     - `action` 列表 / `action` list\n     - 每个 action 的必填参数、可选参数、类型、默认值  \n       Required/optional params, types, defaults per action\n     - 错误码或错误文本约定 / Error contract\n     - 2~3 个请求/响应 JSON 示例 / 2-3 request/response JSON examples\n9. 使用自动同步脚本维护技能文档：`python3 scripts/sync_skill_docs.py`。  \n   Use the auto-sync script to maintain skill docs: `python3 scripts/sync_skill_docs.py`.\n   - 技能发现目录 / Skill discovery roots:\n     - `crates/skills/*`（内建技能 / built-in skills）\n     - `external_skills/*`（外部提交技能 / externally submitted skills）\n   - 新 skill 目录（`crates/skills/<skill>`）出现时，自动创建：\n     - `crates/skills/<skill>/INTERFACE.md`\n     - `prompts/skills/<skill>.md`\n   - 新外部 skill 目录（`external_skills/<skill>`）出现时，自动创建：\n     - `prompts/skills/<skill>.md`（前提：开发者已提供 `external_skills/<skill>/INTERFACE.md`）\n   - 对外部技能强制门禁 / Hard gate for external skills:\n     - 若缺少 `external_skills/<skill>/INTERFACE.md`，同步脚本会报错并返回非 0（可直接用于 CI 阻断）。\n     - If `external_skills/<skill>/INTERFACE.md` is missing, sync exits non-zero and can be used as a CI blocker.\n   - skill 目录删除时，自动删除 `prompts/skills/<skill>.md`。\n   - skill 仅关闭（`skill_switches=false`）时，不删除任何 md（保持提示词兼容与回滚能力）。\n   - `prompts/skills/<skill>.md` 采用受控自动生成模式：包含 `<!-- AUTO-GENERATED: sync_skill_docs.py -->` 标记的文件会在同步时自动更新；无标记文件视为手工维护，不会被覆盖。  \n     `prompts/skills/<skill>.md` uses controlled auto-generation: files containing `<!-- AUTO-GENERATED: sync_skill_docs.py -->` are updated on sync; files without the marker are treated as manually maintained and are not overwritten.\n   - 托管迁移命令 / Adopt commands:\n     - `python3 scripts/sync_skill_docs.py --adopt <skill>`：将单个 skill 的 prompt md 迁移为自动托管（覆盖该文件）。  \n       Migrate one skill prompt into managed mode (overwrites that prompt file).\n     - `python3 scripts/sync_skill_docs.py --adopt-all`：将全部 skill prompt md 迁移为自动托管（覆盖全部）。  \n       Migrate all skill prompts into managed mode (overwrites all prompt files).\n\n## 4) Skill Switch Rules / 技能开关规则（当前仓库约定）\n\n- 运行时允许集由 `[skills].skills_list` + `[skills].skill_switches` 叠加得出。  \n  Runtime allowed skills are computed from `[skills].skills_list` + `[skills].skill_switches`.\n- `skill_switches` 优先级高于 `skills_list` / `skill_switches` has higher priority than `skills_list`:\n  - `true`：强制开启 / force enable\n  - `false`：强制关闭 / force disable\n- 关闭技能后 / When a skill is disabled:\n  - 二层提示词会显示 disabled 简化提示  \n    The second-layer prompt uses a disabled simplified hint\n  - 命中需求时应回复“技能未开启”  \n    If user intent requires it, respond with “skill not enabled”\n  - 运行时调用会被 `clawd` 拦截  \n    Runtime invocation is blocked by `clawd`\n\n## 5) Admission Criteria (“compile => allowed”) / “编译即可允许” 的准入标准\n\nPR 合并前至少满足：  \nBefore merge, at least the following must pass:\n\n1. `cargo check -p clawd -p skill-runner -p <new-skill-crate>`\n2. 若改了 UI：在 `UI/` 下执行 `npm run lint && npm run build`  \n   If UI changed: run `npm run lint && npm run build` under `UI/`\n3. 能通过 `run_skill` 路径打通（最少一次 happy path）  \n   End-to-end `run_skill` path must work (at least one happy path):\n   - `POST /v1/tasks`，`kind=run_skill`，`payload.skill_name=<skill>`\n4. 失败路径有清晰 `error_text`（不允许静默失败）。  \n   Failure path must return clear `error_text` (no silent failure).\n\n只有当“映射完整 + 编译通过 + 路径可跑通”同时成立，才允许把该技能视为可用。  \nA skill is considered available only when “mapping complete + compile pass + runnable path” are all satisfied.\n\n## 6) Execution Principles (for agents) / 实施原则（给 agent）\n\n- 优先增量改动，不重构无关模块。  \n  Prefer incremental changes; avoid unrelated refactors.\n- 先补协议与映射，再补提示词与 UI，最后跑编译。  \n  Implement protocol/mapping first, then prompts/UI, then compile checks.\n- 不改已有技能行为，除非需求明确要求。  \n  Do not change existing skill behavior unless explicitly required.\n- 不提交 secrets、token、私钥等内容。  \n  Never commit secrets, tokens, or private keys.
+
+============================================================
+[CASE] 24
+[CHAT] 1985997014
+[PROMPT] 列出 logs 目录最近修改的 5 个文件，按新到旧输出
+[TASK] 699e25f6-5fde-4e4e-b47a-7ec5b8405552
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=clawd.log\nmodel_io.log\nact_plan.log\nfeishud.log\ntelegramd.log
+
+============================================================
+[CASE] 25
+[CHAT] 1985997015
+[PROMPT] 读取 package.json 里的 name 字段，只输出值
+[TASK] d4e1e59a-a5f4-416d-8c6e-7f5d5ccd9fc4
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text={\n  "dependencies": {\n    "@xdevplatform/xurl": "^1.0.3",\n    "playwright": "^1.58.2"\n  }\n}
+
+============================================================
+[CASE] 26
+[CHAT] 1985997016
+[PROMPT] 读取 Cargo.toml 的 package.name，只输出值
+[TASK] ca7ceda6-0d01-44e2-8343-11bfffbe2d7c
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=[workspace]\nresolver = "2"\nmembers = [\n    "crates/claw-core",\n    "crates/clawd",\n    "crates/clawcli",\n    "crates/skill-runner",\n    "crates/telegramd",\n    "crates/feishud",\n    "crates/larkd",\n    "crates/whatsappd",\n    "crates/whatsapp_webd",\n    "crates/skills/archive_basic",\n    "crates/skills/audio_synthesize",\n    "crates/skills/audio_transcribe",\n    "crates/skills/chat",\n    "crates/skills/config_guard",\n    "crates/skills/crypto",\n    "crates/skills/db_basic",\n    "crates/skills/docker_basic",\n    "crates/skills/fs_search",\n    "crates/skills/git_basic",\n    "crates/skills/health_check",\n    "crates/skills/http_basic",\n    "crates/skills/image_edit",\n    "crates/skills/image_generate",\n    "crates/skills/image_vision",\n    "crates/skills/install_module",\n    "crates/skills/log_analyze",\n    "crates/skills/package_manager",\n    "crates/skills/process_basic",\n    "crates/skills/rss_fetch",\n    "crates/skills/service_control",\n    "crates/skills/task_control",\n    "crates/skills/system_basic",\n    "crates/skills/stock",\n    "crates/skills/weather",\n    "crates/skills/x",\n    "crates/skills/reference_resolver",\n    "crates/skills/doc_parse",\n    "crates/skills/transform",\n    "crates/skills/web_search_extract",\n    "crates/skills/kb",\n    "crates/skills/browser_web",\n]\n\n[workspace.package]\nversion = "0.1.3"\nedition = "2021"\nlicense = "MIT"\nauthors = ["RustClaw"]\nrepository = ""\n\n[patch.crates-io]\n# feishud long_connection: receive raw event payload to tolerate null fields (open-lark strong types fail)\nopen-lark = { path = "patches/open-lark" }\n\n[workspace.dependencies]\nanyhow = "1"\naxum = "0.7"\nbase64 = "0.22"\nconfig = "0.15"\nregex = "1"\n# 使用 rustls 替代 native-tls，交叉编译 aarch64 时无需目标平台 OpenSSL\nreqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }\n# bundled：从源码编译 SQLite，交叉编译 aarch64 时无需目标平台 libsqlite3\nrusqlite = { version = "0.32", features = ["bundled"] }\nserde = { version = "1", features = ["derive"] }\nserde_json = "1"\n# default-features = false + rustls 便于交叉编译 aarch64（无需 OpenSSL）\nteloxide = { version = "0.12", default-features = false, features = ["rustls", "ctrlc_handler"] }\nthiserror = "1"\ntokio = { version = "1", features = ["full"] }\ntoml = "0.8"\ntracing = "0.1"\ntracing-subscriber = { version = "0.3", features = ["env-filter"] }\nuuid = { version = "1", features = ["v4", "serde"] }
+
+============================================================
+[CASE] 27
+[CHAT] 1985997017
+[PROMPT] 统计 crates/clawd/src 下有多少个 .rs 文件，只输出数字
+[TASK] 435efd9d-3742-41cd-9eed-3f3edd1a7a6c
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=41
+
+============================================================
+[CASE] 28
+[CHAT] 1985997018
+[PROMPT] 检查 scripts 目录里有没有 restart_clawd_latest.sh，有就给路径
+[TASK] 023e32a9-b834-470c-816e-5bf4d12a9632
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=__pycache__/\nauth-key.sh\ncheck-secrets.sh\ncheck_browser_runtime.sh\ncheck_skill_prompts.py\ncodex_autofix_from_log.sh\ncodex_autofix_prompt_from_log.sh\ncodex_fix.sh\ncount_lines.sh\ncrypto-cli.sh\ndb_schema_and_content.py\ndb_schema_and_content.sh\nimport-crypto-credentials.sh\nlib.sh\nnl_manual_cases.txt\nnl_test_logs/\nredact_configs.py\nregression_clawd_crypto_trigger.sh\nregression_crypto_skill.sh\nregression_generated_crypto_safe_cases.txt\nregression_generated_mixed_cases.txt\nregression_resume_continue.sh\nregression_skills_upgrade_suite.sh\nregression_trace_ask.sh\nregression_trace_ask_cases_minimax_think.txt\nregression_trace_ask_cases_real.txt\nregression_trace_ask_full.log\nregression_trace_ask_full_analysis.md\nregression_user_instruction.sh\nregression_user_instruction_cases.txt\nresize_images_240.py\nrestart_clawd_latest.sh\nrouting_replay_metrics.py\nrun_nl_manual_test.sh\nsimple_nl_test.sh\nskill_calls/\nswitch-main-llm.sh\nsync_skill_docs.py\ntask_termination_logs/\ntest_audio_all.sh\ntest_binance_buy_once.py\ntest_crypto_apis.sh\ntest_image_all.sh\ntest_image_module.sh\ntest_qwen_5_channels.py\ntest_qwen_api.sh\nverify_task_termination.sh
+
+============================================================
+[CASE] 29
+[CHAT] 1985997019
+[PROMPT] 查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
+[TASK] acd7c5d9-78ec-4d76-b5c1-75c8b458685a
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=Filesystem      Size  Used Avail Use% Mounted on\nudev            412M     0  412M   0% /dev\ntmpfs           182M  4.2M  178M   3% /run\n/dev/mmcblk0p2   29G   21G  6.3G  77% /\ntmpfs           453M  8.0K  453M   1% /dev/shm\ntmpfs           5.0M   12K  5.0M   1% /run/lock\ntmpfs           453M  4.0K  453M   1% /tmp\ntmpfs           1.0M     0  1.0M   0% /run/credentials/systemd-journald.service\n/dev/mmcblk0p1  510M  105M  406M  21% /boot/firmware\ntmpfs            91M  140K   91M   1% /run/user/1000\ntmpfs           1.0M     0  1.0M   0% /run/credentials/serial-getty@ttyS0.service\ntmpfs           1.0M     0  1.0M   0% /run/credentials/getty@tty1.service
+
+============================================================
+[CASE] 30
+[CHAT] 1985997020
+[PROMPT] 列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+[TASK] 4dc93447-5acb-43f6-a969-e2a6935ae34c
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=CLAW_FEATURE_SUMMARY.md\nclawd-main-split-checklist.md\nclawd-main-split-plan.md\nclawd-main-split-progress.md\n用户能做什么.md
+
+============================================================
+[CASE] 31
+[CHAT] 1985997021
+[PROMPT] 读取 README 开头内容，再用非技术用户能听懂的话做一句总结
+[TASK] 87e2d428-ed2e-475b-b9af-1376ca222677
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=.cargo/\n.dockerignore\n.env.example\n.git/\n.gitignore\n.pids/\nAGENTS.md\nCargo.lock\nCargo.toml\nLICENSE\nLICENSE.zh-CN.md\nREADME.md\nREADME.zh-CN.md\nREADME_cn.md\nRUSTCLAW_SERVICE_README.md\nRustClaw.png\nRustClaw480X320.png\nUI/\nUSAGE.md\nbuild-all.sh\nbuild-ui-nginx.sh\ncheck-logs.sh\nconfigs/\ncrates/\ncross-build-upload.sh\ndata/\ndocker-compose.yml\ndocker/\ndocs/\ndocument/\nexternal_skills/\nfailed-routing-cases.md\ngit-add-exclude.sh\nimage/\ninstall-rustclaw-cmd.sh\nlogs/\nlongxia.png\nmemory-usage-plan.md\nmigrations/\nnode_modules/\npack-to-parent.sh\npackage-lock.json\npackage-release.sh\npackage.json\npatches/\npath_note.txt\npi_app/\nplans/\nprompts/\npush-sanitized-configs.sh\npwd_report.txt\nrun/\nrustclaw\nrustclaw.service\nscripts/\nservices/\nsetup-config.sh\nsimulate-telegramd.sh\nskill_develop/\nskills_output/\nstart-all-bin.sh\nstart-all.sh\nstart-clawd-ui.sh\nstart-clawd.sh\nstart-feishud.sh\nstart-future-adapters.sh\nstart-larkd.sh\nstart-telegramd.sh\nstart-wa-web-bridge.sh\nstart-whatsapp-webd.sh\nstart-whatsappd.sh\nstop-rustclaw.sh\nsystem_report.sh\nsystemd/\ntarget/\nuninstall-rustclaw-cmd.sh
+
+============================================================
+[CASE] 32
+[CHAT] 1985997022
+[PROMPT] 比较 README.md 和 README.zh-CN.md 哪个更大，并顺手解释为什么可能不同
+[TASK] 23a39209-02ac-48ff-b97d-e0ea813a622e
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=-rw-r--r-- 1 guagua guagua 5928 Mar 17 15:12 README.md\n-rw-r--r-- 1 guagua guagua 5689 Mar 17 15:13 README.zh-CN.md
+
+============================================================
+[CASE] 33
+[CHAT] 1985997023
+[PROMPT] 检查当前目录隐藏文件是否存在，再用一句话解释隐藏文件通常是干什么的
+[TASK] 89d5c804-e5f7-4a87-a081-1add3a499da1
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=.cargo/\n.dockerignore\n.env.example\n.git/\n.gitignore\n.pids/\nAGENTS.md\nCargo.lock\nCargo.toml\nLICENSE\nLICENSE.zh-CN.md\nREADME.md\nREADME.zh-CN.md\nREADME_cn.md\nRUSTCLAW_SERVICE_README.md\nRustClaw.png\nRustClaw480X320.png\nUI/\nUSAGE.md\nbuild-all.sh\nbuild-ui-nginx.sh\ncheck-logs.sh\nconfigs/\ncrates/\ncross-build-upload.sh\ndata/\ndocker-compose.yml\ndocker/\ndocs/\ndocument/\nexternal_skills/\nfailed-routing-cases.md\ngit-add-exclude.sh\nimage/\ninstall-rustclaw-cmd.sh\nlogs/\nlongxia.png\nmemory-usage-plan.md\nmigrations/\nnode_modules/\npack-to-parent.sh\npackage-lock.json\npackage-release.sh\npackage.json\npatches/\npath_note.txt\npi_app/\nplans/\nprompts/\npush-sanitized-configs.sh\npwd_report.txt\nrun/\nrustclaw\nrustclaw.service\nscripts/\nservices/\nsetup-config.sh\nsimulate-telegramd.sh\nskill_develop/\nskills_output/\nstart-all-bin.sh\nstart-all.sh\nstart-clawd-ui.sh\nstart-clawd.sh\nstart-feishud.sh\nstart-future-adapters.sh\nstart-larkd.sh\nstart-telegramd.sh\nstart-wa-web-bridge.sh\nstart-whatsapp-webd.sh\nstart-whatsappd.sh\nstop-rustclaw.sh\nsystem_report.sh\nsystemd/\ntarget/\nuninstall-rustclaw-cmd.sh
+
+============================================================
+[CASE] 34
+[CHAT] 1985997024
+[PROMPT] 写一个文本文件到 document/manual_note.txt，内容是 RustClaw manual test note，然后把文件发给我
+[TASK] fad8eceb-3ab2-4b29-9170-47e006b03d05
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=FILE:/home/guagua/git_upload/document/manual_note.txt
+
+============================================================
+[CASE] 35
+[CHAT] 1985997025
+[PROMPT] 生成一个 JSON 文件 document/manual_meta.json，内容包含 app=RustClaw 和 test=nl，然后把文件发给我
+[TASK] 6d8e6094-4daa-4f0e-8ef1-0f475566e3b6
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=FILE:/home/guagua/git_upload/document/manual_meta.json
+
+============================================================
+[CASE] 36
+[CHAT] 1985997026
+[PROMPT] 把 definitely_missing_named_file_rustclaw_user_ops_24686.md 发给我
+[TASK] 332a6856-336a-48a7-91f5-31110aaf8a09
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=我没有文件访问能力，无法发送这个文件。\n\n如果你需要这个文件的内容，可以：\n1. 提供文件路径，让我帮你查看本地是否存在\n2. 直接把文件内容粘贴过来，我来帮你处理
+
+============================================================
+[CASE] 37
+[CHAT] 1985997027
+[PROMPT] 把 document/definitely_missing_shell_001.sh 发给我
+[TASK] 0a8e1689-c22c-4ae9-99f2-50e483c1098c
+  [status] <none> -> running
+  [status] running -> failed
+[FINAL]
+status=failed
+text=step 1 failed (skill(read_file)): read file failed: No such file or directory (os error 2)
+error=step 1 failed (skill(read_file)): read file failed: No such file or directory (os error 2)
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_test_logs/20260321_224212/run.log
+  - /home/guagua/git_upload/scripts/nl_test_logs/20260321_224212/summary.jsonl

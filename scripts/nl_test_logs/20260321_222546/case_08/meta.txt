@@ -1,0 +1,4 @@
+index=8
+chat_id=1985996998
+task_id=5a13e373-f587-4529-9f88-4e9d6e421174
+prompt=把 definitely_missing_named_file_rustclaw_001.txt 发给我

@@ -1,0 +1,4 @@
+index=11
+chat_id=1985997001
+task_id=8fa03584-ce24-4915-aaf1-3ab689a8e891
+prompt=只输出当前用户名，不要解释
