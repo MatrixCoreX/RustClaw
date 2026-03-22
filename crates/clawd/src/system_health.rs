@@ -36,6 +36,10 @@ pub(crate) fn wa_webd_process_stats() -> Option<(usize, u64)> {
     daemon_process_stats("whatsapp_webd")
 }
 
+pub(crate) fn wechatd_process_stats() -> Option<(usize, u64)> {
+    daemon_process_stats("wechatd")
+}
+
 pub(crate) fn feishud_process_stats() -> Option<(usize, u64)> {
     daemon_process_stats("feishud")
 }

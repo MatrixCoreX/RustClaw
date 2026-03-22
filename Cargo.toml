@@ -6,6 +6,7 @@ members = [
     "crates/clawcli",
     "crates/skill-runner",
     "crates/telegramd",
+    "crates/wechatd",
     "crates/feishud",
     "crates/larkd",
     "crates/whatsappd",
