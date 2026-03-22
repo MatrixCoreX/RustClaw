@@ -248,7 +248,7 @@ fn synthesize_llm_providers(
             };
             out.push(LlmProviderConfig {
                 name: "vendor-minimax".to_string(),
-                provider_type: "openai_compat".to_string(),
+                provider_type: "anthropic_claude".to_string(),
                 base_url: v.base_url.clone(),
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
@@ -474,7 +474,18 @@ pub(crate) fn selected_openai_model(state: &AppState, task: Option<&ClaimedTask>
 
 #[cfg(test)]
 mod tests {
-    use super::matches_provider_override;
+    use std::path::PathBuf;
+
+    use claw_core::config::AppConfig;
+
+    use super::{matches_provider_override, synthesize_llm_providers};
+
+    fn repo_config_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../configs/config.toml")
+            .canonicalize()
+            .expect("repo config path should resolve")
+    }
 
     #[test]
     fn provider_override_matches_vendor_alias() {
@@ -517,5 +528,22 @@ mod tests {
             "openai_compat",
             "google"
         ));
+    }
+
+    #[test]
+    fn minimax_uses_anthropic_runtime_when_selected() {
+        let path = repo_config_path();
+        let mut config = AppConfig::load(path.to_str().expect("utf-8 path"))
+            .expect("config fixture should load");
+        config.llm.selected_vendor = Some("minimax".to_string());
+        config.llm.selected_model = Some("MiniMax-M2.7".to_string());
+
+        let providers = synthesize_llm_providers(&config, None, None);
+        let minimax = providers
+            .iter()
+            .find(|provider| provider.name == "vendor-minimax")
+            .expect("minimax provider should be synthesized");
+
+        assert_eq!(minimax.provider_type, "anthropic_claude");
     }
 }

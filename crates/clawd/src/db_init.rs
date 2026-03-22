@@ -40,7 +40,7 @@ pub(crate) fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
             job_id            TEXT NOT NULL UNIQUE,
             user_id           INTEGER NOT NULL,
             chat_id           INTEGER NOT NULL,
-            channel           TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
+            channel           TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat')),
             external_user_id  TEXT,
             external_chat_id  TEXT,
             schedule_type     TEXT NOT NULL CHECK (schedule_type IN ('once', 'daily', 'weekly', 'interval', 'cron')),
@@ -163,7 +163,7 @@ pub(crate) fn ensure_channel_schema(db: &Connection) -> anyhow::Result<()> {
         db,
         "tasks",
         "channel",
-        "ALTER TABLE tasks ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark'))",
+        "ALTER TABLE tasks ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat'))",
     )?;
     crate::ensure_column_exists(
         db,
@@ -182,7 +182,7 @@ pub(crate) fn ensure_channel_schema(db: &Connection) -> anyhow::Result<()> {
         db,
         "scheduled_jobs",
         "channel",
-        "ALTER TABLE scheduled_jobs ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark'))",
+        "ALTER TABLE scheduled_jobs ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat'))",
     )?;
     crate::ensure_column_exists(
         db,
@@ -201,7 +201,7 @@ pub(crate) fn ensure_channel_schema(db: &Connection) -> anyhow::Result<()> {
         db,
         "memories",
         "channel",
-        "ALTER TABLE memories ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark'))",
+        "ALTER TABLE memories ADD COLUMN channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat'))",
     )?;
     crate::ensure_column_exists(
         db,
