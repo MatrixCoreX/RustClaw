@@ -1,0 +1,10 @@
+[wechat]
+api_base_url = "https://ilinkai.weixin.qq.com"
+bot_token = ""
+clawd_base_url = "http://127.0.0.1:8787"
+enabled = true
+listen = "0.0.0.0:8792"
+longpoll_timeout_ms = 35000
+request_timeout_seconds = 30
+text_chunk_chars = 1200
+wechat_uin_base64 = ""
