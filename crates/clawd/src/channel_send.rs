@@ -35,6 +35,8 @@ pub struct WechatSendConfig {
     pub bot_token: String,
     pub wechat_uin_base64: Option<String>,
     pub text_chunk_chars: usize,
+    /// Optional `SKRouteTag` (same as OpenClaw weixin plugin / gateway routing).
+    pub sk_route_tag: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -292,6 +294,9 @@ pub(crate) async fn send_wechat_text_message(
         if let Some(uin) = config.wechat_uin_base64.as_deref() {
             req = req.header("X-WECHAT-UIN", uin);
         }
+        if let Some(tag) = config.sk_route_tag.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            req = req.header("SKRouteTag", tag);
+        }
         let resp = req
             .json(&json!({
                 "base_info": {
@@ -335,6 +340,9 @@ fn resolve_wechat_send_config(state: &AppState) -> Option<WechatSendConfig> {
             }
             if loaded.wechat_uin_base64.is_some() {
                 fallback.wechat_uin_base64 = loaded.wechat_uin_base64;
+            }
+            if loaded.sk_route_tag.is_some() {
+                fallback.sk_route_tag = loaded.sk_route_tag;
             }
             fallback.text_chunk_chars = loaded.text_chunk_chars;
             Some(fallback)
@@ -397,11 +405,17 @@ fn load_wechat_send_config_from_workspace(workspace_root: &Path) -> Option<Wecha
         .and_then(|v| v.as_integer())
         .map(|v| v.max(1) as usize)
         .unwrap_or(WECHAT_TEXT_CHUNK_CHARS);
+    let sk_route_tag = wechat
+        .get("sk_route_tag")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     Some(WechatSendConfig {
         api_base_url,
         bot_token,
         wechat_uin_base64,
         text_chunk_chars,
+        sk_route_tag,
     })
 }
 
