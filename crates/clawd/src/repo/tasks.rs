@@ -398,7 +398,7 @@ pub(crate) fn get_task_query_record(
 }
 
 pub(crate) fn channel_allows_shared_ui_task_access(channel: &str) -> bool {
-    matches!(channel, "telegram" | "whatsapp" | "feishu" | "lark")
+    matches!(channel, "telegram" | "whatsapp" | "wechat" | "feishu" | "lark")
 }
 
 pub(crate) enum TaskViewerAccessError {

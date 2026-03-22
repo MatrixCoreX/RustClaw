@@ -165,6 +165,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
     let source = match task_runtime_channel(state, task) {
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
+        RuntimeChannel::Wechat => "wechat",
         RuntimeChannel::Feishu => "feishu",
         RuntimeChannel::Lark => "lark",
     };
