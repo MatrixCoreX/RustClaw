@@ -1,0 +1,6 @@
+ordinal=57
+source_line=60
+case_name=task_list_brief_semantic
+chat_id=1985997047
+task_id=eb798f6c-bdd4-4a97-88e3-18f6bc6a9dc4
+prompt=tell me whether there are any unfinished tasks in this chat right now

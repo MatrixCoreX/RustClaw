@@ -1,0 +1,4 @@
+index=31
+chat_id=1985997021
+task_id=00bf86ae-6c62-49d1-bbe3-ddd0c2fbf3f6
+prompt=check whether this folder has dotfiles; answer briefly with yes or no plus two examples

@@ -19,6 +19,8 @@ POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 WITH_TRACE=0
 WITH_RESUME=0
 FULL_TEXT=0
+RESUME_DIR=""
+RESUME_LINE=""
 
 usage() {
   cat <<'EOF'
@@ -26,7 +28,7 @@ Usage:
   bash scripts/run_nl_full_suite.sh [options]
 
 Default:
-  Run the comprehensive natural-language instruction suite using simple_nl_test.sh.
+  Run the comprehensive natural-language instruction suite using run_nl_manual_test.sh.
 
 Options:
   --case-file PATH      Main NL case file. Default: scripts/nl_full_suite_cases.txt
@@ -39,6 +41,8 @@ Options:
   --wait-seconds N      max wait per case
   --poll-seconds N      poll interval
   --full-text           pass through to child NL runner
+  --resume-dir PATH     existing child run dir for the main NL runner
+  --resume-line N       continue after this tested source line in the main case file
   --with-trace          additionally run regression_trace_ask.sh on focused trace cases
   --with-resume         additionally run regression_resume_continue.sh
   -h, --help            show this help
@@ -96,6 +100,14 @@ while [[ $# -gt 0 ]]; do
       FULL_TEXT=1
       shift
       ;;
+    --resume-dir)
+      RESUME_DIR="$2"
+      shift 2
+      ;;
+    --resume-line)
+      RESUME_LINE="$2"
+      shift 2
+      ;;
     --with-trace)
       WITH_TRACE=1
       shift
@@ -139,12 +151,14 @@ echo "  chat_id:          $CHAT_ID_VALUE"
 echo "  user_key:         ${USER_KEY_VALUE:-<auto-detect admin key>}"
 echo "  wait:             ${WAIT_SECONDS_VALUE}s"
 echo "  poll:             ${POLL_SECONDS_VALUE}s"
+echo "  resume_dir:       ${RESUME_DIR:-<new run>}"
+echo "  resume_line:      ${RESUME_LINE:-<none>}"
 echo "  with_trace:       $WITH_TRACE"
 echo "  with_resume:      $WITH_RESUME"
 echo
 
 simple_cmd=(
-  bash "${SCRIPT_DIR}/simple_nl_test.sh"
+  bash "${SCRIPT_DIR}/run_nl_manual_test.sh"
   --case-file "$CASE_FILE"
   --base-url "$BASE_URL_VALUE"
   --user-id "$USER_ID_VALUE"
@@ -158,6 +172,12 @@ if [[ -n "$USER_KEY_VALUE" ]]; then
 fi
 if [[ "$FULL_TEXT" -eq 1 ]]; then
   simple_cmd+=(--full-text)
+fi
+if [[ -n "$RESUME_DIR" ]]; then
+  simple_cmd+=(--resume-dir "$RESUME_DIR")
+fi
+if [[ -n "$RESUME_LINE" ]]; then
+  simple_cmd+=(--resume-line "$RESUME_LINE")
 fi
 
 echo "== Section 1/3: comprehensive NL cases =="

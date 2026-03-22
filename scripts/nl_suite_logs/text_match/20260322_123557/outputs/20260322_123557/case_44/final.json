@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"c0d5327c-25d6-4494-af08-ab679554bb13","status":"succeeded","result_json":{"messages":["该目录包含大量 shell 脚本和 Python 脚本，主要用于自然语言测试套件运行、代码自动修复、Crypto 相关操作、浏览器运行时检查、数据库处理以及各类回归测试的自动化执行和监控。"],"text":"该目录包含大量 shell 脚本和 Python 脚本，主要用于自然语言测试套件运行、代码自动修复、Crypto 相关操作、浏览器运行时检查、数据库处理以及各类回归测试的自动化执行和监控。"},"error_text":null},"error":null}

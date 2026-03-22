@@ -238,18 +238,24 @@ fn workspace_root() -> PathBuf {
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        .canonicalize()
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
+    let normalized_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
     let base = if Path::new(input).is_absolute() {
         PathBuf::from(input)
     } else {
-        workspace_root.join(input)
+        normalized_root.join(input)
     };
     if base.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err("path with '..' is not allowed".to_string());
     }
-    if !base.starts_with(workspace_root) {
+    let normalized_base = base.canonicalize().unwrap_or_else(|_| base.clone());
+    if !normalized_base.starts_with(&normalized_root) {
         return Err("path is outside workspace".to_string());
     }
     Ok(base)

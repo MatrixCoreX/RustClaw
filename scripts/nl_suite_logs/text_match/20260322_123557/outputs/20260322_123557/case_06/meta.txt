@@ -1,0 +1,4 @@
+index=6
+chat_id=1154158460333669
+task_id=b438123b-b63e-47dc-91da-a7648c0ce568
+prompt=看看 README.md 开头讲了什么，读前 20 行后用三句话总结

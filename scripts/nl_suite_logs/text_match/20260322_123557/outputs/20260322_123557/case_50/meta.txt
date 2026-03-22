@@ -1,0 +1,4 @@
+index=50
+chat_id=1154158460333713
+task_id=359e88ed-9ce1-4dd4-a63a-4a9098f369a4
+prompt=pull the name value out of package.json and return only that value
