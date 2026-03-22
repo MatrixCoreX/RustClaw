@@ -88,7 +88,7 @@ timeout_seconds = 60
 #
 # Historical MiniMax example (commented keep) / 历史 MiniMax 示例（注释保留）
 # [audio_synthesize.providers.minimax]
-# base_url = "https://api.minimax.io/v1"
+# base_url = "https://api.minimax.com/v1"
 # api_key = ""
 # model = "speech-2.8-turbo"
 # timeout_seconds = 60
@@ -182,7 +182,7 @@ oss_url_ttl_seconds = 3600
 #
 # Historical MiniMax example (commented keep) / 历史 MiniMax 示例（注释保留）
 # [audio_transcribe.providers.minimax]
-# base_url = "https://api.minimax.io/v1"
+# base_url = "https://api.minimax.ocom/v1"
 # api_key = ""
 # model = "speech-01"
 # timeout_seconds = 90
