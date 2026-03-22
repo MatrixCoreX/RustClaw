@@ -2207,6 +2207,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrcodegen"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4339fc7a1021c9c1621d87f5e3505f2805c8c105420ba2f2a4df86814590c142"
+
+[[package]]
 name = "quick_cache"
 version = "0.6.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3990,6 +3996,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22cfaf3c063993ff62e73cb4311efde4db1efb31ab78a3e5c457939ad5cc0bed"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "wechatd"
+version = "0.1.3"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "claw-core",
+ "qrcodegen",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
