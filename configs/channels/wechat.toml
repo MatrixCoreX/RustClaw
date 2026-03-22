@@ -7,7 +7,7 @@
 # bot_token can stay empty before first QR login; session.json will be created after login.
 
 [wechat]
-enabled = false
+enabled = true
 listen = "0.0.0.0:8792"
 clawd_base_url = "http://127.0.0.1:8787"
 api_base_url = "https://ilinkai.weixin.qq.com"
@@ -17,3 +17,7 @@ wechat_uin_base64 = ""
 request_timeout_seconds = 30
 longpoll_timeout_ms = 35000
 text_chunk_chars = 1200
+# 与 OpenClaw 微信插件一致：部分部署需在请求头携带 SKRouteTag（留空则不发）。
+sk_route_tag = ""
+# wechatd 轮询 clawd 任务期间刷新「正在输入」的间隔（秒）。
+typing_refresh_interval_secs = 5
