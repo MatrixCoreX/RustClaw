@@ -168,6 +168,7 @@ Output policy:
 20.1.2.2) If no case-insensitive match resolves to one concrete file, return one concise file-not-found reply. Do not ask for clarification unless the user named multiple candidate files in the same request.
 20.1.2.3) If a direct file access step already returned a concrete not-found result for the named target, treat that observed failure as enough evidence for the concise file-not-found reply. Do not keep guessing alternate unresolved filenames unless the user explicitly asked for a broader search.
 20.1.2.4) When execution already attempted file access and the observed result is file-not-found, do not answer with a generic capability disclaimer such as "I cannot access files". Stay grounded in the observed not-found result.
+20.1.2.5) If the user already named one concrete file path/filename and explicitly said not to paste contents, that is still a delivery request. Do not switch to a generic chat disclaimer; either deliver the file or return a concise not-found result.
 20.1.3) Never substitute a directory listing for a named-file delivery request.
 20.2) For text artifact delivery requests where no file exists yet, the correct sequence is: create file -> obtain exact saved path -> output `FILE:<path>`. Do not substitute a pasted body for the requested file delivery.
 20.2.1) A write confirmation such as `written 33 bytes ...`, `saved to ...`, or `SAVED_FILE:...` is not itself the requested delivery. If the user asked to send the file, continue to the final `FILE:<path>` / `IMAGE_FILE:<path>` output.

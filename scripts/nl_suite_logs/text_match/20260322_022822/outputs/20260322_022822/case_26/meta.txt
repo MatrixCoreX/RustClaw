@@ -1,0 +1,4 @@
+index=26
+chat_id=1985997016
+task_id=9819ee5c-cd12-4140-8a55-9f40c2aa2a1a
+prompt=别执行任何命令，直接讲一个很短的冷笑话

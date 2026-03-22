@@ -1,0 +1,4 @@
+index=48
+chat_id=1154158460333711
+task_id=0b27c0f5-395e-4d81-8789-64c7bce134c5
+prompt=send document/definitely_missing_runtime_case_005.txt as the file itself, do not paste the body

@@ -1,0 +1,4 @@
+index=40
+chat_id=1154158460333703
+task_id=cf086136-7656-4412-a7cc-df66c7c37199
+prompt=帮我从 package.json 里把 name 那个值抠出来，别带别的

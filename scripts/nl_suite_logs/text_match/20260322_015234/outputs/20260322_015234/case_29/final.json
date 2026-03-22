@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"10bb9635-e4f6-4089-8965-35faf9eb1532","status":"succeeded","result_json":{"messages":["根目录 `/dev/mmcblk0p2` 最该盯着——总共29GB，已用21GB，剩6.3GB，使用率78%。虽然还没到危险线，但剩余空间不大，留个心眼。"],"text":"根目录 `/dev/mmcblk0p2` 最该盯着——总共29GB，已用21GB，剩6.3GB，使用率78%。虽然还没到危险线，但剩余空间不大，留个心眼。"},"error_text":null},"error":null}
