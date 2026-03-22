@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"5421719e-2fbe-404a-a317-6e1b8b4a30a4","status":"succeeded","result_json":{"messages":["**结论**：是，当前目录下存在以点开头的隐藏项。\n\n**示例**：\n\n1. `.git/`（Git 版本控制目录）\n2. `.cargo/`（Rust 构建缓存目录）"],"text":"**结论**：是，当前目录下存在以点开头的隐藏项。\n\n**示例**：\n\n1. `.git/`（Git 版本控制目录）\n2. `.cargo/`（Rust 构建缓存目录）"},"error_text":null},"error":null}

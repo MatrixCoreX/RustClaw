@@ -1,0 +1,41 @@
+NL suite: text_match
+  run_dir:  /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_133418
+  run_log:  /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_133418/run.log
+
+Usage:
+  bash scripts/run_nl_manual_test.sh [options]
+
+Options:
+  --case-file PATH      Case file to run. Default: scripts/nl_manual_cases.txt
+  --log-root PATH       Root log dir. Default: logs/run_nl_manual_test
+  --resume-dir PATH     Existing run dir to append logs/results into
+  --resume-line N       Continue after this tested source line number
+  --base-url URL        clawd base url. Default: http://127.0.0.1:8787
+  --user-id ID          User id for submit
+  --chat-id ID          Base chat id for submit
+  --user-key KEY        RustClaw user key
+  --wait-seconds N      Max wait seconds per case
+  --poll-seconds N      Poll interval seconds
+  --full-text           Print full response text
+  -h, --help            Show this help
+
+Case format:
+  suite|name|tags|prompt
+  prompt-only lines are also allowed
+
+Resume behavior:
+  If you already tested through line 12, rerun with:
+    bash scripts/run_nl_manual_test.sh --resume-dir <run_dir> --resume-line 12
+
+Artifacts:
+  logs/run_nl_manual_test/<timestamp>/
+    run.log
+    summary.jsonl
+    case_*/
+      submit.json
+      final.json
+      meta.txt
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_133418
+  - /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_133418/run.log

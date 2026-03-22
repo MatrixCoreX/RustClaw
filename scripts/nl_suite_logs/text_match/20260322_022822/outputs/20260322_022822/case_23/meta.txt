@@ -1,0 +1,4 @@
+index=23
+chat_id=1985997013
+task_id=35608101-7ced-403b-b95a-197f8d6dfced
+prompt=把 document/definitely_missing_runtime_case_001.txt 发给我，不要贴内容

@@ -1,0 +1,4 @@
+index=31
+chat_id=1985997021
+task_id=136b8026-1da7-4e02-9e21-cb70f8df5f45
+prompt=look at the top-level directories in this repo and then explain in one plain sentence how the project is laid out

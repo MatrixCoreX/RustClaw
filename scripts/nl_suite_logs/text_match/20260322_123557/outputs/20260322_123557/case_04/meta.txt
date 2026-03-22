@@ -1,0 +1,4 @@
+index=4
+chat_id=1154158460333667
+task_id=6d982a05-7ad4-4bc7-8613-cc7cdacfd852
+prompt=执行 df -h，然后用大白话告诉我最需要关注哪一项

@@ -440,6 +440,59 @@ fn is_meta_respond_instruction(text: &str) -> bool {
 }
 
 fn parse_single_plan_actions(raw: &str, state: &AppState) -> Option<Vec<AgentAction>> {
+    fn parse_action_steps_from_values(values: Vec<Value>, state: &AppState) -> Vec<AgentAction> {
+        let mut actions = Vec::new();
+        for step in values {
+            let Ok(raw_step) = serde_json::to_string(&step) else {
+                continue;
+            };
+            let Ok(normalized) = crate::parse_agent_action_json_with_repair(&raw_step, state)
+            else {
+                continue;
+            };
+            let Ok(action) = serde_json::from_value::<AgentAction>(normalized) else {
+                continue;
+            };
+            match action {
+                AgentAction::Think { .. } => {}
+                AgentAction::Respond { content }
+                    if !actions.is_empty() && is_meta_respond_instruction(&content) => {}
+                _ => actions.push(action),
+            }
+        }
+        actions
+    }
+
+    let mut step_values = Vec::new();
+    if let Some(value) = crate::parse_llm_json_raw_or_any::<Value>(raw) {
+        match value {
+            Value::Object(map) => {
+                if let Some(steps) = map.get("steps").and_then(|v| v.as_array()) {
+                    step_values.extend(steps.iter().cloned());
+                } else {
+                    step_values.push(Value::Object(map));
+                }
+            }
+            Value::Array(arr) => step_values.extend(arr),
+            other => step_values.push(other),
+        }
+    }
+    if step_values.is_empty() {
+        for candidate in crate::prompt_utils::extract_agent_action_objects(raw) {
+            if let Ok(value) = serde_json::from_str::<Value>(&candidate) {
+                step_values.push(value);
+            }
+        }
+    }
+    if step_values.is_empty() {
+        return None;
+    }
+
+    let actions = parse_action_steps_from_values(step_values, state);
+    if !actions.is_empty() {
+        return Some(actions);
+    }
+
     let value = crate::parse_llm_json_raw_or_any::<Value>(raw)?;
     let env = serde_json::from_value::<SinglePlanEnvelope>(value).ok()?;
     if env.steps.is_empty() {
@@ -497,6 +550,8 @@ struct LoopState {
     last_written_file_path: Option<String>,
     /// Last user-visible respond text (final or publishable). Used when delivery_messages was not filled so we do not fall back to subtask summary.
     last_user_visible_respond: Option<String>,
+    /// Last publishable chat-skill output. Prefer this over LLM finalization when no explicit respond was emitted.
+    last_publishable_chat_output: Option<String>,
 }
 
 impl LoopState {
@@ -1396,6 +1451,9 @@ async fn execute_actions_once(
                     Ok(outcome) => {
                         ensure_task_running(state, task)?;
                         let out = outcome.text.clone();
+                        if normalized_skill == "chat" && is_publishable_raw(&out) {
+                            loop_state.last_publishable_chat_output = Some(out.clone());
+                        }
                         if let Some((original_path, _effective_path, user_visible_path)) =
                             &write_file_effective_path
                         {
@@ -1962,7 +2020,7 @@ async fn synthesize_final_response(
     }
     let mut args = json!({
         "text": format!(
-            "Original user request:\n{}\n\nWrite the final user-facing answer now. Use the recent execution context above. Complete any still-pending lightweight conclusion requested by the user, but do not invent unseen files, paths, lines, or command results. If the observed raw result already exactly satisfies the user request, return it unchanged. If the user asked for a boolean / scalar / path / filename / FILE token only, keep that exact compact format and do not wrap it in extra prose. If execution already produced one concrete saved file path and the user asked to receive the file itself, return exactly FILE:<that-path>. If the observed execution context shows a requested file/path was not found, answer concisely that it was not found instead of asking the user to re-provide contents that were already attempted. Do not claim that you lack file access or cannot access files when the execution context already shows that file-access steps were attempted; in that case stay grounded in the observed file-not-found result. Keep the reply concise and direct.",
+            "Original user request:\n{}\n\nWrite the final user-facing answer now. Use the recent execution context above. Complete any still-pending lightweight conclusion requested by the user, but do not invent unseen files, paths, lines, or command results. Treat the current turn's observed tool results as authoritative; do not let older memory or earlier execution snippets override a successful tool result from this turn. If the observed raw result already exactly satisfies the user request, return it unchanged. If the user asked for a boolean / scalar / path / filename / FILE token only, keep that exact compact format and do not wrap it in extra prose. If the user asked for only a number but the observed result is a plain newline-separated listing from this turn, answer with the count only. If the user asked for a field value and the observed extraction result is `undefined`, `null`, or empty, answer that the field was not found; do not turn that into a file-not-found claim. If execution already produced one concrete saved file path and the user asked to receive the file itself, return exactly FILE:<that-path>. If the observed execution context shows a requested file/path was not found, answer concisely that it was not found instead of asking the user to re-provide contents that were already attempted. Do not claim that you lack file access or cannot access files when the execution context already shows that file-access steps were attempted; in that case stay grounded in the observed file-not-found result. Keep the reply concise and direct.",
             user_text
         )
     });
@@ -2107,28 +2165,52 @@ async fn run_agent_with_loop(
         }
     }
 
+    if loop_state.delivery_messages.is_empty() {
+        if let Some(ref last_chat_output) = loop_state.last_publishable_chat_output {
+            if !last_chat_output.trim().is_empty() {
+                append_delivery_message(
+                    &task.task_id,
+                    &mut loop_state.delivery_messages,
+                    last_chat_output.clone(),
+                );
+                info!(
+                    "final_result_use_chat_output task_id={} (delivery was empty)",
+                    task.task_id
+                );
+            }
+        }
+    }
+
     // Finalizer: when execution produced raw outputs but the plan never emitted an explicit
     // publishable respond, synthesize the final user-facing answer from observed results.
     if loop_state.delivery_messages.is_empty() && should_synthesize_final_response(&loop_state) {
-        if let Some(synthesized) =
-            synthesize_final_response(state, task, user_text, &loop_state).await?
-        {
-            append_delivery_message(
-                &task.task_id,
-                &mut loop_state.delivery_messages,
-                synthesized.clone(),
-            );
-            info!("delivery fallback_from_synthesize task_id={}", task.task_id);
-            crate::append_subtask_result(
-                &mut loop_state.subtask_results,
-                loop_state.total_steps_executed + 1,
-                "respond(finalize)",
-                true,
-                &synthesized,
-            );
-            loop_state
-                .history_compact
-                .push("finalize respond".to_string());
+        match synthesize_final_response(state, task, user_text, &loop_state).await {
+            Ok(Some(synthesized)) => {
+                append_delivery_message(
+                    &task.task_id,
+                    &mut loop_state.delivery_messages,
+                    synthesized.clone(),
+                );
+                info!("delivery fallback_from_synthesize task_id={}", task.task_id);
+                crate::append_subtask_result(
+                    &mut loop_state.subtask_results,
+                    loop_state.total_steps_executed + 1,
+                    "respond(finalize)",
+                    true,
+                    &synthesized,
+                );
+                loop_state
+                    .history_compact
+                    .push("finalize respond".to_string());
+            }
+            Ok(None) => {}
+            Err(err) => {
+                warn!(
+                    "finalize_synthesize_failed task_id={} err={}",
+                    task.task_id,
+                    crate::truncate_for_log(&err)
+                );
+            }
         }
     }
 

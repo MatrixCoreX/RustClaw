@@ -1,0 +1,6 @@
+ordinal=49
+source_line=52
+case_name=fs_package_name_cn_variant_2
+chat_id=1985997039
+task_id=162d2967-510f-4f0d-8a4d-b351ff2c08cf
+prompt=package.json 里面 name 是什么，只给那个值

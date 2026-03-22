@@ -1,0 +1,4 @@
+index=38
+chat_id=1985997028
+task_id=07bb2762-33b9-4765-862f-b1c808af31c0
+prompt=does this folder contain any dotfiles? just answer yes or no and give two examples

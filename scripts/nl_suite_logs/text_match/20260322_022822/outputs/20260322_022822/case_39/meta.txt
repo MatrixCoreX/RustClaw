@@ -1,0 +1,4 @@
+index=39
+chat_id=1985997029
+task_id=5ce8b9ea-0eef-4746-a27d-68e102f6b749
+prompt=这个目录里有隐藏项吗？只回有或没有，再给两个例子

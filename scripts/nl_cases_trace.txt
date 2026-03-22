@@ -16,3 +16,11 @@ trace_package_name_variant|帮我从 package.json 里把 name 那个值抠出来
 trace_readme_plain_variant|先看看 README 开头，再用一句不技术的话告诉我这是干什么的
 trace_run_cmd_df_variant|跑一下 df -h，然后用一句人话告诉我哪个盘最该盯着
 trace_missing_file_variant|send me document/definitely_missing_full_suite_trace_002.txt
+trace_git_branch|看看当前 git 分支叫什么，只给我分支名
+trace_git_status|看看这个仓库现在有没有未提交改动，用一句话告诉我
+trace_health_check|帮我做一次基础健康检查，只列最重要的结论
+trace_ports|看一下现在机器上有哪些监听端口，再简短说最值得注意的几个
+trace_log_analyze|快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
+trace_service_status|帮我检查 telegramd 现在是不是在运行，顺手简短解释状态
+trace_task_list|看看我这个会话里现在有没有未完成任务，简短告诉我结果
+trace_transform_table|把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]

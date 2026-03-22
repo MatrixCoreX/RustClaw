@@ -1,0 +1,6 @@
+ordinal=61
+source_line=64
+case_name=mixed_request_cn_variant_3
+chat_id=1985997051
+task_id=0155ab67-2a6b-4e88-82cc-2bbbb810234c
+prompt=先看看仓库顶层目录都有哪些，再用一句给小白看的话说明这个项目怎么摆的

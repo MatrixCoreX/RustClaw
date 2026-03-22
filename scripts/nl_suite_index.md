@@ -8,6 +8,7 @@ Unified natural-language regression entry points:
 - `bash scripts/run_nl_suite_resume.sh`
 - `bash scripts/run_nl_suite_text_match.sh`
 - `bash scripts/run_nl_suite_clarify.sh`
+- `bash scripts/run_nl_suite_all.sh`
 
 Unified case files:
 
@@ -25,6 +26,7 @@ Unified log layout:
 - `scripts/nl_suite_logs/resume/<timestamp>/`
 - `scripts/nl_suite_logs/text_match/<timestamp>/`
 - `scripts/nl_suite_logs/clarify/<timestamp>/`
+- `scripts/nl_suite_logs/all/<timestamp>/`
 
 Compatibility:
 

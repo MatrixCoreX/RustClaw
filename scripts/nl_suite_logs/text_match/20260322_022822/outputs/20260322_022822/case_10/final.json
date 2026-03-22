@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"72e6d6aa-f7c9-4da8-9f2f-42a3bb732089","status":"succeeded","result_json":{"text":"README.md 更大，多 239 字节（5928 vs 5689 字节）。\n\n差异原因：\n\n1. 内容详细度不同：英文版可能有更长的示例或额外说明\n2. 编码差异：中文 UTF-8 每个字占 3 字节，英文占 1 字节\n3. 语言表达习惯：中英文表达相同意思时长度不同\n\n英文版的额外内容足以抵消中文字节的额外开销，因此整体更大。"},"error_text":null},"error":null}

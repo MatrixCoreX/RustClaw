@@ -1,0 +1,4 @@
+index=30
+chat_id=1985997020
+task_id=242bbe10-c595-44ca-b9c0-faddf5ecee11
+prompt=先看一下这个仓库顶层有哪些目录，再用一句新手能懂的话概括这个项目怎么组织

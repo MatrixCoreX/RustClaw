@@ -1,0 +1,4 @@
+index=1
+chat_id=1985996991
+task_id=d6989696-85bf-4da5-8ecb-0856cea75ade
+prompt=执行 pwd，然后告诉我结果

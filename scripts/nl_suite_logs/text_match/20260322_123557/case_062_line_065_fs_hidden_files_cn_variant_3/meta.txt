@@ -1,0 +1,6 @@
+ordinal=62
+source_line=65
+case_name=fs_hidden_files_cn_variant_3
+chat_id=1985997052
+task_id=b8627db1-78d8-4959-8d6a-2558562e7bc2
+prompt=当前目录里有没有隐藏项？只回有或没有，再给我两个例子

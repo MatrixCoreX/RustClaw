@@ -9,3 +9,7 @@ clarify_list_which_dir|看看那个目录下面都有什么|document
 clarify_find_which_script|看看那个重启脚本在不在|restart_clawd_latest.sh
 clarify_read_which_doc|读一下那个说明文档开头，然后用一句话总结|README.md
 clarify_missing_file_after_target|把那个文件发给我|document/definitely_missing_clarify_case_001.txt
+clarify_check_which_service|看看那个服务现在是不是在运行|telegramd
+clarify_tail_which_log|帮我看一下那个日志最近 20 行|logs/clawd.log
+clarify_read_which_git_thing|看看那个分支现在叫什么|current branch
+clarify_transform_which_json|把那个 JSON 数组按 score 排一下并转成表格|[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]

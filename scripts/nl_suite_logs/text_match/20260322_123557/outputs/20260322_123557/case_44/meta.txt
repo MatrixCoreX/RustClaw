@@ -1,0 +1,4 @@
+index=44
+chat_id=1154158460333707
+task_id=c0d5327c-25d6-4494-af08-ab679554bb13
+prompt=帮我看下 scripts 这个目录里大致都是什么，用一句人话说清楚

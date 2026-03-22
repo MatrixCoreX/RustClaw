@@ -1,0 +1,6 @@
+ordinal=50
+source_line=53
+case_name=fs_package_name_en_variant
+chat_id=1985997040
+task_id=e6e23c67-74be-4431-973f-8ae068465f67
+prompt=pull the name value out of package.json and return only that value
