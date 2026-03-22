@@ -8,15 +8,8 @@ execute_prefixes = [
   "执行",
 ]
 
-result_suffixes = [
-  "告诉我结果",
-  "并告诉我结果",
-  "然后告诉我结果",
-  "并把结果告诉我",
-  "然后回复我",
-  "并回复我",
-  "告诉我输出",
-]
+# Natural-language result tails are handled semantically by the planner/LLM.
+result_suffixes = []
 
 negative_markers = [
   "是什么命令",

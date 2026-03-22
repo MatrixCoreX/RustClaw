@@ -11,6 +11,16 @@ enabled = true
 listen = "0.0.0.0:8792"
 clawd_base_url = "http://127.0.0.1:8787"
 api_base_url = "https://ilinkai.weixin.qq.com"
+# 图片 CDN 根地址（与 OpenClaw 插件 CDN_BASE_URL 一致）；收图解密与发图上传均依赖此域。
+cdn_base_url = "https://novac2c.cdn.weixin.qq.com/c2c"
+# 收到图片后的落盘根目录
+image_inbox_dir = "data/wechatd/image"
+# 收到视频后的落盘根目录
+video_inbox_dir = "data/wechatd/video"
+# 收到语音后的落盘根目录
+audio_inbox_dir = "data/wechatd/audio"
+# 收到文件后的落盘根目录
+file_inbox_dir = "data/wechatd/file"
 bot_token = ""
 # Random uint32 encoded as base64 when required by upstream protocol.
 wechat_uin_base64 = ""

@@ -31,6 +31,8 @@ format_mib() { awk -v bytes="${1:-0}" 'BEGIN { printf "%.2f", bytes / 1048576 }'
 SSH_OPTS=(-i "${REMOTE_SSH_KEY}")
 RSYNC_SSH="ssh -i ${REMOTE_SSH_KEY}"
 REMOTE_CARGO_ENV='source ~/.cargo/env 2>/dev/null; export PATH="$HOME/.cargo/bin:$PATH"; '
+# bindgen 在 aarch64 交叉编译时需要显式看到目标头文件，否则 silk-rs 会报 float.h not found
+REMOTE_BINDGEN_ENV='GCC_INCLUDE_DIR="$(aarch64-linux-gnu-gcc -print-file-name=include 2>/dev/null)"; TARGET_INCLUDE_DIR="/usr/aarch64-linux-gnu/include"; if [[ -n "$GCC_INCLUDE_DIR" && -d "$TARGET_INCLUDE_DIR" ]]; then export BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu="--target=aarch64-linux-gnu -I$GCC_INCLUDE_DIR -I$TARGET_INCLUDE_DIR"; fi; '
 
 # 统计并打印拉回产物大小（目录或单个文件）
 print_pull_stats() {
@@ -127,7 +129,7 @@ if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
   echo "[remote] 未检测到 aarch64-linux-gnu-gcc，正在安装..."
   if command -v apt-get &>/dev/null; then
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq && apt-get install -y -qq gcc-aarch64-linux-gnu
+    apt-get update -qq && apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross
   elif command -v dnf &>/dev/null; then
     dnf install -y gcc-aarch64-linux-gnu
   elif command -v yum &>/dev/null; then
@@ -235,7 +237,7 @@ esac
 case "$MODE" in
 all)
 	echo "[$(date)] building full workspace release..."
-	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}cd ${REMOTE_DIR} && cargo build --release --target ${TARGET}"
+	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && cargo build --release --target ${TARGET}"
 	RELEASE_DIR="${LOCAL_RELEASE_DIR}"
 	mkdir -p "${RELEASE_DIR}"
 	if [[ -n "${CROSS_PULL_ALL_ARTIFACTS}" ]]; then
@@ -262,7 +264,7 @@ skill)
 		exit 1
 	}
 	echo "[$(date)] 远程交叉编译技能 ${BIN_NAME}（仅 release）..."
-	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}cd ${REMOTE_DIR} && cargo build -p ${BIN_NAME} --release --target ${TARGET}"
+	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && cargo build -p ${BIN_NAME} --release --target ${TARGET}"
 	echo "[$(date)] 正在拉取 release: ${BIN_NAME} ..."
 	pull_remote_file_direct \
 		"${REMOTE_DIR}/target/${TARGET}/release/${BIN_NAME}" \
@@ -275,7 +277,7 @@ crate)
 		usage
 	}
 	echo "[$(date)] 远程交叉编译 ${PKG}（仅 release）..."
-	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}cd ${REMOTE_DIR} && cargo build -p ${PKG} --release --target ${TARGET}"
+	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && cargo build -p ${PKG} --release --target ${TARGET}"
 	echo "[$(date)] 正在拉取 release: ${PKG} ..."
 	pull_remote_file_direct \
 		"${REMOTE_DIR}/target/${TARGET}/release/${PKG}" \
@@ -288,7 +290,7 @@ dir)
 		usage
 	}
 	echo "[$(date)] 远程执行: ${BUILD_CMD}"
-	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}cd ${REMOTE_DIR} && ${BUILD_CMD}"
+	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && ${BUILD_CMD}"
 	if [[ -n "${PULL_REMOTE}" ]]; then
 		PULL_TO="${PULL_LOCAL:-.}"
 		[[ "$PULL_TO" != /* ]] && PULL_TO="${LOCAL_OUTPUT}/${PULL_TO}"
