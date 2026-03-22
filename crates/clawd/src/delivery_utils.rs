@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use rusqlite::params;
 use serde_json::Value;
@@ -23,18 +24,53 @@ pub(crate) fn intercept_response_text_for_delivery(text: &str) -> String {
 }
 
 pub(crate) fn intercept_response_payload_for_delivery(
+    state: &AppState,
     text: String,
     messages: Vec<String>,
 ) -> (String, Vec<String>) {
     let mut seen = HashSet::new();
     let normalized_messages = messages
         .into_iter()
-        .map(|msg| intercept_response_text_for_delivery(&msg))
+        .filter_map(|msg| normalize_delivery_message(state, &msg))
         .filter(|msg| !msg.is_empty())
         .filter(|msg| seen.insert(msg.clone()))
         .collect::<Vec<_>>();
-    let normalized_text = intercept_response_text_for_delivery(&text);
+    let normalized_text =
+        normalize_delivery_message(state, &text).unwrap_or_else(|| "File not found.".to_string());
     (normalized_text, normalized_messages)
+}
+
+fn normalize_delivery_message(state: &AppState, text: &str) -> Option<String> {
+    let normalized = intercept_response_text_for_delivery(text);
+    if normalized.is_empty() {
+        return None;
+    }
+    let trimmed = normalized.trim();
+    if let Some(path) = trimmed
+        .strip_prefix("FILE:")
+        .or_else(|| trimmed.strip_prefix("IMAGE_FILE:"))
+    {
+        let resolved = resolve_existing_delivery_path(state, path)?;
+        return Some(format!("FILE:{}", resolved.display()));
+    }
+    Some(normalized)
+}
+
+fn resolve_existing_delivery_path(state: &AppState, raw_path: &str) -> Option<PathBuf> {
+    let trimmed = trim_path_token(raw_path);
+    if trimmed.is_empty() {
+        return None;
+    }
+    let candidate = if Path::new(&trimmed).is_absolute() {
+        PathBuf::from(&trimmed)
+    } else {
+        state.workspace_root.join(&trimmed)
+    };
+    let canonical = candidate.canonicalize().ok()?;
+    if !canonical.is_file() {
+        return None;
+    }
+    Some(canonical)
 }
 
 pub(crate) fn collect_recent_image_candidates(

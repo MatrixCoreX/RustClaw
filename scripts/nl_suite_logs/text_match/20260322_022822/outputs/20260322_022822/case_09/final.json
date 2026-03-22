@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"92967c16-eccd-4c19-9ec1-b641a9368a2b","status":"succeeded","result_json":{"messages":["文件 `rustclaw.service` 存在于仓库中。\n\n但当前搜索结果只显示了文件名，未包含完整路径和文件内容，因此无法提供该服务的具体功能说明。如需了解其用途，请提供该文件的内容。"],"text":"文件 `rustclaw.service` 存在于仓库中。\n\n但当前搜索结果只显示了文件名，未包含完整路径和文件内容，因此无法提供该服务的具体功能说明。如需了解其用途，请提供该文件的内容。"},"error_text":null},"error":null}

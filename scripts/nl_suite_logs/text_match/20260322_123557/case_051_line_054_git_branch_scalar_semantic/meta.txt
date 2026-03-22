@@ -1,0 +1,6 @@
+ordinal=51
+source_line=54
+case_name=git_branch_scalar_semantic
+chat_id=1985997041
+task_id=7f83ea1f-01ef-4d92-abc5-03b813a7a9f3
+prompt=tell me the current git branch name and output only the branch

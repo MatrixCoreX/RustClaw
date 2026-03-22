@@ -1,0 +1,4 @@
+index=29
+chat_id=1985997019
+task_id=81189822-7b68-4c5a-a6eb-9b015f49c12c
+prompt=inspect the top-level folders in this repo and then explain in one plain sentence how this project is organized

@@ -1,0 +1,6 @@
+ordinal=52
+source_line=55
+case_name=git_status_brief_semantic
+chat_id=1985997042
+task_id=7eb79e7e-6987-4494-ac64-e743df76c08c
+prompt=check whether this repo has uncommitted changes and tell me in one sentence

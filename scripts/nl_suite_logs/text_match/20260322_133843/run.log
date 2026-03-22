@@ -1,0 +1,268 @@
+NL suite: text_match
+  run_dir:  /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_133843
+  run_log:  /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_133843/run.log
+
+Tested through source line number: Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_cases_text_match.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_123557
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_123557/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_123557/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  resume_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_123557
+  resume_line:   51
+
+[SKIP] source_line=4 name=run_cmd_pwd_with_result_tail already covered by --resume-line 51
+[SKIP] source_line=5 name=run_cmd_uname_with_result_tail_en already covered by --resume-line 51
+[SKIP] source_line=6 name=run_cmd_ls_then_explain already covered by --resume-line 51
+[SKIP] source_line=7 name=run_cmd_df_then_brief already covered by --resume-line 51
+[SKIP] source_line=8 name=run_cmd_whoami_scalar already covered by --resume-line 51
+[SKIP] source_line=9 name=fs_readme_head_summary_semantic already covered by --resume-line 51
+[SKIP] source_line=10 name=fs_hidden_files_bool_semantic already covered by --resume-line 51
+[SKIP] source_line=11 name=fs_package_name_scalar_semantic already covered by --resume-line 51
+[SKIP] source_line=12 name=fs_service_semantic_explain already covered by --resume-line 51
+[SKIP] source_line=13 name=fs_compare_readmes_semantic already covered by --resume-line 51
+[SKIP] source_line=14 name=followup_extract_username_semantic already covered by --resume-line 51
+[SKIP] source_line=15 name=followup_extract_hostname_semantic already covered by --resume-line 51
+[SKIP] source_line=16 name=followup_count_scripts_items_semantic already covered by --resume-line 51
+[SKIP] source_line=17 name=followup_logs_then_conclusion already covered by --resume-line 51
+[SKIP] source_line=18 name=followup_logs_then_conclusion_en_variant already covered by --resume-line 51
+[SKIP] source_line=19 name=followup_logs_then_conclusion_cn_variant_2 already covered by --resume-line 51
+[SKIP] source_line=20 name=followup_logs_then_conclusion_en_variant_2 already covered by --resume-line 51
+[SKIP] source_line=21 name=file_write_and_deliver_semantic_cn already covered by --resume-line 51
+[SKIP] source_line=22 name=file_write_and_deliver_semantic_en already covered by --resume-line 51
+[SKIP] source_line=23 name=file_write_and_deliver_semantic_en_variant_2 already covered by --resume-line 51
+[SKIP] source_line=24 name=missing_file_graceful_cn_semantic already covered by --resume-line 51
+[SKIP] source_line=25 name=missing_file_graceful_en_semantic already covered by --resume-line 51
+[SKIP] source_line=26 name=missing_file_graceful_cn_followup already covered by --resume-line 51
+[SKIP] source_line=27 name=missing_file_graceful_en_followup already covered by --resume-line 51
+[SKIP] source_line=28 name=missing_file_graceful_en_followup_variant_2 already covered by --resume-line 51
+[SKIP] source_line=29 name=plain_chat_no_execution_cn already covered by --resume-line 51
+[SKIP] source_line=30 name=plain_chat_no_execution_en already covered by --resume-line 51
+[SKIP] source_line=31 name=mixed_request_cn_semantic already covered by --resume-line 51
+[SKIP] source_line=32 name=mixed_request_en_semantic already covered by --resume-line 51
+[SKIP] source_line=33 name=mixed_request_cn_semantic_variant_2 already covered by --resume-line 51
+[SKIP] source_line=34 name=mixed_request_en_semantic_variant_2 already covered by --resume-line 51
+[SKIP] source_line=35 name=run_cmd_pwd_with_result_tail_cn_variant already covered by --resume-line 51
+[SKIP] source_line=36 name=run_cmd_pwd_with_result_tail_en_variant already covered by --resume-line 51
+[SKIP] source_line=37 name=run_cmd_hostname_scalar_cn_variant already covered by --resume-line 51
+[SKIP] source_line=38 name=run_cmd_df_cn_variant already covered by --resume-line 51
+[SKIP] source_line=39 name=fs_hidden_files_cn_variant already covered by --resume-line 51
+[SKIP] source_line=40 name=fs_hidden_files_en_variant already covered by --resume-line 51
+[SKIP] source_line=41 name=fs_hidden_files_en_variant_2 already covered by --resume-line 51
+[SKIP] source_line=42 name=fs_hidden_files_cn_variant_2 already covered by --resume-line 51
+[SKIP] source_line=43 name=fs_package_name_cn_variant already covered by --resume-line 51
+[SKIP] source_line=44 name=fs_service_cn_variant already covered by --resume-line 51
+[SKIP] source_line=45 name=mixed_request_cn_variant already covered by --resume-line 51
+[SKIP] source_line=46 name=missing_file_cn_variant already covered by --resume-line 51
+[SKIP] source_line=47 name=run_cmd_ls_then_explain_cn_variant_2 already covered by --resume-line 51
+[SKIP] source_line=48 name=fs_readme_head_summary_cn_variant_2 already covered by --resume-line 51
+[SKIP] source_line=49 name=fs_service_semantic_cn_variant_2 already covered by --resume-line 51
+[SKIP] source_line=50 name=missing_file_graceful_cn_followup_variant_2 already covered by --resume-line 51
+[SKIP] source_line=51 name=missing_file_graceful_en_followup_variant_3 already covered by --resume-line 51
+
+============================================================
+[CASE]        49
+[SOURCE_LINE] 52
+[NAME]        fs_package_name_cn_variant_2
+[CHAT]        1985997039
+[PROMPT]      package.json 里面 name 是什么，只给那个值
+[TASK]        162d2967-510f-4f0d-8a4d-b351ff2c08cf
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The name field value was not captured in the execution output.
+
+============================================================
+[CASE]        50
+[SOURCE_LINE] 53
+[NAME]        fs_package_name_en_variant
+[CHAT]        1985997040
+[PROMPT]      pull the name value out of package.json and return only that value
+[TASK]        e6e23c67-74be-4431-973f-8ae068465f67
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The package.json file does not contain a `name` field. Only a `dependencies` field is present.
+
+============================================================
+[CASE]        51
+[SOURCE_LINE] 54
+[NAME]        git_branch_scalar_semantic
+[CHAT]        1985997041
+[PROMPT]      tell me the current git branch name and output only the branch
+[TASK]        7f83ea1f-01ef-4d92-abc5-03b813a7a9f3
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] main
+
+============================================================
+[CASE]        52
+[SOURCE_LINE] 55
+[NAME]        git_status_brief_semantic
+[CHAT]        1985997042
+[PROMPT]      check whether this repo has uncommitted changes and tell me in one sentence
+[TASK]        7eb79e7e-6987-4494-ac64-e743df76c08c
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Yes, this repo has many uncommitted changes including modified Rust source files, config files, prompt files, build binaries, and newly added untracked files like `docs/`, `data/kb/`, and `image/`.
+
+============================================================
+[CASE]        53
+[SOURCE_LINE] 56
+[NAME]        health_check_brief_semantic
+[CHAT]        1985997043
+[PROMPT]      run a basic health check and summarize the most important findings briefly
+[TASK]        12f4dd96-becd-452e-89c6-741f3c865378
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] **Health Check Summary** | Service | Status | Process Count | Log Issues | |---------|--------|---------------|------------| | **clawd** | ⚠️ Port open | 1 running | 3 errors found | | **telegramd** | ✅ Healthy | 1 runni...(truncated)
+
+============================================================
+[CASE]        54
+[SOURCE_LINE] 57
+[NAME]        ports_brief_semantic
+[CHAT]        1985997044
+[PROMPT]      show the listening ports on this machine and briefly point out the important ones
+[TASK]        eb6aa028-f630-44a6-bfce-dd8c39d92c66
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] ## Listening Ports on This Machine | Port | Service | Notes | |------|---------|-------| | **22** | SSH | Externally accessible; primary remote access method | | **80** | HTTP | Externally accessible; unencrypted web tra...(truncated)
+
+============================================================
+[CASE]        55
+[SOURCE_LINE] 58
+[NAME]        log_analyze_brief_semantic
+[CHAT]        1985997045
+[PROMPT]      scan the recent logs for the most notable errors or anomalies and give me a short summary
+[TASK]        e47da1c3-f027-454e-a9ab-fbd9555a2b96
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] **Log Scan Summary** Analyzed `/home/guagua/git_upload/logs/clawd.log` (~93 KB): | Severity | Count | |----------|-------| | Errors | 16 | | Failed | 5 | | Timeout | 5 | | Exception | 3 | | Critical | 3 | | Warning | 3 |...(truncated)
+
+============================================================
+[CASE]        56
+[SOURCE_LINE] 59
+[NAME]        service_status_brief_semantic
+[CHAT]        1985997046
+[PROMPT]      check whether telegramd is currently running and explain the status briefly
+[TASK]        5aec8739-c151-468e-9235-de12a0eb8a50
+  [status] <none> -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] step 1 failed (skill(service_control)): clawd API 401; set RUSTCLAW_UI_KEY
+  [text] step 1 failed (skill(service_control)): clawd API 401; set RUSTCLAW_UI_KEY
+
+============================================================
+[CASE]        57
+[SOURCE_LINE] 60
+[NAME]        task_list_brief_semantic
+[CHAT]        1985997047
+[PROMPT]      tell me whether there are any unfinished tasks in this chat right now
+[TASK]        eb798f6c-bdd4-4a97-88e3-18f6bc6a9dc4
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] No unfinished tasks. This appears to be the start of the conversation or there are no pending items recorded.
+
+============================================================
+[CASE]        58
+[SOURCE_LINE] 61
+[NAME]        transform_json_table_semantic
+[CHAT]        1985997048
+[PROMPT]      sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+[TASK]        896ce817-f4c4-41de-b887-951e79bdc849
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] | name | score | |--------|-------| | beta | 12 | | gamma | 9 | | alpha | 7 |
+
+============================================================
+[CASE]        59
+[SOURCE_LINE] 62
+[NAME]        followup_logs_then_conclusion_cn_variant_3
+[CHAT]        1985997049
+[PROMPT]      帮我看 logs 里最近动过的三个文件，再判断更像测试产物还是正式运行日志
+[TASK]        c177f400-d2ce-4002-a1b5-4eb5655f4759
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] **logs 目录下最近修改的三个文件：** 1. `logs/clawd.log` — 2026-03-22 13:47:21 (最新) 2. `logs/model_io.log` — 2026-03-22 13:47:13 3. `logs/act_plan.log` — 2026-03-22 13:44:55 **无法完成分析：** 当前执行上下文仅提供了文件路径和修改时间戳，**未包含这三个日志文件的内容**。要判断它们是测试...(truncated)
+
+============================================================
+[CASE]        60
+[SOURCE_LINE] 63
+[NAME]        followup_logs_then_conclusion_en_variant_3
+[CHAT]        1985997050
+[PROMPT]      look at the latest three files inside logs and tell me whether they seem closer to test artifacts or real runtime logs
+[TASK]        8fb6b89e-f8d6-4bdc-9c31-b3dd4e27eed8
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Based on the available execution context showing the logs directory listing, here is the analysis of the latest three files: **1. regression_skills_upgrade_20260321_031137.md** — **TEST ARTIFACT** - The "regression_skill...(truncated)
+
+============================================================
+[CASE]        61
+[SOURCE_LINE] 64
+[NAME]        mixed_request_cn_variant_3
+[CHAT]        1985997051
+[PROMPT]      先看看仓库顶层目录都有哪些，再用一句给小白看的话说明这个项目怎么摆的
+[TASK]        0155ab67-2a6b-4e88-82cc-2bbbb810234c
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] ## 仓库顶层目录结构 ``` .cargo/ # Rust 构建配置（编译选项、依赖） .git/ # Git 版本控制数据 .github/ # GitHub Actions CI/CD 配置 UI/ # 前端界面代码（HTML/CSS/JS） configs/ # JSON 配置文件目录 crates/ # Rust 核心代码包（子模块） data/ # 运行时数据文件存放处 docker/ # Docker 构建相关文件 doc...(truncated)
+
+============================================================
+[CASE]        62
+[SOURCE_LINE] 65
+[NAME]        fs_hidden_files_cn_variant_3
+[CHAT]        1985997052
+[PROMPT]      当前目录里有没有隐藏项？只回有或没有，再给我两个例子
+[TASK]        b8627db1-78d8-4959-8d6a-2558562e7bc2
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 有。例如： - `.cargo/`（隐藏目录） - `.git/`（隐藏目录）
+
+================ Final Summary ================
+TOTAL_CASES=14 SUCCEEDED=13 FAILED=1 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_123557
+  - /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_123557/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_123557/summary.jsonl
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_133843
+  - /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_133843/run.log

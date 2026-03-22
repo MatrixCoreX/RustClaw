@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"98b0c21c-f237-4493-bb26-5be801e17477","status":"succeeded","result_json":{"messages":["**rustclaw.service** 存在（文件已找到）。\n\n但搜索结果仅返回了文件名 `rustclaw.service`，未提供完整路径信息。"],"text":"**rustclaw.service** 存在（文件已找到）。\n\n但搜索结果仅返回了文件名 `rustclaw.service`，未提供完整路径信息。"},"error_text":null},"error":null}

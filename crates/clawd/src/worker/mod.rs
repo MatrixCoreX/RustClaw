@@ -389,6 +389,9 @@ pub(crate) async fn maybe_bind_recent_failed_resume_context(
         return None;
     }
     let candidate = crate::find_recent_failed_resume_context(state, task.user_id, task.chat_id)?;
+    if candidate.has_newer_successful_ask_after_failed_task {
+        return None;
+    }
     let binding_context_json = json!({
         "source": "recent_failed_resume_context_candidate",
         "failed_resume_context_ts": candidate.failed_ts,
@@ -1024,7 +1027,7 @@ Use this block as the primary anchor for short follow-up requests. If the curren
                 return Ok(());
             }
             let (answer_text, answer_messages) =
-                crate::intercept_response_payload_for_delivery(answer.text, answer.messages);
+                crate::intercept_response_payload_for_delivery(state, answer.text, answer.messages);
             let result = if answer_messages.is_empty() {
                 json!({ "text": answer_text.clone() })
             } else {

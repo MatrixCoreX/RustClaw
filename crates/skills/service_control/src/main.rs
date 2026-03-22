@@ -275,6 +275,10 @@ pub(crate) fn is_high_risk_action(action: &str) -> bool {
 struct Req {
     request_id: String,
     args: Value,
+    #[serde(default)]
+    user_key: Option<String>,
+    #[serde(default)]
+    context: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -480,6 +484,25 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
     }
 }
 
+fn request_ui_key(req: &Req) -> Option<String> {
+    req.user_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            req.context
+                .as_ref()
+                .and_then(|v| v.as_object())
+                .and_then(|m| m.get("user_key"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+        .or_else(ui_key)
+}
+
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -488,8 +511,12 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => {
-                let request_id = req.request_id;
-                build_runner_response(request_id.clone(), execute(request_id, req.args))
+                let request_id = req.request_id.clone();
+                let req_ui_key = request_ui_key(&req);
+                build_runner_response(
+                    request_id.clone(),
+                    execute(request_id, req.args, req_ui_key.as_deref()),
+                )
             }
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
@@ -504,7 +531,11 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(_request_id: String, args: Value) -> Result<OutputContract, String> {
+fn execute(
+    _request_id: String,
+    args: Value,
+    req_user_key: Option<&str>,
+) -> Result<OutputContract, String> {
     let input = parse_input(&args)?;
 
     // Target required for all actions except status (all) and when action is status with no target
@@ -615,7 +646,8 @@ fn execute(_request_id: String, args: Value) -> Result<OutputContract, String> {
     let (action, do_verify, do_logs_after_fail) = match input.action.as_str() {
         "diagnose_start_failure" | "diagnose_unhealthy_state" => {
             executed.push("status".to_string());
-            let (pre_state, evidence) = run_status_inner(&input, &manager, effective_target, &mut out);
+            let (pre_state, evidence) =
+                run_status_inner(&input, &manager, effective_target, req_user_key, &mut out);
             out.pre_state = pre_state;
             for e in evidence {
                 out.add_evidence(e);
@@ -636,7 +668,8 @@ fn execute(_request_id: String, args: Value) -> Result<OutputContract, String> {
             return Ok(out);
         }
         "status" => {
-            let (pre_state, evidence) = run_status_inner(&input, &manager, effective_target, &mut out);
+            let (pre_state, evidence) =
+                run_status_inner(&input, &manager, effective_target, req_user_key, &mut out);
             out.pre_state = pre_state.clone();
             out.post_state = pre_state;
             for e in evidence {
@@ -661,7 +694,7 @@ fn execute(_request_id: String, args: Value) -> Result<OutputContract, String> {
         }
         "verify" => {
             let t = effective_target.ok_or_else(|| "target required for verify".to_string())?;
-            let (state, evidence) = run_verify_inner(t, &manager, &mut out);
+            let (state, evidence) = run_verify_inner(t, &manager, req_user_key, &mut out);
             out.post_state = state.clone();
             for e in evidence {
                 out.add_evidence(e);
@@ -684,13 +717,14 @@ fn execute(_request_id: String, args: Value) -> Result<OutputContract, String> {
     // Pre-state for state-changing actions
     if matches!(action, "start" | "stop" | "restart" | "reload") {
         executed.push("status".to_string());
-        let (pre_state, _) = run_status_inner(&input, &manager, Some(target), &mut out);
+        let (pre_state, _) =
+            run_status_inner(&input, &manager, Some(target), req_user_key, &mut out);
         out.pre_state = pre_state;
     }
 
     // Execute control action
     executed.push(action.to_string());
-    let control_result = run_control_inner(action, target, &manager, &mut out);
+    let control_result = run_control_inner(action, target, &manager, req_user_key, &mut out);
     if !control_result.is_ok() {
         if do_logs_after_fail {
             let evidence = fetch_logs_inner(target, &manager, input.tail_lines);
@@ -706,7 +740,7 @@ fn execute(_request_id: String, args: Value) -> Result<OutputContract, String> {
     if do_verify {
         std::thread::sleep(Duration::from_secs(VERIFY_WAIT_SECONDS));
         executed.push("verify".to_string());
-        let (post_state, evidence) = run_verify_inner(target, &manager, &mut out);
+        let (post_state, evidence) = run_verify_inner(target, &manager, req_user_key, &mut out);
         out.post_state = post_state.clone();
         for e in evidence {
             out.add_evidence(e);
@@ -723,7 +757,7 @@ fn execute(_request_id: String, args: Value) -> Result<OutputContract, String> {
             }
         }
     } else if matches!(action, "start" | "restart" | "reload") {
-        let (post_state, _) = run_verify_inner(target, &manager, &mut out);
+        let (post_state, _) = run_verify_inner(target, &manager, req_user_key, &mut out);
         out.post_state = post_state;
     }
 
@@ -758,15 +792,19 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-fn rustclaw_health(client: &reqwest::blocking::Client) -> Result<Value, String> {
+fn rustclaw_health(
+    client: &reqwest::blocking::Client,
+    req_user_key: Option<&str>,
+) -> Result<Value, String> {
     let base = clawd_base_url();
     let mut req = client.get(format!("{base}/v1/health"));
-    if let Some(k) = ui_key().as_deref() {
+    let fallback_ui_key = ui_key();
+    if let Some(k) = req_user_key.or(fallback_ui_key.as_deref()) {
         req = req.header("x-rustclaw-key", k);
     }
     let resp = req.send().map_err(|e| format!("health request failed: {e}"))?;
     if resp.status().as_u16() == 401 {
-        return Err("clawd API 401; set RUSTCLAW_UI_KEY".to_string());
+        return Err("clawd API 401; missing valid user key".to_string());
     }
     if !resp.status().is_success() {
         return Err(format!("health failed: {}", resp.status()));
@@ -814,6 +852,7 @@ fn run_status_inner(
     _input: &SkillInput,
     manager: &str,
     target: Option<&str>,
+    req_user_key: Option<&str>,
     out: &mut OutputContract,
 ) -> (String, Vec<String>) {
     let mut evidence = Vec::new();
@@ -829,7 +868,7 @@ fn run_status_inner(
                     return ("unknown".to_string(), evidence);
                 }
             };
-            let data = match rustclaw_health(&client) {
+            let data = match rustclaw_health(&client, req_user_key) {
                 Ok(d) => d,
                 Err(e) => {
                     out.fail(&e);
@@ -904,7 +943,12 @@ fn run_status_inner(
     }
 }
 
-fn run_verify_inner(target: &str, manager: &str, out: &mut OutputContract) -> (String, Vec<String>) {
+fn run_verify_inner(
+    target: &str,
+    manager: &str,
+    req_user_key: Option<&str>,
+    out: &mut OutputContract,
+) -> (String, Vec<String>) {
     let mut evidence = Vec::new();
     match manager {
         "rustclaw" => {
@@ -915,7 +959,7 @@ fn run_verify_inner(target: &str, manager: &str, out: &mut OutputContract) -> (S
                 Ok(c) => c,
                 Err(_) => return ("unknown".to_string(), evidence),
             };
-            let data = match rustclaw_health(&client) {
+            let data = match rustclaw_health(&client, req_user_key) {
                 Ok(d) => d,
                 Err(_) => return ("unknown".to_string(), evidence),
             };
@@ -962,6 +1006,7 @@ fn run_control_inner(
     action: &str,
     target: &str,
     manager: &str,
+    req_user_key: Option<&str>,
     out: &mut OutputContract,
 ) -> Result<(), ()> {
     let effective_action = if action == "reload" && manager == "rustclaw" {
@@ -987,16 +1032,17 @@ fn run_control_inner(
                 .build()
                 .map_err(|e| {
                     out.fail(&format!("http client: {e}"));
-                })?;
+            })?;
             let mut req = client.post(&url);
-            if let Some(k) = ui_key().as_deref() {
+            let fallback_ui_key = ui_key();
+            if let Some(k) = req_user_key.or(fallback_ui_key.as_deref()) {
                 req = req.header("x-rustclaw-key", k);
             }
             let resp = req.send().map_err(|e| {
                 out.fail(&format!("request failed: {e}"));
             })?;
             if resp.status().as_u16() == 401 {
-                out.fail("clawd API 401; set RUSTCLAW_UI_KEY");
+                out.fail("clawd API 401; missing valid user key");
                 return Err(());
             }
             if !resp.status().is_success() {

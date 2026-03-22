@@ -1,0 +1,4 @@
+index=45
+chat_id=1154158460333708
+task_id=3c81d7c8-ec86-4b87-a617-979860eac1df
+prompt=先读 README.md 开头二十行，再给我三句总结

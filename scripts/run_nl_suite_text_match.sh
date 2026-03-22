@@ -15,7 +15,7 @@ echo "  run_dir:  $RUN_DIR"
 echo "  run_log:  $RUN_LOG"
 echo
 
-bash "${SCRIPT_DIR}/simple_nl_test.sh" \
+bash "${SCRIPT_DIR}/run_nl_manual_test.sh" \
   --case-file "${SCRIPT_DIR}/nl_cases_text_match.txt" \
   --log-root "${RUN_DIR}/outputs" \
   "$@"

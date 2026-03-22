@@ -1,0 +1,4 @@
+index=33
+chat_id=1985997023
+task_id=08ee4143-2d78-41e0-afd4-b6bf75e03968
+prompt=看看 rustclaw.service 在不在；在的话把位置给我并顺手说下用途
