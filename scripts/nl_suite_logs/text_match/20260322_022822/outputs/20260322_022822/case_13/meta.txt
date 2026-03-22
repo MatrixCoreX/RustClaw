@@ -1,0 +1,4 @@
+index=13
+chat_id=1985997003
+task_id=f86bbf4c-4de9-45ed-b6c8-a8cdaf24f6c6
+prompt=统计 scripts 目录下有多少个直接子项，只输出数字

@@ -1,0 +1,4 @@
+index=5
+chat_id=1154158460333668
+task_id=b966bb6a-88cc-475f-86ed-2cc2a3c95501
+prompt=执行 whoami，只输出结果，不要解释

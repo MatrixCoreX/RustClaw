@@ -146,3 +146,260 @@ text=rustclaw
 [PROMPT] 统计 scripts 目录下有多少个直接子项，只输出数字
 [TASK] e422795b-2981-4420-8dd4-0ce75d834b41
   [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=50
+
+============================================================
+[CASE] 14
+[CHAT] 1985997004
+[PROMPT] 列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物
+[TASK] b8ea23ce-0e08-4584-b674-20619b14af5d
+  [status] <none> -> running
+  [status] running -> failed
+[FINAL]
+status=failed
+error=single plan parser failed: no executable steps
+
+============================================================
+[CASE] 15
+[CHAT] 1985997005
+[PROMPT] list the three most recently updated files in logs and then tell me whether these look more like test logs or production outputs
+[TASK] 01c35a8c-16a3-4ea9-9496-fea3589ce70c
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=Based on the execution context, here are the three most recently updated files in the logs directory, ordered from most to least recent:\n\n1. **logs/clawd.log** (355,599 bytes)\n2. **logs/model_io.log** (23,390,171 bytes)\n3. **logs/act_plan.log** (83,440 bytes)\n\n**Analysis: Likely production outputs**\n\nThese appear to be production logs rather than test logs based on:\n- **Substantial file sizes**: model_io.log at ~23 MB indicates sustained, real-world activity\n- **Naming convention**: Generic service names (clawd, model_io, act_plan) suggest operational system components\n- **Relative sizes**: The variation in sizes (81 KB to 23 MB) indicates different logging intensities consistent with production workloads, whereas test logs typically maintain more uniform, smaller sizes\n- **Absence of test-specific patterns**: No "test", "unit", or "mock" markers in the filenames\n\nThe model_io.log's large size particularly suggests it captures real inference or processing events from a deployed system rather than controlled test scenarios.
+
+============================================================
+[CASE] 16
+[CHAT] 1985997006
+[PROMPT] 写一个文本文件到 document/text_match_regression_note.txt，内容是 semantic routing regression note，然后把文件发给我
+[TASK] 77286e20-b57a-453e-8a87-67115f00d41f
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=FILE:/home/guagua/git_upload/document/text_match_regression_note.txt
+
+============================================================
+[CASE] 17
+[CHAT] 1985997007
+[PROMPT] create a text file at document/text_match_regression_en.txt with content semantic command regression and send me the file
+[TASK] e5b3bfe0-347c-49e5-93d7-cac90043e872
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=FILE:/home/guagua/git_upload/document/text_match_regression_en.txt
+
+============================================================
+[CASE] 18
+[CHAT] 1985997008
+[PROMPT] 把 document/definitely_missing_text_match_case_001.txt 发给我
+[TASK] c9bb7eb7-dd2f-4b56-928c-68a36f58a77d
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=文件未找到。
+
+============================================================
+[CASE] 19
+[CHAT] 1985997009
+[PROMPT] please send me document/definitely_missing_text_match_case_002.txt
+[TASK] 19bf8388-9a2a-4a54-8d85-a69b23b2df75
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=File not found.
+
+============================================================
+[CASE] 20
+[CHAT] 1985997010
+[PROMPT] 把 document/definitely_missing_runtime_case_001.txt 发给我，不要贴内容
+[TASK] be422450-b13b-4752-b57d-cfde194e8b49
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=文件不存在
+
+============================================================
+[CASE] 21
+[CHAT] 1985997011
+[PROMPT] send me document/definitely_missing_runtime_case_002.txt and do not paste the content
+[TASK] c253245d-c8c8-45d5-9567-b51328f2dfa1
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=无法执行。我没有文件访问能力，无法读取或发送 `document/definitely_missing_runtime_case_002.txt`。
+
+============================================================
+[CASE] 22
+[CHAT] 1985997012
+[PROMPT] 别执行任何命令，直接讲一个很短的冷笑话
+[TASK] 40513597-88e1-4455-b82d-b58509b4c04d
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=为什么程序员总是分不清万圣节和圣诞节？因为 Oct 31 = Dec 25。
+
+============================================================
+[CASE] 23
+[CHAT] 1985997013
+[PROMPT] do not run anything, just tell me a very short joke
+[TASK] 901d9153-3d47-446d-98c5-a85365bbe1a8
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=Why do Python programmers wear glasses? Because they can't C.
+
+============================================================
+[CASE] 24
+[CHAT] 1985997014
+[PROMPT] 先看看当前目录有哪些顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么组织
+[TASK] b0e0cee8-8950-4793-92c2-78c004c82af3
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=## 顶层文件夹一览\n\n| 文件夹 | 用途 |\n|--------|------|\n| `crates/` | 🌟 Rust 核心源代码（主要业务逻辑） |\n| `configs/` | 配置文件（各平台配置示例） |\n| `docker/` | Docker 构建相关文件 |\n| `scripts/` | 运维脚本（启停、部署等） |\n| `services/` | 各 IM 平台的服务配置 |\n| `UI/` | 前端界面代码 |\n| `data/` | 数据存储目录 |\n| `migrations/` | 数据库迁移脚本 |\n| `logs/` | 日志输出目录 |\n| `run/` | 运行时 PID 等文件 |\n| `target/` | Rust 编译产物（自动生成） |\n\n## 一句话总结\n\n> **这个仓库像一个"万能消息中间件"——用 Rust 编写的核心引擎 (`crates/`) 负责连接 Telegram、WhatsApp、飞书等各个 IM 平台，通过 Docker 容器化部署，配合前端 UI 和一键脚本，让你可以用同一个机器人同时收发不同聊天软件的消息。**
+
+============================================================
+[CASE] 25
+[CHAT] 1985997015
+[PROMPT] inspect the top-level folders in this repo and then explain in one plain sentence how this project is organized
+[TASK] 0d348d3e-5b9c-4908-a597-57e6ee989410
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=This is a Rust-based multi-platform messaging bridge organized as a Cargo workspace with service daemons for Telegram, Feishu, Lark, and WhatsApp, a UI component, Docker/container deployment support, and scripts for managing the various bot adapters.
+
+============================================================
+[CASE] 26
+[CHAT] 1985997016
+[PROMPT] 把 pwd 跑一下，然后把结果回给我
+[TASK] 13104125-62d1-462e-9de2-af20cdc1b1d6
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=/home/guagua/git_upload
+
+============================================================
+[CASE] 27
+[CHAT] 1985997017
+[PROMPT] please execute pwd and reply with the result
+[TASK] 5d149a82-678c-4fd0-9ca3-f9b004b92519
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=/home/guagua/git_upload
+
+============================================================
+[CASE] 28
+[CHAT] 1985997018
+[PROMPT] 执行 hostname，只给结果不要解释
+[TASK] aee58a6f-2055-4139-81f1-0f02122ad733
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=rustclaw
+
+============================================================
+[CASE] 29
+[CHAT] 1985997019
+[PROMPT] 跑一下 df -h，然后用一句人话告诉我哪个盘最该盯着
+[TASK] 10bb9635-e4f6-4089-8965-35faf9eb1532
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=根目录 `/dev/mmcblk0p2` 最该盯着——总共29GB，已用21GB，剩6.3GB，使用率78%。虽然还没到危险线，但剩余空间不大，留个心眼。
+
+============================================================
+[CASE] 30
+[CHAT] 1985997020
+[PROMPT] 看看这里有没有点开头的隐藏项，只给结论和两个例子
+[TASK] 44929751-e881-4063-b513-2c26966337b5
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=**有**隐藏项。\n\n**两个例子：**\n\n- `.git/` (隐藏目录)\n- `.env.example` (隐藏文件)
+
+============================================================
+[CASE] 31
+[CHAT] 1985997021
+[PROMPT] check whether this folder has dotfiles; answer briefly with yes or no plus two examples
+[TASK] 00bf86ae-6c62-49d1-bbe3-ddd0c2fbf3f6
+  [status] <none> -> running
+  [status] running -> failed
+[FINAL]
+status=failed
+error=single plan parser failed: no executable steps
+
+============================================================
+[CASE] 32
+[CHAT] 1985997022
+[PROMPT] 帮我从 package.json 里把 name 那个值抠出来，别带别的
+[TASK] 7f623be8-828d-4ebe-af66-721e6fb345c2
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=未找到 package.json 文件或无法提取 name 字段。
+
+============================================================
+[CASE] 33
+[CHAT] 1985997023
+[PROMPT] 看看 rustclaw.service 在不在；在的话把位置给我并顺手说下用途
+[TASK] 08ee4143-2d78-41e0-afd4-b6bf75e03968
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=rustclaw.service 文件存在。\n\n**文件类型**: systemd 服务单元文件（.service）\n**用途**: 该文件是 Linux 系统中 systemd 的服务配置文件，用于定义 rustclaw 服务的运行参数、启动行为、依赖关系等。rustclaw 可能是一个基于 Rust 语言开发的后台服务或守护进程。
+
+============================================================
+[CASE] 34
+[CHAT] 1985997024
+[PROMPT] 先看看这个仓库顶层有哪些目录，再用一句给新手看的话解释怎么理解这个结构
+[TASK] 2fa53541-cc11-4f2b-a26d-436d2004df81
+  [status] <none> -> running
+  [status] running -> failed
+[FINAL]
+status=failed
+error=single plan parser failed: no executable steps
+
+============================================================
+[CASE] 35
+[CHAT] 1985997025
+[PROMPT] 把 document/definitely_missing_text_match_case_003.txt 发给我
+[TASK] c250bdaa-0c20-4de7-b7a2-c3b71a919890
+  [status] <none> -> running
+  [status] running -> succeeded
+[FINAL]
+status=succeeded
+text=文件未找到。
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_015234/outputs/20260322_015234/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/text_match/20260322_015234/outputs/20260322_015234/summary.jsonl

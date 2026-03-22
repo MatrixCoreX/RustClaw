@@ -1,0 +1,4 @@
+index=35
+chat_id=1154158460333698
+task_id=7487b2f1-ae8c-4f54-a826-befc589b7ea0
+prompt=跑一下 df -h，然后用一句人话告诉我哪个盘最该盯着

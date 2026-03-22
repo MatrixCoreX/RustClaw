@@ -1,0 +1,6 @@
+ordinal=60
+source_line=63
+case_name=followup_logs_then_conclusion_en_variant_3
+chat_id=1985997050
+task_id=8fb6b89e-f8d6-4bdc-9c31-b3dd4e27eed8
+prompt=look at the latest three files inside logs and tell me whether they seem closer to test artifacts or real runtime logs

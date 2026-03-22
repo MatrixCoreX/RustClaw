@@ -1,0 +1,4 @@
+index=49
+chat_id=1154158460333712
+task_id=71f74d8d-922b-496a-854e-1a8ba6eb24fc
+prompt=package.json 里面 name 是什么，只给那个值

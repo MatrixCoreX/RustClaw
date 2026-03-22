@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"7487b2f1-ae8c-4f54-a826-befc589b7ea0","status":"succeeded","result_json":{"messages":["**需要重点关注的是根分区（/dev/mmcblk0p2）**：它已经用了 78%，只剩下约 6GB 空间了，建议及时清理或扩容，避免磁盘被撑满导致系统异常。"],"text":"**需要重点关注的是根分区（/dev/mmcblk0p2）**：它已经用了 78%，只剩下约 6GB 空间了，建议及时清理或扩容，避免磁盘被撑满导致系统异常。"},"error_text":null},"error":null}

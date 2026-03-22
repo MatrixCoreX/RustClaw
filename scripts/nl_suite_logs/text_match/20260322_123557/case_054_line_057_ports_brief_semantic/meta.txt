@@ -1,0 +1,6 @@
+ordinal=54
+source_line=57
+case_name=ports_brief_semantic
+chat_id=1985997044
+task_id=eb6aa028-f630-44a6-bfce-dd8c39d92c66
+prompt=show the listening ports on this machine and briefly point out the important ones
