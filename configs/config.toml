@@ -42,9 +42,9 @@ user_rpm = 20
 # 风险/Risk: vendor/model 不匹配会导致调用失败.
 [llm]
 # 默认模型名 / Default selected model.
-selected_model = "qwen-max-latest"
+selected_model = "MiniMax-M2.7"
 # 默认厂商标识 / Default selected vendor.
-selected_vendor = "qwen"
+selected_vendor = "minimax"
 
 # 用途/Purpose: Anthropic 提供商连接与模型池.
 # 建议修改/Recommended change: 可改，需保证 key/base_url/model 对齐.
@@ -143,12 +143,13 @@ timeout_seconds = 60
 
 # 用途/Purpose: MiniMax 提供商连接与模型池（OpenAI-compatible）.
 # 建议修改/Recommended change: 可改，建议按官方最新兼容模型名维护.
+# api_format：省略或空则默认 openai_compat（/chat/completions + Bearer）；设为 anthropic_claude 则 /messages + x-api-key（clawd 合成 vendor-minimax）.
 # 风险/Risk: 音频/图片相关能力与 OpenAI 兼容接口的覆盖范围可能有限，必要时需补原生适配.
 [llm.minimax]
 api_key = ""
-base_url = "https://api.minimax.io/v1"
+base_url = "https://api.minimaxi.com/v1"
 max_concurrency = 1
-model = "MiniMax-M2.5"
+model = "MiniMax-M2.7"
 models = [
     "MiniMax-M2.5",
     "MiniMax-M2.5-thinking",
@@ -160,7 +161,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改，适合接入私有网关.
 # 风险/Risk: 协议不兼容会出现模型列表可见但调用失败.
 [llm.custom]
-api_key = ""
+api_key = "REPLACE_ME_CUSTOM_API_KEY"
 base_url = "https://api.example.com/v1"
 max_concurrency = 1
 model = "custom-model"
@@ -193,7 +194,7 @@ default_output_dir = "image/download"
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: 模型名下线会报错；并发与超时需与上游配额匹配.
 [llm.openai]
-api_key = ""
+api_key = "REPLACE_ME"
 base_url = "https://api.openai.com/v1"
 max_concurrency = 1
 model = "gpt-4o-mini"
@@ -270,7 +271,7 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = { stock = true, task_control = true }
+skill_switches = { browser_web = true, doc_parse = true, kb = true, reference_resolver = true, schedule = true, stock = true, task_control = true, transform = true, weather = true, web_search_extract = true }
 skill_max_concurrency = 1
 skill_timeout_seconds = 86400
 # 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):
@@ -280,7 +281,7 @@ skill_timeout_seconds = 86400
 # 例子/Example:
 # skill_switches = { image_generate = false, rss_fetch = true }
 # 技能基线列表（建议少改）/ Baseline enabled skills (avoid frequent edits).
-# A 方案：文件系统基础 skill 独立列出（run_cmd/read_file/write_file/list_dir/make_dir/remove_file）。
+# 与 configs/skills_registry.toml 中全部 [[skills]].name 一致（未启用 registry 时作 fallback 基线）。
 skills_list = [
     "run_cmd",
     "read_file",
@@ -288,6 +289,7 @@ skills_list = [
     "list_dir",
     "make_dir",
     "remove_file",
+    "schedule",
     "x",
     "system_basic",
     "http_basic",
@@ -312,6 +314,14 @@ skills_list = [
     "config_guard",
     "crypto",
     "chat",
+    "stock",
+    "weather",
+    "reference_resolver",
+    "doc_parse",
+    "transform",
+    "web_search_extract",
+    "kb",
+    "browser_web",
 ]
 
 # 渠道配置已拆分到以下文件 / Channel configs are split into:
