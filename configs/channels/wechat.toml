@@ -1,0 +1,19 @@
+# WeChat channel daemon config - MVP text channel
+# Typical Docker flow:
+# 1. set enabled=true
+# 2. keep api_base_url as the official default unless your backend is different
+# 3. start wechatd from the UI service panel
+# 4. open the WeChat login panel in UI and scan the QR code
+# bot_token can stay empty before first QR login; session.json will be created after login.
+
+[wechat]
+enabled = false
+listen = "0.0.0.0:8792"
+clawd_base_url = "http://127.0.0.1:8787"
+api_base_url = "https://ilinkai.weixin.qq.com"
+bot_token = ""
+# Random uint32 encoded as base64 when required by upstream protocol.
+wechat_uin_base64 = ""
+request_timeout_seconds = 30
+longpoll_timeout_ms = 35000
+text_chunk_chars = 1200

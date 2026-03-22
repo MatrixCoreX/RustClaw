@@ -197,6 +197,7 @@ pub(crate) fn channel_kind_name(channel: ChannelKind) -> &'static str {
         ChannelKind::Telegram => "telegram",
         ChannelKind::Whatsapp => "whatsapp",
         ChannelKind::Ui => "ui",
+        ChannelKind::Wechat => "wechat",
         ChannelKind::Feishu => "feishu",
         ChannelKind::Lark => "lark",
     }
@@ -236,7 +237,11 @@ pub(crate) fn is_user_allowed(state: &AppState, user_id: i64) -> bool {
 pub(crate) fn channel_allows_public_access(channel: ChannelKind) -> bool {
     matches!(
         channel,
-        ChannelKind::Telegram | ChannelKind::Whatsapp | ChannelKind::Feishu | ChannelKind::Lark
+        ChannelKind::Telegram
+            | ChannelKind::Whatsapp
+            | ChannelKind::Wechat
+            | ChannelKind::Feishu
+            | ChannelKind::Lark
     )
 }
 
