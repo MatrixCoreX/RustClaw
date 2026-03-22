@@ -452,6 +452,9 @@ pub struct LlmVendorConfig {
     pub timeout_seconds: u64,
     #[serde(default = "default_llm_max_concurrency")]
     pub max_concurrency: usize,
+    /// 仅 `[llm.minimax]` 使用：clawd 合成 `vendor-minimax` 时的协议。未填或空字符串默认 `openai_compat`；`anthropic_claude`（及别名）走 Anthropic Messages。其它厂商忽略。
+    #[serde(default)]
+    pub api_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -985,6 +988,7 @@ pub fn core_skills_always_enabled() -> &'static [&'static str] {
 }
 
 fn default_skills_list() -> Vec<String> {
+    // Keep in sync with `configs/skills_registry.toml` [[skills]] names (no-registry fallback baseline).
     vec![
         "run_cmd".to_string(),
         "read_file".to_string(),
@@ -992,10 +996,12 @@ fn default_skills_list() -> Vec<String> {
         "list_dir".to_string(),
         "make_dir".to_string(),
         "remove_file".to_string(),
-        "install_module".to_string(),
+        "schedule".to_string(),
+        "x".to_string(),
         "system_basic".to_string(),
         "http_basic".to_string(),
         "git_basic".to_string(),
+        "install_module".to_string(),
         "process_basic".to_string(),
         "package_manager".to_string(),
         "archive_basic".to_string(),
@@ -1013,7 +1019,16 @@ fn default_skills_list() -> Vec<String> {
         "service_control".to_string(),
         "task_control".to_string(),
         "config_guard".to_string(),
+        "crypto".to_string(),
         "chat".to_string(),
+        "stock".to_string(),
+        "weather".to_string(),
+        "reference_resolver".to_string(),
+        "doc_parse".to_string(),
+        "transform".to_string(),
+        "web_search_extract".to_string(),
+        "kb".to_string(),
+        "browser_web".to_string(),
     ]
 }
 
