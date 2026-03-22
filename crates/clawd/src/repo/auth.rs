@@ -190,10 +190,12 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
         [],
         |row| row.get(0),
     )?;
-    if tasks_sql.contains("'lark'") {
+    if tasks_sql.contains("'wechat'") {
         return Ok(());
     }
-    info!("channel schema: rebuilding tasks/scheduled_jobs/memories to allow channel=lark (and feishu)");
+    info!(
+        "channel schema: rebuilding tasks/scheduled_jobs/memories to allow channel=lark/feishu/wechat"
+    );
     db.execute_batch(
         "BEGIN IMMEDIATE;
          ALTER TABLE tasks RENAME TO tasks_old;
@@ -201,7 +203,7 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
              task_id       TEXT PRIMARY KEY,
              user_id       INTEGER NOT NULL,
              chat_id       INTEGER NOT NULL,
-             channel       TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
+             channel       TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat')),
              external_user_id TEXT,
              external_chat_id TEXT,
              message_id    INTEGER,
@@ -232,7 +234,7 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
              job_id            TEXT NOT NULL UNIQUE,
              user_id           INTEGER NOT NULL,
              chat_id           INTEGER NOT NULL,
-             channel           TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
+             channel           TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat')),
              external_user_id  TEXT,
              external_chat_id  TEXT,
              user_key          TEXT,
@@ -275,7 +277,7 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
              user_id          INTEGER NOT NULL,
              chat_id          INTEGER NOT NULL,
              user_key         TEXT,
-             channel          TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
+             channel          TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark', 'wechat')),
              external_chat_id TEXT,
              role             TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
              content          TEXT NOT NULL,
@@ -355,6 +357,97 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
         params![user_key, role, now_ts()],
     )?;
     Ok(user_key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rebuild_channel_tables_for_ui;
+    use rusqlite::Connection;
+
+    #[test]
+    fn rebuild_channel_tables_upgrades_channel_constraints_for_wechat() {
+        let db = Connection::open_in_memory().expect("open sqlite");
+        db.execute_batch(
+            "CREATE TABLE tasks (
+                task_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
+                external_user_id TEXT,
+                external_chat_id TEXT,
+                message_id INTEGER,
+                user_key TEXT,
+                kind TEXT NOT NULL CHECK (kind IN ('ask', 'run_skill', 'admin')),
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'canceled', 'timeout')),
+                result_json TEXT,
+                error_text TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE scheduled_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
+                external_user_id TEXT,
+                external_chat_id TEXT,
+                user_key TEXT,
+                schedule_type TEXT NOT NULL CHECK (schedule_type IN ('once', 'daily', 'weekly', 'interval', 'cron')),
+                run_at INTEGER,
+                time_of_day TEXT,
+                weekday INTEGER,
+                every_minutes INTEGER,
+                cron_expr TEXT,
+                timezone TEXT NOT NULL,
+                task_kind TEXT NOT NULL CHECK (task_kind IN ('ask', 'run_skill')),
+                task_payload_json TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                notify_on_success INTEGER NOT NULL DEFAULT 1,
+                notify_on_failure INTEGER NOT NULL DEFAULT 1,
+                last_run_at TEXT,
+                next_run_at INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                user_key TEXT,
+                channel TEXT NOT NULL DEFAULT 'telegram' CHECK (channel IN ('telegram', 'whatsapp', 'ui', 'feishu', 'lark')),
+                external_chat_id TEXT,
+                role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                created_at_ts INTEGER NOT NULL DEFAULT 0,
+                memory_type TEXT NOT NULL DEFAULT 'generic',
+                salience REAL NOT NULL DEFAULT 0.5,
+                is_instructional INTEGER NOT NULL DEFAULT 0,
+                safety_flag TEXT NOT NULL DEFAULT 'normal'
+            );",
+        )
+        .expect("create legacy tables");
+
+        rebuild_channel_tables_for_ui(&db).expect("rebuild channel tables");
+
+        let sql: String = db
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read tasks schema");
+        assert!(sql.contains("'wechat'"), "tasks schema should allow wechat: {sql}");
+
+        db.execute(
+            "INSERT INTO tasks (task_id, user_id, chat_id, channel, kind, payload_json, status, created_at, updated_at)
+             VALUES ('t1', 1, 1, 'wechat', 'ask', '{}', 'queued', '1', '1')",
+            [],
+        )
+        .expect("insert wechat task");
+    }
 }
 
 pub(crate) fn update_auth_key_by_id(
