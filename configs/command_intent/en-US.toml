@@ -8,13 +8,8 @@ execute_prefixes = [
   "execute command ",
 ]
 
-result_suffixes = [
-  "and tell me the result",
-  "then tell me the result",
-  "and show me the result",
-  "and tell me the output",
-  "then reply with result",
-]
+# Natural-language result tails are handled semantically by the planner/LLM.
+result_suffixes = []
 
 negative_markers = [
   "what does this command do",

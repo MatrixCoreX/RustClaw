@@ -81,6 +81,12 @@ pub struct TelegramConfig {
     pub quick_result_wait_seconds: u64,
     #[serde(default = "default_telegram_auto_vision_on_image_only")]
     pub auto_vision_on_image_only: bool,
+    #[serde(default = "default_telegram_image_inbox_dir")]
+    pub image_inbox_dir: String,
+    #[serde(default = "default_telegram_video_inbox_dir")]
+    pub video_inbox_dir: String,
+    #[serde(default = "default_telegram_file_inbox_dir")]
+    pub file_inbox_dir: String,
     #[serde(default = "default_telegram_audio_inbox_dir")]
     pub audio_inbox_dir: String,
     #[serde(default = "default_telegram_voice_reply_mode")]
@@ -1410,8 +1416,20 @@ fn default_telegram_auto_vision_on_image_only() -> bool {
     true
 }
 
+fn default_telegram_image_inbox_dir() -> String {
+    "data/telegramd/image".to_string()
+}
+
+fn default_telegram_video_inbox_dir() -> String {
+    "data/telegramd/video".to_string()
+}
+
+fn default_telegram_file_inbox_dir() -> String {
+    "data/telegramd/file".to_string()
+}
+
 fn default_telegram_audio_inbox_dir() -> String {
-    "audio/upload".to_string()
+    "data/telegramd/audio".to_string()
 }
 
 fn default_telegram_voice_reply_mode() -> String {

@@ -1,5 +1,6 @@
 # Lark (international) 应用机器人通道配置 - 与 feishu.toml（飞书中国站）独立，勿混用
 # 国际版 Lark 使用 open.larksuite.com；飞书中国站使用 open.feishu.cn，由 feishu.toml 配置
+# 支持文本与入站媒体（图片/文件/音视频）落盘后再提交 clawd ask
 # 使用方式（二选一）：
 #   - webhook：应用机器人 → 事件订阅 → 请求地址配置为本服务 callback URL（需公网可达）
 #   - long_connection：应用机器人 → 事件订阅 → 使用长连接接收事件（无需公网，内网优先）
@@ -15,6 +16,11 @@ listen = "0.0.0.0:8790"
 clawd_base_url = "http://127.0.0.1:8787"
 # 国际版 Lark API 根地址（与 feishud 的 open.feishu.cn 分开，勿改为中国站）
 api_base_url = "https://open.larksuite.com"
+# 入站媒体落盘根目录（相对 larkd 进程工作目录；实际路径为 <目录>/<chat_id>/<文件名>）
+# image_inbox_dir = "data/larkd/image"
+# video_inbox_dir = "data/larkd/video"
+# audio_inbox_dir = "data/larkd/audio"
+# file_inbox_dir = "data/larkd/file"
 # Lark 应用 App ID
 app_id = ""
 # Lark 应用 App Secret（日志不打印）

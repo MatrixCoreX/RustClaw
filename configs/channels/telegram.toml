@@ -18,8 +18,14 @@ allowlist = []
 access_mode = "public"
 # 当 access_mode = "specified" 时生效。填写 Telegram username，不区分大小写，支持带 @ 或不带 @。
 allowed_usernames = []
-# 音频落盘目录
-audio_inbox_dir = "audio/upload"
+# 图片落盘根目录
+image_inbox_dir = "data/telegramd/image"
+# 视频落盘根目录
+video_inbox_dir = "data/telegramd/video"
+# 文件落盘根目录
+file_inbox_dir = "data/telegramd/file"
+# 音频落盘根目录
+audio_inbox_dir = "data/telegramd/audio"
 # 仅当收到纯图片消息时自动触发视觉能力
 auto_vision_on_image_only = false
 # Telegram Bot Token
@@ -31,7 +37,7 @@ agent_id = "main"
 # Optional static bindings loaded into channel_bindings on clawd startup.
 # Use this only if you want to pre-bind a Telegram account to a key.
 # Example:
-# bindings = [{ external_user_id = "1985996990", external_chat_id = "1985996990", user_key = "" }]
+# bindings = [{ external_user_id = "1985996990", external_chat_id = "1985996990", user_key = "rk-REPLACE_ME" }]
 bindings = []
 # i18n 文案路径
 i18n_path = "configs/i18n/telegramd.zh-CN.toml"
@@ -62,4 +68,4 @@ full_access = true
 # 兼容入口（与 [telegram] 共用同一个客户端运行时）。
 [telegram_bot]
 # 是否启用 telegram_bot 兼容入口
-enabled = false
+enabled = true
