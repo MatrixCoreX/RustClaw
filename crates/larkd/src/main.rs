@@ -1,10 +1,11 @@
 //! Lark (international) 应用机器人通道 - 与 feishud（飞书中国站）独立
 //! 支持两种入站模式：webhook（事件回调）、long_connection（长连接收事件）
-//! 仅支持文本消息 → clawd ask → 轮询结果 → 文本回发
-//! API 与长连接均使用国际版端点（open.larksuite.com），与 feishud 的 open.feishu.cn 分开。
+//! 文本 / 图片 / 文件 / 音频 / 视频等媒体：下载落盘（可配置目录）后提交 clawd ask。
+//! API 与长连接均使用国际版端点（默认 open.larksuite.com），与 feishud 的 open.feishu.cn 分开。
 
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -29,6 +30,8 @@ struct AppState {
     client: Client,
     /// tenant_access_token 缓存 (token, expires_at_secs)
     token_cache: Arc<RwLock<Option<(String, u64)>>>,
+    /// 工作区根目录（用于解析相对落盘路径）
+    workspace_root: PathBuf,
 }
 
 #[derive(Clone, Deserialize)]
@@ -74,6 +77,14 @@ struct LarkSection {
     task_delivery_timeout_seconds: u64,
     #[serde(default = "default_text_chunk_chars")]
     text_chunk_chars: usize,
+    #[serde(default = "default_lark_image_inbox_dir")]
+    image_inbox_dir: String,
+    #[serde(default = "default_lark_video_inbox_dir")]
+    video_inbox_dir: String,
+    #[serde(default = "default_lark_audio_inbox_dir")]
+    audio_inbox_dir: String,
+    #[serde(default = "default_lark_file_inbox_dir")]
+    file_inbox_dir: String,
 }
 
 fn default_listen() -> String {
@@ -96,39 +107,78 @@ fn default_text_chunk_chars() -> usize {
     4000
 }
 
-/// 将 Lark 字符串 ID 稳定映射为 i64（供 clawd user_id/chat_id 使用）
-fn lark_id_to_i64(s: &str) -> i64 {
-    let mut h: i64 = 0;
-    for b in s.bytes() {
-        h = h.wrapping_mul(31).wrapping_add(b as i64);
-    }
-    h
+fn default_lark_image_inbox_dir() -> String {
+    "data/larkd/image".to_string()
 }
 
-/// 从已解析的 event 请求体（webhook 或等价结构）中解析 im.message.receive_v1 文本消息。
-fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String)> {
+fn default_lark_video_inbox_dir() -> String {
+    "data/larkd/video".to_string()
+}
+
+fn default_lark_audio_inbox_dir() -> String {
+    "data/larkd/audio".to_string()
+}
+
+fn default_lark_file_inbox_dir() -> String {
+    "data/larkd/file".to_string()
+}
+
+fn current_ts_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn safe_lark_storage_segment(raw: &str, fallback: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        return fallback.to_string();
+    }
+    let mut out = String::new();
+    for c in t.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        fallback.to_string()
+    } else {
+        out
+    }
+}
+
+fn build_lark_inbox_rel_path(root_dir: &str, chat_id: &str, file_name: &str) -> String {
+    let seg = safe_lark_storage_segment(chat_id, "unknown");
+    format!(
+        "{}/{}/{}",
+        root_dir.trim_end_matches('/'),
+        seg,
+        file_name
+    )
+}
+
+/// 解析 `im.message.receive_v1` 公共字段。
+fn parse_im_receive_v1(body: &Value) -> Option<(String, String, String, String, Value)> {
     let header = body.get("header")?;
     if header.get("event_type").and_then(|v| v.as_str())? != "im.message.receive_v1" {
         return None;
     }
     let event = body.get("event")?;
     let message = event.get("message")?;
-    if message.get("message_type").and_then(|v| v.as_str())? != "text" {
-        return None;
-    }
+    let message_id = message.get("message_id").and_then(|v| v.as_str())?.to_string();
+    let message_type = message
+        .get("message_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let content_str = message
         .get("content")
         .and_then(|v| v.as_str())
         .unwrap_or("{}");
     let content: Value = serde_json::from_str(content_str).ok()?;
-    let text = content
-        .get("text")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .unwrap_or("");
-    if text.is_empty() {
-        return None;
-    }
     let sender = event.get("sender")?;
     let sender_id = sender.get("sender_id")?;
     let open_id = sender_id
@@ -142,6 +192,118 @@ fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String
         .unwrap_or("")
         .to_string();
     if chat_id.is_empty() {
+        return None;
+    }
+    Some((open_id, chat_id, message_id, message_type, content))
+}
+
+/// Lark 消息资源下载：`type=image` 或 `type=file`（音频/视频/普通文件均用 file）。
+fn lark_resource_key_and_query_type(
+    message_type: &str,
+    content: &Value,
+) -> Option<(String, &'static str)> {
+    match message_type {
+        "image" | "sticker" => {
+            let key = content.get("image_key").and_then(|v| v.as_str())?;
+            Some((key.to_string(), "image"))
+        }
+        "file" | "audio" | "media" => {
+            let key = content.get("file_key").and_then(|v| v.as_str())?;
+            Some((key.to_string(), "file"))
+        }
+        _ => None,
+    }
+}
+
+fn lark_inbox_root_for_message_type<'a>(message_type: &str, section: &'a LarkSection) -> &'a str {
+    match message_type {
+        "image" | "sticker" => section.image_inbox_dir.as_str(),
+        "media" => section.video_inbox_dir.as_str(),
+        "audio" => section.audio_inbox_dir.as_str(),
+        "file" => section.file_inbox_dir.as_str(),
+        _ => section.file_inbox_dir.as_str(),
+    }
+}
+
+fn lark_saved_file_name(message_type: &str, content: &Value, ts: u64) -> String {
+    if let Some(name) = content.get("file_name").and_then(|v| v.as_str()) {
+        let n = name.trim();
+        if !n.is_empty() && !n.contains('/') && !n.contains('\\') {
+            let safe = safe_lark_storage_segment(n, "file");
+            return format!("{}_{}", ts, safe);
+        }
+    }
+    let ext = match message_type {
+        "image" | "sticker" => "jpg",
+        "media" => "mp4",
+        "audio" => "m4a",
+        "file" => "bin",
+        _ => "bin",
+    };
+    format!("{}.{}", ts, ext)
+}
+
+fn lark_media_kind_label_en(message_type: &str) -> &'static str {
+    match message_type {
+        "image" => "an image",
+        "sticker" => "a sticker",
+        "media" => "a video",
+        "audio" => "an audio message",
+        "file" => "a file",
+        _ => "a media attachment",
+    }
+}
+
+/// 入站媒体（图片 / 文件 / 音频 / 视频）解析结果。
+#[derive(Clone)]
+struct LarkMediaCtx {
+    open_id: String,
+    chat_id: String,
+    message_id: String,
+    message_type: String,
+    resource_key: String,
+    query_type: &'static str,
+    content: Value,
+}
+
+fn parse_im_media_from_event_body(body: &Value) -> Option<LarkMediaCtx> {
+    let (open_id, chat_id, message_id, message_type, content) = parse_im_receive_v1(body)?;
+    if message_type == "text" {
+        return None;
+    }
+    let (resource_key, query_type) = lark_resource_key_and_query_type(&message_type, &content)?;
+    Some(LarkMediaCtx {
+        open_id,
+        chat_id,
+        message_id,
+        message_type,
+        resource_key,
+        query_type,
+        content,
+    })
+}
+
+/// 将 Lark 字符串 ID 稳定映射为 i64（供 clawd user_id/chat_id 使用）
+fn lark_id_to_i64(s: &str) -> i64 {
+    let mut h: i64 = 0;
+    for b in s.bytes() {
+        h = h.wrapping_mul(31).wrapping_add(b as i64);
+    }
+    h
+}
+
+/// 从已解析的 event 请求体（webhook 或等价结构）中解析 im.message.receive_v1 文本消息。
+fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String)> {
+    let (open_id, chat_id, _mid, message_type, content) = parse_im_receive_v1(body)?;
+    if message_type != "text" {
+        return None;
+    }
+    let text = content
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    if text.is_empty() {
         return None;
     }
     Some((open_id, chat_id, text.to_string()))
@@ -314,6 +476,146 @@ async fn handle_incoming_lark_text(
             .await;
         }
     }
+}
+
+/// 入站媒体：下载并落盘后，将提示文本交给 clawd ask（与文本链路一致）。
+async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
+    let base = state.config.lark.clawd_base_url.clone();
+    let client = state.client.clone();
+    let config = state.config.clone();
+    let token_cache = state.token_cache.clone();
+    let workspace_root = state.workspace_root.clone();
+
+    info!(
+        "larkd: media inbound message_type={} chat_id={} message_id={}",
+        ctx.message_type, ctx.chat_id, ctx.message_id
+    );
+
+    let identity = match resolve_lark_identity(&client, &base, &ctx.open_id, &ctx.chat_id).await {
+        Ok(ident) => ident,
+        Err(e) => {
+            warn!("larkd: media binding resolve failed err={}", e);
+            let _ = send_lark_text(
+                &config,
+                &client,
+                &token_cache,
+                &ctx.chat_id,
+                "Identity check temporarily unavailable, please try again later.",
+            )
+            .await;
+            return;
+        }
+    };
+
+    let Some(ident) = identity else {
+        let _ = send_lark_text(
+            &config,
+            &client,
+            &token_cache,
+            &ctx.chat_id,
+            "Please send your RustClaw key in a text message to bind first.",
+        )
+        .await;
+        return;
+    };
+
+    let token = match get_tenant_access_token(&config.lark, &client, &token_cache).await {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("larkd: media token failed err={}", e);
+            return;
+        }
+    };
+
+    let api_base = config.lark.api_base_url.trim();
+    let bytes = match download_lark_message_resource(
+        &client,
+        api_base,
+        &token,
+        &ctx.message_id,
+        &ctx.resource_key,
+        ctx.query_type,
+    )
+    .await
+    {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("larkd: media download failed err={}", e);
+            let _ = send_lark_text(
+                &config,
+                &client,
+                &token_cache,
+                &ctx.chat_id,
+                "Media download failed, please try again later.",
+            )
+            .await;
+            return;
+        }
+    };
+
+    let max_len = match ctx.message_type.as_str() {
+        "image" | "sticker" => 25 * 1024 * 1024,
+        "audio" => 20 * 1024 * 1024,
+        _ => 100 * 1024 * 1024,
+    };
+    if bytes.len() > max_len {
+        warn!(
+            "larkd: media too large len={} max={}",
+            bytes.len(),
+            max_len
+        );
+        let _ = send_lark_text(
+            &config,
+            &client,
+            &token_cache,
+            &ctx.chat_id,
+            "Media file is too large and was not saved.",
+        )
+        .await;
+        return;
+    }
+
+    let ts = current_ts_ms();
+    let root_dir = lark_inbox_root_for_message_type(&ctx.message_type, &config.lark);
+    let fname = lark_saved_file_name(&ctx.message_type, &ctx.content, ts);
+    let rel = build_lark_inbox_rel_path(root_dir, &ctx.chat_id, &fname);
+    let abs = workspace_root.join(&rel);
+    if let Some(parent) = abs.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            warn!("larkd: create media inbox dir failed err={}", e);
+            return;
+        }
+    }
+    if let Err(e) = tokio::fs::write(&abs, &bytes).await {
+        warn!("larkd: write media file failed err={}", e);
+        return;
+    }
+
+    let label = lark_media_kind_label_en(&ctx.message_type);
+    let hint = format!(
+        "The user sent {}. Saved under workspace-relative path: {}. Reply or use tools as appropriate.",
+        label, rel
+    );
+    handle_text_message_to_clawd(
+        state,
+        ctx.open_id,
+        ctx.chat_id,
+        hint,
+        Some(ident.user_key),
+    );
+}
+
+/// webhook / 长连接统一分发：文本走绑定与 ask；媒体先落盘再 ask。
+fn dispatch_im_incoming_event(state: AppState, body: Value) {
+    if let Some((open_id, chat_id, text)) = parse_im_text_from_event_body(&body) {
+        tokio::spawn(handle_incoming_lark_text(state, open_id, chat_id, text));
+        return;
+    }
+    if let Some(ctx) = parse_im_media_from_event_body(&body) {
+        tokio::spawn(handle_incoming_lark_media(state, ctx));
+        return;
+    }
+    debug!("larkd: im.message.receive_v1 ignored (unsupported type or missing fields)");
 }
 
 fn lark_task_success_text(task: &TaskQueryResponse) -> String {
@@ -732,12 +1034,7 @@ async fn callback_handler(
     }
     info!("larkd: event token verification success");
 
-    let Some((open_id, chat_id, text)) = parse_im_text_from_event_body(&body_json) else {
-        info!("larkd: event ignored (not im.message.receive_v1 text or missing chat_id)");
-        return Json(json!({})).into_response();
-    };
-
-    tokio::spawn(handle_incoming_lark_text(state, open_id, chat_id, text));
+    dispatch_im_incoming_event(state, body_json);
     Json(json!({})).into_response()
 }
 
@@ -760,6 +1057,43 @@ fn chunk_text_utf8(s: &str, max_chars: usize) -> Vec<String> {
         out.push(current);
     }
     out
+}
+
+/// 下载消息内资源（图片 / 文件 / 音视频均走此接口，`type` 为 `image` 或 `file`）。
+async fn download_lark_message_resource(
+    client: &Client,
+    api_base: &str,
+    token: &str,
+    message_id: &str,
+    resource_key: &str,
+    query_type: &str,
+) -> Result<Vec<u8>, String> {
+    let base = api_base.trim_end_matches('/');
+    let mid = urlencoding::encode(message_id);
+    let key = urlencoding::encode(resource_key);
+    let url = format!(
+        "{}/open-apis/im/v1/messages/{}/resources/{}?type={}",
+        base, mid, key, query_type
+    );
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("download request failed: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "download status={} body_len={}",
+            status,
+            text.len()
+        ));
+    }
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("download body read failed: {}", e))
 }
 
 async fn get_tenant_access_token(
@@ -917,25 +1251,8 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
                         .unwrap_or("unknown");
                     tracing::debug!("larkd: long_connection raw event received event_type={} body_len={}", event_type, body_len);
 
-                    match parse_im_text_from_event_body(&body) {
-                        Some((open_id, chat_id, text)) => {
-                            info!("larkd: long_connection event parse success chat_id={} open_id={} text_len={}", chat_id, open_id, text.len());
-                            let state = (*state).clone();
-                            tokio::spawn(handle_incoming_lark_text(state, open_id, chat_id, text));
-                        }
-                        None => {
-                            if body
-                                .get("header")
-                                .and_then(|h| h.get("event_type"))
-                                .and_then(|v| v.as_str())
-                                == Some("im.message.receive_v1")
-                            {
-                                info!("larkd: long_connection event parse skipped (not text / missing fields) event_type={} body_len={}", event_type, body_len);
-                            } else {
-                                tracing::debug!("larkd: long_connection event parse skipped (not im.message.receive_v1) event_type={}", event_type);
-                            }
-                        }
-                    }
+                    let st = (*state).clone();
+                    dispatch_im_incoming_event(st, body);
                     Ok(())
                 }
             })
@@ -984,10 +1301,12 @@ async fn main() -> anyhow::Result<()> {
         .timeout(Duration::from_secs(config.lark.request_timeout_seconds))
         .build()?;
 
+    let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let state = AppState {
         config: config.clone(),
         client: client.clone(),
         token_cache: Arc::new(RwLock::new(None)),
+        workspace_root,
     };
 
     match config.lark.mode {
