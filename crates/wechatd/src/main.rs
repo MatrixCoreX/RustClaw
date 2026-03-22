@@ -1,3 +1,7 @@
+mod config_cache;
+mod config_section;
+mod ilink;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,11 +19,13 @@ use claw_core::types::{
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
 };
+use config_section::{AppConfig, WechatSection};
+use config_cache::WeixinConfigManager;
 use qrcodegen::{QrCode, QrCodeEcc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use tokio::sync::RwLock;
+use serde_json::json;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
 const SESSION_EXPIRED_ERRCODE: i64 = -14;
@@ -28,24 +34,6 @@ const RETRY_DELAY_MS: u64 = 2_000;
 const BACKOFF_DELAY_MS: u64 = 30_000;
 const ACTIVE_LOGIN_TTL_MS: u64 = 5 * 60_000;
 const WECHAT_TEXT_CHUNK_CHARS: usize = 1200;
-
-#[derive(Clone, Deserialize)]
-struct AppConfig {
-    wechat: WechatSection,
-}
-
-#[derive(Clone, Deserialize)]
-struct WechatSection {
-    enabled: bool,
-    listen: String,
-    clawd_base_url: String,
-    api_base_url: String,
-    bot_token: String,
-    wechat_uin_base64: String,
-    request_timeout_seconds: u64,
-    longpoll_timeout_ms: u64,
-    text_chunk_chars: usize,
-}
 
 #[derive(Clone, Serialize, Deserialize)]
 struct WechatRuntimeStatus {
@@ -141,17 +129,13 @@ struct State {
     active_logins: Arc<RwLock<HashMap<String, ActiveLogin>>>,
     context_tokens: Arc<RwLock<HashMap<String, String>>>,
     sync_buf_path: Arc<PathBuf>,
-}
-
-#[derive(Serialize)]
-struct BaseInfo {
-    channel_version: String,
+    config_cache: Arc<Mutex<WeixinConfigManager>>,
 }
 
 #[derive(Serialize)]
 struct GetUpdatesReq<'a> {
     get_updates_buf: &'a str,
-    base_info: BaseInfo,
+    base_info: ilink::BaseInfo,
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,7 +193,7 @@ struct VoiceItem {
 #[derive(Serialize)]
 struct SendMessageReq {
     msg: OutboundMessage,
-    base_info: BaseInfo,
+    base_info: ilink::BaseInfo,
 }
 
 #[derive(Serialize)]
@@ -296,20 +280,6 @@ fn wechat_sync_buf_file_path(workspace_root: &Path) -> PathBuf {
         .join("get_updates_buf.txt")
 }
 
-fn base_info() -> BaseInfo {
-    BaseInfo {
-        channel_version: env!("CARGO_PKG_VERSION").to_string(),
-    }
-}
-
-fn build_wechat_uin_header(config: &WechatSection) -> String {
-    if !config.wechat_uin_base64.trim().is_empty() {
-        return config.wechat_uin_base64.trim().to_string();
-    }
-    let value = (current_ts_ms() % (u32::MAX as u64)) as u32;
-    BASE64_STANDARD.encode(value.to_string())
-}
-
 fn qr_svg_data_url(qr_content: &str) -> Result<String, String> {
     let qr = QrCode::encode_text(qr_content, QrCodeEcc::Medium)
         .map_err(|e| format!("encode QR svg failed: {e:?}"))?;
@@ -378,6 +348,31 @@ fn extract_text_message(msg: &WeixinMessage) -> Option<String> {
         }
     }
     None
+}
+
+/// True when the message carries image / video / file / raw voice items (no usable text).
+fn has_non_text_media_items(msg: &WeixinMessage) -> bool {
+    let Some(items) = msg.item_list.as_ref() else {
+        return false;
+    };
+    for it in items {
+        let t = it.r#type.unwrap_or(0);
+        if t == 2 || t == 4 || t == 5 {
+            return true;
+        }
+        if t == 3 {
+            let voice_text = it
+                .voice_item
+                .as_ref()
+                .and_then(|v| v.text.as_deref())
+                .map(str::trim)
+                .unwrap_or("");
+            if voice_text.is_empty() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn active_login_is_fresh(login: &ActiveLogin) -> bool {
@@ -488,7 +483,7 @@ async fn login_qr_start(
     }
     let response = fetch_qrcode(
         &state.client,
-        &state.config.api_base_url,
+        &state.config,
         req.bot_type.as_deref().unwrap_or("3"),
     )
     .await
@@ -550,7 +545,7 @@ async fn login_qr_wait(
             }));
         }
 
-        let status = poll_qr_status(&state.client, &state.config.api_base_url, &active_login.qrcode)
+        let status = poll_qr_status(&state.client, &state.config, &active_login.qrcode)
             .await
             .map_err(|e| (axum::http::StatusCode::BAD_GATEWAY, e))?;
         match status.status.as_str() {
@@ -597,7 +592,7 @@ async fn login_qr_wait(
                 }
                 let refreshed = fetch_qrcode(
                     &state.client,
-                    &state.config.api_base_url,
+                    &state.config,
                     req.bot_type.as_deref().unwrap_or("3"),
                 )
                 .await
@@ -696,16 +691,16 @@ fn session_base_url(config: &WechatSection, session: Option<&PersistedSession>) 
 
 async fn fetch_qrcode(
     client: &Client,
-    api_base_url: &str,
+    section: &WechatSection,
     bot_type: &str,
 ) -> Result<QRCodeResponse, String> {
-    let base = format!("{}/", api_base_url.trim_end_matches('/'));
+    let base = format!("{}/", section.api_base_url.trim_end_matches('/'));
     let url = format!(
         "{}ilink/bot/get_bot_qrcode?bot_type={}",
         base, bot_type
     );
-    let response = client
-        .get(&url)
+    let req = client.get(&url);
+    let response = ilink::apply_route_tag(req, section)
         .send()
         .await
         .map_err(|e| format!("fetch QR code failed: {e}"))?;
@@ -722,14 +717,15 @@ async fn fetch_qrcode(
 
 async fn poll_qr_status(
     client: &Client,
-    api_base_url: &str,
+    section: &WechatSection,
     qrcode: &str,
 ) -> Result<QRStatusResponse, String> {
-    let base = format!("{}/", api_base_url.trim_end_matches('/'));
+    let base = format!("{}/", section.api_base_url.trim_end_matches('/'));
     let url = format!("{}ilink/bot/get_qrcode_status?qrcode={}", base, qrcode);
-    let response = client
+    let req = client
         .get(&url)
-        .header("iLink-App-ClientVersion", "1")
+        .header("iLink-App-ClientVersion", "1");
+    let response = ilink::apply_route_tag(req, section)
         .send()
         .await
         .map_err(|e| format!("poll QR status failed: {e}"))?;
@@ -744,35 +740,6 @@ async fn poll_qr_status(
         .map_err(|e| format!("parse QR status failed: {e}"))
 }
 
-async fn wechat_post_json<T: Serialize>(
-    client: &Client,
-    config: &WechatSection,
-    base_url: &str,
-    token: &str,
-    endpoint: &str,
-    body: &T,
-    timeout_ms: u64,
-) -> Result<Value, String> {
-    let url = format!("{}/{}", base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'));
-    let response = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .header("AuthorizationType", "ilink_bot_token")
-        .header("Authorization", format!("Bearer {token}"))
-        .header("X-WECHAT-UIN", build_wechat_uin_header(config))
-        .json(body)
-        .timeout(Duration::from_millis(timeout_ms.max(1_000)))
-        .send()
-        .await
-        .map_err(|e| format!("wechat request failed: {e}"))?;
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!("wechat request status={status} body={body}"));
-    }
-    serde_json::from_str(&body).map_err(|e| format!("wechat response parse failed: {e}"))
-}
-
 async fn get_updates(
     client: &Client,
     config: &WechatSection,
@@ -781,7 +748,7 @@ async fn get_updates(
     get_updates_buf: &str,
     timeout_ms: u64,
 ) -> Result<GetUpdatesResp, String> {
-    let value = wechat_post_json(
+    let value = ilink::post_json(
         client,
         config,
         base_url,
@@ -789,7 +756,7 @@ async fn get_updates(
         "ilink/bot/getupdates",
         &GetUpdatesReq {
             get_updates_buf,
-            base_info: base_info(),
+            base_info: ilink::base_info(),
         },
         timeout_ms,
     )
@@ -835,9 +802,9 @@ async fn send_text_message(
                 }],
                 context_token: context_token.map(str::to_string),
             },
-            base_info: base_info(),
+            base_info: ilink::base_info(),
         };
-        let _ = wechat_post_json(
+        let _ = ilink::post_json(
             client,
             config,
             base_url,
@@ -941,12 +908,105 @@ fn task_success_text(task: &TaskQueryResponse) -> String {
         .unwrap_or_else(|| "处理完成。".to_string())
 }
 
+/// Refresh `ilink/bot/sendtyping` while clawd runs (`keepaliveIntervalMs` ≈ 5s in OpenClaw weixin).
+struct WechatTypingHeartbeat {
+    stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl WechatTypingHeartbeat {
+    fn start(
+        client: Client,
+        section: WechatSection,
+        base_url: String,
+        token: String,
+        to_user_id: String,
+        typing_ticket: String,
+        interval: Duration,
+    ) -> Self {
+        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            loop {
+                let _ = ilink::send_typing_once(
+                    &client,
+                    &section,
+                    &base_url,
+                    &token,
+                    &to_user_id,
+                    &typing_ticket,
+                    1,
+                )
+                .await;
+                tokio::select! {
+                    _ = tokio::time::sleep(interval) => {}
+                    _ = &mut stop_rx => {
+                        let _ = ilink::send_typing_once(
+                            &client,
+                            &section,
+                            &base_url,
+                            &token,
+                            &to_user_id,
+                            &typing_ticket,
+                            2,
+                        )
+                        .await;
+                        break;
+                    }
+                }
+            }
+        });
+        Self {
+            stop_tx: Some(stop_tx),
+        }
+    }
+
+    fn stop(&mut self) {
+        if let Some(tx) = self.stop_tx.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
+impl Drop for WechatTypingHeartbeat {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+async fn resolve_typing_ticket_for_peer(
+    state: &State,
+    from_user_id: &str,
+    context_token: Option<&str>,
+) -> Option<String> {
+    let session_guard = state.session.read().await;
+    let token = session_token(&state.config, session_guard.as_ref())?;
+    let base_url = session_base_url(&state.config, session_guard.as_ref());
+    drop(session_guard);
+    let mut mgr = state.config_cache.lock().await;
+    let ticket = mgr
+        .typing_ticket_for_user(
+            &state.client,
+            &state.config,
+            &base_url,
+            &token,
+            from_user_id,
+            context_token,
+        )
+        .await;
+    let t = ticket.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(ticket)
+    }
+}
+
 async fn submit_wechat_task_and_reply(
     state: State,
     from_user_id: String,
     text: String,
     context_token: Option<String>,
     user_key: Option<String>,
+    typing_ticket: Option<String>,
 ) {
     let submit_req = SubmitTaskRequest {
         user_id: Some(stable_i64_from_string(&from_user_id)),
@@ -992,6 +1052,26 @@ async fn submit_wechat_task_and_reply(
     };
     let task_id = task_data.task_id.to_string();
     let started = std::time::Instant::now();
+    let (poll_token, poll_base) = {
+        let g = state.session.read().await;
+        (
+            session_token(&state.config, g.as_ref()),
+            session_base_url(&state.config, g.as_ref()),
+        )
+    };
+    let interval = Duration::from_secs(state.config.typing_refresh_interval_secs.max(1));
+    let _typing_guard = match (&typing_ticket, &poll_token) {
+        (Some(ticket), Some(tok)) if !ticket.trim().is_empty() => Some(WechatTypingHeartbeat::start(
+            state.client.clone(),
+            state.config.clone(),
+            poll_base,
+            tok.clone(),
+            from_user_id.clone(),
+            ticket.clone(),
+            interval,
+        )),
+        _ => None,
+    };
     loop {
         let url = format!(
             "{}/v1/tasks/{}",
@@ -1097,8 +1177,29 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     let Some(from_user_id) = msg.from_user_id.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string) else {
         return;
     };
-    let Some(text) = extract_text_message(&msg) else {
-        return;
+    let text = match extract_text_message(&msg) {
+        Some(t) => t,
+        None => {
+            if has_non_text_media_items(&msg) {
+                let session_guard = state.session.read().await;
+                let token = session_token(&state.config, session_guard.as_ref());
+                let base_url = session_base_url(&state.config, session_guard.as_ref());
+                drop(session_guard);
+                if let Some(token) = token {
+                    let _ = send_text_message(
+                        &state.client,
+                        &state.config,
+                        &base_url,
+                        &token,
+                        &from_user_id,
+                        msg.context_token.as_deref(),
+                        "当前仅支持文本与已转文字的语音。图片/视频/文件等媒体将后续对齐 CDN 加解密与上传流程。",
+                    )
+                    .await;
+                }
+            }
+            return;
+        }
     };
     if let Some(token) = msg.context_token.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         state
@@ -1131,12 +1232,19 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         }
     };
     if let Some(identity) = identity {
+        let typing_ticket = resolve_typing_ticket_for_peer(
+            &state,
+            &from_user_id,
+            msg.context_token.as_deref(),
+        )
+        .await;
         tokio::spawn(submit_wechat_task_and_reply(
             state,
             from_user_id,
             text,
             msg.context_token,
             Some(identity.user_key),
+            typing_ticket,
         ));
         return;
     }
@@ -1349,6 +1457,7 @@ async fn main() -> anyhow::Result<()> {
         active_logins: Arc::new(RwLock::new(HashMap::new())),
         context_tokens: Arc::new(RwLock::new(HashMap::new())),
         sync_buf_path,
+        config_cache: Arc::new(Mutex::new(WeixinConfigManager::new())),
     };
     let session_snapshot = state.session.read().await.clone();
     update_status(&state, |status| {
