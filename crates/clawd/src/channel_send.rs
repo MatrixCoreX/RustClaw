@@ -9,8 +9,15 @@ use toml::Value as TomlValue;
 use tracing::info;
 
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
+use claw_core::wechat_reply_media::{
+    extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
+};
 
 use crate::AppState;
+use wechat_ilink::http::IlinkAuth;
+use wechat_ilink::{
+    send_weixin_file_from_file, send_weixin_image_from_file, send_weixin_video_from_file,
+};
 
 /// Feishu 中国站发送配置（定时任务主动推送用，从 configs/channels/feishu.toml 可选加载）
 #[derive(Clone, Debug)]
@@ -28,7 +35,7 @@ pub struct LarkSendConfig {
     pub api_base_url: String,
 }
 
-/// WeChat 发送配置（MVP 文本发送）
+/// WeChat 发送配置（文本 + CDN 媒体，与 OpenClaw weixin 对齐）
 #[derive(Clone, Debug)]
 pub struct WechatSendConfig {
     pub api_base_url: String,
@@ -37,6 +44,8 @@ pub struct WechatSendConfig {
     pub text_chunk_chars: usize,
     /// Optional `SKRouteTag` (same as OpenClaw weixin plugin / gateway routing).
     pub sk_route_tag: Option<String>,
+    /// CDN root for outbound images/videos/files (`novac2c.cdn.weixin.qq.com/c2c`).
+    pub cdn_base_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +63,11 @@ const TELEGRAM_TEXT_CHUNK_CHARS: usize = 3500;
 const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
 const WECHAT_SEND_MESSAGE_TYPE: i64 = 2;
 const WECHAT_SEND_MESSAGE_STATE: i64 = 2;
+const CLAWD_WECHAT_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn default_wechat_cdn_base_url() -> String {
+    "https://novac2c.cdn.weixin.qq.com/c2c".to_string()
+}
 
 pub(crate) async fn send_telegram_message(
     state: &AppState,
@@ -249,6 +263,10 @@ pub(crate) async fn send_wechat_text_message(
     context_token: Option<&str>,
     text: &str,
 ) -> Result<(), String> {
+    let context_token = context_token
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "wechat send requires context_token".to_string())?;
     let config = resolve_wechat_send_config(state).ok_or_else(|| {
         "wechat send not configured (configs/channels/wechat.toml api_base_url/bot_token)"
             .to_string()
@@ -261,21 +279,34 @@ pub(crate) async fn send_wechat_text_message(
     if token.is_empty() {
         return Err("wechat bot_token is empty".to_string());
     }
+    let cdn = config.cdn_base_url.trim();
+    if cdn.is_empty() {
+        return Err("wechat cdn_base_url is empty".to_string());
+    }
+    let auth = IlinkAuth {
+        sk_route_tag: config.sk_route_tag.as_deref().unwrap_or(""),
+        wechat_uin_base64: config.wechat_uin_base64.as_deref().unwrap_or(""),
+    };
+    let media = extract_wechat_outbound_media(text, &state.workspace_root);
+    let stripped = strip_wechat_delivery_lines(text);
+    let send_text = if stripped.trim().is_empty() && media.is_empty() && !text.trim().is_empty() {
+        text
+    } else {
+        stripped.as_str()
+    };
     let url = format!("{base}/ilink/bot/sendmessage");
-    let chunks = chunk_text_for_channel(
-        text,
-        config
-            .text_chunk_chars
-            .max(1)
-            .min(WECHAT_TEXT_CHUNK_CHARS)
-            .saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
-    );
+    let max_chunk = config
+        .text_chunk_chars
+        .max(1)
+        .min(WECHAT_TEXT_CHUNK_CHARS)
+        .saturating_sub(SEGMENT_PREFIX_MAX_CHARS);
+    let chunks = chunk_text_for_channel(send_text, max_chunk);
     let n = chunks.len();
     if n > 1 {
         info!(
             "send_chunks channel=wechat to_user_id={} original_len={} chunk_count={}",
             to_user_id,
-            text.len(),
+            send_text.len(),
             n
         );
     }
@@ -312,7 +343,7 @@ pub(crate) async fn send_wechat_text_message(
                         "type": 1,
                         "text_item": { "text": body }
                     }],
-                    "context_token": context_token.unwrap_or_default()
+                    "context_token": context_token
                 }
             }))
             .send()
@@ -322,6 +353,61 @@ pub(crate) async fn send_wechat_text_message(
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             return Err(format!("wechat send status={status} body={body}"));
+        }
+    }
+    let timeout_ms: u64 = 30_000;
+    for (p, kind) in media {
+        match kind {
+            WechatOutboundKind::Image => {
+                send_weixin_image_from_file(
+                    &state.http_client,
+                    base,
+                    token,
+                    auth,
+                    cdn,
+                    to_user_id,
+                    Some(context_token),
+                    &p,
+                    CLAWD_WECHAT_CHANNEL_VERSION,
+                    timeout_ms,
+                )
+                .await?
+            }
+            WechatOutboundKind::Video => {
+                send_weixin_video_from_file(
+                    &state.http_client,
+                    base,
+                    token,
+                    auth,
+                    cdn,
+                    to_user_id,
+                    Some(context_token),
+                    &p,
+                    CLAWD_WECHAT_CHANNEL_VERSION,
+                    timeout_ms,
+                )
+                .await?
+            }
+            WechatOutboundKind::File => {
+                let fname = p
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("file");
+                send_weixin_file_from_file(
+                    &state.http_client,
+                    base,
+                    token,
+                    auth,
+                    cdn,
+                    to_user_id,
+                    Some(context_token),
+                    &p,
+                    fname,
+                    CLAWD_WECHAT_CHANNEL_VERSION,
+                    timeout_ms,
+                )
+                .await?
+            }
         }
     }
     Ok(())
@@ -343,6 +429,9 @@ fn resolve_wechat_send_config(state: &AppState) -> Option<WechatSendConfig> {
             }
             if loaded.sk_route_tag.is_some() {
                 fallback.sk_route_tag = loaded.sk_route_tag;
+            }
+            if !loaded.cdn_base_url.trim().is_empty() {
+                fallback.cdn_base_url = loaded.cdn_base_url;
             }
             fallback.text_chunk_chars = loaded.text_chunk_chars;
             Some(fallback)
@@ -410,12 +499,19 @@ fn load_wechat_send_config_from_workspace(workspace_root: &Path) -> Option<Wecha
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let cdn_base_url = wechat
+        .get("cdn_base_url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(default_wechat_cdn_base_url);
     Some(WechatSendConfig {
         api_base_url,
         bot_token,
         wechat_uin_base64,
         text_chunk_chars,
         sk_route_tag,
+        cdn_base_url,
     })
 }
 

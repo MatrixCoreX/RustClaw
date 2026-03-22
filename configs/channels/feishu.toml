@@ -1,4 +1,4 @@
-# Feishu (Lark) 应用机器人通道配置 - Phase 1 最小可用（事件回调 / 长连接 + 文本消息）
+# Feishu (Lark) 应用机器人通道配置（事件回调 / 长连接 + 文本与入站媒体落盘）
 # 使用方式（二选一）：
 #   - webhook：应用机器人 → 事件订阅 → 请求地址配置为本服务 callback URL（需公网可达）
 #   - long_connection：应用机器人 → 事件订阅 → 使用长连接接收事件（无需公网，内网优先）
@@ -6,7 +6,7 @@
 
 [feishu]
 # 是否启用
-enabled = false
+enabled = true
 # 入站模式：webhook | long_connection
 #   webhook：有公网回调地址时使用；飞书将事件 POST 到本服务，需配置 listen 并保证请求地址可达
 #   long_connection：无公网时使用；本服务主动连飞书收事件，仅需出口能访问公网
@@ -15,8 +15,15 @@ mode = "long_connection"
 listen = "0.0.0.0:8789"
 # clawd 基地址，用于提交任务与轮询结果
 clawd_base_url = "http://127.0.0.1:8787"
+# Open API 根 URL（国内默认 https://open.feishu.cn；国际 Lark 用 https://open.larksuite.com）
+# api_base_url = "https://open.feishu.cn"
+# 入站媒体落盘根目录（相对 feishud 进程工作目录；实际路径为 <目录>/<chat_id>/<文件名>）
+# image_inbox_dir = "data/feishud/image"
+# video_inbox_dir = "data/feishud/video"
+# audio_inbox_dir = "data/feishud/audio"
+# file_inbox_dir = "data/feishud/file"
 # 飞书应用 App ID
-app_id = "cli_a939d198c8ba1cc8"
+app_id = ""
 # 飞书应用 App Secret（日志不打印）
 app_secret = ""
 # 事件订阅 Verification Token（webhook 时校验请求来自飞书）

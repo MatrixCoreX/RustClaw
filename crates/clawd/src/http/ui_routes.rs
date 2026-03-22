@@ -1675,7 +1675,19 @@ fn read_last_lines(path: &std::path::Path, limit_lines: usize) -> anyhow::Result
     Ok(lines[start..].join("\n"))
 }
 
-fn auth_user_summary_counts(state: &AppState) -> anyhow::Result<(usize, usize)> {
+fn canonical_bound_channel_name(raw: &str) -> String {
+    let channel = raw.trim().to_ascii_lowercase();
+    match channel.as_str() {
+        "" => String::new(),
+        "telegram_bot" => "telegram".to_string(),
+        "whatsapp_cloud" | "whatsapp-cloud" | "whatsapp_web" | "whatsapp-web" | "wa_cloud"
+        | "wa-cloud" | "wa_web" | "wa-web" => "whatsapp".to_string(),
+        "wechat_bot" | "openclaw-weixin" | "weixin" => "wechat".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn auth_user_summary_counts(state: &AppState) -> anyhow::Result<(usize, usize, Vec<String>)> {
     let db = state
         .db
         .lock()
@@ -1685,13 +1697,30 @@ fn auth_user_summary_counts(state: &AppState) -> anyhow::Result<(usize, usize)> 
         [],
         |row| row.get(0),
     )?;
-    let bound_channel_count: i64 =
-        db.query_row("SELECT COUNT(*) FROM channel_bindings", [], |row| {
-            row.get(0)
-        })?;
+    let mut stmt = db.prepare("SELECT DISTINCT channel FROM channel_bindings WHERE TRIM(COALESCE(channel, '')) != ''")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut bound_channels = Vec::new();
+    for row in rows {
+        let channel = canonical_bound_channel_name(&row?);
+        if !channel.is_empty() && !bound_channels.iter().any(|existing| existing == &channel) {
+            bound_channels.push(channel);
+        }
+    }
+    let channel_order = |channel: &str| match channel {
+        "telegram" => 0,
+        "whatsapp" => 1,
+        "wechat" => 2,
+        "feishu" => 3,
+        "lark" => 4,
+        "ui" => 5,
+        _ => 99,
+    };
+    bound_channels.sort_by(|a, b| channel_order(a).cmp(&channel_order(b)).then_with(|| a.cmp(b)));
+    let bound_channel_count = bound_channels.len();
     Ok((
         user_count.max(0) as usize,
-        bound_channel_count.max(0) as usize,
+        bound_channel_count,
+        bound_channels,
     ))
 }
 
@@ -3003,7 +3032,8 @@ async fn health(
     let larkd_stats = larkd_process_stats();
     let larkd_process_count_raw = larkd_stats.map(|(count, _)| count);
     let larkd_memory_rss_bytes_raw = larkd_stats.map(|(_, rss_bytes)| rss_bytes);
-    let (user_count, bound_channel_count) = auth_user_summary_counts(&state).unwrap_or_default();
+    let (user_count, bound_channel_count, bound_channels) =
+        auth_user_summary_counts(&state).unwrap_or_default();
     let telegram_configured_bot_names = state.telegram_configured_bot_names.as_ref().clone();
     let telegram_bot_statuses =
         read_telegram_bot_statuses(&state.workspace_root, &telegram_configured_bot_names);
@@ -3244,6 +3274,7 @@ async fn health(
         larkd_memory_rss_bytes,
         user_count,
         bound_channel_count,
+        bound_channels,
         future_adapters_enabled: state.future_adapters_enabled.as_ref().clone(),
     };
 

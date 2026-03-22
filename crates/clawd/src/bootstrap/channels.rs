@@ -104,11 +104,18 @@ pub(crate) fn load_wechat_send_config(
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let cdn_base_url = wechat
+        .get("cdn_base_url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "https://novac2c.cdn.weixin.qq.com/c2c".to_string());
     Some(channel_send::WechatSendConfig {
         api_base_url,
         bot_token,
         wechat_uin_base64,
         text_chunk_chars,
         sk_route_tag,
+        cdn_base_url,
     })
 }

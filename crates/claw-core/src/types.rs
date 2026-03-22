@@ -234,8 +234,10 @@ pub struct HealthResponse {
     pub larkd_memory_rss_bytes: Option<u64>,
     /// 当前启用中的用户 key 数量
     pub user_count: usize,
-    /// 当前已绑定的通信端数量
+    /// 当前已绑定的渠道种类数量（去重后）
     pub bound_channel_count: usize,
+    /// 当前已绑定的渠道种类列表（如 telegram / wechat）
+    pub bound_channels: Vec<String>,
     /// 配置中启用但尚未实现的 future adapters
     pub future_adapters_enabled: Vec<String>,
 }
