@@ -99,10 +99,16 @@ pub(crate) fn load_wechat_send_config(
         .and_then(|v| v.as_integer())
         .map(|v| v.max(1) as usize)
         .unwrap_or(1200);
+    let sk_route_tag = wechat
+        .get("sk_route_tag")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     Some(channel_send::WechatSendConfig {
         api_base_url,
         bot_token,
         wechat_uin_base64,
         text_chunk_chars,
+        sk_route_tag,
     })
 }
