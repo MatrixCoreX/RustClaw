@@ -1459,6 +1459,31 @@ impl Drop for WechatTypingHeartbeat {
     }
 }
 
+async fn start_typing_heartbeat_for_peer(
+    state: &State,
+    from_user_id: &str,
+    typing_ticket: Option<&str>,
+) -> Option<WechatTypingHeartbeat> {
+    let ticket = typing_ticket
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?
+        .to_string();
+    let session_guard = state.session.read().await;
+    let token = session_token(&state.config, session_guard.as_ref())?;
+    let base_url = session_base_url(&state.config, session_guard.as_ref());
+    drop(session_guard);
+    let interval = Duration::from_secs(state.config.typing_refresh_interval_secs.max(1));
+    Some(WechatTypingHeartbeat::start(
+        state.client.clone(),
+        state.config.clone(),
+        base_url,
+        token.clone(),
+        from_user_id.to_string(),
+        ticket,
+        interval,
+    ))
+}
+
 async fn resolve_typing_ticket_for_peer(
     state: &State,
     from_user_id: &str,
@@ -1949,6 +1974,17 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     }
     let prefetched_typing_ticket =
         resolve_typing_ticket_for_peer(&state, &from_user_id, msg.context_token.as_deref()).await;
+    // Cover CDN download / decrypt / transcode latency before the clawd task heartbeat starts.
+    let _media_typing_guard = if extract_text_message(&msg).is_none() {
+        start_typing_heartbeat_for_peer(
+            &state,
+            &from_user_id,
+            prefetched_typing_ticket.as_deref(),
+        )
+        .await
+    } else {
+        None
+    };
 
     if extract_text_message(&msg).is_none() {
         if let Some((ep, key)) = inbound_image_decrypt_params(&msg) {
@@ -2044,7 +2080,18 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         status.last_error = None;
                     })
                     .await;
-                    return;
+                    let hint = format!(
+                        "用户发来视频，已保存为工作区相对路径：{}。请根据能力回复或调用工具处理。",
+                        rel
+                    );
+                    return spawn_inbound_ask_flow(
+                        state,
+                        from_user_id,
+                        msg,
+                        hint,
+                        prefetched_typing_ticket.clone(),
+                    )
+                    .await;
                 }
                 Err(err) => {
                     warn!("wechatd: inbound video decrypt/download failed: {}", err);
