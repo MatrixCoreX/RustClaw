@@ -1,0 +1,367 @@
+# 技能注册表 Phase 1：发现 / 启用 / 别名 / 超时 由此驱动。
+# 未配置 registry_path 时 clawd 仍使用 config.toml [skills].skills_list + skill_switches。
+# 配置 [skills].registry_path = "configs/skills_registry.toml" 后启用本表。
+
+[[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+aliases = ["shell", "exec"]
+timeout_seconds = 60
+prompt_file = "prompts/skills/run_cmd.md"
+output_kind = "text"
+
+[[skills]]
+name = "read_file"
+enabled = true
+kind = "builtin"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/read_file.md"
+output_kind = "text"
+
+[[skills]]
+name = "write_file"
+enabled = true
+kind = "builtin"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/write_file.md"
+output_kind = "text"
+
+[[skills]]
+name = "list_dir"
+enabled = true
+kind = "builtin"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/list_dir.md"
+output_kind = "text"
+
+[[skills]]
+name = "make_dir"
+enabled = true
+kind = "builtin"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/make_dir.md"
+output_kind = "text"
+
+[[skills]]
+name = "remove_file"
+enabled = true
+kind = "builtin"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/remove_file.md"
+output_kind = "text"
+
+[[skills]]
+name = "schedule"
+enabled = true
+kind = "builtin"
+aliases = ["schedule_compile", "timer_compile"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/schedule.md"
+output_kind = "text"
+
+[[skills]]
+name = "x"
+enabled = true
+kind = "runner"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/x.md"
+output_kind = "text"
+
+[[skills]]
+name = "system_basic"
+enabled = true
+kind = "runner"
+aliases = ["system"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/system_basic.md"
+output_kind = "text"
+
+[[skills]]
+name = "http_basic"
+enabled = true
+kind = "runner"
+aliases = ["http"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/http_basic.md"
+output_kind = "text"
+
+[[skills]]
+name = "git_basic"
+enabled = true
+kind = "runner"
+aliases = ["git"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/git_basic.md"
+output_kind = "text"
+
+[[skills]]
+name = "install_module"
+enabled = true
+kind = "runner"
+aliases = ["module_install", "install_modules"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/install_module.md"
+output_kind = "text"
+
+[[skills]]
+name = "process_basic"
+enabled = true
+kind = "runner"
+aliases = ["process", "process_manager"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/process_basic.md"
+output_kind = "text"
+
+[[skills]]
+name = "package_manager"
+enabled = true
+kind = "runner"
+aliases = ["package_install", "pkg_manager", "packages"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/package_manager.md"
+output_kind = "text"
+
+[[skills]]
+name = "archive_basic"
+enabled = true
+kind = "runner"
+aliases = ["archive", "archive_tool"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/archive_basic.md"
+output_kind = "text"
+
+[[skills]]
+name = "db_basic"
+enabled = true
+kind = "runner"
+aliases = ["database", "sqlite_tool"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/db_basic.md"
+output_kind = "text"
+
+[[skills]]
+name = "docker_basic"
+enabled = true
+kind = "runner"
+aliases = ["docker", "docker_ops"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/docker_basic.md"
+output_kind = "text"
+
+[[skills]]
+name = "fs_search"
+enabled = true
+kind = "runner"
+aliases = ["fs-search", "filesystem_search", "file_search", "search_files"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/fs_search.md"
+output_kind = "text"
+
+[[skills]]
+name = "rss_fetch"
+enabled = true
+kind = "runner"
+aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/rss_fetch.md"
+output_kind = "text"
+
+[[skills]]
+name = "image_vision"
+enabled = true
+kind = "runner"
+aliases = ["vision", "image_vision_skill", "vision_image", "image-analyze"]
+timeout_seconds = 90
+prompt_file = "prompts/skills/image_vision.md"
+output_kind = "image"
+
+[[skills]]
+name = "image_generate"
+enabled = true
+kind = "runner"
+aliases = ["image_generation", "generate_image", "draw_image", "text_to_image"]
+timeout_seconds = 180
+prompt_file = "prompts/skills/image_generate.md"
+output_kind = "image"
+
+[[skills]]
+name = "image_edit"
+enabled = true
+kind = "runner"
+aliases = ["image_modify", "image_editor", "edit_image", "image_outpaint"]
+timeout_seconds = 180
+prompt_file = "prompts/skills/image_edit.md"
+output_kind = "image"
+
+[[skills]]
+name = "audio_transcribe"
+enabled = true
+kind = "runner"
+aliases = []
+timeout_seconds = 120
+prompt_file = "prompts/skills/audio_transcribe.md"
+output_kind = "text"
+
+[[skills]]
+name = "audio_synthesize"
+enabled = true
+kind = "runner"
+aliases = []
+timeout_seconds = 90
+prompt_file = "prompts/skills/audio_synthesize.md"
+output_kind = "text"
+
+[[skills]]
+name = "health_check"
+enabled = true
+kind = "runner"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/health_check.md"
+output_kind = "text"
+
+[[skills]]
+name = "log_analyze"
+enabled = true
+kind = "runner"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/log_analyze.md"
+output_kind = "text"
+
+[[skills]]
+name = "service_control"
+enabled = true
+kind = "runner"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/service_control.md"
+output_kind = "text"
+
+[[skills]]
+name = "task_control"
+enabled = true
+kind = "runner"
+aliases = ["task_manager", "task_status", "task_cancel"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/task_control.md"
+output_kind = "text"
+
+[[skills]]
+name = "config_guard"
+enabled = true
+kind = "runner"
+aliases = []
+timeout_seconds = 30
+prompt_file = "prompts/skills/config_guard.md"
+output_kind = "text"
+
+[[skills]]
+name = "crypto"
+enabled = true
+kind = "runner"
+aliases = ["coin", "coins", "crypto_trade", "market_data", "crypto_market"]
+timeout_seconds = 60
+prompt_file = "prompts/skills/crypto.md"
+output_kind = "text"
+
+[[skills]]
+name = "chat"
+enabled = true
+kind = "runner"
+aliases = ["talk", "smalltalk", "joke", "chitchat"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/chat.md"
+output_kind = "text"
+
+[[skills]]
+name = "stock"
+enabled = true
+kind = "runner"
+aliases = ["a_stock", "stock_quote", "股票"]
+timeout_seconds = 15
+prompt_file = "prompts/skills/stock.md"
+output_kind = "text"
+
+[[skills]]
+name = "weather"
+enabled = true
+kind = "runner"
+aliases = ["天气", "weather_query", "查天气"]
+timeout_seconds = 15
+prompt_file = "prompts/skills/weather.md"
+output_kind = "text"
+
+# Phase 5 示例（可选）：
+# - runner 技能可配置 runner_name，未配则用 name 作为执行名。
+# - external 技能需配置 external_kind（如 "http_json"）、external_endpoint；可选 external_timeout_seconds、external_auth_ref。
+# [[skills]]
+# name = "my_external"
+# enabled = false
+# kind = "external"
+# external_kind = "http_json"
+# external_endpoint = "https://example.com/skill"
+# external_timeout_seconds = 60
+# prompt_file = "prompts/skills/my_external.md"
+# output_kind = "text"
+
+[[skills]]
+name = "reference_resolver"
+enabled = true
+kind = "runner"
+aliases = ["resolve_reference", "reference", "context_reference"]
+timeout_seconds = 15
+prompt_file = "prompts/skills/reference_resolver.md"
+output_kind = "text"
+
+[[skills]]
+name = "doc_parse"
+enabled = true
+kind = "runner"
+aliases = ["parse_doc", "document_parse", "doc_reader"]
+timeout_seconds = 20
+prompt_file = "prompts/skills/doc_parse.md"
+output_kind = "text"
+
+[[skills]]
+name = "transform"
+enabled = true
+kind = "runner"
+aliases = ["transform_data", "data_transform", "table_transform"]
+timeout_seconds = 20
+prompt_file = "prompts/skills/transform.md"
+output_kind = "text"
+
+[[skills]]
+name = "web_search_extract"
+enabled = true
+kind = "runner"
+aliases = ["search_extract", "web_search", "web_extract"]
+timeout_seconds = 25
+prompt_file = "prompts/skills/web_search_extract.md"
+output_kind = "text"
+
+[[skills]]
+name = "kb"
+enabled = true
+kind = "runner"
+aliases = ["knowledge_base", "kb_ingest", "kb_search"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/kb.md"
+output_kind = "text"
+
+[[skills]]
+name = "browser_web"
+enabled = true
+kind = "runner"
+aliases = ["browser_fetch", "page_extract", "browser_search"]
+timeout_seconds = 45
+prompt_file = "prompts/skills/browser_web.md"
+output_kind = "text"

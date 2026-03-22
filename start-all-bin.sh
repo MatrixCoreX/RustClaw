@@ -38,6 +38,7 @@ CLAWD_BIN="$SCRIPT_DIR/target/$PROFILE/clawd"
 TELEGRAMD_BIN="$SCRIPT_DIR/target/$PROFILE/telegramd"
 WHATSAPPD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsappd"
 WHATSAPP_WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsapp_webd"
+WECHATD_BIN="$SCRIPT_DIR/target/$PROFILE/wechatd"
 FEISHUD_BIN="$SCRIPT_DIR/target/$PROFILE/feishud"
 
 if [[ ! -x "$CLAWD_BIN" ]]; then
@@ -233,6 +234,45 @@ PY
   fi
 }
 
+start_wechatd() {
+  local wechat_enabled
+  wechat_enabled="$(
+python3 - <<'PY'
+import tomllib
+from pathlib import Path
+path = Path("configs/channels/wechat.toml")
+if not path.exists():
+    print("0")
+    raise SystemExit(0)
+cfg = tomllib.loads(path.read_text(encoding="utf-8"))
+wechat = cfg.get("wechat", {}) or {}
+print("1" if bool(wechat.get("enabled", False)) else "0")
+PY
+  )"
+  if [[ "$wechat_enabled" != "1" ]]; then
+    echo "wechat.enabled=false, skipping wechatd startup."
+    return 0
+  fi
+  if [[ ! -x "$WECHATD_BIN" ]]; then
+    echo "Binary not found or not executable: $WECHATD_BIN"
+    return 0
+  fi
+  if pgrep -f 'target/(debug|release)/wechatd|cargo run -p wechatd' >/dev/null 2>&1; then
+    echo "wechatd is already running, skipping startup."
+    return 0
+  fi
+  export WECHAT_CONFIG_PATH="${WECHAT_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/wechat.toml}"
+  nohup "$WECHATD_BIN" >"$LOG_DIR/wechatd.log" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$PID_DIR/wechatd.pid"
+  echo "Starting wechatd binary, PID=$pid, log: $LOG_DIR/wechatd.log"
+  sleep 2
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    echo "Failed to start wechatd binary. Check log: $LOG_DIR/wechatd.log"
+    return 1
+  fi
+}
+
 start_future_adapters_placeholder() {
   "$SCRIPT_DIR/start-future-adapters.sh" || true
 }
@@ -246,6 +286,7 @@ fi
 start_future_adapters_placeholder
 start_whatsapp_webd
 start_whatsappd
+start_wechatd
 start_feishud
 
 echo "One-click binary startup command executed (profile: $PROFILE)." # zh: 一键启动已编译二进制命令已执行（profile: $PROFILE）。

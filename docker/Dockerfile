@@ -10,11 +10,13 @@ RUN cargo build --release \
     -p clawd \
     -p skill-runner \
     -p telegramd \
+    -p wechatd \
     -p whatsappd \
     -p whatsapp_webd \
     -p archive-basic-skill \
     -p audio-synthesize-skill \
     -p audio-transcribe-skill \
+    -p browser-web-skill \
     -p chat-skill \
     -p config-guard-skill \
     -p crypto-skill \
@@ -35,6 +37,7 @@ RUN cargo build --release \
     -p service-control-skill \
     -p stock-skill \
     -p system-basic-skill \
+    -p web-search-extract-skill \
     -p x-skill
 
 FROM alpine:3.21
@@ -48,6 +51,7 @@ RUN mkdir -p /app/target/release /app/UI/dist /app/docker/config
 COPY --from=builder /build/target/release/clawd /app/target/release/
 COPY --from=builder /build/target/release/skill-runner /app/target/release/
 COPY --from=builder /build/target/release/telegramd /app/target/release/
+COPY --from=builder /build/target/release/wechatd /app/target/release/
 COPY --from=builder /build/target/release/whatsappd /app/target/release/
 COPY --from=builder /build/target/release/whatsapp_webd /app/target/release/
 COPY --from=builder /build/target/release/*-skill /app/target/release/
@@ -59,12 +63,14 @@ COPY prompts/ /app/prompts/
 COPY services/ /app/services/
 COPY scripts/ /app/scripts/
 COPY start-all-bin.sh /app/start-all-bin.sh
+COPY start-wechatd.sh /app/start-wechatd.sh
 COPY start-future-adapters.sh /app/start-future-adapters.sh
 COPY stop-rustclaw.sh /app/stop-rustclaw.sh
 COPY docker/docker-entrypoint.sh /app/docker/docker-entrypoint.sh
 
 RUN chmod +x \
     /app/start-all-bin.sh \
+    /app/start-wechatd.sh \
     /app/start-future-adapters.sh \
     /app/stop-rustclaw.sh \
     /app/docker/docker-entrypoint.sh \
@@ -72,6 +78,7 @@ RUN chmod +x \
     /app/target/release/clawd \
     /app/target/release/skill-runner \
     /app/target/release/telegramd \
+    /app/target/release/wechatd \
     /app/target/release/whatsappd \
     /app/target/release/whatsapp_webd \
     /app/target/release/*-skill \
