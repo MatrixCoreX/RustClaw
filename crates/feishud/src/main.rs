@@ -1,9 +1,10 @@
-//! Feishu (Lark) 应用机器人通道 - Phase 1 最小可用
+//! Feishu (Lark) 应用机器人通道
 //! 支持两种入站模式：webhook（事件回调）、long_connection（长连接收事件）
-//! 仅支持文本消息 → clawd ask → 轮询结果 → 文本回发
+//! 文本 / 图片 / 文件 / 音频 / 视频等媒体：下载落盘（可配置目录）后提交 clawd ask。
 
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -28,6 +29,8 @@ struct AppState {
     client: Client,
     /// tenant_access_token 缓存 (token, expires_at_secs)
     token_cache: Arc<RwLock<Option<(String, u64)>>>,
+    /// 工作区根目录（用于解析相对落盘路径）
+    workspace_root: PathBuf,
 }
 
 #[derive(Clone, Deserialize)]
@@ -55,6 +58,9 @@ struct FeishuSection {
     listen: String,
     #[serde(default = "default_clawd_base_url")]
     clawd_base_url: String,
+    /// Open API 根地址（中国站默认 open.feishu.cn；国际 Lark 用 open.larksuite.com）
+    #[serde(default = "default_feishu_api_base_url")]
+    api_base_url: String,
     #[serde(default)]
     app_id: String,
     #[serde(default)]
@@ -70,6 +76,14 @@ struct FeishuSection {
     task_delivery_timeout_seconds: u64,
     #[serde(default = "default_text_chunk_chars")]
     text_chunk_chars: usize,
+    #[serde(default = "default_feishu_image_inbox_dir")]
+    image_inbox_dir: String,
+    #[serde(default = "default_feishu_video_inbox_dir")]
+    video_inbox_dir: String,
+    #[serde(default = "default_feishu_audio_inbox_dir")]
+    audio_inbox_dir: String,
+    #[serde(default = "default_feishu_file_inbox_dir")]
+    file_inbox_dir: String,
 }
 
 fn default_listen() -> String {
@@ -88,40 +102,84 @@ fn default_text_chunk_chars() -> usize {
     4000
 }
 
-/// 将飞书字符串 ID 稳定映射为 i64（供 clawd user_id/chat_id 使用）
-fn feishu_id_to_i64(s: &str) -> i64 {
-    let mut h: i64 = 0;
-    for b in s.bytes() {
-        h = h.wrapping_mul(31).wrapping_add(b as i64);
-    }
-    h
+fn default_feishu_api_base_url() -> String {
+    "https://open.feishu.cn".to_string()
 }
 
-/// 从已解析的 event 请求体（webhook 或等价结构）中解析 im.message.receive_v1 文本消息。
-/// 返回 (open_id, chat_id, text)；若非该事件或非文本或缺少 chat_id 则返回 None。
-fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String)> {
+fn default_feishu_image_inbox_dir() -> String {
+    "data/feishud/image".to_string()
+}
+
+fn default_feishu_video_inbox_dir() -> String {
+    "data/feishud/video".to_string()
+}
+
+fn default_feishu_audio_inbox_dir() -> String {
+    "data/feishud/audio".to_string()
+}
+
+fn default_feishu_file_inbox_dir() -> String {
+    "data/feishud/file".to_string()
+}
+
+fn current_ts_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn safe_feishu_storage_segment(raw: &str, fallback: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        return fallback.to_string();
+    }
+    let mut out = String::new();
+    for c in t.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        fallback.to_string()
+    } else {
+        out
+    }
+}
+
+fn build_feishu_inbox_rel_path(root_dir: &str, chat_id: &str, file_name: &str) -> String {
+    let seg = safe_feishu_storage_segment(chat_id, "unknown");
+    format!(
+        "{}/{}/{}",
+        root_dir.trim_end_matches('/'),
+        seg,
+        file_name
+    )
+}
+
+/// 解析 `im.message.receive_v1` 公共字段。
+fn parse_im_receive_v1(
+    body: &Value,
+) -> Option<(String, String, String, String, Value)> {
     let header = body.get("header")?;
     if header.get("event_type").and_then(|v| v.as_str())? != "im.message.receive_v1" {
         return None;
     }
     let event = body.get("event")?;
     let message = event.get("message")?;
-    if message.get("message_type").and_then(|v| v.as_str())? != "text" {
-        return None;
-    }
+    let message_id = message.get("message_id").and_then(|v| v.as_str())?.to_string();
+    let message_type = message
+        .get("message_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let content_str = message
         .get("content")
         .and_then(|v| v.as_str())
         .unwrap_or("{}");
     let content: Value = serde_json::from_str(content_str).ok()?;
-    let text = content
-        .get("text")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .unwrap_or("");
-    if text.is_empty() {
-        return None;
-    }
     let sender = event.get("sender")?;
     let sender_id = sender.get("sender_id")?;
     let open_id = sender_id
@@ -135,6 +193,122 @@ fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String
         .unwrap_or("")
         .to_string();
     if chat_id.is_empty() {
+        return None;
+    }
+    Some((open_id, chat_id, message_id, message_type, content))
+}
+
+/// 飞书消息资源下载：`type=image` 或 `type=file`（音频/视频/普通文件均用 file）。
+fn feishu_resource_key_and_query_type(
+    message_type: &str,
+    content: &Value,
+) -> Option<(String, &'static str)> {
+    match message_type {
+        "image" | "sticker" => {
+            let key = content.get("image_key").and_then(|v| v.as_str())?;
+            Some((key.to_string(), "image"))
+        }
+        "file" | "audio" | "media" => {
+            let key = content.get("file_key").and_then(|v| v.as_str())?;
+            Some((key.to_string(), "file"))
+        }
+        _ => None,
+    }
+}
+
+fn feishu_inbox_root_for_message_type<'a>(
+    message_type: &str,
+    section: &'a FeishuSection,
+) -> &'a str {
+    match message_type {
+        "image" | "sticker" => section.image_inbox_dir.as_str(),
+        "media" => section.video_inbox_dir.as_str(),
+        "audio" => section.audio_inbox_dir.as_str(),
+        "file" => section.file_inbox_dir.as_str(),
+        _ => section.file_inbox_dir.as_str(),
+    }
+}
+
+fn feishu_saved_file_name(message_type: &str, content: &Value, ts: u64) -> String {
+    if let Some(name) = content.get("file_name").and_then(|v| v.as_str()) {
+        let n = name.trim();
+        if !n.is_empty() && !n.contains('/') && !n.contains('\\') {
+            let safe = safe_feishu_storage_segment(n, "file");
+            return format!("{}_{}", ts, safe);
+        }
+    }
+    let ext = match message_type {
+        "image" | "sticker" => "jpg",
+        "media" => "mp4",
+        "audio" => "m4a",
+        "file" => "bin",
+        _ => "bin",
+    };
+    format!("{}.{}", ts, ext)
+}
+
+fn feishu_media_kind_label_zh(message_type: &str) -> &'static str {
+    match message_type {
+        "image" => "图片",
+        "sticker" => "表情",
+        "media" => "视频",
+        "audio" => "语音",
+        "file" => "文件",
+        _ => "媒体",
+    }
+}
+
+/// 入站媒体（图片 / 文件 / 音频 / 视频）解析结果。
+#[derive(Clone)]
+struct FeishuMediaCtx {
+    open_id: String,
+    chat_id: String,
+    message_id: String,
+    message_type: String,
+    resource_key: String,
+    query_type: &'static str,
+    content: Value,
+}
+
+fn parse_im_media_from_event_body(body: &Value) -> Option<FeishuMediaCtx> {
+    let (open_id, chat_id, message_id, message_type, content) = parse_im_receive_v1(body)?;
+    if message_type == "text" {
+        return None;
+    }
+    let (resource_key, query_type) = feishu_resource_key_and_query_type(&message_type, &content)?;
+    Some(FeishuMediaCtx {
+        open_id,
+        chat_id,
+        message_id,
+        message_type,
+        resource_key,
+        query_type,
+        content,
+    })
+}
+
+/// 将飞书字符串 ID 稳定映射为 i64（供 clawd user_id/chat_id 使用）
+fn feishu_id_to_i64(s: &str) -> i64 {
+    let mut h: i64 = 0;
+    for b in s.bytes() {
+        h = h.wrapping_mul(31).wrapping_add(b as i64);
+    }
+    h
+}
+
+/// 从已解析的 event 请求体（webhook 或等价结构）中解析 im.message.receive_v1 文本消息。
+/// 返回 (open_id, chat_id, text)；若非该事件或非文本或缺少 chat_id 则返回 None。
+fn parse_im_text_from_event_body(body: &Value) -> Option<(String, String, String)> {
+    let (open_id, chat_id, _mid, message_type, content) = parse_im_receive_v1(body)?;
+    if message_type != "text" {
+        return None;
+    }
+    let text = content
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    if text.is_empty() {
         return None;
     }
     Some((open_id, chat_id, text.to_string()))
@@ -313,6 +487,146 @@ async fn handle_incoming_feishu_text(
             .await;
         }
     }
+}
+
+/// 入站媒体：下载并落盘后，将提示文本交给 clawd ask（与文本链路一致）。
+async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
+    let base = state.config.feishu.clawd_base_url.clone();
+    let client = state.client.clone();
+    let config = state.config.clone();
+    let token_cache = state.token_cache.clone();
+    let workspace_root = state.workspace_root.clone();
+
+    info!(
+        "feishud: media inbound message_type={} chat_id={} message_id={}",
+        ctx.message_type, ctx.chat_id, ctx.message_id
+    );
+
+    let identity = match resolve_feishu_identity(&client, &base, &ctx.open_id, &ctx.chat_id).await {
+        Ok(ident) => ident,
+        Err(e) => {
+            warn!("feishud: media binding resolve failed err={}", e);
+            let _ = send_feishu_text(
+                &config,
+                &client,
+                &token_cache,
+                &ctx.chat_id,
+                "身份校验暂时不可用，请稍后重试。",
+            )
+            .await;
+            return;
+        }
+    };
+
+    let Some(ident) = identity else {
+        let _ = send_feishu_text(
+            &config,
+            &client,
+            &token_cache,
+            &ctx.chat_id,
+            "请先发送文本消息中的 RustClaw key 完成绑定。",
+        )
+        .await;
+        return;
+    };
+
+    let token = match get_tenant_access_token(&config.feishu, &client, &token_cache).await {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("feishud: media token failed err={}", e);
+            return;
+        }
+    };
+
+    let api_base = config.feishu.api_base_url.trim();
+    let bytes = match download_feishu_message_resource(
+        &client,
+        api_base,
+        &token,
+        &ctx.message_id,
+        &ctx.resource_key,
+        ctx.query_type,
+    )
+    .await
+    {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("feishud: media download failed err={}", e);
+            let _ = send_feishu_text(
+                &config,
+                &client,
+                &token_cache,
+                &ctx.chat_id,
+                "媒体下载失败，请稍后重试。",
+            )
+            .await;
+            return;
+        }
+    };
+
+    let max_len = match ctx.message_type.as_str() {
+        "image" | "sticker" => 25 * 1024 * 1024,
+        "audio" => 20 * 1024 * 1024,
+        _ => 100 * 1024 * 1024,
+    };
+    if bytes.len() > max_len {
+        warn!(
+            "feishud: media too large len={} max={}",
+            bytes.len(),
+            max_len
+        );
+        let _ = send_feishu_text(
+            &config,
+            &client,
+            &token_cache,
+            &ctx.chat_id,
+            "媒体文件过大，已拒绝保存。",
+        )
+        .await;
+        return;
+    }
+
+    let ts = current_ts_ms();
+    let root_dir = feishu_inbox_root_for_message_type(&ctx.message_type, &config.feishu);
+    let fname = feishu_saved_file_name(&ctx.message_type, &ctx.content, ts);
+    let rel = build_feishu_inbox_rel_path(root_dir, &ctx.chat_id, &fname);
+    let abs = workspace_root.join(&rel);
+    if let Some(parent) = abs.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            warn!("feishud: create media inbox dir failed err={}", e);
+            return;
+        }
+    }
+    if let Err(e) = tokio::fs::write(&abs, &bytes).await {
+        warn!("feishud: write media file failed err={}", e);
+        return;
+    }
+
+    let label = feishu_media_kind_label_zh(&ctx.message_type);
+    let hint = format!(
+        "用户发来{}，已保存为工作区相对路径：{}。请根据能力回复或调用工具处理。",
+        label, rel
+    );
+    handle_text_message_to_clawd(
+        state,
+        ctx.open_id,
+        ctx.chat_id,
+        hint,
+        Some(ident.user_key),
+    );
+}
+
+/// webhook / 长连接统一分发：文本走绑定与 ask；媒体先落盘再 ask。
+fn dispatch_im_incoming_event(state: AppState, body: Value) {
+    if let Some((open_id, chat_id, text)) = parse_im_text_from_event_body(&body) {
+        tokio::spawn(handle_incoming_feishu_text(state, open_id, chat_id, text));
+        return;
+    }
+    if let Some(ctx) = parse_im_media_from_event_body(&body) {
+        tokio::spawn(handle_incoming_feishu_media(state, ctx));
+        return;
+    }
+    debug!("feishud: im.message.receive_v1 ignored (unsupported type or missing fields)");
 }
 
 /// 从成功任务的 result_json 取回复正文：优先 messages 数组（与 telegramd 一致），其次 text，否则占位。
@@ -751,12 +1065,7 @@ async fn callback_handler(
     }
     info!("feishud: event token verification success");
 
-    let Some((open_id, chat_id, text)) = parse_im_text_from_event_body(&body_json) else {
-        info!("feishud: event ignored (not im.message.receive_v1 text or missing chat_id)");
-        return Json(json!({})).into_response();
-    };
-
-    tokio::spawn(handle_incoming_feishu_text(state, open_id, chat_id, text));
+    dispatch_im_incoming_event(state, body_json);
     Json(json!({})).into_response()
 }
 
@@ -781,6 +1090,43 @@ fn chunk_text_utf8(s: &str, max_chars: usize) -> Vec<String> {
     out
 }
 
+/// 下载消息内资源（图片 / 文件 / 音视频均走此接口，`type` 为 `image` 或 `file`）。
+async fn download_feishu_message_resource(
+    client: &Client,
+    api_base: &str,
+    token: &str,
+    message_id: &str,
+    resource_key: &str,
+    query_type: &str,
+) -> Result<Vec<u8>, String> {
+    let base = api_base.trim_end_matches('/');
+    let mid = urlencoding::encode(message_id);
+    let key = urlencoding::encode(resource_key);
+    let url = format!(
+        "{}/open-apis/im/v1/messages/{}/resources/{}?type={}",
+        base, mid, key, query_type
+    );
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("download request failed: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "download status={} url_tail=.../messages/.../resources/... body_len={}",
+            status,
+            text.len()
+        ));
+    }
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("download body read failed: {}", e))
+}
+
 async fn get_tenant_access_token(
     config: &FeishuSection,
     client: &Client,
@@ -798,7 +1144,10 @@ async fn get_tenant_access_token(
             }
         }
     }
-    let url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
+    let url = format!(
+        "{}/open-apis/auth/v3/tenant_access_token/internal",
+        config.api_base_url.trim_end_matches('/')
+    );
     let body = json!({
         "app_id": config.app_id,
         "app_secret": config.app_secret
@@ -847,7 +1196,10 @@ async fn send_feishu_text(
     text: &str,
 ) -> Result<(), String> {
     let token = get_tenant_access_token(&config.feishu, client, token_cache).await?;
-    let url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id";
+    let url = format!(
+        "{}/open-apis/im/v1/messages?receive_id_type=chat_id",
+        config.feishu.api_base_url.trim_end_matches('/')
+    );
     let body = json!({
         "receive_id": receive_id,
         "msg_type": "text",
@@ -924,25 +1276,8 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
                         .unwrap_or("unknown");
                     tracing::debug!("feishud: long_connection raw event received event_type={} body_len={}", event_type, body_len);
 
-                    match parse_im_text_from_event_body(&body) {
-                        Some((open_id, chat_id, text)) => {
-                            info!("feishud: long_connection event parse success chat_id={} open_id={} text_len={}", chat_id, open_id, text.len());
-                            let state = (*state).clone();
-                            tokio::spawn(handle_incoming_feishu_text(state, open_id, chat_id, text));
-                        }
-                        None => {
-                            let header_ok = body
-                                .get("header")
-                                .and_then(|h| h.get("event_type"))
-                                .and_then(|v| v.as_str())
-                                == Some("im.message.receive_v1");
-                            if header_ok {
-                                info!("feishud: long_connection event parse skipped (not text / missing fields) event_type={} body_len={}", event_type, body_len);
-                            } else {
-                                tracing::debug!("feishud: long_connection event parse skipped (not im.message.receive_v1) event_type={}", event_type);
-                            }
-                        }
-                    }
+                    let st = (*state).clone();
+                    dispatch_im_incoming_event(st, body);
                     Ok(())
                 }
             })
@@ -991,10 +1326,12 @@ async fn main() -> anyhow::Result<()> {
         .timeout(Duration::from_secs(config.feishu.request_timeout_seconds))
         .build()?;
 
+    let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let state = AppState {
         config: config.clone(),
         client: client.clone(),
         token_cache: Arc::new(RwLock::new(None)),
+        workspace_root,
     };
 
     match config.feishu.mode {
