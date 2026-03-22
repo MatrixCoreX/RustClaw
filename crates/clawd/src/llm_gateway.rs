@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use claw_core::config::{AppConfig, LlmProviderConfig};
+use claw_core::config::{AppConfig, LlmProviderConfig, LlmVendorConfig};
 use reqwest::Client;
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
@@ -108,6 +108,28 @@ fn build_providers_with_overrides(
 
     providers.sort_by_key(|p| p.config.priority);
     providers
+}
+
+/// `[llm.minimax]` 的 `api_format`：未配置或为空时默认 `openai_compat`；显式 `anthropic_claude` 等则走 Anthropic Messages。
+fn minimax_synthesized_provider_type(v: &LlmVendorConfig) -> &'static str {
+    let Some(raw) = v.api_format.as_ref() else {
+        return "openai_compat";
+    };
+    let fmt = raw.trim();
+    if fmt.is_empty() {
+        return "openai_compat";
+    }
+    if fmt.eq_ignore_ascii_case("anthropic") || fmt.eq_ignore_ascii_case("anthropic_claude") {
+        return "anthropic_claude";
+    }
+    if fmt.eq_ignore_ascii_case("openai") || fmt.eq_ignore_ascii_case("openai_compat") {
+        return "openai_compat";
+    }
+    warn!(
+        "llm.minimax api_format={:?} is not recognized (expected openai_compat or anthropic_claude); defaulting to openai_compat",
+        v.api_format
+    );
+    "openai_compat"
 }
 
 fn synthesize_llm_providers(
@@ -246,9 +268,10 @@ fn synthesize_llm_providers(
             } else {
                 &v.model
             };
+            let provider_type = minimax_synthesized_provider_type(v).to_string();
             out.push(LlmProviderConfig {
                 name: "vendor-minimax".to_string(),
-                provider_type: "anthropic_claude".to_string(),
+                provider_type,
                 base_url: v.base_url.clone(),
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
@@ -531,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn minimax_uses_anthropic_runtime_when_selected() {
+    fn minimax_uses_openai_compat_runtime_when_selected() {
         let path = repo_config_path();
         let mut config = AppConfig::load(path.to_str().expect("utf-8 path"))
             .expect("config fixture should load");
@@ -544,6 +567,54 @@ mod tests {
             .find(|provider| provider.name == "vendor-minimax")
             .expect("minimax provider should be synthesized");
 
+        assert_eq!(minimax.provider_type, "openai_compat");
+    }
+
+    #[test]
+    fn minimax_respects_api_format_anthropic() {
+        let path = repo_config_path();
+        let mut config = AppConfig::load(path.to_str().expect("utf-8 path"))
+            .expect("config fixture should load");
+        config.llm.selected_vendor = Some("minimax".to_string());
+        config.llm.selected_model = Some("MiniMax-M2.7".to_string());
+        if let Some(ref mut mm) = config.llm.minimax {
+            mm.api_format = Some("anthropic_claude".to_string());
+        }
+
+        let providers = synthesize_llm_providers(&config, None, None);
+        let minimax = providers
+            .iter()
+            .find(|provider| provider.name == "vendor-minimax")
+            .expect("minimax provider should be synthesized");
+
         assert_eq!(minimax.provider_type, "anthropic_claude");
+    }
+
+    #[test]
+    fn minimax_defaults_openai_when_api_format_missing_or_empty() {
+        let path = repo_config_path();
+        let mut config = AppConfig::load(path.to_str().expect("utf-8 path"))
+            .expect("config fixture should load");
+        config.llm.selected_vendor = Some("minimax".to_string());
+        if let Some(ref mut mm) = config.llm.minimax {
+            mm.api_format = None;
+        }
+
+        let providers = synthesize_llm_providers(&config, None, None);
+        let minimax = providers
+            .iter()
+            .find(|p| p.name == "vendor-minimax")
+            .expect("vendor-minimax when api_format unset");
+        assert_eq!(minimax.provider_type, "openai_compat");
+
+        if let Some(ref mut mm) = config.llm.minimax {
+            mm.api_format = Some("   ".to_string());
+        }
+        let providers = synthesize_llm_providers(&config, None, None);
+        let minimax = providers
+            .iter()
+            .find(|p| p.name == "vendor-minimax")
+            .expect("vendor-minimax when api_format blank");
+        assert_eq!(minimax.provider_type, "openai_compat");
     }
 }
