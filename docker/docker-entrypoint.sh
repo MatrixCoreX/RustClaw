@@ -9,8 +9,10 @@ PID_DIR="$SCRIPT_DIR/.pids"
 MOUNTED_CONFIG_DIR="$SCRIPT_DIR/docker/config"
 MOUNTED_CONFIG_FILE="$MOUNTED_CONFIG_DIR/config.toml"
 MOUNTED_REGISTRY_FILE="$MOUNTED_CONFIG_DIR/skills_registry.toml"
+MOUNTED_CHANNELS_DIR="$MOUNTED_CONFIG_DIR/channels"
 ACTIVE_CONFIG_FILE="$SCRIPT_DIR/configs/config.toml"
 ACTIVE_REGISTRY_FILE="$SCRIPT_DIR/configs/skills_registry.toml"
+ACTIVE_CHANNELS_DIR="$SCRIPT_DIR/configs/channels"
 
 sync_config_from_mount() {
   if [[ -f "$MOUNTED_CONFIG_FILE" ]]; then
@@ -27,6 +29,15 @@ sync_config_from_mount() {
   elif [[ -f "$ACTIVE_REGISTRY_FILE" ]]; then
     cp "$ACTIVE_REGISTRY_FILE" "$MOUNTED_REGISTRY_FILE"
     echo "Seeded mounted skills registry at $MOUNTED_REGISTRY_FILE"
+  fi
+
+  mkdir -p "$ACTIVE_CHANNELS_DIR" "$MOUNTED_CHANNELS_DIR"
+  if compgen -G "$MOUNTED_CHANNELS_DIR/*.toml" >/dev/null; then
+    cp "$MOUNTED_CHANNELS_DIR"/*.toml "$ACTIVE_CHANNELS_DIR"/
+    echo "Loaded channel config overrides from $MOUNTED_CHANNELS_DIR"
+  elif compgen -G "$ACTIVE_CHANNELS_DIR/*.toml" >/dev/null; then
+    cp "$ACTIVE_CHANNELS_DIR"/*.toml "$MOUNTED_CHANNELS_DIR"/
+    echo "Seeded mounted channel configs at $MOUNTED_CHANNELS_DIR"
   fi
 }
 

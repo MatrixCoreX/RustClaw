@@ -1,0 +1,31 @@
+# Lark (international) 应用机器人通道配置 - 与 feishu.toml（飞书中国站）独立，勿混用
+# 国际版 Lark 使用 open.larksuite.com；飞书中国站使用 open.feishu.cn，由 feishu.toml 配置
+# 使用方式（二选一）：
+#   - webhook：应用机器人 → 事件订阅 → 请求地址配置为本服务 callback URL（需公网可达）
+#   - long_connection：应用机器人 → 事件订阅 → 使用长连接接收事件（无需公网，内网优先）
+
+[lark]
+# 是否启用
+enabled = false
+# 入站模式：webhook | long_connection
+mode = "long_connection"
+# 本服务监听地址（webhook 模式时用于接收回调；long_connection 模式可选用于健康检查等）
+listen = "0.0.0.0:8790"
+# clawd 基地址，用于提交任务与轮询结果
+clawd_base_url = "http://127.0.0.1:8787"
+# 国际版 Lark API 根地址（与 feishud 的 open.feishu.cn 分开，勿改为中国站）
+api_base_url = "https://open.larksuite.com"
+# Lark 应用 App ID
+app_id = ""
+# Lark 应用 App Secret（日志不打印）
+app_secret = ""
+# 事件订阅 Verification Token（webhook 时校验请求来自 Lark）
+verification_token = ""
+# 事件加密密钥（webhook 时用于签名校验）
+encrypt_key = ""
+# 单次 HTTP 请求超时秒数（submit / poll / 发消息等单次请求）
+request_timeout_seconds = 30
+# 整条任务轮询最长等待时间（秒）。与 request_timeout_seconds 分离：单次 poll 可能很快，但任务本身（长 chat、多步 act、生图等）可能较久，应给足时间
+task_delivery_timeout_seconds = 180
+# 长文本分段发送时每段最大字符数（按 UTF-8 安全截断）
+text_chunk_chars = 4000

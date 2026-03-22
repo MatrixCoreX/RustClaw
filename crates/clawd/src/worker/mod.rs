@@ -287,6 +287,9 @@ pub(crate) fn runtime_channel_from_payload(
     if is_whatsapp_channel_value(crate::main_flow_rules(state), &ch) {
         return crate::RuntimeChannel::Whatsapp;
     }
+    if ch == "wechat" {
+        return crate::RuntimeChannel::Wechat;
+    }
     if ch == "feishu" {
         return crate::RuntimeChannel::Feishu;
     }
@@ -320,6 +323,9 @@ pub(crate) fn task_runtime_channel(
     let ch = task.channel.trim().to_ascii_lowercase();
     if is_whatsapp_channel_value(crate::main_flow_rules(state), &ch) {
         return crate::RuntimeChannel::Whatsapp;
+    }
+    if ch == "wechat" {
+        return crate::RuntimeChannel::Wechat;
     }
     if ch == "feishu" {
         return crate::RuntimeChannel::Feishu;
@@ -1292,6 +1298,24 @@ async fn send_task_channel_message(
                 }
             }
         }
+        crate::RuntimeChannel::Wechat => {
+            let to_user_id = task_external_chat_id(task)
+                .or_else(|| {
+                    payload
+                        .get("external_chat_id")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                })
+                .ok_or_else(|| "missing external_chat_id for wechat task".to_string())?;
+            let context_token = payload
+                .get("context_token")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty());
+            crate::channel_send::send_wechat_text_message(state, &to_user_id, context_token, text)
+                .await
+        }
         crate::RuntimeChannel::Feishu => {
             let receive_id = task_external_chat_id(task)
                 .or_else(|| {
@@ -1316,6 +1340,25 @@ async fn send_task_channel_message(
                 .ok_or_else(|| "missing external_chat_id for lark task".to_string())?;
             crate::channel_send::send_lark_text_message(state, &receive_id, text).await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn wechat_payload_shape_keeps_context_token_available() {
+        let payload = json!({
+            "channel": "wechat",
+            "external_chat_id": "wx-user-1",
+            "context_token": "ctx-123"
+        });
+        assert_eq!(payload.get("channel").and_then(|v| v.as_str()), Some("wechat"));
+        assert_eq!(
+            payload.get("context_token").and_then(|v| v.as_str()),
+            Some("ctx-123")
+        );
     }
 }
 

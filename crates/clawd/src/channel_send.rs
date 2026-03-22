@@ -1,7 +1,11 @@
 //! Channel text sending with safe chunking (Telegram, WhatsApp Cloud, WhatsApp Web Bridge, Feishu, Lark).
 //! Used when clawd delivers task results directly to a channel (e.g. schedule_triggered notify).
 
+use std::path::Path;
+
+use serde::Deserialize;
 use serde_json::json;
+use toml::Value as TomlValue;
 use tracing::info;
 
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
@@ -24,11 +28,30 @@ pub struct LarkSendConfig {
     pub api_base_url: String,
 }
 
+/// WeChat 发送配置（MVP 文本发送）
+#[derive(Clone, Debug)]
+pub struct WechatSendConfig {
+    pub api_base_url: String,
+    pub bot_token: String,
+    pub wechat_uin_base64: Option<String>,
+    pub text_chunk_chars: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct PersistedWechatSession {
+    #[serde(default)]
+    bot_token: String,
+    #[serde(default)]
+    base_url: Option<String>,
+}
+
 /// Max characters per Telegram message (conservative; platform limit ~4096).
 const TELEGRAM_TEXT_CHUNK_CHARS: usize = 3500;
 
 /// Max characters per WhatsApp text message (conservative; platform limit ~4096).
 const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
+const WECHAT_SEND_MESSAGE_TYPE: i64 = 2;
+const WECHAT_SEND_MESSAGE_STATE: i64 = 2;
 
 pub(crate) async fn send_telegram_message(
     state: &AppState,
@@ -216,6 +239,177 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
 
 /// Max characters per Feishu/Lark text message (conservative; platform limit ~4096).
 const FEISHU_LARK_TEXT_CHUNK_CHARS: usize = 3500;
+const WECHAT_TEXT_CHUNK_CHARS: usize = 1200;
+
+pub(crate) async fn send_wechat_text_message(
+    state: &AppState,
+    to_user_id: &str,
+    context_token: Option<&str>,
+    text: &str,
+) -> Result<(), String> {
+    let config = resolve_wechat_send_config(state).ok_or_else(|| {
+        "wechat send not configured (configs/channels/wechat.toml api_base_url/bot_token)"
+            .to_string()
+    })?;
+    let base = config.api_base_url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("wechat api_base_url is empty".to_string());
+    }
+    let token = config.bot_token.trim();
+    if token.is_empty() {
+        return Err("wechat bot_token is empty".to_string());
+    }
+    let url = format!("{base}/ilink/bot/sendmessage");
+    let chunks = chunk_text_for_channel(
+        text,
+        config
+            .text_chunk_chars
+            .max(1)
+            .min(WECHAT_TEXT_CHUNK_CHARS)
+            .saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
+    let n = chunks.len();
+    if n > 1 {
+        info!(
+            "send_chunks channel=wechat to_user_id={} original_len={} chunk_count={}",
+            to_user_id,
+            text.len(),
+            n
+        );
+    }
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        let body = if n > 1 {
+            format!("（{}/{}）\n{}", i + 1, n, chunk)
+        } else {
+            chunk
+        };
+        let mut req = state
+            .http_client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("AuthorizationType", "ilink_bot_token")
+            .header("Authorization", format!("Bearer {token}"));
+        if let Some(uin) = config.wechat_uin_base64.as_deref() {
+            req = req.header("X-WECHAT-UIN", uin);
+        }
+        let resp = req
+            .json(&json!({
+                "base_info": {
+                    "channel_version": env!("CARGO_PKG_VERSION")
+                },
+                "msg": {
+                    "from_user_id": "",
+                    "to_user_id": to_user_id,
+                    "client_id": format!("clawd-{}", i + 1),
+                    "message_type": WECHAT_SEND_MESSAGE_TYPE,
+                    "message_state": WECHAT_SEND_MESSAGE_STATE,
+                    "item_list": [{
+                        "type": 1,
+                        "text_item": { "text": body }
+                    }],
+                    "context_token": context_token.unwrap_or_default()
+                }
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("wechat send status={status} body={body}"));
+        }
+    }
+    Ok(())
+}
+
+fn resolve_wechat_send_config(state: &AppState) -> Option<WechatSendConfig> {
+    let fallback = state.wechat_send_config.clone();
+    let loaded = load_wechat_send_config_from_workspace(&state.workspace_root);
+    match (loaded, fallback) {
+        (Some(loaded), Some(mut fallback)) => {
+            if !loaded.api_base_url.trim().is_empty() {
+                fallback.api_base_url = loaded.api_base_url;
+            }
+            if !loaded.bot_token.trim().is_empty() {
+                fallback.bot_token = loaded.bot_token;
+            }
+            if loaded.wechat_uin_base64.is_some() {
+                fallback.wechat_uin_base64 = loaded.wechat_uin_base64;
+            }
+            fallback.text_chunk_chars = loaded.text_chunk_chars;
+            Some(fallback)
+        }
+        (Some(loaded), None) => Some(loaded),
+        (None, Some(fallback)) => Some(fallback),
+        (None, None) => None,
+    }
+}
+
+fn load_wechat_send_config_from_workspace(workspace_root: &Path) -> Option<WechatSendConfig> {
+    let path = workspace_root.join("configs/channels/wechat.toml");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let table: TomlValue = toml::from_str(&content).ok()?;
+    let wechat = table.get("wechat")?.as_table()?;
+    let enabled = wechat
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+    let session = load_wechat_session(workspace_root);
+    let api_base_url = wechat
+        .get("api_base_url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            session
+                .as_ref()
+                .and_then(|session| session.base_url.as_deref())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })?;
+    let configured_token = wechat
+        .get("bot_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let bot_token = if configured_token.is_empty() || configured_token == "REPLACE_ME" {
+        session
+            .as_ref()
+            .map(|session| session.bot_token.trim().to_string())
+            .unwrap_or_default()
+    } else {
+        configured_token
+    };
+    if bot_token.is_empty() {
+        return None;
+    }
+    let wechat_uin_base64 = wechat
+        .get("wechat_uin_base64")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let text_chunk_chars = wechat
+        .get("text_chunk_chars")
+        .and_then(|v| v.as_integer())
+        .map(|v| v.max(1) as usize)
+        .unwrap_or(WECHAT_TEXT_CHUNK_CHARS);
+    Some(WechatSendConfig {
+        api_base_url,
+        bot_token,
+        wechat_uin_base64,
+        text_chunk_chars,
+    })
+}
+
+fn load_wechat_session(workspace_root: &Path) -> Option<PersistedWechatSession> {
+    let path = workspace_root.join("data/wechatd/session.json");
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
 
 async fn get_tenant_access_token(
     client: &reqwest::Client,
