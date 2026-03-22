@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { hasUnsavedLlmDraftChanges } from "./lib/llm-config";
 
 interface ApiResponse<T> {
   ok: boolean;
@@ -51,6 +52,9 @@ interface HealthResponse {
   whatsapp_web_healthy?: boolean | null;
   whatsapp_web_process_count?: number | null;
   whatsapp_web_memory_rss_bytes?: number | null;
+  wechatd_healthy?: boolean | null;
+  wechatd_process_count?: number | null;
+  wechatd_memory_rss_bytes?: number | null;
   feishud_healthy?: boolean | null;
   feishud_process_count?: number | null;
   feishud_memory_rss_bytes?: number | null;
@@ -134,6 +138,7 @@ interface LlmVendorOption {
   default_model: string;
   models: string[];
   base_url: string;
+  api_key?: string;
   api_key_configured: boolean;
   api_key_masked?: string | null;
 }
@@ -151,6 +156,21 @@ interface LlmConfigResponse {
   selected_model: string;
   vendors: LlmVendorOption[];
   runtime?: LlmRuntimeInfo | null;
+  restart_required: boolean;
+}
+
+interface WechatConfigResponse {
+  config_path: string;
+  enabled: boolean;
+  listen: string;
+  clawd_base_url: string;
+  api_base_url: string;
+  wechat_uin_base64: string;
+  request_timeout_seconds: number;
+  longpoll_timeout_ms: number;
+  text_chunk_chars: number;
+  bot_token_configured: boolean;
+  saved_session_present: boolean;
   restart_required: boolean;
 }
 
@@ -185,6 +205,33 @@ interface WhatsappWebLoginStatus {
   last_error?: string | null;
 }
 
+interface WechatLoginStatus {
+  connected?: boolean;
+  qr_ready?: boolean;
+  session_key?: string | null;
+  qr_status?: string | null;
+  qrcode_url?: string | null;
+  message?: string | null;
+  last_update_ts?: number;
+  last_error?: string | null;
+  account_label?: string | null;
+  status?: string | null;
+}
+
+interface WechatQrStartResponse {
+  session_key: string;
+  qrcode_url: string;
+  message?: string;
+}
+
+interface WechatQrWaitResponse {
+  connected?: boolean;
+  qr_status?: string | null;
+  message?: string;
+  account_id?: string | null;
+  user_id?: string | null;
+}
+
 interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -205,7 +252,7 @@ interface ChatImageAttachment {
 interface AdapterHealthRow {
   key: string;
   label: string;
-  serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "feishud" | "larkd";
+  serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "wechatd" | "feishud" | "larkd";
   healthy: boolean | null | undefined;
   processCount: number | null | undefined;
   memoryRssBytes: number | null | undefined;
@@ -226,7 +273,7 @@ interface ServiceStatusRow extends AdapterHealthRow {
   detail: string;
 }
 
-type ChannelName = "telegram" | "whatsapp" | "ui" | "feishu" | "lark";
+type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" | "lark";
 type ConsolePage = "dashboard" | "chat" | "services" | "channels" | "models" | "skills" | "logs" | "tasks";
 type ThemeMode = "dark" | "light";
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "services", "channels", "models", "skills", "logs", "tasks"];
@@ -466,6 +513,12 @@ export default function App() {
   const [skillsConfigError, setSkillsConfigError] = useState<string | null>(null);
   const [skillsConfigData, setSkillsConfigData] = useState<SkillsConfigResponse | null>(null);
   const [skillSwitchDraft, setSkillSwitchDraft] = useState<Record<string, boolean>>({});
+  const [wechatConfigLoading, setWechatConfigLoading] = useState(false);
+  const [wechatConfigError, setWechatConfigError] = useState<string | null>(null);
+  const [wechatConfigData, setWechatConfigData] = useState<WechatConfigResponse | null>(null);
+  const [wechatConfigDraft, setWechatConfigDraft] = useState<WechatConfigResponse | null>(null);
+  const [wechatConfigSaving, setWechatConfigSaving] = useState(false);
+  const [wechatConfigSaveMessage, setWechatConfigSaveMessage] = useState<string | null>(null);
   const [skillSwitchSaving, setSkillSwitchSaving] = useState(false);
   const [skillUninstallingName, setSkillUninstallingName] = useState<string | null>(null);
   const [skillSwitchSaveMessage, setSkillSwitchSaveMessage] = useState<string | null>(null);
@@ -541,6 +594,13 @@ export default function App() {
   const [waLoginStatus, setWaLoginStatus] = useState<WhatsappWebLoginStatus | null>(null);
   const [waWebBridgeReachable, setWaWebBridgeReachable] = useState(false);
   const [waLogoutLoading, setWaLogoutLoading] = useState(false);
+  const [wechatLoginDialogOpen, setWechatLoginDialogOpen] = useState(false);
+  const [wechatLoginLoading, setWechatLoginLoading] = useState(false);
+  const [wechatLoginError, setWechatLoginError] = useState<string | null>(null);
+  const [wechatLoginStatus, setWechatLoginStatus] = useState<WechatLoginStatus | null>(null);
+  const [wechatSessionKey, setWechatSessionKey] = useState<string | null>(null);
+  const [wechatQrStarting, setWechatQrStarting] = useState(false);
+  const [wechatAdvancedOpen, setWechatAdvancedOpen] = useState(false);
   const [channelBindingChannel, setChannelBindingChannel] = useState<ChannelName>("telegram");
   const [channelBindingExternalUserId, setChannelBindingExternalUserId] = useState("");
   const [channelBindingExternalChatId, setChannelBindingExternalChatId] = useState("");
@@ -596,6 +656,7 @@ export default function App() {
       telegram: "Telegram",
       whatsapp: "WhatsApp",
       ui: "UI",
+      wechat: t("微信", "WeChat"),
       feishu: "Feishu",
       lark: "Lark",
     };
@@ -620,6 +681,7 @@ export default function App() {
       telegram_bot: t("Telegram 机器人", "Telegram Bot"),
       whatsapp_web: t("WhatsApp 网页版", "WhatsApp Web"),
       whatsapp_cloud: t("WhatsApp 云接口", "WhatsApp Cloud"),
+      wechat_bot: t("微信通道", "WeChat Channel"),
       feishu_bot: t("飞书机器人", "Feishu Bot"),
       lark_bot: t("Lark 机器人", "Lark Bot"),
     };
@@ -650,6 +712,14 @@ export default function App() {
         exampleUser: "",
         exampleChat: "",
         note: t("这个渠道更多是验证当前 key 与本地上下文是否一致。", "This channel is mainly for verifying the current key against local context."),
+      },
+      wechat: {
+        summary: t("适合绑定微信用户或会话身份。", "Best for binding WeChat user or conversation identities."),
+        userHint: t("通常填写微信侧用户 ID。", "Usually the WeChat-side user ID."),
+        chatHint: t("如果后端区分会话，可补充会话 ID 或 peer 标识。", "If your backend distinguishes sessions, also fill the session or peer id."),
+        exampleUser: "wx_user_xxxxxxxx",
+        exampleChat: "wx_peer_xxxxxxxx",
+        note: t("首版建议直接使用后端事件里给出的用户/会话字段，不要手动猜字段名。", "For the MVP, use the exact user/session identifiers from backend events instead of guessing field names."),
       },
       feishu: {
         summary: t("适合绑定飞书账号或会话。", "Best for binding Feishu identities or chats."),
@@ -833,7 +903,7 @@ export default function App() {
   };
 
   const controlService = async (
-    serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "feishud" | "larkd",
+    serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "wechatd" | "feishud" | "larkd",
     action: "start" | "stop" | "restart",
   ) => {
     setServiceActionMessage(null);
@@ -910,6 +980,133 @@ export default function App() {
       setWaLoginError(message);
     } finally {
       setWaLogoutLoading(false);
+    }
+  };
+
+  const fetchWechatLoginStatus = async (silent = false) => {
+    if (!silent) {
+      setWechatLoginLoading(true);
+      setWechatLoginError(null);
+    }
+    try {
+      const res = await apiFetch(`/v1/wechat/login-status`);
+      const body = (await res.json()) as ApiResponse<WechatLoginStatus>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `获取微信登录状态失败 (${res.status})`);
+      }
+      setWechatLoginStatus(body.data);
+      if (body.data.qr_ready && body.data.session_key) {
+        setWechatSessionKey(body.data.session_key);
+      } else if (!body.data.qr_ready || body.data.connected) {
+        setWechatSessionKey(null);
+      }
+      if (!silent) {
+        setWechatLoginError(null);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      if (!silent) {
+        setWechatLoginError(message);
+      }
+    } finally {
+      if (!silent) {
+        setWechatLoginLoading(false);
+      }
+    }
+  };
+
+  const startWechatQrLogin = async (force = true) => {
+    setWechatQrStarting(true);
+    setWechatLoginError(null);
+    setWechatSessionKey(null);
+    setWechatLoginStatus((prev) => ({
+      ...(prev ?? {}),
+      connected: false,
+      qr_ready: false,
+      qrcode_url: null,
+      qr_status: "generating",
+      message: t("正在生成二维码...", "Generating QR code..."),
+      last_error: null,
+      status: "qr_generating",
+      last_update_ts: Date.now(),
+    }));
+    try {
+      const res = await apiFetch(`/v1/wechat/login-qr/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force }),
+      });
+      const body = (await res.json()) as ApiResponse<WechatQrStartResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `生成微信二维码失败 (${res.status})`);
+      }
+      setWechatSessionKey(body.data.session_key);
+      setWechatLoginStatus((prev) => ({
+        ...(prev ?? {}),
+        connected: false,
+        qr_ready: true,
+        qr_status: "wait",
+        qrcode_url: body.data.qrcode_url,
+        message: body.data.message,
+        last_error: null,
+        status: "qr_ready",
+        last_update_ts: Date.now(),
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setWechatLoginError(message);
+    } finally {
+      setWechatQrStarting(false);
+    }
+  };
+
+  const pollWechatQrLogin = async (sessionKey: string) => {
+    try {
+      const res = await apiFetch(`/v1/wechat/login-qr/wait`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_key: sessionKey, timeout_ms: 1500 }),
+      });
+      const body = (await res.json()) as ApiResponse<WechatQrWaitResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `等待微信登录失败 (${res.status})`);
+      }
+      if (body.data.connected) {
+        setWechatSessionKey(null);
+        await fetchWechatLoginStatus(true);
+      } else if (body.data.message && !body.data.message.includes("超时")) {
+        setWechatLoginStatus((prev) => ({
+          ...(prev ?? {}),
+          connected: false,
+          qr_ready: true,
+          qr_status: body.data.qr_status ?? prev?.qr_status ?? "wait",
+          message: body.data.message,
+          status: "qr_ready",
+        }));
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      const transientQrPollFailure =
+        message.includes("get_qrcode_status") ||
+        message.includes("poll QR status failed") ||
+        message.includes("wechat QR wait failed");
+      if (transientQrPollFailure) {
+        setWechatLoginStatus((prev) => (
+          prev
+            ? {
+                ...prev,
+                message: t(
+                  "二维码已经生成，可以继续扫码。状态轮询刚刚抖了一下，界面会继续自动刷新。",
+                  "The QR code is ready and can still be scanned. Status polling briefly failed and will retry automatically.",
+                ),
+              }
+            : prev
+        ));
+        return;
+      }
+      if (!message.includes("超时")) {
+        setWechatLoginError(message);
+      }
     }
   };
 
@@ -1151,6 +1348,25 @@ export default function App() {
     }
   };
 
+  const fetchWechatConfig = async () => {
+    setWechatConfigLoading(true);
+    setWechatConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/wechat/config`);
+      const body = (await res.json()) as ApiResponse<WechatConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `微信配置获取失败 (${res.status})`);
+      }
+      setWechatConfigData(body.data);
+      setWechatConfigDraft(body.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setWechatConfigError(message);
+    } finally {
+      setWechatConfigLoading(false);
+    }
+  };
+
   const fetchLlmConfig = async () => {
     setLlmConfigLoading(true);
     setLlmConfigError(null);
@@ -1165,7 +1381,7 @@ export default function App() {
       setLlmDraftModel(body.data.selected_model || "");
       const selectedVendor = body.data.vendors.find((vendor) => vendor.name === (body.data.selected_vendor || ""));
       setLlmDraftBaseUrl(selectedVendor?.base_url || "");
-      setLlmDraftApiKey(selectedVendor?.api_key_masked || "");
+      setLlmDraftApiKey(selectedVendor?.api_key || "");
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setLlmConfigError(message);
@@ -1242,6 +1458,63 @@ export default function App() {
     } finally {
       setSkillSwitchSaving(false);
     }
+  };
+
+  const setWechatConfigDraftField = <K extends keyof WechatConfigResponse>(key: K, value: WechatConfigResponse[K]) => {
+    setWechatConfigDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+  };
+
+  const saveWechatConfig = async () => {
+    if (!wechatConfigDraft) return;
+    setWechatConfigSaving(true);
+    setWechatConfigSaveMessage(null);
+    setWechatConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/wechat/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: wechatConfigDraft.enabled,
+          listen: wechatConfigDraft.listen,
+          clawd_base_url: wechatConfigDraft.clawd_base_url,
+          api_base_url: wechatConfigDraft.api_base_url,
+          wechat_uin_base64: wechatConfigDraft.wechat_uin_base64,
+          request_timeout_seconds: wechatConfigDraft.request_timeout_seconds,
+          longpoll_timeout_ms: wechatConfigDraft.longpoll_timeout_ms,
+          text_chunk_chars: wechatConfigDraft.text_chunk_chars,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<WechatConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `微信配置保存失败 (${res.status})`);
+      }
+      setWechatConfigData(body.data);
+      setWechatConfigDraft(body.data);
+      setWechatConfigSaveMessage(
+        t(
+          "微信配置已保存。请到 Services 页重启 wechatd，让新配置生效。",
+          "WeChat config was saved. Restart wechatd from the Services page to apply it.",
+        ),
+      );
+      await fetchWechatLoginStatus(true);
+      await fetchHealth();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setWechatConfigError(message);
+    } finally {
+      setWechatConfigSaving(false);
+    }
+  };
+
+  const openWechatLoginDialog = () => {
+    setWechatLoginDialogOpen(true);
+    setWechatLoginError(null);
+    setWechatAdvancedOpen(false);
+    void fetchWechatConfig();
+  };
+
+  const closeWechatLoginDialog = () => {
+    setWechatLoginDialogOpen(false);
   };
 
   const importExternalSkill = async () => {
@@ -1900,6 +2173,7 @@ export default function App() {
     void fetchAuthMe(true);
     void fetchSkills();
     void fetchSkillsConfig();
+    void fetchWechatConfig();
     void fetchLlmConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1923,6 +2197,7 @@ export default function App() {
     if (!uiAuthReady) return;
     if (currentPage === "channels") {
       void fetchAuthKeys();
+      void fetchWechatConfig();
     }
   }, [currentPage, uiAuthReady, isAdminIdentity]);
 
@@ -1947,16 +2222,25 @@ export default function App() {
   useEffect(() => {
     if (!uiAuthReady) return;
     if (!waLoginDialogOpen) return;
+    if (health?.whatsapp_web_healthy !== true) {
+      setWaWebBridgeReachable(false);
+      setWaLoginError(null);
+      return;
+    }
     void fetchWhatsappWebLoginStatus();
     const timer = window.setInterval(() => {
       void fetchWhatsappWebLoginStatus(true);
     }, 2000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waLoginDialogOpen, apiBase, uiAuthReady]);
+  }, [waLoginDialogOpen, apiBase, uiAuthReady, health?.whatsapp_web_healthy]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
+    if (health?.whatsapp_web_healthy !== true) {
+      setWaWebBridgeReachable(false);
+      return;
+    }
     // Keep whatsapp web login status fresh for row actions.
     void fetchWhatsappWebLoginStatus(true);
     const timer = window.setInterval(() => {
@@ -1964,7 +2248,53 @@ export default function App() {
     }, 5000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase, uiAuthReady, health?.whatsapp_web_healthy]);
+
+  useEffect(() => {
+    if (!uiAuthReady) return;
+    void fetchWechatLoginStatus(true);
+    const timer = window.setInterval(() => {
+      void fetchWechatLoginStatus(true);
+    }, 5000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, uiAuthReady]);
+
+  useEffect(() => {
+    if (!uiAuthReady) return;
+    if (!wechatLoginDialogOpen) return;
+    void fetchWechatLoginStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wechatLoginDialogOpen, apiBase, uiAuthReady]);
+
+  useEffect(() => {
+    if (!uiAuthReady) return;
+    if (!wechatLoginDialogOpen) return;
+    if (!wechatSessionKey) return;
+    if (wechatLoginStatus?.connected) return;
+    const timer = window.setInterval(() => {
+      void pollWechatQrLogin(wechatSessionKey);
+      void fetchWechatLoginStatus(true);
+    }, 2000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wechatLoginDialogOpen, wechatSessionKey, wechatLoginStatus?.connected, apiBase, uiAuthReady]);
+
+  useEffect(() => {
+    if (!wechatLoginDialogOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setWechatLoginDialogOpen(false);
+      }
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [wechatLoginDialogOpen]);
 
   const maskedSavedUiKey = useMemo(() => maskStoredKey(uiKey), [uiKey]);
   const adapterHealthRows = useMemo<AdapterHealthRow[]>(() => {
@@ -2000,6 +2330,14 @@ export default function App() {
         healthy: health?.feishud_healthy,
         processCount: health?.feishud_process_count,
         memoryRssBytes: health?.feishud_memory_rss_bytes,
+      },
+      {
+        key: "wechat_bot",
+        label: serviceDisplayName("wechat_bot"),
+        serviceName: "wechatd",
+        healthy: health?.wechatd_healthy,
+        processCount: health?.wechatd_process_count,
+        memoryRssBytes: health?.wechatd_memory_rss_bytes,
       },
       {
         key: "lark_bot",
@@ -2056,6 +2394,43 @@ export default function App() {
         };
       }
 
+      if (row.key === "wechat_bot") {
+        if (row.healthy === true && wechatLoginStatus?.connected === true) {
+          return {
+            ...row,
+            category: "ready",
+            statusLabel: t("已登录可用", "Connected and ready"),
+            detail: t("进程正常，微信通道已完成登录。", "Daemon is healthy and the WeChat channel is connected."),
+          };
+        }
+        if (row.healthy === true) {
+          return {
+            ...row,
+            category: "attention",
+            statusLabel: t("进程已起，待登录", "Running, login required"),
+            detail: wechatLoginStatus?.qr_status === "scaned"
+              ? t("二维码已被扫描，请在手机上完成确认。", "The QR code was scanned. Please confirm on the phone.")
+              : wechatLoginStatus?.qr_ready
+                ? t("二维码已就绪，可以直接扫码登录微信。", "QR is ready and can be scanned to log in.")
+                : t("进程已启动，但当前还没有可用微信登录态。", "Daemon is running, but there is no active WeChat login yet."),
+          };
+        }
+        if (row.healthy === false) {
+          return {
+            ...row,
+            category: "stopped",
+            statusLabel: t("进程未运行", "Daemon stopped"),
+            detail: t("先启动 wechatd，再在下方生成二维码完成登录。", "Start wechatd first, then generate a QR code below to log in."),
+          };
+        }
+        return {
+          ...row,
+          category: "unknown",
+          statusLabel: t("状态未知", "Unknown"),
+          detail: t("暂时无法判断 wechatd 当前状态。", "Unable to determine the current wechatd state."),
+        };
+      }
+
       if (row.healthy === true) {
         return {
           ...row,
@@ -2079,7 +2454,7 @@ export default function App() {
         detail: t("当前还拿不到足够的进程状态。", "There is not enough process state information yet."),
       };
     });
-  }, [adapterHealthRows, lang, waLoginStatus]);
+  }, [adapterHealthRows, lang, waLoginStatus, wechatLoginStatus]);
   const healthyServiceCount = useMemo(
     () => adapterHealthRows.filter((row) => row.healthy === true).length,
     [adapterHealthRows],
@@ -2098,6 +2473,28 @@ export default function App() {
     );
   }, [serviceStatusRows]);
   const selectedChannelPreset = useMemo(() => channelPresets[channelBindingChannel], [channelBindingChannel, channelPresets]);
+  const hasUnsavedWechatConfigChanges = useMemo(() => {
+    if (!wechatConfigData || !wechatConfigDraft) return false;
+    return JSON.stringify({
+      enabled: wechatConfigData.enabled,
+      listen: wechatConfigData.listen,
+      clawd_base_url: wechatConfigData.clawd_base_url,
+      api_base_url: wechatConfigData.api_base_url,
+      wechat_uin_base64: wechatConfigData.wechat_uin_base64,
+      request_timeout_seconds: wechatConfigData.request_timeout_seconds,
+      longpoll_timeout_ms: wechatConfigData.longpoll_timeout_ms,
+      text_chunk_chars: wechatConfigData.text_chunk_chars,
+    }) !== JSON.stringify({
+      enabled: wechatConfigDraft.enabled,
+      listen: wechatConfigDraft.listen,
+      clawd_base_url: wechatConfigDraft.clawd_base_url,
+      api_base_url: wechatConfigDraft.api_base_url,
+      wechat_uin_base64: wechatConfigDraft.wechat_uin_base64,
+      request_timeout_seconds: wechatConfigDraft.request_timeout_seconds,
+      longpoll_timeout_ms: wechatConfigDraft.longpoll_timeout_ms,
+      text_chunk_chars: wechatConfigDraft.text_chunk_chars,
+    });
+  }, [wechatConfigData, wechatConfigDraft]);
   const managedSkills = useMemo(() => {
     const set = new Set<string>(skillsConfigData?.managed_skills ?? []);
     Object.keys(skillSwitchDraft).forEach((k) => set.add(k));
@@ -2147,13 +2544,18 @@ export default function App() {
     [llmConfigData],
   );
   const hasUnsavedLlmChanges = useMemo(() => {
-    if (!llmConfigData) return false;
-    const selectedVendorConfig = llmConfigData.vendors.find((vendor) => vendor.name === llmConfigData.selected_vendor);
-    return (
-      llmDraftVendor.trim() !== (llmConfigData.selected_vendor || "").trim() ||
-      llmDraftModel.trim() !== (llmConfigData.selected_model || "").trim() ||
-      llmDraftBaseUrl.trim() !== (selectedVendorConfig?.base_url || "").trim() ||
-      llmDraftApiKey !== (selectedVendorConfig?.api_key_masked || "")
+    return hasUnsavedLlmDraftChanges(
+      llmConfigData
+        ? {
+            selectedVendor: llmConfigData.selected_vendor || "",
+            selectedModel: llmConfigData.selected_model || "",
+            vendors: llmConfigData.vendors,
+            draftVendor: llmDraftVendor,
+            draftModel: llmDraftModel,
+            draftBaseUrl: llmDraftBaseUrl,
+            draftApiKey: llmDraftApiKey,
+          }
+        : null,
     );
   }, [llmConfigData, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
   const llmRuntimeLabel = useMemo(() => {
@@ -2236,7 +2638,7 @@ export default function App() {
     const nextModel = vendorInfo.default_model || vendorInfo.models[0] || "";
     setLlmDraftModel(nextModel);
     setLlmDraftBaseUrl(vendorInfo.base_url || "");
-    setLlmDraftApiKey(vendorInfo.api_key_masked || "");
+    setLlmDraftApiKey(vendorInfo.api_key || "");
   };
 
   const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
@@ -3111,6 +3513,14 @@ export default function App() {
                               {tSlash("扫码登录 / QR Login")}
                             </button>
                           ) : null}
+                          {row.key === "wechat_bot" ? (
+                            <button
+                              onClick={() => openWechatLoginDialog()}
+                              className="theme-service-action theme-service-action-extra"
+                            >
+                              {tSlash("微信登录 / WeChat Login")}
+                            </button>
+                          ) : null}
                           {row.key === "whatsapp_web" && waLoginStatus?.connected === true ? (
                             <button
                               onClick={() => void logoutWhatsappWeb()}
@@ -3149,124 +3559,6 @@ export default function App() {
                 </section>
               </section>
 
-              <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-                <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <h3 className="text-base font-semibold">{tSlash("WhatsApp Web 接入 / WhatsApp Web Access")}</h3>
-                    <button
-                      onClick={() => setWaLoginDialogOpen((open) => !open)}
-                      className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
-                    >
-                      {waLoginDialogOpen ? t("收起", "Collapse") : t("展开", "Expand")}
-                    </button>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm text-white/85">{tSlash("连接状态 / Connection")}</p>
-                        <p className="mt-1 text-xs text-white/45">
-                          {waLoginStatus?.last_update_ts
-                            ? `${t("最近更新", "Updated")} ${toLocalTime(waLoginStatus.last_update_ts * 1000)}`
-                            : t("尚未获取状态", "No status yet")}
-                        </p>
-                      </div>
-                      <span
-                        className={
-                          waLoginStatus?.connected
-                            ? "rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200"
-                            : "rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs text-amber-200"
-                        }
-                      >
-                        {waLoginStatus?.connected ? tSlash("已登录 / Connected") : tSlash("未登录 / Not Connected")}
-                      </span>
-                    </div>
-                  </div>
-
-                  {waLoginDialogOpen ? (
-                    <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4">
-                      {!waWebBridgeReachable ? (
-                        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                          {tSlash("WhatsApp Web 服务未运行，请先启动 wa-web-bridge 后再使用扫码登录。 / WhatsApp Web service not running. Start wa-web-bridge first to use scan login.")}
-                        </p>
-                      ) : (
-                        <>
-                          <div className="mb-3 flex items-center justify-between gap-3">
-                            <h4 className="text-sm font-semibold">{tSlash("扫码区 / QR Panel")}</h4>
-                            <button
-                              onClick={() => void fetchWhatsappWebLoginStatus()}
-                              disabled={waLoginLoading}
-                              className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs hover:bg-white/20 disabled:opacity-50"
-                            >
-                              {waLoginLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                              {tSlash("刷新状态 / Refresh")}
-                            </button>
-                          </div>
-                          {waLoginStatus?.connected ? (
-                            <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
-                              {tSlash("WhatsApp Web 已登录，无需扫码。 / WhatsApp Web already connected.")}
-                            </p>
-                          ) : waLoginStatus?.qr_data_url ? (
-                            <div className="inline-block rounded-xl border border-white/15 bg-white p-3">
-                              <img src={waLoginStatus.qr_data_url} alt="WhatsApp QR" className="h-56 w-56" />
-                            </div>
-                          ) : (
-                            <p className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/70">
-                              {waLoginLoading
-                                ? tSlash("正在拉取二维码... / Fetching QR...")
-                                : tSlash("暂无可用二维码，请稍候或重启 whatsapp_webd。 / QR not ready yet, please wait or restart whatsapp_webd.")}
-                            </p>
-                          )}
-                          {waLoginStatus?.last_error ? (
-                            <p className="mt-3 text-xs text-amber-300">
-                              {tSlash("最近错误 / Last error")}: {waLoginStatus.last_error}
-                            </p>
-                          ) : null}
-                          {waLoginError ? (
-                            <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                              {waLoginError}
-                            </p>
-                          ) : null}
-                        </>
-                      )}
-                    </div>
-                  ) : null}
-                </section>
-
-                <section className="space-y-4">
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-                    <div className="mb-4 flex items-center gap-2">
-                      <Timer className="theme-icon-accent h-4 w-4" />
-                      <h3 className="text-base font-semibold">{tSlash("预留适配器 / Future Adapters")}</h3>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(health?.future_adapters_enabled?.length ?? 0) > 0 ? (
-                        health?.future_adapters_enabled?.map((name) => (
-                          <span key={name} className="rounded-md border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
-                            {name}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-white/50">{t("当前没有启用的 future adapters。", "No future adapters enabled right now.")}</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-                    <div className="mb-4 flex items-center gap-2">
-                      <AlertCircle className="theme-icon-accent h-4 w-4" />
-                      <h3 className="text-base font-semibold">{tSlash("下一步 / Next Step")}</h3>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setCurrentPage("channels")}
-                      className="theme-accent-soft-btn"
-                    >
-                      <Database className="h-4 w-4" />
-                      {tSlash("打开渠道 / 诊断 / Open Channels / Diagnostics")}
-                    </button>
-                  </div>
-                </section>
-              </section>
             </div>
           ) : null}
 
@@ -3557,11 +3849,11 @@ export default function App() {
                       <label className="block space-y-2">
                         <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
                         <input
-                          type="password"
+                          type="text"
                           className="theme-input"
                           value={llmDraftApiKey}
                           onChange={(e) => setLlmDraftApiKey(e.target.value)}
-                          placeholder="****************"
+                          placeholder="sk-..."
                           autoComplete="off"
                           disabled={!selectedLlmVendorInfo}
                         />
@@ -3604,10 +3896,10 @@ export default function App() {
                               {selectedLlmVendorInfo.api_key_configured ? t("已配置", "Configured") : t("未配置", "Missing")}
                             </span>
                           </p>
-                          {selectedLlmVendorInfo.api_key_masked ? (
+                          {selectedLlmVendorInfo.api_key ? (
                             <p className="break-all">
-                              <span className="text-white/45">{t("当前掩码", "Masked key")}</span>
-                              <span className="ml-2 text-white/80">{selectedLlmVendorInfo.api_key_masked}</span>
+                              <span className="text-white/45">{t("当前 API Key", "Current API Key")}</span>
+                              <span className="ml-2 text-white/80">{selectedLlmVendorInfo.api_key}</span>
                             </p>
                           ) : null}
                         </div>
@@ -4345,6 +4637,293 @@ export default function App() {
           ) : null}
         </main>
       </div>
+
+      {wechatLoginDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/78 backdrop-blur-sm"
+          onClick={() => closeWechatLoginDialog()}
+        >
+          <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+            <div
+              className="w-full max-w-6xl overflow-hidden rounded-[28px] border border-white/10 bg-[#0f131c] shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-white/5 px-5 py-4 sm:px-6">
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.28em] text-white/45">{t("微信登录", "WeChat Login")}</p>
+                  <h3 className="mt-2 text-lg font-semibold text-white/95">{t("打开弹窗后，直接扫码登录微信", "Open the dialog and scan to log in to WeChat")}</h3>
+                  <p className="mt-1 text-sm text-white/60">
+                    {t(
+                      "默认只保留扫码所需的步骤。需要排障或改配置时，再展开下面的高级设置。",
+                      "Only the steps needed for scanning stay visible by default. Expand advanced settings only when you need to troubleshoot or adjust config.",
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => closeWechatLoginDialog()}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white"
+                  aria-label={t("关闭弹窗", "Close dialog")}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="theme-scrollbar max-h-[calc(100vh-7rem)] overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+                <section className="rounded-[26px] border border-white/10 bg-white/5 p-5 sm:p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.28em] text-white/45">{t("扫码优先", "Scan-first")}</p>
+                      <h4 className="mt-2 text-xl font-semibold text-white/95">{t("启动服务后，直接生成二维码扫码", "Start the daemon, then generate a QR code and scan it")}</h4>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-white/60">
+                        {t(
+                          "界面会自动刷新扫码状态。大多数情况下，你只需要点下面两个按钮。",
+                          "The dialog refreshes the scan status automatically. In most cases, you only need the two buttons below.",
+                        )}
+                      </p>
+                    </div>
+                    <span
+                      className={
+                        wechatLoginStatus?.connected
+                          ? "rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200"
+                          : wechatQrStarting || wechatLoginStatus?.qr_status === "generating"
+                            ? "rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-200"
+                          : wechatLoginStatus?.qr_status === "scaned"
+                            ? "rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-200"
+                          : wechatLoginStatus?.qrcode_url
+                            ? "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200"
+                            : "rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/65"
+                      }
+                    >
+                      {wechatLoginStatus?.connected
+                        ? t("已登录", "Connected")
+                        : wechatQrStarting || wechatLoginStatus?.qr_status === "generating"
+                          ? t("生成中", "Generating")
+                        : wechatLoginStatus?.qr_status === "scaned"
+                          ? t("已扫码待确认", "Scanned")
+                          : wechatLoginStatus?.qrcode_url
+                            ? t("二维码已就绪", "QR ready")
+                            : t("等待生成", "Waiting")}
+                    </span>
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void controlService("wechatd", health?.wechatd_healthy === true ? "restart" : "start")}
+                      disabled={Boolean(serviceActionLoading.wechatd) || !wechatConfigDraft?.enabled}
+                      className="theme-secondary-btn px-4 py-2.5 text-sm"
+                    >
+                      {serviceActionLoading.wechatd ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      {health?.wechatd_healthy === true ? t("重启 wechatd", "Restart wechatd") : t("启动 wechatd", "Start wechatd")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void startWechatQrLogin(true)}
+                      disabled={Boolean(serviceActionLoading.wechatd) || wechatQrStarting || health?.wechatd_healthy !== true}
+                      className="theme-accent-btn px-4 py-2.5 text-sm"
+                    >
+                      {wechatQrStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      {wechatLoginStatus?.qrcode_url ? t("刷新二维码", "Refresh QR") : t("生成二维码", "Generate QR")}
+                    </button>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/72">
+                    {health?.wechatd_healthy !== true
+                      ? t("先点击“启动 wechatd”，等服务起来后再生成二维码。", "Start wechatd first, then generate the QR code.")
+                      : wechatQrStarting || wechatLoginStatus?.qr_status === "generating"
+                        ? t("正在生成新的二维码，界面会马上更新。", "Generating a fresh QR code now. The panel will update in a moment.")
+                        : wechatLoginStatus?.connected
+                          ? t("微信已经连接成功，可以直接收发消息。", "WeChat is connected and ready to send or receive messages.")
+                          : wechatLoginStatus?.qr_status === "scaned"
+                            ? t("二维码已被扫描，请在手机上确认登录。", "The QR code was scanned. Please confirm the login on your phone.")
+                            : wechatLoginStatus?.message || t("点击“生成二维码”后，用手机微信扫码即可。", "Click Generate QR, then scan it with the WeChat app.")}
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/58">
+                    <button
+                      type="button"
+                      onClick={() => void fetchWechatLoginStatus()}
+                      disabled={wechatLoginLoading}
+                      className="inline-flex items-center gap-2 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {wechatLoginLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      {t("手动刷新状态", "Refresh status manually")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWechatAdvancedOpen((open) => !open)}
+                      className="inline-flex items-center gap-2 transition hover:text-white"
+                    >
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${wechatAdvancedOpen ? "rotate-180" : ""}`} />
+                      {wechatAdvancedOpen ? t("收起高级设置", "Hide advanced settings") : t("高级设置", "Advanced settings")}
+                    </button>
+                  </div>
+
+                  {wechatQrStarting || wechatLoginStatus?.qr_status === "generating" ? (
+                    <div className="mt-5 flex min-h-[23rem] items-center justify-center rounded-[28px] border border-dashed border-sky-500/25 bg-sky-500/6">
+                      <div className="flex flex-col items-center gap-3 text-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-sky-200" />
+                        <p className="text-sm font-medium text-sky-100">{t("正在生成二维码", "Generating QR code")}</p>
+                        <p className="max-w-sm text-xs leading-6 text-sky-100/70">
+                          {t("生成完成后，这里会自动切换成可扫码的二维码。", "This panel will switch to a scannable QR code automatically once generation finishes.")}
+                        </p>
+                      </div>
+                    </div>
+                  ) : wechatLoginStatus?.qrcode_url ? (
+                    <div className="mt-5 space-y-3">
+                      <div className="inline-block rounded-[28px] border border-white/12 bg-white p-5 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
+                        <img src={wechatLoginStatus.qrcode_url} alt="WeChat QR" className="h-72 w-72" />
+                      </div>
+                      <p className="text-xs text-white/52">
+                        {t("二维码有效期较短，过期后点击“刷新二维码”即可。", "The QR code expires quickly. Click Refresh QR if it expires.")}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-5 flex min-h-[23rem] items-center justify-center rounded-[28px] border border-dashed border-white/12 bg-black/15">
+                      <div className="max-w-sm text-center">
+                        <p className="text-sm font-medium text-white/82">{t("还没有二维码", "No QR code yet")}</p>
+                        <p className="mt-2 text-xs leading-6 text-white/50">
+                          {t("服务启动后，点一次“生成二维码”，这里就会立刻出现二维码。", "Once the daemon is running, click Generate QR and the QR code will appear here immediately.")}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {wechatLoginStatus?.last_error ? (
+                    <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                      {wechatLoginStatus.last_error}
+                    </p>
+                  ) : null}
+                  {wechatLoginError ? (
+                    <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                      {wechatLoginError}
+                    </p>
+                  ) : null}
+
+                  <div className="mt-5 border-t border-white/8 pt-4">
+                    {wechatAdvancedOpen ? (
+                      <div className="mt-4 space-y-4 rounded-2xl border border-white/10 bg-black/18 p-4">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void fetchWechatConfig()}
+                            disabled={wechatConfigLoading}
+                            className="theme-topbar-btn px-3 py-2 text-xs"
+                          >
+                            {wechatConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                            {t("刷新配置", "Refresh config")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void saveWechatConfig()}
+                            disabled={wechatConfigSaving || !wechatConfigDraft || !hasUnsavedWechatConfigChanges}
+                            className="theme-accent-btn px-3 py-2 text-xs"
+                          >
+                            {wechatConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
+                            {t("保存配置", "Save config")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCurrentPage("channels");
+                              closeWechatLoginDialog();
+                            }}
+                            className="theme-secondary-btn px-3 py-2 text-xs"
+                          >
+                            {t("打开 Channels", "Open Channels")}
+                          </button>
+                        </div>
+
+                        {wechatConfigSaveMessage ? (
+                          <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                            {wechatConfigSaveMessage}
+                          </p>
+                        ) : null}
+                        {hasUnsavedWechatConfigChanges ? (
+                          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                            {t("你有未保存的微信配置变更。保存后再重启 wechatd。", "You have unsaved WeChat config changes. Save them before restarting wechatd.")}
+                          </p>
+                        ) : null}
+                        {wechatConfigData?.restart_required ? (
+                          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                            {t("当前保存的配置需要重启 wechatd 才会完全生效。", "The saved config still needs a wechatd restart to fully apply.")}
+                          </p>
+                        ) : null}
+                        {wechatConfigError ? (
+                          <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                            {wechatConfigError}
+                          </p>
+                        ) : null}
+
+                        {wechatConfigDraft ? (
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 md:col-span-2">
+                              <span className="text-sm font-medium text-white/85">{t("启用微信通道", "Enable WeChat channel")}</span>
+                              <div className="mt-3 flex items-center gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={wechatConfigDraft.enabled}
+                                  onChange={(e) => setWechatConfigDraftField("enabled", e.target.checked)}
+                                />
+                                <span className="text-sm text-white/65">
+                                  {wechatConfigDraft.enabled
+                                    ? t("已启用，保存后即可使用。", "Enabled. Save it and the channel can be used.")
+                                    : t("已关闭，保存后 wechatd 不会使用这组配置。", "Disabled. wechatd will ignore this config after saving.")}
+                                </span>
+                              </div>
+                            </label>
+
+                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                              <span className="text-sm font-medium text-white/85">{t("监听地址", "Listen address")}</span>
+                              <input
+                                className="theme-input mt-3 w-full"
+                                value={wechatConfigDraft.listen}
+                                onChange={(e) => setWechatConfigDraftField("listen", e.target.value)}
+                                placeholder="0.0.0.0:8792"
+                              />
+                            </label>
+
+                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                              <span className="text-sm font-medium text-white/85">{t("clawd 地址", "clawd base URL")}</span>
+                              <input
+                                className="theme-input mt-3 w-full"
+                                value={wechatConfigDraft.clawd_base_url}
+                                onChange={(e) => setWechatConfigDraftField("clawd_base_url", e.target.value)}
+                                placeholder="http://127.0.0.1:8787"
+                              />
+                            </label>
+
+                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                              <span className="text-sm font-medium text-white/85">{t("微信后端地址", "WeChat backend URL")}</span>
+                              <input
+                                className="theme-input mt-3 w-full"
+                                value={wechatConfigDraft.api_base_url}
+                                onChange={(e) => setWechatConfigDraftField("api_base_url", e.target.value)}
+                                placeholder="https://ilinkai.weixin.qq.com"
+                              />
+                            </label>
+
+                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                              <span className="text-sm font-medium text-white/85">{t("X-WECHAT-UIN（可选）", "X-WECHAT-UIN (optional)")}</span>
+                              <input
+                                className="theme-input mt-3 w-full"
+                                value={wechatConfigDraft.wechat_uin_base64}
+                                onChange={(e) => setWechatConfigDraftField("wechat_uin_base64", e.target.value)}
+                                placeholder={t("留空时会自动生成", "Leave blank to auto-generate")}
+                              />
+                            </label>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
