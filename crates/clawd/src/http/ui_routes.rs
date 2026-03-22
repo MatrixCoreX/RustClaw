@@ -20,7 +20,7 @@ use super::super::{
     reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
     task_count_by_status, telegramd_process_stats, update_auth_key_by_id,
     upsert_exchange_credential_for_user_key, wa_webd_process_stats, whatsappd_process_stats,
-    ApiResponse, AppState, HealthResponse, LocalInteractionContext,
+    wechatd_process_stats, ApiResponse, AppState, HealthResponse, LocalInteractionContext,
 };
 use claw_core::skill_registry::SkillKind;
 use claw_core::types::{
@@ -125,8 +125,24 @@ fn telegram_config_path(state: &AppState) -> PathBuf {
     state.workspace_root.join("configs/channels/telegram.toml")
 }
 
+fn wechat_config_path(state: &AppState) -> PathBuf {
+    state.workspace_root.join("configs/channels/wechat.toml")
+}
+
 fn read_telegram_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
     let path = telegram_config_path(state);
+    if !path.exists() {
+        return Ok(toml::Value::Table(Default::default()));
+    }
+    let raw = std::fs::read_to_string(&path)?;
+    if raw.trim().is_empty() {
+        return Ok(toml::Value::Table(Default::default()));
+    }
+    Ok(toml::from_str(&raw)?)
+}
+
+fn read_wechat_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
+    let path = wechat_config_path(state);
     if !path.exists() {
         return Ok(toml::Value::Table(Default::default()));
     }
@@ -396,6 +412,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/telegram/config",
             get(get_telegram_config).post(update_telegram_config),
         )
+        .route("/wechat/config", get(get_wechat_config).post(update_wechat_config))
         .route("/skills/import", post(import_external_skill))
         .route("/skills/import/upload", post(import_external_skill_upload))
         .route("/skills/uninstall", post(uninstall_external_skill))
@@ -405,6 +422,9 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/debug/recent-robot-tasks", get(recent_robot_tasks))
         .route("/debug/usage-records", get(usage_records))
         .route("/debug/usage-records/:record_id", get(usage_record_detail))
+        .route("/wechat/login-status", get(wechat_login_status))
+        .route("/wechat/login-qr/start", post(wechat_login_qr_start))
+        .route("/wechat/login-qr/wait", post(wechat_login_qr_wait))
         .route("/whatsapp-web/login-status", get(whatsapp_web_login_status))
         .route("/whatsapp-web/logout", post(whatsapp_web_logout))
         .route("/services/:service/:action", post(control_service))
@@ -1112,6 +1132,238 @@ async fn update_telegram_config(
     )
 }
 
+fn load_wechat_config_response(state: &AppState) -> anyhow::Result<WechatConfigResponse> {
+    let value = read_wechat_config_value(state)?;
+    let wechat = value
+        .get("wechat")
+        .and_then(|v| v.as_table())
+        .cloned()
+        .unwrap_or_default();
+    let session_path = state.workspace_root.join("data/wechatd/session.json");
+    let bot_token = wechat
+        .get("bot_token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    Ok(WechatConfigResponse {
+        config_path: "configs/channels/wechat.toml".to_string(),
+        enabled: wechat
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        listen: wechat
+            .get("listen")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.0.0.0:8792")
+            .to_string(),
+        clawd_base_url: wechat
+            .get("clawd_base_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("http://127.0.0.1:8787")
+            .to_string(),
+        api_base_url: wechat
+            .get("api_base_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("https://ilinkai.weixin.qq.com")
+            .to_string(),
+        wechat_uin_base64: wechat
+            .get("wechat_uin_base64")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        request_timeout_seconds: wechat
+            .get("request_timeout_seconds")
+            .and_then(|v| v.as_integer())
+            .map(|v| v.max(5) as u64)
+            .unwrap_or(30),
+        longpoll_timeout_ms: wechat
+            .get("longpoll_timeout_ms")
+            .and_then(|v| v.as_integer())
+            .map(|v| v.max(1_000) as u64)
+            .unwrap_or(35_000),
+        text_chunk_chars: wechat
+            .get("text_chunk_chars")
+            .and_then(|v| v.as_integer())
+            .map(|v| v.max(1) as usize)
+            .unwrap_or(1200),
+        bot_token_configured: !bot_token.is_empty() && bot_token != "REPLACE_ME",
+        saved_session_present: session_path.exists(),
+        restart_required: true,
+    })
+}
+
+async fn get_wechat_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WechatConfigResponse>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+    match load_wechat_config_response(&state) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("read wechat config failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn update_wechat_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateWechatConfigRequest>,
+) -> (StatusCode, Json<ApiResponse<WechatConfigResponse>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+
+    if req.listen.trim().is_empty()
+        || req.clawd_base_url.trim().is_empty()
+        || req.api_base_url.trim().is_empty()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("listen, clawd_base_url, and api_base_url are required".to_string()),
+            }),
+        );
+    }
+
+    let mut value = match read_wechat_config_value(&state) {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read wechat config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let wechat_table = match ensure_toml_table(&mut value, &["wechat"]) {
+        Ok(table) => table,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("prepare wechat config failed: {err}")),
+                }),
+            );
+        }
+    };
+    wechat_table.insert("enabled".to_string(), toml::Value::Boolean(req.enabled));
+    wechat_table.insert(
+        "listen".to_string(),
+        toml::Value::String(req.listen.trim().to_string()),
+    );
+    wechat_table.insert(
+        "clawd_base_url".to_string(),
+        toml::Value::String(req.clawd_base_url.trim().to_string()),
+    );
+    wechat_table.insert(
+        "api_base_url".to_string(),
+        toml::Value::String(req.api_base_url.trim().to_string()),
+    );
+    wechat_table.insert(
+        "wechat_uin_base64".to_string(),
+        toml::Value::String(req.wechat_uin_base64.trim().to_string()),
+    );
+    wechat_table.insert(
+        "request_timeout_seconds".to_string(),
+        toml::Value::Integer(req.request_timeout_seconds.max(5) as i64),
+    );
+    wechat_table.insert(
+        "longpoll_timeout_ms".to_string(),
+        toml::Value::Integer(req.longpoll_timeout_ms.max(1_000) as i64),
+    );
+    wechat_table.insert(
+        "text_chunk_chars".to_string(),
+        toml::Value::Integer(req.text_chunk_chars.max(1) as i64),
+    );
+    if !wechat_table.contains_key("bot_token") {
+        wechat_table.insert("bot_token".to_string(), toml::Value::String(String::new()));
+    }
+
+    let output = match toml::to_string_pretty(&value) {
+        Ok(output) => output,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("serialize wechat config failed: {err}")),
+                }),
+            );
+        }
+    };
+    if let Err(err) = write_workspace_and_mounted_file(
+        &state.workspace_root,
+        "configs/channels/wechat.toml",
+        &output,
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("write wechat config failed: {err}")),
+            }),
+        );
+    }
+
+    match load_wechat_config_response(&state) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("reload wechat config failed: {err}")),
+            }),
+        ),
+    }
+}
+
 fn scoped_channel_name(
     channel: claw_core::types::ChannelKind,
     telegram_bot_name: Option<&str>,
@@ -1124,6 +1376,7 @@ fn scoped_channel_name(
             .unwrap_or_else(|| "telegram".to_string()),
         claw_core::types::ChannelKind::Whatsapp => "whatsapp".to_string(),
         claw_core::types::ChannelKind::Ui => "ui".to_string(),
+        claw_core::types::ChannelKind::Wechat => "wechat".to_string(),
         claw_core::types::ChannelKind::Feishu => "feishu".to_string(),
         claw_core::types::ChannelKind::Lark => "lark".to_string(),
     }
@@ -1481,7 +1734,7 @@ async fn logs_latest(
 }
 
 fn channel_allows_shared_ui_task_access(channel: &str) -> bool {
-    matches!(channel, "telegram" | "whatsapp" | "feishu" | "lark")
+    matches!(channel, "telegram" | "whatsapp" | "wechat" | "feishu" | "lark")
 }
 
 fn task_access_meta_for_debug(
@@ -1779,7 +2032,7 @@ async fn recent_robot_tasks(
                     CAST(NULLIF(created_at, '') AS INTEGER) AS created_ts,
                     CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) AS updated_ts
              FROM tasks
-             WHERE channel IN ('telegram', 'whatsapp', 'feishu', 'lark')
+             WHERE channel IN ('telegram', 'whatsapp', 'wechat', 'feishu', 'lark')
              ORDER BY updated_ts DESC
              LIMIT ?1",
         )?;
@@ -2218,6 +2471,7 @@ fn service_start_script(service: &str) -> Option<&'static str> {
         "channel-gateway" | "channel_gateway" | "telegramd" => Some("start-channel-gateway.sh"),
         "whatsappd" => Some("start-whatsappd.sh"),
         "whatsapp_webd" => Some("start-whatsapp-webd.sh"),
+        "wechatd" => Some("start-wechatd.sh"),
         "feishud" => Some("start-feishud.sh"),
         "larkd" => Some("start-larkd.sh"),
         _ => None,
@@ -2230,6 +2484,7 @@ fn service_process_name(service: &str) -> Option<&'static str> {
         "telegramd" => Some("telegramd"),
         "whatsappd" => Some("whatsappd"),
         "whatsapp_webd" => Some("whatsapp_webd"),
+        "wechatd" => Some("wechatd"),
         "feishud" => Some("feishud"),
         "larkd" => Some("larkd"),
         _ => None,
@@ -2242,6 +2497,7 @@ fn service_pid_file(service: &str) -> Option<&'static str> {
         "telegramd" => Some("telegramd.pid"),
         "whatsappd" => Some("whatsappd.pid"),
         "whatsapp_webd" => Some("whatsapp_webd.pid"),
+        "wechatd" => Some("wechatd.pid"),
         "feishud" => Some("feishud.pid"),
         "larkd" => Some("larkd.pid"),
         _ => None,
@@ -2268,6 +2524,9 @@ fn service_is_running(service: &str) -> bool {
             .map(|(count, _)| count > 0)
             .unwrap_or(false),
         "whatsapp_webd" => wa_webd_process_stats()
+            .map(|(count, _)| count > 0)
+            .unwrap_or(false),
+        "wechatd" => wechatd_process_stats()
             .map(|(count, _)| count > 0)
             .unwrap_or(false),
         "feishud" => feishud_process_stats()
@@ -2318,6 +2577,17 @@ fn runtime_profile_default() -> &'static str {
     } else {
         "release"
     }
+}
+
+fn spawn_background_shell(cmd: &str) -> std::io::Result<()> {
+    Command::new("bash")
+        .arg("-lc")
+        .arg(cmd)
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::null())
+        .stderr(StdProcessStdio::null())
+        .spawn()?;
+    Ok(())
 }
 
 async fn control_service(
@@ -2392,29 +2662,13 @@ async fn control_service(
                 shell_escape_arg(profile.as_str()),
                 shell_escape_arg(log_file.as_str())
             );
-            let output = match Command::new("bash").arg("-lc").arg(cmd).output().await {
-                Ok(v) => v,
-                Err(err) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiResponse {
-                            ok: false,
-                            data: None,
-                            error: Some(format!("failed to start service process: {err}")),
-                        }),
-                    );
-                }
-            };
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let detail = if !stderr.is_empty() { stderr } else { stdout };
+            if let Err(err) = spawn_background_shell(&cmd) {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ApiResponse {
                         ok: false,
                         data: None,
-                        error: Some(format!("service start command failed: {detail}")),
+                        error: Some(format!("failed to start service process: {err}")),
                     }),
                 );
             }
@@ -2602,29 +2856,13 @@ async fn control_service(
                 shell_escape_arg(profile.as_str()),
                 shell_escape_arg(log_file.as_str())
             );
-            let output = match Command::new("bash").arg("-lc").arg(cmd).output().await {
-                Ok(v) => v,
-                Err(err) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ApiResponse {
-                            ok: false,
-                            data: None,
-                            error: Some(format!("failed to start service process: {err}")),
-                        }),
-                    );
-                }
-            };
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let detail = if !stderr.is_empty() { stderr } else { stdout };
+            if let Err(err) = spawn_background_shell(&cmd) {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ApiResponse {
                         ok: false,
                         data: None,
-                        error: Some(format!("service restart start command failed: {detail}")),
+                        error: Some(format!("failed to start service process: {err}")),
                     }),
                 );
             }
@@ -2739,6 +2977,7 @@ async fn health(
     let channel_gateway_stats = channel_gateway_process_stats();
     let whatsappd_stats = whatsappd_process_stats();
     let wa_webd_stats = wa_webd_process_stats();
+    let wechatd_stats = wechatd_process_stats();
     let channel_gateway_process_count = channel_gateway_stats.map(|(count, _)| count);
     let channel_gateway_memory_rss_bytes = channel_gateway_stats.map(|(_, rss_bytes)| rss_bytes);
     let channel_gateway_healthy = channel_gateway_process_count.map(|count| count > 0);
@@ -2755,6 +2994,9 @@ async fn health(
     let whatsappd_memory_rss_bytes_raw = whatsappd_stats.map(|(_, rss_bytes)| rss_bytes);
     let wa_webd_process_count_raw = wa_webd_stats.map(|(count, _)| count);
     let wa_webd_memory_rss_bytes_raw = wa_webd_stats.map(|(_, rss_bytes)| rss_bytes);
+    let wechatd_process_count = wechatd_stats.map(|(count, _)| count);
+    let wechatd_memory_rss_bytes = wechatd_stats.map(|(_, rss_bytes)| rss_bytes);
+    let wechatd_healthy = wechatd_process_count.map(|count| count > 0);
     let feishud_stats = feishud_process_stats();
     let feishud_process_count_raw = feishud_stats.map(|(count, _)| count);
     let feishud_memory_rss_bytes_raw = feishud_stats.map(|(_, rss_bytes)| rss_bytes);
@@ -2899,6 +3141,26 @@ async fn health(
                 }),
         );
     }
+    if state.wechat_send_config.is_some() {
+        let scope = "wechat:primary".to_string();
+        gateway_instance_statuses.push(
+            gateway_instance_statuses_by_scope
+                .remove(&scope)
+                .unwrap_or_else(|| GatewayInstanceRuntimeStatus {
+                    kind: "wechat".to_string(),
+                    name: "primary".to_string(),
+                    scope,
+                    healthy: wechatd_healthy.unwrap_or(false),
+                    status: if wechatd_healthy.unwrap_or(false) {
+                        "running".to_string()
+                    } else {
+                        "stopped".to_string()
+                    },
+                    last_heartbeat_ts: None,
+                    last_error: None,
+                }),
+        );
+    }
     if state.feishu_send_config.is_some() {
         let scope = "feishu:primary".to_string();
         gateway_instance_statuses.push(
@@ -2971,6 +3233,9 @@ async fn health(
         whatsapp_web_healthy: wa_webd_healthy,
         whatsapp_web_process_count: wa_webd_process_count,
         whatsapp_web_memory_rss_bytes: wa_webd_memory_rss_bytes,
+        wechatd_healthy,
+        wechatd_process_count,
+        wechatd_memory_rss_bytes,
         feishud_healthy,
         feishud_process_count,
         feishud_memory_rss_bytes,
@@ -3341,6 +3606,35 @@ struct UpdateTelegramConfigRequest {
     bots: Vec<TelegramBotConfigItem>,
     #[serde(default)]
     agents: Vec<AgentConfigItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WechatConfigResponse {
+    config_path: String,
+    enabled: bool,
+    listen: String,
+    clawd_base_url: String,
+    api_base_url: String,
+    wechat_uin_base64: String,
+    request_timeout_seconds: u64,
+    longpoll_timeout_ms: u64,
+    text_chunk_chars: usize,
+    bot_token_configured: bool,
+    saved_session_present: bool,
+    restart_required: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateWechatConfigRequest {
+    enabled: bool,
+    listen: String,
+    clawd_base_url: String,
+    api_base_url: String,
+    #[serde(default)]
+    wechat_uin_base64: String,
+    request_timeout_seconds: u64,
+    longpoll_timeout_ms: u64,
+    text_chunk_chars: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4028,16 +4322,30 @@ fn read_skill_config_file(state: &AppState) -> anyhow::Result<(String, toml::Val
     Ok((raw, parsed))
 }
 
-fn write_runtime_config_file(state: &AppState, raw: &str) -> std::io::Result<()> {
-    let active_path = state.workspace_root.join("configs/config.toml");
+fn write_workspace_and_mounted_file(
+    workspace_root: &Path,
+    relative_path: &str,
+    raw: &str,
+) -> std::io::Result<()> {
+    let active_path = workspace_root.join(relative_path);
+    if let Some(parent) = active_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(&active_path, raw)?;
 
-    let mounted_path = state.workspace_root.join("docker/config/config.toml");
+    let mounted_relative = relative_path
+        .strip_prefix("configs/")
+        .unwrap_or(relative_path);
+    let mounted_path = workspace_root.join("docker/config").join(mounted_relative);
     if let Some(parent) = mounted_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&mounted_path, raw)?;
     Ok(())
+}
+
+fn write_runtime_config_file(state: &AppState, raw: &str) -> std::io::Result<()> {
+    write_workspace_and_mounted_file(&state.workspace_root, "configs/config.toml", raw)
 }
 
 fn read_skills_registry_file(state: &AppState) -> std::io::Result<String> {
@@ -4856,6 +5164,12 @@ fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(mask_secret);
+        let api_key = vendor
+            .get("api_key")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .unwrap_or("")
+            .to_string();
         let mut models = vendor
             .get("models")
             .and_then(|v| v.as_array())
@@ -4876,6 +5190,7 @@ fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
             "default_model": default_model,
             "models": models,
             "base_url": base_url,
+            "api_key": api_key,
             "api_key_configured": api_key_configured,
             "api_key_masked": api_key_masked
         }));
@@ -4901,19 +5216,72 @@ fn current_runtime_llm_info(state: &AppState) -> Value {
     json!(null)
 }
 
-fn llm_restart_required(state: &AppState, selected_vendor: &str, selected_model: &str) -> bool {
-    let runtime = current_runtime_llm_info(state);
-    let runtime_vendor = runtime
-        .get("vendor")
+fn saved_llm_vendor_runtime_fields(
+    parsed: &toml::Value,
+    selected_vendor: &str,
+) -> (String, String) {
+    let section_key = format!("llm.{selected_vendor}");
+    let vendor = parsed
+        .get("llm")
+        .and_then(|llm| llm.get(selected_vendor))
+        .or_else(|| parsed.get(&section_key));
+    let base_url = vendor
+        .and_then(|v| v.get("base_url"))
         .and_then(|v| v.as_str())
+        .map(str::trim)
         .unwrap_or("")
-        .trim();
-    let runtime_model = runtime
-        .get("model")
+        .to_string();
+    let api_key = vendor
+        .and_then(|v| v.get("api_key"))
         .and_then(|v| v.as_str())
+        .map(str::trim)
         .unwrap_or("")
-        .trim();
-    runtime_vendor != selected_vendor.trim() || runtime_model != selected_model.trim()
+        .to_string();
+    (base_url, api_key)
+}
+
+fn llm_runtime_differs(
+    runtime_vendor: &str,
+    runtime_model: &str,
+    runtime_base_url: &str,
+    runtime_api_key: &str,
+    selected_vendor: &str,
+    selected_model: &str,
+    saved_base_url: &str,
+    saved_api_key: &str,
+) -> bool {
+    runtime_vendor.trim() != selected_vendor.trim()
+        || runtime_model.trim() != selected_model.trim()
+        || runtime_base_url.trim() != saved_base_url.trim()
+        || runtime_api_key.trim() != saved_api_key.trim()
+}
+
+fn llm_restart_required(
+    state: &AppState,
+    parsed: &toml::Value,
+    selected_vendor: &str,
+    selected_model: &str,
+) -> bool {
+    let Some(provider) = state.llm_providers.first() else {
+        return true;
+    };
+    let runtime_vendor = provider
+        .config
+        .name
+        .strip_prefix("vendor-")
+        .unwrap_or(provider.config.name.as_str());
+    let (saved_base_url, saved_api_key) =
+        saved_llm_vendor_runtime_fields(parsed, selected_vendor.trim());
+    llm_runtime_differs(
+        runtime_vendor,
+        &provider.config.model,
+        &provider.config.base_url,
+        &provider.config.api_key,
+        selected_vendor,
+        selected_model,
+        &saved_base_url,
+        &saved_api_key,
+    )
 }
 
 fn skills_restart_required(runtime_visible: &[String], effective_visible: &[String]) -> bool {
@@ -5173,7 +5541,7 @@ async fn get_llm_config(
         .trim()
         .to_string();
     let vendors = collect_llm_vendor_info(&parsed);
-    let restart_required = llm_restart_required(&state, &selected_vendor, &selected_model);
+    let restart_required = llm_restart_required(&state, &parsed, &selected_vendor, &selected_model);
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -5315,16 +5683,12 @@ async fn update_llm_config(
         &format!("model = {:?}", selected_model),
     );
     let vendor_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
-    let final_updated = if vendor_api_key.is_empty() {
-        updated_vendor_model
-    } else {
-        upsert_string_key_in_section(
-            &updated_vendor_model,
-            &format!("llm.{selected_vendor}"),
-            "api_key",
-            &format!("api_key = {:?}", vendor_api_key),
-        )
-    };
+    let final_updated = upsert_string_key_in_section(
+        &updated_vendor_model,
+        &format!("llm.{selected_vendor}"),
+        "api_key",
+        &format!("api_key = {:?}", vendor_api_key),
+    );
     if let Err(err) = write_runtime_config_file(&state, &final_updated) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -5335,7 +5699,9 @@ async fn update_llm_config(
             }),
         );
     }
-    let restart_required = llm_restart_required(&state, &selected_vendor, &selected_model);
+    let updated_parsed = toml::from_str::<toml::Value>(&final_updated).unwrap_or(parsed);
+    let restart_required =
+        llm_restart_required(&state, &updated_parsed, &selected_vendor, &selected_model);
 
     (
         StatusCode::OK,
@@ -5688,6 +6054,247 @@ async fn whatsapp_web_login_status(
     )
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct WechatQrStartRequest {
+    #[serde(default)]
+    force: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct WechatQrWaitRequest {
+    session_key: String,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
+
+fn wechatd_base_url(state: &AppState) -> Result<String, (StatusCode, Json<ApiResponse<Value>>)> {
+    let config = load_wechat_config_response(state).map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("read wechat config failed: {err}")),
+            }),
+        )
+    })?;
+    let listen = config.listen.trim();
+    if !config.enabled || listen.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("wechat daemon is not configured".to_string()),
+            }),
+        ));
+    }
+    let host_port = if let Some(rest) = listen.strip_prefix("0.0.0.0:") {
+        format!("127.0.0.1:{rest}")
+    } else if let Some(rest) = listen.strip_prefix("[::]:") {
+        format!("127.0.0.1:{rest}")
+    } else {
+        listen.to_string()
+    };
+    Ok(format!("http://{host_port}"))
+}
+
+async fn wechat_login_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let Ok(base) = wechatd_base_url(&state) else {
+        return wechatd_base_url(&state).err().unwrap();
+    };
+    let url = format!("{}/login/status", base.trim_end_matches('/'));
+    let resp = match state.http_client.get(&url).send().await {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("request wechat login status failed: {err}")),
+                }),
+            );
+        }
+    };
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!(
+                    "wechat login status failed: status={status} body={body}"
+                )),
+            }),
+        );
+    }
+    let data = match resp.json::<Value>().await {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("decode wechat login status failed: {err}")),
+                }),
+            );
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(data),
+            error: None,
+        }),
+    )
+}
+
+async fn wechat_login_qr_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<WechatQrStartRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let Ok(base) = wechatd_base_url(&state) else {
+        return wechatd_base_url(&state).err().unwrap();
+    };
+    let url = format!("{}/login/qr/start", base.trim_end_matches('/'));
+    let resp = match state
+        .http_client
+        .post(&url)
+        .json(&json!({ "force": req.force }))
+        .send()
+        .await
+    {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("request wechat QR start failed: {err}")),
+                }),
+            );
+        }
+    };
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("wechat QR start failed: status={status} body={body}")),
+            }),
+        );
+    }
+    let data = match resp.json::<Value>().await {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("decode wechat QR start failed: {err}")),
+                }),
+            );
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(data),
+            error: None,
+        }),
+    )
+}
+
+async fn wechat_login_qr_wait(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<WechatQrWaitRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let Ok(base) = wechatd_base_url(&state) else {
+        return wechatd_base_url(&state).err().unwrap();
+    };
+    let url = format!("{}/login/qr/wait", base.trim_end_matches('/'));
+    let resp = match state
+        .http_client
+        .post(&url)
+        .json(&json!({
+            "session_key": req.session_key,
+            "timeout_ms": req.timeout_ms.unwrap_or(1_500)
+        }))
+        .send()
+        .await
+    {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("request wechat QR wait failed: {err}")),
+                }),
+            );
+        }
+    };
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("wechat QR wait failed: status={status} body={body}")),
+            }),
+        );
+    }
+    let data = match resp.json::<Value>().await {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("decode wechat QR wait failed: {err}")),
+                }),
+            );
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(data),
+            error: None,
+        }),
+    )
+}
+
 async fn whatsapp_web_logout(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -5770,5 +6377,94 @@ async fn local_interaction_context(
                 error: resp.error,
             }),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_workspace_root() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("rustclaw-ui-routes-{unique}"));
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
+
+    #[test]
+    fn write_workspace_and_mounted_file_writes_both_copies() {
+        let root = temp_workspace_root();
+        let relative = "configs/config.toml";
+        let raw = "[llm]\nprovider = \"minimax\"\n";
+
+        write_workspace_and_mounted_file(&root, relative, raw).expect("write config");
+
+        let active = std::fs::read_to_string(root.join(relative)).expect("read active");
+        let mounted =
+            std::fs::read_to_string(root.join("docker/config/config.toml")).expect("read mounted");
+        assert_eq!(active, raw);
+        assert_eq!(mounted, raw);
+    }
+
+    #[test]
+    fn write_workspace_and_mounted_file_writes_channel_copy_to_mounted_channels_dir() {
+        let root = temp_workspace_root();
+        let relative = "configs/channels/wechat.toml";
+        let raw = "[wechat]\nenabled = true\n";
+
+        write_workspace_and_mounted_file(&root, relative, raw).expect("write config");
+
+        let active = std::fs::read_to_string(root.join(relative)).expect("read active");
+        let mounted = std::fs::read_to_string(root.join("docker/config/channels/wechat.toml"))
+            .expect("read mounted");
+        assert_eq!(active, raw);
+        assert_eq!(mounted, raw);
+    }
+
+    #[test]
+    fn llm_runtime_differs_when_only_api_key_changes() {
+        assert!(llm_runtime_differs(
+            "minimax",
+            "MiniMax-M2.7",
+            "https://api.minimax.io/v1",
+            "old-key",
+            "minimax",
+            "MiniMax-M2.7",
+            "https://api.minimax.io/v1",
+            "new-key",
+        ));
+    }
+
+    #[test]
+    fn llm_runtime_differs_when_only_base_url_changes() {
+        assert!(llm_runtime_differs(
+            "minimax",
+            "MiniMax-M2.7",
+            "https://api.minimax.io/v1",
+            "same-key",
+            "minimax",
+            "MiniMax-M2.7",
+            "https://api.minimax.cn/v1",
+            "same-key",
+        ));
+    }
+
+    #[test]
+    fn llm_runtime_differs_is_false_when_runtime_matches_saved_config() {
+        assert!(!llm_runtime_differs(
+            "minimax",
+            "MiniMax-M2.7",
+            "https://api.minimax.io/v1",
+            "same-key",
+            "minimax",
+            "MiniMax-M2.7",
+            "https://api.minimax.io/v1",
+            "same-key",
+        ));
     }
 }

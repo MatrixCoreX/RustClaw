@@ -1,0 +1,8 @@
+# Legacy compatibility file.
+# WhatsApp channel config has been split into:
+# - configs/channels/whatsapp-cloud.toml  (cloud/webhook mode)
+# - configs/channels/whatsapp-web.toml    (QR login / web mode)
+#
+# Loader still reads this file for backward compatibility, but new configs
+# should be placed in the two split files above.
+# 本文件建议仅保留说明，不再继续写实际配置。

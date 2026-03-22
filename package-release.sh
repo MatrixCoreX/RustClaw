@@ -102,6 +102,7 @@ copy_if_exists "start-clawd-ui.sh"
 copy_if_exists "start-telegramd.sh"
 copy_if_exists "start-whatsappd.sh"
 copy_if_exists "start-whatsapp-webd.sh"
+copy_if_exists "start-wechatd.sh"
 copy_if_exists "start-future-adapters.sh"
 copy_if_exists "stop-rustclaw.sh"
 
@@ -221,6 +222,7 @@ script_names = [
     "start-telegramd.sh",
     "start-whatsappd.sh",
     "start-whatsapp-webd.sh",
+    "start-wechatd.sh",
 ]
 
 for name in script_names:
