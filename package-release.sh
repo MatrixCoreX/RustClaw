@@ -90,6 +90,7 @@ copy_if_exists "configs"
 copy_if_exists "prompts"
 copy_if_exists "migrations"
 copy_if_exists "scripts"
+copy_if_exists "pi_app"
 copy_if_exists "services/wa-web-bridge"
 copy_if_exists "README.md"
 copy_if_exists "rustclaw"
@@ -129,6 +130,7 @@ RustClaw 运行时包 — 解压即用
    - 仅后端：./start-all-bin.sh release
 4) 停止：./stop-rustclaw.sh
 5) 数据与日志：data/（数据库）、logs/（运行日志）。
+6) 树莓派小屏（可选）：见 pi_app/ 内脚本与 README；也可用 ./install-rustclaw-cmd.sh --pi-app 配置桌面与自启。
 USAGE
 cat > "$STAGE_PROJECT_DIR/USAGE.txt" <<'USAGE_EN'
 RustClaw runtime package — ready to run
@@ -142,6 +144,7 @@ RustClaw runtime package — ready to run
    - Backend only: ./start-all-bin.sh release
 4) Stop: ./stop-rustclaw.sh
 5) Data and logs: data/ (database), logs/ (runtime logs).
+6) Raspberry Pi small screen (optional): see pi_app/ scripts and README; or ./install-rustclaw-cmd.sh --pi-app for desktop shortcut and autostart.
 USAGE_EN
 
 echo "[5/6] Apply sanitized config as configs/config.toml..."
