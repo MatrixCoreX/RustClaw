@@ -7,6 +7,7 @@ use serde_json::Value;
 pub(crate) enum RuntimeChannel {
     Telegram,
     Whatsapp,
+    Wechat,
     Feishu,
     Lark,
 }
