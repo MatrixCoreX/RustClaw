@@ -176,6 +176,7 @@ pub(crate) struct AppState {
     pub(crate) whatsapp_web_enabled: bool,
     pub(crate) whatsapp_web_bridge_base_url: String,
     pub(crate) future_adapters_enabled: Arc<Vec<String>>,
+    pub(crate) wechat_send_config: Option<crate::channel_send::WechatSendConfig>,
     pub(crate) feishu_send_config: Option<crate::channel_send::FeishuSendConfig>,
     pub(crate) lark_send_config: Option<crate::channel_send::LarkSendConfig>,
     pub(crate) http_client: Client,

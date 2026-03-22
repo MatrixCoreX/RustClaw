@@ -65,3 +65,44 @@ pub(crate) fn load_lark_send_config(workspace_root: &Path) -> Option<channel_sen
         api_base_url,
     })
 }
+
+pub(crate) fn load_wechat_send_config(
+    workspace_root: &Path,
+) -> Option<channel_send::WechatSendConfig> {
+    let path = workspace_root.join("configs/channels/wechat.toml");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let table: TomlValue = toml::from_str(&content).ok()?;
+    let wechat = table.get("wechat")?.as_table()?;
+    let enabled = wechat
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+    let api_base_url = wechat.get("api_base_url")?.as_str()?.trim().to_string();
+    let bot_token = wechat
+        .get("bot_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    if api_base_url.is_empty() || bot_token.is_empty() {
+        return None;
+    }
+    let wechat_uin_base64 = wechat
+        .get("wechat_uin_base64")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let text_chunk_chars = wechat
+        .get("text_chunk_chars")
+        .and_then(|v| v.as_integer())
+        .map(|v| v.max(1) as usize)
+        .unwrap_or(1200);
+    Some(channel_send::WechatSendConfig {
+        api_base_url,
+        bot_token,
+        wechat_uin_base64,
+        text_chunk_chars,
+    })
+}
