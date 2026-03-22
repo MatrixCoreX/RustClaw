@@ -45,6 +45,8 @@ struct BotState {
     pending_image_by_chat: Arc<Mutex<HashMap<i64, String>>>,
     bot_token: String,
     image_inbox_dir: String,
+    video_inbox_dir: String,
+    file_inbox_dir: String,
     audio_inbox_dir: String,
     voice_reply_mode: String,
     voice_mode_nl_intent_enabled: bool,
@@ -622,7 +624,9 @@ fn build_bot_state(
         auto_vision_on_image_only: config.telegram.auto_vision_on_image_only,
         pending_image_by_chat: Arc::new(Mutex::new(HashMap::new())),
         bot_token: bot_config.bot_token.clone(),
-        image_inbox_dir: "image/upload".to_string(),
+        image_inbox_dir: config.telegram.image_inbox_dir.clone(),
+        video_inbox_dir: config.telegram.video_inbox_dir.clone(),
+        file_inbox_dir: config.telegram.file_inbox_dir.clone(),
         audio_inbox_dir: config.telegram.audio_inbox_dir.clone(),
         voice_reply_mode: config.telegram.voice_reply_mode.clone(),
         voice_mode_nl_intent_enabled: config.telegram.voice_mode_nl_intent_enabled,
@@ -719,6 +723,33 @@ fn sanitize_status_name(raw: &str) -> String {
             }
         })
         .collect()
+}
+
+fn safe_telegram_storage_segment(raw: &str, fallback: &str) -> String {
+    let sanitized = sanitize_status_name(raw);
+    if sanitized.trim_matches('_').is_empty() {
+        fallback.to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn build_telegram_inbox_rel_path(
+    root_dir: &str,
+    bot_name: &str,
+    chat_id: i64,
+    user_id: i64,
+    ts: u64,
+    ext: &str,
+) -> String {
+    let base = root_dir.trim().trim_end_matches('/');
+    let safe_bot = safe_telegram_storage_segment(bot_name, "bot");
+    let safe_ext = ext.trim().trim_start_matches('.');
+    if base.is_empty() {
+        format!("{safe_bot}/{chat_id}/{user_id}/{ts}.{safe_ext}")
+    } else {
+        format!("{base}/{safe_bot}/{chat_id}/{user_id}/{ts}.{safe_ext}")
+    }
 }
 
 async fn write_bot_runtime_status(path: &Path, status: &TelegramBotRuntimeStatus) {
@@ -1105,6 +1136,12 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                 return handle_image_only_message(&bot, &msg, &state, user_id, file_id, &ext).await;
             }
             return handle_image_only_save_only(&bot, &msg, &state, user_id, file_id, &ext).await;
+        }
+        if let Some((file_id, ext)) = extract_video_attachment(&msg) {
+            return handle_video_message(&bot, &msg, &state, user_id, file_id, &ext).await;
+        }
+        if let Some((file_id, ext)) = extract_file_attachment(&msg) {
+            return handle_file_message(&bot, &msg, &state, user_id, file_id, &ext).await;
         }
         if let Some((file_id, ext)) = extract_audio_attachment(&msg) {
             return handle_audio_message(&bot, &msg, &state, user_id, file_id, &ext).await;
@@ -1840,9 +1877,13 @@ async fn handle_image_only_message(
 
     let ts = unix_ts();
     let normalized_ext = normalize_image_ext(ext);
-    let rel_path = format!(
-        "{}/tg_{}_{}_{}.{}",
-        state.image_inbox_dir, msg.chat.id.0, user_id, ts, normalized_ext
+    let rel_path = build_telegram_inbox_rel_path(
+        &state.image_inbox_dir,
+        &state.bot_name,
+        msg.chat.id.0,
+        user_id,
+        ts,
+        &normalized_ext,
     );
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
@@ -1898,9 +1939,13 @@ async fn handle_image_only_save_only(
 ) -> anyhow::Result<()> {
     let ts = unix_ts();
     let normalized_ext = normalize_image_ext(ext);
-    let rel_path = format!(
-        "{}/tg_{}_{}_{}.{}",
-        state.image_inbox_dir, msg.chat.id.0, user_id, ts, normalized_ext
+    let rel_path = build_telegram_inbox_rel_path(
+        &state.image_inbox_dir,
+        &state.bot_name,
+        msg.chat.id.0,
+        user_id,
+        ts,
+        &normalized_ext,
     );
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
@@ -1928,9 +1973,13 @@ async fn handle_audio_message(
 ) -> anyhow::Result<()> {
     let ts = unix_ts();
     let normalized_ext = normalize_audio_ext(ext);
-    let rel_path = format!(
-        "{}/tg_{}_{}_{}.{}",
-        state.audio_inbox_dir, msg.chat.id.0, user_id, ts, normalized_ext
+    let rel_path = build_telegram_inbox_rel_path(
+        &state.audio_inbox_dir,
+        &state.bot_name,
+        msg.chat.id.0,
+        user_id,
+        ts,
+        &normalized_ext,
     );
     let abs_path = std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
@@ -2081,6 +2130,72 @@ async fn handle_audio_message(
     Ok(())
 }
 
+async fn handle_file_message(
+    bot: &Bot,
+    msg: &Message,
+    state: &BotState,
+    user_id: i64,
+    file_id: String,
+    ext: &str,
+) -> anyhow::Result<()> {
+    let ts = unix_ts();
+    let normalized_ext = normalize_file_ext(ext);
+    let rel_path = build_telegram_inbox_rel_path(
+        &state.file_inbox_dir,
+        &state.bot_name,
+        msg.chat.id.0,
+        user_id,
+        ts,
+        &normalized_ext,
+    );
+    let abs_path = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(&rel_path);
+    download_telegram_file(state, bot, file_id, &abs_path).await?;
+    bot.send_message(
+        msg.chat.id,
+        state
+            .i18n
+            .t_with("telegram.msg.file_saved_path", &[("path", &rel_path)]),
+    )
+    .await
+    .context("send file saved path message failed")?;
+    Ok(())
+}
+
+async fn handle_video_message(
+    bot: &Bot,
+    msg: &Message,
+    state: &BotState,
+    user_id: i64,
+    file_id: String,
+    ext: &str,
+) -> anyhow::Result<()> {
+    let ts = unix_ts();
+    let normalized_ext = normalize_video_ext(ext);
+    let rel_path = build_telegram_inbox_rel_path(
+        &state.video_inbox_dir,
+        &state.bot_name,
+        msg.chat.id.0,
+        user_id,
+        ts,
+        &normalized_ext,
+    );
+    let abs_path = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(&rel_path);
+    download_telegram_file(state, bot, file_id, &abs_path).await?;
+    bot.send_message(
+        msg.chat.id,
+        state
+            .i18n
+            .t_with("telegram.msg.video_saved_path", &[("path", &rel_path)]),
+    )
+    .await
+    .context("send video saved path message failed")?;
+    Ok(())
+}
+
 fn extract_image_attachment(msg: &Message) -> Option<(String, String)> {
     let MessageKind::Common(common) = &msg.kind else {
         return None;
@@ -2137,6 +2252,81 @@ fn extract_audio_attachment(msg: &Message) -> Option<(String, String)> {
     }
 }
 
+fn extract_video_attachment(msg: &Message) -> Option<(String, String)> {
+    let MessageKind::Common(common) = &msg.kind else {
+        return None;
+    };
+    match &common.media_kind {
+        MediaKind::Video(media) => {
+            let ext = media
+                .video
+                .file_name
+                .as_deref()
+                .and_then(extension_from_filename)
+                .unwrap_or_else(|| "mp4".to_string());
+            Some((media.video.file.id.to_string(), ext))
+        }
+        MediaKind::Document(media) => {
+            let file_name_ext = media
+                .document
+                .file_name
+                .as_deref()
+                .and_then(extension_from_filename)
+                .unwrap_or_default();
+            let mime_is_video = media
+                .document
+                .mime_type
+                .as_ref()
+                .map(|m| m.type_().as_str() == "video")
+                .unwrap_or(false);
+            if mime_is_video || matches!(file_name_ext.as_str(), "mp4" | "mov" | "webm" | "mkv" | "m4v") {
+                let ext = if file_name_ext.is_empty() {
+                    "mp4".to_string()
+                } else {
+                    file_name_ext
+                };
+                Some((media.document.file.id.to_string(), ext))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn extract_file_attachment(msg: &Message) -> Option<(String, String)> {
+    let MessageKind::Common(common) = &msg.kind else {
+        return None;
+    };
+    let MediaKind::Document(media) = &common.media_kind else {
+        return None;
+    };
+    let file_name_ext = media
+        .document
+        .file_name
+        .as_deref()
+        .and_then(extension_from_filename)
+        .unwrap_or_default();
+    let mime = media.document.mime_type.as_ref();
+    let mime_type = mime.map(|m| m.type_().as_str()).unwrap_or("");
+    let mime_subtype = mime.map(|m| m.subtype().as_str()).unwrap_or("");
+    let looks_like_audio = mime_type == "audio"
+        || matches!(mime_subtype, "ogg" | "mpeg" | "mp3" | "wav" | "x-wav" | "aac" | "flac" | "opus")
+        || matches!(
+            file_name_ext.as_str(),
+            "ogg" | "mp3" | "wav" | "m4a" | "aac" | "flac" | "opus"
+        );
+    if mime_type == "image" || is_image_ext(&file_name_ext) || looks_like_audio {
+        return None;
+    }
+    let ext = if file_name_ext.is_empty() {
+        "bin".to_string()
+    } else {
+        file_name_ext
+    };
+    Some((media.document.file.id.to_string(), ext))
+}
+
 async fn download_telegram_file(
     state: &BotState,
     bot: &Bot,
@@ -2163,7 +2353,7 @@ async fn download_telegram_file(
     if let Some(parent) = local_path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
-            .context("create image inbox dir failed")?;
+            .context("create telegram media inbox dir failed")?;
     }
     tokio::fs::write(local_path, &bytes)
         .await
@@ -2198,6 +2388,24 @@ fn normalize_audio_ext(ext: &str) -> String {
         e
     } else {
         "ogg".to_string()
+    }
+}
+
+fn normalize_file_ext(ext: &str) -> String {
+    let e = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    if e.is_empty() {
+        "bin".to_string()
+    } else {
+        e
+    }
+}
+
+fn normalize_video_ext(ext: &str) -> String {
+    let e = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    if matches!(e.as_str(), "mp4" | "mov" | "webm" | "mkv" | "m4v") {
+        e
+    } else {
+        "mp4".to_string()
     }
 }
 

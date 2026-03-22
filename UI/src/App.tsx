@@ -63,6 +63,7 @@ interface HealthResponse {
   larkd_memory_rss_bytes?: number | null;
   user_count?: number;
   bound_channel_count?: number;
+  bound_channels?: string[];
   future_adapters_enabled?: string[];
 }
 
@@ -662,6 +663,18 @@ export default function App() {
     };
     return labels[channel];
   };
+  const boundChannelsLabel = useMemo(() => {
+    const channels = health?.bound_channels ?? [];
+    if (channels.length === 0) return "";
+    return channels
+      .map((channel) => {
+        if (channel === "telegram" || channel === "whatsapp" || channel === "ui" || channel === "wechat" || channel === "feishu" || channel === "lark") {
+          return channelLabel(channel);
+        }
+        return channel;
+      })
+      .join(" / ");
+  }, [health?.bound_channels, lang]);
   const formatDateTimeHuman = (raw: string | null | undefined) => {
     if (!raw) return "--";
     const date = new Date(raw);
@@ -2757,7 +2770,7 @@ export default function App() {
     if ((health?.bound_channel_count ?? 0) === 0) {
       return {
         title: t("绑定你的账号", "Bind your account"),
-        desc: t("第一次使用时，先把 Telegram / WhatsApp / 飞书 这些外部账号绑定到当前登录 key。", "For first-time setup, bind Telegram / WhatsApp / Feishu identities to the current login key."),
+        desc: t("第一次使用时，先把 Telegram / WhatsApp / 微信 / 飞书 这些外部账号绑定到当前登录 key。", "For first-time setup, bind Telegram / WhatsApp / WeChat / Feishu identities to the current login key."),
         page: "channels" as const,
         cta: t("去绑定账号", "Bind account"),
       };
@@ -3434,6 +3447,7 @@ export default function App() {
                     </div>
                     <div className="theme-service-kpi">
                       {t("已绑定渠道", "Bound channels")} {health?.bound_channel_count ?? "--"}
+                      {boundChannelsLabel ? <span className="ml-2 text-xs text-white/45">{boundChannelsLabel}</span> : null}
                     </div>
                   </div>
 

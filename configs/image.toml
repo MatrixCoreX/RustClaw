@@ -71,7 +71,7 @@ oss_url_ttl_seconds = 3600
 #   / 图片编辑推荐 Qwen `qwen-image-edit-max`，当前编辑效果和原生支持更合适
 # [image_edit.providers.openai]
 # base_url = "https://api.openai.com/v1"
-# api_key = ""
+# api_key = "REPLACE_ME_OPENAI_API_KEY"
 # model = "gpt-image-1"
 # timeout_seconds = 120
 [image_edit.providers.minimax]
@@ -193,17 +193,17 @@ timeout_seconds = 90
 #   / 图片理解推荐 OpenAI `gpt-4o-mini`，兼容性更广、输出更稳
 # [image_vision.providers.google]
 # base_url = "https://generativelanguage.googleapis.com/v1beta"
-# api_key = ""
+# api_key = "REPLACE_ME_GOOGLE_API_KEY"
 # model = "gemini-2.5-flash"
 # timeout_seconds = 90
 [image_vision.providers.minimax]
-base_url = "https://api.minimax.io/v1"
+base_url = "https://api.minimax.com/v1"
 api_key = ""
 model = "MiniMax-VL-01"
 timeout_seconds = 90
 # [image_vision.providers.openai]
 # base_url = "https://api.openai.com/v1"
-# api_key = ""
+# api_key = "sk-proj-..."
 # model = "gpt-4o-mini"
 # timeout_seconds = 90
 
