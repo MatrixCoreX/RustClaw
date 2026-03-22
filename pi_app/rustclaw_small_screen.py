@@ -2715,7 +2715,7 @@ class SmallScreenApp:
         self.running_var.set(str(data.get("running_length") if data.get("running_length") is not None else "--"))
         self.worker_var.set((data.get("worker_state") or "--")[:16])
         self.rss_var.set(fmt_bytes(data.get("memory_rss_bytes")))
-        # 通信端：TG 后显示 TG 占用内存，WA / WA-Web / FS(Feishu)
+        # 通信端：TG 后显示 TG 占用内存，WA / WA-Web / FS(Feishu) / Lark / WX(wechatd)
         parts = []
         if data.get("telegramd_healthy") or data.get("telegram_bot_healthy"):
             tg_rss = data.get("telegramd_memory_rss_bytes") or data.get("telegram_bot_memory_rss_bytes")
@@ -2730,8 +2730,11 @@ class SmallScreenApp:
         if data.get("larkd_healthy"):
             lk_rss = data.get("larkd_memory_rss_bytes")
             parts.append("Lark " + fmt_bytes(lk_rss) if lk_rss is not None else "Lark")
+        if data.get("wechatd_healthy"):
+            wx_rss = data.get("wechatd_memory_rss_bytes")
+            parts.append("WX " + fmt_bytes(wx_rss) if wx_rss is not None else "WX")
         self.adapters_var.set(", ".join(parts) if parts else "--")
-        # 通信端占的内存（TG + WA + WA-Web + Feishu + Lark 进程 RSS 之和）
+        # 通信端占的内存（TG + WA + WA-Web + Feishu + Lark + wechatd 进程 RSS 之和）
         def _n(v):
             return v if isinstance(v, (int, float)) and v is not None else 0
         total = (
@@ -2740,6 +2743,7 @@ class SmallScreenApp:
             + _n(data.get("whatsapp_web_memory_rss_bytes"))
             + _n(data.get("feishud_memory_rss_bytes"))
             + _n(data.get("larkd_memory_rss_bytes"))
+            + _n(data.get("wechatd_memory_rss_bytes"))
         )
         self.adapters_rss_var.set(fmt_bytes(int(total)) if total else "--")
         self._update_user_summary_view()
