@@ -95,12 +95,27 @@ fn execute(args: Value) -> Result<String, String> {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "pattern is required".to_string())?
                 .to_ascii_lowercase();
-            walk_collect(&search_root, &mut |p| {
+            let target_kind = obj
+                .get("target_kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("any")
+                .to_ascii_lowercase();
+            walk_collect_nodes(&search_root, &mut |p| {
                 let name = p
                     .file_name()
                     .map(|s| s.to_string_lossy().to_ascii_lowercase())
                     .unwrap_or_default();
-                if name.contains(&pattern) {
+                if !name.contains(&pattern) {
+                    return false;
+                }
+                let kind = if p.is_dir() {
+                    "dir"
+                } else if p.is_file() {
+                    "file"
+                } else {
+                    "other"
+                };
+                if target_kind == "any" || target_kind == kind {
                     results.push(to_rel(&root, p));
                 }
                 results.len() >= max_results
@@ -219,6 +234,27 @@ fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), Str
         let p = entry.path();
         if p.is_dir() {
             walk_collect(&p, f)?;
+        } else if f(&p) {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn walk_collect_nodes(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), String> {
+    if path.is_file() {
+        let _ = f(path);
+        return Ok(());
+    }
+    if path.is_dir() && f(path) {
+        return Ok(());
+    }
+    let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
+    for entry in iter {
+        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
+        let p = entry.path();
+        if p.is_dir() {
+            walk_collect_nodes(&p, f)?;
         } else if f(&p) {
             return Ok(());
         }
