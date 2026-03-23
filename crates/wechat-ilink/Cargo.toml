@@ -20,3 +20,6 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
 tracing = "0.1"
 urlencoding = "2"
+
+[dev-dependencies]
+axum.workspace = true
