@@ -6,6 +6,7 @@
 ## Capability Summary
 - `fs_search` performs filesystem-level search by name, extension, text, or images.
 - It is intended for bounded queries with optional root scoping and result caps.
+- `find_name` can return directory names as well as file names; use `target_kind` to narrow when needed.
 
 ## Actions
 - `find_name`
@@ -17,7 +18,8 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of supported search actions. |
-| `find_name` | `pattern` (or `name`/`keyword`) | yes | string | - | Name pattern/keyword. |
+| `find_name` | `pattern` (or `name`/`keyword`) | yes | string | - | Name pattern/keyword; matches basename contains. |
+| `find_name` | `target_kind` | no | string | `any` | `any|file|dir`; narrow name search to files or directories. |
 | `find_ext` | `ext` (or `extension`) | yes | string | - | Extension selector (e.g. `rs`). |
 | `grep_text` | `query` | yes | string | - | Text/regex query for content search. |
 | optional | `root` | no | string(path) | workspace | Search root path. |
@@ -28,6 +30,7 @@
 - Invalid root path.
 - Unsupported action names.
 - Search runtime errors return readable filesystem/tool errors.
+- `find_name` may return both files and directories unless `target_kind` is provided.
 
 ## Request/Response Examples
 ### Example 1

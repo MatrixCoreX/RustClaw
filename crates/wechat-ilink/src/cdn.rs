@@ -1,6 +1,6 @@
 //! Weixin CDN download/upload (`cdn-url.ts`, `cdn-upload.ts`, `upload.ts`, `send.ts`).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as B64;
@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::crypto::{aes_ecb_padded_size, decrypt_aes_128_ecb, encrypt_aes_128_ecb};
 use crate::http::{post_ilink_json, BaseInfo, IlinkAuth};
@@ -76,6 +76,51 @@ pub async fn fetch_cdn_bytes(client: &Client, url: &str, label: &str) -> Result<
         .map_err(|e| format!("{label}: cdn read body {e}"))
 }
 
+pub async fn download_remote_media_to_temp(
+    client: &Client,
+    url: &str,
+    dest_dir: &Path,
+    prefix: &str,
+) -> Result<PathBuf, String> {
+    let res = client
+        .get(url)
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|e| format!("remote media download failed: fetch {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!(
+            "remote media download failed: {} {} url={}",
+            res.status(),
+            res.status().canonical_reason().unwrap_or(""),
+            url
+        ));
+    }
+    let content_type = res
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let body = res
+        .bytes()
+        .await
+        .map_err(|e| format!("remote media download failed: read body {e}"))?;
+    tokio::fs::create_dir_all(dest_dir)
+        .await
+        .map_err(|e| format!("remote media download failed: mkdir {e}"))?;
+    let suffix = hex::encode(rand::random::<[u8; 4]>());
+    let mut filename = format!("{}-{}-{}", prefix.trim_matches('-'), ts_ms(), suffix);
+    if let Some(ext) = infer_extension_from_content_type_or_url(content_type.as_deref(), url) {
+        filename.push('.');
+        filename.push_str(&ext);
+    }
+    let path = dest_dir.join(filename);
+    tokio::fs::write(&path, &body)
+        .await
+        .map_err(|e| format!("remote media download failed: write {e}"))?;
+    Ok(path)
+}
+
 #[derive(Serialize)]
 pub struct GetUploadUrlReq {
     pub filekey: String,
@@ -84,6 +129,12 @@ pub struct GetUploadUrlReq {
     pub rawsize: i64,
     pub rawfilemd5: String,
     pub filesize: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb_rawsize: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb_rawfilemd5: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb_filesize: Option<i64>,
     pub no_need_thumb: bool,
     pub aeskey: String,
     pub base_info: BaseInfo,
@@ -123,7 +174,6 @@ pub struct UploadedCdnBlob {
     pub filekey: String,
     pub download_encrypted_query_param: String,
     pub aeskey_hex: String,
-    #[allow(dead_code)]
     pub plaintext_size: usize,
     pub ciphertext_size: usize,
 }
@@ -153,7 +203,6 @@ pub async fn upload_plaintext_to_cdn(
         let aeskey_hex = hex::encode(aeskey_bytes);
         (filekey, aeskey_bytes, aeskey_hex)
     };
-
     let req = GetUploadUrlReq {
         filekey: filekey.clone(),
         media_type: upload_media_type,
@@ -161,6 +210,9 @@ pub async fn upload_plaintext_to_cdn(
         rawsize,
         rawfilemd5,
         filesize,
+        thumb_rawsize: None,
+        thumb_rawfilemd5: None,
+        thumb_filesize: None,
         no_need_thumb: true,
         aeskey: aeskey_hex.clone(),
         base_info: BaseInfo {
@@ -175,20 +227,45 @@ pub async fn upload_plaintext_to_cdn(
 
     let ciphertext = encrypt_aes_128_ecb(plaintext, &aeskey_bytes)?;
     let cdn_url = build_cdn_upload_url(cdn_base_url.trim_end_matches('/'), &upload_param, &filekey);
+    let download_encrypted_query_param = upload_cdn_ciphertext(
+        client,
+        &cdn_url,
+        &ciphertext,
+        true,
+        "cdn upload",
+    )
+    .await?
+    .ok_or_else(|| "cdn upload: missing x-encrypted-param".to_string())?;
 
+    Ok(UploadedCdnBlob {
+        filekey,
+        download_encrypted_query_param,
+        aeskey_hex,
+        plaintext_size: plaintext.len(),
+        ciphertext_size: ciphertext.len(),
+    })
+}
+
+async fn upload_cdn_ciphertext(
+    client: &Client,
+    cdn_url: &str,
+    ciphertext: &[u8],
+    require_download_param: bool,
+    label: &str,
+) -> Result<Option<String>, String> {
     let mut last_err = String::new();
     for attempt in 1..=CDN_UPLOAD_MAX_RETRIES {
         let res = match client
-            .post(&cdn_url)
+            .post(cdn_url)
             .header("Content-Type", "application/octet-stream")
             .timeout(Duration::from_secs(120))
-            .body(ciphertext.clone())
+            .body(ciphertext.to_vec())
             .send()
             .await
         {
             Ok(r) => r,
             Err(e) => {
-                last_err = format!("cdn upload attempt {attempt}: {e}");
+                last_err = format!("{label} attempt {attempt}: {e}");
                 warn!("wechat-ilink: {}", last_err);
                 continue;
             }
@@ -203,10 +280,10 @@ pub async fn upload_plaintext_to_cdn(
                 Some(s) if !s.is_empty() => s.to_string(),
                 _ => res.text().await.unwrap_or_default(),
             };
-            return Err(format!("cdn upload client error {status}: {msg}"));
+            return Err(format!("{label} client error {status}: {msg}"));
         }
         if !status.is_success() {
-            last_err = format!("cdn upload attempt {attempt} status={status}");
+            last_err = format!("{label} attempt {attempt} status={status}");
             warn!("wechat-ilink: {}", last_err);
             continue;
         }
@@ -215,18 +292,15 @@ pub async fn upload_plaintext_to_cdn(
             .get("x-encrypted-param")
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
-        let Some(download_encrypted_query_param) = download_param.filter(|s| !s.is_empty()) else {
-            last_err = format!("cdn upload attempt {attempt}: missing x-encrypted-param");
-            warn!("wechat-ilink: {}", last_err);
-            continue;
-        };
-        return Ok(UploadedCdnBlob {
-            filekey,
-            download_encrypted_query_param,
-            aeskey_hex,
-            plaintext_size: plaintext.len(),
-            ciphertext_size: ciphertext.len(),
-        });
+        if require_download_param {
+            let Some(param) = download_param.filter(|s| !s.is_empty()) else {
+                last_err = format!("{label} attempt {attempt}: missing x-encrypted-param");
+                warn!("wechat-ilink: {}", last_err);
+                continue;
+            };
+            return Ok(Some(param));
+        }
+        return Ok(None);
     }
     Err(last_err)
 }
@@ -237,6 +311,40 @@ pub fn media_aes_key_b64_from_hex(aeskey_hex: &str) -> Result<String, String> {
         return Err(format!("aeskey hex len {}", raw.len()));
     }
     Ok(B64.encode(raw))
+}
+
+fn infer_extension_from_content_type_or_url(content_type: Option<&str>, url: &str) -> Option<String> {
+    let content_type = content_type
+        .and_then(|v| v.split(';').next())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_ascii_lowercase);
+    if let Some(ct) = content_type.as_deref() {
+        let mapped = match ct {
+            "image/jpeg" => Some("jpg"),
+            "image/png" => Some("png"),
+            "image/webp" => Some("webp"),
+            "image/gif" => Some("gif"),
+            "image/bmp" => Some("bmp"),
+            "video/mp4" => Some("mp4"),
+            "video/webm" => Some("webm"),
+            "video/quicktime" => Some("mov"),
+            "application/pdf" => Some("pdf"),
+            "text/plain" => Some("txt"),
+            "application/json" => Some("json"),
+            _ => None,
+        };
+        if let Some(ext) = mapped {
+            return Some(ext.to_string());
+        }
+    }
+    let url_path = url.split(['?', '#']).next().unwrap_or(url);
+    let ext = Path::new(url_path)
+        .extension()
+        .and_then(|v| v.to_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?;
+    Some(ext.to_ascii_lowercase())
 }
 
 fn ts_ms() -> u64 {
@@ -305,6 +413,12 @@ pub async fn send_weixin_image_from_file(
         channel_version,
     )
     .await?;
+    info!(
+        "wechat-ilink: outbound image uploaded path={} raw={} cipher={}",
+        file_path.display(),
+        uploaded.plaintext_size,
+        uploaded.ciphertext_size
+    );
     let aes_b64 = media_aes_key_b64_from_hex(&uploaded.aeskey_hex)?;
     let ts = ts_ms();
     let mut msg_obj = json!({

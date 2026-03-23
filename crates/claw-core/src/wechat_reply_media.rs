@@ -10,46 +10,105 @@ pub enum WechatOutboundKind {
     File,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WechatOutboundSource {
+    LocalPath(PathBuf),
+    RemoteUrl(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WechatOutboundMedia {
+    pub kind: WechatOutboundKind,
+    pub source: WechatOutboundSource,
+}
+
 /// Ordered media attachments to send after optional caption text (line order preserved).
 pub fn extract_wechat_outbound_media(
     answer: &str,
     workspace_root: &Path,
-) -> Vec<(PathBuf, WechatOutboundKind)> {
+) -> Vec<WechatOutboundMedia> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for line in answer.lines() {
         let t = line.trim();
         if let Some(rest) = t.strip_prefix("IMAGE_FILE:") {
-            if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
-                if is_probably_image(&p) && p.is_file() && seen.insert(p.clone()) {
-                    out.push((p, WechatOutboundKind::Image));
-                }
-            }
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                Some(WechatOutboundKind::Image),
+            );
             continue;
         }
         if let Some(rest) = t.strip_prefix("VIDEO_FILE:") {
-            if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
-                if is_probably_video(&p) && p.is_file() && seen.insert(p.clone()) {
-                    out.push((p, WechatOutboundKind::Video));
-                }
-            }
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                Some(WechatOutboundKind::Video),
+            );
             continue;
         }
         if let Some(rest) = t.strip_prefix("FILE:") {
-            if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
-                if p.is_file() && seen.insert(p.clone()) {
-                    let kind = classify_path_kind(&p);
-                    out.push((p, kind));
-                }
-            }
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                None,
+            );
             continue;
         }
         if let Some(rest) = t.strip_prefix("FILE_FILE:") {
-            if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
-                if p.is_file() && seen.insert(p.clone()) {
-                    out.push((p, WechatOutboundKind::File));
-                }
-            }
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                Some(WechatOutboundKind::File),
+            );
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("IMAGE_URL:") {
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                Some(WechatOutboundKind::Image),
+            );
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("VIDEO_URL:") {
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                Some(WechatOutboundKind::Video),
+            );
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("FILE_URL:") {
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                Some(WechatOutboundKind::File),
+            );
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("MEDIA_URL:") {
+            push_media_reference(
+                &mut out,
+                &mut seen,
+                workspace_root,
+                normalize_token(rest),
+                None,
+            );
             continue;
         }
         for prefix in [
@@ -58,43 +117,42 @@ pub fn extract_wechat_outbound_media(
             "图片编辑成功并已保存：",
         ] {
             if let Some(rest) = t.strip_prefix(prefix) {
-                if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
-                    if is_probably_image(&p) && p.is_file() && seen.insert(p.clone()) {
-                        out.push((p, WechatOutboundKind::Image));
-                    }
-                }
+                push_media_reference(
+                    &mut out,
+                    &mut seen,
+                    workspace_root,
+                    normalize_token(rest),
+                    Some(WechatOutboundKind::Image),
+                );
                 break;
             }
         }
         for prefix in ["视频已保存：", "视频生成成功并已保存："] {
             if let Some(rest) = t.strip_prefix(prefix) {
-                if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
-                    if is_probably_video(&p) && p.is_file() && seen.insert(p.clone()) {
-                        out.push((p, WechatOutboundKind::Video));
-                    }
-                }
+                push_media_reference(
+                    &mut out,
+                    &mut seen,
+                    workspace_root,
+                    normalize_token(rest),
+                    Some(WechatOutboundKind::Video),
+                );
                 break;
             }
         }
         for prefix in ["Saved path:", "保存路径：", "文件路径：", "文件路径:"] {
             if let Some(rest) = t.strip_prefix(prefix) {
-                if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
-                    if p.is_file() && seen.insert(p.clone()) {
-                        let kind = classify_path_kind(&p);
-                        out.push((p, kind));
-                    }
-                }
+                push_media_reference(
+                    &mut out,
+                    &mut seen,
+                    workspace_root,
+                    normalize_token(rest),
+                    None,
+                );
                 break;
             }
         }
         if let Some(p) = parse_written_bytes_line(t) {
-            if let Some(abs) = resolve_workspace_path(workspace_root, p) {
-                if !abs.is_file() || !seen.insert(abs.clone()) {
-                    continue;
-                }
-                let kind = classify_path_kind(&abs);
-                out.push((abs, kind));
-            }
+            push_media_reference(&mut out, &mut seen, workspace_root, p, None);
         }
     }
     out
@@ -104,8 +162,13 @@ pub fn extract_wechat_outbound_media(
 pub fn extract_image_paths_from_reply(answer: &str, workspace_root: &Path) -> Vec<PathBuf> {
     extract_wechat_outbound_media(answer, workspace_root)
         .into_iter()
-        .filter(|(_, k)| *k == WechatOutboundKind::Image)
-        .map(|(p, _)| p)
+        .filter_map(|media| match media {
+            WechatOutboundMedia {
+                kind: WechatOutboundKind::Image,
+                source: WechatOutboundSource::LocalPath(path),
+            } => Some(path),
+            _ => None,
+        })
         .collect()
 }
 
@@ -118,6 +181,10 @@ pub fn strip_wechat_delivery_lines(answer: &str) -> String {
                 || t.starts_with("VIDEO_FILE:")
                 || t.starts_with("FILE:")
                 || t.starts_with("FILE_FILE:")
+                || t.starts_with("IMAGE_URL:")
+                || t.starts_with("VIDEO_URL:")
+                || t.starts_with("FILE_URL:")
+                || t.starts_with("MEDIA_URL:")
             {
                 return false;
             }
@@ -153,6 +220,67 @@ fn normalize_token(s: &str) -> String {
     s.trim().trim_matches('"').trim_matches('\'').to_string()
 }
 
+fn push_media_reference(
+    out: &mut Vec<WechatOutboundMedia>,
+    seen: &mut HashSet<String>,
+    workspace_root: &Path,
+    token: String,
+    forced_kind: Option<WechatOutboundKind>,
+) {
+    let Some(media) = parse_media_reference(workspace_root, token, forced_kind) else {
+        return;
+    };
+    let key = media_dedupe_key(&media);
+    if seen.insert(key) {
+        out.push(media);
+    }
+}
+
+fn parse_media_reference(
+    workspace_root: &Path,
+    token: String,
+    forced_kind: Option<WechatOutboundKind>,
+) -> Option<WechatOutboundMedia> {
+    if token.is_empty() {
+        return None;
+    }
+    if is_remote_url(&token) {
+        return Some(WechatOutboundMedia {
+            kind: forced_kind.unwrap_or_else(|| classify_remote_kind(&token)),
+            source: WechatOutboundSource::RemoteUrl(token),
+        });
+    }
+    let local_token = normalize_local_token(&token);
+    let path = resolve_workspace_path(workspace_root, local_token)?;
+    if !path.is_file() {
+        return None;
+    }
+    Some(WechatOutboundMedia {
+        kind: forced_kind.unwrap_or_else(|| classify_path_kind(&path)),
+        source: WechatOutboundSource::LocalPath(path),
+    })
+}
+
+fn media_dedupe_key(media: &WechatOutboundMedia) -> String {
+    match media {
+        WechatOutboundMedia {
+            kind,
+            source: WechatOutboundSource::LocalPath(path),
+        } => format!("{kind:?}:local:{}", path.display()),
+        WechatOutboundMedia {
+            kind,
+            source: WechatOutboundSource::RemoteUrl(url),
+        } => format!("{kind:?}:remote:{url}"),
+    }
+}
+
+fn normalize_local_token(token: &str) -> String {
+    token
+        .strip_prefix("file://")
+        .unwrap_or(token)
+        .to_string()
+}
+
 fn resolve_workspace_path(workspace_root: &Path, token: String) -> Option<PathBuf> {
     if token.is_empty() {
         return None;
@@ -170,6 +298,10 @@ fn resolve_workspace_path(workspace_root: &Path, token: String) -> Option<PathBu
             None
         }
     })
+}
+
+fn is_remote_url(token: &str) -> bool {
+    token.starts_with("http://") || token.starts_with("https://")
 }
 
 fn is_probably_image(p: &Path) -> bool {
@@ -200,6 +332,32 @@ fn classify_path_kind(p: &Path) -> WechatOutboundKind {
     if is_probably_image(p) {
         WechatOutboundKind::Image
     } else if is_probably_video(p) {
+        WechatOutboundKind::Video
+    } else {
+        WechatOutboundKind::File
+    }
+}
+
+fn classify_remote_kind(url: &str) -> WechatOutboundKind {
+    let normalized = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .to_ascii_lowercase();
+    if normalized.ends_with(".jpg")
+        || normalized.ends_with(".jpeg")
+        || normalized.ends_with(".png")
+        || normalized.ends_with(".webp")
+        || normalized.ends_with(".gif")
+        || normalized.ends_with(".bmp")
+    {
+        WechatOutboundKind::Image
+    } else if normalized.ends_with(".mp4")
+        || normalized.ends_with(".mov")
+        || normalized.ends_with(".webm")
+        || normalized.ends_with(".mkv")
+        || normalized.ends_with(".m4v")
+    {
         WechatOutboundKind::Video
     } else {
         WechatOutboundKind::File

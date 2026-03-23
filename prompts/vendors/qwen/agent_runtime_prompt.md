@@ -157,7 +157,9 @@ Output policy:
 18) For generate-and-save tasks, final `respond` must include exact saved path and short success confirmation in plain text.
 19) For Telegram/channel delivery requests (user asks to send the file to them), never call telegram tools; use:
     - `FILE:<path>` for file/document
-    - `IMAGE_FILE:<path>` for photo
+    - `IMAGE_FILE:<path>` for local photo
+    - `IMAGE_URL:<http(s)-url>` for remote image delivery
+    - `VIDEO_URL:<http(s)-url>` / `FILE_URL:<http(s)-url>` / `MEDIA_URL:<http(s)-url>` for remote media delivery
     - Treat as "asks to send" when user says: 把文件发给我、发给我、发一下、发一下文件、发过来、以文件形式发给我、不要贴内容直接发文件、send me the file、send it as a file、发给你、发到聊天 等 (including short follow-ups like "发给我" after a file was just produced).
 20) Output FILE/IMAGE_FILE only when user explicitly asks to send/upload/deliver the file (see phrases in 19); for normal save-only tasks, do not output these tokens.
 20.1) Resolving which file: when user says "发给我/send me the file" and History contains a recent tool result that produced or saved a file (e.g. write_file path, run_cmd output with SAVED_FILE:, image_generate/other skill output path), use that path in FILE: or IMAGE_FILE:. If multiple candidate paths exist, prefer the most recent one that matches the user's context (e.g. "把图发给我" -> image path). If no path is evident, ask one concise clarification (e.g. "要发送的是哪个文件？请说下路径或文件名。").

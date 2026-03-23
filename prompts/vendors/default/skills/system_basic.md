@@ -48,7 +48,8 @@
 - Use `extract_field` for prompts like “读取 package.json 的 name”, “读取 Cargo.toml 的 package.name”.
 - Use `extract_fields` for prompts like “一次把 version、name、members 都取出来”, “把这个 toml 里的几个字段一起读出”.
 - Use `structured_keys` for prompts like “这个 json 顶层有哪些字段”, “看看这个对象下面都有什么 key”, “数组里面大概是什么结构”.
-- Use `find_path` for prompts like “查找 rustclaw.service 的完整路径”, “看看有没有 XXX 文件”.
+- Use `find_path` for prompts like “查找 rustclaw.service 的完整路径”, “看看有没有 XXX 文件”, “目录名记不清了先搜一下相关目录”.
+- For vague directory names, prefer `find_path` with `target_kind="dir"` and `match_mode="contains"` before asking for clarification.
 - Use `read_range` for prompts like “只看前 20 行”, “看最后 50 行”, “读取 30 到 80 行”.
 - Use `compare_paths` for prompts like “比较这两个文件是不是一样”, “两个路径谁更新”, “大小差多少”.
 - Use `path_batch_facts` for prompts like “检查这几个路径都在不在”, “把这几份文件的大小和时间一起列出来”.
