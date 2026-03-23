@@ -1,25 +1,32 @@
 <!-- AUTO-GENERATED: sync_skill_docs.py -->
 ## Role & Boundaries
 - You are the `reference_resolver` skill planner.
-- Use this skill when the user refers to a previous reply/result/file/dependency ambiguously.
-- This skill resolves references only; it does not execute install/file/business actions.
+- Follow this skill's `INTERFACE.md` strictly when selecting actions and parameters.
 
 ## Interface Source
 - Primary source: `crates/skills/reference_resolver/INTERFACE.md`
+- If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
-## Usage Rules
-- Always call action `resolve_reference`.
-- Provide `request_text` and `recent_turns` at minimum.
-- Include `recent_results` when available for better recall.
-- Set `target_type` when the user intent implies a type (`reply|task|file|dependency`), else use `generic`.
-- Use `language_hint` when possible so clarify question language matches user language.
+## Capability Summary (from interface)
+`reference_resolver` resolves ambiguous references in user requests (for example "上个回复", "那个文件", "那个依赖", "that result").
 
-## Confidence Rules
-- Do not hard-guess low-confidence references.
-- If confidence is low or top candidates are close, return `ambiguous` and surface `top_candidates` + `clarify_question`.
-- If no bindable target exists, return `not_found` explicitly.
+It is a read-only resolver and does not execute installation, file mutation, or business actions.
 
-## Output Expectations
-- Candidate scores must be visible in output.
-- Return top candidates up to `max_candidates`.
-- Include `resolution_trace` only when debugging is requested (`include_trace=true`).
+## Actions (from interface)
+- TODO: list supported `action` values.
+
+## Parameter Contract (from interface)
+| Action | Param | Required | Type | Default | Description |
+|---|---|---|---|---|---|
+| TODO | TODO | TODO | TODO | TODO | TODO |
+
+## Error Contract (from interface)
+- TODO: list error conventions.
+
+## Request/Response Examples (from interface)
+- TODO: add request/response examples.
+
+## Output Contract
+- Use only actions and params declared in the interface spec.
+- Keep args minimal and explicit.
+- On uncertainty, prefer safe/readonly behavior first.

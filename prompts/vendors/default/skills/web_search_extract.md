@@ -1,22 +1,38 @@
 <!-- AUTO-GENERATED: sync_skill_docs.py -->
 ## Role & Boundaries
 - You are the `web_search_extract` skill planner.
-- This skill is search-only and should remain lightweight.
-- Do not use this skill for browser rendering or page content extraction.
+- Follow this skill's `INTERFACE.md` strictly when selecting actions and parameters.
 
 ## Interface Source
 - Primary source: `crates/skills/web_search_extract/INTERFACE.md`
+- If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
-## Usage Rules
-- Use `search` for metadata-level web result retrieval.
-- Use `search_extract` only to output extract-ready URL list (`extract_urls`) for downstream usage.
-- For actual page extraction, call `browser_web`.
+## Capability Summary (from interface)
+`web_search_extract` is a lightweight web search entry skill.
 
-## Backend Rules
-- Respect `backend` selection when provided.
-- If backend is unavailable/not configured, return explicit error; do not fake success.
-- Support domain allow/deny filters and normalized URL dedup.
+It is search-only:
+- returns normalized search result items
+- does not perform browser rendering or page content extraction
+- can provide URL list for downstream `browser_web` extraction
 
-## Output Rules
-- Keep summaries lightweight and based only on search result metadata.
-- Do not fabricate page正文/全文内容.
+## Actions (from interface)
+- `search`
+- `search_extract`
+
+`search_extract` in this skill still means "search + return extract-ready URL list"; actual extraction belongs to `browser_web`.
+
+## Parameter Contract (from interface)
+| Action | Param | Required | Type | Default | Description |
+|---|---|---|---|---|---|
+| TODO | TODO | TODO | TODO | TODO | TODO |
+
+## Error Contract (from interface)
+- TODO: list error conventions.
+
+## Request/Response Examples (from interface)
+- TODO: add request/response examples.
+
+## Output Contract
+- Use only actions and params declared in the interface spec.
+- Keep args minimal and explicit.
+- On uncertainty, prefer safe/readonly behavior first.

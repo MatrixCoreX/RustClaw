@@ -389,6 +389,8 @@ Skill behavior notes (file/path):
   - `find_ext`: `ext` (or `extension`)
   - `grep_text`: `query`
 - optional: `root`, `max_results`
+- Prefer `system_basic.find_path` for exact/full-path lookup tasks.
+- Prefer `system_basic.inventory_dir` for immediate directory listing / hidden-file / names-only inventory tasks.
 
 #### fs_search JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"fs_search","args":{...}}`
@@ -503,14 +505,41 @@ Skill behavior notes (file/path):
 - Prefer `list` for readonly queries
 - For cancel requests without a specific number, prefer `cancel_all`
 
-### system_basic (supplementary — system introspection only)
-- **File/command/dir 能力已全部收口为独立 base skill**：run_cmd, read_file, write_file, list_dir, make_dir, remove_file 均使用上方的独立 skill，不要用 system_basic。
-- system_basic 仅保留：**info**（主机/运行时信息等系统自检）。
-- required: `info` 无必填参数。
+### system_basic (supplementary — complex readonly system/file queries)
+- **原子文件/目录/命令能力仍使用独立 base skill**：run_cmd, read_file, write_file, list_dir, make_dir, remove_file 均不要由 system_basic 替代。
+- system_basic 保留并增强为**复杂查询层**：
+  - `info`：主机/运行时信息等系统自检
+  - `inventory_dir`：目录清单、隐藏文件判断、名字列表、扩展名过滤
+  - `count_inventory`：目录/子目录数量统计、扩展名分布、总字节数
+  - `workspace_glance`：目录顶层速览，适合“先看概况再深入”
+  - `tree_summary`：受限目录树概览，适合“先看结构，不要全量展开”
+  - `dir_compare`：比较两个目录的共同项、左右独有项、类型不一致项
+  - `extract_field`：JSON/TOML/YAML 字段提取
+  - `extract_fields`：一次提取多个结构化字段，减少重复解析
+  - `structured_keys`：查看结构化文件某个对象/数组的大致键名或形状
+  - `find_path`：按名称/模式返回完整路径
+  - `read_range`：按头部/尾部/指定行区间读取带行号片段
+  - `compare_paths`：比较两个路径的类型、大小、时间和文件内容是否一致
+  - `path_batch_facts`：批量检查一组显式路径的存在性与元数据
+  - `diagnose_runtime`：聚合型运行时诊断摘要
+- required:
+  - `info` 无必填参数
+  - `inventory_dir` 默认 `path="."`
+  - `count_inventory` 默认 `path="."`
+  - `workspace_glance` 默认 `path="."`
+  - `tree_summary` 默认 `path="."`
+  - `dir_compare` 需要 `left_path` + `right_path`
+  - `extract_field` 需要 `path` + `field_path`
+  - `extract_fields` 需要 `path` + `field_paths`
+  - `structured_keys` 需要 `path`
+  - `find_path` 需要 `name` 或 `pattern`
+  - `read_range` 需要 `path`
+  - `compare_paths` 需要 `left_path` + `right_path`
+  - `path_batch_facts` 需要 `paths`
 
 #### system_basic JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"system_basic","args":{...}}`
-- Use only for **info** (system introspection). For any file/dir/command operation use the standalone base skills above.
+- Use `system_basic` only for the higher-level readonly actions above. For raw file/dir/command execution, continue to use the standalone base skills.
 
 ## Execution constraints
 - Args must match capability definitions above; do not add unknown fields.
