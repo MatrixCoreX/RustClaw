@@ -140,6 +140,7 @@ interface LlmVendorOption {
   models: string[];
   base_url: string;
   api_key?: string;
+  api_format?: string;
   api_key_configured: boolean;
   api_key_masked?: string | null;
 }
@@ -542,6 +543,7 @@ export default function App() {
   const [llmConfigSaveMessage, setLlmConfigSaveMessage] = useState<string | null>(null);
   const [llmDraftBaseUrl, setLlmDraftBaseUrl] = useState("");
   const [llmDraftApiKey, setLlmDraftApiKey] = useState("");
+  const [llmDraftApiFormat, setLlmDraftApiFormat] = useState("openai_compat");
   const [multimodalConfigData, setMultimodalConfigData] = useState<ModelConfigResponse | null>(null);
   const [multimodalConfigLoading, setMultimodalConfigLoading] = useState(false);
   const [multimodalConfigError, setMultimodalConfigError] = useState<string | null>(null);
@@ -1395,6 +1397,7 @@ export default function App() {
       const selectedVendor = body.data.vendors.find((vendor) => vendor.name === (body.data.selected_vendor || ""));
       setLlmDraftBaseUrl(selectedVendor?.base_url || "");
       setLlmDraftApiKey(selectedVendor?.api_key || "");
+      setLlmDraftApiFormat(selectedVendor?.name === "minimax" ? (selectedVendor.api_format || "openai_compat") : "");
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setLlmConfigError(message);
@@ -1683,6 +1686,7 @@ export default function App() {
           selected_model: llmDraftModel,
           vendor_base_url: llmDraftBaseUrl,
           vendor_api_key: llmDraftApiKey.trim(),
+          vendor_api_format: llmDraftVendor === "minimax" ? llmDraftApiFormat : undefined,
         }),
       });
       const body = (await res.json()) as ApiResponse<{
@@ -2567,10 +2571,11 @@ export default function App() {
             draftModel: llmDraftModel,
             draftBaseUrl: llmDraftBaseUrl,
             draftApiKey: llmDraftApiKey,
+            draftApiFormat: llmDraftApiFormat,
           }
         : null,
     );
-  }, [llmConfigData, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
+  }, [llmConfigData, llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
   const llmRuntimeLabel = useMemo(() => {
     if (!llmConfigData?.runtime?.vendor || !llmConfigData.runtime.model) {
       return t("当前还没有读到运行中的模型信息", "Runtime model info is not available yet");
@@ -2646,12 +2651,14 @@ export default function App() {
       setLlmDraftModel("");
       setLlmDraftBaseUrl("");
       setLlmDraftApiKey("");
+      setLlmDraftApiFormat("");
       return;
     }
     const nextModel = vendorInfo.default_model || vendorInfo.models[0] || "";
     setLlmDraftModel(nextModel);
     setLlmDraftBaseUrl(vendorInfo.base_url || "");
     setLlmDraftApiKey(vendorInfo.api_key || "");
+    setLlmDraftApiFormat(vendorInfo.name === "minimax" ? (vendorInfo.api_format || "openai_compat") : "");
   };
 
   const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
@@ -3860,6 +3867,22 @@ export default function App() {
                         />
                       </label>
 
+                      {selectedLlmVendorInfo?.name === "minimax" ? (
+                        <label className="block space-y-2">
+                          <span className="text-xs uppercase tracking-widest text-white/50">{t("接口协议", "Protocol")}</span>
+                          <select
+                            className="theme-input"
+                            value={llmDraftApiFormat || "openai_compat"}
+                            onChange={(e) => setLlmDraftApiFormat(e.target.value)}
+                          >
+                            <option value="openai_compat">{t("OpenAI（默认）", "OpenAI (Default)")}</option>
+                            <option value="anthropic_claude">{t("Anthropic", "Anthropic")}</option>
+                          </select>
+                          <p className="text-xs text-white/45">
+                            {t("MiniMax 默认走 OpenAI 兼容接口；只有你填的是 Anthropic 风格地址时，再切到 Anthropic。", "MiniMax uses the OpenAI-compatible API by default. Switch to Anthropic only when your base URL is an Anthropic-style endpoint.")}
+                          </p>
+                        </label>
+                      ) : (
                       <label className="block space-y-2">
                         <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
                         <input
@@ -3872,6 +3895,39 @@ export default function App() {
                           disabled={!selectedLlmVendorInfo}
                         />
                       </label>
+                      )}
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {selectedLlmVendorInfo?.name === "minimax" ? (
+                        <label className="block space-y-2">
+                          <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
+                          <input
+                            type="text"
+                            className="theme-input"
+                            value={llmDraftApiKey}
+                            onChange={(e) => setLlmDraftApiKey(e.target.value)}
+                            placeholder="sk-..."
+                            autoComplete="off"
+                            disabled={!selectedLlmVendorInfo}
+                          />
+                        </label>
+                      ) : null}
+
+                      {selectedLlmVendorInfo?.name !== "minimax" ? (
+                        <label className="block space-y-2">
+                          <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
+                          <input
+                            type="text"
+                            className="theme-input"
+                            value={llmDraftApiKey}
+                            onChange={(e) => setLlmDraftApiKey(e.target.value)}
+                            placeholder="sk-..."
+                            autoComplete="off"
+                            disabled={!selectedLlmVendorInfo}
+                          />
+                        </label>
+                      ) : <div />}
                     </div>
 
                     {llmConfigError ? (
@@ -3904,6 +3960,14 @@ export default function App() {
                             <span className="text-white/45">Base URL</span>
                             <span className="ml-2 text-white/80">{selectedLlmVendorInfo.base_url || "--"}</span>
                           </p>
+                          {selectedLlmVendorInfo.name === "minimax" ? (
+                            <p>
+                              <span className="text-white/45">{t("接口协议", "Protocol")}</span>
+                              <span className="ml-2 text-white/80">
+                                {(selectedLlmVendorInfo.api_format || "openai_compat") === "anthropic_claude" ? "Anthropic" : "OpenAI"}
+                              </span>
+                            </p>
+                          ) : null}
                           <p>
                             <span className="text-white/45">{t("API Key", "API Key")}</span>
                             <span className={`ml-2 ${selectedLlmVendorInfo.api_key_configured ? "text-emerald-200" : "text-amber-200"}`}>
