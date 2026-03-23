@@ -14,6 +14,14 @@ pub(crate) fn extract_delivery_file_tokens(text: &str) -> Vec<String> {
             out.push(format!("FILE:{}", rest.trim()));
         } else if let Some(rest) = trimmed.strip_prefix("IMAGE_FILE:") {
             out.push(format!("FILE:{}", rest.trim()));
+        } else if let Some(rest) = trimmed.strip_prefix("IMAGE_URL:") {
+            out.push(format!("IMAGE_URL:{}", rest.trim()));
+        } else if let Some(rest) = trimmed.strip_prefix("VIDEO_URL:") {
+            out.push(format!("VIDEO_URL:{}", rest.trim()));
+        } else if let Some(rest) = trimmed.strip_prefix("FILE_URL:") {
+            out.push(format!("FILE_URL:{}", rest.trim()));
+        } else if let Some(rest) = trimmed.strip_prefix("MEDIA_URL:") {
+            out.push(format!("MEDIA_URL:{}", rest.trim()));
         }
     }
     out
@@ -52,6 +60,27 @@ fn normalize_delivery_message(state: &AppState, text: &str) -> Option<String> {
     {
         let resolved = resolve_existing_delivery_path(state, path)?;
         return Some(format!("FILE:{}", resolved.display()));
+    }
+    if let Some(url) = trimmed
+        .strip_prefix("IMAGE_URL:")
+        .or_else(|| trimmed.strip_prefix("VIDEO_URL:"))
+        .or_else(|| trimmed.strip_prefix("FILE_URL:"))
+        .or_else(|| trimmed.strip_prefix("MEDIA_URL:"))
+    {
+        let url = trim_path_token(url);
+        if url.is_empty() {
+            return None;
+        }
+        let prefix = if trimmed.starts_with("IMAGE_URL:") {
+            "IMAGE_URL:"
+        } else if trimmed.starts_with("VIDEO_URL:") {
+            "VIDEO_URL:"
+        } else if trimmed.starts_with("FILE_URL:") {
+            "FILE_URL:"
+        } else {
+            "MEDIA_URL:"
+        };
+        return Some(format!("{prefix}{url}"));
     }
     Some(normalized)
 }
@@ -106,9 +135,9 @@ pub(crate) fn collect_recent_image_candidates(
         for row in rows.flatten() {
             let tokens = extract_delivery_file_tokens(&row);
             for t in tokens {
-                if let Some(path) = extract_file_path_from_delivery_token(&t) {
-                    if is_image_file_path(&path) && seen.insert(path.clone()) {
-                        out.push(path);
+                if let Some(reference) = extract_image_reference_from_delivery_token(&t) {
+                    if seen.insert(reference.clone()) {
+                        out.push(reference);
                     }
                 }
             }
@@ -139,9 +168,9 @@ pub(crate) fn collect_recent_image_candidates(
                 if let Ok(v) = serde_json::from_str::<Value>(&result) {
                     if let Some(text) = v.get("text").and_then(|x| x.as_str()) {
                         for t in extract_delivery_file_tokens(text) {
-                            if let Some(path) = extract_file_path_from_delivery_token(&t) {
-                                if is_image_file_path(&path) && seen.insert(path.clone()) {
-                                    out.push(path);
+                            if let Some(reference) = extract_image_reference_from_delivery_token(&t) {
+                                if seen.insert(reference.clone()) {
+                                    out.push(reference);
                                 }
                             }
                         }
@@ -159,6 +188,18 @@ fn extract_file_path_from_delivery_token(token: &str) -> Option<String> {
         .or_else(|| token.strip_prefix("IMAGE_FILE:"))
         .map(trim_path_token)
         .filter(|s| !s.is_empty())
+}
+
+fn extract_image_reference_from_delivery_token(token: &str) -> Option<String> {
+    if let Some(path) = extract_file_path_from_delivery_token(token) {
+        if is_image_file_path(&path) {
+            return Some(path);
+        }
+    }
+    token
+        .strip_prefix("IMAGE_URL:")
+        .map(trim_path_token)
+        .filter(|s| is_remote_image_url(s))
 }
 
 fn trim_path_token(token: &str) -> String {
@@ -181,6 +222,15 @@ fn is_image_file_path(path: &str) -> bool {
         || lower.ends_with(".webp")
         || lower.ends_with(".gif")
         || lower.ends_with(".bmp")
+}
+
+fn is_remote_image_url(url: &str) -> bool {
+    let lower = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .to_ascii_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://")) && is_image_file_path(&lower)
 }
 
 fn merge_image_candidate_paths_from_args(

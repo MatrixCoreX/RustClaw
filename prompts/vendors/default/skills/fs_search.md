@@ -10,6 +10,7 @@
 ## Capability Summary (from interface)
 - `fs_search` performs filesystem-level search by name, extension, text, or images.
 - It is intended for bounded queries with optional root scoping and result caps.
+- `find_name` can return directory names as well as file names; use `target_kind` to narrow when needed.
 
 ## Actions (from interface)
 - `find_name`
@@ -21,7 +22,8 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of supported search actions. |
-| `find_name` | `pattern` (or `name`/`keyword`) | yes | string | - | Name pattern/keyword. |
+| `find_name` | `pattern` (or `name`/`keyword`) | yes | string | - | Name pattern/keyword; matches basename contains. |
+| `find_name` | `target_kind` | no | string | `any` | `any|file|dir`; narrow name search to files or directories. |
 | `find_ext` | `ext` (or `extension`) | yes | string | - | Extension selector (e.g. `rs`). |
 | `grep_text` | `query` | yes | string | - | Text/regex query for content search. |
 | optional | `root` | no | string(path) | workspace | Search root path. |
@@ -32,6 +34,7 @@
 - Invalid root path.
 - Unsupported action names.
 - Search runtime errors return readable filesystem/tool errors.
+- `find_name` may return both files and directories unless `target_kind` is provided.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -48,3 +51,4 @@ Response:
 - Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
 - On uncertainty, prefer safe/readonly behavior first.
+- When the user only remembers part of a directory name, you may use `find_name` with `target_kind="dir"`; for direct path resolution, `system_basic.find_path` is usually a better first choice.
