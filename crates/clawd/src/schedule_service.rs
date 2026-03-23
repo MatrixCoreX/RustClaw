@@ -436,6 +436,40 @@ pub(crate) fn schedule_invocation_metadata(job_id: &str) -> Vec<(String, Value)>
     ]
 }
 
+fn inherit_schedule_delivery_context(task: &ClaimedTask, payload: Value) -> Value {
+    if !task.channel.trim().eq_ignore_ascii_case("wechat") {
+        return payload;
+    }
+    let Some(source_payload) = serde_json::from_str::<Value>(&task.payload_json).ok() else {
+        return payload;
+    };
+    let Some(source_token) = source_payload
+        .get("context_token")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        return payload;
+    };
+    let mut payload = payload;
+    let Value::Object(map) = &mut payload else {
+        return payload;
+    };
+    let has_context_token = map
+        .get("context_token")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_some();
+    if !has_context_token {
+        map.insert(
+            "context_token".to_string(),
+            Value::String(source_token.to_string()),
+        );
+    }
+    payload
+}
+
 pub(crate) async fn try_handle_schedule_request(
     state: &AppState,
     task: &ClaimedTask,
@@ -764,6 +798,8 @@ pub(crate) async fn try_handle_schedule_request(
                 intent.task.payload.clone()
             };
 
+            let payload = inherit_schedule_delivery_context(task, payload);
+
             let payload = if task_kind == "run_skill" {
                 match validate_schedule_run_skill(state, &payload) {
                     Ok(normalized) => normalized,
@@ -828,6 +864,8 @@ pub(crate) async fn try_handle_schedule_request(
 #[cfg(test)]
 mod schedule_skill_tests {
     use super::*;
+    use crate::ClaimedTask;
+    use serde_json::json;
 
     fn test_registry() -> SkillsRegistry {
         let toml = r#"
@@ -872,6 +910,80 @@ output_kind = "text"
         let reg = SkillsRegistry::load_from_path(&path).unwrap();
         let _ = std::fs::remove_file(path);
         reg
+    }
+
+    fn claimed_task_with_payload(channel: &str, payload: serde_json::Value) -> ClaimedTask {
+        ClaimedTask {
+            task_id: "task-1".to_string(),
+            user_id: 1,
+            chat_id: 2,
+            user_key: Some("rk-test".to_string()),
+            channel: channel.to_string(),
+            external_user_id: Some("external-user".to_string()),
+            external_chat_id: Some("external-chat".to_string()),
+            kind: "ask".to_string(),
+            payload_json: payload.to_string(),
+        }
+    }
+
+    #[test]
+    fn schedule_payload_inherits_wechat_context_token_from_source_task() {
+        let task = claimed_task_with_payload(
+            "wechat",
+            json!({
+                "context_token": "ctx-123",
+                "text": "45分的时候，发条消息给我"
+            }),
+        );
+        let payload = json!({
+            "text": "今晚记得点外卖",
+            "schedule_task_mode": "direct_text"
+        });
+
+        let merged = inherit_schedule_delivery_context(&task, payload);
+
+        assert_eq!(
+            merged.get("context_token").and_then(|v| v.as_str()),
+            Some("ctx-123")
+        );
+    }
+
+    #[test]
+    fn schedule_payload_keeps_existing_context_token() {
+        let task = claimed_task_with_payload(
+            "wechat",
+            json!({
+                "context_token": "ctx-from-source"
+            }),
+        );
+        let payload = json!({
+            "text": "今晚记得点外卖",
+            "context_token": "ctx-existing"
+        });
+
+        let merged = inherit_schedule_delivery_context(&task, payload);
+
+        assert_eq!(
+            merged.get("context_token").and_then(|v| v.as_str()),
+            Some("ctx-existing")
+        );
+    }
+
+    #[test]
+    fn schedule_payload_does_not_inherit_context_token_for_non_wechat_channel() {
+        let task = claimed_task_with_payload(
+            "telegram",
+            json!({
+                "context_token": "ctx-123"
+            }),
+        );
+        let payload = json!({
+            "text": "今晚记得点外卖"
+        });
+
+        let merged = inherit_schedule_delivery_context(&task, payload);
+
+        assert_eq!(merged.get("context_token"), None);
     }
 
     #[test]
