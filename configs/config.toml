@@ -151,6 +151,7 @@ base_url = "https://api.minimaxi.com/v1"
 max_concurrency = 1
 model = "MiniMax-M2.7"
 models = [
+    "MiniMax-M2.7",
     "MiniMax-M2.5",
     "MiniMax-M2.5-thinking",
     "MiniMax-M2.5-coder",
