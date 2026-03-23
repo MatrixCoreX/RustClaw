@@ -1,6 +1,23 @@
-FROM rust:1.90-alpine3.21 AS builder
+ARG DEBIAN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-security
 
-RUN apk add --no-cache bash build-base musl-dev protobuf python3
+FROM rust:1.90-bookworm AS builder
+ARG DEBIAN_MIRROR
+ARG DEBIAN_SECURITY_MIRROR
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+    bash \
+    build-essential \
+    clang \
+    libclang-dev \
+    pkg-config \
+    protobuf-compiler \
+    python3 \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
@@ -40,9 +57,27 @@ RUN cargo build --release \
     -p web-search-extract-skill \
     -p x-skill
 
-FROM alpine:3.21
+FROM debian:bookworm-slim
+ARG DEBIAN_MIRROR
+ARG DEBIAN_SECURITY_MIRROR
 
-RUN apk add --no-cache bash ca-certificates curl jq openssl py3-pip python3
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    jq \
+    libsqlite3-0 \
+    libssl3 \
+    libstdc++6 \
+    openssl \
+    procps \
+    python3 \
+    python3-pip \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
