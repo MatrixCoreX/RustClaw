@@ -8,6 +8,12 @@ use tracing::warn;
 use super::{anthropic_usage_snapshot, gemini_usage_snapshot, openai_usage_snapshot};
 use crate::{LlmProviderRuntime, LLM_RETRY_TIMES};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnthropicAuthMode {
+    XApiKey,
+    AuthorizationBearer,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct LlmUsageSnapshot {
     pub(crate) prompt_tokens: Option<u64>,
@@ -129,6 +135,23 @@ async fn call_provider(
             format!("unsupported provider type: {other}"),
             Value::Null,
         )),
+    }
+}
+
+fn anthropic_messages_url(provider: &LlmProviderRuntime) -> String {
+    let base = provider.config.base_url.trim_end_matches('/');
+    if base.ends_with("/v1") {
+        format!("{base}/messages")
+    } else {
+        format!("{base}/v1/messages")
+    }
+}
+
+fn anthropic_auth_mode(provider: &LlmProviderRuntime) -> AnthropicAuthMode {
+    if provider.config.name.eq_ignore_ascii_case("vendor-minimax") {
+        AnthropicAuthMode::AuthorizationBearer
+    } else {
+        AnthropicAuthMode::XApiKey
     }
 }
 
@@ -423,10 +446,7 @@ async fn call_anthropic_claude(
             ProviderError::non_retryable(format!("semaphore closed: {err}"), Value::Null)
         })?;
 
-    let url = format!(
-        "{}/messages",
-        provider.config.base_url.trim_end_matches('/')
-    );
+    let url = anthropic_messages_url(&provider);
     let req_body = json!({
         "model": provider.config.model,
         "max_tokens": 4096,
@@ -435,11 +455,16 @@ async fn call_anthropic_claude(
         ]
     });
 
-    let resp = provider
+    let request = provider
         .client
         .post(url)
-        .header("x-api-key", &provider.config.api_key)
-        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-version", "2023-06-01");
+    let request = match anthropic_auth_mode(&provider) {
+        AnthropicAuthMode::XApiKey => request.header("x-api-key", &provider.config.api_key),
+        AnthropicAuthMode::AuthorizationBearer => request.bearer_auth(&provider.config.api_key),
+    };
+
+    let resp = request
         .json(&req_body)
         .send()
         .await
@@ -526,4 +551,66 @@ async fn call_anthropic_claude(
         raw_response: body_text,
         usage,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use claw_core::config::LlmProviderConfig;
+    use reqwest::Client;
+    use tokio::sync::Semaphore;
+
+    use super::{anthropic_auth_mode, anthropic_messages_url, AnthropicAuthMode};
+    use crate::LlmProviderRuntime;
+
+    fn provider(name: &str, base_url: &str) -> LlmProviderRuntime {
+        LlmProviderRuntime {
+            config: LlmProviderConfig {
+                name: name.to_string(),
+                provider_type: "anthropic_claude".to_string(),
+                base_url: base_url.to_string(),
+                api_key: "test-key".to_string(),
+                model: "test-model".to_string(),
+                priority: 1,
+                timeout_seconds: 30,
+                max_concurrency: 1,
+            },
+            client: Client::new(),
+            semaphore: Arc::new(Semaphore::new(1)),
+        }
+    }
+
+    #[test]
+    fn anthropic_messages_url_appends_v1_when_base_url_has_no_version() {
+        let provider = provider("vendor-minimax", "https://api.minimaxi.com/anthropic");
+        assert_eq!(
+            anthropic_messages_url(&provider),
+            "https://api.minimaxi.com/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn anthropic_messages_url_reuses_existing_v1_suffix() {
+        let provider = provider("vendor-anthropic", "https://api.anthropic.com/v1");
+        assert_eq!(
+            anthropic_messages_url(&provider),
+            "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn minimax_anthropic_uses_bearer_auth() {
+        let provider = provider("vendor-minimax", "https://api.minimaxi.com/anthropic");
+        assert_eq!(
+            anthropic_auth_mode(&provider),
+            AnthropicAuthMode::AuthorizationBearer
+        );
+    }
+
+    #[test]
+    fn anthropic_vendor_uses_x_api_key_auth() {
+        let provider = provider("vendor-anthropic", "https://api.anthropic.com/v1");
+        assert_eq!(anthropic_auth_mode(&provider), AnthropicAuthMode::XApiKey);
+    }
 }
