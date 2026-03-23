@@ -35,6 +35,15 @@ pub fn extract_wechat_outbound_media(
             }
             continue;
         }
+        if let Some(rest) = t.strip_prefix("FILE:") {
+            if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
+                if p.is_file() && seen.insert(p.clone()) {
+                    let kind = classify_path_kind(&p);
+                    out.push((p, kind));
+                }
+            }
+            continue;
+        }
         if let Some(rest) = t.strip_prefix("FILE_FILE:") {
             if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
                 if p.is_file() && seen.insert(p.clone()) {
@@ -62,6 +71,17 @@ pub fn extract_wechat_outbound_media(
                 if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
                     if is_probably_video(&p) && p.is_file() && seen.insert(p.clone()) {
                         out.push((p, WechatOutboundKind::Video));
+                    }
+                }
+                break;
+            }
+        }
+        for prefix in ["Saved path:", "保存路径：", "文件路径：", "文件路径:"] {
+            if let Some(rest) = t.strip_prefix(prefix) {
+                if let Some(p) = resolve_workspace_path(workspace_root, normalize_token(rest)) {
+                    if p.is_file() && seen.insert(p.clone()) {
+                        let kind = classify_path_kind(&p);
+                        out.push((p, kind));
                     }
                 }
                 break;
@@ -96,6 +116,7 @@ pub fn strip_wechat_delivery_lines(answer: &str) -> String {
             let t = line.trim();
             if t.starts_with("IMAGE_FILE:")
                 || t.starts_with("VIDEO_FILE:")
+                || t.starts_with("FILE:")
                 || t.starts_with("FILE_FILE:")
             {
                 return false;
@@ -107,6 +128,13 @@ pub fn strip_wechat_delivery_lines(answer: &str) -> String {
                 return false;
             }
             if t.starts_with("视频已保存：") || t.starts_with("视频生成成功并已保存：") {
+                return false;
+            }
+            if t.starts_with("Saved path:")
+                || t.starts_with("保存路径：")
+                || t.starts_with("文件路径：")
+                || t.starts_with("文件路径:")
+            {
                 return false;
             }
             if parse_written_bytes_line(t).is_some() {
@@ -150,7 +178,7 @@ fn is_probably_image(p: &Path) -> bool {
         .map(|e| {
             matches!(
                 e.to_ascii_lowercase().as_str(),
-                "jpg" | "jpeg" | "png" | "webp" | "gif"
+                "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp"
             )
         })
         .unwrap_or(false)

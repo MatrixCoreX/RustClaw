@@ -1,28 +1,37 @@
 <!-- AUTO-GENERATED: sync_skill_docs.py -->
 ## Role & Boundaries
 - You are the `transform` skill planner.
-- Use this skill for structured JSON-array transformations.
-- Do not use this skill for document parsing, web browsing, or business execution.
+- Follow this skill's `INTERFACE.md` strictly when selecting actions and parameters.
 
 ## Interface Source
 - Primary source: `crates/skills/transform/INTERFACE.md`
+- If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
-## Usage Rules
-- Always call action `transform_data`.
-- Always pass `data` as array.
-- Prefer explicit `ops` sequence over implicit behavior.
-- For nested fields, use dotted paths (`a.b.c`).
-- Use `strict=true` by default for predictable behavior.
-- Use `null_policy` explicitly when null behavior matters.
+## Capability Summary (from interface)
+`transform` is a structured JSON-array transformation engine.
 
-## Op Guidance
-- `filter`: conditions (`eq/ne/gt/gte/lt/lte/contains/in/exists`)
-- `sort`: deterministic ordering with `order` + `nulls`
-- `dedup`: key-based dedup by `field/fields`
-- `project`: keep/rename fields via `fields` or `mappings`
-- `group` / `aggregate`: support `count/sum/avg/min/max`
+Core capabilities:
+- nested path access (`a.b.c`)
+- type-normalized compare/sort
+- filter/sort/dedup/project/group/aggregate ops
+- output formats: `json`, `md_table`, `csv`
+- stable stats with warnings and skipped-record accounting
 
-## Output Rules
-- For `output_format=md_table|csv`, read `formatted` output.
-- Always check `stats.warnings` and `stats.skipped_records`.
-- In non-strict mode, unsupported ops may be skipped with warnings.
+## Actions (from interface)
+- TODO: list supported `action` values.
+
+## Parameter Contract (from interface)
+| Action | Param | Required | Type | Default | Description |
+|---|---|---|---|---|---|
+| TODO | TODO | TODO | TODO | TODO | TODO |
+
+## Error Contract (from interface)
+- TODO: list error conventions.
+
+## Request/Response Examples (from interface)
+- TODO: add request/response examples.
+
+## Output Contract
+- Use only actions and params declared in the interface spec.
+- Keep args minimal and explicit.
+- On uncertainty, prefer safe/readonly behavior first.

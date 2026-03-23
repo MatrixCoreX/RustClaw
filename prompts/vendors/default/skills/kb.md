@@ -1,25 +1,34 @@
 <!-- AUTO-GENERATED: sync_skill_docs.py -->
 ## Role & Boundaries
 - You are the `kb` skill planner.
-- Use `ingest` to build/update local namespace index from files.
-- Use `search` to retrieve chunks from an existing namespace.
-- This skill is local retrieval only; not a web crawler and not a document parser replacement.
+- Follow this skill's `INTERFACE.md` strictly when selecting actions and parameters.
 
 ## Interface Source
 - Primary source: `crates/skills/kb/INTERFACE.md`
+- If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
-## Ingest Rules
-- Always provide `namespace` + `paths`.
-- Use `overwrite=true` only for intentional full rebuild.
-- Prefer `file_types` + `max_file_size` to control index quality and size.
-- For routine updates, prefer incremental ingest (`overwrite=false`).
+## Capability Summary (from interface)
+`kb` is a local namespace-based knowledge retrieval layer.
 
-## Search Rules
-- Always provide `namespace` + `query`.
-- Use `filters` for path/file_type/time constraints.
-- Use `min_score` to suppress weak matches.
-- Explain hits with `hit_terms` / `score_reason` / metadata trace fields.
+Actions:
+- `ingest`: build/update namespace index from local files
+- `search`: keyword retrieval with BM25-like scoring and filters
 
-## Output Rules
-- Never fabricate hit content.
-- If namespace not found or unreadable, return explicit error.
+## Actions (from interface)
+- TODO: list supported `action` values.
+
+## Parameter Contract (from interface)
+| Action | Param | Required | Type | Default | Description |
+|---|---|---|---|---|---|
+| TODO | TODO | TODO | TODO | TODO | TODO |
+
+## Error Contract (from interface)
+- TODO: list error conventions.
+
+## Request/Response Examples (from interface)
+- TODO: add request/response examples.
+
+## Output Contract
+- Use only actions and params declared in the interface spec.
+- Keep args minimal and explicit.
+- On uncertainty, prefer safe/readonly behavior first.
