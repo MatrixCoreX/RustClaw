@@ -1,22 +1,25 @@
 //! Channel text sending with safe chunking (Telegram, WhatsApp Cloud, WhatsApp Web Bridge, Feishu, Lark).
 //! Used when clawd delivers task results directly to a channel (e.g. schedule_triggered notify).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::json;
 use toml::Value as TomlValue;
 use tracing::info;
+use uuid::Uuid;
 
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::wechat_reply_media::{
     extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
+    WechatOutboundMedia, WechatOutboundSource,
 };
 
 use crate::AppState;
 use wechat_ilink::http::IlinkAuth;
 use wechat_ilink::{
-    send_weixin_file_from_file, send_weixin_image_from_file, send_weixin_video_from_file,
+    download_remote_media_to_temp, send_weixin_file_from_file, send_weixin_image_from_file,
+    send_weixin_video_from_file,
 };
 
 /// Feishu 中国站发送配置（定时任务主动推送用，从 configs/channels/feishu.toml 可选加载）
@@ -64,9 +67,32 @@ const WHATSAPP_TEXT_CHUNK_CHARS: usize = 3500;
 const WECHAT_SEND_MESSAGE_TYPE: i64 = 2;
 const WECHAT_SEND_MESSAGE_STATE: i64 = 2;
 const CLAWD_WECHAT_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
+const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/rustclaw/wechat/media/outbound-temp";
 
 fn default_wechat_cdn_base_url() -> String {
     "https://novac2c.cdn.weixin.qq.com/c2c".to_string()
+}
+
+fn next_wechat_client_id(prefix: &str) -> String {
+    format!("{prefix}-{}", Uuid::new_v4().simple())
+}
+
+async fn materialize_wechat_outbound_media(
+    state: &AppState,
+    media: &WechatOutboundMedia,
+) -> Result<PathBuf, String> {
+    match &media.source {
+        WechatOutboundSource::LocalPath(path) => Ok(path.clone()),
+        WechatOutboundSource::RemoteUrl(url) => {
+            download_remote_media_to_temp(
+                &state.http_client,
+                url,
+                Path::new(WECHAT_MEDIA_OUTBOUND_TEMP_DIR),
+                "clawd-wechat",
+            )
+            .await
+        }
+    }
 }
 
 pub(crate) async fn send_telegram_message(
@@ -336,7 +362,7 @@ pub(crate) async fn send_wechat_text_message(
                 "msg": {
                     "from_user_id": "",
                     "to_user_id": to_user_id,
-                    "client_id": format!("clawd-{}", i + 1),
+                    "client_id": next_wechat_client_id("clawd-wechat"),
                     "message_type": WECHAT_SEND_MESSAGE_TYPE,
                     "message_state": WECHAT_SEND_MESSAGE_STATE,
                     "item_list": [{
@@ -356,8 +382,9 @@ pub(crate) async fn send_wechat_text_message(
         }
     }
     let timeout_ms: u64 = 30_000;
-    for (p, kind) in media {
-        match kind {
+    for media in media {
+        let file_path = materialize_wechat_outbound_media(state, &media).await?;
+        match media.kind {
             WechatOutboundKind::Image => {
                 send_weixin_image_from_file(
                     &state.http_client,
@@ -367,7 +394,7 @@ pub(crate) async fn send_wechat_text_message(
                     cdn,
                     to_user_id,
                     Some(context_token),
-                    &p,
+                    &file_path,
                     CLAWD_WECHAT_CHANNEL_VERSION,
                     timeout_ms,
                 )
@@ -382,14 +409,14 @@ pub(crate) async fn send_wechat_text_message(
                     cdn,
                     to_user_id,
                     Some(context_token),
-                    &p,
+                    &file_path,
                     CLAWD_WECHAT_CHANNEL_VERSION,
                     timeout_ms,
                 )
                 .await?
             }
             WechatOutboundKind::File => {
-                let fname = p
+                let fname = file_path
                     .file_name()
                     .and_then(|s| s.to_str())
                     .unwrap_or("file");
@@ -401,7 +428,7 @@ pub(crate) async fn send_wechat_text_message(
                     cdn,
                     to_user_id,
                     Some(context_token),
-                    &p,
+                    &file_path,
                     fname,
                     CLAWD_WECHAT_CHANNEL_VERSION,
                     timeout_ms,
