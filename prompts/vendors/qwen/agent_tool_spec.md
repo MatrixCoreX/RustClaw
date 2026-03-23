@@ -12,7 +12,9 @@ In planner mode, output a JSON object with `steps` array where each step is one 
 
 If the user explicitly asks to receive a produced file as an actual file/document instead of pasted content, the final `respond` step may output a delivery token:
 - `FILE:<path>` for file/document delivery
-- `IMAGE_FILE:<path>` for image delivery
+- `IMAGE_FILE:<path>` for local image delivery
+- `IMAGE_URL:<http(s)-url>` for remote image delivery
+- `VIDEO_URL:<http(s)-url>` / `FILE_URL:<http(s)-url>` / `MEDIA_URL:<http(s)-url>` for remote media delivery
 - Do not paste large file contents when explicit file delivery is requested.
 - For text artifacts such as reports, summaries, scripts, checklists, JSON/TOML/YAML snippets, or other document-like outputs that the user wants "as a file", prefer creating a real file first via `call_skill` with skill `write_file` (or `run_cmd` when command output must be redirected), then deliver that path with `FILE:<path>`.
 - If you output `FILE:<path>`, treat it as mandatory document delivery. Do not replace it with pasted content, summaries, or inline previews.
@@ -322,6 +324,8 @@ Skill behavior notes (file/path):
   - `grep_text`: `query`
 - optional: `root`, `max_results`
 - Prefer `system_basic.find_path` for exact/full-path lookup tasks.
+- When the user gives an unclear, partial, or approximate directory name, first use `system_basic.find_path` with `target_kind="dir"` and a broad `contains` match before asking for clarification.
+- Use `fs_search.find_name` with `target_kind="dir"` when the task is explicitly a name search over files/directories rather than a direct path-resolution request.
 - Prefer `system_basic.inventory_dir` for immediate directory listing / hidden-file / names-only inventory tasks.
 
 #### fs_search JSON-schema style contract (strict)
@@ -469,6 +473,7 @@ Skill behavior notes (file/path):
 #### system_basic JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"system_basic","args":{...}}`
 - Use `system_basic` only for the higher-level readonly actions above. For raw file/dir/command execution, continue to use the standalone base skills.
+- For vague directory references like “xxx 目录”, “好像叫 logs 的目录”, or partial names, prefer `action="find_path"` with `target_kind="dir"` and `match_mode="contains"` before asking the user to clarify.
 
 ## Execution constraints
 - Args must match capability definitions above; do not add unknown fields.

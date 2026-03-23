@@ -17,6 +17,7 @@ use base64::Engine;
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::wechat_reply_media::{
     extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
+    WechatOutboundMedia, WechatOutboundSource,
 };
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
@@ -34,8 +35,9 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 use wechat_ilink::http::IlinkAuth;
 use wechat_ilink::{
-    download_decrypted_media, parse_aes_key_base64, parse_aes_key_hex_or_base64_media,
-    send_weixin_file_from_file, send_weixin_image_from_file, send_weixin_video_from_file,
+    download_decrypted_media, download_remote_media_to_temp, parse_aes_key_base64,
+    parse_aes_key_hex_or_base64_media, send_weixin_file_from_file, send_weixin_image_from_file,
+    send_weixin_video_from_file,
 };
 
 const SESSION_EXPIRED_ERRCODE: i64 = -14;
@@ -45,6 +47,7 @@ const BACKOFF_DELAY_MS: u64 = 30_000;
 const ACTIVE_LOGIN_TTL_MS: u64 = 5 * 60_000;
 const WECHAT_TEXT_CHUNK_CHARS: usize = 1200;
 const WECHATD_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
+const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/rustclaw/wechatd/media/outbound-temp";
 
 fn wechat_ilink_auth(sec: &WechatSection) -> IlinkAuth<'_> {
     IlinkAuth {
@@ -1277,6 +1280,60 @@ async fn send_text_message(
     Ok(())
 }
 
+async fn materialize_wechat_outbound_media(
+    state: &State,
+    media: &WechatOutboundMedia,
+) -> Result<PathBuf, String> {
+    match &media.source {
+        WechatOutboundSource::LocalPath(path) => Ok(path.clone()),
+        WechatOutboundSource::RemoteUrl(url) => {
+            download_remote_media_to_temp(
+                &state.client,
+                url,
+                Path::new(WECHAT_MEDIA_OUTBOUND_TEMP_DIR),
+                "wechatd",
+            )
+            .await
+        }
+    }
+}
+
+async fn send_wechat_error_notice(
+    state: &State,
+    base_url: &str,
+    token: &str,
+    to_user_id: &str,
+    context_token: &str,
+    err: &str,
+) {
+    let notice = if err.contains("remote media download failed") || err.contains("fetch") {
+        "⚠️ 媒体文件下载失败，请检查链接是否可访问。".to_string()
+    } else if err.contains("getuploadurl")
+        || err.contains("cdn upload")
+        || err.contains("upload_param")
+    {
+        "⚠️ 媒体文件上传失败，请稍后重试。".to_string()
+    } else {
+        format!("⚠️ 消息发送失败：{err}")
+    };
+    if let Err(send_err) = send_text_message(
+        &state.client,
+        &state.config,
+        base_url,
+        token,
+        to_user_id,
+        Some(context_token),
+        &notice,
+    )
+    .await
+    {
+        warn!(
+            "wechatd: send error notice failed to={} original_err={} notice_err={}",
+            to_user_id, err, send_err
+        );
+    }
+}
+
 async fn send_text_reply_via_session(
     state: &State,
     to_user_id: &str,
@@ -1552,8 +1609,31 @@ async fn deliver_wechat_clawd_reply(
             warn!("wechatd: send reply text failed err={}", err);
         }
     }
-    for (p, kind) in &media {
-        let res = match kind {
+    let mut media_error_notified = false;
+    for media in &media {
+        let file_path = match materialize_wechat_outbound_media(state, media).await {
+            Ok(path) => path,
+            Err(err) => {
+                warn!(
+                    "wechatd: prepare reply media {:?} kind={:?} err={}",
+                    media, media.kind, err
+                );
+                if !media_error_notified {
+                    send_wechat_error_notice(
+                        state,
+                        &base_url,
+                        &token,
+                        from_user_id,
+                        context_token.as_str(),
+                        &err,
+                    )
+                    .await;
+                    media_error_notified = true;
+                }
+                continue;
+            }
+        };
+        let res = match media.kind {
             WechatOutboundKind::Image => {
                 send_weixin_image_from_file(
                     &state.client,
@@ -1563,7 +1643,7 @@ async fn deliver_wechat_clawd_reply(
                     cdn,
                     from_user_id,
                     Some(context_token.as_str()),
-                    p,
+                    &file_path,
                     WECHATD_CHANNEL_VERSION,
                     timeout_ms,
                 )
@@ -1578,14 +1658,14 @@ async fn deliver_wechat_clawd_reply(
                     cdn,
                     from_user_id,
                     Some(context_token.as_str()),
-                    p,
+                    &file_path,
                     WECHATD_CHANNEL_VERSION,
                     timeout_ms,
                 )
                 .await
             }
             WechatOutboundKind::File => {
-                let fname = p
+                let fname = file_path
                     .file_name()
                     .and_then(|s| s.to_str())
                     .unwrap_or("file");
@@ -1597,7 +1677,7 @@ async fn deliver_wechat_clawd_reply(
                     cdn,
                     from_user_id,
                     Some(context_token.as_str()),
-                    p,
+                    &file_path,
                     fname,
                     WECHATD_CHANNEL_VERSION,
                     timeout_ms,
@@ -1606,7 +1686,22 @@ async fn deliver_wechat_clawd_reply(
             }
         };
         if let Err(err) = res {
-            warn!("wechatd: send reply media {:?} kind={:?} err={}", p, kind, err);
+            warn!(
+                "wechatd: send reply media {:?} kind={:?} err={}",
+                file_path, media.kind, err
+            );
+            if !media_error_notified {
+                send_wechat_error_notice(
+                    state,
+                    &base_url,
+                    &token,
+                    from_user_id,
+                    context_token.as_str(),
+                    &err,
+                )
+                .await;
+                media_error_notified = true;
+            }
         }
     }
     if stripped.trim().is_empty() && no_outbound_media && !reply_text.trim().is_empty() {
