@@ -3605,6 +3605,8 @@ struct UpdateLlmConfigRequest {
     vendor_base_url: Option<String>,
     #[serde(default)]
     vendor_api_key: Option<String>,
+    #[serde(default)]
+    vendor_api_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5201,6 +5203,13 @@ fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
             .map(str::trim)
             .unwrap_or("")
             .to_string();
+        let api_format = if vendor_name == "minimax" {
+            normalize_minimax_api_format(
+                vendor.get("api_format").and_then(|v| v.as_str()),
+            )
+        } else {
+            String::new()
+        };
         let mut models = vendor
             .get("models")
             .and_then(|v| v.as_array())
@@ -5221,12 +5230,22 @@ fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
             "default_model": default_model,
             "models": models,
             "base_url": base_url,
+            "api_format": api_format,
             "api_key": api_key,
             "api_key_configured": api_key_configured,
             "api_key_masked": api_key_masked
         }));
     }
     vendors
+}
+
+fn normalize_minimax_api_format(raw: Option<&str>) -> String {
+    let fmt = raw.unwrap_or("").trim();
+    if fmt.eq_ignore_ascii_case("anthropic") || fmt.eq_ignore_ascii_case("anthropic_claude") {
+        "anthropic_claude".to_string()
+    } else {
+        "openai_compat".to_string()
+    }
 }
 
 fn current_runtime_llm_info(state: &AppState) -> Value {
@@ -5250,7 +5269,7 @@ fn current_runtime_llm_info(state: &AppState) -> Value {
 fn saved_llm_vendor_runtime_fields(
     parsed: &toml::Value,
     selected_vendor: &str,
-) -> (String, String) {
+) -> (String, String, String) {
     let section_key = format!("llm.{selected_vendor}");
     let vendor = parsed
         .get("llm")
@@ -5268,21 +5287,30 @@ fn saved_llm_vendor_runtime_fields(
         .map(str::trim)
         .unwrap_or("")
         .to_string();
-    (base_url, api_key)
+    let provider_type = if selected_vendor.trim().eq_ignore_ascii_case("minimax") {
+        normalize_minimax_api_format(vendor.and_then(|v| v.get("api_format")).and_then(|v| v.as_str()))
+    } else {
+        String::new()
+    };
+    (base_url, api_key, provider_type)
 }
 
 fn llm_runtime_differs(
     runtime_vendor: &str,
     runtime_model: &str,
+    runtime_provider_type: &str,
     runtime_base_url: &str,
     runtime_api_key: &str,
     selected_vendor: &str,
     selected_model: &str,
+    saved_provider_type: &str,
     saved_base_url: &str,
     saved_api_key: &str,
 ) -> bool {
     runtime_vendor.trim() != selected_vendor.trim()
         || runtime_model.trim() != selected_model.trim()
+        || (selected_vendor.trim().eq_ignore_ascii_case("minimax")
+            && runtime_provider_type.trim() != saved_provider_type.trim())
         || runtime_base_url.trim() != saved_base_url.trim()
         || runtime_api_key.trim() != saved_api_key.trim()
 }
@@ -5301,15 +5329,17 @@ fn llm_restart_required(
         .name
         .strip_prefix("vendor-")
         .unwrap_or(provider.config.name.as_str());
-    let (saved_base_url, saved_api_key) =
+    let (saved_base_url, saved_api_key, saved_provider_type) =
         saved_llm_vendor_runtime_fields(parsed, selected_vendor.trim());
     llm_runtime_differs(
         runtime_vendor,
         &provider.config.model,
+        &provider.config.provider_type,
         &provider.config.base_url,
         &provider.config.api_key,
         selected_vendor,
         selected_model,
+        &saved_provider_type,
         &saved_base_url,
         &saved_api_key,
     )
@@ -5714,12 +5744,23 @@ async fn update_llm_config(
         &format!("model = {:?}", selected_model),
     );
     let vendor_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
-    let final_updated = upsert_string_key_in_section(
+    let updated_api_key = upsert_string_key_in_section(
         &updated_vendor_model,
         &format!("llm.{selected_vendor}"),
         "api_key",
         &format!("api_key = {:?}", vendor_api_key),
     );
+    let final_updated = if selected_vendor == "minimax" {
+        let vendor_api_format = normalize_minimax_api_format(req.vendor_api_format.as_deref());
+        upsert_string_key_in_section(
+            &updated_api_key,
+            "llm.minimax",
+            "api_format",
+            &format!("api_format = {:?}", vendor_api_format),
+        )
+    } else {
+        updated_api_key
+    };
     if let Err(err) = write_runtime_config_file(&state, &final_updated) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -6462,10 +6503,12 @@ mod tests {
         assert!(llm_runtime_differs(
             "minimax",
             "MiniMax-M2.7",
+            "openai_compat",
             "https://api.minimax.io/v1",
             "old-key",
             "minimax",
             "MiniMax-M2.7",
+            "openai_compat",
             "https://api.minimax.io/v1",
             "new-key",
         ));
@@ -6476,10 +6519,12 @@ mod tests {
         assert!(llm_runtime_differs(
             "minimax",
             "MiniMax-M2.7",
+            "openai_compat",
             "https://api.minimax.io/v1",
             "same-key",
             "minimax",
             "MiniMax-M2.7",
+            "openai_compat",
             "https://api.minimax.cn/v1",
             "same-key",
         ));
@@ -6490,12 +6535,59 @@ mod tests {
         assert!(!llm_runtime_differs(
             "minimax",
             "MiniMax-M2.7",
+            "openai_compat",
             "https://api.minimax.io/v1",
             "same-key",
             "minimax",
             "MiniMax-M2.7",
+            "openai_compat",
             "https://api.minimax.io/v1",
             "same-key",
         ));
+    }
+
+    #[test]
+    fn llm_runtime_differs_when_only_minimax_provider_type_changes() {
+        assert!(llm_runtime_differs(
+            "minimax",
+            "MiniMax-M2.7",
+            "anthropic_claude",
+            "https://api.minimax.io/v1",
+            "same-key",
+            "minimax",
+            "MiniMax-M2.7",
+            "openai_compat",
+            "https://api.minimax.io/v1",
+            "same-key",
+        ));
+    }
+
+    #[test]
+    fn collect_llm_vendor_info_defaults_minimax_api_format_to_openai() {
+        let parsed = toml::from_str::<toml::Value>(
+            r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M2.7"
+
+[llm.minimax]
+api_key = ""
+base_url = "https://api.minimax.io/v1"
+model = "MiniMax-M2.7"
+models = ["MiniMax-M2.7"]
+"#,
+        )
+        .expect("parse");
+
+        let vendors = collect_llm_vendor_info(&parsed);
+        let minimax = vendors
+            .iter()
+            .find(|vendor| vendor.get("name").and_then(|v| v.as_str()) == Some("minimax"))
+            .expect("minimax vendor");
+
+        assert_eq!(
+            minimax.get("api_format").and_then(|v| v.as_str()),
+            Some("openai_compat")
+        );
     }
 }
