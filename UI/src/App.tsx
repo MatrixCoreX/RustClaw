@@ -318,7 +318,9 @@ const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
 
 const STORAGE_KEYS = {
   baseUrl: "rustclaw.monitor.baseUrl",
+  webdBaseUrl: "rustclaw.monitor.webdBaseUrl",
   userKey: "rustclaw.monitor.userKey",
+  authMode: "rustclaw.monitor.authMode",
   polling: "rustclaw.monitor.pollingSeconds",
   queueWarn: "rustclaw.monitor.queueWarn",
   ageWarn: "rustclaw.monitor.ageWarnSeconds",
@@ -338,6 +340,19 @@ function getDefaultClawdBaseUrl(): string {
   const protocol = loc.protocol && loc.protocol !== "file:" ? loc.protocol : "http:";
   if (hostname) return `${protocol}//${hostname}:8787`;
   return "http://127.0.0.1:8787";
+}
+
+/** 根据当前页面地址推断 webd 默认地址；获取不到主机名时用 127.0.0.1 */
+function getDefaultWebdBaseUrl(): string {
+  if (typeof window === "undefined" || !window.location) return "http://127.0.0.1:8788";
+  const loc = window.location;
+  let hostname = (loc.hostname && loc.hostname.trim()) || "";
+  if (!hostname && loc.host) {
+    hostname = loc.host.split(":")[0]?.trim() || "";
+  }
+  const protocol = loc.protocol && loc.protocol !== "file:" ? loc.protocol : "http:";
+  if (hostname) return `${protocol}//${hostname}:8788`;
+  return "http://127.0.0.1:8788";
 }
 
 function readNumber(key: string, fallback: number): number {
@@ -489,6 +504,20 @@ export default function App() {
   });
   const apiBase = baseUrl || getDefaultClawdBaseUrl();
   const [uiKey, setUiKey] = useState(() => window.localStorage.getItem(STORAGE_KEYS.userKey)?.trim() ?? "");
+  const [authMode, setAuthMode] = useState<"key" | "webd" | null>(() => {
+    const saved = window.localStorage.getItem(STORAGE_KEYS.authMode);
+    if (saved === "webd" || saved === "key") return saved;
+    if (window.localStorage.getItem(STORAGE_KEYS.userKey)?.trim()) return "key";
+    return null;
+  });
+  const [loginTab, setLoginTab] = useState<"key" | "webd">("key");
+  const [webdBaseUrlDraft, setWebdBaseUrlDraft] = useState(() => {
+    const saved = window.localStorage.getItem(STORAGE_KEYS.webdBaseUrl);
+    if (saved != null && saved.trim() !== "") return saved.trim();
+    return getDefaultWebdBaseUrl();
+  });
+  const [webdUsername, setWebdUsername] = useState("");
+  const [webdPassword, setWebdPassword] = useState("");
   const [uiKeyDraft, setUiKeyDraft] = useState("");
   const [uiAuthReady, setUiAuthReady] = useState(false);
   const [uiAuthLoading, setUiAuthLoading] = useState(false);
@@ -496,6 +525,7 @@ export default function App() {
   const [authIdentity, setAuthIdentity] = useState<AuthIdentityResponse | null>(null);
   const [authMeLoading, setAuthMeLoading] = useState(false);
   const [authMeError, setAuthMeError] = useState<string | null>(null);
+  const authFlowEpochRef = useRef(0);
   const [pollingSeconds, setPollingSeconds] = useState(() => {
     return readNumber(STORAGE_KEYS.polling, 5);
   });
@@ -759,7 +789,7 @@ export default function App() {
   const isOnline = Boolean(health) && !error;
   const queuePressureHigh = (health?.queue_length ?? 0) >= queueWarn;
   const runningTooOld = (health?.running_oldest_age_seconds ?? 0) >= ageWarnSeconds;
-  const authHeaders = uiKey ? { "X-RustClaw-Key": uiKey } : {};
+  const authHeaders = authMode !== "webd" && uiKey ? { "X-RustClaw-Key": uiKey } : {};
   const normalizeFetchError = (err: unknown, targetUrl: string) => {
     const fallback = t("未知错误", "Unknown error");
     if (!(err instanceof Error)) return fallback;
@@ -790,9 +820,12 @@ export default function App() {
 
   const safeFetch = async (path: string, init?: RequestInit, withAuth = true) => {
     const targetUrl = `${apiBase.replace(/\/$/, "")}${path}`;
+    const credentials =
+      authMode === "webd" ? "include" : init?.credentials ?? "same-origin";
     try {
       return await fetch(targetUrl, {
         ...init,
+        credentials,
         headers: {
           ...(init?.headers ?? {}),
           ...(withAuth ? authHeaders : {}),
@@ -805,6 +838,11 @@ export default function App() {
 
   const apiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, true);
   const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
+  const activeUserKey = authMode === "key" && uiKey.trim() ? uiKey.trim() : "";
+  const activeIdentityIds =
+    activeUserKey || interactionUserId == null || interactionChatId == null
+      ? {}
+      : { user_id: interactionUserId, chat_id: interactionChatId };
 
   const applyIdentity = (identity: AuthIdentityResponse) => {
     setAuthIdentity(identity);
@@ -843,6 +881,7 @@ export default function App() {
   };
 
   const verifyUiKey = async (candidate: string, persist = true) => {
+    const authEpoch = authFlowEpochRef.current;
     const normalized = candidate.trim();
     if (!normalized) {
       setUiAuthReady(false);
@@ -858,6 +897,7 @@ export default function App() {
         body: JSON.stringify({ user_key: normalized }),
       });
       const body = (await res.json()) as ApiResponse<AuthIdentityResponse>;
+      if (authEpoch !== authFlowEpochRef.current) return false;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `key 校验失败 (${res.status})`);
       }
@@ -866,11 +906,14 @@ export default function App() {
       setUiAuthReady(true);
       setAuthMeError(null);
       applyIdentity(body.data);
+      setAuthMode("key");
+      window.localStorage.setItem(STORAGE_KEYS.authMode, "key");
       if (persist) {
         window.localStorage.setItem(STORAGE_KEYS.userKey, normalized);
       }
       return true;
     } catch (err) {
+      if (authEpoch !== authFlowEpochRef.current) return false;
       setUiAuthReady(false);
       setUiKey("");
       setAuthIdentity(null);
@@ -880,23 +923,103 @@ export default function App() {
       const message = err instanceof Error ? err.message : "未知错误";
       setUiAuthError(message);
       window.localStorage.removeItem(STORAGE_KEYS.userKey);
+      setAuthMode(null);
+      window.localStorage.removeItem(STORAGE_KEYS.authMode);
       return false;
     } finally {
+      if (authEpoch !== authFlowEpochRef.current) return;
       setUiAuthLoading(false);
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    authFlowEpochRef.current += 1;
+    if (authMode === "webd") {
+      try {
+        const webdBase = apiBase.replace(/\/$/, "");
+        await fetch(`${webdBase}/webd/logout`, { method: "POST", credentials: "include" });
+      } catch {
+        // ignore network errors on logout
+      }
+    }
     window.localStorage.removeItem(STORAGE_KEYS.userKey);
+    window.localStorage.removeItem(STORAGE_KEYS.authMode);
+    setAuthMode(null);
     setUiKey("");
     setUiKeyDraft("");
     setUiAuthReady(false);
+    setUiAuthLoading(false);
     setUiAuthError(null);
     setAuthIdentity(null);
     setAuthMeError(null);
     setInteractionUserId(null);
     setInteractionChatId(null);
     setInteractionRole("-");
+  };
+
+  const loginWebd = async () => {
+    const authEpoch = authFlowEpochRef.current;
+    const u = webdUsername.trim();
+    if (!u || !webdPassword) {
+      setUiAuthError(t("请输入用户名和密码", "Please enter username and password"));
+      return;
+    }
+    setUiAuthLoading(true);
+    setUiAuthError(null);
+    const webdBase = (webdBaseUrlDraft.trim() || window.location.origin).replace(/\/$/, "");
+    const loginUrl = `${webdBase}/webd/login`;
+    let failingUrl = loginUrl;
+    try {
+      const res = await fetch(loginUrl, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: u, password: webdPassword }),
+      });
+      if (authEpoch !== authFlowEpochRef.current) return;
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error ?? `${t("登录失败", "Sign-in failed")} (${res.status})`);
+      }
+      setBaseUrl(webdBase);
+      window.localStorage.setItem(STORAGE_KEYS.baseUrl, webdBase);
+      window.localStorage.removeItem(STORAGE_KEYS.userKey);
+      setUiKey("");
+      setUiKeyDraft("");
+      setWebdPassword("");
+      setAuthMode("webd");
+      window.localStorage.setItem(STORAGE_KEYS.authMode, "webd");
+      setUiAuthReady(true);
+      setAuthMeError(null);
+      const meUrl = `${webdBase}/v1/auth/me`;
+      failingUrl = meUrl;
+      const meRes = await fetch(meUrl, { credentials: "include" });
+      if (authEpoch !== authFlowEpochRef.current) return;
+      const meBody = (await meRes.json()) as ApiResponse<AuthIdentityResponse>;
+      if (!meRes.ok || !meBody.ok || !meBody.data) {
+        setUiAuthReady(false);
+        setAuthMode(null);
+        window.localStorage.removeItem(STORAGE_KEYS.authMode);
+        setUiAuthError(
+          t("登录成功但无法获取身份信息", "Signed in but failed to load profile"),
+        );
+        return;
+      }
+      applyIdentity(meBody.data);
+    } catch (err) {
+      if (authEpoch !== authFlowEpochRef.current) return;
+      setUiAuthReady(false);
+      setAuthIdentity(null);
+      setInteractionUserId(null);
+      setInteractionChatId(null);
+      setInteractionRole("-");
+      const message =
+        err instanceof Error ? normalizeFetchError(err, failingUrl) : t("未知错误", "Unknown error");
+      setUiAuthError(message);
+    } finally {
+      if (authEpoch !== authFlowEpochRef.current) return;
+      setUiAuthLoading(false);
+    }
   };
 
   const fetchHealth = async () => {
@@ -1188,7 +1311,7 @@ export default function App() {
     try {
       const body: Record<string, unknown> = {
         channel: channelBindingChannel,
-        user_key: uiKey,
+        ...(activeUserKey ? { user_key: activeUserKey } : {}),
       };
       const externalUserId = channelBindingExternalUserId.trim();
       const externalChatId = channelBindingExternalChatId.trim();
@@ -1945,10 +2068,11 @@ export default function App() {
       }
 
       const body: Record<string, unknown> = {
-        user_key: uiKey,
         channel: interactionChannel,
         kind: interactionKind,
         payload,
+        ...(activeUserKey ? { user_key: activeUserKey } : {}),
+        ...activeIdentityIds,
       };
       const externalUserId = interactionExternalUserId.trim();
       if (externalUserId) {
@@ -2031,9 +2155,10 @@ export default function App() {
     try {
       const adapterName = interactionAdapter.trim();
       const submitBody: Record<string, unknown> = {
-        user_key: uiKey,
         channel: interactionChannel,
         kind: "ask",
+        ...(activeUserKey ? { user_key: activeUserKey } : {}),
+        ...activeIdentityIds,
         ...(interactionExternalUserId.trim() ? { external_user_id: interactionExternalUserId.trim() } : {}),
         ...(interactionExternalChatId.trim() ? { external_chat_id: interactionExternalChatId.trim() } : {}),
         payload: {
@@ -2109,6 +2234,49 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (authMode === "webd") {
+      if (uiAuthLoading) return;
+      if (uiAuthReady && authIdentity) return;
+      const authEpoch = authFlowEpochRef.current;
+      void (async () => {
+        setUiAuthLoading(true);
+        setUiAuthError(null);
+        try {
+          const targetUrl = `${apiBase.replace(/\/$/, "")}/v1/auth/me`;
+          const res = await fetch(targetUrl, { credentials: "include" });
+          if (authEpoch !== authFlowEpochRef.current) return;
+          const body = (await res.json()) as ApiResponse<AuthIdentityResponse>;
+          if (!res.ok || !body.ok || !body.data) {
+            setUiAuthReady(false);
+            setAuthIdentity(null);
+            setInteractionUserId(null);
+            setInteractionChatId(null);
+            setInteractionRole("-");
+            setAuthMode(null);
+            window.localStorage.removeItem(STORAGE_KEYS.authMode);
+            setUiAuthError(
+              t("Web 会话已失效，请重新登录", "Web session expired; please sign in again."),
+            );
+            return;
+          }
+          applyIdentity(body.data);
+          setUiAuthReady(true);
+          setAuthMeError(null);
+        } catch (err) {
+          if (authEpoch !== authFlowEpochRef.current) return;
+          setUiAuthReady(false);
+          setAuthMode(null);
+          window.localStorage.removeItem(STORAGE_KEYS.authMode);
+          const message =
+            err instanceof Error ? normalizeFetchError(err, `${apiBase.replace(/\/$/, "")}/v1/auth/me`) : t("未知错误", "Unknown error");
+          setUiAuthError(message);
+        } finally {
+          if (authEpoch !== authFlowEpochRef.current) return;
+          setUiAuthLoading(false);
+        }
+      })();
+      return;
+    }
     if (!uiKey) {
       setUiAuthReady(false);
       setAuthIdentity(null);
@@ -2119,7 +2287,7 @@ export default function App() {
     }
     void verifyUiKey(uiKey, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase]);
+  }, [apiBase, authMode, uiKey, uiAuthLoading, uiAuthReady, authIdentity]);
 
   useEffect(() => {
     if (!uiAuthReady || pollingSeconds <= 0) return;
@@ -2148,12 +2316,24 @@ export default function App() {
   }, [baseUrl]);
 
   useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.webdBaseUrl, webdBaseUrlDraft);
+  }, [webdBaseUrlDraft]);
+
+  useEffect(() => {
     if (uiKey) {
       window.localStorage.setItem(STORAGE_KEYS.userKey, uiKey);
     } else {
       window.localStorage.removeItem(STORAGE_KEYS.userKey);
     }
   }, [uiKey]);
+
+  useEffect(() => {
+    if (authMode === null) {
+      window.localStorage.removeItem(STORAGE_KEYS.authMode);
+    } else {
+      window.localStorage.setItem(STORAGE_KEYS.authMode, authMode);
+    }
+  }, [authMode]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.polling, String(pollingSeconds));
@@ -2313,7 +2493,10 @@ export default function App() {
     };
   }, [wechatLoginDialogOpen]);
 
-  const maskedSavedUiKey = useMemo(() => maskStoredKey(uiKey), [uiKey]);
+  const maskedSavedUiKey = useMemo(() => {
+    if (authMode === "webd") return "";
+    return maskStoredKey(uiKey);
+  }, [uiKey, authMode]);
   const adapterHealthRows = useMemo<AdapterHealthRow[]>(() => {
     const rows: AdapterHealthRow[] = [
       {
@@ -2834,53 +3017,138 @@ export default function App() {
             <div className="mb-6">
               <h2 className="text-xl font-bold">{t("登录", "Sign in")}</h2>
               <p className="mt-2 text-sm text-white/60">
-                {t("先验证 key，验证成功后再进入控制台。", "Verify your key first, then enter the console.")}
+                {loginTab === "key"
+                  ? t("使用 Access Key 验证后进入控制台。", "Verify with an access key to enter the console.")
+                  : t("通过 webd 使用用户名与密码（需同源 Cookie）。", "Sign in with username and password via webd (same-origin cookies required).")}
               </p>
             </div>
 
+            <div
+              className="mb-4 flex rounded-xl border border-white/10 bg-black/20 p-1"
+              role="tablist"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={loginTab === "key"}
+                onClick={() => setLoginTab("key")}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  loginTab === "key" ? "bg-white/12 text-white" : "text-white/55 hover:text-white/80"
+                }`}
+              >
+                {t("Key 登录", "Access key")}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={loginTab === "webd"}
+                onClick={() => setLoginTab("webd")}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  loginTab === "webd" ? "bg-white/12 text-white" : "text-white/55 hover:text-white/80"
+                }`}
+              >
+                {t("用户名密码", "Username & password")}
+              </button>
+            </div>
+
             <div className="space-y-4">
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-widest text-white/50">
-                  {t("RustClaw 服务地址", "RustClaw service URL")}
-                </span>
-                <input
-                  className="theme-input"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="http://127.0.0.1:8787"
-                />
-                <p className="text-xs text-white/45">
-                  {t("通常就是你打开面板时使用的地址。", "This is usually the same address you use to open the console.")}
-                </p>
-              </label>
+              {loginTab === "key" ? (
+                <>
+                  <label className="block space-y-2">
+                    <span className="text-xs uppercase tracking-widest text-white/50">
+                      {t("RustClaw 服务地址", "RustClaw service URL")}
+                    </span>
+                    <input
+                      className="theme-input"
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      placeholder="http://127.0.0.1:8787"
+                    />
+                    <p className="text-xs text-white/45">
+                      {t("直连 clawd 或经 webd 代理时均可；请与浏览器能访问到的 API 地址一致。", "Use the API URL your browser can reach (direct clawd or via webd).")}
+                    </p>
+                  </label>
 
-              <label className="block space-y-2">
-                <span className="text-xs uppercase tracking-widest text-white/50">{t("访问 Key", "Access Key")}</span>
-                <input
-                  className="theme-input"
-                  value={uiKeyDraft}
-                  onChange={(e) => setUiKeyDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      void verifyUiKey(uiKeyDraft);
-                    }
-                  }}
-                  placeholder={t("输入已经生成好的 user_key", "Enter an existing user_key")}
-                />
-                <p className="text-xs text-white/45">
-                  {t("如果你不知道这个 key，通常需要找部署 RustClaw 的人帮你生成。", "If you do not know this key, it usually needs to be generated by whoever set up RustClaw.")}
-                </p>
-              </label>
+                  <label className="block space-y-2">
+                    <span className="text-xs uppercase tracking-widest text-white/50">{t("访问 Key", "Access Key")}</span>
+                    <input
+                      className="theme-input"
+                      value={uiKeyDraft}
+                      onChange={(e) => setUiKeyDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void verifyUiKey(uiKeyDraft);
+                        }
+                      }}
+                      placeholder={t("输入已经生成好的 user_key", "Enter an existing user_key")}
+                    />
+                    <p className="text-xs text-white/45">
+                      {t("如果你不知道这个 key，通常需要找部署 RustClaw 的人帮你生成。", "If you do not know this key, it usually needs to be generated by whoever set up RustClaw.")}
+                    </p>
+                  </label>
 
-              {maskedSavedUiKey ? (
-                <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/70">
-                  <div>{t("已保存 Key", "Saved key")}: {maskedSavedUiKey}</div>
-                  <div className="mt-1 text-white/45">
-                    {t("输入新 key 会覆盖已保存的 key。", "Entering a new key will replace the saved key.")}
-                  </div>
-                </div>
-              ) : null}
+                  {maskedSavedUiKey ? (
+                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/70">
+                      <div>{t("已保存 Key", "Saved key")}: {maskedSavedUiKey}</div>
+                      <div className="mt-1 text-white/45">
+                        {t("输入新 key 会覆盖已保存的 key。", "Entering a new key will replace the saved key.")}
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs leading-relaxed text-white/55">
+                    {t(
+                      "可填写 webd 地址端口（例如 http://127.0.0.1:8788）；留空则默认走当前页面地址（常见于 nginx 反代）。",
+                      "You can enter a webd URL/port (for example http://127.0.0.1:8788); if left empty, current page origin is used (common with nginx reverse proxy).",
+                    )}
+                  </p>
+                  <label className="block space-y-2">
+                    <span className="text-xs uppercase tracking-widest text-white/50">
+                      {t("Webd 地址（可选）", "Webd URL (optional)")}
+                    </span>
+                    <input
+                      className="theme-input"
+                      value={webdBaseUrlDraft}
+                      onChange={(e) => setWebdBaseUrlDraft(e.target.value)}
+                      placeholder="http://127.0.0.1:8788"
+                    />
+                  </label>
+                  <label className="block space-y-2">
+                    <span className="text-xs uppercase tracking-widest text-white/50">{t("用户名", "Username")}</span>
+                    <input
+                      className="theme-input"
+                      autoComplete="username"
+                      value={webdUsername}
+                      onChange={(e) => setWebdUsername(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void loginWebd();
+                        }
+                      }}
+                    />
+                  </label>
+                  <label className="block space-y-2">
+                    <span className="text-xs uppercase tracking-widest text-white/50">{t("密码", "Password")}</span>
+                    <input
+                      className="theme-input"
+                      type="password"
+                      autoComplete="current-password"
+                      value={webdPassword}
+                      onChange={(e) => setWebdPassword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void loginWebd();
+                        }
+                      }}
+                    />
+                  </label>
+                </>
+              )}
 
               {uiAuthError ? (
                 <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
@@ -2889,24 +3157,41 @@ export default function App() {
               ) : null}
 
               <div className="flex flex-wrap items-center gap-3">
-                <button
-                  onClick={() => void verifyUiKey(uiKeyDraft)}
-                  disabled={uiAuthLoading}
-                  className="theme-accent-btn"
-                >
-                  {uiAuthLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  {t("进入控制台", "Enter Console")}
-                </button>
-                {uiKey ? (
+                {loginTab === "key" ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void verifyUiKey(uiKeyDraft)}
+                      disabled={uiAuthLoading}
+                      className="theme-accent-btn"
+                    >
+                      {uiAuthLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      {t("进入控制台", "Enter Console")}
+                    </button>
+                    {uiKey ? (
+                      <button
+                        type="button"
+                        onClick={() => void verifyUiKey(uiKey)}
+                        disabled={uiAuthLoading}
+                        className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {t("使用已保存 Key", "Use saved key")}
+                      </button>
+                    ) : null}
+                  </>
+                ) : (
                   <button
-                    onClick={() => void verifyUiKey(uiKey)}
+                    type="button"
+                    onClick={() => void loginWebd()}
                     disabled={uiAuthLoading}
-                    className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="theme-accent-btn"
                   >
-                    {t("使用已保存 Key", "Use saved key")}
+                    {uiAuthLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {t("进入控制台", "Enter Console")}
                   </button>
-                ) : null}
+                )}
                 <button
+                  type="button"
                   onClick={toggleThemeMode}
                   className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs hover:bg-white/10 sm:text-sm"
                 >
@@ -2914,6 +3199,7 @@ export default function App() {
                   {themeMode === "dark" ? t("日间模式", "Day mode") : t("夜间模式", "Night mode")}
                 </button>
                 <button
+                  type="button"
                   onClick={() => setLang((v) => (v === "zh" ? "en" : "zh"))}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
                 >
@@ -2993,9 +3279,13 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={logout}
+              onClick={() => void logout()}
               className="theme-topbar-btn h-full min-h-0 py-1.5"
-              title={t("退出登录，需重新输入 key", "Log out; key required to sign in again")}
+              title={
+                authMode === "webd"
+                  ? t("退出登录并清除 Web 会话", "Log out and clear web session")
+                  : t("退出登录，需重新输入 key", "Log out; key required to sign in again")
+              }
             >
               {t("退出", "Log out")}
             </button>
@@ -3038,7 +3328,13 @@ export default function App() {
 
             <div className="theme-panel-soft mt-3 p-3.5 text-sm text-white/70">
               <p className="font-medium text-white">{t("当前登录身份", "Current identity")}</p>
-              <p className="mt-2 break-all font-mono text-xs text-white/55">{maskedSavedUiKey || "--"}</p>
+              {authMode === "webd" ? (
+                <p className="mt-2 text-xs text-white/55">
+                  {t("Web 会话（由 webd 注入访问凭证，浏览器不保存明文 key）", "Web session (webd injects credentials; no plaintext key in browser)")}
+                </p>
+              ) : (
+                <p className="mt-2 break-all font-mono text-xs text-white/55">{maskedSavedUiKey || "--"}</p>
+              )}
             </div>
           </div>
         </aside>
