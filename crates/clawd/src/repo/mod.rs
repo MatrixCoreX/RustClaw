@@ -9,6 +9,7 @@ pub(crate) use auth::{
     ensure_key_auth_schema, exchange_credential_status_for_user_key, list_auth_keys,
     normalize_user_key, resolve_auth_identity_by_key, resolve_channel_binding_identity,
     seed_channel_bindings, update_auth_key_by_id, upsert_exchange_credential_for_user_key,
+    upsert_webd_login_account, verify_webd_password_login,
 };
 pub(crate) use submit::{
     build_conversation_chat_id, build_submit_task_payload, check_submit_task_access,

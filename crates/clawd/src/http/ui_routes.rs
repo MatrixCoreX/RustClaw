@@ -19,7 +19,8 @@ use super::super::{
     larkd_process_stats, list_auth_keys, mask_secret, oldest_running_task_age_seconds,
     reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
     task_count_by_status, telegramd_process_stats, update_auth_key_by_id,
-    upsert_exchange_credential_for_user_key, wa_webd_process_stats, whatsappd_process_stats,
+    upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
+    wa_webd_process_stats, webd_process_stats, whatsappd_process_stats,
     wechatd_process_stats, ApiResponse, AppState, HealthResponse, LocalInteractionContext,
 };
 use claw_core::skill_registry::SkillKind;
@@ -447,6 +448,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/admin/auth-keys/:key_id",
             put(update_auth_key_handler).delete(delete_auth_key_handler),
         )
+        .route("/internal/webd/verify-login", post(webd_internal_verify_login))
+        .route("/admin/webd-accounts", post(admin_upsert_webd_account))
 }
 
 #[derive(Debug, Deserialize)]
@@ -688,6 +691,125 @@ pub(crate) fn require_ui_identity(
                 error: Some(format!("auth lookup failed: {err}")),
             }),
         )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct WebdInternalVerifyRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminWebdAccountRequest {
+    username: String,
+    password: String,
+    user_key: String,
+}
+
+async fn webd_internal_verify_login(
+    State(state): State<AppState>,
+    Json(req): Json<WebdInternalVerifyRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let db = match state.db.lock() {
+        Ok(g) => g,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("db lock poisoned".to_string()),
+                }),
+            );
+        }
+    };
+    match verify_webd_password_login(&db, &req.username, &req.password) {
+        Ok(Some(user_key)) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({ "user_key": user_key })),
+                error: None,
+            }),
+        ),
+        Ok(None) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("invalid username or password".to_string()),
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("login failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn admin_upsert_webd_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<AdminWebdAccountRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(id) => id,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can manage webd accounts".to_string()),
+            }),
+        );
+    }
+    let db = match state.db.lock() {
+        Ok(g) => g,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("db lock poisoned".to_string()),
+                }),
+            );
+        }
+    };
+    match upsert_webd_login_account(&db, &req.username, &req.password, &req.user_key) {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({ "updated": true })),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(err.to_string()),
+            }),
+        ),
     }
 }
 
@@ -3006,6 +3128,7 @@ async fn health(
     let channel_gateway_stats = channel_gateway_process_stats();
     let whatsappd_stats = whatsappd_process_stats();
     let wa_webd_stats = wa_webd_process_stats();
+    let webd_stats = webd_process_stats();
     let wechatd_stats = wechatd_process_stats();
     let channel_gateway_process_count = channel_gateway_stats.map(|(count, _)| count);
     let channel_gateway_memory_rss_bytes = channel_gateway_stats.map(|(_, rss_bytes)| rss_bytes);
@@ -3023,6 +3146,9 @@ async fn health(
     let whatsappd_memory_rss_bytes_raw = whatsappd_stats.map(|(_, rss_bytes)| rss_bytes);
     let wa_webd_process_count_raw = wa_webd_stats.map(|(count, _)| count);
     let wa_webd_memory_rss_bytes_raw = wa_webd_stats.map(|(_, rss_bytes)| rss_bytes);
+    let webd_process_count = webd_stats.map(|(count, _)| count);
+    let webd_memory_rss_bytes = webd_stats.map(|(_, rss_bytes)| rss_bytes);
+    let webd_healthy = webd_process_count.map(|count| count > 0);
     let wechatd_process_count = wechatd_stats.map(|(count, _)| count);
     let wechatd_memory_rss_bytes = wechatd_stats.map(|(_, rss_bytes)| rss_bytes);
     let wechatd_healthy = wechatd_process_count.map(|count| count > 0);
@@ -3263,6 +3389,9 @@ async fn health(
         whatsapp_web_healthy: wa_webd_healthy,
         whatsapp_web_process_count: wa_webd_process_count,
         whatsapp_web_memory_rss_bytes: wa_webd_memory_rss_bytes,
+        webd_healthy,
+        webd_process_count,
+        webd_memory_rss_bytes,
         wechatd_healthy,
         wechatd_process_count,
         wechatd_memory_rss_bytes,

@@ -91,6 +91,7 @@ pub(crate) use repo::{
     resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
     stable_i64_from_key, submit_task_audit_detail, task_count_by_status, task_kind_name,
     update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
+    upsert_webd_login_account, verify_webd_password_login,
     SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
@@ -106,6 +107,7 @@ use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
 pub(crate) use system_health::{
     channel_gateway_process_stats, current_rss_bytes, feishud_process_stats, larkd_process_stats,
     oldest_running_task_age_seconds, telegramd_process_stats, wa_webd_process_stats,
+    webd_process_stats,
     wechatd_process_stats, whatsappd_process_stats,
 };
 pub(crate) use worker::task_payload_value;
@@ -117,6 +119,7 @@ pub(crate) const MEMORY_UPGRADE_SQL: &str =
 pub(crate) const CHANNEL_UPGRADE_SQL: &str =
     include_str!("../../../migrations/003_channels_upgrade.sql");
 const KEY_AUTH_UPGRADE_SQL: &str = include_str!("../../../migrations/004_key_auth.sql");
+pub(crate) const WEBD_LOGIN_SQL: &str = include_str!("../../../migrations/005_webd_login.sql");
 const LLM_RETRY_TIMES: usize = 2;
 pub(crate) const AGENT_MAX_STEPS: usize = 32;
 pub(crate) const RESUME_CONTEXT_ERROR_PREFIX: &str = "__RESUME_CTX__";
@@ -940,8 +943,17 @@ fn is_affirmation_click_text(state: &AppState, text: &str) -> bool {
 
 async fn submit_task(
     State(state): State<AppState>,
-    Json(req): Json<SubmitTaskRequest>,
+    headers: HeaderMap,
+    Json(mut req): Json<SubmitTaskRequest>,
 ) -> (StatusCode, Json<ApiResponse<SubmitTaskResponse>>) {
+    if req.user_key.is_none() {
+        req.user_key = headers
+            .get("x-rustclaw-key")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string());
+    }
     let submit_ctx = match resolve_submit_task_context(&state, &req, DEFAULT_AGENT_ID) {
         Ok(ctx) => ctx,
         Err(SubmitTaskContextError::AuthLookup(err)) => {
