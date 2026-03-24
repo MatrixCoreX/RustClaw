@@ -823,6 +823,7 @@ run_embedded_setup
 
 # Self-contained startup with selectable profile (default: release).
 CLAWD_BIN="$SCRIPT_DIR/target/$PROFILE/clawd"
+WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/webd"
 TELEGRAMD_BIN="$SCRIPT_DIR/target/$PROFILE/telegramd"
 WHATSAPPD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsappd"
 WHATSAPP_WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsapp_webd"
@@ -870,6 +871,37 @@ start_clawd() {
 	local pid=$!
 	echo "$pid" >"$PID_DIR/clawd.pid"
 	echo "Starting clawd binary, PID=$pid, log: $LOG_DIR/clawd.log" # zh: clawd 二进制启动中，PID=$pid, 日志: $LOG_DIR/clawd.log
+}
+
+start_webd() {
+	local webd_enabled
+	webd_enabled="$(
+		python3 - <<'PY'
+import tomllib
+from pathlib import Path
+cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
+webd_cfg = Path("configs/channels/webd.toml")
+if webd_cfg.exists():
+    cfg.update(tomllib.loads(webd_cfg.read_text(encoding="utf-8")))
+print("1" if bool(cfg.get("webd", {}).get("enabled", False)) else "0")
+PY
+	)"
+	if [[ "$webd_enabled" != "1" ]]; then
+		echo "webd.enabled=false, skipping webd startup." # zh: webd.enabled=false，跳过 webd 启动。
+		return 0
+	fi
+	if [[ ! -x "$WEBD_BIN" ]]; then
+		echo "Binary not found or not executable: $WEBD_BIN" # zh: 二进制不存在或不可执行：$WEBD_BIN
+		return 1
+	fi
+	if pgrep -f 'target/(debug|release)/webd|cargo run -p webd' >/dev/null 2>&1; then
+		echo "webd is already running, skipping startup." # zh: webd 已在运行，跳过启动。
+		return 0
+	fi
+	nohup "$WEBD_BIN" >"$LOG_DIR/webd.log" 2>&1 &
+	local pid=$!
+	echo "$pid" >"$PID_DIR/webd.pid"
+	echo "Starting webd binary, PID=$pid, log: $LOG_DIR/webd.log" # zh: webd 二进制启动中，PID=$pid, 日志: $LOG_DIR/webd.log
 }
 
 start_telegramd() {
@@ -997,6 +1029,7 @@ PY
 
 echo "Step 5/5: Start services" # zh: 第 5/5 步：启动服务
 start_clawd
+start_webd
 start_telegramd
 start_whatsapp_webd
 start_whatsappd
