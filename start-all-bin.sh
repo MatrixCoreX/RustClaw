@@ -40,6 +40,7 @@ WHATSAPPD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsappd"
 WHATSAPP_WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsapp_webd"
 WECHATD_BIN="$SCRIPT_DIR/target/$PROFILE/wechatd"
 FEISHUD_BIN="$SCRIPT_DIR/target/$PROFILE/feishud"
+WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/webd"
 
 if [[ ! -x "$CLAWD_BIN" ]]; then
   echo "Binary not found or not executable: $CLAWD_BIN" # zh: 二进制不存在或不可执行：$CLAWD_BIN
@@ -85,6 +86,43 @@ start_clawd() {
   sleep 2
   if ! kill -0 "$pid" >/dev/null 2>&1; then
     echo "Failed to start clawd binary. Check log: $LOG_DIR/clawd.log" # zh: clawd 二进制启动失败，请检查日志: $LOG_DIR/clawd.log
+    return 1
+  fi
+}
+
+start_webd() {
+  local webd_enabled
+  webd_enabled="$(
+python3 - <<'PY'
+import tomllib
+from pathlib import Path
+cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
+webd_cfg = Path("configs/channels/webd.toml")
+if webd_cfg.exists():
+    cfg.update(tomllib.loads(webd_cfg.read_text(encoding="utf-8")))
+print("1" if bool(cfg.get("webd", {}).get("enabled", False)) else "0")
+PY
+  )"
+  if [[ "$webd_enabled" != "1" ]]; then
+    echo "webd.enabled=false, skipping webd startup." # zh: webd.enabled=false，跳过 webd 启动。
+    return 0
+  fi
+  if [[ ! -x "$WEBD_BIN" ]]; then
+    echo "Binary not found or not executable: $WEBD_BIN" # zh: 二进制不存在或不可执行：$WEBD_BIN
+    echo "Please run: ./build-all.sh $PROFILE" # zh: 请先执行：./build-all.sh $PROFILE
+    return 1
+  fi
+  if pgrep -f 'target/(debug|release)/webd|cargo run -p webd' >/dev/null 2>&1; then
+    echo "webd is already running, skipping startup." # zh: webd 已在运行，跳过启动。
+    return 0
+  fi
+  nohup "$WEBD_BIN" >"$LOG_DIR/webd.log" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$PID_DIR/webd.pid"
+  echo "Starting webd, PID=$pid, log: $LOG_DIR/webd.log" # zh: webd 启动中，PID=$pid, 日志: $LOG_DIR/webd.log
+  sleep 2
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    echo "Failed to start webd. Check log: $LOG_DIR/webd.log" # zh: webd 启动失败，请检查日志: $LOG_DIR/webd.log
     return 1
   fi
 }
@@ -278,6 +316,7 @@ start_future_adapters_placeholder() {
 }
 
 start_clawd
+start_webd
 if [[ "${RUSTCLAW_SKIP_TELEGRAMD:-0}" == "1" ]]; then
   echo "RUSTCLAW_SKIP_TELEGRAMD=1, skipping telegramd startup."
 else

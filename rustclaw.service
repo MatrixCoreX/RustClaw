@@ -1,0 +1,42 @@
+[Unit]
+Description=RustClaw Service (start-all-bin with singbox proxy)
+After=network.target sing-box.service
+Wants=sing-box.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=guagua
+Group=guagua
+WorkingDirectory=/home/guagua/git_upload
+
+# 使用 singbox 代理
+# 如果您的 singbox mixed_port 不是 2080，请修改下面的端口号
+# 可以通过查看 singbox 配置文件确认端口，或使用: ss -tlnp | grep sing-box
+Environment="HTTP_PROXY=http://127.0.0.1:2080"
+Environment="HTTPS_PROXY=http://127.0.0.1:2080"
+Environment="ALL_PROXY=socks5://127.0.0.1:2080"
+Environment="http_proxy=http://127.0.0.1:2080"
+Environment="https_proxy=http://127.0.0.1:2080"
+Environment="all_proxy=socks5://127.0.0.1:2080"
+
+# 保留其他环境变量
+Environment="RUSTCLAW_LOG_COLOR=1"
+
+# 执行启动脚本（免配置直接启动，默认使用 release profile）
+ExecStart=/bin/bash /home/guagua/git_upload/start-all-bin.sh
+
+# 停止时执行停止脚本
+ExecStop=/bin/bash /home/guagua/git_upload/stop-rustclaw.sh
+
+# 重启策略
+Restart=on-failure
+RestartSec=10
+
+# 日志设置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rustclaw
+
+[Install]
+WantedBy=multi-user.target
