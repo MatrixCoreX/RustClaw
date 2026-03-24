@@ -85,6 +85,9 @@ stop_by_name() {
   fi
 } 
 
+if ! stop_by_pid_file "$PID_DIR/webd.pid" "webd" 'target/(debug|release)/webd|cargo run -p webd'; then
+  stop_by_name 'target/(debug|release)/webd|cargo run -p webd'
+fi
 if ! stop_by_pid_file "$PID_DIR/clawd.pid" "clawd" 'target/(debug|release)/clawd|cargo run -p clawd'; then
   stop_by_name 'target/(debug|release)/clawd|cargo run -p clawd'
 fi
@@ -107,7 +110,7 @@ if ! stop_by_pid_file "$PID_DIR/feishud.pid" "feishud" 'target/(debug|release)/f
 fi
 
 if [[ -d "$PID_DIR" ]]; then
-  rm -f "$PID_DIR/clawd.pid" "$PID_DIR/telegramd.pid" "$PID_DIR/whatsappd.pid" "$PID_DIR/whatsapp_webd.pid" "$PID_DIR/wechatd.pid" "$PID_DIR/feishud.pid"
+  rm -f "$PID_DIR/webd.pid" "$PID_DIR/clawd.pid" "$PID_DIR/telegramd.pid" "$PID_DIR/whatsappd.pid" "$PID_DIR/whatsapp_webd.pid" "$PID_DIR/wechatd.pid" "$PID_DIR/feishud.pid"
 fi
 
 echo "RustClaw has been stopped." # zh: RustClaw 已停止。
