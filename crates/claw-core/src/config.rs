@@ -47,6 +47,8 @@ pub struct AppConfig {
     pub agents: Vec<AgentConfig>,
     #[serde(default)]
     pub schedule: ScheduleConfig,
+    #[serde(default)]
+    pub webd: WebdConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -358,6 +360,77 @@ impl Default for WhatsappWebConfig {
             bindings: Vec::new(),
         }
     }
+}
+
+/// 面向公网的 HTTP 反向代理（转发至本机 `clawd`），见 `webd` 二进制。
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebdConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_webd_listen")]
+    pub listen: String,
+    #[serde(default = "default_webd_upstream")]
+    pub upstream: String,
+    #[serde(default = "default_webd_connect_timeout_seconds")]
+    pub connect_timeout_seconds: u64,
+    /// 0 表示使用 `[server].request_timeout_seconds`。
+    #[serde(default)]
+    pub request_timeout_seconds: u64,
+    #[serde(default = "default_webd_forward_x_forwarded")]
+    pub forward_x_forwarded: bool,
+    /// 入站请求体最大字节数（缓冲后转发给 clawd）；过大返回 413。
+    #[serde(default = "default_webd_max_incoming_body_bytes")]
+    pub max_incoming_body_bytes: usize,
+    /// HttpOnly 会话 Cookie 名。
+    #[serde(default = "default_webd_session_cookie_name")]
+    pub session_cookie_name: String,
+    /// 会话有效期（秒）。
+    #[serde(default = "default_webd_session_ttl_seconds")]
+    pub session_ttl_seconds: u64,
+}
+
+impl Default for WebdConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen: default_webd_listen(),
+            upstream: default_webd_upstream(),
+            connect_timeout_seconds: default_webd_connect_timeout_seconds(),
+            request_timeout_seconds: 0,
+            forward_x_forwarded: default_webd_forward_x_forwarded(),
+            max_incoming_body_bytes: default_webd_max_incoming_body_bytes(),
+            session_cookie_name: default_webd_session_cookie_name(),
+            session_ttl_seconds: default_webd_session_ttl_seconds(),
+        }
+    }
+}
+
+fn default_webd_session_cookie_name() -> String {
+    "webd_sid".to_string()
+}
+
+fn default_webd_session_ttl_seconds() -> u64 {
+    86400
+}
+
+fn default_webd_max_incoming_body_bytes() -> usize {
+    100 * 1024 * 1024
+}
+
+fn default_webd_listen() -> String {
+    "0.0.0.0:8788".to_string()
+}
+
+fn default_webd_upstream() -> String {
+    "http://127.0.0.1:8787".to_string()
+}
+
+fn default_webd_connect_timeout_seconds() -> u64 {
+    10
+}
+
+fn default_webd_forward_x_forwarded() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1553,6 +1626,7 @@ impl AppConfig {
             .add_source(
                 config::File::from(base_dir.join("channels/whatsapp-web.toml")).required(false),
             )
+            .add_source(config::File::from(base_dir.join("channels/webd.toml")).required(false))
             .build()?;
         let mut app: AppConfig = cfg.try_deserialize()?;
 

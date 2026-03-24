@@ -214,6 +214,12 @@ pub struct HealthResponse {
     pub whatsapp_web_process_count: Option<usize>,
     /// whatsapp web adapter RSS 内存总和（字节，None 表示无法检测）
     pub whatsapp_web_memory_rss_bytes: Option<u64>,
+    /// webd 进程健康状态（None 表示无法检测）
+    pub webd_healthy: Option<bool>,
+    /// 检测到的 webd 进程数量（None 表示无法检测）
+    pub webd_process_count: Option<usize>,
+    /// webd 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub webd_memory_rss_bytes: Option<u64>,
     /// wechatd 进程健康状态（None 表示无法检测）
     pub wechatd_healthy: Option<bool>,
     /// 检测到的 wechatd 进程数量（None 表示无法检测）
