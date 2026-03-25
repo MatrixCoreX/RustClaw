@@ -29,6 +29,8 @@ HEALTH_REFRESH_SEC = 15
 LOGS_REFRESH_SEC = 5
 W, H = 480, 320
 ASSETS_DIR = None
+CRYPTOAUTHLIB_PYTHON = "/home/guagua/cryptoauthlib/python/.venv/bin/python"
+CRYPTOAUTHLIB_LIB_DIR = "/home/guagua/cryptoauthlib/build-pyfix"
 
 # Matrix 主题下竖排随机字符（数字、拉丁、片假名等）
 MATRIX_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝｦｧｨｩｪｫｬｭｮｯｰ"
@@ -79,11 +81,53 @@ STRINGS = {
         "llm_title": "NNI分布式模型 (test)",
         "llm_join": "加入",
         "llm_stop": "停止",
+        "llm_pubkey_slot0": "slot 0",
+        "llm_pubkey_loading": "正在读取 slot 0.....",
+        "llm_pubkey_empty": "还未读取 slot 0",
+        "llm_pubkey_error": "获取不到公钥",
+        "llm_signing": "正在签名.....",
+        "llm_sign_failed": "签名失败",
+        "llm_sign_timestamp": "时间",
+        "llm_sign_signature": "签名",
         "theme": "界面",
         "theme_default": "默认",
         "theme_matrix": "Matrix",
         "restart": "重启RustClaw核心",
         "restarting": "重启中.....",
+        "wifi_title": "WiFi",
+        "wifi_refresh": "刷新列表",
+        "wifi_refreshing": "扫描中.....",
+        "wifi_connect": "连接 WiFi",
+        "wifi_connecting": "连接中.....",
+        "wifi_join": "加入",
+        "wifi_disconnect": "断开",
+        "wifi_disconnecting": "断开中.....",
+        "wifi_selected": "已选网络",
+        "wifi_password": "密码",
+        "wifi_edit_password": "输入密码",
+        "wifi_keyboard_done": "完成",
+        "wifi_show_password": "显示",
+        "wifi_hide_password": "隐藏",
+        "wifi_backspace": "退格",
+        "wifi_clear": "清空",
+        "wifi_space": "空格",
+        "wifi_shift": "大小写",
+        "wifi_symbols": "符号",
+        "wifi_letters": "字母",
+        "wifi_prev_page": "上一页",
+        "wifi_next_page": "下一页",
+        "wifi_no_selection": "请先选择一个 WiFi",
+        "wifi_password_required": "该 WiFi 需要密码，请先输入密码。",
+        "wifi_empty": "没有扫描到可用 WiFi",
+        "wifi_open_hint": "开放网络可直接连接，密码可留空。",
+        "wifi_secure_hint": "加密网络请输入密码后连接。",
+        "wifi_connected_tag": "已连接",
+        "wifi_connect_success": "已连接到 {ssid}",
+        "wifi_connect_failed": "连接失败: {error}",
+        "wifi_disconnect_success": "已断开 {ssid}",
+        "wifi_disconnect_failed": "断开失败: {error}",
+        "wifi_scan_failed": "扫描失败: {error}",
+        "wifi_scan_hint": "点按列表选择 WiFi，再用屏幕键盘输入密码。",
         "reset_admin_login": "重置管理员账号密码",
         "resetting_admin_login": "重置中.....",
         "reset_admin_login_success": "已重置：admin 账号 rustclaw / rustclaw123456",
@@ -135,11 +179,53 @@ STRINGS = {
         "llm_title": "Network Native Intelligence (test)",
         "llm_join": "Join",
         "llm_stop": "Stop",
+        "llm_pubkey_slot0": "Slot 0",
+        "llm_pubkey_loading": "Loading slot 0.....",
+        "llm_pubkey_empty": "Slot 0 not loaded yet",
+        "llm_pubkey_error": "Public key unavailable",
+        "llm_signing": "Signing.....",
+        "llm_sign_failed": "Sign failed",
+        "llm_sign_timestamp": "Time",
+        "llm_sign_signature": "Signature",
         "theme": "Theme",
         "theme_default": "Default",
         "theme_matrix": "Matrix",
         "restart": "Restart RustClaw Core",
         "restarting": "Restarting.....",
+        "wifi_title": "WiFi",
+        "wifi_refresh": "Refresh",
+        "wifi_refreshing": "Scanning.....",
+        "wifi_connect": "Connect WiFi",
+        "wifi_connecting": "Connecting.....",
+        "wifi_join": "Join",
+        "wifi_disconnect": "Disconnect",
+        "wifi_disconnecting": "Disconnecting.....",
+        "wifi_selected": "Selected",
+        "wifi_password": "Password",
+        "wifi_edit_password": "Enter Password",
+        "wifi_keyboard_done": "Done",
+        "wifi_show_password": "Show",
+        "wifi_hide_password": "Hide",
+        "wifi_backspace": "Back",
+        "wifi_clear": "Clear",
+        "wifi_space": "Space",
+        "wifi_shift": "Shift",
+        "wifi_symbols": "Symbols",
+        "wifi_letters": "Letters",
+        "wifi_prev_page": "Prev",
+        "wifi_next_page": "Next",
+        "wifi_no_selection": "Select a WiFi first",
+        "wifi_password_required": "This WiFi requires a password. Enter the password first.",
+        "wifi_empty": "No WiFi networks found",
+        "wifi_open_hint": "Open network: password can be empty.",
+        "wifi_secure_hint": "Secure network: enter password first.",
+        "wifi_connected_tag": "Connected",
+        "wifi_connect_success": "Connected to {ssid}",
+        "wifi_connect_failed": "Connect failed: {error}",
+        "wifi_disconnect_success": "Disconnected from {ssid}",
+        "wifi_disconnect_failed": "Disconnect failed: {error}",
+        "wifi_scan_failed": "Scan failed: {error}",
+        "wifi_scan_hint": "Tap a WiFi, then use the on-screen keyboard to enter the password.",
         "reset_admin_login": "Reset admin username/password",
         "resetting_admin_login": "Resetting.....",
         "reset_admin_login_success": "Reset done: admin rustclaw / rustclaw123456",
@@ -403,6 +489,272 @@ def reset_admin_login_account(username="rustclaw", password="rustclaw123456"):
     if not admin_key:
         return False, "enabled admin key not found"
     return post_admin_webd_account(admin_key, username, password)
+
+
+def _wifi_sort_key(item):
+    active_rank = 0 if item.get("active") else 1
+    signal_rank = -(item.get("signal") or 0)
+    name_rank = (item.get("ssid") or "").lower()
+    return (active_rank, signal_rank, name_rank)
+
+
+def _split_nmcli_escaped(line, expected_parts=4):
+    parts = []
+    current = []
+    escaped = False
+    for ch in line:
+        if escaped:
+            current.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch == ":" and len(parts) < expected_parts - 1:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(ch)
+    parts.append("".join(current))
+    while len(parts) < expected_parts:
+        parts.append("")
+    return parts[:expected_parts]
+
+
+def scan_wifi_networks():
+    try:
+        result = subprocess.run(
+            [
+                "nmcli",
+                "-t",
+                "--escape",
+                "yes",
+                "-f",
+                "IN-USE,SSID,SECURITY,SIGNAL",
+                "dev",
+                "wifi",
+                "list",
+                "--rescan",
+                "yes",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None, "nmcli not found"
+    except Exception as exc:
+        return None, str(exc)
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout or "nmcli failed").strip()
+        return None, error
+
+    dedup = {}
+    for raw_line in (result.stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        active, ssid, security, signal_text = _split_nmcli_escaped(line, expected_parts=4)
+        ssid = (ssid or "").strip()
+        if not ssid:
+            continue
+        try:
+            signal = int((signal_text or "0").strip() or "0")
+        except Exception:
+            signal = 0
+        item = {
+            "active": active.strip().lower() in ("*", "yes", "true", "activated"),
+            "ssid": ssid,
+            "security": (security or "").strip(),
+            "signal": max(0, min(signal, 100)),
+        }
+        existing = dedup.get(ssid)
+        if existing is None or _wifi_sort_key(item) < _wifi_sort_key(existing):
+            dedup[ssid] = item
+    return sorted(dedup.values(), key=_wifi_sort_key), None
+
+
+def connect_wifi_network(ssid, password=""):
+    ssid = (ssid or "").strip()
+    if not ssid:
+        return False, "SSID required"
+    cmd = ["nmcli", "dev", "wifi", "connect", ssid]
+    if password:
+        cmd += ["password", password]
+
+    def _run_connect():
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+    try:
+        result = _run_connect()
+    except FileNotFoundError:
+        return False, "nmcli not found"
+    except Exception as exc:
+        return False, str(exc)
+    if result.returncode == 0:
+        return True, (result.stdout or "").strip()
+    error = (result.stderr or result.stdout or "nmcli failed").strip()
+    lower_error = error.lower()
+    should_retry = (
+        bool(password)
+        and (
+            "property is missing" in lower_error
+            or "secrets were required" in lower_error
+            or "no valid secrets" in lower_error
+        )
+    )
+    if should_retry:
+        try:
+            cleanup = subprocess.run(
+                ["nmcli", "connection", "delete", "id", ssid],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if cleanup.returncode == 0 or "unknown connection" in (cleanup.stderr or "").lower():
+                retry = _run_connect()
+                if retry.returncode == 0:
+                    return True, (retry.stdout or "").strip()
+                retry_error = (retry.stderr or retry.stdout or "nmcli failed").strip()
+                return False, retry_error
+        except FileNotFoundError:
+            return False, "nmcli not found"
+        except Exception as exc:
+            return False, str(exc)
+    return False, error
+
+
+def disconnect_wifi_network(ssid=""):
+    ssid = (ssid or "").strip()
+    try:
+        status = subprocess.run(
+            [
+                "nmcli",
+                "-t",
+                "--escape",
+                "no",
+                "-f",
+                "DEVICE,TYPE,STATE,CONNECTION",
+                "device",
+                "status",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False, "nmcli not found"
+    except Exception as exc:
+        return False, str(exc)
+    if status.returncode != 0:
+        error = (status.stderr or status.stdout or "nmcli failed").strip()
+        return False, error
+
+    target_device = ""
+    for raw_line in (status.stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(":")
+        if len(parts) < 4:
+            continue
+        device, dev_type, state = parts[0].strip(), parts[1].strip(), parts[2].strip().lower()
+        connection = ":".join(parts[3:]).strip()
+        if dev_type != "wifi" or state != "connected":
+            continue
+        if not ssid or connection == ssid:
+            target_device = device
+            break
+    if not target_device and ssid:
+        try:
+            result = subprocess.run(
+                ["nmcli", "connection", "down", "id", ssid],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except FileNotFoundError:
+            return False, "nmcli not found"
+        except Exception as exc:
+            return False, str(exc)
+        if result.returncode == 0:
+            return True, (result.stdout or "").strip()
+        error = (result.stderr or result.stdout or "nmcli failed").strip()
+        return False, error
+    if not target_device:
+        return False, "connected wifi device not found"
+    try:
+        result = subprocess.run(
+            ["nmcli", "device", "disconnect", target_device],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False, "nmcli not found"
+    except Exception as exc:
+        return False, str(exc)
+    if result.returncode == 0:
+        return True, (result.stdout or "").strip()
+    error = (result.stderr or result.stdout or "nmcli failed").strip()
+    return False, error
+
+
+def _run_signature_helper(args):
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signature.py")
+    if not os.path.isfile(script_path):
+        return None, "helper script not found"
+    if not os.path.isfile(CRYPTOAUTHLIB_PYTHON):
+        return None, "cryptoauthlib python not found"
+    env = os.environ.copy()
+    if os.path.isdir(CRYPTOAUTHLIB_LIB_DIR):
+        env["LD_LIBRARY_PATH"] = f"{CRYPTOAUTHLIB_LIB_DIR}:{env.get('LD_LIBRARY_PATH', '')}".rstrip(":")
+    try:
+        result = subprocess.run(
+            [CRYPTOAUTHLIB_PYTHON, script_path, *args],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            check=False,
+            env=env,
+        )
+    except Exception as exc:
+        return None, str(exc)
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return None, (result.stderr or "empty helper response").strip()
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return None, raw
+    if payload.get("ok"):
+        return payload, ""
+    return None, str(payload.get("error") or "helper request failed")
+
+
+def read_slot0_pubkey_via_helper():
+    payload, error = _run_signature_helper(["pubkey"])
+    if payload and payload.get("pubkey"):
+        return str(payload.get("pubkey")).strip(), ""
+    return None, error or "public key unavailable"
+
+
+def sign_unix_time_via_helper(unix_time):
+    payload, error = _run_signature_helper(["sign_timestamp", str(int(unix_time))])
+    if payload and payload.get("signature"):
+        return payload, ""
+    return None, error or "sign failed"
 
 
 def _default_lang_from_system():
@@ -1225,6 +1577,31 @@ class SmallScreenApp:
         self._pending_log_entries = []
         self._log_append_job = None
         self.error = None
+        self._wifi_networks = []
+        self._wifi_scan_error = None
+        self._wifi_status_text = ""
+        self._wifi_selected_ssid = ""
+        self._wifi_selected_security = ""
+        self._wifi_password_var = tk.StringVar(value="")
+        self._wifi_password_visible = False
+        self._wifi_keyboard_mode = "lower"
+        self._wifi_page_index = 0
+        self._wifi_scan_in_progress = False
+        self._wifi_connect_in_progress = False
+        self._wifi_disconnect_in_progress = False
+        self._wifi_keyboard_window = None
+        self._llm_pubkey_hex = ""
+        self._llm_pubkey_error = ""
+        self._llm_pubkey_loading = False
+        self._llm_signing = False
+        self._llm_signature_hex = ""
+        self._llm_signature_error = ""
+        self._llm_signature_timestamp = ""
+        self._llm_info_hidden = True
+        self._llm_clear_job = None
+        self._llm_info_frame = None
+        self._llm_info_pady = (0, 8)
+        self._llm_join_in_progress = False
         self.gif_frames = []
         self.gif_delays = []
         self.gif_frame_idx = 0
@@ -1323,10 +1700,11 @@ class SmallScreenApp:
         # 标题 RustClaw
         top_text = tk.Frame(top, bg=self._c("bg"))
         top_text.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-        tk.Label(
+        self._top_title_label = tk.Label(
             top_text, text="RustClaw", font=("", 20, "bold"),
             bg=self._c("bg"), fg=self._c("accent"), anchor="w"
-        ).pack(anchor=tk.W)
+        )
+        self._top_title_label.pack(anchor=tk.W)
         self._top_recent_message_var = tk.StringVar(value="")
         self._top_recent_message_label = tk.Label(
             top_text,
@@ -1361,11 +1739,12 @@ class SmallScreenApp:
         self.gallery_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.crypto_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.stock_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
+        self.wifi_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=12, pady=8)
         self.users_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=20, pady=18)
         self.logs_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=10, pady=8)
         self.settings_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=24, pady=20)
-        # 顺序（左滑下一页）：首页 → 用户 → 日志 → 技能 → A股 → 加密货币 → 挖矿 → 设置 → 首页；右滑=上一页
-        self._view_mode = "dashboard"  # dashboard | users | logs | skills | stock | crypto | gallery | settings
+        # 顺序（左滑下一页）：首页 → 用户 → 日志 → 技能 → A股 → 加密货币 → 挖矿 → 设置 → WiFi → 首页；右滑=上一页
+        self._view_mode = "dashboard"  # dashboard | users | logs | skills | stock | crypto | gallery | wifi | settings
         self._crypto_job = None
         self._stock_job = None
         self._gallery_images = []
@@ -1491,7 +1870,98 @@ class SmallScreenApp:
             wraplength=440,
         )
         self._settings_reset_status_label.pack(anchor=tk.W, pady=(8, 0))
+        self._wifi_status_var = tk.StringVar(value=_t("wifi_scan_hint"))
+        self._wifi_status_label = tk.Label(
+            self.wifi_frame,
+            textvariable=self._wifi_status_var,
+            font=("", 10),
+            bg=self._c("bg"),
+            fg=self._c("fg_dim"),
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=450,
+        )
+        self._wifi_status_label.pack(fill=tk.X, pady=(0, 4))
+        self._wifi_list_frame = tk.Frame(self.wifi_frame, bg=self._c("bg"))
+        self._wifi_list_frame.pack(fill=tk.X)
+        self._wifi_pager_row = tk.Frame(self.wifi_frame, bg=self._c("bg"))
+        self._wifi_pager_row.pack(fill=tk.X, pady=(4, 4))
+        self._wifi_prev_btn = tk.Button(
+            self._wifi_pager_row,
+            text=_t("wifi_prev_page"),
+            font=("", 10),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=lambda: self._change_wifi_page(-1),
+        )
+        self._wifi_prev_btn.pack(side=tk.LEFT)
+        self._wifi_page_var = tk.StringVar(value="1/1")
+        self._wifi_page_label = tk.Label(
+            self._wifi_pager_row,
+            textvariable=self._wifi_page_var,
+            font=("", 10),
+            bg=self._c("bg"),
+            fg=self._c("fg_dim"),
+        )
+        self._wifi_page_label.pack(side=tk.LEFT, padx=10)
+        self._wifi_next_btn = tk.Button(
+            self._wifi_pager_row,
+            text=_t("wifi_next_page"),
+            font=("", 10),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=lambda: self._change_wifi_page(1),
+        )
+        self._wifi_next_btn.pack(side=tk.LEFT, padx=(0, 8))
+        self._wifi_right_actions = tk.Frame(self._wifi_pager_row, bg=self._c("bg"))
+        self._wifi_right_actions.pack(side=tk.RIGHT)
+        self._wifi_refresh_btn = tk.Button(
+            self._wifi_right_actions,
+            text=_t("wifi_refresh"),
+            font=("", 10),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=self._refresh_wifi_networks,
+        )
+        self._wifi_refresh_btn.pack(side=tk.LEFT)
+        self._wifi_join_btn = tk.Button(
+            self._wifi_right_actions,
+            text=_t("wifi_join"),
+            font=("", 10),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=self._on_wifi_join_click,
+        )
+        self._wifi_selected_var = tk.StringVar(value="--")
+        self._wifi_selected_label = tk.Label(
+            self.wifi_frame,
+            textvariable=self._wifi_selected_var,
+            font=("", 11, "bold"),
+            bg=self._c("bg"),
+            fg=self._c("accent"),
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=450,
+        )
+        self._wifi_selected_label.pack(fill=tk.X, pady=(2, 2))
+        self._wifi_hint_var = tk.StringVar(value="")
+        self._wifi_hint_label = tk.Label(
+            self.wifi_frame,
+            textvariable=self._wifi_hint_var,
+            font=("", 10),
+            bg=self._c("bg"),
+            fg=self._c("fg_dim"),
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=450,
+        )
+        self._wifi_hint_label.pack(fill=tk.X, pady=(0, 4))
         self._refresh_topbar()
+        self._render_wifi_view()
 
     def _t(self, key):
         return STRINGS.get(self._lang, STRINGS["CN"]).get(key, key)
@@ -1610,12 +2080,20 @@ class SmallScreenApp:
         self._refresh_topbar()
 
     def _refresh_topbar(self):
+        try:
+            self._top_title_label.config(text="RustClaw", bg=self._c("bg"), fg=self._c("accent"))
+            if self._top_title_label.winfo_manager() != "pack":
+                self._top_title_label.pack(anchor=tk.W, before=self._top_recent_message_label)
+        except tk.TclError:
+            pass
         if self._view_mode == "users":
             self._top_recent_message_var.set(self._t("recent_messages_title"))
         elif self._view_mode == "logs":
             self._top_recent_message_var.set("logs")
         elif self._view_mode == "skills":
             self._top_recent_message_var.set("skills")
+        elif self._view_mode == "wifi":
+            self._top_recent_message_var.set(self._t("wifi_title"))
         else:
             if self._top_recent_message_label.winfo_manager():
                 self._top_recent_message_label.pack_forget()
@@ -1646,6 +2124,466 @@ class SmallScreenApp:
         self._settings_lang_var.set(self._lang)
         self._settings_theme_var.set(self._theme)
 
+    def _prepare_wifi_view(self):
+        self._wifi_refresh_btn.config(
+            text=self._t("wifi_refreshing") if self._wifi_scan_in_progress else self._t("wifi_refresh"),
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+        )
+        self._wifi_join_btn.config(
+            text=self._t("wifi_connecting") if self._wifi_connect_in_progress else self._t("wifi_join"),
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+        )
+        self._wifi_prev_btn.config(text=self._t("wifi_prev_page"), bg=self._c("button_bg"), fg=self._c("button_fg"))
+        self._wifi_next_btn.config(text=self._t("wifi_next_page"), bg=self._c("button_bg"), fg=self._c("button_fg"))
+        self._wifi_status_label.config(bg=self._c("bg"), fg=self._c("fg_dim"))
+        self._wifi_selected_label.config(bg=self._c("bg"), fg=self._c("accent"))
+        self._wifi_hint_label.config(bg=self._c("bg"), fg=self._c("fg_dim"))
+        self._wifi_page_label.config(bg=self._c("bg"), fg=self._c("fg_dim"))
+        self._render_wifi_view()
+
+    def _format_wifi_name(self, item):
+        ssid = str(item.get("ssid") or "--")
+        if len(ssid) > 24:
+            ssid = ssid[:21] + "..."
+        signal = item.get("signal")
+        signal_text = f"{signal}%" if signal is not None else "--"
+        secure = str(item.get("security") or "").strip()
+        suffix = " 🔒" if secure else ""
+        if item.get("active"):
+            suffix += " " + self._t("wifi_connected_tag")
+        return f"{ssid}  {signal_text}{suffix}"
+
+    def _wifi_keyboard_rows(self):
+        if self._wifi_keyboard_mode == "symbol":
+            return [
+                list("1234567890"),
+                list("!@#$%^&*()"),
+                list("-_=+[]{}"),
+                list(";:,.?/\\|"),
+            ]
+        if self._wifi_keyboard_mode == "upper":
+            return [
+                list("1234567890"),
+                list("QWERTYUIOP"),
+                list("ASDFGHJKL"),
+                list("ZXCVBNM"),
+            ]
+        return [
+            list("1234567890"),
+            list("qwertyuiop"),
+            list("asdfghjkl"),
+            list("zxcvbnm"),
+        ]
+
+    def _render_wifi_view(self):
+        if not hasattr(self, "_wifi_list_frame"):
+            return
+        for child in self._wifi_list_frame.winfo_children():
+            child.destroy()
+        page_size = 3
+        total = len(self._wifi_networks)
+        page_count = max(1, (total + page_size - 1) // page_size)
+        self._wifi_page_index = max(0, min(self._wifi_page_index, page_count - 1))
+        start = self._wifi_page_index * page_size
+        current = self._wifi_networks[start:start + page_size]
+        if not current:
+            tk.Label(
+                self._wifi_list_frame,
+                text=self._t("wifi_empty") if not self._wifi_scan_error else self._t("wifi_scan_failed").format(error=self._wifi_scan_error),
+                font=("", 11),
+                bg=self._c("bg"),
+                fg=self._c("fg_dim"),
+                anchor="w",
+                justify=tk.LEFT,
+                wraplength=450,
+            ).pack(fill=tk.X, pady=(6, 0))
+        else:
+            for item in current:
+                selected = item.get("ssid") == self._wifi_selected_ssid
+                row = tk.Frame(self._wifi_list_frame, bg=self._c("bg"))
+                row.pack(fill=tk.X, pady=(0, 4))
+                active = bool(item.get("active"))
+                actions = tk.Frame(row, bg=self._c("bg"))
+                actions.pack(side=tk.RIGHT, padx=(6, 0))
+                btn = tk.Button(
+                    row,
+                    text=self._format_wifi_name(item),
+                    font=("", 10, "bold" if selected else "normal"),
+                    relief=tk.FLAT,
+                    anchor="w",
+                    justify=tk.LEFT,
+                    bg=self._c("accent") if selected else self._c("box_bg"),
+                    fg=self._c("button_fg") if selected else self._c("fg"),
+                    activebackground=self._c("button_active_bg"),
+                    activeforeground=self._c("fg"),
+                    command=lambda data=item: self._select_wifi_network(data),
+                )
+                btn.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
+                if active:
+                    disconnect_btn = tk.Button(
+                        actions,
+                        text=self._t("wifi_disconnecting") if self._wifi_disconnect_in_progress else self._t("wifi_disconnect"),
+                        font=("", 9),
+                        relief=tk.FLAT,
+                        bg=self._c("button_bg"),
+                        fg=self._c("button_fg"),
+                        state=tk.DISABLED if self._wifi_disconnect_in_progress else tk.NORMAL,
+                        command=lambda ssid=item.get("ssid") or "": self._disconnect_wifi(ssid),
+                    )
+                    disconnect_btn.pack(side=tk.RIGHT)
+        self._wifi_page_var.set(f"{self._wifi_page_index + 1}/{page_count}")
+        self._wifi_prev_btn.config(state=tk.NORMAL if self._wifi_page_index > 0 else tk.DISABLED)
+        self._wifi_next_btn.config(state=tk.NORMAL if self._wifi_page_index < page_count - 1 else tk.DISABLED)
+        selected_text = self._wifi_selected_ssid or "--"
+        self._wifi_selected_var.set(f"{self._t('wifi_selected')}: {selected_text}")
+        if self._wifi_selected_security:
+            self._wifi_hint_var.set(self._t("wifi_secure_hint"))
+        else:
+            self._wifi_hint_var.set(self._t("wifi_open_hint") if self._wifi_selected_ssid else self._t("wifi_scan_hint"))
+        self._wifi_status_var.set(self._wifi_status_text or self._t("wifi_scan_hint"))
+        selected_active = any(
+            item.get("active") and str(item.get("ssid") or "") == self._wifi_selected_ssid
+            for item in self._wifi_networks
+        )
+        self._wifi_join_btn.config(
+            text=self._t("wifi_connecting") if self._wifi_connect_in_progress else self._t("wifi_join"),
+            state=tk.DISABLED if self._wifi_connect_in_progress or self._wifi_disconnect_in_progress or not self._wifi_selected_ssid else tk.NORMAL,
+        )
+        if self._wifi_selected_ssid and not selected_active:
+            if self._wifi_join_btn.winfo_manager() != "pack":
+                self._wifi_join_btn.pack(side=tk.LEFT, padx=(8, 0))
+        else:
+            if self._wifi_join_btn.winfo_manager():
+                self._wifi_join_btn.pack_forget()
+        self._wifi_refresh_btn.config(
+            text=self._t("wifi_refreshing") if self._wifi_scan_in_progress else self._t("wifi_refresh"),
+            state=tk.DISABLED if self._wifi_scan_in_progress or self._wifi_connect_in_progress or self._wifi_disconnect_in_progress else tk.NORMAL,
+        )
+
+    def _change_wifi_page(self, delta):
+        self._wifi_page_index = max(0, self._wifi_page_index + delta)
+        self._render_wifi_view()
+
+    def _select_wifi_network(self, item):
+        self._wifi_selected_ssid = str(item.get("ssid") or "").strip()
+        self._wifi_selected_security = str(item.get("security") or "").strip()
+        self._wifi_password_var.set("")
+        self._wifi_status_text = self._t("wifi_secure_hint") if self._wifi_selected_security else self._t("wifi_open_hint")
+        self._render_wifi_view()
+
+    def _on_wifi_join_click(self):
+        if not self._wifi_selected_ssid.strip():
+            self._wifi_status_text = self._t("wifi_no_selection")
+            self._render_wifi_view()
+            return
+        if self._wifi_selected_security:
+            self._open_wifi_keyboard()
+            return
+        self._connect_selected_wifi()
+
+    def _wifi_append_char(self, text):
+        self._wifi_password_var.set(self._wifi_password_var.get() + text)
+
+    def _wifi_backspace(self):
+        current = self._wifi_password_var.get()
+        self._wifi_password_var.set(current[:-1] if current else "")
+
+    def _toggle_wifi_keyboard_case(self):
+        if self._wifi_keyboard_mode == "symbol":
+            self._wifi_keyboard_mode = "lower"
+        else:
+            self._wifi_keyboard_mode = "upper" if self._wifi_keyboard_mode == "lower" else "lower"
+        self._render_wifi_view()
+        self._refresh_wifi_keyboard_popup()
+
+    def _toggle_wifi_keyboard_symbols(self):
+        self._wifi_keyboard_mode = "symbol" if self._wifi_keyboard_mode != "symbol" else "lower"
+        self._render_wifi_view()
+        self._refresh_wifi_keyboard_popup()
+
+    def _toggle_wifi_password_visibility(self):
+        self._wifi_password_visible = not self._wifi_password_visible
+        self._render_wifi_view()
+        self._refresh_wifi_keyboard_popup()
+
+    def _refresh_wifi_keyboard_popup(self):
+        popup = getattr(self, "_wifi_keyboard_window", None)
+        if not popup or not popup.winfo_exists():
+            return
+        for child in popup.winfo_children():
+            child.destroy()
+        self._build_wifi_keyboard_popup(popup)
+
+    def _build_wifi_keyboard_popup(self, popup):
+        header = tk.Frame(popup, bg=self._c("bg"))
+        header.pack(fill=tk.X, padx=8, pady=(6, 3))
+        tk.Label(
+            header,
+            text=self._t("wifi_password") + ": " + (self._wifi_selected_ssid or "--"),
+            font=("", 11, "bold"),
+            bg=self._c("bg"),
+            fg=self._c("fg"),
+            anchor="w",
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(
+            header,
+            text=self._t("wifi_join"),
+            font=("", 10),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=lambda: self._connect_selected_wifi(close_keyboard_on_success=True),
+        ).pack(side=tk.RIGHT, padx=(0, 6))
+        tk.Button(
+            header,
+            text=self._t("wifi_keyboard_done"),
+            font=("", 10),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=self._close_wifi_keyboard,
+        ).pack(side=tk.RIGHT)
+        entry_row = tk.Frame(popup, bg=self._c("bg"))
+        entry_row.pack(fill=tk.X, padx=8, pady=(0, 4))
+        entry = tk.Entry(
+            entry_row,
+            textvariable=self._wifi_password_var,
+            font=("", 10),
+            relief=tk.FLAT,
+            show="" if self._wifi_password_visible else "*",
+            bg=self._c("box_bg"),
+            fg=self._c("fg"),
+            insertbackground=self._c("fg"),
+        )
+        entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(
+            entry_row,
+            text=self._t("wifi_hide_password") if self._wifi_password_visible else self._t("wifi_show_password"),
+            font=("", 9),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=self._toggle_wifi_password_visibility,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        keyboard = tk.Frame(popup, bg=self._c("bg"))
+        keyboard.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 6))
+        rows = self._wifi_keyboard_rows()
+        for keys in rows:
+            row = tk.Frame(keyboard, bg=self._c("bg"))
+            row.pack(fill=tk.X, pady=(0, 2))
+            for key in keys:
+                tk.Button(
+                    row,
+                    text=key,
+                    font=("", 9),
+                    relief=tk.FLAT,
+                    bg=self._c("button_bg"),
+                    fg=self._c("button_fg"),
+                    command=lambda ch=key: self._wifi_append_char(ch),
+                ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2), ipady=0)
+        control = tk.Frame(keyboard, bg=self._c("bg"))
+        control.pack(fill=tk.X, pady=(1, 0))
+        tk.Button(
+            control,
+            text=self._t("wifi_shift"),
+            font=("", 8),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=self._toggle_wifi_keyboard_case,
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2), ipady=0)
+        tk.Button(
+            control,
+            text=self._t("wifi_symbols") if self._wifi_keyboard_mode != "symbol" else self._t("wifi_letters"),
+            font=("", 8),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=self._toggle_wifi_keyboard_symbols,
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2), ipady=0)
+        tk.Button(
+            control,
+            text=self._t("wifi_space"),
+            font=("", 8),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=lambda: self._wifi_append_char(" "),
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2), ipady=0)
+        tk.Button(
+            control,
+            text=self._t("wifi_backspace"),
+            font=("", 8),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=self._wifi_backspace,
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2), ipady=0)
+        tk.Button(
+            control,
+            text=self._t("wifi_clear"),
+            font=("", 8),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=lambda: self._wifi_password_var.set(""),
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=0)
+
+    def _open_wifi_keyboard(self):
+        popup = getattr(self, "_wifi_keyboard_window", None)
+        if popup and popup.winfo_exists():
+            popup.lift()
+            return
+        popup = tk.Toplevel(self.root)
+        popup.configure(bg=self._c("bg"))
+        popup.geometry(f"{W}x{H}")
+        popup.resizable(False, False)
+        popup.transient(self.root)
+        popup.grab_set()
+        popup.attributes("-topmost", True)
+        self._wifi_keyboard_window = popup
+        popup.protocol("WM_DELETE_WINDOW", self._close_wifi_keyboard)
+        self._build_wifi_keyboard_popup(popup)
+
+    def _close_wifi_keyboard(self):
+        popup = getattr(self, "_wifi_keyboard_window", None)
+        if not popup:
+            return
+        try:
+            popup.grab_release()
+        except Exception:
+            pass
+        try:
+            popup.destroy()
+        except Exception:
+            pass
+        self._wifi_keyboard_window = None
+
+    def _refresh_wifi_networks(self):
+        if self._wifi_scan_in_progress:
+            return
+        self._wifi_scan_in_progress = True
+        self._wifi_scan_error = None
+        self._wifi_status_text = self._t("wifi_refreshing")
+        self._render_wifi_view()
+
+        def worker():
+            items, err = scan_wifi_networks()
+
+            def finish():
+                self._wifi_scan_in_progress = False
+                self._wifi_scan_error = err
+                if isinstance(items, list):
+                    self._wifi_networks = items
+                    if self._wifi_selected_ssid and not any(
+                        str(item.get("ssid") or "") == self._wifi_selected_ssid for item in items
+                    ):
+                        self._wifi_selected_ssid = ""
+                        self._wifi_selected_security = ""
+                        self._wifi_password_var.set("")
+                    self._wifi_status_text = self._t("wifi_scan_hint") if items else self._t("wifi_empty")
+                else:
+                    self._wifi_networks = []
+                    self._wifi_status_text = self._t("wifi_scan_failed").format(error=(err or "unknown error"))
+                self._render_wifi_view()
+
+            self.root.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _connect_selected_wifi(self, close_keyboard_on_success=False):
+        ssid = self._wifi_selected_ssid.strip()
+        if not ssid:
+            self._wifi_status_text = self._t("wifi_no_selection")
+            self._render_wifi_view()
+            return
+        password = self._wifi_password_var.get()
+        if self._wifi_selected_security and not str(password).strip():
+            self._wifi_status_text = self._t("wifi_password_required")
+            self._render_wifi_view()
+            try:
+                from tkinter import messagebox
+
+                messagebox.showerror(self._t("wifi_title"), self._wifi_status_text)
+            except Exception:
+                pass
+            return
+        if self._wifi_connect_in_progress:
+            return
+        self._wifi_connect_in_progress = True
+        self._wifi_status_text = self._t("wifi_connecting")
+        self._render_wifi_view()
+
+        def worker():
+            ok, message = connect_wifi_network(ssid, password=password)
+
+            def finish():
+                self._wifi_connect_in_progress = False
+                if ok:
+                    if close_keyboard_on_success:
+                        self._close_wifi_keyboard()
+                    self._wifi_status_text = self._t("wifi_connect_success").format(ssid=ssid)
+                    try:
+                        from tkinter import messagebox
+
+                        messagebox.showinfo(self._t("wifi_title"), self._t("wifi_connect_success").format(ssid=ssid))
+                    except Exception:
+                        pass
+                    self._refresh_wifi_networks()
+                else:
+                    self._wifi_status_text = self._t("wifi_connect_failed").format(error=(message or "unknown error"))
+                    try:
+                        from tkinter import messagebox
+
+                        messagebox.showerror(self._t("wifi_title"), self._wifi_status_text)
+                    except Exception:
+                        pass
+                    self._render_wifi_view()
+
+            self.root.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _disconnect_wifi(self, ssid):
+        ssid = (ssid or "").strip()
+        if not ssid or self._wifi_disconnect_in_progress or self._wifi_connect_in_progress:
+            return
+        self._wifi_disconnect_in_progress = True
+        self._wifi_status_text = self._t("wifi_disconnecting")
+        self._render_wifi_view()
+
+        def worker():
+            ok, message = disconnect_wifi_network(ssid)
+
+            def finish():
+                self._wifi_disconnect_in_progress = False
+                if ok:
+                    if self._wifi_selected_ssid == ssid:
+                        self._wifi_password_var.set("")
+                    self._wifi_status_text = self._t("wifi_disconnect_success").format(ssid=ssid)
+                    try:
+                        from tkinter import messagebox
+
+                        messagebox.showinfo(self._t("wifi_title"), self._t("wifi_disconnect_success").format(ssid=ssid))
+                    except Exception:
+                        pass
+                    self._refresh_wifi_networks()
+                else:
+                    self._wifi_status_text = self._t("wifi_disconnect_failed").format(error=(message or "unknown error"))
+                    try:
+                        from tkinter import messagebox
+
+                        messagebox.showerror(self._t("wifi_title"), self._wifi_status_text)
+                    except Exception:
+                        pass
+                    self._render_wifi_view()
+
+            self.root.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _prepare_logs_view(self):
         self._render_logs_view()
 
@@ -1667,6 +2605,266 @@ class SmallScreenApp:
         self.bound_channels_var.set(str(bound_channel_count) if bound_channel_count is not None else "--")
         if self._view_mode == "users":
             self._render_user_messages()
+
+    def _format_llm_pubkey_text(self):
+        if (
+            self._llm_info_hidden
+            and not self._llm_pubkey_loading
+            and not self._llm_signing
+            and not self._llm_pubkey_hex
+            and not self._llm_signature_hex
+            and not self._llm_pubkey_error
+            and not self._llm_signature_error
+        ):
+            return ""
+        parts = []
+        if self._llm_pubkey_loading:
+            parts.append(self._t("llm_pubkey_loading"))
+        elif self._llm_pubkey_hex:
+            chunks = [
+                self._llm_pubkey_hex[i:i + 32]
+                for i in range(0, len(self._llm_pubkey_hex), 32)
+            ]
+            parts.append(self._t("llm_pubkey_slot0") + ":\n" + "\n".join(chunks))
+        elif self._llm_pubkey_error:
+            parts.append(self._t("llm_pubkey_error"))
+        else:
+            parts.append(self._t("llm_pubkey_empty"))
+
+        if self._llm_signing:
+            parts.append(self._t("llm_signing"))
+        elif self._llm_signature_hex:
+            sig_chunks = [
+                self._llm_signature_hex[i:i + 32]
+                for i in range(0, len(self._llm_signature_hex), 32)
+            ]
+            parts.append(
+                self._t("llm_sign_timestamp") + f": {self._llm_signature_timestamp}\n"
+                + self._t("llm_sign_signature") + ":\n"
+                + "\n".join(sig_chunks)
+            )
+        elif self._llm_signature_error:
+            parts.append(self._t("llm_sign_failed"))
+
+        return "\n\n".join(parts)
+
+    def _refresh_llm_pubkey_label(self):
+        info_frame = getattr(self, "_llm_info_frame", None)
+        label = getattr(self, "_llm_pubkey_label", None)
+        if not label or not label.winfo_exists() or not info_frame or not info_frame.winfo_exists():
+            return
+        text = self._format_llm_pubkey_text()
+        try:
+            if text:
+                if not info_frame.winfo_manager():
+                    content = getattr(self, "_llm_content", None)
+                    if content and content.winfo_exists():
+                        info_frame.pack(fill=tk.X, pady=self._llm_info_pady, before=content)
+                    else:
+                        info_frame.pack(fill=tk.X, pady=self._llm_info_pady)
+            else:
+                if info_frame.winfo_manager():
+                    info_frame.pack_forget()
+            label.config(
+                text=text,
+                bg=self._c("box_bg"),
+                fg=self._c("fg"),
+            )
+        except tk.TclError:
+            pass
+
+    def _cancel_llm_clear_job(self):
+        if self._llm_clear_job:
+            try:
+                self.root.after_cancel(self._llm_clear_job)
+            except tk.TclError:
+                pass
+            self._llm_clear_job = None
+
+    def _clear_llm_info_display(self):
+        self._cancel_llm_clear_job()
+        self._llm_pubkey_hex = ""
+        self._llm_pubkey_error = ""
+        self._llm_pubkey_loading = False
+        self._llm_signature_hex = ""
+        self._llm_signature_error = ""
+        self._llm_signature_timestamp = ""
+        self._llm_signing = False
+        self._llm_info_hidden = True
+        self._refresh_llm_pubkey_label()
+
+    def _schedule_llm_info_clear(self):
+        self._cancel_llm_clear_job()
+        self._llm_clear_job = self.root.after(5000, self._clear_llm_info_display)
+
+    def _stop_llm_animation(self):
+        if self._llm_lobster_job:
+            try:
+                self.root.after_cancel(self._llm_lobster_job)
+            except tk.TclError:
+                pass
+            self._llm_lobster_job = None
+        content = getattr(self, "_llm_content", None)
+        if content and content.winfo_exists():
+            for w in content.winfo_children():
+                try:
+                    w.destroy()
+                except tk.TclError:
+                    pass
+        self._llm_dot_labels.clear()
+        self._llm_lobster_count = 0
+
+    def _start_llm_pubkey_and_sign_flow(self):
+        if self._llm_join_in_progress:
+            return
+        self._cancel_llm_clear_job()
+        self._stop_llm_animation()
+        self._llm_join_in_progress = True
+        self._llm_info_hidden = False
+        self._llm_pubkey_hex = ""
+        self._llm_pubkey_error = ""
+        self._llm_signature_hex = ""
+        self._llm_signature_error = ""
+        self._llm_signature_timestamp = ""
+        self._llm_pubkey_loading = True
+        self._llm_signing = False
+        self._refresh_llm_pubkey_label()
+
+        def worker():
+            pubkey_hex, pubkey_error = read_slot0_pubkey_via_helper()
+            if not pubkey_hex:
+                def finish_pubkey_failed():
+                    self._stop_llm_animation()
+                    self._llm_join_in_progress = False
+                    self._llm_pubkey_loading = False
+                    self._llm_pubkey_hex = ""
+                    self._llm_pubkey_error = (pubkey_error or "").strip()
+                    self._llm_signing = False
+                    self._llm_signature_hex = ""
+                    self._llm_signature_error = ""
+                    self._llm_signature_timestamp = ""
+                    try:
+                        self._llm_join_btn.config(text=self._t("llm_join"))
+                    except tk.TclError:
+                        pass
+                    self._refresh_llm_pubkey_label()
+
+                self.root.after(0, finish_pubkey_failed)
+                return
+
+            now_ts = int(time.time())
+
+            def switch_to_signing():
+                self._llm_pubkey_loading = False
+                self._llm_pubkey_hex = pubkey_hex or ""
+                self._llm_pubkey_error = ""
+                self._llm_signing = True
+                self._llm_signature_hex = ""
+                self._llm_signature_error = ""
+                self._llm_signature_timestamp = str(now_ts)
+                self._refresh_llm_pubkey_label()
+
+            self.root.after(0, switch_to_signing)
+            payload, sign_error = sign_unix_time_via_helper(now_ts)
+
+            def finish():
+                self._llm_join_in_progress = False
+                self._llm_pubkey_loading = False
+                self._llm_pubkey_hex = pubkey_hex or ""
+                self._llm_pubkey_error = ""
+                self._llm_signing = False
+                if payload:
+                    self._llm_signature_timestamp = str(payload.get("timestamp") or now_ts)
+                    self._llm_signature_hex = str(payload.get("signature") or "").strip()
+                    self._llm_signature_error = ""
+                    self._schedule_llm_info_clear()
+                    if self._theme == "matrix":
+                        self._llm_start_matrix_rain()
+                    else:
+                        if self._llm_lobster_photo is None:
+                            self._llm_lobster_photo = self._llm_load_lobster_icon()
+                        if self._llm_lobster_photo:
+                            self._llm_lobster_tick()
+                        else:
+                            tk.Label(
+                                self._llm_content, text="(无 lobster.gif)", font=("", 12),
+                                bg=self._c("bg"), fg=self._c("status_off")
+                            ).pack(pady=20)
+                            try:
+                                self._llm_join_btn.config(text=self._t("llm_join"))
+                            except tk.TclError:
+                                pass
+                else:
+                    self._stop_llm_animation()
+                    self._llm_signature_timestamp = str(now_ts)
+                    self._llm_signature_hex = ""
+                    self._llm_signature_error = (sign_error or "").strip()
+                    try:
+                        self._llm_join_btn.config(text=self._t("llm_join"))
+                    except tk.TclError:
+                        pass
+                self._refresh_llm_pubkey_label()
+
+            self.root.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _load_llm_pubkey(self, force=False):
+        if self._llm_pubkey_loading:
+            return
+        self._cancel_llm_clear_job()
+        self._llm_info_hidden = False
+        if self._llm_pubkey_hex and not force:
+            self._refresh_llm_pubkey_label()
+            return
+        self._llm_pubkey_loading = True
+        self._llm_pubkey_error = ""
+        self._refresh_llm_pubkey_label()
+
+        def worker():
+            pubkey_hex, error = read_slot0_pubkey_via_helper()
+
+            def finish():
+                self._llm_pubkey_loading = False
+                self._llm_pubkey_hex = pubkey_hex or ""
+                self._llm_pubkey_error = (error or "").strip()
+                self._refresh_llm_pubkey_label()
+
+            self.root.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _load_llm_signature_for_now(self):
+        if self._llm_signing:
+            return
+        self._cancel_llm_clear_job()
+        now_ts = int(time.time())
+        self._llm_info_hidden = False
+        self._llm_signing = True
+        self._llm_signature_error = ""
+        self._llm_signature_hex = ""
+        self._llm_signature_timestamp = str(now_ts)
+        self._refresh_llm_pubkey_label()
+
+        def worker():
+            payload, error = sign_unix_time_via_helper(now_ts)
+
+            def finish():
+                self._llm_signing = False
+                if payload:
+                    self._llm_signature_timestamp = str(payload.get("timestamp") or now_ts)
+                    self._llm_signature_hex = str(payload.get("signature") or "").strip()
+                    self._llm_signature_error = ""
+                    self._schedule_llm_info_clear()
+                else:
+                    self._llm_signature_hex = ""
+                    self._llm_signature_error = (error or "").strip()
+                self._refresh_llm_pubkey_label()
+
+            self.root.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
 
     def _user_messages_signature(self, items):
         return tuple(
@@ -2029,7 +3227,7 @@ class SmallScreenApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _toggle_view(self):
-        """左滑/下一页：dashboard -> users -> logs -> skills -> stock -> crypto -> gallery -> settings -> dashboard"""
+        """左滑/下一页：dashboard -> users -> logs -> skills -> stock -> crypto -> gallery -> settings -> wifi -> dashboard"""
         if self._gallery_job:
             self.root.after_cancel(self._gallery_job)
             self._gallery_job = None
@@ -2074,20 +3272,34 @@ class SmallScreenApp:
             self.gallery_frame.pack_forget()
             self._prepare_settings_view()
             self.settings_frame.pack(fill=tk.BOTH, expand=True)
+        elif self._view_mode == "settings":
+            self._view_mode = "wifi"
+            self.settings_frame.pack_forget()
+            self._prepare_wifi_view()
+            self.wifi_frame.pack(fill=tk.BOTH, expand=True)
+            if not self._wifi_networks and not self._wifi_scan_in_progress:
+                self._refresh_wifi_networks()
         else:
             self._view_mode = "dashboard"
-            self.settings_frame.pack_forget()
+            self.wifi_frame.pack_forget()
             self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
         self._refresh_topbar()
 
     def _go_prev_view(self):
-        """右滑/上一页：dashboard -> settings -> gallery -> crypto -> stock -> skills -> logs -> users -> dashboard（循环）。"""
+        """右滑/上一页：dashboard -> wifi -> settings -> gallery -> crypto -> stock -> skills -> logs -> users -> dashboard（循环）。"""
         if self._gallery_job:
             self.root.after_cancel(self._gallery_job)
             self._gallery_job = None
         if self._view_mode == "dashboard":
-            self._view_mode = "settings"
+            self._view_mode = "wifi"
             self.dashboard_frame.pack_forget()
+            self._prepare_wifi_view()
+            self.wifi_frame.pack(fill=tk.BOTH, expand=True)
+            if not self._wifi_networks and not self._wifi_scan_in_progress:
+                self._refresh_wifi_networks()
+        elif self._view_mode == "wifi":
+            self._view_mode = "settings"
+            self.wifi_frame.pack_forget()
             self._prepare_settings_view()
             self.settings_frame.pack(fill=tk.BOTH, expand=True)
         elif self._view_mode == "settings":
@@ -2156,6 +3368,22 @@ class SmallScreenApp:
                 command=self._on_llm_join_click, padx=12, pady=4
             )
             self._llm_join_btn.pack(side=tk.RIGHT)
+            llm_info = tk.Frame(self.gallery_frame, bg=self._c("box_bg"), padx=6, pady=4)
+            self._llm_info_frame = llm_info
+            self._llm_info_pady = (0, 6)
+            llm_info.pack(fill=tk.X, pady=self._llm_info_pady)
+            self._llm_pubkey_label = tk.Label(
+                llm_info,
+                text=self._format_llm_pubkey_text(),
+                font=("DejaVu Sans Mono", 8),
+                bg=self._c("box_bg"),
+                fg=self._c("fg"),
+                anchor="w",
+                justify=tk.LEFT,
+                wraplength=W - 32,
+            )
+            self._llm_pubkey_label.pack(fill=tk.X)
+            self._clear_llm_info_display()
             self._llm_content.pack(fill=tk.BOTH, expand=True)
             return
         # 非 Matrix：标题行 + 加入/停止按钮，再内容区
@@ -2171,6 +3399,22 @@ class SmallScreenApp:
             command=self._on_llm_join_click, padx=12, pady=4
         )
         self._llm_join_btn.pack(side=tk.RIGHT)
+        llm_info = tk.Frame(self.gallery_frame, bg=self._c("box_bg"), padx=6, pady=4)
+        self._llm_info_frame = llm_info
+        self._llm_info_pady = (0, 8)
+        llm_info.pack(fill=tk.X, pady=self._llm_info_pady)
+        self._llm_pubkey_label = tk.Label(
+            llm_info,
+            text=self._format_llm_pubkey_text(),
+            font=("DejaVu Sans Mono", 8),
+            bg=self._c("box_bg"),
+            fg=self._c("fg"),
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=W - 32,
+        )
+        self._llm_pubkey_label.pack(fill=tk.X)
+        self._clear_llm_info_display()
         self._llm_content.pack(fill=tk.BOTH, expand=True)
 
     def _llm_start_matrix_rain(self):
@@ -2200,12 +3444,11 @@ class SmallScreenApp:
         """加入/停止：未运行时开始画龙虾点（每 0.5 秒一个），运行时停止并恢复按钮为加入。"""
         if getattr(self, "_closing", False) or self._view_mode != "gallery":
             return
+        if self._llm_join_in_progress:
+            return
         if self._llm_lobster_job:
-            try:
-                self.root.after_cancel(self._llm_lobster_job)
-            except tk.TclError:
-                pass
-            self._llm_lobster_job = None
+            self._stop_llm_animation()
+            self._clear_llm_info_display()
             try:
                 self._llm_join_btn.config(text=self._t("llm_join"))
             except tk.TclError:
@@ -2216,19 +3459,7 @@ class SmallScreenApp:
         self._llm_dot_labels.clear()
         self._llm_lobster_count = 0
         self._llm_join_btn.config(text=self._t("llm_stop"))
-        if self._theme == "matrix":
-            self._llm_start_matrix_rain()
-            return
-        if self._llm_lobster_photo is None:
-            self._llm_lobster_photo = self._llm_load_lobster_icon()
-        if self._llm_lobster_photo:
-            self._llm_lobster_tick()
-        else:
-            tk.Label(
-                self._llm_content, text="(无 lobster.gif)", font=("", 12),
-                bg=self._c("bg"), fg=self._c("status_off")
-            ).pack(pady=20)
-            self._llm_join_btn.config(text=self._t("llm_join"))
+        self._start_llm_pubkey_and_sign_flow()
 
     def _llm_load_lobster_icon(self):
         """从 scripts/assets 加载 lobster.png 或 lobster.gif，缩成小图标，透明处叠到深色底（无白底）。"""
@@ -2890,6 +4121,7 @@ class SmallScreenApp:
 
     def _on_close(self):
         self._closing = True
+        self._close_wifi_keyboard()
         for attr in ("_blink_job", "_gallery_job", "_crypto_job", "_stock_job", "_llm_lobster_job"):
             job = getattr(self, attr, None)
             if job is not None:
@@ -2970,10 +4202,6 @@ class SmallScreenApp:
             return
         if getattr(self, "_view_mode", None) is None:
             return
-        # 设置页左滑（下一页）= 按顺序到首页
-        if self._view_mode == "settings":
-            self._settings_frame_to_dashboard()
-            return
         self._toggle_view()
 
     def _on_swipe_prev(self, _event=None):
@@ -2981,24 +4209,7 @@ class SmallScreenApp:
             return
         if getattr(self, "_view_mode", None) is None:
             return
-        # 设置页右滑（上一页）= 按顺序到用户页
-        if self._view_mode == "settings":
-            self._settings_frame_to_users()
-            return
         self._go_prev_view()
-
-    def _settings_frame_to_dashboard(self):
-        """设置 → 首页（左滑下一页）。"""
-        self.settings_frame.pack_forget()
-        self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
-        self._view_mode = "dashboard"
-
-    def _settings_frame_to_users(self):
-        """设置 → 用户页（右滑上一页）。"""
-        self.settings_frame.pack_forget()
-        self._prepare_users_view()
-        self.users_frame.pack(fill=tk.BOTH, expand=True)
-        self._view_mode = "users"
 
     def _toggle_fullscreen(self):
         self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))
