@@ -7,7 +7,7 @@
 # bot_token can stay empty before first QR login; session.json will be created after login.
 
 [wechat]
-enabled = true
+enabled = false
 listen = "0.0.0.0:8792"
 clawd_base_url = "http://127.0.0.1:8787"
 api_base_url = "https://ilinkai.weixin.qq.com"
