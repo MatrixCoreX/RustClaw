@@ -4,6 +4,7 @@ members = [
     "crates/claw-core",
     "crates/wechat-ilink",
     "crates/clawd",
+    "crates/webd",
     "crates/clawcli",
     "crates/skill-runner",
     "crates/telegramd",
