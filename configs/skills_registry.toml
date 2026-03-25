@@ -78,8 +78,8 @@ output_kind = "text"
 name = "system_basic"
 enabled = true
 kind = "runner"
-aliases = ["system"]
-timeout_seconds = 30
+aliases = ["system", "system_query"]
+timeout_seconds = 45
 prompt_file = "prompts/skills/system_basic.md"
 output_kind = "text"
 
