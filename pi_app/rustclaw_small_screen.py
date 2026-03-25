@@ -84,6 +84,12 @@ STRINGS = {
         "theme_matrix": "Matrix",
         "restart": "重启RustClaw核心",
         "restarting": "重启中.....",
+        "reset_admin_login": "重置管理员账号密码",
+        "resetting_admin_login": "重置中.....",
+        "reset_admin_login_success": "已重置：admin 账号 rustclaw / rustclaw123456",
+        "reset_admin_login_failed": "重置失败: {error}",
+        "reset_admin_login_dialog_title": "管理员账号已重置",
+        "reset_admin_login_dialog_body": "用户名: rustclaw\n密码: rustclaw123456",
     },
     "EN": {
         "app_title": "RustClaw Small Screen",
@@ -134,6 +140,12 @@ STRINGS = {
         "theme_matrix": "Matrix",
         "restart": "Restart RustClaw Core",
         "restarting": "Restarting.....",
+        "reset_admin_login": "Reset admin username/password",
+        "resetting_admin_login": "Resetting.....",
+        "reset_admin_login_success": "Reset done: admin rustclaw / rustclaw123456",
+        "reset_admin_login_failed": "Reset failed: {error}",
+        "reset_admin_login_dialog_title": "Admin login reset",
+        "reset_admin_login_dialog_body": "Username: rustclaw\nPassword: rustclaw123456",
     },
 }
 
@@ -339,6 +351,58 @@ def ensure_small_screen_auth_key():
         return user_key
     except Exception:
         return user_key
+
+
+def load_enabled_admin_user_key():
+    db_path = _load_sqlite_path_from_config()
+    try:
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            """
+            SELECT user_key
+            FROM auth_keys
+            WHERE role = 'admin' AND enabled = 1
+            ORDER BY rowid ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        conn.close()
+        if row and row[0]:
+            return str(row[0]).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def post_admin_webd_account(user_key, username, password):
+    payload = {
+        "username": (username or "").strip(),
+        "password": password or "",
+        "user_key": (user_key or "").strip(),
+    }
+    if not payload["username"] or not payload["password"] or not payload["user_key"]:
+        return False, "missing username/password/user_key"
+    body = json.dumps(payload).encode("utf-8")
+    req = _build_api_request("/v1/admin/webd-accounts", user_key)
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, data=body, timeout=8) as r:
+            raw = r.read().decode()
+        parsed = json.loads(raw) if raw else {}
+        if not isinstance(parsed, dict):
+            return False, "invalid response"
+        if parsed.get("ok"):
+            return True, ""
+        return False, str(parsed.get("error") or "request failed")
+    except Exception as exc:
+        return False, str(exc)
+
+
+def reset_admin_login_account(username="rustclaw", password="rustclaw123456"):
+    admin_key = load_enabled_admin_user_key()
+    if not admin_key:
+        return False, "enabled admin key not found"
+    return post_admin_webd_account(admin_key, username, password)
 
 
 def _default_lang_from_system():
@@ -1381,8 +1445,6 @@ class SmallScreenApp:
         self._logs_body.pack(fill=tk.BOTH, expand=True)
         # 翻页：左右滑屏可到仪表盘 / 技能 / 加密货币 / 图库 / 用户 / 设置
         # 设置页（内嵌在主窗口，左滑可进入）
-        self._settings_title_label = tk.Label(self.settings_frame, text=_t("settings_title"), font=("", 16, "bold"), bg=self._c("bg"), fg=self._c("fg"))
-        self._settings_title_label.pack(anchor=tk.W, pady=(0, 12))
         self._settings_lang_label = tk.Label(self.settings_frame, text=_t("language") + ":", font=("", 12), bg=self._c("bg"), fg=self._c("fg"))
         self._settings_lang_label.pack(anchor=tk.W)
         self._settings_lang_var = tk.StringVar(value=self._lang)
@@ -1405,6 +1467,30 @@ class SmallScreenApp:
         self._settings_cancel_btn.pack(side=tk.LEFT, padx=(0, 8))
         self._settings_restart_btn = tk.Button(bf, text=_t("restart"), font=("", 11), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"), command=self._on_settings_restart)
         self._settings_restart_btn.pack(side=tk.LEFT)
+        bf2 = tk.Frame(self.settings_frame, bg=self._c("bg"))
+        bf2.pack(fill=tk.X, pady=(8, 0))
+        self._settings_reset_admin_btn = tk.Button(
+            bf2,
+            text=_t("reset_admin_login"),
+            font=("", 11),
+            relief=tk.FLAT,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            command=self._on_settings_reset_admin_login,
+        )
+        self._settings_reset_admin_btn.pack(fill=tk.X)
+        self._settings_reset_status_var = tk.StringVar(value="")
+        self._settings_reset_status_label = tk.Label(
+            self.settings_frame,
+            textvariable=self._settings_reset_status_var,
+            font=("", 10),
+            bg=self._c("bg"),
+            fg=self._c("fg_dim"),
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=440,
+        )
+        self._settings_reset_status_label.pack(anchor=tk.W, pady=(8, 0))
         self._refresh_topbar()
 
     def _t(self, key):
@@ -1540,12 +1626,19 @@ class SmallScreenApp:
 
     def _prepare_settings_view(self):
         """进入设置页时刷新标题和按钮文案。"""
-        self._settings_title_label.config(text=self._t("settings_title"), bg=self._c("bg"), fg=self._c("fg"))
         self._settings_lang_label.config(text=self._t("language") + ":", bg=self._c("bg"), fg=self._c("fg"))
         self._settings_theme_label.config(text=self._t("theme") + ":", bg=self._c("bg"), fg=self._c("fg"))
         self._settings_ok_btn.config(text=self._t("ok"), bg=self._c("button_bg"), fg=self._c("button_fg"))
         self._settings_cancel_btn.config(text=self._t("cancel"), bg=self._c("button_bg"), fg=self._c("button_fg"))
         self._settings_restart_btn.config(bg=self._c("button_bg"), fg=self._c("button_fg"))
+        self._settings_reset_admin_btn.config(
+            text=self._t("reset_admin_login")
+            if self._settings_reset_admin_btn["state"] != tk.DISABLED
+            else self._t("resetting_admin_login"),
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+        )
+        self._settings_reset_status_label.config(bg=self._c("bg"), fg=self._c("fg_dim"))
         try:
             self._settings_restart_btn.config(text=self._t("restart") if self._settings_restart_btn["state"] != tk.DISABLED else self._t("restarting"))
         except tk.TclError:
@@ -1894,6 +1987,46 @@ class SmallScreenApp:
                     pass
 
         self.root.after(15000, reenable)
+
+    def _on_settings_reset_admin_login(self):
+        btn = self._settings_reset_admin_btn
+        if btn["state"] == tk.DISABLED:
+            return
+        btn.config(state=tk.DISABLED, text=self._t("resetting_admin_login"))
+        self._settings_reset_status_var.set(self._t("resetting_admin_login"))
+
+        def worker():
+            ok, err = reset_admin_login_account(
+                username="rustclaw",
+                password="rustclaw123456",
+            )
+
+            def finish():
+                b = getattr(self, "_settings_reset_admin_btn", None)
+                if b and b.winfo_exists():
+                    try:
+                        b.config(state=tk.NORMAL, text=self._t("reset_admin_login"))
+                    except tk.TclError:
+                        pass
+                if ok:
+                    self._settings_reset_status_var.set(self._t("reset_admin_login_success"))
+                    try:
+                        from tkinter import messagebox
+
+                        messagebox.showinfo(
+                            self._t("reset_admin_login_dialog_title"),
+                            self._t("reset_admin_login_dialog_body"),
+                        )
+                    except Exception:
+                        pass
+                else:
+                    self._settings_reset_status_var.set(
+                        self._t("reset_admin_login_failed").format(error=(err or "unknown error"))
+                    )
+
+            self.root.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _toggle_view(self):
         """左滑/下一页：dashboard -> users -> logs -> skills -> stock -> crypto -> gallery -> settings -> dashboard"""
