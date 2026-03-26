@@ -156,10 +156,10 @@ async fn webd_login(
             error!("webd login upstream error: {}", e);
             return with_cors(
                 (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "ok": false, "error": format!("upstream: {}", e) })),
-            )
-                .into_response(),
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({ "ok": false, "error": format!("upstream: {}", e) })),
+                )
+                    .into_response(),
                 origin.as_ref(),
             );
         }
@@ -170,10 +170,10 @@ async fn webd_login(
         Err(e) => {
             return with_cors(
                 (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "ok": false, "error": format!("read body: {}", e) })),
-            )
-                .into_response(),
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({ "ok": false, "error": format!("read body: {}", e) })),
+                )
+                    .into_response(),
                 origin.as_ref(),
             );
         }
@@ -183,10 +183,10 @@ async fn webd_login(
         Err(_) => {
             return with_cors(
                 (
-                status,
-                Json(json!({ "ok": false, "error": "invalid JSON from clawd", "raw": text })),
-            )
-                .into_response(),
+                    status,
+                    Json(json!({ "ok": false, "error": "invalid JSON from clawd", "raw": text })),
+                )
+                    .into_response(),
                 origin.as_ref(),
             );
         }
@@ -210,10 +210,10 @@ async fn webd_login(
         None => {
             return with_cors(
                 (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "ok": false, "error": "missing user_key in clawd response" })),
-            )
-                .into_response(),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "ok": false, "error": "missing user_key in clawd response" })),
+                )
+                    .into_response(),
                 origin.as_ref(),
             );
         }
@@ -384,12 +384,11 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
         }
     };
 
-    let rb = state.client.request(method.clone(), &full_url).headers(out_headers);
-    let rb = if bytes.is_empty() {
-        rb
-    } else {
-        rb.body(bytes)
-    };
+    let rb = state
+        .client
+        .request(method.clone(), &full_url)
+        .headers(out_headers);
+    let rb = if bytes.is_empty() { rb } else { rb.body(bytes) };
 
     let res = match rb.send().await {
         Ok(r) => r,
@@ -405,9 +404,9 @@ async fn proxy_inner(state: AppState, client_addr: SocketAddr, req: Request) -> 
 
     let status = res.status();
     let resp_headers = sanitize_response_headers(res.headers());
-    let stream = res.bytes_stream().map(|r| {
-        r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-    });
+    let stream = res
+        .bytes_stream()
+        .map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())));
     let body = Body::from_stream(stream);
 
     let mut builder = Response::builder().status(status);
@@ -453,15 +452,8 @@ fn with_cors(mut response: Response, origin: Option<&HeaderValue>) -> Response {
 
 fn upstream_host_header(upstream: &str) -> Result<String, &'static str> {
     let u = upstream.trim();
-    let after_scheme = u
-        .find("://")
-        .map(|i| &u[i + 3..])
-        .unwrap_or(u);
-    let host_port = after_scheme
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .trim();
+    let after_scheme = u.find("://").map(|i| &u[i + 3..]).unwrap_or(u);
+    let host_port = after_scheme.split('/').next().unwrap_or("").trim();
     if host_port.is_empty() {
         return Err("empty host");
     }

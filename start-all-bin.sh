@@ -8,6 +8,13 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
+RUNTIME_ENV_SCRIPT="${RUSTCLAW_RUNTIME_ENV_SCRIPT:-$HOME/runtime_env_filled.sh}"
+if [[ -f "$RUNTIME_ENV_SCRIPT" ]]; then
+  # Source runtime secrets/env before starting any daemon so child processes inherit them.
+  # shellcheck source=/dev/null
+  . "$RUNTIME_ENV_SCRIPT"
+fi
+
 # Enable colored log tags on interactive terminals unless overridden.
 if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
   export RUSTCLAW_LOG_COLOR=1

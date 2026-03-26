@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::env;
 use std::path::Path;
 
 use serde::Deserialize;
@@ -62,6 +63,7 @@ pub struct ServerConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TelegramConfig {
+    #[serde(default)]
     pub bot_token: String,
     #[serde(default = "default_agent_id")]
     pub agent_id: String,
@@ -523,6 +525,7 @@ pub struct LlmConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct LlmVendorConfig {
     pub base_url: String,
+    #[serde(default)]
     pub api_key: String,
     pub model: String,
     #[serde(default)]
@@ -1642,6 +1645,7 @@ impl AppConfig {
         app.image_vision = image_cfg.image_vision;
         app.image_generation = image_cfg.image_generation;
         app.image_edit = image_cfg.image_edit;
+        apply_env_overrides(&mut app);
 
         Ok(app)
     }
@@ -1833,6 +1837,64 @@ impl AppConfig {
 
         agents
     }
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_string_env(target: &mut String, key: &str) {
+    if let Some(value) = env_non_empty(key) {
+        *target = value;
+    }
+}
+
+fn apply_llm_vendor_api_key_env(target: &mut Option<LlmVendorConfig>, key: &str) {
+    if let (Some(value), Some(cfg)) = (env_non_empty(key), target.as_mut()) {
+        cfg.api_key = value;
+    }
+}
+
+fn apply_env_overrides(app: &mut AppConfig) {
+    apply_llm_vendor_api_key_env(&mut app.llm.openai, "OPENAI_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.google, "GOOGLE_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.anthropic, "ANTHROPIC_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.grok, "GROK_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.deepseek, "DEEPSEEK_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.qwen, "QWEN_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.minimax, "MINIMAX_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.custom, "CUSTOM_API_KEY");
+
+    apply_string_env(&mut app.telegram.bot_token, "TELEGRAM_BOT_TOKEN");
+    apply_string_env(&mut app.telegram_bot.bot_token, "TELEGRAM_BOT_TOKEN");
+
+    apply_string_env(&mut app.whatsapp.access_token, "WHATSAPP_ACCESS_TOKEN");
+    apply_string_env(&mut app.whatsapp.app_secret, "WHATSAPP_APP_SECRET");
+    apply_string_env(&mut app.whatsapp.verify_token, "WHATSAPP_VERIFY_TOKEN");
+    apply_string_env(
+        &mut app.whatsapp.phone_number_id,
+        "WHATSAPP_PHONE_NUMBER_ID",
+    );
+
+    apply_string_env(
+        &mut app.whatsapp_cloud.access_token,
+        "WHATSAPP_CLOUD_ACCESS_TOKEN",
+    );
+    apply_string_env(
+        &mut app.whatsapp_cloud.app_secret,
+        "WHATSAPP_CLOUD_APP_SECRET",
+    );
+    apply_string_env(
+        &mut app.whatsapp_cloud.verify_token,
+        "WHATSAPP_CLOUD_VERIFY_TOKEN",
+    );
+    apply_string_env(
+        &mut app.whatsapp_cloud.phone_number_id,
+        "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
+    );
 }
 
 fn unique_telegram_bot_name(

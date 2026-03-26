@@ -24,6 +24,7 @@
 - Missing action/sql/confirm fields as required.
 - `sqlite_query` with non-read-only SQL should be rejected.
 - SQL/runtime errors should return explicit database error text.
+- Successful responses also mirror structured metadata into `extra`, including `action`, `db_path`, `sql`, and parsed `result`.
 
 ## Request/Response Examples
 ### Example 1
@@ -33,5 +34,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"rows=5 ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"columns\":[\"id\"],\"rows\":[{\"id\":1}]}","extra":{"action":"sqlite_query","db_path":"data/app.db","sql":"SELECT * FROM users LIMIT 5","result":{"columns":["id"],"rows":[{"id":1}]}},"error_text":null}
 ```

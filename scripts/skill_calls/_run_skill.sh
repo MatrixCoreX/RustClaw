@@ -67,6 +67,16 @@ skill_bin_name() {
     service_control) echo "service-control-skill" ;;
     config_guard) echo "config-guard-skill" ;;
     crypto) echo "crypto-skill" ;;
+    chat) echo "chat-skill" ;;
+    stock) echo "stock-skill" ;;
+    weather) echo "weather-skill" ;;
+    reference_resolver) echo "reference-resolver-skill" ;;
+    doc_parse) echo "doc-parse-skill" ;;
+    transform) echo "transform-skill" ;;
+    web_search_extract) echo "web-search-extract-skill" ;;
+    kb) echo "kb-skill" ;;
+    browser_web) echo "browser-web-skill" ;;
+    task_control) echo "task-control-skill" ;;
     *) return 1 ;;
   esac
 }

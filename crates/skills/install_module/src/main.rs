@@ -195,8 +195,7 @@ fn run_install_command(
         }
         "go" => {
             let mut c = Command::new("go");
-            c.arg("install")
-                .arg(render_module_for_go(module, version));
+            c.arg("install").arg(render_module_for_go(module, version));
             c
         }
         _ => return Err(format!("unsupported ecosystem: {ecosystem}")),

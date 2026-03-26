@@ -94,7 +94,11 @@ fn execute_skill(req: SkillRequest) -> SkillResponse {
         "chat_id": req.chat_id,
     });
 
-    match run_child_skill(&child_bin, &child_req.to_string(), Duration::from_secs(timeout_secs)) {
+    match run_child_skill(
+        &child_bin,
+        &child_req.to_string(),
+        Duration::from_secs(timeout_secs),
+    ) {
         Ok(out) => {
             let parsed: Result<ChildSkillResponse, _> = serde_json::from_str(&out);
             match parsed {
@@ -232,7 +236,10 @@ fn run_child_skill(child_bin: &str, input_line: &str, timeout: Duration) -> Resu
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("child exited with {:?}: {stderr}", output.status.code()));
+        return Err(format!(
+            "child exited with {:?}: {stderr}",
+            output.status.code()
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

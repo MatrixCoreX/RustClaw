@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNNER="${RUNNER:-$ROOT_DIR/target/release/skill-runner}"
 REPORT_PATH="${REPORT_PATH:-$ROOT_DIR/logs/regression_skills_upgrade_$(date +%Y%m%d_%H%M%S).md}"
+INCLUDE_WRAPPER_SMOKE=1
+WRAPPER_SMOKE_PROFILE="${WRAPPER_SMOKE_PROFILE:-release}"
+WRAPPER_SMOKE_TIMEOUT="${WRAPPER_SMOKE_TIMEOUT:-60}"
+WRAPPER_SMOKE_LOG_DIR=""
+WRAPPER_SMOKE_REPORT=""
+INCLUDE_BASE_CONTRACTS=1
+BASE_CONTRACTS_PROFILE="${BASE_CONTRACTS_PROFILE:-release}"
+BASE_CONTRACTS_REPORT=""
 
 PASS=0
 FAIL=0
@@ -28,6 +36,49 @@ fi
 
 TMP_DIR="$(mktemp -d /tmp/skills-upgrade-regression-XXXXXX)"
 trap 'rm -rf "$TMP_DIR"' EXIT
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-wrapper-smoke)
+      INCLUDE_WRAPPER_SMOKE=0
+      shift
+      ;;
+    --wrapper-smoke-profile)
+      WRAPPER_SMOKE_PROFILE="${2:-release}"
+      shift 2
+      ;;
+    --wrapper-smoke-timeout)
+      WRAPPER_SMOKE_TIMEOUT="${2:-60}"
+      shift 2
+      ;;
+    --skip-base-contracts)
+      INCLUDE_BASE_CONTRACTS=0
+      shift
+      ;;
+    --base-contracts-profile)
+      BASE_CONTRACTS_PROFILE="${2:-release}"
+      shift 2
+      ;;
+    --help|-h)
+      cat <<EOF
+Usage:
+  bash scripts/regression_skills_upgrade_suite.sh [options]
+
+Options:
+  --skip-wrapper-smoke           Skip scripts/smoke_skill_calls.sh stage
+  --wrapper-smoke-profile P      Wrapper smoke profile (default: release)
+  --wrapper-smoke-timeout N      Timeout per wrapper in seconds (default: 60)
+  --skip-base-contracts          Skip base skill response-contract stage
+  --base-contracts-profile P     Base skill contract profile (default: release)
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      exit 2
+      ;;
+  esac
+done
 
 log_case() {
   echo
@@ -237,6 +288,40 @@ else
   skip "browser_web invocation skipped (runner/skill returned non-ok status): $bw_status"
 fi
 
+if [[ "$INCLUDE_WRAPPER_SMOKE" == "1" ]]; then
+  log_case "wrapper smoke"
+  WRAPPER_SMOKE_LOG_DIR="$ROOT_DIR/logs/skill_call_smoke_from_upgrade_$(date +%Y%m%d_%H%M%S)"
+  WRAPPER_SMOKE_REPORT="$WRAPPER_SMOKE_LOG_DIR/report.md"
+  set +e
+  REPORT_PATH="$WRAPPER_SMOKE_REPORT" \
+  LOG_DIR="$WRAPPER_SMOKE_LOG_DIR" \
+  bash "$ROOT_DIR/scripts/smoke_skill_calls.sh" \
+    --profile "$WRAPPER_SMOKE_PROFILE" \
+    --timeout "$WRAPPER_SMOKE_TIMEOUT" \
+    --exclude "audio_transcribe,audio_synthesize,image_generate,image_edit,image_vision,crypto,stock,weather,browser_web,web_search_extract,service_control,task_control,chat" >/tmp/rustclaw_wrapper_smoke.log 2>&1
+  wrapper_rc=$?
+  set -e
+  if [[ "$wrapper_rc" -eq 0 ]]; then
+    pass "wrapper smoke completed successfully (report: $WRAPPER_SMOKE_REPORT)"
+  else
+    fail "wrapper smoke reported failures (report: $WRAPPER_SMOKE_REPORT)"
+    echo "  smoke log: /tmp/rustclaw_wrapper_smoke.log"
+  fi
+fi
+
+if [[ "$INCLUDE_BASE_CONTRACTS" == "1" ]]; then
+  log_case "base skill response contracts"
+  BASE_CONTRACTS_REPORT="$TMP_DIR/base_contracts_report.md"
+  if bash "$ROOT_DIR/scripts/check_base_skill_response_contracts.sh" \
+      --profile "$BASE_CONTRACTS_PROFILE" \
+      --log-dir "$TMP_DIR/base_contracts_logs" \
+      --report "$BASE_CONTRACTS_REPORT"; then
+    pass "base skill response contracts passed"
+  else
+    fail "base skill response contracts failed"
+  fi
+fi
+
 echo
 echo "==== Regression Summary ===="
 echo "PASS: $PASS"
@@ -252,10 +337,28 @@ mkdir -p "$(dirname "$REPORT_PATH")"
   echo "- PASS: $PASS"
   echo "- FAIL: $FAIL"
   echo "- SKIP: $SKIP"
+  if [[ -n "$WRAPPER_SMOKE_REPORT" ]]; then
+    echo "- Wrapper smoke report: \`$WRAPPER_SMOKE_REPORT\`"
+  fi
+  if [[ -n "$BASE_CONTRACTS_REPORT" ]]; then
+    echo "- Base contract report: \`$BASE_CONTRACTS_REPORT\`"
+  fi
   echo
   for line in "${RESULT_LINES[@]}"; do
     echo "$line"
   done
+  if [[ -n "$WRAPPER_SMOKE_REPORT" ]]; then
+    echo
+    echo "## Wrapper Smoke Report"
+    echo
+    echo "See: \`$WRAPPER_SMOKE_REPORT\`"
+  fi
+  if [[ -n "$BASE_CONTRACTS_REPORT" ]]; then
+    echo
+    echo "## Base Skill Response Contract Report"
+    echo
+    echo "See: \`$BASE_CONTRACTS_REPORT\`"
+  fi
 } >"$REPORT_PATH"
 echo "Report saved: $REPORT_PATH"
 

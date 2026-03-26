@@ -6,13 +6,13 @@
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Supports natural-language task operations such as "看看我现在有哪些任务", "结束当前任务", and "结束第 2 个任务".
 
-## Supported Actions
+## Actions
 
 - `list` - List current unfinished tasks (`running` + `queued`) for this user/chat.
 - `cancel_all` - Cancel all unfinished tasks for this user/chat, excluding the current control task itself.
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
 
-## Input Contract
+## Parameter Contract
 
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
@@ -37,7 +37,7 @@ Notes:
 - `cancel_one` without valid `index` -> readable error text.
 - Invalid index -> readable error text telling the user to query tasks first.
 
-## Request / Response Examples
+## Request/Response Examples
 
 ### list
 

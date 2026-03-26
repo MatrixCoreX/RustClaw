@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Check that every skill in skills_registry.toml has a prompt file in the canonical locations.
-Canonical: registry prompt_file = prompts/skills/<name>.md.
-Resolution order at runtime: vendors/<active>/skills/<name>.md -> vendors/default/skills/<name>.md -> skills/<name>.md.
-This script ensures at least one of (prompts/skills/<name>.md, prompts/vendors/default/skills/<name>.md) exists.
+"""Check that every registry skill has a default vendor skill prompt.
+
+Canonical registry prompt_file remains prompts/skills/<name>.md as a logical path.
+Runtime loads skill prompts from vendor layers only:
+prompts/vendors/<active_vendor>/skills/<name>.md -> prompts/vendors/default/skills/<name>.md.
+This script validates the required fallback baseline under vendors/default.
 Does not touch production code or clawd.
 """
 from __future__ import annotations
@@ -13,7 +15,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = REPO_ROOT / "configs" / "skills_registry.toml"
-PROMPTS_SKILLS = REPO_ROOT / "prompts" / "skills"
 VENDOR_DEFAULT_SKILLS = REPO_ROOT / "prompts" / "vendors" / "default" / "skills"
 
 
@@ -44,16 +45,20 @@ def main() -> int:
         if not prompt_file.strip().startswith("prompts/skills/"):
             continue
         base = Path(prompt_file.strip()).name
-        in_main = (PROMPTS_SKILLS / base).is_file()
-        in_vendor = (VENDOR_DEFAULT_SKILLS / base).is_file()
-        if not in_main and not in_vendor:
+        in_vendor_default = (VENDOR_DEFAULT_SKILLS / base).is_file()
+        if not in_vendor_default:
             missing.append(f"{name} (expect {base})")
     if missing:
-        print("Missing skill prompt file (need in prompts/skills/ or prompts/vendors/default/skills/):", file=sys.stderr)
+        print(
+            "Missing default vendor skill prompt file (need in prompts/vendors/default/skills/):",
+            file=sys.stderr,
+        )
         for m in missing:
             print(f"  - {m}", file=sys.stderr)
         return 1
-    print(f"OK: all {len(skills)} registry skills have a prompt file in canonical locations.")
+    print(
+        f"OK: all {len(skills)} registry skills have a default vendor prompt fallback."
+    )
     return 0
 
 

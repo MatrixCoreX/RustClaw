@@ -443,7 +443,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("read tasks schema");
-        assert!(sql.contains("'wechat'"), "tasks schema should allow wechat: {sql}");
+        assert!(
+            sql.contains("'wechat'"),
+            "tasks schema should allow wechat: {sql}"
+        );
 
         db.execute(
             "INSERT INTO tasks (task_id, user_id, chat_id, channel, kind, payload_json, status, created_at, updated_at)

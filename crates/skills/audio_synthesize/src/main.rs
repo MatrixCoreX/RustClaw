@@ -56,6 +56,7 @@ struct LlmConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
     base_url: String,
+    #[serde(default)]
     api_key: String,
     model: String,
     #[serde(default)]
@@ -187,7 +188,11 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(String, Value), String> {
+fn execute(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    args: Value,
+) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -198,7 +203,11 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
         .ok_or_else(|| "text is required".to_string())?;
-    let max_input_chars = cfg.audio_synthesize.max_input_chars.unwrap_or(4000).max(100);
+    let max_input_chars = cfg
+        .audio_synthesize
+        .max_input_chars
+        .unwrap_or(4000)
+        .max(100);
     if input.chars().count() > max_input_chars {
         return Err(format!(
             "text too long: {} chars, max={max_input_chars}",
@@ -214,7 +223,12 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .get("response_format")
         .or_else(|| obj.get("format"))
         .and_then(|v| v.as_str())
-        .unwrap_or_else(|| cfg.audio_synthesize.default_format.as_deref().unwrap_or("opus"));
+        .unwrap_or_else(|| {
+            cfg.audio_synthesize
+                .default_format
+                .as_deref()
+                .unwrap_or("opus")
+        });
     let normalized_format = normalize_format(response_format);
 
     let requested_vendor = obj.get("vendor").and_then(|v| v.as_str());
@@ -307,26 +321,26 @@ fn synthesize_by_vendor(
     match vendor {
         VendorKind::Google => {
             google_native_synthesize(
-            client,
-            cfg,
-            model,
-            voice,
-            response_format,
-            input,
-            output_path,
+                client,
+                cfg,
+                model,
+                voice,
+                response_format,
+                input,
+                output_path,
             )?;
             Ok("native")
-        },
+        }
         VendorKind::OpenAI => {
             openai_compatible_synthesize(
-            client,
-            cfg,
-            vendor_name,
-            model,
-            voice,
-            response_format,
-            input,
-            output_path,
+                client,
+                cfg,
+                vendor_name,
+                model,
+                voice,
+                response_format,
+                input,
+                output_path,
             )?;
             Ok("compat")
         }
@@ -423,9 +437,9 @@ fn qwen_uses_native_tts_model(cfg: &AudioSynthesizeConfig, model: &str) -> bool 
     cfg.native_models
         .as_ref()
         .and_then(|list| {
-            list.iter()
-                .map(|s| s.trim())
-                .find(|candidate| !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested))
+            list.iter().map(|s| s.trim()).find(|candidate| {
+                !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested)
+            })
         })
         .is_some()
 }
@@ -460,16 +474,68 @@ const OPENAI_COMPAT_VOICES: &[&str] = &[
 ];
 
 const GOOGLE_TTS_VOICES: &[&str] = &[
-    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
-    "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi",
-    "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
-    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+    "Zephyr",
+    "Puck",
+    "Charon",
+    "Kore",
+    "Fenrir",
+    "Leda",
+    "Orus",
+    "Aoede",
+    "Callirrhoe",
+    "Autonoe",
+    "Enceladus",
+    "Iapetus",
+    "Umbriel",
+    "Algieba",
+    "Despina",
+    "Erinome",
+    "Algenib",
+    "Rasalgethi",
+    "Laomedeia",
+    "Achernar",
+    "Alnilam",
+    "Schedar",
+    "Gacrux",
+    "Pulcherrima",
+    "Achird",
+    "Zubenelgenubi",
+    "Vindemiatrix",
+    "Sadachbia",
+    "Sadaltager",
+    "Sulafat",
 ];
 
 const QWEN_TTS_VOICES: &[&str] = &[
-    "Cherry", "Serena", "Ethan", "Chelsie", "Momo", "Vivian", "Moon", "Maia", "Kai", "Nofish",
-    "Bella", "Jennifer", "Ryan", "Katerina", "Aiden", "Eldric Sage", "Mia", "Mochi", "Bellona",
-    "Vincent", "Bunny", "Neil", "Elias", "Arthur", "Nini", "Ebona", "Seren", "Pip", "Stella",
+    "Cherry",
+    "Serena",
+    "Ethan",
+    "Chelsie",
+    "Momo",
+    "Vivian",
+    "Moon",
+    "Maia",
+    "Kai",
+    "Nofish",
+    "Bella",
+    "Jennifer",
+    "Ryan",
+    "Katerina",
+    "Aiden",
+    "Eldric Sage",
+    "Mia",
+    "Mochi",
+    "Bellona",
+    "Vincent",
+    "Bunny",
+    "Neil",
+    "Elias",
+    "Arthur",
+    "Nini",
+    "Ebona",
+    "Seren",
+    "Pip",
+    "Stella",
 ];
 
 fn minimax_audio_format(response_format: &str) -> &'static str {
@@ -494,7 +560,11 @@ fn canonical_voice_name<'a>(voices: &'a [&'a str], voice: &str) -> Option<&'a st
 
 fn default_voice_for_vendor(vendor: VendorKind) -> &'static str {
     match vendor {
-        VendorKind::OpenAI | VendorKind::Anthropic | VendorKind::Grok | VendorKind::DeepSeek | VendorKind::Custom => OPENAI_COMPAT_DEFAULT_VOICE,
+        VendorKind::OpenAI
+        | VendorKind::Anthropic
+        | VendorKind::Grok
+        | VendorKind::DeepSeek
+        | VendorKind::Custom => OPENAI_COMPAT_DEFAULT_VOICE,
         VendorKind::Google => GOOGLE_DEFAULT_VOICE,
         VendorKind::Qwen => QWEN_DEFAULT_VOICE,
         VendorKind::MiniMax => MINIMAX_DEFAULT_VOICE_ID,
@@ -507,7 +577,11 @@ fn normalize_voice_for_vendor(vendor: VendorKind, voice: &str) -> Option<String>
         return None;
     }
     match vendor {
-        VendorKind::OpenAI | VendorKind::Anthropic | VendorKind::Grok | VendorKind::DeepSeek | VendorKind::Custom => {
+        VendorKind::OpenAI
+        | VendorKind::Anthropic
+        | VendorKind::Grok
+        | VendorKind::DeepSeek
+        | VendorKind::Custom => {
             canonical_voice_name(OPENAI_COMPAT_VOICES, trimmed).map(str::to_string)
         }
         VendorKind::Google => canonical_voice_name(GOOGLE_TTS_VOICES, trimmed).map(str::to_string),
@@ -537,7 +611,10 @@ fn minimax_voice_id(voice: &str) -> String {
     match trimmed.to_ascii_lowercase().as_str() {
         // Common cross-vendor voices that frequently get copied into MiniMax config.
         // MiniMax safe fallback: `male-qn-qingse`.
-        "alloy" | "ash" | "ballad" | "coral" | "echo" | "fable" | "nova" | "onyx" | "sage" | "shimmer" | "cherry" | "serena" | "ethan" | "kore" | "puck" | "aoede" => MINIMAX_DEFAULT_VOICE_ID.to_string(),
+        "alloy" | "ash" | "ballad" | "coral" | "echo" | "fable" | "nova" | "onyx" | "sage"
+        | "shimmer" | "cherry" | "serena" | "ethan" | "kore" | "puck" | "aoede" => {
+            MINIMAX_DEFAULT_VOICE_ID.to_string()
+        }
         _ => trimmed.to_string(),
     }
 }
@@ -600,7 +677,8 @@ fn qwen_native_synthesize(
         .bytes()
         .map_err(|err| format!("read qwen native tts audio failed: {err}"))?;
     ensure_parent_dir(output_path)?;
-    std::fs::write(output_path, &bytes).map_err(|err| format!("write audio output failed: {err}"))?;
+    std::fs::write(output_path, &bytes)
+        .map_err(|err| format!("write audio output failed: {err}"))?;
     Ok(())
 }
 
@@ -675,10 +753,11 @@ fn minimax_native_synthesize(
                 truncate(&v.to_string(), 400)
             )
         })?;
-    let bytes = hex::decode(audio_hex)
-        .map_err(|err| format!("decode minimax tts audio failed: {err}"))?;
+    let bytes =
+        hex::decode(audio_hex).map_err(|err| format!("decode minimax tts audio failed: {err}"))?;
     ensure_parent_dir(output_path)?;
-    std::fs::write(output_path, &bytes).map_err(|err| format!("write audio output failed: {err}"))?;
+    std::fs::write(output_path, &bytes)
+        .map_err(|err| format!("write audio output failed: {err}"))?;
     Ok(())
 }
 
@@ -717,7 +796,8 @@ fn openai_compatible_synthesize(
         ));
     }
     ensure_parent_dir(output_path)?;
-    std::fs::write(output_path, &bytes).map_err(|err| format!("write audio output failed: {err}"))?;
+    std::fs::write(output_path, &bytes)
+        .map_err(|err| format!("write audio output failed: {err}"))?;
     Ok(())
 }
 
@@ -900,7 +980,65 @@ fn load_root_config() -> RootConfig {
             cfg.audio_synthesize = parsed;
         }
     }
+    apply_env_overrides(&mut cfg);
     cfg
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
+    if let (Some(value), Some(cfg)) = (env_non_empty(key), target.as_mut()) {
+        cfg.api_key = value;
+    }
+}
+
+fn apply_env_overrides(cfg: &mut RootConfig) {
+    apply_vendor_api_key_env(&mut cfg.llm.openai, "OPENAI_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.google, "GOOGLE_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.anthropic, "ANTHROPIC_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.grok, "GROK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.deepseek, "DEEPSEEK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.qwen, "QWEN_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.minimax, "MINIMAX_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.custom, "CUSTOM_API_KEY");
+
+    apply_vendor_api_key_env(
+        &mut cfg.audio_synthesize.providers.openai,
+        "AUDIO_SYNTHESIZE_OPENAI_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_synthesize.providers.google,
+        "AUDIO_SYNTHESIZE_GOOGLE_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_synthesize.providers.anthropic,
+        "AUDIO_SYNTHESIZE_ANTHROPIC_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_synthesize.providers.grok,
+        "AUDIO_SYNTHESIZE_GROK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_synthesize.providers.deepseek,
+        "AUDIO_SYNTHESIZE_DEEPSEEK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_synthesize.providers.qwen,
+        "AUDIO_SYNTHESIZE_QWEN_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_synthesize.providers.minimax,
+        "AUDIO_SYNTHESIZE_MINIMAX_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_synthesize.providers.custom,
+        "AUDIO_SYNTHESIZE_CUSTOM_API_KEY",
+    );
 }
 
 fn first_model_candidate<'a>(
@@ -911,13 +1049,18 @@ fn first_model_candidate<'a>(
     if let Some(v) = default_model.map(str::trim).filter(|v| !v.is_empty()) {
         return Some(v);
     }
-    if let Some(v) = vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty())) {
+    if let Some(v) =
+        vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+    {
         return Some(v);
     }
     models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
 }
 
-fn vendor_models<'a>(cfg: &'a AudioSynthesizeConfig, vendor: VendorKind) -> Option<&'a Vec<String>> {
+fn vendor_models<'a>(
+    cfg: &'a AudioSynthesizeConfig,
+    vendor: VendorKind,
+) -> Option<&'a Vec<String>> {
     match vendor {
         VendorKind::OpenAI => cfg.openai_models.as_ref(),
         VendorKind::Google => cfg.google_models.as_ref(),
@@ -1033,7 +1176,10 @@ mod tests {
     fn parse_vendor_aliases() {
         assert!(matches!(parse_vendor("openai"), Some(VendorKind::OpenAI)));
         assert!(matches!(parse_vendor("gemini"), Some(VendorKind::Google)));
-        assert!(matches!(parse_vendor("claude"), Some(VendorKind::Anthropic)));
+        assert!(matches!(
+            parse_vendor("claude"),
+            Some(VendorKind::Anthropic)
+        ));
         assert!(matches!(parse_vendor("xai"), Some(VendorKind::Grok)));
     }
 

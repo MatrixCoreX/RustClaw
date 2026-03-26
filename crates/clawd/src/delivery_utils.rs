@@ -168,7 +168,8 @@ pub(crate) fn collect_recent_image_candidates(
                 if let Ok(v) = serde_json::from_str::<Value>(&result) {
                     if let Some(text) = v.get("text").and_then(|x| x.as_str()) {
                         for t in extract_delivery_file_tokens(text) {
-                            if let Some(reference) = extract_image_reference_from_delivery_token(&t) {
+                            if let Some(reference) = extract_image_reference_from_delivery_token(&t)
+                            {
                                 if seen.insert(reference.clone()) {
                                     out.push(reference);
                                 }

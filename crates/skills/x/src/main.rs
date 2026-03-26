@@ -140,7 +140,9 @@ fn parse_input(args: Value) -> Result<XActionInput, String> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(!send);
             if send && dry_run {
-                return Err("x skill args are invalid: send=true conflicts with dry_run=true".to_string());
+                return Err(
+                    "x skill args are invalid: send=true conflicts with dry_run=true".to_string(),
+                );
             }
             Ok(XActionInput {
                 text,
@@ -211,7 +213,10 @@ fn run_x_post_via_xurl(text: &str, runtime_cfg: &XRuntimeConfig) -> Result<Strin
     let mut child = cmd
         .spawn()
         .map_err(|err| format!("spawn xurl failed (bin={}): {}", runtime_cfg.xurl_bin, err))?;
-    let output = wait_with_timeout(&mut child, Duration::from_secs(runtime_cfg.xurl_timeout_seconds))?;
+    let output = wait_with_timeout(
+        &mut child,
+        Duration::from_secs(runtime_cfg.xurl_timeout_seconds),
+    )?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
@@ -270,10 +275,16 @@ fn run_x_post_via_xurl(text: &str, runtime_cfg: &XRuntimeConfig) -> Result<Strin
         .and_then(|d| d.get("text"))
         .and_then(|v| v.as_str())
         .unwrap_or(text);
-    Ok(format!("x post success via xurl: id={} text={}", id, posted_text))
+    Ok(format!(
+        "x post success via xurl: id={} text={}",
+        id, posted_text
+    ))
 }
 
-fn wait_with_timeout(child: &mut std::process::Child, timeout: Duration) -> Result<ChildOutput, String> {
+fn wait_with_timeout(
+    child: &mut std::process::Child,
+    timeout: Duration,
+) -> Result<ChildOutput, String> {
     let start = Instant::now();
     loop {
         match child.try_wait() {
@@ -328,9 +339,7 @@ fn truncate_text(text: &str, max_chars: usize) -> String {
 
 fn load_runtime_config() -> Result<XRuntimeConfig, String> {
     let file_cfg = load_file_config()?;
-    let use_xurl = env_bool("X_USE_XURL")
-        .or(file_cfg.use_xurl)
-        .unwrap_or(true);
+    let use_xurl = env_bool("X_USE_XURL").or(file_cfg.use_xurl).unwrap_or(true);
     let xurl_bin = std::env::var("XURL_BIN")
         .ok()
         .or(file_cfg.xurl_bin)

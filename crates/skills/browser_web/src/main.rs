@@ -1,11 +1,11 @@
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use url::Url;
 
 #[derive(Debug, Deserialize)]
@@ -187,7 +187,9 @@ fn handle(req: Request) -> Response {
                 Err(e) => Err(e),
             }
         }
-        other => Err(format!("unknown action: {other}; allowed: open_extract|search_page|search_extract")),
+        other => Err(format!(
+            "unknown action: {other}; allowed: open_extract|search_page|search_extract"
+        )),
     };
 
     match result {
@@ -210,29 +212,33 @@ fn handle(req: Request) -> Response {
     }
 }
 
-fn parse_open_extract_args(obj: &serde_json::Map<String, Value>) -> Result<OpenExtractArgs, String> {
+fn parse_open_extract_args(
+    obj: &serde_json::Map<String, Value>,
+) -> Result<OpenExtractArgs, String> {
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "action is required".to_string())?
         .to_string();
 
-    let url = obj.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let urls = obj
-        .get("urls")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        });
+    let url = obj
+        .get("url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let urls = obj.get("urls").and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect()
+    });
 
     if url.is_none() && urls.as_ref().map_or(true, Vec::is_empty) {
         return Err("at least one of url or urls is required".to_string());
     }
 
     let max_pages = if let Some(v) = obj.get("max_pages") {
-        let val = v.as_u64().ok_or_else(|| "max_pages must be an integer".to_string())?;
+        let val = v
+            .as_u64()
+            .ok_or_else(|| "max_pages must be an integer".to_string())?;
         if val < 1 || val > 10 {
             return Err(format!("max_pages must be between 1 and 10, got {}", val));
         }
@@ -247,11 +253,19 @@ fn parse_open_extract_args(obj: &serde_json::Map<String, Value>) -> Result<OpenE
         .map(|s| s.to_string())
         .unwrap_or_else(|| "domcontentloaded".to_string());
 
-    if !matches!(wait_until.as_str(), "domcontentloaded" | "load" | "networkidle") {
-        return Err(format!("wait_until must be one of: domcontentloaded, load, networkidle"));
+    if !matches!(
+        wait_until.as_str(),
+        "domcontentloaded" | "load" | "networkidle"
+    ) {
+        return Err(format!(
+            "wait_until must be one of: domcontentloaded, load, networkidle"
+        ));
     }
 
-    let save_screenshot = obj.get("save_screenshot").and_then(|v| v.as_bool()).unwrap_or(true);
+    let save_screenshot = obj
+        .get("save_screenshot")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
 
     let screenshot_dir = obj
         .get("screenshot_dir")
@@ -348,11 +362,15 @@ fn parse_search_page_args(obj: &serde_json::Map<String, Value>) -> Result<Search
         .unwrap_or_else(|| "google".to_string());
 
     if engine != "google" {
-        return Err(format!("unsupported engine: {engine}; only 'google' is supported"));
+        return Err(format!(
+            "unsupported engine: {engine}; only 'google' is supported"
+        ));
     }
 
     let top_k = if let Some(v) = obj.get("top_k") {
-        let val = v.as_u64().ok_or_else(|| "top_k must be an integer".to_string())?;
+        let val = v
+            .as_u64()
+            .ok_or_else(|| "top_k must be an integer".to_string())?;
         if val < 1 || val > 20 {
             return Err(format!("top_k must be between 1 and 20, got {}", val));
         }
@@ -384,7 +402,9 @@ fn parse_search_page_args(obj: &serde_json::Map<String, Value>) -> Result<Search
     })
 }
 
-fn parse_search_extract_args(obj: &serde_json::Map<String, Value>) -> Result<SearchExtractArgs, String> {
+fn parse_search_extract_args(
+    obj: &serde_json::Map<String, Value>,
+) -> Result<SearchExtractArgs, String> {
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
@@ -409,11 +429,15 @@ fn parse_search_extract_args(obj: &serde_json::Map<String, Value>) -> Result<Sea
         .unwrap_or_else(|| "google".to_string());
 
     if engine != "google" {
-        return Err(format!("unsupported engine: {engine}; only 'google' is supported"));
+        return Err(format!(
+            "unsupported engine: {engine}; only 'google' is supported"
+        ));
     }
 
     let top_k = if let Some(v) = obj.get("top_k") {
-        let val = v.as_u64().ok_or_else(|| "top_k must be an integer".to_string())?;
+        let val = v
+            .as_u64()
+            .ok_or_else(|| "top_k must be an integer".to_string())?;
         if val < 1 || val > 20 {
             return Err(format!("top_k must be between 1 and 20, got {}", val));
         }
@@ -423,9 +447,14 @@ fn parse_search_extract_args(obj: &serde_json::Map<String, Value>) -> Result<Sea
     };
 
     let extract_top_n = if let Some(v) = obj.get("extract_top_n") {
-        let val = v.as_u64().ok_or_else(|| "extract_top_n must be an integer".to_string())?;
+        let val = v
+            .as_u64()
+            .ok_or_else(|| "extract_top_n must be an integer".to_string())?;
         if val < 1 || val > 10 {
-            return Err(format!("extract_top_n must be between 1 and 10, got {}", val));
+            return Err(format!(
+                "extract_top_n must be between 1 and 10, got {}",
+                val
+            ));
         }
         val as u32
     } else {
@@ -438,10 +467,18 @@ fn parse_search_extract_args(obj: &serde_json::Map<String, Value>) -> Result<Sea
         .map(|s| s.to_string())
         .unwrap_or_else(|| "domcontentloaded".to_string());
 
-    if !matches!(wait_until.as_str(), "domcontentloaded" | "load" | "networkidle") {
-        return Err(format!("wait_until must be one of: domcontentloaded, load, networkidle"));
+    if !matches!(
+        wait_until.as_str(),
+        "domcontentloaded" | "load" | "networkidle"
+    ) {
+        return Err(format!(
+            "wait_until must be one of: domcontentloaded, load, networkidle"
+        ));
     }
-    let summarize = obj.get("summarize").and_then(|v| v.as_bool()).unwrap_or(true);
+    let summarize = obj
+        .get("summarize")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
     let content_mode = obj
         .get("content_mode")
         .and_then(|v| v.as_str())
@@ -569,7 +606,10 @@ fn search_page_action(workspace_root: &PathBuf, args: SearchPageArgs) -> Result<
     call_browser_helper(workspace_root, helper_input)
 }
 
-fn search_extract_action(workspace_root: &PathBuf, args: SearchExtractArgs) -> Result<String, String> {
+fn search_extract_action(
+    workspace_root: &PathBuf,
+    args: SearchExtractArgs,
+) -> Result<String, String> {
     let helper_input = json!({
         "action": "searchExtract",
         "query": args.query,
@@ -628,8 +668,12 @@ fn call_browser_helper(workspace_root: &PathBuf, input: Value) -> Result<String,
         .map_err(|e| format!("failed to serialize helper input: {}", e))?;
 
     {
-        let mut stdin = child.stdin.take().ok_or_else(|| "failed to take stdin".to_string())?;
-        writeln!(stdin, "{}", input_json).map_err(|e| format!("failed to write to helper stdin: {}", e))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "failed to take stdin".to_string())?;
+        writeln!(stdin, "{}", input_json)
+            .map_err(|e| format!("failed to write to helper stdin: {}", e))?;
         drop(stdin);
     }
 
@@ -714,7 +758,9 @@ mod tests {
 
         let args = parse_open_extract_args(&obj);
         assert!(args.is_err());
-        assert!(args.unwrap_err().contains("at least one of url or urls is required"));
+        assert!(args
+            .unwrap_err()
+            .contains("at least one of url or urls is required"));
     }
 
     #[test]
@@ -790,7 +836,9 @@ mod tests {
 
         let args = parse_open_extract_args(&obj);
         assert!(args.is_err());
-        assert!(args.unwrap_err().contains("max_pages must be between 1 and 10"));
+        assert!(args
+            .unwrap_err()
+            .contains("max_pages must be between 1 and 10"));
     }
 
     #[test]
@@ -806,7 +854,9 @@ mod tests {
 
         let args = parse_open_extract_args(&obj);
         assert!(args.is_err());
-        assert!(args.unwrap_err().contains("max_pages must be between 1 and 10"));
+        assert!(args
+            .unwrap_err()
+            .contains("max_pages must be between 1 and 10"));
     }
 
     #[test]
@@ -922,7 +972,9 @@ mod tests {
 
         let args = parse_search_extract_args(&obj);
         assert!(args.is_err());
-        assert!(args.unwrap_err().contains("extract_top_n must be between 1 and 10"));
+        assert!(args
+            .unwrap_err()
+            .contains("extract_top_n must be between 1 and 10"));
     }
 
     #[test]
@@ -938,7 +990,9 @@ mod tests {
 
         let args = parse_search_extract_args(&obj);
         assert!(args.is_err());
-        assert!(args.unwrap_err().contains("extract_top_n must be between 1 and 10"));
+        assert!(args
+            .unwrap_err()
+            .contains("extract_top_n must be between 1 and 10"));
     }
 
     #[test]

@@ -35,6 +35,8 @@
 - Unsupported action names.
 - Not a git repository: `status=error`, `error_text` set.
 - Invalid target/revision/path; git command failures return readable stderr.
+- Non-zero `git` command exit codes are returned as `status=error` with `error_text=git command failed: exit=<code>\n<stdout/stderr>`.
+- Successful responses also mirror structured metadata into `extra`, including `action`, `subcommand`, `exit_code`, and `output`.
 
 ## Request/Response Examples
 ### Example 1
@@ -44,7 +46,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"On branch ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"exit=0\n## main","extra":{"action":"status","subcommand":"status","exit_code":0,"output":"exit=0\n## main"},"error_text":null}
 ```
 ### Example 2 (log with n or limit)
 Request:
