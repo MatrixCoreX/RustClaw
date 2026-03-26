@@ -4,6 +4,13 @@ use toml::Value as TomlValue;
 
 use crate::channel_send;
 
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 pub(crate) fn resolve_ui_dist_dir(workspace_root: &Path) -> PathBuf {
     if let Ok(raw) = std::env::var("RUSTCLAW_UI_DIST") {
         let trimmed = raw.trim();
@@ -25,8 +32,18 @@ pub(crate) fn load_feishu_send_config(
     let content = std::fs::read_to_string(&path).ok()?;
     let table: TomlValue = toml::from_str(&content).ok()?;
     let feishu = table.get("feishu")?.as_table()?;
-    let app_id = feishu.get("app_id")?.as_str()?.trim().to_string();
-    let app_secret = feishu.get("app_secret")?.as_str()?.trim().to_string();
+    let app_id = feishu
+        .get("app_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let app_secret = feishu
+        .get("app_secret")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let app_id = env_non_empty("FEISHU_APP_ID").unwrap_or(app_id);
+    let app_secret = env_non_empty("FEISHU_APP_SECRET").unwrap_or(app_secret);
     if app_id.is_empty() || app_secret.is_empty() {
         return None;
     }
@@ -48,8 +65,18 @@ pub(crate) fn load_lark_send_config(workspace_root: &Path) -> Option<channel_sen
     let content = std::fs::read_to_string(&path).ok()?;
     let table: TomlValue = toml::from_str(&content).ok()?;
     let lark = table.get("lark")?.as_table()?;
-    let app_id = lark.get("app_id")?.as_str()?.trim().to_string();
-    let app_secret = lark.get("app_secret")?.as_str()?.trim().to_string();
+    let app_id = lark
+        .get("app_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let app_secret = lark
+        .get("app_secret")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let app_id = env_non_empty("LARK_APP_ID").unwrap_or(app_id);
+    let app_secret = env_non_empty("LARK_APP_SECRET").unwrap_or(app_secret);
     if app_id.is_empty() || app_secret.is_empty() {
         return None;
     }
@@ -86,6 +113,7 @@ pub(crate) fn load_wechat_send_config(
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
+    let bot_token = env_non_empty("WECHAT_BOT_TOKEN").unwrap_or(bot_token);
     if api_base_url.is_empty() || bot_token.is_empty() {
         return None;
     }
@@ -104,6 +132,8 @@ pub(crate) fn load_wechat_send_config(
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let wechat_uin_base64 = env_non_empty("WECHAT_UIN_BASE64").or(wechat_uin_base64);
+    let sk_route_tag = env_non_empty("WECHAT_SK_ROUTE_TAG").or(sk_route_tag);
     let cdn_base_url = wechat
         .get("cdn_base_url")
         .and_then(|v| v.as_str())

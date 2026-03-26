@@ -126,8 +126,8 @@ pub async fn get_config(
         DEFAULT_CONFIG_API_TIMEOUT_MS,
     )
     .await?;
-    let parsed: GetConfigResp = serde_json::from_value(v)
-        .map_err(|e| format!("getconfig decode failed: {e}"))?;
+    let parsed: GetConfigResp =
+        serde_json::from_value(v).map_err(|e| format!("getconfig decode failed: {e}"))?;
     if parsed.ret == Some(0) {
         Ok(Some(parsed.typing_ticket.unwrap_or_default()))
     } else {

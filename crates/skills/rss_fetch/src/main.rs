@@ -117,7 +117,10 @@ fn deprecated_urls(cfg: &RootConfig) -> HashSet<String> {
 }
 
 /// 返回该 category 下要全量抓取的所有 feed URL 及其状态（排除 deprecated）；兼容旧 primary/secondary/fallback。
-fn all_sources_with_state_for_category(cfg: &RootConfig, category: &str) -> Vec<(String, SourceStateEntry)> {
+fn all_sources_with_state_for_category(
+    cfg: &RootConfig,
+    category: &str,
+) -> Vec<(String, SourceStateEntry)> {
     let dep = deprecated_urls(cfg);
     let cat = match cfg.rss.categories.get(category) {
         Some(c) => c,
@@ -215,7 +218,8 @@ fn main() -> anyhow::Result<()> {
             Ok(req) => {
                 let result = execute(&mut cfg, req.args);
                 if let Err(e) = save_config(&cfg) {
-                    let _ = std::io::stderr().write_fmt(format_args!("rss_fetch save_config failed: {}\n", e));
+                    let _ = std::io::stderr()
+                        .write_fmt(format_args!("rss_fetch save_config failed: {}\n", e));
                 }
                 match result {
                     Ok(text) => Resp {
@@ -299,7 +303,9 @@ fn direct_feed_selector_present(obj: &serde_json::Map<String, Value>) -> bool {
         }
     }
     if let Some(arr) = obj.get("feed_urls").and_then(|v| v.as_array()) {
-        return arr.iter().any(|v| v.as_str().is_some_and(|s| !s.trim().is_empty()));
+        return arr
+            .iter()
+            .any(|v| v.as_str().is_some_and(|s| !s.trim().is_empty()));
     }
     false
 }
@@ -406,7 +412,10 @@ fn now_iso_secs() -> String {
         .unwrap_or_else(|_| "0".to_string())
 }
 
-fn fetch_layered_news(cfg: &mut RootConfig, obj: &serde_json::Map<String, Value>) -> Result<String, String> {
+fn fetch_layered_news(
+    cfg: &mut RootConfig,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<String, String> {
     let default_category = cfg
         .rss
         .default_category
@@ -598,17 +607,13 @@ fn apply_deprecation_and_state(
     let mut active_urls: Vec<String> = Vec::new();
     let mut entries: Vec<SourceStateEntry> = Vec::new();
 
-    let existing_urls: Vec<String> = cat
-        .sources
-        .as_ref()
-        .map(|s| s.clone())
-        .unwrap_or_else(|| {
-            let mut u = Vec::new();
-            u.extend(cat.primary.clone());
-            u.extend(cat.secondary.clone());
-            u.extend(cat.fallback.clone());
-            u
-        });
+    let existing_urls: Vec<String> = cat.sources.as_ref().map(|s| s.clone()).unwrap_or_else(|| {
+        let mut u = Vec::new();
+        u.extend(cat.primary.clone());
+        u.extend(cat.secondary.clone());
+        u.extend(cat.fallback.clone());
+        u
+    });
 
     for url in &existing_urls {
         if dep_urls.contains(url) {
@@ -625,7 +630,11 @@ fn apply_deprecation_and_state(
     }
 
     cat.sources = Some(active_urls);
-    cat.source_entries = if entries.is_empty() { None } else { Some(entries) };
+    cat.source_entries = if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    };
 
     let existing_dep_urls: HashSet<String> = cfg
         .rss
@@ -638,7 +647,11 @@ fn apply_deprecation_and_state(
         if existing_dep_urls.contains(&entry.url) {
             continue;
         }
-        cfg.rss.deprecated.get_or_insert_with(DeprecatedSection::default).sources.push(entry.clone());
+        cfg.rss
+            .deprecated
+            .get_or_insert_with(DeprecatedSection::default)
+            .sources
+            .push(entry.clone());
     }
 }
 
@@ -865,19 +878,53 @@ fn format_classified_news_output(
 
 fn classify_news_topic(title: &str) -> &'static str {
     let t = title.to_ascii_lowercase();
-    if has_any(&t, &["sec", "senate", "bill", "policy", "regulat", "ban", "cbdc"]) {
+    if has_any(
+        &t,
+        &["sec", "senate", "bill", "policy", "regulat", "ban", "cbdc"],
+    ) {
         return "policy_regulation";
     }
-    if has_any(&t, &["hack", "exploit", "breach", "attack", "drain", "vulnerability"]) {
+    if has_any(
+        &t,
+        &[
+            "hack",
+            "exploit",
+            "breach",
+            "attack",
+            "drain",
+            "vulnerability",
+        ],
+    ) {
         return "security_incident";
     }
-    if has_any(&t, &["ipo", "earnings", "results", "revenue", "funding", "acquire", "merger"]) {
+    if has_any(
+        &t,
+        &[
+            "ipo", "earnings", "results", "revenue", "funding", "acquire", "merger",
+        ],
+    ) {
         return "company_business";
     }
-    if has_any(&t, &["etf", "inflation", "fed", "interest rate", "macro", "economy", "jobs"]) {
+    if has_any(
+        &t,
+        &[
+            "etf",
+            "inflation",
+            "fed",
+            "interest rate",
+            "macro",
+            "economy",
+            "jobs",
+        ],
+    ) {
         return "macro_market";
     }
-    if has_any(&t, &["upgrade", "launch", "mainnet", "protocol", "rollup", "layer 2", "l2"]) {
+    if has_any(
+        &t,
+        &[
+            "upgrade", "launch", "mainnet", "protocol", "rollup", "layer 2", "l2",
+        ],
+    ) {
         return "tech_ecosystem";
     }
     "other"
@@ -915,7 +962,12 @@ fn source_host(url: &str) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn build_summary_lines(item: &FeedItem, host: &str, class_key: &str, i18n: &TextCatalog) -> Vec<String> {
+fn build_summary_lines(
+    item: &FeedItem,
+    host: &str,
+    class_key: &str,
+    i18n: &TextCatalog,
+) -> Vec<String> {
     let class_label = localized_class_label(class_key, i18n);
     let mut lines = Vec::new();
     lines.push(i18n.render(
@@ -1049,14 +1101,11 @@ fn extract_blocks<'a>(xml: &'a str, tag: &str) -> Vec<&'a str> {
 }
 
 fn extract_tag_text(xml: &str, tag: &str) -> Option<String> {
-    extract_blocks(xml, tag)
-        .into_iter()
-        .next()
-        .map(|v| {
-            let raw = v.trim();
-            let stripped = strip_cdata(raw);
-            xml_unescape(stripped.trim())
-        })
+    extract_blocks(xml, tag).into_iter().next().map(|v| {
+        let raw = v.trim();
+        let stripped = strip_cdata(raw);
+        xml_unescape(stripped.trim())
+    })
 }
 
 fn extract_atom_link(xml: &str) -> Option<String> {
@@ -1114,10 +1163,22 @@ fn normalize_lang_tag(lang: &str) -> &'static str {
 
 fn default_i18n_dict(_lang: &str) -> HashMap<String, String> {
     let mut current = HashMap::new();
-    current.insert("rss.msg.summary_header".to_string(), "🧾 Summary:".to_string());
-    current.insert("rss.msg.summary_from".to_string(), "From {host}.".to_string());
-    current.insert("rss.msg.summary_time".to_string(), "Time: {time}.".to_string());
-    current.insert("rss.msg.summary_topic".to_string(), "Topic: {topic}.".to_string());
+    current.insert(
+        "rss.msg.summary_header".to_string(),
+        "🧾 Summary:".to_string(),
+    );
+    current.insert(
+        "rss.msg.summary_from".to_string(),
+        "From {host}.".to_string(),
+    );
+    current.insert(
+        "rss.msg.summary_time".to_string(),
+        "Time: {time}.".to_string(),
+    );
+    current.insert(
+        "rss.msg.summary_topic".to_string(),
+        "Topic: {topic}.".to_string(),
+    );
     current.insert(
         "rss.msg.summary_tip".to_string(),
         "Please check the original title and link for details.".to_string(),
@@ -1139,13 +1200,23 @@ fn default_i18n_dict(_lang: &str) -> HashMap<String, String> {
         "rss.topic.company_business".to_string(),
         "Company & Business".to_string(),
     );
-    current.insert("rss.topic.macro_market".to_string(), "Macro & Market".to_string());
-    current.insert("rss.topic.tech_ecosystem".to_string(), "Tech & Ecosystem".to_string());
+    current.insert(
+        "rss.topic.macro_market".to_string(),
+        "Macro & Market".to_string(),
+    );
+    current.insert(
+        "rss.topic.tech_ecosystem".to_string(),
+        "Tech & Ecosystem".to_string(),
+    );
     current.insert("rss.topic.other".to_string(), "Other".to_string());
     current
 }
 
-fn flatten_toml_table(prefix: &str, table: &toml::map::Map<String, toml::Value>, out: &mut HashMap<String, String>) {
+fn flatten_toml_table(
+    prefix: &str,
+    table: &toml::map::Map<String, toml::Value>,
+    out: &mut HashMap<String, String>,
+) {
     for (k, v) in table {
         let key = if prefix.is_empty() {
             k.to_string()
@@ -1228,7 +1299,12 @@ mod tests {
         }
     }
 
-    fn make_cfg_legacy_only(category: &str, primary: Vec<String>, secondary: Vec<String>, fallback: Vec<String>) -> RootConfig {
+    fn make_cfg_legacy_only(
+        category: &str,
+        primary: Vec<String>,
+        secondary: Vec<String>,
+        fallback: Vec<String>,
+    ) -> RootConfig {
         let mut categories = HashMap::new();
         let cat = RssCategoryConfig {
             sources: None,
@@ -1254,7 +1330,13 @@ mod tests {
 
     #[test]
     fn all_sources_for_category_uses_sources_when_present() {
-        let cfg = make_cfg_with_sources("crypto", vec!["https://a.com/feed".to_string(), "https://b.com/rss".to_string()]);
+        let cfg = make_cfg_with_sources(
+            "crypto",
+            vec![
+                "https://a.com/feed".to_string(),
+                "https://b.com/rss".to_string(),
+            ],
+        );
         let urls = all_sources_for_category(&cfg, "crypto");
         assert_eq!(urls.len(), 2);
         assert_eq!(urls[0], "https://a.com/feed");
@@ -1286,9 +1368,27 @@ mod tests {
     #[test]
     fn sort_feed_items_by_date_orders_by_date_desc() {
         let mut items = vec![
-            FeedItem { title: "a".into(), link: "l1".into(), date: "2020-01-01".into(), source: String::new(), layer: String::new() },
-            FeedItem { title: "b".into(), link: "l2".into(), date: "2022-06-15".into(), source: String::new(), layer: String::new() },
-            FeedItem { title: "c".into(), link: "l3".into(), date: "2021-03-10".into(), source: String::new(), layer: String::new() },
+            FeedItem {
+                title: "a".into(),
+                link: "l1".into(),
+                date: "2020-01-01".into(),
+                source: String::new(),
+                layer: String::new(),
+            },
+            FeedItem {
+                title: "b".into(),
+                link: "l2".into(),
+                date: "2022-06-15".into(),
+                source: String::new(),
+                layer: String::new(),
+            },
+            FeedItem {
+                title: "c".into(),
+                link: "l3".into(),
+                date: "2021-03-10".into(),
+                source: String::new(),
+                layer: String::new(),
+            },
         ];
         sort_feed_items_by_date(&mut items);
         assert_eq!(items[0].date, "2022-06-15");
@@ -1299,9 +1399,27 @@ mod tests {
     #[test]
     fn sort_feed_items_by_date_empty_dates_at_end() {
         let mut items = vec![
-            FeedItem { title: "a".into(), link: "l1".into(), date: "2022-01-01".into(), source: String::new(), layer: String::new() },
-            FeedItem { title: "b".into(), link: "l2".into(), date: "".into(), source: String::new(), layer: String::new() },
-            FeedItem { title: "c".into(), link: "l3".into(), date: "2021-01-01".into(), source: String::new(), layer: String::new() },
+            FeedItem {
+                title: "a".into(),
+                link: "l1".into(),
+                date: "2022-01-01".into(),
+                source: String::new(),
+                layer: String::new(),
+            },
+            FeedItem {
+                title: "b".into(),
+                link: "l2".into(),
+                date: "".into(),
+                source: String::new(),
+                layer: String::new(),
+            },
+            FeedItem {
+                title: "c".into(),
+                link: "l3".into(),
+                date: "2021-01-01".into(),
+                source: String::new(),
+                layer: String::new(),
+            },
         ];
         sort_feed_items_by_date(&mut items);
         assert_eq!(items[0].date, "2022-01-01");
@@ -1311,7 +1429,10 @@ mod tests {
 
     #[test]
     fn all_sources_fail_returns_err() {
-        let mut cfg = make_cfg_with_sources("fail_cat", vec!["https://nonexistent.invalid.example/feed".to_string()]);
+        let mut cfg = make_cfg_with_sources(
+            "fail_cat",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
         let args = serde_json::json!({
             "action": "latest",
             "category": "fail_cat",
@@ -1442,7 +1563,10 @@ mod tests {
             "url": "https://nonexistent.invalid.example/feed.xml",
             "timeout_seconds": 1
         });
-        let r = execute(&mut cfg, serde_json::Value::Object(args.as_object().unwrap().clone()));
+        let r = execute(
+            &mut cfg,
+            serde_json::Value::Object(args.as_object().unwrap().clone()),
+        );
         assert!(r.is_err());
         let err = r.unwrap_err();
         assert!(
@@ -1489,13 +1613,19 @@ mod tests {
     /// Omitted `action` defaults to category `latest`, not direct `fetch`.
     #[test]
     fn omitted_action_uses_latest_category_mode() {
-        let mut cfg = make_cfg_with_sources("omitted_cat", vec!["https://nonexistent.invalid.example/feed".to_string()]);
+        let mut cfg = make_cfg_with_sources(
+            "omitted_cat",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
         let args = serde_json::json!({
             "category": "omitted_cat",
             "limit": 5,
             "timeout_seconds": 1
         });
-        let result = execute(&mut cfg, serde_json::Value::Object(args.as_object().unwrap().clone()));
+        let result = execute(
+            &mut cfg,
+            serde_json::Value::Object(args.as_object().unwrap().clone()),
+        );
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -1506,13 +1636,19 @@ mod tests {
 
     #[test]
     fn news_action_same_error_shape_as_latest_for_failed_sources() {
-        let mut cfg_latest = make_cfg_with_sources("cat", vec!["https://nonexistent.invalid.example/feed".to_string()]);
+        let mut cfg_latest = make_cfg_with_sources(
+            "cat",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
         let latest_args = serde_json::json!({"action": "latest", "category": "cat", "timeout_seconds": 1, "limit": 3});
         let r_latest = execute(
             &mut cfg_latest,
             serde_json::Value::Object(latest_args.as_object().unwrap().clone()),
         );
-        let mut cfg_news = make_cfg_with_sources("cat", vec!["https://nonexistent.invalid.example/feed".to_string()]);
+        let mut cfg_news = make_cfg_with_sources(
+            "cat",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
         let news_args = serde_json::json!({"action": "news", "category": "cat", "timeout_seconds": 1, "limit": 3});
         let r_news = execute(
             &mut cfg_news,
@@ -1554,7 +1690,10 @@ mod tests {
 
     #[test]
     fn deprecated_urls_excluded_from_all_sources() {
-        let mut cfg = make_cfg_with_sources("c", vec!["https://a.com".to_string(), "https://b.com".to_string()]);
+        let mut cfg = make_cfg_with_sources(
+            "c",
+            vec!["https://a.com".to_string(), "https://b.com".to_string()],
+        );
         cfg.rss.deprecated = Some(DeprecatedSection {
             sources: vec![DeprecatedEntry {
                 url: "https://b.com".to_string(),
@@ -1572,11 +1711,22 @@ mod tests {
 
     #[test]
     fn single_failure_does_not_deprecate() {
-        let mut cfg = make_cfg_with_sources("one", vec!["https://nonexistent.invalid.example/feed".to_string()]);
+        let mut cfg = make_cfg_with_sources(
+            "one",
+            vec!["https://nonexistent.invalid.example/feed".to_string()],
+        );
         cfg.rss.deprecate_after_failures = Some(3);
         let args = serde_json::json!({"action": "latest", "category": "one", "limit": 5, "timeout_seconds": 1});
-        let _ = execute(&mut cfg, serde_json::Value::Object(args.as_object().unwrap().clone()));
-        assert!(cfg.rss.deprecated.as_ref().map(|d| d.sources.is_empty()).unwrap_or(true));
+        let _ = execute(
+            &mut cfg,
+            serde_json::Value::Object(args.as_object().unwrap().clone()),
+        );
+        assert!(cfg
+            .rss
+            .deprecated
+            .as_ref()
+            .map(|d| d.sources.is_empty())
+            .unwrap_or(true));
     }
 
     #[test]
@@ -1604,7 +1754,12 @@ mod tests {
         });
         let urls = all_sources_for_category(&cfg, "c");
         assert!(urls.is_empty());
-        let dep_count = cfg.rss.deprecated.as_ref().map(|d| d.sources.len()).unwrap_or(0);
+        let dep_count = cfg
+            .rss
+            .deprecated
+            .as_ref()
+            .map(|d| d.sources.len())
+            .unwrap_or(0);
         assert_eq!(dep_count, 1);
     }
 
@@ -1628,7 +1783,12 @@ mod tests {
             },
         );
         apply_deprecation_and_state(&mut cfg, "c", &state_updates, &[]);
-        let entries = cfg.rss.categories.get("c").and_then(|c| c.source_entries.as_ref()).unwrap();
+        let entries = cfg
+            .rss
+            .categories
+            .get("c")
+            .and_then(|c| c.source_entries.as_ref())
+            .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].failure_count, 0);
     }
@@ -1648,14 +1808,25 @@ mod tests {
                 "limit": 5,
                 "timeout_seconds": 1
             });
-            let _ = execute(&mut cfg, serde_json::Value::Object(args.as_object().unwrap().clone()));
+            let _ = execute(
+                &mut cfg,
+                serde_json::Value::Object(args.as_object().unwrap().clone()),
+            );
         }
         assert!(
-            cfg.rss.deprecated.as_ref().map(|d| d.sources.len()).unwrap_or(0) >= 1,
+            cfg.rss
+                .deprecated
+                .as_ref()
+                .map(|d| d.sources.len())
+                .unwrap_or(0)
+                >= 1,
             "expected url to be in deprecated after 3 consecutive failures"
         );
         let urls = all_sources_for_category(&cfg, "fail3");
-        assert!(urls.is_empty(), "deprecated source should no longer be in active sources");
+        assert!(
+            urls.is_empty(),
+            "deprecated source should no longer be in active sources"
+        );
     }
 
     /// 需要网络：至少一个源可访问时，应返回 ok 且 text 含 sources_ok>=1。
@@ -1677,7 +1848,11 @@ mod tests {
         });
         let args = args.as_object().unwrap().clone();
         let result = execute(&mut cfg, serde_json::Value::Object(args));
-        assert!(result.is_ok(), "expected ok when at least one source succeeds: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "expected ok when at least one source succeeds: {:?}",
+            result
+        );
         let text = result.unwrap();
         assert!(text.contains("sources_ok="));
         assert!(text.contains("items="));

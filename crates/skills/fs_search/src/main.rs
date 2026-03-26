@@ -3,7 +3,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -16,6 +16,7 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -27,16 +28,18 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok(extra) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
-                    text,
+                    text: extra.to_string(),
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: None,
                     error_text: Some(err),
                 },
             },
@@ -44,6 +47,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -53,7 +57,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
+fn execute(args: Value) -> Result<Value, String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -120,6 +124,12 @@ fn execute(args: Value) -> Result<String, String> {
                 }
                 results.len() >= max_results
             })?;
+            Ok(json!({
+                "action": "find_name",
+                "root": to_rel(&root, &search_root),
+                "count": results.len(),
+                "results": results,
+            }))
         }
         "find_ext" => {
             let ext = obj
@@ -139,6 +149,13 @@ fn execute(args: Value) -> Result<String, String> {
                 }
                 results.len() >= max_results
             })?;
+            Ok(json!({
+                "action": "find_ext",
+                "root": to_rel(&root, &search_root),
+                "ext": ext,
+                "count": results.len(),
+                "results": results,
+            }))
         }
         "grep_text" => {
             let query = obj
@@ -153,6 +170,13 @@ fn execute(args: Value) -> Result<String, String> {
                 }
                 results.len() >= max_results
             })?;
+            Ok(json!({
+                "action": "grep_text",
+                "root": to_rel(&root, &search_root),
+                "query": query,
+                "count": results.len(),
+                "results": results,
+            }))
         }
         "find_images" | "images" | "image_search" => {
             let mut files = Vec::new();
@@ -210,17 +234,24 @@ fn execute(args: Value) -> Result<String, String> {
             if dir_items.len() > max_dirs {
                 dir_items.truncate(max_dirs);
             }
-            let mut out = Vec::new();
-            out.push(format!("total_images={}", files.len()));
-            out.push("directories_by_count:".to_string());
-            for (dir, cnt) in dir_items {
-                out.push(format!("{cnt}\t{dir}"));
-            }
-            return Ok(out.join("\n"));
+            let directories_by_count: Vec<Value> = dir_items
+                .into_iter()
+                .map(|(dir, count)| json!({"dir": dir, "count": count}))
+                .collect();
+            return Ok(json!({
+                "action": "find_images",
+                "root": to_rel(&root, &search_root),
+                "count": files.len(),
+                "results": files,
+                "directories_by_count": directories_by_count,
+            }));
         }
-        _ => return Err("unsupported action; use find_name|find_ext|grep_text|find_images".to_string()),
+        _ => {
+            return Err(
+                "unsupported action; use find_name|find_ext|grep_text|find_images".to_string(),
+            )
+        }
     }
-    Ok(results.join("\n"))
 }
 
 fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), String> {

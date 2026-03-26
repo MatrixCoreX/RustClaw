@@ -167,7 +167,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn execute(args: Value, runtime: &RuntimeConfig) -> Result<String, String> {
-    let obj = args.as_object().ok_or_else(|| "args must be object".to_string())?;
+    let obj = args
+        .as_object()
+        .ok_or_else(|| "args must be object".to_string())?;
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
@@ -272,7 +274,11 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
         });
     }
 
-    let candidates = best_alias_candidates(&normalized_input, &alias_map, runtime.stock.max_llm_candidates);
+    let candidates = best_alias_candidates(
+        &normalized_input,
+        &alias_map,
+        runtime.stock.max_llm_candidates,
+    );
     if let Some(best) = choose_direct_candidate(input, &normalized_input, &candidates) {
         return Ok(ResolvedSymbol {
             code: best.code.clone(),
@@ -327,10 +333,7 @@ fn quote_a_share(resolved: &ResolvedSymbol) -> Result<String, String> {
         return Err(format!("行情接口返回 HTTP {}", resp.status()));
     }
 
-    let body = decode_sina_body(
-        &resp.bytes()
-            .map_err(|e| format!("读取响应失败: {e}"))?,
-    );
+    let body = decode_sina_body(&resp.bytes().map_err(|e| format!("读取响应失败: {e}"))?);
 
     parse_sina_hq(&body, &code, resolved.correction_note.as_deref())
 }
@@ -359,7 +362,10 @@ fn parse_sina_hq(body: &str, code: &str, note: Option<&str>) -> Result<String, S
             .ok_or_else(|| "响应格式异常".to_string())?;
     let content = rest[content_start..content_end].trim();
     if content.is_empty() {
-        return Err(format!("未获取到 {code} 的行情，请检查代码是否正确或是否 A 股", code = code));
+        return Err(format!(
+            "未获取到 {code} 的行情，请检查代码是否正确或是否 A 股",
+            code = code
+        ));
     }
 
     let parts: Vec<&str> = content.split(',').map(str::trim).collect();
@@ -538,7 +544,13 @@ fn resolve_llm_vendor(runtime: &RuntimeConfig) -> Option<(&VendorConfig, String,
         .llm_vendor
         .as_deref()
         .and_then(parse_vendor_kind)
-        .or_else(|| runtime.llm.selected_vendor.as_deref().and_then(parse_vendor_kind));
+        .or_else(|| {
+            runtime
+                .llm
+                .selected_vendor
+                .as_deref()
+                .and_then(parse_vendor_kind)
+        });
     let mut order = Vec::new();
     if let Some(v) = requested {
         order.push(v);
@@ -568,7 +580,10 @@ fn resolve_llm_vendor(runtime: &RuntimeConfig) -> Option<(&VendorConfig, String,
         let Some(cfg) = cfg else {
             continue;
         };
-        if cfg.api_key.trim().is_empty() || cfg.base_url.trim().is_empty() || cfg.model.trim().is_empty() {
+        if cfg.api_key.trim().is_empty()
+            || cfg.base_url.trim().is_empty()
+            || cfg.model.trim().is_empty()
+        {
             continue;
         }
         let model = runtime
@@ -716,9 +731,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i + 1;
         for (j, b_ch) in b_chars.iter().enumerate() {
             let cost = if a_ch == b_ch { 0 } else { 1 };
-            curr[j + 1] = (prev[j + 1] + 1)
-                .min(curr[j] + 1)
-                .min(prev[j] + cost);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
         }
         prev.clone_from(&curr);
     }

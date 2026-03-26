@@ -107,8 +107,7 @@ impl WeixinConfigManager {
                 let now = Instant::now();
                 match entry {
                     Some(e) => {
-                        let next_delay =
-                            (e.retry_delay_ms * 2).min(CONFIG_CACHE_MAX_RETRY_MS);
+                        let next_delay = (e.retry_delay_ms * 2).min(CONFIG_CACHE_MAX_RETRY_MS);
                         e.retry_delay_ms = next_delay;
                         e.next_fetch_at = now + Duration::from_millis(next_delay);
                     }

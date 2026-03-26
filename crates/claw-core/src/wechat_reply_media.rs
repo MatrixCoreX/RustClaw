@@ -194,7 +194,8 @@ pub fn strip_wechat_delivery_lines(answer: &str) -> String {
             {
                 return false;
             }
-            if t.starts_with("视频已保存：") || t.starts_with("视频生成成功并已保存：") {
+            if t.starts_with("视频已保存：") || t.starts_with("视频生成成功并已保存：")
+            {
                 return false;
             }
             if t.starts_with("Saved path:")
@@ -275,10 +276,7 @@ fn media_dedupe_key(media: &WechatOutboundMedia) -> String {
 }
 
 fn normalize_local_token(token: &str) -> String {
-    token
-        .strip_prefix("file://")
-        .unwrap_or(token)
-        .to_string()
+    token.strip_prefix("file://").unwrap_or(token).to_string()
 }
 
 fn resolve_workspace_path(workspace_root: &Path, token: String) -> Option<PathBuf> {

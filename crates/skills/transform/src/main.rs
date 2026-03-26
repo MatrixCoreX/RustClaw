@@ -35,7 +35,8 @@ fn main() -> Result<()> {
 
     for line in stdin.lock().lines() {
         let line = line?;
-        let req: Value = serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
+        let req: Value =
+            serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
         let request_id = req
             .get("request_id")
             .and_then(Value::as_str)
@@ -134,8 +135,10 @@ fn handle_transform(req: &Value) -> Result<Value> {
         if ctx.strict {
             return Err(anyhow!("unsupported output_format: {}", output_format));
         }
-        ctx.warnings
-            .push(format!("unsupported output_format `{}`; fallback to json", output_format));
+        ctx.warnings.push(format!(
+            "unsupported output_format `{}`; fallback to json",
+            output_format
+        ));
     }
 
     Ok(json!({
@@ -353,7 +356,10 @@ fn op_group(data: &mut Vec<Value>, op: &Value, ctx: &mut Ctx) -> Result<()> {
     let mut groups: HashMap<String, Vec<Value>> = HashMap::new();
     let mut key_values: HashMap<String, Vec<Value>> = HashMap::new();
     for item in data.iter() {
-        let key_parts = by.iter().map(|p| get_path(item, p).clone()).collect::<Vec<_>>();
+        let key_parts = by
+            .iter()
+            .map(|p| get_path(item, p).clone())
+            .collect::<Vec<_>>();
         let key = serde_json::to_string(&key_parts).unwrap_or_default();
         groups.entry(key.clone()).or_default().push(item.clone());
         key_values.entry(key).or_insert(key_parts);
@@ -565,7 +571,8 @@ fn cmp_values(a: &Value, b: &Value, nulls_last: bool) -> Ordering {
                 Ordering::Greater
             }
         }
-        _ => order_values(a, b, NullPolicy::Keep).unwrap_or_else(|_| coerce_string(a).cmp(&coerce_string(b))),
+        _ => order_values(a, b, NullPolicy::Keep)
+            .unwrap_or_else(|_| coerce_string(a).cmp(&coerce_string(b))),
     }
 }
 

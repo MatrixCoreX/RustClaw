@@ -313,16 +313,7 @@ fn default_chat_max_tokens(style: &str, text: &str) -> u64 {
     }
     let char_count = text.chars().count();
     let report_like = [
-        "总结",
-        "分析",
-        "报告",
-        "方案",
-        "计划",
-        "research",
-        "summary",
-        "analysis",
-        "report",
-        "plan",
+        "总结", "分析", "报告", "方案", "计划", "research", "summary", "analysis", "report", "plan",
     ]
     .iter()
     .any(|kw| text.contains(kw) || text.to_ascii_lowercase().contains(kw));

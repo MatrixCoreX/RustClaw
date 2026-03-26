@@ -31,7 +31,7 @@
 - `kind = "runner"`
 - `aliases`
 - `timeout_seconds`
-- `prompt_file = "prompts/skills/<skill_name>.md"` (registry logical path; runtime loads from `prompts/vendors/<vendor>/skills/` or `prompts/vendors/default/skills/` only, not from `prompts/skills/`)
+- `prompt_file = "prompts/skills/<skill_name>.md"` (registry logical path; runtime first loads `prompts/vendors/<active_vendor>/skills/<skill_name>.md`, and falls back to `prompts/vendors/default/skills/<skill_name>.md`; `prompts/skills/` is not a runtime prompt directory)
 - `output_kind`
 - 仅当二进制名不符合默认约定时，再额外配置 `runner_name`
 

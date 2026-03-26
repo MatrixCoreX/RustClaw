@@ -83,7 +83,8 @@ fn main() -> Result<()> {
 
     for line in stdin.lock().lines() {
         let line = line?;
-        let req: Value = serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
+        let req: Value =
+            serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
         let request_id = req
             .get("request_id")
             .and_then(Value::as_str)
@@ -100,11 +101,15 @@ fn main() -> Result<()> {
         let text_payload = match action.as_str() {
             "ingest" => match do_ingest(args) {
                 Ok(v) => v,
-                Err(e) => json!({"status":"error","error_code":"INGEST_FAILED","error":e.to_string()}),
+                Err(e) => {
+                    json!({"status":"error","error_code":"INGEST_FAILED","error":e.to_string()})
+                }
             },
             "search" => match do_search(args) {
                 Ok(v) => v,
-                Err(e) => json!({"status":"error","error_code":"SEARCH_FAILED","error":e.to_string(),"hits":[]}),
+                Err(e) => {
+                    json!({"status":"error","error_code":"SEARCH_FAILED","error":e.to_string(),"hits":[]})
+                }
             },
             _ => json!({
                 "status":"error",
@@ -151,7 +156,8 @@ fn do_ingest(args: &Value) -> Result<Value> {
     let mut removed_docs = 0usize;
 
     for file in all_files {
-        let meta = fs::metadata(&file).with_context(|| format!("stat failed: {}", file.display()))?;
+        let meta =
+            fs::metadata(&file).with_context(|| format!("stat failed: {}", file.display()))?;
         if !meta.is_file() {
             continue;
         }
@@ -252,11 +258,15 @@ fn do_search(args: &Value) -> Result<Value> {
     let index = load_namespace(&s.namespace)
         .map_err(|_| anyhow!("namespace not found or unreadable: {}", s.namespace))?;
     if s.query.trim().is_empty() {
-        return Ok(json!({"status":"error","error_code":"INVALID_INPUT","error":"query is required","hits":[]}));
+        return Ok(
+            json!({"status":"error","error_code":"INVALID_INPUT","error":"query is required","hits":[]}),
+        );
     }
     let q_terms = tokenize(&s.query);
     if q_terms.is_empty() {
-        return Ok(json!({"status":"ok","hits":[],"summary":"no effective query terms","stats":{"total_candidates":0}}));
+        return Ok(
+            json!({"status":"ok","hits":[],"summary":"no effective query terms","stats":{"total_candidates":0}}),
+        );
     }
 
     let filtered_chunks = index
@@ -266,7 +276,9 @@ fn do_search(args: &Value) -> Result<Value> {
         .collect::<Vec<_>>();
     let n_docs = filtered_chunks.len() as f64;
     if n_docs <= 0.0 {
-        return Ok(json!({"status":"ok","hits":[],"summary":"no matching chunks under filters","stats":{"total_candidates":0}}));
+        return Ok(
+            json!({"status":"ok","hits":[],"summary":"no matching chunks under filters","stats":{"total_candidates":0}}),
+        );
     }
 
     let avgdl = filtered_chunks
@@ -326,7 +338,11 @@ fn do_search(args: &Value) -> Result<Value> {
         });
     }
 
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     if hits.len() > s.top_k {
         hits.truncate(s.top_k);
     }
@@ -367,7 +383,10 @@ fn parse_ingest_args(args: &Value) -> Result<IngestArgs> {
         .map(|n| n as usize)
         .unwrap_or(DEFAULT_CHUNK_SIZE)
         .clamp(200, 8000);
-    let overwrite = args.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
+    let overwrite = args
+        .get("overwrite")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let file_types = args
         .get("file_types")
         .and_then(Value::as_array)
@@ -428,10 +447,7 @@ fn parse_search_args(args: &Value) -> Result<SearchArgs> {
         .and_then(|f| f.get("time_to"))
         .or_else(|| args.get("time_to"))
         .and_then(parse_epoch_value);
-    let min_score = args
-        .get("min_score")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
+    let min_score = args.get("min_score").and_then(Value::as_f64).unwrap_or(0.0);
     Ok(SearchArgs {
         namespace,
         query,
@@ -534,7 +550,8 @@ fn split_chunks(text: &str, chunk_size: usize) -> Vec<String> {
 
 fn read_text_lossy(path: &Path) -> Result<String> {
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let text = String::from_utf8(bytes.clone()).unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
+    let text = String::from_utf8(bytes.clone())
+        .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
     Ok(text)
 }
 
@@ -599,7 +616,13 @@ fn ns_file(namespace: &str) -> PathBuf {
 
 fn sanitize_ns(ns: &str) -> String {
     ns.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -620,8 +643,10 @@ impl DefaultWithNs for Result<NamespaceIndex> {
 
 fn load_namespace(namespace: &str) -> Result<NamespaceIndex> {
     let p = ns_file(namespace);
-    let raw = fs::read_to_string(&p).with_context(|| format!("read index failed: {}", p.display()))?;
-    let mut idx: NamespaceIndex = serde_json::from_str(&raw).with_context(|| "index json parse failed")?;
+    let raw =
+        fs::read_to_string(&p).with_context(|| format!("read index failed: {}", p.display()))?;
+    let mut idx: NamespaceIndex =
+        serde_json::from_str(&raw).with_context(|| "index json parse failed")?;
     if idx.namespace.is_empty() {
         idx.namespace = namespace.to_string();
     }

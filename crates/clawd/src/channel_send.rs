@@ -351,7 +351,12 @@ pub(crate) async fn send_wechat_text_message(
         if let Some(uin) = config.wechat_uin_base64.as_deref() {
             req = req.header("X-WECHAT-UIN", uin);
         }
-        if let Some(tag) = config.sk_route_tag.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(tag) = config
+            .sk_route_tag
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             req = req.header("SKRouteTag", tag);
         }
         let resp = req

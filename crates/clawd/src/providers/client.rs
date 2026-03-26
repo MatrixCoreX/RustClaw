@@ -464,17 +464,13 @@ async fn call_anthropic_claude(
         AnthropicAuthMode::AuthorizationBearer => request.bearer_auth(&provider.config.api_key),
     };
 
-    let resp = request
-        .json(&req_body)
-        .send()
-        .await
-        .map_err(|err| {
-            if err.is_timeout() {
-                ProviderError::retryable(format!("timeout: {err}"), req_body.clone())
-            } else {
-                ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
-            }
-        })?;
+    let resp = request.json(&req_body).send().await.map_err(|err| {
+        if err.is_timeout() {
+            ProviderError::retryable(format!("timeout: {err}"), req_body.clone())
+        } else {
+            ProviderError::retryable(format!("request failed: {err}"), req_body.clone())
+        }
+    })?;
 
     let status = resp.status();
     let body_text = resp.text().await.map_err(|err| {

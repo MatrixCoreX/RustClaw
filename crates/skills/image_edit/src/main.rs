@@ -68,6 +68,7 @@ struct LlmConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
     base_url: String,
+    #[serde(default)]
     api_key: String,
     model: String,
     #[serde(default)]
@@ -165,7 +166,12 @@ impl TextCatalog {
         if let Some(external) = load_external_i18n(&default_path) {
             current.extend(external);
         }
-        if let Some(custom) = cfg.i18n_path.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        if let Some(custom) = cfg
+            .i18n_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             let custom_path = if Path::new(custom).is_absolute() {
                 PathBuf::from(custom)
             } else {
@@ -336,14 +342,21 @@ fn load_image_reference_resolver_prompt(workspace_root: &Path) -> String {
     if let Ok(s) = fs::read_to_string(&primary) {
         return s;
     }
-    let fallback = workspace_root.join("prompts/vendors/default/image_reference_resolver_prompt.md");
+    let fallback =
+        workspace_root.join("prompts/vendors/default/image_reference_resolver_prompt.md");
     if let Ok(s) = fs::read_to_string(&fallback) {
         return s;
     }
-    include_str!("../../../../prompts/vendors/default/image_reference_resolver_prompt.md").to_string()
+    include_str!("../../../../prompts/vendors/default/image_reference_resolver_prompt.md")
+        .to_string()
 }
 
-fn render_image_reference_prompt(template: &str, memory: &str, goal: &str, candidates: &[String]) -> String {
+fn render_image_reference_prompt(
+    template: &str,
+    memory: &str,
+    goal: &str,
+    candidates: &[String],
+) -> String {
     let lines = candidates
         .iter()
         .enumerate()
@@ -403,8 +416,7 @@ fn openai_compat_chat_completion(
     let v: Value = resp
         .json()
         .map_err(|e| format!("parse chat response: {e}"))?;
-    Ok(v
-        .get("choices")
+    Ok(v.get("choices")
         .and_then(|c| c.as_array())
         .and_then(|a| a.first())
         .and_then(|c| c.get("message"))
@@ -513,7 +525,10 @@ fn execute(
         .unwrap_or("edit")
         .trim()
         .to_ascii_lowercase();
-    if !matches!(action.as_str(), "edit" | "outpaint" | "restyle" | "add_remove") {
+    if !matches!(
+        action.as_str(),
+        "edit" | "outpaint" | "restyle" | "add_remove"
+    ) {
         return Err("unsupported action; use edit|outpaint|restyle|add_remove".to_string());
     }
     let instruction = obj
@@ -525,7 +540,8 @@ fn execute(
         .to_string();
 
     if !image_edit_args_has_image(&obj) {
-        let path = resolve_image_path_from_context(cfg, workspace_root, &instruction, &obj, context)?;
+        let path =
+            resolve_image_path_from_context(cfg, workspace_root, &instruction, &obj, context)?;
         obj.insert("image".to_string(), json!({ "path": path }));
     } else if obj.get("image").is_none() {
         if let Some(p) = first_image_path_from_images_array(&obj) {
@@ -562,7 +578,10 @@ fn execute(
 
     let output_path = resolve_output_path(
         workspace_root,
-        cfg.image_edit.default_output_dir.as_deref().unwrap_or("image"),
+        cfg.image_edit
+            .default_output_dir
+            .as_deref()
+            .unwrap_or("image"),
         obj.get("output_path").and_then(|v| v.as_str()),
     )?;
     let output_lang = resolve_output_language(cfg, &obj);
@@ -574,7 +593,11 @@ fn execute(
         .and_then(|v| v.as_str())
         .unwrap_or("1024x1024");
     let quality = obj.get("quality").and_then(|v| v.as_str());
-    let n = obj.get("n").and_then(|v| v.as_u64()).unwrap_or(1).clamp(1, 2);
+    let n = obj
+        .get("n")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1)
+        .clamp(1, 2);
 
     let mut provider_errors: Vec<String> = Vec::new();
     for vendor in providers {
@@ -635,11 +658,12 @@ fn first_model_candidate<'a>(
     if let Some(v) = default_model.map(str::trim).filter(|v| !v.is_empty()) {
         return Some(v);
     }
-    if let Some(v) = vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty())) {
+    if let Some(v) =
+        vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+    {
         return Some(v);
     }
-    models
-        .and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+    models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
 }
 
 fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'a Vec<String>> {
@@ -748,7 +772,9 @@ fn call_edit(
         VendorKind::OpenAI => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build openai client failed: {err}"))?;
             openai_compatible_edit(
@@ -770,7 +796,9 @@ fn call_edit(
         VendorKind::Google => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build google client failed: {err}"))?;
             google_edit(
@@ -800,7 +828,9 @@ fn call_edit(
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build anthropic client failed: {err}"))?;
             openai_compatible_edit(
@@ -821,7 +851,9 @@ fn call_edit(
         }
         VendorKind::Grok | VendorKind::DeepSeek | VendorKind::MiniMax => {
             if mode == AdapterMode::Native {
-                return Err(format!("{vendor_name} native image edit adapter is not available"));
+                return Err(format!(
+                    "{vendor_name} native image edit adapter is not available"
+                ));
             }
             if !cfg.image_edit.allow_compat_adapters && mode != AdapterMode::Compat {
                 return Err(
@@ -832,7 +864,9 @@ fn call_edit(
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
             openai_compatible_edit(
@@ -854,7 +888,9 @@ fn call_edit(
         VendorKind::Qwen => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build qwen client failed: {err}"))?;
             let can_use_native_inputs =
@@ -930,9 +966,9 @@ fn qwen_uses_native_edit_api(cfg: &ImageSkillConfig, model: &str) -> bool {
     cfg.native_models
         .as_ref()
         .and_then(|list| {
-            list.iter()
-                .map(|s| s.trim())
-                .find(|candidate| !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested))
+            list.iter().map(|s| s.trim()).find(|candidate| {
+                !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested)
+            })
         })
         .is_some()
 }
@@ -954,7 +990,8 @@ fn qwen_native_edit_inputs_supported(
 
 fn qwen_native_edit_source_supported(cfg: &ImageSkillConfig, source: &ImageSource) -> bool {
     matches!(source, ImageSource::Url(_))
-        || (cfg.local_auto_upload_enabled && matches!(source, ImageSource::Path(_) | ImageSource::Base64(_)))
+        || (cfg.local_auto_upload_enabled
+            && matches!(source, ImageSource::Path(_) | ImageSource::Base64(_)))
 }
 
 fn should_use_qwen_native_edit(
@@ -1017,8 +1054,14 @@ fn qwen_native_edit(
         "{}/services/aigc/image2image/image-synthesis",
         trim_trailing_slash(base)
     );
-    let base_image_url =
-        resolve_qwen_native_image_url(client, image_cfg, image, max_input_bytes, "image.png", "image")?;
+    let base_image_url = resolve_qwen_native_image_url(
+        client,
+        image_cfg,
+        image,
+        max_input_bytes,
+        "image.png",
+        "image",
+    )?;
     let normalized_size = size.trim().replace('x', "*").replace('X', "*");
     let function = native_function
         .map(str::trim)
@@ -1128,7 +1171,8 @@ fn qwen_native_edit(
                 .bytes()
                 .map_err(|err| format!("read edited image bytes failed: {err}"))?;
             ensure_parent_dir(output_path)?;
-            std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+            std::fs::write(output_path, &bytes)
+                .map_err(|err| format!("write output failed: {err}"))?;
             return Ok(());
         }
         if status == "FAILED" || status == "CANCELED" || status == "CANCELLED" {
@@ -1261,7 +1305,8 @@ fn qwen_wan26_edit(
                 .bytes()
                 .map_err(|err| format!("read edited image bytes failed: {err}"))?;
             ensure_parent_dir(output_path)?;
-            std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+            std::fs::write(output_path, &bytes)
+                .map_err(|err| format!("write output failed: {err}"))?;
             return Ok(());
         }
         if status == "FAILED" || status == "CANCELED" || status == "CANCELLED" {
@@ -1420,7 +1465,10 @@ fn google_edit(
         .json()
         .map_err(|err| format!("parse google response failed: {err}"))?;
     if status >= 300 {
-        return Err(format!("google error status={status}: {}", truncate(&v.to_string(), 400)));
+        return Err(format!(
+            "google error status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
     }
     if let Some(parts) = v
         .get("candidates")
@@ -1594,7 +1642,12 @@ fn upload_image_to_oss_and_sign_url(
         load_image_for_oss_upload(source, max_input_bytes, fallback_name)?;
     let ts = unix_ts();
     let object_key = format!("{}/{}-{}", prefix.trim_matches('/'), ts, file_name);
-    let put_url = format!("https://{}.{}{}", bucket, endpoint, object_path(&object_key));
+    let put_url = format!(
+        "https://{}.{}{}",
+        bucket,
+        endpoint,
+        object_path(&object_key)
+    );
     let date = httpdate::fmt_http_date(SystemTime::now());
     let canonical_resource = format!("/{}/{}", bucket, object_key);
     let string_to_sign = format!("PUT\n\n{}\n{}\n{}", content_type, date, canonical_resource);
@@ -1717,7 +1770,9 @@ fn rewrite_instruction(action: &str, instruction: &str) -> String {
     match action {
         "outpaint" => format!("Outpaint this image. Extend canvas naturally. {instruction}"),
         "restyle" => format!("Keep composition, restyle visual style only. {instruction}"),
-        "add_remove" => format!("Add/remove elements as requested while preserving realism. {instruction}"),
+        "add_remove" => {
+            format!("Add/remove elements as requested while preserving realism. {instruction}")
+        }
         _ => instruction.to_string(),
     }
 }
@@ -1782,7 +1837,74 @@ fn load_root_config() -> RootConfig {
             cfg.command_intent = parsed;
         }
     }
+    apply_env_overrides(&mut cfg);
     cfg
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
+    if let (Some(value), Some(cfg)) = (env_non_empty(key), target.as_mut()) {
+        cfg.api_key = value;
+    }
+}
+
+fn apply_option_string_env(target: &mut Option<String>, key: &str) {
+    if let Some(value) = env_non_empty(key) {
+        *target = Some(value);
+    }
+}
+
+fn apply_env_overrides(cfg: &mut RootConfig) {
+    apply_vendor_api_key_env(&mut cfg.llm.openai, "OPENAI_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.google, "GOOGLE_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.anthropic, "ANTHROPIC_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.grok, "GROK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.deepseek, "DEEPSEEK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.qwen, "QWEN_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.minimax, "MINIMAX_API_KEY");
+
+    apply_vendor_api_key_env(
+        &mut cfg.image_edit.providers.openai,
+        "IMAGE_EDIT_OPENAI_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_edit.providers.google,
+        "IMAGE_EDIT_GOOGLE_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_edit.providers.anthropic,
+        "IMAGE_EDIT_ANTHROPIC_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_edit.providers.grok,
+        "IMAGE_EDIT_GROK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_edit.providers.deepseek,
+        "IMAGE_EDIT_DEEPSEEK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_edit.providers.qwen,
+        "IMAGE_EDIT_QWEN_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_edit.providers.minimax,
+        "IMAGE_EDIT_MINIMAX_API_KEY",
+    );
+    apply_option_string_env(
+        &mut cfg.image_edit.oss_access_key_id,
+        "IMAGE_EDIT_OSS_ACCESS_KEY_ID",
+    );
+    apply_option_string_env(
+        &mut cfg.image_edit.oss_access_key_secret,
+        "IMAGE_EDIT_OSS_ACCESS_KEY_SECRET",
+    );
 }
 
 fn workspace_root() -> PathBuf {
@@ -2020,8 +2142,8 @@ fn unix_ts() -> u64 {
 
 fn hmac_sha1_base64(secret: &str, message: &str) -> Result<String, String> {
     type HmacSha1 = Hmac<Sha1>;
-    let mut mac =
-        HmacSha1::new_from_slice(secret.as_bytes()).map_err(|err| format!("invalid HMAC key: {err}"))?;
+    let mut mac = HmacSha1::new_from_slice(secret.as_bytes())
+        .map_err(|err| format!("invalid HMAC key: {err}"))?;
     mac.update(message.as_bytes());
     Ok(STANDARD.encode(mac.finalize().into_bytes()))
 }
@@ -2085,7 +2207,9 @@ mod tests {
             &cfg,
             "wanx2.1-imageedit",
             &ImageSource::Path(PathBuf::from("/tmp/demo.png")),
-            Some(&ImageSource::Base64("data:image/png;base64,abc".to_string()))
+            Some(&ImageSource::Base64(
+                "data:image/png;base64,abc".to_string()
+            ))
         ));
     }
 
@@ -2125,6 +2249,9 @@ mod tests {
                 }]
             }
         });
-        assert_eq!(extract_qwen_output_image_url(&v), Some("https://example.com/demo.png"));
+        assert_eq!(
+            extract_qwen_output_image_url(&v),
+            Some("https://example.com/demo.png")
+        );
     }
 }
