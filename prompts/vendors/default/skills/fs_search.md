@@ -51,4 +51,3 @@ Response:
 - Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
 - On uncertainty, prefer safe/readonly behavior first.
-- When the user only remembers part of a directory name, you may use `find_name` with `target_kind="dir"`; for direct path resolution, `system_basic.find_path` is usually a better first choice.

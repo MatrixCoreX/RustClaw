@@ -58,6 +58,7 @@ struct LlmConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
     base_url: String,
+    #[serde(default)]
     api_key: String,
     model: String,
     #[serde(default)]
@@ -622,8 +623,7 @@ fn openai_compat_chat_rewrite(
     let v: Value = resp
         .json()
         .map_err(|e| format!("parse chat response: {e}"))?;
-    Ok(v
-        .get("choices")
+    Ok(v.get("choices")
         .and_then(|c| c.as_array())
         .and_then(|a| a.first())
         .and_then(|c| c.get("message"))
@@ -646,10 +646,7 @@ fn maybe_rewrite_image_vision_text_for_target_language(
     let Some(lang) = target_language.map(str::trim).filter(|s| !s.is_empty()) else {
         return vision_output;
     };
-    if !matches!(
-        action,
-        "describe" | "compare" | "screenshot_summary"
-    ) {
+    if !matches!(action, "describe" | "compare" | "screenshot_summary") {
         return vision_output;
     }
     if vision_output.trim().is_empty() {
@@ -1185,7 +1182,60 @@ fn load_root_config() -> RootConfig {
             cfg.image_vision = parsed;
         }
     }
+    apply_env_overrides(&mut cfg);
     cfg
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
+    if let (Some(value), Some(cfg)) = (env_non_empty(key), target.as_mut()) {
+        cfg.api_key = value;
+    }
+}
+
+fn apply_env_overrides(cfg: &mut RootConfig) {
+    apply_vendor_api_key_env(&mut cfg.llm.openai, "OPENAI_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.google, "GOOGLE_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.anthropic, "ANTHROPIC_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.grok, "GROK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.deepseek, "DEEPSEEK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.qwen, "QWEN_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.minimax, "MINIMAX_API_KEY");
+
+    apply_vendor_api_key_env(
+        &mut cfg.image_vision.providers.openai,
+        "IMAGE_VISION_OPENAI_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_vision.providers.google,
+        "IMAGE_VISION_GOOGLE_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_vision.providers.anthropic,
+        "IMAGE_VISION_ANTHROPIC_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_vision.providers.grok,
+        "IMAGE_VISION_GROK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_vision.providers.deepseek,
+        "IMAGE_VISION_DEEPSEEK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_vision.providers.qwen,
+        "IMAGE_VISION_QWEN_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_vision.providers.minimax,
+        "IMAGE_VISION_MINIMAX_API_KEY",
+    );
 }
 
 fn workspace_root() -> PathBuf {

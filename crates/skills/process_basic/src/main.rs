@@ -1,11 +1,11 @@
+use std::fs::{create_dir_all, OpenOptions};
 use std::io::{self, BufRead, Write};
-use std::fs::{OpenOptions, create_dir_all};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -18,6 +18,7 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -30,16 +31,18 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: None,
                     error_text: Some(err),
                 },
             },
@@ -47,6 +50,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -57,7 +61,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
+fn execute(args: Value) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -76,25 +80,31 @@ fn execute(args: Value) -> Result<String, String> {
                 .min(200);
             run_command(
                 "ps",
-                &[
-                    "-eo",
-                    "pid,ppid,%cpu,%mem,comm",
-                    "--sort=-%cpu",
-                ],
+                &["-eo", "pid,ppid,%cpu,%mem,comm", "--sort=-%cpu"],
                 Some(limit as usize + 1),
             )
+            .map(|text| {
+                (
+                    text.clone(),
+                    json!({"action":"ps","exit_code":0,"limit":limit,"output":text}),
+                )
+            })
         }
-        "port_list" => run_command("ss", &["-ltnp"], None).or_else(|_| run_command("netstat", &["-ltnp"], None)),
+        "port_list" => run_command("ss", &["-ltnp"], None)
+            .or_else(|_| run_command("netstat", &["-ltnp"], None))
+            .map(|text| (text.clone(), json!({"action":"port_list","exit_code":0,"output":text}))),
         "kill" => {
             let pid = obj
                 .get("pid")
                 .and_then(|v| v.as_i64())
                 .ok_or_else(|| "pid is required".to_string())?;
-            let signal = obj
-                .get("signal")
-                .and_then(|v| v.as_str())
-                .unwrap_or("TERM");
-            run_command("kill", &["-s", signal, &pid.to_string()], None)
+            let signal = obj.get("signal").and_then(|v| v.as_str()).unwrap_or("TERM");
+            run_command("kill", &["-s", signal, &pid.to_string()], None).map(|text| {
+                (
+                    text.clone(),
+                    json!({"action":"kill","exit_code":0,"pid":pid,"signal":signal,"output":text}),
+                )
+            })
         }
         "tail_log" => {
             let path = obj
@@ -108,7 +118,12 @@ fn execute(args: Value) -> Result<String, String> {
                 .min(1000) as usize;
             let root = workspace_root();
             let full = resolve_path(&root, path)?;
-            tail_file(&full, n)
+            tail_file(&full, n).map(|text| {
+                (
+                    text.clone(),
+                    json!({"action":"tail_log","path":path,"n":n,"output":text}),
+                )
+            })
         }
         _ => Err("unsupported action; use ps|port_list|kill|tail_log".to_string()),
     };
@@ -123,14 +138,7 @@ fn run_command(bin: &str, args: &[&str], limit_lines: Option<usize>) -> Result<S
         .output()
         .map_err(|err| format!("run {bin} failed: {err}"))?;
 
-    let mut text = String::new();
-    text.push_str(&String::from_utf8_lossy(&output.stdout));
-    if !output.stderr.is_empty() {
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        text.push_str(&String::from_utf8_lossy(&output.stderr));
-    }
+    let mut text = format_command_output(&output.stdout, &output.stderr);
 
     if let Some(limit) = limit_lines {
         let mut lines: Vec<&str> = text.lines().collect();
@@ -141,11 +149,29 @@ fn run_command(bin: &str, args: &[&str], limit_lines: Option<usize>) -> Result<S
         }
     }
 
-    Ok(format!("exit={}\n{}", output.status.code().unwrap_or(-1), text))
+    let exit_code = output.status.code().unwrap_or(-1);
+    if output.status.success() {
+        Ok(format!("exit={exit_code}\n{text}"))
+    } else {
+        Err(format!("process command failed: exit={exit_code}\n{text}"))
+    }
+}
+
+fn format_command_output(stdout: &[u8], stderr: &[u8]) -> String {
+    let mut text = String::new();
+    text.push_str(&String::from_utf8_lossy(stdout));
+    if !stderr.is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&String::from_utf8_lossy(stderr));
+    }
+    text
 }
 
 fn tail_file(path: &Path, n: usize) -> Result<String, String> {
-    let content = std::fs::read_to_string(path).map_err(|err| format!("read file failed: {err}"))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|err| format!("read file failed: {err}"))?;
     let lines: Vec<&str> = content.lines().collect();
     let start = lines.len().saturating_sub(n);
     Ok(lines[start..].join("\n"))
@@ -176,7 +202,7 @@ fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
 fn append_service_log(
     action: &str,
     args: &serde_json::Map<String, Value>,
-    result: &Result<String, String>,
+    result: &Result<(String, Value), String>,
 ) {
     let root = workspace_root();
     let log_dir = root.join("logs");
@@ -185,7 +211,11 @@ fn append_service_log(
         return;
     }
     let file_path = log_dir.join("service_ops.log");
-    let mut file = match OpenOptions::new().create(true).append(true).open(&file_path) {
+    let mut file = match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+    {
         Ok(f) => f,
         Err(err) => {
             eprintln!("open service log failed: {err}");
@@ -194,7 +224,7 @@ fn append_service_log(
     };
 
     let (status, output, error) = match result {
-        Ok(text) => ("ok", Some(truncate_for_log(text)), None),
+        Ok((text, _extra)) => ("ok", Some(truncate_for_log(text)), None),
         Err(err) => ("failed", None, Some(truncate_for_log(err))),
     };
 

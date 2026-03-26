@@ -37,11 +37,7 @@ fn sqlite_path_from_config() -> Option<std::path::PathBuf> {
     let config_path = root.join(CONFIG_REL);
     let raw = std::fs::read_to_string(&config_path).ok()?;
     let value: toml::Value = toml::from_str(&raw).ok()?;
-    let path_str = value
-        .get("database")?
-        .get("sqlite_path")?
-        .as_str()?
-        .trim();
+    let path_str = value.get("database")?.get("sqlite_path")?.as_str()?.trim();
     if path_str.is_empty() {
         return Some(root.join(DEFAULT_SQLITE_PATH));
     }
@@ -55,9 +51,8 @@ fn sqlite_path_from_config() -> Option<std::path::PathBuf> {
 
 /// 从数据库读取一个已启用的 admin key；无则返回 None。
 fn admin_key_from_db() -> Option<String> {
-    let db_path = sqlite_path_from_config().or_else(|| {
-        find_workspace_root().map(|root| root.join(DEFAULT_SQLITE_PATH))
-    })?;
+    let db_path = sqlite_path_from_config()
+        .or_else(|| find_workspace_root().map(|root| root.join(DEFAULT_SQLITE_PATH)))?;
     let db = rusqlite::Connection::open(&db_path).ok()?;
     let mut stmt = db
         .prepare("SELECT user_key FROM auth_keys WHERE role = 'admin' AND enabled = 1 LIMIT 1")
@@ -123,9 +118,7 @@ enum Command {
     },
 
     /// GET /v1/tasks/:task_id
-    Get {
-        task_id: String,
-    },
+    Get { task_id: String },
 
     /// POST /v1/tasks/active — 列出活跃任务
     Active {
@@ -171,7 +164,10 @@ fn run_health(base_url: &str, key: Option<&str>) -> Result<()> {
     let resp = req.send().context("request failed")?;
     let status = resp.status();
     let body: serde_json::Value = resp.json().context("parse health response")?;
-    println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&body).unwrap_or_default()
+    );
     if !status.is_success() {
         anyhow::bail!("health returned {}", status);
     }
@@ -215,7 +211,11 @@ fn run_submit(base_url: &str, key: &str, text: &str) -> Result<()> {
 
 /// 拉取任务详情，返回 (status, result_text, error_text)。
 /// result_text：优先用 result_json.messages（多条拼成一段，不丢），无则用 result_json.text。
-fn get_task_status(base_url: &str, key: &str, task_id: &str) -> Result<(String, Option<String>, Option<String>)> {
+fn get_task_status(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+) -> Result<(String, Option<String>, Option<String>)> {
     let url = format!("{}/tasks/{}", base_v1(base_url), task_id);
     let resp = make_client()?
         .get(&url)
@@ -227,8 +227,14 @@ fn get_task_status(base_url: &str, key: &str, task_id: &str) -> Result<(String, 
     if !status_code.is_success() {
         anyhow::bail!("get task returned {}: {:?}", status_code, body.get("error"));
     }
-    let data = body.get("data").ok_or_else(|| anyhow::anyhow!("response missing data"))?;
-    let status = data.get("status").and_then(|s| s.as_str()).unwrap_or("").to_string();
+    let data = body
+        .get("data")
+        .ok_or_else(|| anyhow::anyhow!("response missing data"))?;
+    let status = data
+        .get("status")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
     let result_json = data.get("result_json");
     let result_text = result_json
         .and_then(|v| v.get("messages").and_then(|m| m.as_array()))
@@ -236,7 +242,9 @@ fn get_task_status(base_url: &str, key: &str, task_id: &str) -> Result<(String, 
             let lines: Vec<String> = arr
                 .iter()
                 .filter_map(|m| {
-                    m.get("text").and_then(|t| t.as_str()).map(String::from)
+                    m.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(String::from)
                         .or_else(|| m.as_str().map(String::from))
                 })
                 .collect();
@@ -246,8 +254,13 @@ fn get_task_status(base_url: &str, key: &str, task_id: &str) -> Result<(String, 
                 Some(lines.join("\n\n"))
             }
         })
-        .or_else(|| result_json.and_then(|v| v.get("text").and_then(|t| t.as_str()).map(String::from)));
-    let error_text = data.get("error_text").and_then(|e| e.as_str()).map(String::from);
+        .or_else(|| {
+            result_json.and_then(|v| v.get("text").and_then(|t| t.as_str()).map(String::from))
+        });
+    let error_text = data
+        .get("error_text")
+        .and_then(|e| e.as_str())
+        .map(String::from);
     Ok((status, result_text, error_text))
 }
 
@@ -263,7 +276,13 @@ fn run_get(base_url: &str, key: &str, task_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn run_active(base_url: &str, key: &str, user_id: i64, chat_id: i64, exclude_task_id: Option<String>) -> Result<()> {
+fn run_active(
+    base_url: &str,
+    key: &str,
+    user_id: i64,
+    chat_id: i64,
+    exclude_task_id: Option<String>,
+) -> Result<()> {
     let url = format!("{}/tasks/active", base_v1(base_url));
     let payload = json!({
         "user_id": user_id,
@@ -279,14 +298,23 @@ fn run_active(base_url: &str, key: &str, user_id: i64, chat_id: i64, exclude_tas
         .context("list active tasks failed")?;
     let status = resp.status();
     let body: serde_json::Value = resp.json().context("parse active response")?;
-    println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&body).unwrap_or_default()
+    );
     if !status.is_success() {
         anyhow::bail!("active returned {}: {:?}", status, body.get("error"));
     }
     Ok(())
 }
 
-fn run_cancel(base_url: &str, key: &str, user_id: i64, chat_id: i64, exclude_task_id: Option<String>) -> Result<()> {
+fn run_cancel(
+    base_url: &str,
+    key: &str,
+    user_id: i64,
+    chat_id: i64,
+    exclude_task_id: Option<String>,
+) -> Result<()> {
     let url = format!("{}/tasks/cancel", base_v1(base_url));
     let payload = json!({
         "user_id": user_id,
@@ -302,7 +330,10 @@ fn run_cancel(base_url: &str, key: &str, user_id: i64, chat_id: i64, exclude_tas
         .context("cancel tasks failed")?;
     let status = resp.status();
     let body: serde_json::Value = resp.json().context("parse cancel response")?;
-    println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&body).unwrap_or_default()
+    );
     if !status.is_success() {
         anyhow::bail!("cancel returned {}: {:?}", status, body.get("error"));
     }
@@ -318,7 +349,10 @@ fn run_reload_skills(base_url: &str, key: &str) -> Result<()> {
         .context("reload-skills failed")?;
     let status = resp.status();
     let body: serde_json::Value = resp.json().context("parse reload-skills response")?;
-    println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&body).unwrap_or_default()
+    );
     if !status.is_success() {
         anyhow::bail!("reload-skills returned {}: {:?}", status, body.get("error"));
     }

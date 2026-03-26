@@ -20,8 +20,8 @@ use super::super::{
     reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
     task_count_by_status, telegramd_process_stats, update_auth_key_by_id,
     upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
-    wa_webd_process_stats, webd_process_stats, whatsappd_process_stats,
-    wechatd_process_stats, ApiResponse, AppState, HealthResponse, LocalInteractionContext,
+    wa_webd_process_stats, webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
+    ApiResponse, AppState, HealthResponse, LocalInteractionContext,
 };
 use claw_core::skill_registry::SkillKind;
 use claw_core::types::{
@@ -413,7 +413,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/telegram/config",
             get(get_telegram_config).post(update_telegram_config),
         )
-        .route("/wechat/config", get(get_wechat_config).post(update_wechat_config))
+        .route(
+            "/wechat/config",
+            get(get_wechat_config).post(update_wechat_config),
+        )
         .route("/skills/import", post(import_external_skill))
         .route("/skills/import/upload", post(import_external_skill_upload))
         .route("/skills/uninstall", post(uninstall_external_skill))
@@ -448,7 +451,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/admin/auth-keys/:key_id",
             put(update_auth_key_handler).delete(delete_auth_key_handler),
         )
-        .route("/internal/webd/verify-login", post(webd_internal_verify_login))
+        .route(
+            "/internal/webd/verify-login",
+            post(webd_internal_verify_login),
+        )
         .route("/admin/webd-accounts", post(admin_upsert_webd_account))
 }
 
@@ -1819,7 +1825,9 @@ fn auth_user_summary_counts(state: &AppState) -> anyhow::Result<(usize, usize, V
         [],
         |row| row.get(0),
     )?;
-    let mut stmt = db.prepare("SELECT DISTINCT channel FROM channel_bindings WHERE TRIM(COALESCE(channel, '')) != ''")?;
+    let mut stmt = db.prepare(
+        "SELECT DISTINCT channel FROM channel_bindings WHERE TRIM(COALESCE(channel, '')) != ''",
+    )?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
     let mut bound_channels = Vec::new();
     for row in rows {
@@ -1837,7 +1845,11 @@ fn auth_user_summary_counts(state: &AppState) -> anyhow::Result<(usize, usize, V
         "ui" => 5,
         _ => 99,
     };
-    bound_channels.sort_by(|a, b| channel_order(a).cmp(&channel_order(b)).then_with(|| a.cmp(b)));
+    bound_channels.sort_by(|a, b| {
+        channel_order(a)
+            .cmp(&channel_order(b))
+            .then_with(|| a.cmp(b))
+    });
     let bound_channel_count = bound_channels.len();
     Ok((
         user_count.max(0) as usize,
@@ -1885,7 +1897,10 @@ async fn logs_latest(
 }
 
 fn channel_allows_shared_ui_task_access(channel: &str) -> bool {
-    matches!(channel, "telegram" | "whatsapp" | "wechat" | "feishu" | "lark")
+    matches!(
+        channel,
+        "telegram" | "whatsapp" | "wechat" | "feishu" | "lark"
+    )
 }
 
 fn task_access_meta_for_debug(
@@ -5333,9 +5348,7 @@ fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
             .unwrap_or("")
             .to_string();
         let api_format = if vendor_name == "minimax" {
-            normalize_minimax_api_format(
-                vendor.get("api_format").and_then(|v| v.as_str()),
-            )
+            normalize_minimax_api_format(vendor.get("api_format").and_then(|v| v.as_str()))
         } else {
             String::new()
         };
@@ -5417,7 +5430,11 @@ fn saved_llm_vendor_runtime_fields(
         .unwrap_or("")
         .to_string();
     let provider_type = if selected_vendor.trim().eq_ignore_ascii_case("minimax") {
-        normalize_minimax_api_format(vendor.and_then(|v| v.get("api_format")).and_then(|v| v.as_str()))
+        normalize_minimax_api_format(
+            vendor
+                .and_then(|v| v.get("api_format"))
+                .and_then(|v| v.as_str()),
+        )
     } else {
         String::new()
     };
@@ -6400,7 +6417,9 @@ async fn wechat_login_qr_start(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("wechat QR start failed: status={status} body={body}")),
+                error: Some(format!(
+                    "wechat QR start failed: status={status} body={body}"
+                )),
             }),
         );
     }
@@ -6469,7 +6488,9 @@ async fn wechat_login_qr_wait(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("wechat QR wait failed: status={status} body={body}")),
+                error: Some(format!(
+                    "wechat QR wait failed: status={status} body={body}"
+                )),
             }),
         );
     }

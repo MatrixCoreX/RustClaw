@@ -60,7 +60,8 @@ fn main() -> Result<()> {
 
     for line in stdin.lock().lines() {
         let line = line?;
-        let req: Value = serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
+        let req: Value =
+            serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
         let input = parse_input(&req);
         let text_payload = match handle(&input) {
             Ok(v) => v,
@@ -118,7 +119,10 @@ fn parse_input(req: &Value) -> SearchInput {
         .map(|n| n as usize)
         .unwrap_or(5)
         .clamp(1, 20);
-    let lang = args.get("lang").and_then(Value::as_str).map(|s| s.to_string());
+    let lang = args
+        .get("lang")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
     let time_range = args
         .get("time_range")
         .and_then(Value::as_str)
@@ -249,7 +253,8 @@ fn resolve_backend(raw: Option<&str>) -> Result<Backend> {
 }
 
 fn search_serpapi(input: &SearchInput) -> Result<Vec<SearchItem>> {
-    let api_key = env::var("SERPAPI_API_KEY").context("SERPAPI_API_KEY missing for serpapi backend")?;
+    let api_key =
+        env::var("SERPAPI_API_KEY").context("SERPAPI_API_KEY missing for serpapi backend")?;
     let client = Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -345,7 +350,8 @@ fn search_duckduckgo_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
         .context("duckduckgo body read failed")?;
 
     let row_re = Regex::new(r#"(?is)<div class="result__body".*?</div>\s*</div>"#).expect("regex");
-    let a_re = Regex::new(r#"(?is)<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#).expect("regex");
+    let a_re = Regex::new(r#"(?is)<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#)
+        .expect("regex");
     let sn_re = Regex::new(r#"(?is)<a[^>]*class="result__snippet"[^>]*>(.*?)</a>|<div[^>]*class="result__snippet"[^>]*>(.*?)</div>"#)
         .expect("regex");
     let tag_re = Regex::new(r"(?is)<[^>]+>").expect("regex");
@@ -353,16 +359,25 @@ fn search_duckduckgo_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
     let mut out = vec![];
     for row in row_re.find_iter(&html) {
         let block = row.as_str();
-        let Some(ac) = a_re.captures(block) else { continue; };
+        let Some(ac) = a_re.captures(block) else {
+            continue;
+        };
         let href = ac.get(1).map(|m| m.as_str()).unwrap_or("").trim();
         let title_html = ac.get(2).map(|m| m.as_str()).unwrap_or("").trim();
-        let title = tag_re.replace_all(title_html, " ").to_string().replace("&amp;", "&");
+        let title = tag_re
+            .replace_all(title_html, " ")
+            .to_string()
+            .replace("&amp;", "&");
         let url = unwrap_ddg_redirect(href).unwrap_or_else(|| href.to_string());
         if title.trim().is_empty() || url.trim().is_empty() {
             continue;
         }
         let snippet = sn_re.captures(block).and_then(|c| {
-            let s = c.get(1).or_else(|| c.get(2)).map(|m| m.as_str()).unwrap_or("");
+            let s = c
+                .get(1)
+                .or_else(|| c.get(2))
+                .map(|m| m.as_str())
+                .unwrap_or("");
             let cleaned = tag_re.replace_all(s, " ").to_string().replace("&amp;", "&");
             let trimmed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
             if trimmed.is_empty() {
@@ -388,7 +403,10 @@ fn search_duckduckgo_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
 fn unwrap_ddg_redirect(href: &str) -> Option<String> {
     let parsed = Url::parse(href).ok()?;
     if parsed.domain() == Some("duckduckgo.com") && parsed.path() == "/l/" {
-        let uddg = parsed.query_pairs().find(|(k, _)| k == "uddg").map(|(_, v)| v.to_string());
+        let uddg = parsed
+            .query_pairs()
+            .find(|(k, _)| k == "uddg")
+            .map(|(_, v)| v.to_string());
         return uddg;
     }
     Some(href.to_string())
@@ -399,7 +417,9 @@ fn normalize_and_filter(items: &mut Vec<SearchItem>, input: &SearchInput) {
     let mut out = vec![];
 
     for it in items.drain(..) {
-        let Some(norm_url) = normalize_url(&it.url) else { continue; };
+        let Some(norm_url) = normalize_url(&it.url) else {
+            continue;
+        };
         let host = host_of(&norm_url);
         if !input.domains_allow.is_empty()
             && !input

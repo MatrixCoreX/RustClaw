@@ -93,7 +93,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn parse_input(args: &Value) -> Result<SkillInput, String> {
-    let obj = args.as_object().ok_or_else(|| "args must be object".to_string())?;
+    let obj = args
+        .as_object()
+        .ok_or_else(|| "args must be object".to_string())?;
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
@@ -103,14 +105,8 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
     let action = match action.as_str() {
         "list" | "query" | "status" => "list",
         "cancel" | "cancel_all" | "stop" | "stop_all" => "cancel_all",
-        "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => {
-            "cancel_one"
-        }
-        _ => {
-            return Err(
-                "unsupported action; use list | cancel_all | cancel_one".to_string(),
-            )
-        }
+        "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
+        _ => return Err("unsupported action; use list | cancel_all | cancel_one".to_string()),
     }
     .to_string();
     let index = obj
@@ -141,13 +137,13 @@ fn execute(
             .map_err(|e| format!("build http client failed: {e}"))?;
         match input.action.as_str() {
             "list" => {
-                let tasks = fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id)
-                    .await?;
+                let tasks =
+                    fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id).await?;
                 Ok(render_task_list(&tasks))
             }
             "cancel_all" => {
-                let tasks = fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id)
-                    .await?;
+                let tasks =
+                    fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id).await?;
                 if tasks.is_empty() {
                     return Ok("当前没有可结束的未完成任务。".to_string());
                 }
@@ -197,7 +193,10 @@ async fn fetch_active_tasks(
     exclude_task_id: &str,
 ) -> Result<Vec<ActiveTaskItem>, String> {
     let resp = client
-        .post(format!("{}/v1/tasks/active", base_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/v1/tasks/active",
+            base_url.trim_end_matches('/')
+        ))
         .json(&json!({
             "user_id": user_id,
             "chat_id": chat_id,
@@ -220,7 +219,10 @@ async fn cancel_all_tasks(
     exclude_task_id: &str,
 ) -> Result<usize, String> {
     let resp = client
-        .post(format!("{}/v1/tasks/cancel", base_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/v1/tasks/cancel",
+            base_url.trim_end_matches('/')
+        ))
         .json(&json!({
             "user_id": user_id,
             "chat_id": chat_id,
@@ -230,10 +232,7 @@ async fn cancel_all_tasks(
         .await
         .map_err(|e| format!("request cancel tasks failed: {e}"))?;
     let value = parse_api_response::<Value>(resp).await?;
-    Ok(value
-        .get("canceled")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as usize)
+    Ok(value.get("canceled").and_then(|v| v.as_u64()).unwrap_or(0) as usize)
 }
 
 async fn cancel_one_task(
@@ -281,7 +280,9 @@ async fn parse_api_response<T: for<'de> Deserialize<'de>>(
             .error
             .unwrap_or_else(|| format!("request failed with status {status}")));
     }
-    let data = api.data.ok_or_else(|| "api response missing data".to_string())?;
+    let data = api
+        .data
+        .ok_or_else(|| "api response missing data".to_string())?;
     serde_json::from_value(data).map_err(|e| format!("decode api data failed: {e}"))
 }
 

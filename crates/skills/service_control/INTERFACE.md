@@ -9,7 +9,7 @@
 - **Behavior**: Read-only first; high-risk (stop/restart) blocked for ambiguous targets; auto-verify after start/restart/reload; auto logs on failure.
 - **Security**: Target validation; no arbitrary shell; RustClaw whitelist for HTTP path; safe unit names for systemd/service.
 
-## Supported Actions
+## Actions
 
 - `status` — Get running state (one or all for rustclaw).
 - `start`, `stop`, `restart`, `reload` — Lifecycle (reload → restart for rustclaw).
@@ -24,7 +24,7 @@
 - **service** — Explicit `manager_type: "service"`; target = service name; uses `service <name> status/start/stop/restart/reload`.
 - **docker_compose**, **docker_container**, **supervisor**, **process_only**, **unknown** — Recognized in input; status/logs may return "not implemented" for lifecycle.
 
-## Input Contract
+## Parameter Contract
 
 | Param         | Required | Type   | Default | Description |
 |---------------|----------|--------|---------|-------------|

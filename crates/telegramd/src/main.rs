@@ -2279,7 +2279,12 @@ fn extract_video_attachment(msg: &Message) -> Option<(String, String)> {
                 .as_ref()
                 .map(|m| m.type_().as_str() == "video")
                 .unwrap_or(false);
-            if mime_is_video || matches!(file_name_ext.as_str(), "mp4" | "mov" | "webm" | "mkv" | "m4v") {
+            if mime_is_video
+                || matches!(
+                    file_name_ext.as_str(),
+                    "mp4" | "mov" | "webm" | "mkv" | "m4v"
+                )
+            {
                 let ext = if file_name_ext.is_empty() {
                     "mp4".to_string()
                 } else {
@@ -2311,7 +2316,10 @@ fn extract_file_attachment(msg: &Message) -> Option<(String, String)> {
     let mime_type = mime.map(|m| m.type_().as_str()).unwrap_or("");
     let mime_subtype = mime.map(|m| m.subtype().as_str()).unwrap_or("");
     let looks_like_audio = mime_type == "audio"
-        || matches!(mime_subtype, "ogg" | "mpeg" | "mp3" | "wav" | "x-wav" | "aac" | "flac" | "opus")
+        || matches!(
+            mime_subtype,
+            "ogg" | "mpeg" | "mp3" | "wav" | "x-wav" | "aac" | "flac" | "opus"
+        )
         || matches!(
             file_name_ext.as_str(),
             "ogg" | "mp3" | "wav" | "m4a" | "aac" | "flac" | "opus"

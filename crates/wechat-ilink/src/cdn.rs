@@ -227,15 +227,10 @@ pub async fn upload_plaintext_to_cdn(
 
     let ciphertext = encrypt_aes_128_ecb(plaintext, &aeskey_bytes)?;
     let cdn_url = build_cdn_upload_url(cdn_base_url.trim_end_matches('/'), &upload_param, &filekey);
-    let download_encrypted_query_param = upload_cdn_ciphertext(
-        client,
-        &cdn_url,
-        &ciphertext,
-        true,
-        "cdn upload",
-    )
-    .await?
-    .ok_or_else(|| "cdn upload: missing x-encrypted-param".to_string())?;
+    let download_encrypted_query_param =
+        upload_cdn_ciphertext(client, &cdn_url, &ciphertext, true, "cdn upload")
+            .await?
+            .ok_or_else(|| "cdn upload: missing x-encrypted-param".to_string())?;
 
     Ok(UploadedCdnBlob {
         filekey,
@@ -327,7 +322,10 @@ pub fn media_aes_key_b64_from_hex(aeskey_hex: &str) -> Result<String, String> {
     Ok(B64.encode(trimmed.as_bytes()))
 }
 
-fn infer_extension_from_content_type_or_url(content_type: Option<&str>, url: &str) -> Option<String> {
+fn infer_extension_from_content_type_or_url(
+    content_type: Option<&str>,
+    url: &str,
+) -> Option<String> {
     let content_type = content_type
         .and_then(|v| v.split(';').next())
         .map(str::trim)
@@ -600,13 +598,13 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
-    use base64::Engine;
     use axum::body::Bytes;
     use axum::extract::State;
     use axum::http::{HeaderMap, StatusCode, Uri};
     use axum::response::IntoResponse;
     use axum::routing::post;
     use axum::{Json, Router};
+    use base64::Engine;
     use reqwest::Client;
     use serde_json::{json, Value};
     use tokio::net::TcpListener;
@@ -621,10 +619,7 @@ mod tests {
         upload_queries: Arc<Mutex<Vec<String>>>,
     }
 
-    async fn handle_getuploadurl(
-        State(state): State<TestState>,
-        body: Bytes,
-    ) -> impl IntoResponse {
+    async fn handle_getuploadurl(State(state): State<TestState>, body: Bytes) -> impl IntoResponse {
         let parsed: Value = serde_json::from_slice(&body).expect("valid getuploadurl body");
         *state
             .getuploadurl_body
@@ -636,10 +631,7 @@ mod tests {
         }))
     }
 
-    async fn handle_upload(
-        State(state): State<TestState>,
-        uri: Uri,
-    ) -> impl IntoResponse {
+    async fn handle_upload(State(state): State<TestState>, uri: Uri) -> impl IntoResponse {
         state
             .upload_queries
             .lock()
@@ -670,7 +662,10 @@ mod tests {
         body: Bytes,
     ) -> impl IntoResponse {
         let parsed: Value = serde_json::from_slice(&body).expect("valid sendmessage body");
-        *state.sendmessage_body.lock().expect("sendmessage body lock") = Some(parsed);
+        *state
+            .sendmessage_body
+            .lock()
+            .expect("sendmessage body lock") = Some(parsed);
         assert_eq!(
             headers
                 .get("authorizationtype")
@@ -701,10 +696,7 @@ mod tests {
     async fn send_weixin_image_matches_openclaw_weixin_message_shape() {
         let (addr, state) = spawn_test_server().await;
         let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!(
-            "wechat-ilink-test-{}.png",
-            std::process::id()
-        ));
+        let file_path = temp_dir.join(format!("wechat-ilink-test-{}.png", std::process::id()));
         tokio::fs::write(&file_path, b"fake-png-content")
             .await
             .expect("write temp image");
@@ -740,8 +732,7 @@ mod tests {
             .as_str()
             .expect("image media aes_key");
         assert_eq!(
-            payload["msg"]["item_list"][0]["image_item"]["media"]["encrypt_query_param"]
-                .as_str(),
+            payload["msg"]["item_list"][0]["image_item"]["media"]["encrypt_query_param"].as_str(),
             Some("legacy-download-token")
         );
         assert!(
@@ -766,9 +757,7 @@ mod tests {
             .expect("getuploadurl body lock")
             .clone()
             .expect("captured getuploadurl body");
-        let decoded_media_aes_key = B64
-            .decode(media_aes_key)
-            .expect("decode media aes_key");
+        let decoded_media_aes_key = B64.decode(media_aes_key).expect("decode media aes_key");
         assert_eq!(
             std::str::from_utf8(&decoded_media_aes_key).ok(),
             getuploadurl_body["aeskey"].as_str(),
@@ -795,7 +784,9 @@ mod tests {
             .clone();
         assert_eq!(upload_queries.len(), 1, "expected origin upload only");
         assert!(upload_queries.iter().any(|q| q.contains("upload-token")));
-        assert!(!upload_queries.iter().any(|q| q.contains("thumb-upload-token")));
+        assert!(!upload_queries
+            .iter()
+            .any(|q| q.contains("thumb-upload-token")));
 
         let _ = tokio::fs::remove_file(&file_path).await;
     }
