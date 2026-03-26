@@ -58,6 +58,7 @@ struct LlmConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
     base_url: String,
+    #[serde(default)]
     api_key: String,
     model: String,
     #[serde(default)]
@@ -311,11 +312,17 @@ fn transcribe_by_vendor(
     match vendor {
         VendorKind::Google => {
             let audio_path = require_local_audio(audio_input)?;
-            Ok((google_native_transcribe(client, cfg, model, audio_path, prompt)?, "native"))
+            Ok((
+                google_native_transcribe(client, cfg, model, audio_path, prompt)?,
+                "native",
+            ))
         }
         VendorKind::OpenAI => {
             let audio_path = require_local_audio(audio_input)?;
-            Ok((openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?, "compat"))
+            Ok((
+                openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?,
+                "compat",
+            ))
         }
         VendorKind::Anthropic
         | VendorKind::Grok
@@ -331,19 +338,25 @@ fn transcribe_by_vendor(
                 ));
             }
             let audio_path = require_local_audio(audio_input)?;
-            Ok((openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?, "compat"))
+            Ok((
+                openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?,
+                "compat",
+            ))
         }
         VendorKind::Qwen => {
             if should_use_qwen_native_asr(audio_cfg, model, mode, allow_compat_adapters) {
-                Ok((qwen_native_transcribe(
-                    client,
-                    audio_cfg,
-                    audio_cfg.qwen_native_base_url.as_deref(),
-                    &cfg.api_key,
-                    model,
-                    audio_input,
-                    prompt,
-                )?, "native"))
+                Ok((
+                    qwen_native_transcribe(
+                        client,
+                        audio_cfg,
+                        audio_cfg.qwen_native_base_url.as_deref(),
+                        &cfg.api_key,
+                        model,
+                        audio_input,
+                        prompt,
+                    )?,
+                    "native",
+                ))
             } else {
                 if !allow_compat_adapters {
                     return Err(
@@ -352,7 +365,17 @@ fn transcribe_by_vendor(
                     );
                 }
                 let audio_path = require_local_audio(audio_input)?;
-                Ok((openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?, "compat"))
+                Ok((
+                    openai_compatible_transcribe(
+                        client,
+                        cfg,
+                        vendor_name,
+                        model,
+                        audio_path,
+                        prompt,
+                    )?,
+                    "compat",
+                ))
             }
         }
     }
@@ -1000,7 +1023,79 @@ fn load_root_config() -> RootConfig {
             cfg.audio_transcribe = parsed;
         }
     }
+    apply_env_overrides(&mut cfg);
     cfg
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
+    if let (Some(value), Some(cfg)) = (env_non_empty(key), target.as_mut()) {
+        cfg.api_key = value;
+    }
+}
+
+fn apply_option_string_env(target: &mut Option<String>, key: &str) {
+    if let Some(value) = env_non_empty(key) {
+        *target = Some(value);
+    }
+}
+
+fn apply_env_overrides(cfg: &mut RootConfig) {
+    apply_vendor_api_key_env(&mut cfg.llm.openai, "OPENAI_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.google, "GOOGLE_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.anthropic, "ANTHROPIC_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.grok, "GROK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.deepseek, "DEEPSEEK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.qwen, "QWEN_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.minimax, "MINIMAX_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.custom, "CUSTOM_API_KEY");
+
+    apply_vendor_api_key_env(
+        &mut cfg.audio_transcribe.providers.openai,
+        "AUDIO_TRANSCRIBE_OPENAI_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_transcribe.providers.google,
+        "AUDIO_TRANSCRIBE_GOOGLE_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_transcribe.providers.anthropic,
+        "AUDIO_TRANSCRIBE_ANTHROPIC_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_transcribe.providers.grok,
+        "AUDIO_TRANSCRIBE_GROK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_transcribe.providers.deepseek,
+        "AUDIO_TRANSCRIBE_DEEPSEEK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_transcribe.providers.qwen,
+        "AUDIO_TRANSCRIBE_QWEN_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_transcribe.providers.minimax,
+        "AUDIO_TRANSCRIBE_MINIMAX_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_transcribe.providers.custom,
+        "AUDIO_TRANSCRIBE_CUSTOM_API_KEY",
+    );
+    apply_option_string_env(
+        &mut cfg.audio_transcribe.oss_access_key_id,
+        "AUDIO_TRANSCRIBE_OSS_ACCESS_KEY_ID",
+    );
+    apply_option_string_env(
+        &mut cfg.audio_transcribe.oss_access_key_secret,
+        "AUDIO_TRANSCRIBE_OSS_ACCESS_KEY_SECRET",
+    );
 }
 
 fn first_model_candidate<'a>(

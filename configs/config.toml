@@ -162,7 +162,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改，适合接入私有网关.
 # 风险/Risk: 协议不兼容会出现模型列表可见但调用失败.
 [llm.custom]
-api_key = "REPLACE_ME_CUSTOM_API_KEY"
+api_key = ""
 base_url = "https://api.example.com/v1"
 max_concurrency = 1
 model = "custom-model"
@@ -171,31 +171,11 @@ models = [
 ]
 timeout_seconds = 60
 
-# 用途/Purpose: 图片生成全局参数（vendor/model/并发/输出路径）.
-# 建议修改/Recommended change: 可改.
-# 风险/Risk: 并发和 max_images 过高会放大成本与超时概率.
-[image_generation]
-default_vendor = "qwen"
-default_model = "wanx2.1-t2i-turbo"
-qwen_models = ["wanx2.1-t2i-turbo"]
-models = ["wanx2.1-t2i-turbo"]
-# 允许兼容适配层 / Allow compatibility adapters.
-allow_compat_adapters = true
-# 图片任务超时（秒） / Image generation timeout in seconds.
-timeout_seconds = 120
-max_concurrency = 1
-# 单请求最大出图数 / Maximum images per request.
-max_images = 4
-# 输入大小上限（字节） / Max input payload size in bytes.
-max_input_bytes = 10485760
-# 输出目录 / Output directory.
-default_output_dir = "image/download"
-
 # 用途/Purpose: OpenAI 提供商连接与模型池.
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: 模型名下线会报错；并发与超时需与上游配额匹配.
 [llm.openai]
-api_key = "REPLACE_ME"
+api_key = ""
 base_url = "https://api.openai.com/v1"
 max_concurrency = 1
 model = "gpt-4o-mini"

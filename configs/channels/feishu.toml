@@ -6,7 +6,7 @@
 
 [feishu]
 # 是否启用
-enabled = true
+enabled = false
 # 入站模式：webhook | long_connection
 #   webhook：有公网回调地址时使用；飞书将事件 POST 到本服务，需配置 listen 并保证请求地址可达
 #   long_connection：无公网时使用；本服务主动连飞书收事件，仅需出口能访问公网

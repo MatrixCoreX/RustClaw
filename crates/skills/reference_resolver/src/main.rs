@@ -105,7 +105,8 @@ fn main() -> Result<()> {
 
     for line in stdin.lock().lines() {
         let line = line?;
-        let request: Value = serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
+        let request: Value =
+            serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
         let parsed = parse_input(&request);
         let request_id = parsed.request_id.clone();
         let action = parsed.action.clone();
@@ -117,7 +118,9 @@ fn main() -> Result<()> {
                 top_candidates: vec![],
                 clarify_question: None,
                 message: Some(format!("unsupported action: {action}")),
-                resolution_trace: parsed.include_trace.then(|| json!({"reason":"unsupported_action"})),
+                resolution_trace: parsed
+                    .include_trace
+                    .then(|| json!({"reason":"unsupported_action"})),
             }
         } else {
             resolve_reference(parsed)
@@ -166,7 +169,10 @@ fn parse_input(v: &Value) -> ResolveInput {
         .map(|n| n as usize)
         .unwrap_or(5)
         .clamp(1, 10);
-    let include_trace = args.get("include_trace").and_then(Value::as_bool).unwrap_or(false);
+    let include_trace = args
+        .get("include_trace")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     ResolveInput {
         request_id,
@@ -260,7 +266,8 @@ fn collect_candidates(input: &ResolveInput) -> Vec<Candidate> {
     for (i, turn) in input.recent_turns.iter().rev().enumerate() {
         let role = pick_str(turn, &["role", "speaker"]).unwrap_or_else(|| "unknown".to_string());
         let role_l = role.to_lowercase();
-        let text = pick_str(turn, &["text", "content", "message", "short_preview"]).unwrap_or_default();
+        let text =
+            pick_str(turn, &["text", "content", "message", "short_preview"]).unwrap_or_default();
         let id = pick_str(turn, &["id", "turn_id"]).unwrap_or_else(|| format!("turn_{}", i + 1));
         let turn_index = turn.get("turn_index").and_then(Value::as_i64);
 
@@ -328,7 +335,8 @@ fn collect_candidates(input: &ResolveInput) -> Vec<Candidate> {
 
     for (i, item) in input.recent_results.iter().rev().enumerate() {
         let text = pick_str(item, &["text", "output", "summary", "result"]).unwrap_or_default();
-        let id = pick_str(item, &["id", "task_id", "request_id"]).unwrap_or_else(|| format!("result_{}", i + 1));
+        let id = pick_str(item, &["id", "task_id", "request_id"])
+            .unwrap_or_else(|| format!("result_{}", i + 1));
         if !text.trim().is_empty() {
             out.push(Candidate {
                 kind: CandidateKind::Task,
@@ -383,11 +391,29 @@ fn score_candidates(candidates: &mut [Candidate], input: &ResolveInput) {
     let request = input.request_text.to_lowercase();
     let tokens_req = tokenize(&request);
 
-    let ordinal_last = contains_any(&request, &["上个", "上一条", "last reply", "previous reply", "previous response"]);
-    let ordinal_prev2 = contains_any(&request, &["上上个", "上上条", "reply before that", "second last"]);
+    let ordinal_last = contains_any(
+        &request,
+        &[
+            "上个",
+            "上一条",
+            "last reply",
+            "previous reply",
+            "previous response",
+        ],
+    );
+    let ordinal_prev2 = contains_any(
+        &request,
+        &["上上个", "上上条", "reply before that", "second last"],
+    );
     let file_hint = contains_any(&request, &["文件", "file", "路径", "path"]);
-    let dep_hint = contains_any(&request, &["依赖", "dependency", "package", "模块", "module"]);
-    let task_hint = contains_any(&request, &["任务", "结果", "run", "执行", "output", "command result"]);
+    let dep_hint = contains_any(
+        &request,
+        &["依赖", "dependency", "package", "模块", "module"],
+    );
+    let task_hint = contains_any(
+        &request,
+        &["任务", "结果", "run", "执行", "output", "command result"],
+    );
 
     for c in candidates {
         let recency = 1.0 / ((c.recency_rank + 1) as f64);
@@ -477,7 +503,12 @@ fn build_clarify_question(input: &ResolveInput, candidates: &[Candidate]) -> Str
         .language_hint
         .as_deref()
         .map(|l| l.to_lowercase().starts_with("zh"))
-        .unwrap_or_else(|| contains_any(&input.request_text, &["上个", "这个", "那个", "依赖", "文件"]));
+        .unwrap_or_else(|| {
+            contains_any(
+                &input.request_text,
+                &["上个", "这个", "那个", "依赖", "文件"],
+            )
+        });
     if zh {
         format!("我需要确认你指的是哪个{kind_text}：A) {a} 还是 B) {b}？")
     } else {
@@ -485,7 +516,12 @@ fn build_clarify_question(input: &ResolveInput, candidates: &[Candidate]) -> Str
     }
 }
 
-fn trace_value(input: &ResolveInput, candidates: &[Candidate], top_score: f64, gap: f64) -> Option<Value> {
+fn trace_value(
+    input: &ResolveInput,
+    candidates: &[Candidate],
+    top_score: f64,
+    gap: f64,
+) -> Option<Value> {
     if !input.include_trace {
         return None;
     }
@@ -543,7 +579,8 @@ fn contains_any(text: &str, terms: &[&str]) -> bool {
 }
 
 fn looks_like_path(s: &str) -> bool {
-    let path_re = Regex::new(r"(/|\\|[a-zA-Z]:\\|\.md$|\.txt$|\.rs$|\.py$|\.json$)").expect("valid regex");
+    let path_re =
+        Regex::new(r"(/|\\|[a-zA-Z]:\\|\.md$|\.txt$|\.rs$|\.py$|\.json$)").expect("valid regex");
     path_re.is_match(s)
 }
 

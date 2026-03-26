@@ -1357,7 +1357,10 @@ mod tests {
             "external_chat_id": "wx-user-1",
             "context_token": "ctx-123"
         });
-        assert_eq!(payload.get("channel").and_then(|v| v.as_str()), Some("wechat"));
+        assert_eq!(
+            payload.get("channel").and_then(|v| v.as_str()),
+            Some("wechat")
+        );
         assert_eq!(
             payload.get("context_token").and_then(|v| v.as_str()),
             Some("ctx-123")

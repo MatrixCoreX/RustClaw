@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -16,6 +16,7 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -27,16 +28,18 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: None,
                     error_text: Some(err),
                 },
             },
@@ -44,6 +47,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -53,35 +57,55 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
+fn execute(args: Value) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
-    let action = obj
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or("list");
+    let action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("list");
     let root = workspace_root();
 
     match action {
         "list" => {
             let archive = required_str(obj, "archive")?;
             let archive = resolve_path(&root, archive)?;
-            list_archive(&archive)
+            list_archive(&archive).map(|text| {
+                (
+                    text.clone(),
+                    json!({"action":"list","archive":archive.display().to_string(),"output":text}),
+                )
+            })
         }
         "pack" => {
-            let format = obj
-                .get("format")
-                .and_then(|v| v.as_str())
-                .unwrap_or("zip");
+            let format = obj.get("format").and_then(|v| v.as_str()).unwrap_or("zip");
             let source = resolve_path(&root, required_str(obj, "source")?)?;
             let archive = resolve_path(&root, required_str(obj, "archive")?)?;
-            pack_archive(format, &source, &archive)
+            pack_archive(format, &source, &archive).map(|text| {
+                (
+                    text.clone(),
+                    json!({
+                        "action":"pack",
+                        "format":format,
+                        "source":source.display().to_string(),
+                        "archive":archive.display().to_string(),
+                        "output":text
+                    }),
+                )
+            })
         }
         "unpack" => {
             let archive = resolve_path(&root, required_str(obj, "archive")?)?;
             let dest = resolve_path(&root, required_str(obj, "dest")?)?;
-            unpack_archive(&archive, &dest)
+            unpack_archive(&archive, &dest).map(|text| {
+                (
+                    text.clone(),
+                    json!({
+                        "action":"unpack",
+                        "archive":archive.display().to_string(),
+                        "dest":dest.display().to_string(),
+                        "output":text
+                    }),
+                )
+            })
         }
         _ => Err("unsupported action; use list|pack|unpack".to_string()),
     }
@@ -130,18 +154,28 @@ fn run(bin: &str, args: &[String]) -> Result<String, String> {
         .args(args)
         .output()
         .map_err(|err| format!("run {bin} failed: {err}"))?;
+    let text = format_command_output(&output.stdout, &output.stderr);
+    let exit_code = output.status.code().unwrap_or(-1);
+    if output.status.success() {
+        Ok(format!("exit={exit_code}\n{text}"))
+    } else {
+        Err(format!("archive command failed: exit={exit_code}\n{text}"))
+    }
+}
+
+fn format_command_output(stdout: &[u8], stderr: &[u8]) -> String {
     let mut text = String::new();
-    text.push_str(&String::from_utf8_lossy(&output.stdout));
-    if !output.stderr.is_empty() {
+    text.push_str(&String::from_utf8_lossy(stdout));
+    if !stderr.is_empty() {
         if !text.is_empty() {
             text.push('\n');
         }
-        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        text.push_str(&String::from_utf8_lossy(stderr));
     }
     if text.len() > 10000 {
         text.truncate(10000);
     }
-    Ok(format!("exit={}\n{}", output.status.code().unwrap_or(-1), text))
+    text
 }
 
 fn required_str<'a>(obj: &'a serde_json::Map<String, Value>, key: &str) -> Result<&'a str, String> {

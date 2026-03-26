@@ -133,7 +133,8 @@ fn main() -> Result<()> {
 
     for line in stdin.lock().lines() {
         let line = line?;
-        let req: Value = serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
+        let req: Value =
+            serde_json::from_str(&line).unwrap_or_else(|_| json!({"request_id":"unknown"}));
         let request_id = req
             .get("request_id")
             .and_then(Value::as_str)
@@ -317,7 +318,8 @@ fn parse_document(opts: ParseOptions) -> Result<(ParseResultInternal, ParseOptio
 
 fn parse_text(path: &Path) -> Result<ParseResultInternal> {
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let text = String::from_utf8(bytes.clone()).unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
+    let text = String::from_utf8(bytes.clone())
+        .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
     let sections = split_plain_sections(&text);
     Ok(ParseResultInternal {
         title: first_non_empty_line(&text).unwrap_or_default(),
@@ -331,7 +333,8 @@ fn parse_text(path: &Path) -> Result<ParseResultInternal> {
 
 fn parse_markdown(path: &Path, table_mode: TableMode) -> Result<ParseResultInternal> {
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let text = String::from_utf8(bytes.clone()).unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
+    let text = String::from_utf8(bytes.clone())
+        .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
     let sections = parse_md_sections(&text);
     let tables = parse_md_tables(&text, table_mode);
     Ok(ParseResultInternal {
@@ -349,7 +352,8 @@ fn parse_markdown(path: &Path, table_mode: TableMode) -> Result<ParseResultInter
 
 fn parse_html(path: &Path, table_mode: TableMode) -> Result<ParseResultInternal> {
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let html = String::from_utf8(bytes.clone()).unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
+    let html = String::from_utf8(bytes.clone())
+        .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
     let text = strip_html_tags(&html);
     let sections = parse_html_sections(&html);
     let tables = parse_html_tables(&html, table_mode);
@@ -376,7 +380,9 @@ fn parse_pdf(path: &Path, page_range: &PageRange) -> Result<ParseResultInternal>
         cmd.arg("-l").arg(e.to_string());
     }
     cmd.arg(path.as_os_str()).arg("-");
-    let output = cmd.output().with_context(|| "failed to run pdftotext; install poppler-utils")?;
+    let output = cmd
+        .output()
+        .with_context(|| "failed to run pdftotext; install poppler-utils")?;
     if !output.status.success() {
         return Err(anyhow!(
             "pdftotext failed: {}",
@@ -396,7 +402,8 @@ fn parse_pdf(path: &Path, page_range: &PageRange) -> Result<ParseResultInternal>
 }
 
 fn parse_docx(path: &Path, table_mode: TableMode) -> Result<ParseResultInternal> {
-    let file = fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut zip = ZipArchive::new(file).with_context(|| "invalid docx zip archive")?;
 
     let mut document_xml = String::new();
@@ -558,7 +565,9 @@ fn parse_md_tables(text: &str, table_mode: TableMode) -> Vec<Table> {
 
 fn is_md_separator(line: &str) -> bool {
     let t = line.trim();
-    t.contains('|') && t.chars().all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
+    t.contains('|')
+        && t.chars()
+            .all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
 }
 
 fn split_md_row(line: &str) -> Vec<String> {
@@ -673,7 +682,9 @@ fn parse_docx_tables(xml: &str, table_mode: TableMode) -> Vec<Table> {
                     if !cell.is_empty() {
                         cell.push(' ');
                     }
-                    cell.push_str(&xml_unescape(text_cap.get(1).map(|m| m.as_str()).unwrap_or("")));
+                    cell.push_str(&xml_unescape(
+                        text_cap.get(1).map(|m| m.as_str()).unwrap_or(""),
+                    ));
                 }
                 row.push(cell.trim().to_string());
             }
@@ -693,7 +704,12 @@ fn parse_docx_tables(xml: &str, table_mode: TableMode) -> Vec<Table> {
     out
 }
 
-fn normalize_table(id: String, header: Vec<String>, rows: Vec<Vec<String>>, mode: TableMode) -> Option<Table> {
+fn normalize_table(
+    id: String,
+    header: Vec<String>,
+    rows: Vec<Vec<String>>,
+    mode: TableMode,
+) -> Option<Table> {
     if header.is_empty() {
         return None;
     }
@@ -732,7 +748,11 @@ fn strip_html_tags(html: &str) -> String {
     s = tag_re.replace_all(&s, " ").to_string();
     s = html_unescape(&s);
     s = ws_re.replace_all(&s, " ").to_string();
-    s.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n")
+    s.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn extract_between(text: &str, start_tag: &str, end_tag: &str) -> Option<String> {
@@ -759,7 +779,10 @@ fn file_stem(path: &Path) -> String {
 }
 
 fn pdf_page_count(path: &Path) -> Option<u32> {
-    let out = Command::new("pdfinfo").arg(path.as_os_str()).output().ok()?;
+    let out = Command::new("pdfinfo")
+        .arg(path.as_os_str())
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }

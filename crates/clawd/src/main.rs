@@ -58,7 +58,7 @@ use bootstrap::{
     active_prompt_vendor_name, load_command_intent_runtime, load_feishu_send_config,
     load_lark_send_config, load_memory_runtime_config, load_persona_prompt,
     load_prompt_template_for_state, load_prompt_template_for_vendor, load_schedule_runtime,
-    resolve_prompt_rel_path_for_vendor, resolve_ui_dist_dir, load_wechat_send_config,
+    load_wechat_send_config, resolve_prompt_rel_path_for_vendor, resolve_ui_dist_dir,
 };
 use db_init::{
     ensure_channel_schema, ensure_memory_schema, ensure_schedule_schema, init_db, seed_users,
@@ -91,8 +91,8 @@ pub(crate) use repo::{
     resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
     stable_i64_from_key, submit_task_audit_detail, task_count_by_status, task_kind_name,
     update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
-    upsert_webd_login_account, verify_webd_password_login,
-    SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
+    upsert_webd_login_account, verify_webd_password_login, SubmitTaskAccessError,
+    SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 pub(crate) use runtime::{
@@ -107,8 +107,7 @@ use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
 pub(crate) use system_health::{
     channel_gateway_process_stats, current_rss_bytes, feishud_process_stats, larkd_process_stats,
     oldest_running_task_age_seconds, telegramd_process_stats, wa_webd_process_stats,
-    webd_process_stats,
-    wechatd_process_stats, whatsappd_process_stats,
+    webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
 };
 pub(crate) use worker::task_payload_value;
 use worker::{spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, task_external_chat_id};
