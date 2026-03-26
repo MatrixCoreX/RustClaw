@@ -5,7 +5,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use toml::Value as TomlValue;
 
 static I18N: OnceLock<TextCatalog> = OnceLock::new();
@@ -21,6 +21,7 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -61,17 +62,27 @@ fn tr_with(key: &str, vars: &[(&str, &str)]) -> String {
 fn default_catalog(lang: &str) -> TextCatalog {
     let mut current = HashMap::new();
     let _ = lang;
-    current.insert("git_basic.err.invalid_input".to_string(), "invalid input: {error}".to_string());
-    current.insert("git_basic.err.args_object".to_string(), "args must be object".to_string());
+    current.insert(
+        "git_basic.err.invalid_input".to_string(),
+        "invalid input: {error}".to_string(),
+    );
+    current.insert(
+        "git_basic.err.args_object".to_string(),
+        "args must be object".to_string(),
+    );
     current.insert(
         "git_basic.msg.not_git_repo".to_string(),
-        "current directory is not a git repository. Please use git_basic in a git repo.".to_string(),
+        "current directory is not a git repository. Please use git_basic in a git repo."
+            .to_string(),
     );
     current.insert(
         "git_basic.err.unsupported_action".to_string(),
         "unsupported action; use status|log|diff|branch|show|rev_parse|diff_cached|current_branch|remote|changed_files|show_file_at_rev".to_string(),
     );
-    current.insert("git_basic.err.run_git_failed".to_string(), "run git failed: {error}".to_string());
+    current.insert(
+        "git_basic.err.run_git_failed".to_string(),
+        "run git failed: {error}".to_string(),
+    );
     TextCatalog { current }
 }
 
@@ -135,16 +146,18 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: None,
                     error_text: Some(err),
                 },
             },
@@ -152,7 +165,11 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                error_text: Some(tr_with("git_basic.err.invalid_input", &[("error", &err.to_string())])),
+                extra: None,
+                error_text: Some(tr_with(
+                    "git_basic.err.invalid_input",
+                    &[("error", &err.to_string())],
+                )),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -161,7 +178,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
+fn execute(args: Value) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| tr("git_basic.err.args_object"))?;
@@ -186,36 +203,29 @@ fn execute(args: Value) -> Result<String, String> {
         .min(100);
 
     let (subcmd, mut extra): (&str, Vec<String>) = match action {
-        "status" => ("status", vec!["--short".to_string(), "--branch".to_string()]),
+        "status" => (
+            "status",
+            vec!["--short".to_string(), "--branch".to_string()],
+        ),
         "log" => (
             "log",
-            vec![
-                "--oneline".to_string(),
-                "-n".to_string(),
-                log_n.to_string(),
-            ],
+            vec!["--oneline".to_string(), "-n".to_string(), log_n.to_string()],
         ),
         "diff" => ("diff", vec![]),
         "diff_cached" => ("diff", vec!["--cached".to_string()]),
         "branch" => ("branch", vec!["--all".to_string()]),
-        "current_branch" => ("rev-parse", vec!["--abbrev-ref".to_string(), "HEAD".to_string()]),
-        "remote" => ("remote", vec!["-v".to_string()]),
-        "changed_files" => (
-            "diff",
-            vec!["--name-only".to_string(), "HEAD".to_string()],
+        "current_branch" => (
+            "rev-parse",
+            vec!["--abbrev-ref".to_string(), "HEAD".to_string()],
         ),
+        "remote" => ("remote", vec!["-v".to_string()]),
+        "changed_files" => ("diff", vec!["--name-only".to_string(), "HEAD".to_string()]),
         "show" => {
-            let target = obj
-                .get("target")
-                .and_then(|v| v.as_str())
-                .unwrap_or("HEAD");
+            let target = obj.get("target").and_then(|v| v.as_str()).unwrap_or("HEAD");
             ("show", vec!["--stat".to_string(), target.to_string()])
         }
         "show_file_at_rev" => {
-            let target = obj
-                .get("target")
-                .and_then(|v| v.as_str())
-                .unwrap_or("HEAD");
+            let target = obj.get("target").and_then(|v| v.as_str()).unwrap_or("HEAD");
             let path = obj.get("path").and_then(|v| v.as_str()).unwrap_or("");
             if path.is_empty() {
                 return Err("show_file_at_rev requires path".to_string());
@@ -236,9 +246,12 @@ fn execute(args: Value) -> Result<String, String> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    let out = cmd
-        .output()
-        .map_err(|err| tr_with("git_basic.err.run_git_failed", &[("error", &err.to_string())]))?;
+    let out = cmd.output().map_err(|err| {
+        tr_with(
+            "git_basic.err.run_git_failed",
+            &[("error", &err.to_string())],
+        )
+    })?;
 
     let mut text = String::new();
     text.push_str(&String::from_utf8_lossy(&out.stdout));
@@ -263,7 +276,21 @@ fn execute(args: Value) -> Result<String, String> {
         text.push_str(marker);
     }
 
-    Ok(format!("exit={}\n{}", out.status.code().unwrap_or(-1), text))
+    let exit_code = out.status.code().unwrap_or(-1);
+    if out.status.success() {
+        let output = format!("exit={exit_code}\n{text}");
+        Ok((
+            output.clone(),
+            json!({
+                "action": action,
+                "subcommand": subcmd,
+                "exit_code": exit_code,
+                "output": output,
+            }),
+        ))
+    } else {
+        Err(format!("git command failed: exit={exit_code}\n{text}"))
+    }
 }
 
 /// 使用 `git rev-parse --is-inside-work-tree` 可靠识别仓库根、子目录与 worktree。

@@ -16,7 +16,7 @@ It is search-only:
 
 `search_extract` in this skill still means "search + return extract-ready URL list"; actual extraction belongs to `browser_web`.
 
-## Input Parameters
+## Parameter Contract
 
 - `action` (required, string): `search|search_extract`
 - `query` (required, string)
@@ -28,9 +28,41 @@ It is search-only:
 - `backend` (optional, string): `serpapi|duckduckgo_html`
 - `include_snippet` (optional, bool, default `true`)
 
-## Output Schema
+## Error Contract
 
-The skill returns JSON in `text` with:
+- `INVALID_INPUT`: required fields like `query` are missing or malformed.
+- `INVALID_ACTION`: `action` is not one of `search` or `search_extract`.
+- `SEARCH_FAILED`: configured backend failed or no backend is configured.
+- Never return fake empty success when backend configuration is missing.
+
+## Request/Response Examples
+
+### Example 1
+
+Request:
+```json
+{
+  "request_id": "web-1",
+  "args": {
+    "action": "search_extract",
+    "query": "rust async tutorial",
+    "top_k": 3,
+    "include_snippet": true
+  }
+}
+```
+
+Response:
+```json
+{
+  "request_id": "web-1",
+  "status": "ok",
+  "text": "{\"status\":\"ok\",\"backend\":\"duckduckgo_html\",\"items\":[{\"title\":\"Rust Async\",\"url\":\"https://example.com\"}],\"extract_urls\":[\"https://example.com\"],\"summary\":\"1 result\",\"citations\":[\"https://example.com\"],\"notes\":\"search only\"}",
+  "error_text": null
+}
+```
+
+Returned JSON inside `text` contains:
 
 - `status`: `ok|error`
 - `error_code`: nullable (`INVALID_INPUT|INVALID_ACTION|SEARCH_FAILED`)
@@ -47,11 +79,8 @@ The skill returns JSON in `text` with:
 - `citations[]`: same as result URLs
 - `notes`: boundary hint
 
-## Behavior Notes
-
 - Dedup by normalized URL.
 - URL normalization removes fragments and common tracking params (`utm_*`, `gclid`, `fbclid`).
 - Apply domain allow/deny filtering after normalization.
 - If backend is not configured, return explicit error (do not fake empty success).
 - Keep search responsibility separate from `browser_web`.
-

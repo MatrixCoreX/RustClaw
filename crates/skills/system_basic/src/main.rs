@@ -19,6 +19,7 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -35,6 +36,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -55,6 +57,7 @@ fn handle(req: Req) -> Resp {
         Ok(text) => Resp {
             request_id: req.request_id,
             status: "ok".to_string(),
+            extra: serde_json::from_str(&text).ok(),
             text,
             error_text: None,
         },
@@ -62,6 +65,7 @@ fn handle(req: Req) -> Resp {
             request_id: req.request_id,
             status: "error".to_string(),
             text: String::new(),
+            extra: None,
             error_text: Some(err),
         },
     }
@@ -382,7 +386,11 @@ fn workspace_glance(workspace_root: &Path, obj: &Map<String, Value>) -> Result<S
         if is_hidden {
             hidden_count += 1;
         }
-        let modified_ts = meta.modified().ok().and_then(system_time_to_ts).unwrap_or(0);
+        let modified_ts = meta
+            .modified()
+            .ok()
+            .and_then(system_time_to_ts)
+            .unwrap_or(0);
         entries.push(json!({
             "name": file_name,
             "path": to_rel(workspace_root, &entry_path),
@@ -462,19 +470,32 @@ fn dir_compare(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String
     let recursive = bool_arg(obj, "recursive", false);
     let max_diffs = u64_arg(obj, "max_diffs", 100).clamp(1, 500) as usize;
 
-    let left_meta = std::fs::metadata(&left_real).map_err(|err| format!("left metadata failed: {err}"))?;
-    let right_meta = std::fs::metadata(&right_real).map_err(|err| format!("right metadata failed: {err}"))?;
+    let left_meta =
+        std::fs::metadata(&left_real).map_err(|err| format!("left metadata failed: {err}"))?;
+    let right_meta =
+        std::fs::metadata(&right_real).map_err(|err| format!("right metadata failed: {err}"))?;
     if !left_meta.is_dir() || !right_meta.is_dir() {
         return Err("dir_compare requires both paths to be directories".to_string());
     }
 
-    let left_entries = collect_dir_signatures(&left_real, include_hidden, recursive, max_diffs * 20)?;
-    let right_entries = collect_dir_signatures(&right_real, include_hidden, recursive, max_diffs * 20)?;
+    let left_entries =
+        collect_dir_signatures(&left_real, include_hidden, recursive, max_diffs * 20)?;
+    let right_entries =
+        collect_dir_signatures(&right_real, include_hidden, recursive, max_diffs * 20)?;
 
-    let left_keys = left_entries.keys().cloned().collect::<std::collections::BTreeSet<_>>();
-    let right_keys = right_entries.keys().cloned().collect::<std::collections::BTreeSet<_>>();
+    let left_keys = left_entries
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let right_keys = right_entries
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
 
-    let common = left_keys.intersection(&right_keys).cloned().collect::<Vec<_>>();
+    let common = left_keys
+        .intersection(&right_keys)
+        .cloned()
+        .collect::<Vec<_>>();
     let left_only = left_keys
         .difference(&right_keys)
         .take(max_diffs)
@@ -489,7 +510,10 @@ fn dir_compare(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String
     let mut kind_mismatches = Vec::new();
     for key in common.iter().take(max_diffs) {
         let left_kind = left_entries.get(key).map(String::as_str).unwrap_or("other");
-        let right_kind = right_entries.get(key).map(String::as_str).unwrap_or("other");
+        let right_kind = right_entries
+            .get(key)
+            .map(String::as_str)
+            .unwrap_or("other");
         if left_kind != right_kind {
             kind_mismatches.push(json!({
                 "path": key,
@@ -526,7 +550,8 @@ fn extract_field(workspace_root: &Path, obj: &Map<String, Value>) -> Result<Stri
     let path = required_str(obj, "path")?;
     let field_path = required_str(obj, "field_path")?;
     let real = resolve_path(workspace_root, path)?;
-    let (format, root_value) = parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
+    let (format, root_value) =
+        parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
 
     let found = lookup_field_value(&root_value, field_path);
     let (exists, value, value_type, value_text) = match found {
@@ -560,7 +585,8 @@ fn extract_fields(workspace_root: &Path, obj: &Map<String, Value>) -> Result<Str
     if field_paths.is_empty() {
         return Err("field_paths is required".to_string());
     }
-    let (format, root_value) = parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
+    let (format, root_value) =
+        parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
 
     let mut results = Vec::new();
     for field_path in field_paths {
@@ -599,7 +625,8 @@ fn structured_keys(workspace_root: &Path, obj: &Map<String, Value>) -> Result<St
     let real = resolve_path(workspace_root, path)?;
     let field_path = obj.get("field_path").and_then(Value::as_str).unwrap_or("");
     let max_keys = u64_arg(obj, "max_keys", 200).clamp(1, 1000) as usize;
-    let (format, root_value) = parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
+    let (format, root_value) =
+        parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
 
     let target = if field_path.is_empty() {
         Some(&root_value)
@@ -749,8 +776,14 @@ fn read_range(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String,
         .unwrap_or("head")
         .to_ascii_lowercase();
     let n = u64_arg(obj, "n", 20).clamp(1, 500) as usize;
-    let start = obj.get("start_line").and_then(Value::as_u64).map(|v| v as usize);
-    let end = obj.get("end_line").and_then(Value::as_u64).map(|v| v as usize);
+    let start = obj
+        .get("start_line")
+        .and_then(Value::as_u64)
+        .map(|v| v as usize);
+    let end = obj
+        .get("end_line")
+        .and_then(Value::as_u64)
+        .map(|v| v as usize);
 
     let (from, to) = if total_lines == 0 {
         (0, 0)
@@ -762,7 +795,9 @@ fn read_range(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String,
             }
             "range" => {
                 let from = start.unwrap_or(1).max(1);
-                let to = end.unwrap_or(from.saturating_add(n).saturating_sub(1)).max(from);
+                let to = end
+                    .unwrap_or(from.saturating_add(n).saturating_sub(1))
+                    .max(from);
                 (from, to.min(total_lines))
             }
             _ => (1, n.min(total_lines)),
@@ -797,7 +832,8 @@ fn compare_paths(workspace_root: &Path, obj: &Map<String, Value>) -> Result<Stri
     let right = required_str(obj, "right_path")?;
     let left_real = resolve_path(workspace_root, left)?;
     let right_real = resolve_path(workspace_root, right)?;
-    let left_meta = std::fs::metadata(&left_real).map_err(|err| format!("left metadata failed: {err}"))?;
+    let left_meta =
+        std::fs::metadata(&left_real).map_err(|err| format!("left metadata failed: {err}"))?;
     let right_meta =
         std::fs::metadata(&right_real).map_err(|err| format!("right metadata failed: {err}"))?;
 
@@ -848,11 +884,13 @@ fn path_batch_facts(workspace_root: &Path, obj: &Map<String, Value>) -> Result<S
                 "exists": true,
                 "fact": build_path_fact(workspace_root, &real, &meta),
             })),
-            Err(err) if include_missing && err.kind() == io::ErrorKind::NotFound => facts.push(json!({
-                "path": path,
-                "exists": false,
-                "error": "not found",
-            })),
+            Err(err) if include_missing && err.kind() == io::ErrorKind::NotFound => {
+                facts.push(json!({
+                    "path": path,
+                    "exists": false,
+                    "error": "not found",
+                }))
+            }
             Err(err) => return Err(format!("metadata failed for {}: {err}", real.display())),
         }
     }
@@ -884,7 +922,8 @@ fn diagnose_runtime(workspace_root: &Path, obj: &Map<String, Value>) -> Result<S
         None
     };
     let ports_snapshot = if include_ports {
-        run_command_lines("ss", &["-ltn"], 10).or_else(|| run_command_lines("netstat", &["-ltn"], 10))
+        run_command_lines("ss", &["-ltn"], 10)
+            .or_else(|| run_command_lines("netstat", &["-ltn"], 10))
     } else {
         None
     };
@@ -936,7 +975,10 @@ fn summarize_meminfo() -> Value {
         let Some((key, value)) = line.split_once(':') else {
             continue;
         };
-        if matches!(key, "MemTotal" | "MemFree" | "MemAvailable" | "SwapTotal" | "SwapFree") {
+        if matches!(
+            key,
+            "MemTotal" | "MemFree" | "MemAvailable" | "SwapTotal" | "SwapFree"
+        ) {
             picked.insert(key.to_string(), Value::String(value.trim().to_string()));
         }
     }
@@ -1095,7 +1137,13 @@ fn string_list_arg(obj: &Map<String, Value>, key: &str) -> Vec<String> {
 }
 
 fn detect_format_from_path(path: &Path) -> String {
-    match path.extension().and_then(OsStr::to_str).unwrap_or("").to_ascii_lowercase().as_str() {
+    match path
+        .extension()
+        .and_then(OsStr::to_str)
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "json" => "json",
         "toml" => "toml",
         "yaml" | "yml" => "yaml",
@@ -1104,20 +1152,25 @@ fn detect_format_from_path(path: &Path) -> String {
     .to_string()
 }
 
-fn parse_structured_root(path: &Path, format_hint: Option<&str>) -> Result<(String, Value), String> {
+fn parse_structured_root(
+    path: &Path,
+    format_hint: Option<&str>,
+) -> Result<(String, Value), String> {
     let format = format_hint
         .map(|v| v.to_ascii_lowercase())
         .unwrap_or_else(|| detect_format_from_path(path));
     let raw = std::fs::read_to_string(path).map_err(|err| format!("read file failed: {err}"))?;
     let root_value = match format.as_str() {
-        "json" => serde_json::from_str::<Value>(&raw).map_err(|err| format!("json parse failed: {err}"))?,
+        "json" => serde_json::from_str::<Value>(&raw)
+            .map_err(|err| format!("json parse failed: {err}"))?,
         "toml" => {
-            let value = raw.parse::<toml::Value>().map_err(|err| format!("toml parse failed: {err}"))?;
+            let value = raw
+                .parse::<toml::Value>()
+                .map_err(|err| format!("toml parse failed: {err}"))?;
             serde_json::to_value(value).map_err(|err| format!("toml convert failed: {err}"))?
         }
-        "yaml" | "yml" => {
-            serde_yaml::from_str::<Value>(&raw).map_err(|err| format!("yaml parse failed: {err}"))?
-        }
+        "yaml" | "yml" => serde_yaml::from_str::<Value>(&raw)
+            .map_err(|err| format!("yaml parse failed: {err}"))?,
         other => return Err(format!("unsupported format: {other}; use json|toml|yaml")),
     };
     Ok((format, root_value))
@@ -1241,7 +1294,8 @@ fn build_tree_summary_node(
     }
     state.remaining_nodes -= 1;
 
-    let meta = std::fs::metadata(path).map_err(|err| format!("metadata failed for {}: {err}", path.display()))?;
+    let meta = std::fs::metadata(path)
+        .map_err(|err| format!("metadata failed for {}: {err}", path.display()))?;
     let mut node = build_path_fact(workspace_root, path, &meta);
     if !meta.is_dir() {
         return Ok(node);
@@ -1297,8 +1351,10 @@ fn build_tree_summary_node(
 
 fn same_file_content(left: &Path, right: &Path) -> Result<bool, String> {
     const MAX_COMPARE_BYTES: u64 = 4 * 1024 * 1024;
-    let left_meta = std::fs::metadata(left).map_err(|err| format!("left metadata failed: {err}"))?;
-    let right_meta = std::fs::metadata(right).map_err(|err| format!("right metadata failed: {err}"))?;
+    let left_meta =
+        std::fs::metadata(left).map_err(|err| format!("left metadata failed: {err}"))?;
+    let right_meta =
+        std::fs::metadata(right).map_err(|err| format!("right metadata failed: {err}"))?;
     if left_meta.len() != right_meta.len() {
         return Ok(false);
     }

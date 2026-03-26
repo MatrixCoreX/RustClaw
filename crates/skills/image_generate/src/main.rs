@@ -63,6 +63,7 @@ struct LlmConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct VendorConfig {
     base_url: String,
+    #[serde(default)]
     api_key: String,
     model: String,
     #[serde(default)]
@@ -138,11 +139,17 @@ impl TextCatalog {
     fn for_lang(workspace_root: &Path, cfg: &ImageSkillConfig, lang: &str) -> Self {
         let mut current = default_i18n_dict(lang);
         let lang_tag = normalize_lang_tag(lang);
-        let default_path = workspace_root.join(format!("configs/i18n/image_generate.{lang_tag}.toml"));
+        let default_path =
+            workspace_root.join(format!("configs/i18n/image_generate.{lang_tag}.toml"));
         if let Some(external) = load_external_i18n(&default_path) {
             current.extend(external);
         }
-        if let Some(custom) = cfg.i18n_path.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        if let Some(custom) = cfg
+            .i18n_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             let custom_path = if Path::new(custom).is_absolute() {
                 PathBuf::from(custom)
             } else {
@@ -227,7 +234,11 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(String, Value), String> {
+fn execute(
+    cfg: &RootConfig,
+    workspace_root: &Path,
+    args: Value,
+) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -243,7 +254,11 @@ fn execute(cfg: &RootConfig, workspace_root: &Path, args: Value) -> Result<(Stri
         .unwrap_or("1024x1024");
     let style = obj.get("style").and_then(|v| v.as_str());
     let quality = obj.get("quality").and_then(|v| v.as_str());
-    let n = obj.get("n").and_then(|v| v.as_u64()).unwrap_or(1).clamp(1, 4);
+    let n = obj
+        .get("n")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1)
+        .clamp(1, 4);
     let timeout_seconds = obj
         .get("timeout_seconds")
         .and_then(|v| v.as_u64())
@@ -328,11 +343,12 @@ fn first_model_candidate<'a>(
     if let Some(v) = default_model.map(str::trim).filter(|v| !v.is_empty()) {
         return Some(v);
     }
-    if let Some(v) = vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty())) {
+    if let Some(v) =
+        vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+    {
         return Some(v);
     }
-    models
-        .and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
+    models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
 }
 
 fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'a Vec<String>> {
@@ -439,7 +455,9 @@ fn call_generate(
         VendorKind::OpenAI => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build openai client failed: {err}"))?;
             openai_compatible_generate(
@@ -459,17 +477,29 @@ fn call_generate(
         VendorKind::Google => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build google client failed: {err}"))?;
             google_generate(
-                &client, vcfg, &model, prompt, size, style, quality, n, output_path,
+                &client,
+                vcfg,
+                &model,
+                prompt,
+                size,
+                style,
+                quality,
+                n,
+                output_path,
             )?;
             Ok((model, "native"))
         }
         VendorKind::Anthropic => {
             if mode == AdapterMode::Native {
-                return Err("anthropic native image generation adapter is not available".to_string());
+                return Err(
+                    "anthropic native image generation adapter is not available".to_string()
+                );
             }
             if !cfg.image_generation.allow_compat_adapters && mode != AdapterMode::Compat {
                 return Err(
@@ -479,7 +509,9 @@ fn call_generate(
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build anthropic client failed: {err}"))?;
             openai_compatible_generate(
@@ -511,18 +543,31 @@ fn call_generate(
             }
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
             openai_compatible_generate(
-                &client, vendor_name, vcfg, &model, prompt, size, style, quality, n, output_path,
+                &client,
+                vendor_name,
+                vcfg,
+                &model,
+                prompt,
+                size,
+                style,
+                quality,
+                n,
+                output_path,
             )?;
             Ok((model, "compat"))
         }
         VendorKind::MiniMax => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
             minimax_generate(
@@ -541,7 +586,9 @@ fn call_generate(
         VendorKind::Qwen => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
             let client = Client::builder()
-                .timeout(Duration::from_secs(timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30))))
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
                 .build()
                 .map_err(|err| format!("build qwen client failed: {err}"))?;
             if should_use_qwen_native(
@@ -570,7 +617,16 @@ fn call_generate(
                     );
                 }
                 openai_compatible_generate(
-                    &client, "qwen", vcfg, &model, prompt, size, style, quality, n, output_path,
+                    &client,
+                    "qwen",
+                    vcfg,
+                    &model,
+                    prompt,
+                    size,
+                    style,
+                    quality,
+                    n,
+                    output_path,
                 )?;
                 Ok((model, "compat"))
             }
@@ -583,9 +639,9 @@ fn qwen_uses_native_image_api(cfg: &ImageSkillConfig, model: &str) -> bool {
     cfg.native_models
         .as_ref()
         .and_then(|list| {
-            list.iter()
-                .map(|s| s.trim())
-                .find(|candidate| !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested))
+            list.iter().map(|s| s.trim()).find(|candidate| {
+                !candidate.is_empty() && candidate.eq_ignore_ascii_case(requested)
+            })
         })
         .is_some()
 }
@@ -753,7 +809,8 @@ fn qwen_native_generate(
                 .bytes()
                 .map_err(|err| format!("read generated image bytes failed: {err}"))?;
             ensure_parent_dir(output_path)?;
-            std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+            std::fs::write(output_path, &bytes)
+                .map_err(|err| format!("write output failed: {err}"))?;
             return Ok(());
         }
         if status == "FAILED" || status == "CANCELED" || status == "CANCELLED" {
@@ -885,7 +942,8 @@ fn qwen_wan26_generate(
                 .bytes()
                 .map_err(|err| format!("read generated image bytes failed: {err}"))?;
             ensure_parent_dir(output_path)?;
-            std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+            std::fs::write(output_path, &bytes)
+                .map_err(|err| format!("write output failed: {err}"))?;
             return Ok(());
         }
         if status == "FAILED" || status == "CANCELED" || status == "CANCELLED" {
@@ -1012,8 +1070,12 @@ fn minimax_generate(
     let raw = resp
         .text()
         .map_err(|err| format!("read minimax response failed: {err}"))?;
-    let v: Value = serde_json::from_str(&raw)
-        .map_err(|err| format!("parse minimax response failed: {err}; body={}", truncate(&raw, 400)))?;
+    let v: Value = serde_json::from_str(&raw).map_err(|err| {
+        format!(
+            "parse minimax response failed: {err}; body={}",
+            truncate(&raw, 400)
+        )
+    })?;
     if status >= 300 {
         return Err(format!(
             "minimax error status={status}: {}",
@@ -1097,7 +1159,10 @@ fn google_generate(
         .json()
         .map_err(|err| format!("parse google response failed: {err}"))?;
     if status >= 300 {
-        return Err(format!("google error status={status}: {}", truncate(&v.to_string(), 400)));
+        return Err(format!(
+            "google error status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
     }
     if let Some(parts) = v
         .get("candidates")
@@ -1189,7 +1254,60 @@ fn load_root_config() -> RootConfig {
             cfg.command_intent = parsed;
         }
     }
+    apply_env_overrides(&mut cfg);
     cfg
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
+    if let (Some(value), Some(cfg)) = (env_non_empty(key), target.as_mut()) {
+        cfg.api_key = value;
+    }
+}
+
+fn apply_env_overrides(cfg: &mut RootConfig) {
+    apply_vendor_api_key_env(&mut cfg.llm.openai, "OPENAI_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.google, "GOOGLE_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.anthropic, "ANTHROPIC_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.grok, "GROK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.deepseek, "DEEPSEEK_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.qwen, "QWEN_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.minimax, "MINIMAX_API_KEY");
+
+    apply_vendor_api_key_env(
+        &mut cfg.image_generation.providers.openai,
+        "IMAGE_GENERATION_OPENAI_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_generation.providers.google,
+        "IMAGE_GENERATION_GOOGLE_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_generation.providers.anthropic,
+        "IMAGE_GENERATION_ANTHROPIC_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_generation.providers.grok,
+        "IMAGE_GENERATION_GROK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_generation.providers.deepseek,
+        "IMAGE_GENERATION_DEEPSEEK_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_generation.providers.qwen,
+        "IMAGE_GENERATION_QWEN_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.image_generation.providers.minimax,
+        "IMAGE_GENERATION_MINIMAX_API_KEY",
+    );
 }
 
 fn workspace_root() -> PathBuf {
@@ -1327,7 +1445,10 @@ fn size_to_minimax_aspect_ratio(size: &str) -> String {
     let normalized = size.trim().replace('X', "x");
     let parts = normalized.split('x').collect::<Vec<_>>();
     if parts.len() == 2 {
-        if let (Ok(w), Ok(h)) = (parts[0].trim().parse::<u64>(), parts[1].trim().parse::<u64>()) {
+        if let (Ok(w), Ok(h)) = (
+            parts[0].trim().parse::<u64>(),
+            parts[1].trim().parse::<u64>(),
+        ) {
             if w > 0 && h > 0 {
                 let g = gcd_u64(w, h);
                 return format!("{}:{}", w / g, h / g);
@@ -1424,6 +1545,9 @@ mod tests {
                 }]
             }
         });
-        assert_eq!(extract_qwen_output_image_url(&v), Some("https://example.com/demo.png"));
+        assert_eq!(
+            extract_qwen_output_image_url(&v),
+            Some("https://example.com/demo.png")
+        );
     }
 }

@@ -92,6 +92,7 @@
 - `read_range` and `compare_paths` return explicit read/metadata errors for missing or unreadable target paths.
 - `tree_summary` intentionally truncates deep/wide trees and reports truncation metadata instead of dumping the full directory.
 - Runtime data collection should degrade gracefully where possible (for example, missing `/proc` fields produce fallback values instead of fabricated data).
+- Successful responses that already use JSON text are also mirrored into the optional `extra` field for machine-readable consumers.
 
 ## Request/Response Examples
 ### Example 1
@@ -101,7 +102,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"{\"hostname\":\"host\",\"pid\":1234,\"cwd\":\"/workspace\",\"workspace_root\":\"/workspace\",\"os\":\"linux\",\"arch\":\"x86_64\"}","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"hostname\":\"host\",\"pid\":1234,\"cwd\":\"/workspace\",\"workspace_root\":\"/workspace\",\"os\":\"linux\",\"arch\":\"x86_64\"}","extra":{"hostname":"host","pid":1234,"cwd":"/workspace","workspace_root":"/workspace","os":"linux","arch":"x86_64"},"error_text":null}
 ```
 
 ### Example 2
@@ -111,7 +112,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"{\"action\":\"inventory_dir\",\"names\":[\"a.txt\",\"b.md\"],\"counts\":{\"total\":2}}","error_text":null}
+{"request_id":"demo-2","status":"ok","text":"{\"action\":\"inventory_dir\",\"names\":[\"a.txt\",\"b.md\"],\"counts\":{\"total\":2}}","extra":{"action":"inventory_dir","names":["a.txt","b.md"],"counts":{"total":2}},"error_text":null}
 ```
 
 ### Example 3
@@ -121,7 +122,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-3","status":"ok","text":"{\"action\":\"extract_field\",\"exists\":true,\"value_type\":\"string\",\"value_text\":\"0.1.3\"}","error_text":null}
+{"request_id":"demo-3","status":"ok","text":"{\"action\":\"extract_field\",\"exists\":true,\"value_type\":\"string\",\"value_text\":\"0.1.3\"}","extra":{"action":"extract_field","exists":true,"value_type":"string","value_text":"0.1.3"},"error_text":null}
 ```
 
 ### Example 4
@@ -131,7 +132,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-4","status":"ok","text":"{\"action\":\"read_range\",\"start_line\":1,\"end_line\":8,\"excerpt\":\"1|[server]\\n2|port = 8080\"}","error_text":null}
+{"request_id":"demo-4","status":"ok","text":"{\"action\":\"read_range\",\"start_line\":1,\"end_line\":8,\"excerpt\":\"1|[server]\\n2|port = 8080\"}","extra":{"action":"read_range","start_line":1,"end_line":8,"excerpt":"1|[server]\n2|port = 8080"},"error_text":null}
 ```
 
 ### Example 5
@@ -141,7 +142,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-5","status":"ok","text":"{\"action\":\"extract_fields\",\"count\":2,\"results\":[{\"field_path\":\"workspace.package.version\",\"exists\":true},{\"field_path\":\"workspace.members.0\",\"exists\":true}]}","error_text":null}
+{"request_id":"demo-5","status":"ok","text":"{\"action\":\"extract_fields\",\"count\":2,\"results\":[{\"field_path\":\"workspace.package.version\",\"exists\":true},{\"field_path\":\"workspace.members.0\",\"exists\":true}]}","extra":{"action":"extract_fields","count":2,"results":[{"field_path":"workspace.package.version","exists":true},{"field_path":"workspace.members.0","exists":true}]},"error_text":null}
 ```
 
 ### Example 6
@@ -151,5 +152,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-6","status":"ok","text":"{\"action\":\"dir_compare\",\"counts\":{\"common\":8,\"left_only\":3,\"right_only\":1},\"left_only\":[\"channels\"],\"right_only\":[\"example.toml\"]}","error_text":null}
+{"request_id":"demo-6","status":"ok","text":"{\"action\":\"dir_compare\",\"counts\":{\"common\":8,\"left_only\":3,\"right_only\":1},\"left_only\":[\"channels\"],\"right_only\":[\"example.toml\"]}","extra":{"action":"dir_compare","counts":{"common":8,"left_only":3,"right_only":1},"left_only":["channels"],"right_only":["example.toml"]},"error_text":null}
 ```

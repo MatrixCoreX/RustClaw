@@ -17,6 +17,7 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -28,16 +29,18 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: None,
                     error_text: Some(err),
                 },
             },
@@ -45,6 +48,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -54,7 +58,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
+fn execute(args: Value) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -78,19 +82,42 @@ fn execute(args: Value) -> Result<String, String> {
 
     let root = workspace_root();
     let db = resolve_path(&root, db_path)?;
-    let conn = Connection::open(db).map_err(|err| format!("open sqlite failed: {err}"))?;
+    let conn = Connection::open(&db).map_err(|err| format!("open sqlite failed: {err}"))?;
+    let db_path_text = db.display().to_string();
 
     match action {
-        "sqlite_query" => run_query(&conn, &sql, obj),
+        "sqlite_query" => run_query(&conn, &sql, obj).map(|payload| {
+            (
+                payload.to_string(),
+                json!({
+                    "action": "sqlite_query",
+                    "db_path": db_path_text,
+                    "sql": sql,
+                    "result": payload,
+                }),
+            )
+        }),
         "sqlite_execute" => {
-            let confirm = obj.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false);
+            let confirm = obj
+                .get("confirm")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if !confirm {
                 return Err("sqlite_execute requires confirm=true".to_string());
             }
             let changed = conn
                 .execute(&sql, [])
                 .map_err(|err| format!("execute failed: {err}"))?;
-            Ok(json!({"rows_affected": changed}).to_string())
+            let payload = json!({"rows_affected": changed});
+            Ok((
+                payload.to_string(),
+                json!({
+                    "action": "sqlite_execute",
+                    "db_path": db_path_text,
+                    "sql": sql,
+                    "result": payload,
+                }),
+            ))
         }
         _ => Err("unsupported action; use sqlite_query|sqlite_execute".to_string()),
     }
@@ -100,7 +127,7 @@ fn run_query(
     conn: &Connection,
     sql: &str,
     obj: &serde_json::Map<String, Value>,
-) -> Result<String, String> {
+) -> Result<Value, String> {
     let lower = sql.to_ascii_lowercase();
     if !(lower.starts_with("select") || lower.starts_with("pragma") || lower.starts_with("with")) {
         return Err("sqlite_query only allows SELECT/PRAGMA/WITH".to_string());
@@ -117,16 +144,23 @@ fn run_query(
         .map_err(|err| format!("prepare query failed: {err}"))?;
     let col_count = stmt.column_count();
     let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
-    let mut rows = stmt.query([]).map_err(|err| format!("run query failed: {err}"))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|err| format!("run query failed: {err}"))?;
     let mut out_rows = Vec::new();
-    while let Some(row) = rows.next().map_err(|err| format!("next row failed: {err}"))? {
+    while let Some(row) = rows
+        .next()
+        .map_err(|err| format!("next row failed: {err}"))?
+    {
         let mut item = serde_json::Map::new();
         for i in 0..col_count {
             let key = columns
                 .get(i)
                 .cloned()
                 .unwrap_or_else(|| format!("col_{i}"));
-            let value = row.get_ref(i).map_err(|err| format!("read col failed: {err}"))?;
+            let value = row
+                .get_ref(i)
+                .map_err(|err| format!("read col failed: {err}"))?;
             item.insert(key, sql_value_to_json(value));
         }
         out_rows.push(Value::Object(item));
@@ -134,7 +168,7 @@ fn run_query(
             break;
         }
     }
-    Ok(json!({"columns": columns, "rows": out_rows}).to_string())
+    Ok(json!({"columns": columns, "rows": out_rows}))
 }
 
 fn sql_value_to_json(v: ValueRef<'_>) -> Value {

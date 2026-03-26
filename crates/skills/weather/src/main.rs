@@ -110,7 +110,11 @@ fn execute(args: Value) -> Result<String, String> {
             (lat, lon, name)
         }
         (None, Some(lat), Some(lon)) => (lat, lon, format!("{lat:.2}°N, {lon:.2}°E")),
-        _ => return Err("请提供城市名（city/location/place/q）或经纬度（latitude + longitude）".to_string()),
+        _ => {
+            return Err(
+                "请提供城市名（city/location/place/q）或经纬度（latitude + longitude）".to_string(),
+            )
+        }
     };
 
     let client = Client::builder()
@@ -139,12 +143,7 @@ fn execute(args: Value) -> Result<String, String> {
     let day_night = if cur.is_day == 1 { "白天" } else { "夜间" };
     let text = format!(
         "{} {}：{}，气温 {}°C，风速 {} km/h，风向 {}°。",
-        place_name,
-        day_night,
-        desc,
-        cur.temperature,
-        cur.windspeed,
-        cur.winddirection as u32
+        place_name, day_night, desc, cur.temperature, cur.windspeed, cur.winddirection as u32
     );
     Ok(text)
 }
@@ -154,7 +153,11 @@ fn geocode(query: &str) -> Result<(f64, f64, String), String> {
         .timeout(std::time::Duration::from_secs(8))
         .build()
         .map_err(|e| e.to_string())?;
-    let url = format!("{}?name={}&count=1", GEOCODE_URL, urlencoding::encode(query));
+    let url = format!(
+        "{}?name={}&count=1",
+        GEOCODE_URL,
+        urlencoding::encode(query)
+    );
     let res = client
         .get(&url)
         .send()

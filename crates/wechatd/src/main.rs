@@ -15,17 +15,17 @@ use axum::{Json, Router};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
-use claw_core::wechat_reply_media::{
-    extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
-    WechatOutboundMedia, WechatOutboundSource,
-};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
 };
-use config_section::{AppConfig, WechatSection};
+use claw_core::wechat_reply_media::{
+    extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
+    WechatOutboundMedia, WechatOutboundSource,
+};
 use config_cache::WeixinConfigManager;
+use config_section::{AppConfig, WechatSection};
 use qrcodegen::{QrCode, QrCodeEcc};
 use regex::Regex;
 use reqwest::Client;
@@ -48,6 +48,25 @@ const ACTIVE_LOGIN_TTL_MS: u64 = 5 * 60_000;
 const WECHAT_TEXT_CHUNK_CHARS: usize = 1200;
 const WECHATD_CHANNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const WECHAT_MEDIA_OUTBOUND_TEMP_DIR: &str = "/tmp/rustclaw/wechatd/media/outbound-temp";
+
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_string_env(target: &mut String, key: &str) {
+    if let Some(value) = env_non_empty(key) {
+        *target = value;
+    }
+}
+
+fn apply_wechat_env_overrides(config: &mut AppConfig) {
+    apply_string_env(&mut config.wechat.bot_token, "WECHAT_BOT_TOKEN");
+    apply_string_env(&mut config.wechat.wechat_uin_base64, "WECHAT_UIN_BASE64");
+    apply_string_env(&mut config.wechat.sk_route_tag, "WECHAT_SK_ROUTE_TAG");
+}
 
 fn wechat_ilink_auth(sec: &WechatSection) -> IlinkAuth<'_> {
     IlinkAuth {
@@ -345,7 +364,10 @@ fn wechat_runtime_status_file_path(workspace_root: &Path) -> PathBuf {
 }
 
 fn wechat_session_file_path(workspace_root: &Path) -> PathBuf {
-    workspace_root.join("data").join("wechatd").join("session.json")
+    workspace_root
+        .join("data")
+        .join("wechatd")
+        .join("session.json")
 }
 
 fn wechat_sync_buf_file_path(workspace_root: &Path) -> PathBuf {
@@ -424,7 +446,12 @@ fn body_from_message_item(item: &MessageItem) -> String {
             return text.to_string();
         }
         let mut quoted_parts = Vec::new();
-        if let Some(title) = ref_msg.title.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        if let Some(title) = ref_msg
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             quoted_parts.push(title.to_string());
         }
         if let Some(ref_item) = ref_msg.message_item.as_deref() {
@@ -472,7 +499,11 @@ fn first_item_or_ref_item(
         }
     }
     for item in items {
-        let Some(ref_item) = item.ref_msg.as_ref().and_then(|v| v.message_item.as_deref()) else {
+        let Some(ref_item) = item
+            .ref_msg
+            .as_ref()
+            .and_then(|v| v.message_item.as_deref())
+        else {
             continue;
         };
         if matches(ref_item) {
@@ -704,10 +735,7 @@ fn load_session_file(path: &Path) -> Option<PersistedSession> {
     serde_json::from_str(&raw).ok()
 }
 
-async fn update_status(
-    state: &State,
-    mut mutate: impl FnMut(&mut WechatRuntimeStatus),
-) {
+async fn update_status(state: &State, mut mutate: impl FnMut(&mut WechatRuntimeStatus)) {
     let snapshot = {
         let mut guard = state.status.write().await;
         mutate(&mut guard);
@@ -904,7 +932,8 @@ async fn login_qr_wait(
                     return Ok(Json(LoginWaitResponse {
                         connected: false,
                         qr_status: "confirmed".to_string(),
-                        message: "登录失败：服务器未返回完整 bot_token / ilink_bot_id。".to_string(),
+                        message: "登录失败：服务器未返回完整 bot_token / ilink_bot_id。"
+                            .to_string(),
                         account_id: None,
                         user_id: None,
                     }));
@@ -981,10 +1010,7 @@ async fn fetch_qrcode(
     bot_type: &str,
 ) -> Result<QRCodeResponse, String> {
     let base = format!("{}/", section.api_base_url.trim_end_matches('/'));
-    let url = format!(
-        "{}ilink/bot/get_bot_qrcode?bot_type={}",
-        base, bot_type
-    );
+    let url = format!("{}ilink/bot/get_bot_qrcode?bot_type={}", base, bot_type);
     let req = client.get(&url);
     let response = ilink::apply_route_tag(req, section)
         .send()
@@ -1008,9 +1034,7 @@ async fn poll_qr_status(
 ) -> Result<QRStatusResponse, String> {
     let base = format!("{}/", section.api_base_url.trim_end_matches('/'));
     let url = format!("{}ilink/bot/get_qrcode_status?qrcode={}", base, qrcode);
-    let req = client
-        .get(&url)
-        .header("iLink-App-ClientVersion", "1");
+    let req = client.get(&url).header("iLink-App-ClientVersion", "1");
     let response = ilink::apply_route_tag(req, section)
         .send()
         .await
@@ -1059,7 +1083,8 @@ async fn get_updates(
                 errcode: None,
                 errmsg: None,
                 msgs: Vec::new(),
-                get_updates_buf: (!get_updates_buf.is_empty()).then_some(get_updates_buf.to_string()),
+                get_updates_buf: (!get_updates_buf.is_empty())
+                    .then_some(get_updates_buf.to_string()),
                 longpolling_timeout_ms: None,
             });
         }
@@ -1095,11 +1120,10 @@ async fn remember_context_token(state: &State, user_id: &str, token: &str) {
         let session = state.session.read().await;
         session_account_id(session.as_ref())
     };
-    state
-        .context_tokens
-        .write()
-        .await
-        .insert(context_token_store_key(&account_id, user_id), token.to_string());
+    state.context_tokens.write().await.insert(
+        context_token_store_key(&account_id, user_id),
+        token.to_string(),
+    );
 }
 
 async fn resolve_delivery_context_token(
@@ -1158,15 +1182,16 @@ fn markdown_to_plain_text(text: &str) -> String {
     let mut lines = Vec::new();
     for line in result.lines() {
         let trimmed = line.trim();
-        let mut normalized = if trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.len() >= 2 {
-            trimmed[1..trimmed.len() - 1]
-                .split('|')
-                .map(str::trim)
-                .collect::<Vec<_>>()
-                .join("  ")
-        } else {
-            line.to_string()
-        };
+        let mut normalized =
+            if trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.len() >= 2 {
+                trimmed[1..trimmed.len() - 1]
+                    .split('|')
+                    .map(str::trim)
+                    .collect::<Vec<_>>()
+                    .join("  ")
+            } else {
+                line.to_string()
+            };
         normalized = HEADING_RE
             .get_or_init(|| Regex::new(r"^\s{0,3}#{1,6}\s+").expect("valid heading regex"))
             .replace(&normalized, "")
@@ -1347,7 +1372,9 @@ async fn send_text_reply_via_session(
     let Some(token) = token else {
         return;
     };
-    let Some(context_token) = resolve_delivery_context_token(state, to_user_id, context_token).await else {
+    let Some(context_token) =
+        resolve_delivery_context_token(state, to_user_id, context_token).await
+    else {
         return;
     };
     let _ = send_text_message(
@@ -1583,15 +1610,16 @@ async fn deliver_wechat_clawd_reply(
     };
     let base_url = session_base_url(&state.config, session_guard.as_ref());
     drop(session_guard);
-    let Some(context_token) = resolve_delivery_context_token(state, from_user_id, context_token).await else {
+    let Some(context_token) =
+        resolve_delivery_context_token(state, from_user_id, context_token).await
+    else {
         warn!("wechatd: deliver reply skipped (missing context_token)");
         return;
     };
     let timeout_ms = state.config.request_timeout_seconds.max(1) * 1_000;
     let cdn = state.config.cdn_base_url.trim();
     let auth = wechat_ilink_auth(&state.config);
-    let media =
-        extract_wechat_outbound_media(reply_text, &state.workspace_root);
+    let media = extract_wechat_outbound_media(reply_text, &state.workspace_root);
     let stripped = markdown_to_plain_text(&strip_wechat_delivery_lines(reply_text));
     let no_outbound_media = media.is_empty();
     if !stripped.trim().is_empty() {
@@ -1752,8 +1780,17 @@ async fn submit_wechat_task_with_payload(
         kind,
         payload,
     };
-    let submit_url = format!("{}/v1/tasks", state.config.clawd_base_url.trim_end_matches('/'));
-    let submit_resp = match state.client.post(&submit_url).json(&submit_req).send().await {
+    let submit_url = format!(
+        "{}/v1/tasks",
+        state.config.clawd_base_url.trim_end_matches('/')
+    );
+    let submit_resp = match state
+        .client
+        .post(&submit_url)
+        .json(&submit_req)
+        .send()
+        .await
+    {
         Ok(resp) => resp,
         Err(err) => {
             warn!("wechatd: task submit failed err={}", err);
@@ -1790,15 +1827,17 @@ async fn submit_wechat_task_with_payload(
     };
     let interval = Duration::from_secs(state.config.typing_refresh_interval_secs.max(1));
     let _typing_guard = match (&typing_ticket, &poll_token) {
-        (Some(ticket), Some(tok)) if !ticket.trim().is_empty() => Some(WechatTypingHeartbeat::start(
-            state.client.clone(),
-            state.config.clone(),
-            poll_base,
-            tok.clone(),
-            from_user_id.clone(),
-            ticket.clone(),
-            interval,
-        )),
+        (Some(ticket), Some(tok)) if !ticket.trim().is_empty() => {
+            Some(WechatTypingHeartbeat::start(
+                state.client.clone(),
+                state.config.clone(),
+                poll_base,
+                tok.clone(),
+                from_user_id.clone(),
+                ticket.clone(),
+                interval,
+            ))
+        }
         _ => None,
     };
     loop {
@@ -1868,7 +1907,13 @@ async fn submit_wechat_task_with_payload(
                 let error_text = task
                     .error_text
                     .unwrap_or_else(|| "请求处理失败，请稍后重试。".to_string());
-                send_text_reply_via_session(&state, &from_user_id, context_token.as_deref(), &error_text).await;
+                send_text_reply_via_session(
+                    &state,
+                    &from_user_id,
+                    context_token.as_deref(),
+                    &error_text,
+                )
+                .await;
                 break;
             }
         }
@@ -2061,22 +2106,29 @@ async fn spawn_inbound_skill_flow(
 }
 
 async fn handle_incoming_message(state: State, msg: WeixinMessage) {
-    let Some(from_user_id) = msg.from_user_id.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string) else {
+    let Some(from_user_id) = msg
+        .from_user_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+    else {
         return;
     };
-    if let Some(token) = msg.context_token.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(token) = msg
+        .context_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         remember_context_token(&state, &from_user_id, token).await;
     }
     let prefetched_typing_ticket =
         resolve_typing_ticket_for_peer(&state, &from_user_id, msg.context_token.as_deref()).await;
     // Cover CDN download / decrypt / transcode latency before the clawd task heartbeat starts.
     let _media_typing_guard = if extract_text_message(&msg).is_none() {
-        start_typing_heartbeat_for_peer(
-            &state,
-            &from_user_id,
-            prefetched_typing_ticket.as_deref(),
-        )
-        .await
+        start_typing_heartbeat_for_peer(&state, &from_user_id, prefetched_typing_ticket.as_deref())
+            .await
     } else {
         None
     };
@@ -2084,15 +2136,7 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     if extract_text_message(&msg).is_none() {
         if let Some((ep, key)) = inbound_image_decrypt_params(&msg) {
             let cdn = state.config.cdn_base_url.trim();
-            match download_decrypted_media(
-                &state.client,
-                &ep,
-                &key,
-                cdn,
-                "inbound-image",
-            )
-            .await
-            {
+            match download_decrypted_media(&state.client, &ep, &key, cdn, "inbound-image").await {
                 Ok(bytes) => {
                     if bytes.len() > 25 * 1024 * 1024 {
                         warn!("wechatd: inbound image too large ({} bytes)", bytes.len());
@@ -2140,15 +2184,7 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         }
         if let Some((ep, key)) = inbound_video_decrypt_params(&msg) {
             let cdn = state.config.cdn_base_url.trim();
-            match download_decrypted_media(
-                &state.client,
-                &ep,
-                &key,
-                cdn,
-                "inbound-video",
-            )
-            .await
-            {
+            match download_decrypted_media(&state.client, &ep, &key, cdn, "inbound-video").await {
                 Ok(bytes) => {
                     if bytes.len() > 100 * 1024 * 1024 {
                         warn!("wechatd: inbound video too large");
@@ -2195,15 +2231,7 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         }
         if let Some((ep, key, safe_name)) = inbound_file_decrypt_params(&msg) {
             let cdn = state.config.cdn_base_url.trim();
-            match download_decrypted_media(
-                &state.client,
-                &ep,
-                &key,
-                cdn,
-                "inbound-file",
-            )
-            .await
-            {
+            match download_decrypted_media(&state.client, &ep, &key, cdn, "inbound-file").await {
                 Ok(bytes) => {
                     if bytes.len() > 100 * 1024 * 1024 {
                         warn!("wechatd: inbound file too large");
@@ -2267,15 +2295,7 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         }
         if let Some((ep, key)) = inbound_voice_decrypt_params(&msg) {
             let cdn = state.config.cdn_base_url.trim();
-            match download_decrypted_media(
-                &state.client,
-                &ep,
-                &key,
-                cdn,
-                "inbound-voice",
-            )
-            .await
-            {
+            match download_decrypted_media(&state.client, &ep, &key, cdn, "inbound-voice").await {
                 Ok(bytes) => {
                     if bytes.len() > 20 * 1024 * 1024 {
                         warn!("wechatd: inbound voice too large");
@@ -2532,11 +2552,12 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let config_path =
-        std::env::var("WECHAT_CONFIG_PATH").unwrap_or_else(|_| "configs/channels/wechat.toml".to_string());
+    let config_path = std::env::var("WECHAT_CONFIG_PATH")
+        .unwrap_or_else(|_| "configs/channels/wechat.toml".to_string());
     let raw = std::fs::read_to_string(&config_path)
         .with_context(|| format!("read wechat config failed: {config_path}"))?;
-    let config: AppConfig = toml::from_str(&raw).context("parse wechat config failed")?;
+    let mut config: AppConfig = toml::from_str(&raw).context("parse wechat config failed")?;
+    apply_wechat_env_overrides(&mut config);
     if !config.wechat.enabled {
         anyhow::bail!("wechat.enabled=false; nothing to do");
     }
@@ -2562,7 +2583,9 @@ async fn main() -> anyhow::Result<()> {
     write_json_file(&status_path, &starting).await;
 
     let client = Client::builder()
-        .timeout(Duration::from_secs(config.wechat.request_timeout_seconds.max(5)))
+        .timeout(Duration::from_secs(
+            config.wechat.request_timeout_seconds.max(5),
+        ))
         .build()?;
     let persisted_session = load_session_file(&session_path);
     let state = State {
@@ -2688,7 +2711,10 @@ mod tests {
 
         assert_eq!(response.session_key.as_deref(), Some("primary"));
         assert_eq!(response.qr_status.as_deref(), Some("wait"));
-        assert_eq!(response.qrcode_url.as_deref(), Some("data:image/svg+xml;base64,abc"));
+        assert_eq!(
+            response.qrcode_url.as_deref(),
+            Some("data:image/svg+xml;base64,abc")
+        );
     }
 
     #[test]

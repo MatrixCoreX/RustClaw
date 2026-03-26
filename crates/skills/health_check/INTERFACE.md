@@ -19,6 +19,8 @@
 ## Error Contract
 - Invalid log path should return clear filesystem errors.
 - Diagnostic execution/runtime failures should return explicit error text.
+- `log_dir` rejects `..` traversal and paths outside workspace.
+- Successful responses also mirror the parsed diagnostic object into the optional `extra` field.
 
 ## Request/Response Examples
 ### Example 1
@@ -28,5 +30,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"health diagnostics: ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"workspace_root\":\"/workspace\",\"log_dir\":\"/workspace/logs\",\"clawd_process_count\":1}","extra":{"workspace_root":"/workspace","log_dir":"/workspace/logs","clawd_process_count":1},"error_text":null}
 ```

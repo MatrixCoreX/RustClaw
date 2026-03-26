@@ -12,7 +12,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = REPO_ROOT / "crates" / "skills"
 EXTERNAL_SKILLS_DIR = REPO_ROOT / "external_skills"
 PROMPTS_DIR = REPO_ROOT / "prompts" / "vendors" / "default" / "skills"
+REGISTRY_PATH = REPO_ROOT / "configs" / "skills_registry.toml"
 PROMPT_MANAGED_MARKER = "<!-- AUTO-GENERATED: sync_skill_docs.py -->"
+RESERVED_PROMPT_STEMS = {"README"}
 
 
 @dataclass
@@ -35,14 +37,38 @@ def discover_skill_dirs() -> dict[str, SkillEntry]:
         for child in sorted(root.iterdir()):
             if not child.is_dir():
                 continue
-            if not (child / "Cargo.toml").exists():
-                continue
+            if source == "built_in":
+                if not (child / "Cargo.toml").exists():
+                    continue
+            else:
+                if not (child / "INTERFACE.md").exists():
+                    continue
             name = child.name.strip()
             if not re.fullmatch(r"[a-z0-9_]+", name):
                 continue
             if name not in out:
                 out[name] = SkillEntry(name=name, path=child, source=source)
     return out
+
+
+def discover_builtin_registry_skills() -> set[str]:
+    if not REGISTRY_PATH.exists():
+        return set()
+    text = REGISTRY_PATH.read_text(encoding="utf-8")
+    names: set[str] = set()
+    for block in re.split(r"(?m)^\[\[skills\]\]\s*$", text):
+        if not block.strip():
+            continue
+        name_m = re.search(r'^\s*name\s*=\s*"([^"]+)"', block, re.M)
+        kind_m = re.search(r'^\s*kind\s*=\s*"([^"]+)"', block, re.M)
+        if not name_m or not kind_m:
+            continue
+        if kind_m.group(1).strip().lower() != "builtin":
+            continue
+        name = name_m.group(1).strip()
+        if re.fullmatch(r"[a-z0-9_]+", name):
+            names.add(name)
+    return names
 
 
 def interface_template(skill: str) -> str:
@@ -184,6 +210,7 @@ def sync(apply: bool, adopt_skills: set[str] | None = None) -> int:
     skill_dirs = discover_skill_dirs()
     skills = sorted(skill_dirs.keys())
     skill_set = set(skills)
+    preserved_prompt_stems = RESERVED_PROMPT_STEMS | discover_builtin_registry_skills()
     changed = 0
     adopt_skills = adopt_skills or set()
 
@@ -227,7 +254,7 @@ def sync(apply: bool, adopt_skills: set[str] | None = None) -> int:
     if PROMPTS_DIR.exists():
         for md in sorted(PROMPTS_DIR.glob("*.md")):
             stem = md.stem
-            if stem.startswith("_"):
+            if stem.startswith("_") or stem in preserved_prompt_stems:
                 continue
             if stem not in skill_set:
                 if remove_file(md, apply):

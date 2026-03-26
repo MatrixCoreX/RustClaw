@@ -11,11 +11,11 @@ Core capabilities:
 - output formats: `json`, `md_table`, `csv`
 - stable stats with warnings and skipped-record accounting
 
-## Action
+## Actions
 
-### `transform_data`
+- `transform_data`
 
-## Input Parameters
+## Parameter Contract
 
 - `action` (required, string): `transform_data`
 - `data` (required, array): input records
@@ -71,31 +71,17 @@ Aggregation item fields:
 - `field` optional (`count` can omit)
 - `name` optional output alias
 
-## Output Schema
+## Error Contract
 
-The skill returns JSON in `text` with:
+- `INVALID_ACTION`: unsupported `action` value.
+- `TRANSFORM_FAILED`: invalid input data or unsupported/malformed operations in strict mode.
+- In non-strict mode, unsupported ops should be skipped with warnings instead of hard failure where possible.
 
-- `status`: `ok|error`
-- `error_code`: nullable (`INVALID_ACTION|TRANSFORM_FAILED`)
-- `error`: nullable message
-- `result`: transformed array
-- `formatted`: nullable string (for `md_table`/`csv`)
-- `stats`:
-  - `input_count`
-  - `output_count`
-  - `skipped_records`
-  - `warnings` (array)
+## Request/Response Examples
 
-## Behavior Notes
+### Example 1
 
-- strict mode default is `true`.
-- in non-strict mode, unsupported ops are skipped with warnings.
-- nested path resolution returns null when path not found.
-- numeric/bool/string comparisons are normalized where possible.
-- output column order is stable by first-seen key order.
-
-## Example Request
-
+Request:
 ```json
 {
   "request_id": "tf-1",
@@ -115,3 +101,32 @@ The skill returns JSON in `text` with:
   }
 }
 ```
+
+Response:
+```json
+{
+  "request_id": "tf-1",
+  "status": "ok",
+  "text": "{\"status\":\"ok\",\"result\":[{\"name\":\"B\",\"score\":\"20\"}],\"formatted\":null,\"stats\":{\"input_count\":2,\"output_count\":1,\"skipped_records\":0,\"warnings\":[]},\"error_code\":null,\"error\":null}",
+  "error_text": null
+}
+```
+
+Returned JSON inside `text` contains:
+
+- `status`: `ok|error`
+- `error_code`: nullable (`INVALID_ACTION|TRANSFORM_FAILED`)
+- `error`: nullable message
+- `result`: transformed array
+- `formatted`: nullable string (for `md_table`/`csv`)
+- `stats`:
+  - `input_count`
+  - `output_count`
+  - `skipped_records`
+  - `warnings` (array)
+
+- strict mode default is `true`.
+- in non-strict mode, unsupported ops are skipped with warnings.
+- nested path resolution returns null when path not found.
+- numeric/bool/string comparisons are normalized where possible.
+- output column order is stable by first-seen key order.

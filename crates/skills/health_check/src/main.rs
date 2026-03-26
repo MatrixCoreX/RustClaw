@@ -1,10 +1,10 @@
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -17,6 +17,7 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -28,16 +29,18 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok(extra) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
-                    text,
+                    text: extra.to_string(),
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: None,
                     error_text: Some(err),
                 },
             },
@@ -45,6 +48,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -54,7 +58,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
+fn execute(args: Value) -> Result<Value, String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -62,7 +66,8 @@ fn execute(args: Value) -> Result<String, String> {
     let log_dir = obj
         .get("log_dir")
         .and_then(|v| v.as_str())
-        .map(PathBuf::from)
+        .map(|v| resolve_path(&root, v))
+        .transpose()?
         .unwrap_or_else(|| root.join("logs"));
 
     let clawd_count = process_count("clawd");
@@ -75,13 +80,13 @@ fn execute(args: Value) -> Result<String, String> {
     Ok(json!({
         "ts": now_ts(),
         "workspace_root": root.display().to_string(),
+        "log_dir": log_dir.display().to_string(),
         "clawd_process_count": clawd_count,
         "telegramd_process_count": telegramd_count,
         "clawd_health_port_open": health_port_open,
         "clawd_log": clawd_log,
         "telegramd_log": telegramd_log
-    })
-    .to_string())
+    }))
 }
 
 fn summarize_log_file(path: &PathBuf) -> Value {
@@ -124,11 +129,23 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
+fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
+    let base = if Path::new(input).is_absolute() {
+        PathBuf::from(input)
+    } else {
+        workspace_root.join(input)
+    };
+    if base.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err("path with '..' is not allowed".to_string());
+    }
+    if !base.starts_with(workspace_root) {
+        return Err("path is outside workspace".to_string());
+    }
+    Ok(base)
+}
+
 fn process_count(keyword: &str) -> usize {
-    let out = Command::new("pgrep")
-        .args(["-fc", keyword])
-        .output()
-        .ok();
+    let out = Command::new("pgrep").args(["-fc", keyword]).output().ok();
     out.and_then(|v| String::from_utf8(v.stdout).ok())
         .and_then(|s| s.trim().parse::<usize>().ok())
         .unwrap_or(0)

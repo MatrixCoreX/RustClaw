@@ -123,6 +123,29 @@ fn default_lark_file_inbox_dir() -> String {
     "data/larkd/file".to_string()
 }
 
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_string_env(target: &mut String, key: &str) {
+    if let Some(value) = env_non_empty(key) {
+        *target = value;
+    }
+}
+
+fn apply_env_overrides(config: &mut LarkConfig) {
+    apply_string_env(&mut config.lark.app_id, "LARK_APP_ID");
+    apply_string_env(&mut config.lark.app_secret, "LARK_APP_SECRET");
+    apply_string_env(
+        &mut config.lark.verification_token,
+        "LARK_VERIFICATION_TOKEN",
+    );
+    apply_string_env(&mut config.lark.encrypt_key, "LARK_ENCRYPT_KEY");
+}
+
 fn current_ts_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -152,12 +175,7 @@ fn safe_lark_storage_segment(raw: &str, fallback: &str) -> String {
 
 fn build_lark_inbox_rel_path(root_dir: &str, chat_id: &str, file_name: &str) -> String {
     let seg = safe_lark_storage_segment(chat_id, "unknown");
-    format!(
-        "{}/{}/{}",
-        root_dir.trim_end_matches('/'),
-        seg,
-        file_name
-    )
+    format!("{}/{}/{}", root_dir.trim_end_matches('/'), seg, file_name)
 }
 
 /// 解析 `im.message.receive_v1` 公共字段。
@@ -168,7 +186,10 @@ fn parse_im_receive_v1(body: &Value) -> Option<(String, String, String, String, 
     }
     let event = body.get("event")?;
     let message = event.get("message")?;
-    let message_id = message.get("message_id").and_then(|v| v.as_str())?.to_string();
+    let message_id = message
+        .get("message_id")
+        .and_then(|v| v.as_str())?
+        .to_string();
     let message_type = message
         .get("message_type")
         .and_then(|v| v.as_str())
@@ -559,11 +580,7 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
         _ => 100 * 1024 * 1024,
     };
     if bytes.len() > max_len {
-        warn!(
-            "larkd: media too large len={} max={}",
-            bytes.len(),
-            max_len
-        );
+        warn!("larkd: media too large len={} max={}", bytes.len(), max_len);
         let _ = send_lark_text(
             &config,
             &client,
@@ -596,13 +613,7 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
         "The user sent {}. Saved under workspace-relative path: {}. Reply or use tools as appropriate.",
         label, rel
     );
-    handle_text_message_to_clawd(
-        state,
-        ctx.open_id,
-        ctx.chat_id,
-        hint,
-        Some(ident.user_key),
-    );
+    handle_text_message_to_clawd(state, ctx.open_id, ctx.chat_id, hint, Some(ident.user_key));
 }
 
 /// webhook / 长连接统一分发：文本走绑定与 ask；媒体先落盘再 ask。
@@ -1240,7 +1251,10 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
                     let body: Value = match serde_json::from_slice(payload) {
                         Ok(v) => v,
                         Err(e) => {
-                            warn!("larkd: long_connection event parse failed with reason: {}", e);
+                            warn!(
+                                "larkd: long_connection event parse failed with reason: {}",
+                                e
+                            );
                             return Ok(());
                         }
                     };
@@ -1249,7 +1263,11 @@ async fn run_long_connection_loop(state: AppState) -> anyhow::Result<()> {
                         .and_then(|h| h.get("event_type"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
-                    tracing::debug!("larkd: long_connection raw event received event_type={} body_len={}", event_type, body_len);
+                    tracing::debug!(
+                        "larkd: long_connection raw event received event_type={} body_len={}",
+                        event_type,
+                        body_len
+                    );
 
                     let st = (*state).clone();
                     dispatch_im_incoming_event(st, body);
@@ -1286,11 +1304,12 @@ async fn main() -> anyhow::Result<()> {
 
     let config_path = std::env::var("LARK_CONFIG_PATH")
         .unwrap_or_else(|_| "configs/channels/lark.toml".to_string());
-    let config: LarkConfig = {
+    let mut config: LarkConfig = {
         let raw = std::fs::read_to_string(&config_path)
             .map_err(|e| anyhow::anyhow!("read config {}: {}", config_path, e))?;
         toml::from_str(&raw).map_err(|e| anyhow::anyhow!("parse config: {}", e))?
     };
+    apply_env_overrides(&mut config);
 
     if !config.lark.enabled {
         tracing::info!("larkd: disabled in config, exiting");

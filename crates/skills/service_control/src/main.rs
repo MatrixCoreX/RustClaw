@@ -70,7 +70,10 @@ fn strip_service_suffix(s: &str) -> &str {
     if s.ends_with("\u{670D}\u{52A1}") {
         s[..s.len().saturating_sub("\u{670D}\u{52A1}".len())].trim()
     } else if s_lower.ends_with(" service") {
-        s_lower.rfind(" service").map(|i| s[..i].trim()).unwrap_or(s)
+        s_lower
+            .rfind(" service")
+            .map(|i| s[..i].trim())
+            .unwrap_or(s)
     } else if s_lower.ends_with(".service") {
         s[..s.len().saturating_sub(".service".len())].trim()
     } else {
@@ -166,7 +169,11 @@ pub(crate) fn discover_service_candidates(target: &str) -> Vec<String> {
         let rest = raw.trim();
         if let Some(idx) = rest.find(']') {
             let name = rest[idx + 1..].trim();
-            if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
                 names.push(name.to_string());
             }
         }
@@ -252,7 +259,8 @@ pub(crate) fn is_safe_target(s: &str) -> bool {
     if s.is_empty() || s.len() > 256 {
         return false;
     }
-    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '@')
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '@')
 }
 
 pub(crate) fn is_ambiguous_target(target: &str) -> bool {
@@ -330,7 +338,9 @@ fn extract_suggest_once(obj: &serde_json::Map<String, Value>) -> bool {
 }
 
 fn parse_input(args: &Value) -> Result<SkillInput, String> {
-    let obj = args.as_object().ok_or_else(|| "args must be object".to_string())?;
+    let obj = args
+        .as_object()
+        .ok_or_else(|| "args must be object".to_string())?;
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
@@ -361,11 +371,11 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|i| i as u64)))
         .unwrap_or(TAIL_LINES_DEFAULT as u64)
         .min(TAIL_LINES_MAX as u64) as usize;
-    let verify = obj
-        .get("verify")
+    let verify = obj.get("verify").and_then(|v| v.as_bool()).unwrap_or(true);
+    let allow_risky = obj
+        .get("allow_risky")
         .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    let allow_risky = obj.get("allow_risky").and_then(|v| v.as_bool()).unwrap_or(false);
+        .unwrap_or(false);
     let suggested_target = extract_suggested_target(obj);
     let suggest_once = extract_suggest_once(obj);
 
@@ -422,11 +432,18 @@ fn detect_manager_for_target(target: &str) -> Option<&'static str> {
         return None;
     }
     // Try systemctl is-active (read-only)
-    if let Ok(cmd_out) = Command::new("systemctl").args(["is-active", target]).output() {
+    if let Ok(cmd_out) = Command::new("systemctl")
+        .args(["is-active", target])
+        .output()
+    {
         if cmd_out.status.code().is_some() {
             let stdout_str = String::from_utf8_lossy(&cmd_out.stdout).into_owned();
             let s = stdout_str.trim();
-            if !s.is_empty() && s.len() < 50 && s.chars().all(|c| c.is_ascii_alphabetic() || c == ' ' || c == '(' || c == ')') {
+            if !s.is_empty()
+                && s.len() < 50
+                && s.chars()
+                    .all(|c| c.is_ascii_alphabetic() || c == ' ' || c == '(' || c == ')')
+            {
                 return Some("systemd");
             }
         }
@@ -451,7 +468,9 @@ fn resolve_manager(input: &SkillInput, effective_target: Option<&str>) -> String
         if RUSTCLAW_SERVICES.contains(&t) {
             return "rustclaw".to_string();
         }
-        return detect_manager_for_target(t).unwrap_or("unknown").to_string();
+        return detect_manager_for_target(t)
+            .unwrap_or("unknown")
+            .to_string();
     }
     "unknown".to_string()
 }
@@ -466,10 +485,18 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
             let is_business_error = out.status == "error";
             Resp {
                 request_id,
-                status: if is_business_error { "error".to_string() } else { "ok".to_string() },
+                status: if is_business_error {
+                    "error".to_string()
+                } else {
+                    "ok".to_string()
+                },
                 text: text.clone(),
                 error_text: if is_business_error {
-                    Some(if out.failure_reason.is_empty() { "skill reported error".to_string() } else { out.failure_reason })
+                    Some(if out.failure_reason.is_empty() {
+                        "skill reported error".to_string()
+                    } else {
+                        out.failure_reason
+                    })
                 } else {
                     None
                 },
@@ -543,8 +570,14 @@ fn execute(
         || input.target.is_some()
         || matches!(
             input.action.as_str(),
-            "start" | "stop" | "restart" | "reload" | "logs" | "verify"
-                | "diagnose_start_failure" | "diagnose_unhealthy_state"
+            "start"
+                | "stop"
+                | "restart"
+                | "reload"
+                | "logs"
+                | "verify"
+                | "diagnose_start_failure"
+                | "diagnose_unhealthy_state"
         );
     let target_opt = input.target.as_deref();
 
@@ -553,7 +586,8 @@ fn execute(
         out.service_name = input.target.clone().unwrap_or_default();
         out.requested_action = input.action.clone();
         out.fail("target (service name) is required for this action and must not be empty");
-        out.next_step = "Provide a specific service name in args.target or args.service.".to_string();
+        out.next_step =
+            "Provide a specific service name in args.target or args.service.".to_string();
         return Ok(out);
     }
 
@@ -563,7 +597,9 @@ fn execute(
             out.service_name = t.to_string();
             out.requested_action = input.action.clone();
             out.fail("target is ambiguous or too broad for high-risk action (stop/restart); refuse to execute");
-            out.next_step = "Use a specific service name and avoid vague targets like backend/services/all.".to_string();
+            out.next_step =
+                "Use a specific service name and avoid vague targets like backend/services/all."
+                    .to_string();
             return Ok(out);
         }
         if input.manager_type.as_deref() != Some("rustclaw") && !RUSTCLAW_SERVICES.contains(&t) {
@@ -700,7 +736,8 @@ fn execute(
                 out.add_evidence(e);
             }
             out.executed_actions = vec!["verify".to_string()];
-            out.verified = !state.is_empty() && (state == "active" || state == "running" || state == "active (running)");
+            out.verified = !state.is_empty()
+                && (state == "active" || state == "running" || state == "active (running)");
             if out.failure_reason.is_empty() {
                 out.ok_summary(&format!("Verify: {}", state));
             }
@@ -745,10 +782,13 @@ fn execute(
         for e in evidence {
             out.add_evidence(e);
         }
-        let healthy = post_state == "active" || post_state == "running" || post_state == "active (running)";
+        let healthy =
+            post_state == "active" || post_state == "running" || post_state == "active (running)";
         out.verified = healthy;
         if !healthy {
-            out.fail("Post-action verification failed: service did not reach active/running state.");
+            out.fail(
+                "Post-action verification failed: service did not reach active/running state.",
+            );
             if do_logs_after_fail {
                 let log_ev = fetch_logs_inner(target, &manager, input.tail_lines);
                 for e in log_ev {
@@ -802,7 +842,9 @@ fn rustclaw_health(
     if let Some(k) = req_user_key.or(fallback_ui_key.as_deref()) {
         req = req.header("x-rustclaw-key", k);
     }
-    let resp = req.send().map_err(|e| format!("health request failed: {e}"))?;
+    let resp = req
+        .send()
+        .map_err(|e| format!("health request failed: {e}"))?;
     if resp.status().as_u16() == 401 {
         return Err("clawd API 401; missing valid user key".to_string());
     }
@@ -820,28 +862,52 @@ fn rustclaw_service_state(data: &Value, service: &str) -> (bool, Option<usize>, 
             (true, Some(1), rss)
         }
         "telegramd" => (
-            data.get("telegramd_healthy").and_then(|v| v.as_bool()).unwrap_or(false),
-            data.get("telegramd_process_count").and_then(|v| v.as_u64()).map(|u| u as usize),
-            data.get("telegramd_memory_rss_bytes").and_then(|v| v.as_u64()),
+            data.get("telegramd_healthy")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            data.get("telegramd_process_count")
+                .and_then(|v| v.as_u64())
+                .map(|u| u as usize),
+            data.get("telegramd_memory_rss_bytes")
+                .and_then(|v| v.as_u64()),
         ),
         "whatsappd" => (
-            data.get("whatsappd_healthy").and_then(|v| v.as_bool()).unwrap_or(false),
-            data.get("whatsappd_process_count").and_then(|v| v.as_u64()).map(|u| u as usize),
-            data.get("whatsappd_memory_rss_bytes").and_then(|v| v.as_u64()),
+            data.get("whatsappd_healthy")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            data.get("whatsappd_process_count")
+                .and_then(|v| v.as_u64())
+                .map(|u| u as usize),
+            data.get("whatsappd_memory_rss_bytes")
+                .and_then(|v| v.as_u64()),
         ),
         "whatsapp_webd" => (
-            data.get("whatsapp_web_healthy").and_then(|v| v.as_bool()).unwrap_or(false),
-            data.get("whatsapp_web_process_count").and_then(|v| v.as_u64()).map(|u| u as usize),
-            data.get("whatsapp_web_memory_rss_bytes").and_then(|v| v.as_u64()),
+            data.get("whatsapp_web_healthy")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            data.get("whatsapp_web_process_count")
+                .and_then(|v| v.as_u64())
+                .map(|u| u as usize),
+            data.get("whatsapp_web_memory_rss_bytes")
+                .and_then(|v| v.as_u64()),
         ),
         "feishud" => (
-            data.get("feishud_healthy").and_then(|v| v.as_bool()).unwrap_or(false),
-            data.get("feishud_process_count").and_then(|v| v.as_u64()).map(|u| u as usize),
-            data.get("feishud_memory_rss_bytes").and_then(|v| v.as_u64()),
+            data.get("feishud_healthy")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            data.get("feishud_process_count")
+                .and_then(|v| v.as_u64())
+                .map(|u| u as usize),
+            data.get("feishud_memory_rss_bytes")
+                .and_then(|v| v.as_u64()),
         ),
         "larkd" => (
-            data.get("larkd_healthy").and_then(|v| v.as_bool()).unwrap_or(false),
-            data.get("larkd_process_count").and_then(|v| v.as_u64()).map(|u| u as usize),
+            data.get("larkd_healthy")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            data.get("larkd_process_count")
+                .and_then(|v| v.as_u64())
+                .map(|u| u as usize),
             data.get("larkd_memory_rss_bytes").and_then(|v| v.as_u64()),
         ),
         _ => (false, None, None),
@@ -883,7 +949,12 @@ fn run_status_inner(
                 let (running, count, rss) = rustclaw_service_state(&data, s);
                 let state = if running { "running" } else { "stopped" };
                 parts.push(format!("{}={}", s, state));
-                evidence.push(format!("{} process_count={} memory_rss_bytes={:?}", s, count.unwrap_or(0), rss));
+                evidence.push(format!(
+                    "{} process_count={} memory_rss_bytes={:?}",
+                    s,
+                    count.unwrap_or(0),
+                    rss
+                ));
             }
             let pre_state = parts.join(", ");
             (pre_state, evidence)
@@ -894,9 +965,7 @@ fn run_status_inner(
                 out.fail("invalid target for systemd");
                 return ("unknown".to_string(), evidence);
             }
-            let o = Command::new("systemctl")
-                .args(["is-active", t])
-                .output();
+            let o = Command::new("systemctl").args(["is-active", t]).output();
             match o {
                 Ok(outp) => {
                     let s = String::from_utf8_lossy(&outp.stdout).trim().to_string();
@@ -927,7 +996,11 @@ fn run_status_inner(
                     let s = String::from_utf8_lossy(&outp.stdout);
                     let first = s.lines().next().unwrap_or("").to_string();
                     evidence.push(first.clone());
-                    let state = if outp.status.success() { "running" } else { "stopped" };
+                    let state = if outp.status.success() {
+                        "running"
+                    } else {
+                        "stopped"
+                    };
                     (state.to_string(), evidence)
                 }
                 Err(e) => {
@@ -972,7 +1045,9 @@ fn run_verify_inner(
             if !is_safe_target(target) {
                 return ("unknown".to_string(), evidence);
             }
-            let o = Command::new("systemctl").args(["is-active", target]).output();
+            let o = Command::new("systemctl")
+                .args(["is-active", target])
+                .output();
             match o {
                 Ok(outp) => {
                     let s = String::from_utf8_lossy(&outp.stdout).trim().to_string();
@@ -989,7 +1064,11 @@ fn run_verify_inner(
             let o = Command::new("service").args([target, "status"]).output();
             match o {
                 Ok(outp) => {
-                    let state = if outp.status.success() { "running" } else { "stopped" };
+                    let state = if outp.status.success() {
+                        "running"
+                    } else {
+                        "stopped"
+                    };
                     (state.to_string(), evidence)
                 }
                 Err(_) => ("unknown".to_string(), evidence),
@@ -1032,7 +1111,7 @@ fn run_control_inner(
                 .build()
                 .map_err(|e| {
                     out.fail(&format!("http client: {e}"));
-            })?;
+                })?;
             let mut req = client.post(&url);
             let fallback_ui_key = ui_key();
             if let Some(k) = req_user_key.or(fallback_ui_key.as_deref()) {
@@ -1071,7 +1150,10 @@ fn run_control_inner(
                 "restart" => "restart",
                 "reload" => "reload",
                 _ => {
-                    out.fail(&format!("action {} not supported for systemd", effective_action));
+                    out.fail(&format!(
+                        "action {} not supported for systemd",
+                        effective_action
+                    ));
                     return Err(());
                 }
             };
@@ -1132,7 +1214,10 @@ fn run_control_inner(
                 "restart" => "restart",
                 "reload" => "reload",
                 _ => {
-                    out.fail(&format!("action {} not supported for service", effective_action));
+                    out.fail(&format!(
+                        "action {} not supported for service",
+                        effective_action
+                    ));
                     return Err(());
                 }
             };
@@ -1181,7 +1266,10 @@ fn run_control_inner(
             }
         }
         _ => {
-            out.fail(&format!("manager {} does not support lifecycle control", manager));
+            out.fail(&format!(
+                "manager {} does not support lifecycle control",
+                manager
+            ));
             Err(())
         }
     }
@@ -1209,7 +1297,16 @@ fn fetch_logs_inner(target: &str, manager: &str, tail_lines: usize) -> Vec<Strin
                         .cloned()
                         .collect::<Vec<_>>()
                         .join("; ");
-                    evidence.push(format!("last {} lines (total {}); recent: {}", slice.len(), lines.len(), if summary.len() > 400 { format!("{}...", &summary[..400]) } else { summary }));
+                    evidence.push(format!(
+                        "last {} lines (total {}); recent: {}",
+                        slice.len(),
+                        lines.len(),
+                        if summary.len() > 400 {
+                            format!("{}...", &summary[..400])
+                        } else {
+                            summary
+                        }
+                    ));
                 }
                 Err(e) => {
                     evidence.push(format!("read log failed: {} ({})", path.display(), e));
@@ -1226,7 +1323,15 @@ fn fetch_logs_inner(target: &str, manager: &str, tail_lines: usize) -> Vec<Strin
             if let Ok(outp) = o {
                 let s = String::from_utf8_lossy(&outp.stdout);
                 let last: String = s.lines().rev().take(10).collect::<Vec<_>>().join(" ");
-                evidence.push(format!("journalctl last {} lines; recent: {}", s.lines().count(), if last.len() > 300 { format!("{}...", &last[..300]) } else { last }));
+                evidence.push(format!(
+                    "journalctl last {} lines; recent: {}",
+                    s.lines().count(),
+                    if last.len() > 300 {
+                        format!("{}...", &last[..300])
+                    } else {
+                        last
+                    }
+                ));
             }
         }
         _ => {
@@ -1246,7 +1351,8 @@ mod tests {
     #[test]
     fn target_missing_returns_structured_error() {
         let args = json!({"action": "start"});
-        let out = execute("req-1".to_string(), args).expect("execute must return Ok(OutputContract)");
+        let out =
+            execute("req-1".to_string(), args).expect("execute must return Ok(OutputContract)");
         assert_eq!(out.status, "error");
         assert!(!out.failure_reason.is_empty(), "failure_reason must be set");
         assert!(!out.next_step.is_empty());
@@ -1255,7 +1361,8 @@ mod tests {
     #[test]
     fn ambiguous_target_blocks_high_risk_action() {
         let args = json!({"action": "restart", "target": "\u{540E}\u{7AEF}"});
-        let out = execute("req-2".to_string(), args).expect("execute must return Ok(OutputContract)");
+        let out =
+            execute("req-2".to_string(), args).expect("execute must return Ok(OutputContract)");
         assert_eq!(out.status, "error");
         assert!(
             out.failure_reason.contains("ambiguous") || out.failure_reason.contains("high-risk"),
@@ -1278,7 +1385,10 @@ mod tests {
     fn status_failure_not_overwritten_by_ok_summary() {
         let args = json!({"action": "status", "target": "nonexistent_xyz_123"});
         let out = execute("req-status".to_string(), args).unwrap();
-        assert_eq!(out.status, "error", "unknown manager or status failure must set status=error");
+        assert_eq!(
+            out.status, "error",
+            "unknown manager or status failure must set status=error"
+        );
         assert!(!out.failure_reason.is_empty());
     }
 
@@ -1286,7 +1396,10 @@ mod tests {
     fn verify_failure_not_overwritten_by_ok_summary() {
         let args = json!({"action": "verify", "target": "nonexistent_xyz_456"});
         let out = execute("req-verify".to_string(), args).unwrap();
-        assert_eq!(out.status, "error", "unknown manager for verify must set status=error");
+        assert_eq!(
+            out.status, "error",
+            "unknown manager for verify must set status=error"
+        );
         assert!(!out.failure_reason.is_empty());
     }
 
@@ -1309,7 +1422,9 @@ mod tests {
         let args = json!({"action": "status", "target": "nonexistent_svc_xyz_789"});
         let out = execute("req-m3".to_string(), args).unwrap();
         assert!(
-            out.manager_type == "unknown" || out.manager_type == "systemd" || out.manager_type == "service",
+            out.manager_type == "unknown"
+                || out.manager_type == "systemd"
+                || out.manager_type == "service",
             "fallback or detected: {}",
             out.manager_type
         );
@@ -1321,9 +1436,21 @@ mod tests {
         let out = execute("req-3".to_string(), args).unwrap();
         let text = serde_json::to_string(&out).unwrap();
         let parsed: Value = serde_json::from_str(&text).unwrap();
-        let required = ["status", "service_name", "manager_type", "requested_action", "executed_actions", "key_evidence", "failure_reason"];
+        let required = [
+            "status",
+            "service_name",
+            "manager_type",
+            "requested_action",
+            "executed_actions",
+            "key_evidence",
+            "failure_reason",
+        ];
         for key in required {
-            assert!(parsed.get(key).is_some(), "output must contain key: {}", key);
+            assert!(
+                parsed.get(key).is_some(),
+                "output must contain key: {}",
+                key
+            );
         }
     }
 

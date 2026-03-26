@@ -37,7 +37,9 @@ pub struct WechatSection {
     pub listen: String,
     pub clawd_base_url: String,
     pub api_base_url: String,
+    #[serde(default)]
     pub bot_token: String,
+    #[serde(default)]
     pub wechat_uin_base64: String,
     pub request_timeout_seconds: u64,
     pub longpoll_timeout_ms: u64,

@@ -31,6 +31,8 @@
 - Unsupported action names.
 - Search runtime errors return readable filesystem/tool errors.
 - `find_name` may return both files and directories unless `target_kind` is provided.
+- Successful responses are returned as JSON text with stable top-level fields like `action`, `root`, `count`, and `results`.
+- Successful responses also mirror that parsed JSON into the optional `extra` field for machine-readable consumers.
 
 ## Request/Response Examples
 ### Example 1
@@ -40,5 +42,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"crates/...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"action\":\"find_ext\",\"root\":\"crates\",\"ext\":\"rs\",\"count\":20,\"results\":[\"crates/a.rs\"]}","extra":{"action":"find_ext","root":"crates","ext":"rs","count":20,"results":["crates/a.rs"]},"error_text":null}
 ```

@@ -41,8 +41,11 @@
 - Runtime/system errors:
   - `mkdir failed: <error>`
   - `run <bin> failed: <error>`
+  - `archive command failed: exit=<code>\n<stdout/stderr>`
   - On malformed stdin JSON request: `invalid input: <serde error>`
-- Note: command execution output is returned in `text` as `exit=<code>\n<stdout/stderr>`. Current implementation does not convert non-zero exit code into `status=error`.
+- Successful command execution output is returned in `text` as `exit=<code>\n<stdout/stderr>`.
+- Non-zero archive command exit codes are returned as `status=error` with `error_text=archive command failed: exit=<code>\n<stdout/stderr>`.
+- Successful responses also mirror structured metadata into `extra`, including `action`, relevant paths, and `output`.
 
 ## Request/Response Examples
 ### Example 1
@@ -52,7 +55,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"exit=0\nArchive: ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"exit=0\nArchive: ...","extra":{"action":"list","archive":"/workspace/tmp/sample.zip","output":"exit=0\nArchive: ..."},"error_text":null}
 ```
 
 ### Example 2
@@ -62,7 +65,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"exit=0\n  adding: ...","error_text":null}
+{"request_id":"demo-2","status":"ok","text":"exit=0\n  adding: ...","extra":{"action":"pack","format":"zip","source":"/workspace/tmp/data","archive":"/workspace/tmp/data.zip","output":"exit=0\n  adding: ..."},"error_text":null}
 ```
 
 ### Example 3
@@ -72,5 +75,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-3","status":"ok","text":"exit=0\n...","error_text":null}
+{"request_id":"demo-3","status":"ok","text":"exit=0\n...","extra":{"action":"unpack","archive":"/workspace/tmp/data.tgz","dest":"/workspace/tmp/out","output":"exit=0\n..."},"error_text":null}
 ```

@@ -2,7 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use toml::Value as TomlValue;
 
 #[derive(Debug, Deserialize)]
@@ -64,12 +64,16 @@ fn execute(args: Value) -> Result<String, String> {
         .map(PathBuf::from)
         .unwrap_or_else(|| discover_default_config_path(&root));
 
-    let raw =
-        std::fs::read_to_string(&config_path).map_err(|err| format!("read config failed: {err}"))?;
+    let raw = std::fs::read_to_string(&config_path)
+        .map_err(|err| format!("read config failed: {err}"))?;
     let v: TomlValue = toml::from_str(&raw).map_err(|err| format!("parse toml failed: {err}"))?;
 
     let mut risks = Vec::new();
-    if has_real_token(v.get("telegram").and_then(|x| x.get("bot_token")).and_then(|x| x.as_str())) {
+    if has_real_token(
+        v.get("telegram")
+            .and_then(|x| x.get("bot_token"))
+            .and_then(|x| x.as_str()),
+    ) {
         risks.push("telegram.bot_token looks like a real token".to_string());
     }
     for vendor in ["openai", "google", "anthropic", "grok"] {

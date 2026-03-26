@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -17,6 +17,7 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -29,16 +30,18 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: None,
                     error_text: Some(err),
                 },
             },
@@ -46,6 +49,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -56,15 +60,12 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
+fn execute(args: Value) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
 
-    let action = obj
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or("get");
+    let action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("get");
     let url = obj
         .get("url")
         .and_then(|v| v.as_str())
@@ -116,10 +117,28 @@ fn execute(args: Value) -> Result<String, String> {
         .send()
         .map_err(|err| format!("http request failed: {err}"))?;
     let status = resp.status().as_u16();
+    let success = resp.status().is_success();
     let text = resp
         .text()
         .map_err(|err| format!("read response failed: {err}"))?;
-    let preview = if text.len() > 8000 { &text[..8000] } else { &text };
+    let preview = if text.len() > 8000 {
+        &text[..8000]
+    } else {
+        &text
+    };
 
-    Ok(format!("status={status}\n{preview}"))
+    if success {
+        let output = format!("status={status}\n{preview}");
+        Ok((
+            output.clone(),
+            json!({
+                "action": action,
+                "url": url,
+                "status_code": status,
+                "body_preview": preview,
+            }),
+        ))
+    } else {
+        Err(format!("http request returned non-success status={status}\n{preview}"))
+    }
 }
