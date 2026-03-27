@@ -198,6 +198,42 @@
     background: color-mix(in srgb, var(--theme-card) 80%, white 20%);
   }
 
+  .theme-topbar-nav-btn {
+    @apply inline-flex min-h-10 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition;
+    color: var(--theme-text-soft);
+  }
+
+  .theme-topbar-nav-btn:hover {
+    background: color-mix(in srgb, var(--theme-card) 72%, transparent);
+    color: var(--theme-text-strong);
+  }
+
+  .theme-toolbar-shell {
+    @apply inline-flex items-center gap-1;
+  }
+
+  .theme-toolbar-segment {
+    @apply inline-flex min-h-10 items-center rounded-xl px-3 py-2 text-sm font-medium transition;
+    color: var(--theme-text-soft);
+  }
+
+  .theme-toolbar-segment:hover {
+    background: color-mix(in srgb, var(--theme-card) 72%, transparent);
+    color: var(--theme-text-strong);
+  }
+
+  .theme-toolbar-segment-danger:hover {
+    background: color-mix(in srgb, var(--theme-card) 74%, rgba(214, 78, 78, 0.1) 26%);
+    color: var(--theme-text-strong);
+  }
+
+  .theme-toolbar-divider {
+    width: 1px;
+    height: 18px;
+    margin: 0 1px;
+    background: color-mix(in srgb, var(--theme-border) 88%, transparent);
+  }
+
   .theme-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 138, 76, 0.32) rgba(255, 255, 255, 0.06);
@@ -259,6 +295,82 @@
     border-color: var(--theme-border);
     background: var(--theme-sidebar-bg);
     box-shadow: none;
+  }
+
+  .setup-hero {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-card) 88%, rgba(255, 138, 76, 0.08) 12%) 0%, var(--theme-card) 100%);
+    box-shadow: var(--theme-panel-shadow);
+  }
+
+  .setup-step-card,
+  .setup-channel-card {
+    @apply rounded-[22px] border p-4 transition;
+    border-color: var(--theme-border);
+    background: rgba(0, 0, 0, 0.22);
+  }
+
+  .setup-step-card {
+    @apply relative h-full;
+    min-height: 16rem;
+  }
+
+  .setup-step-card:hover,
+  .setup-channel-card:hover {
+    background: color-mix(in srgb, rgba(0, 0, 0, 0.22) 82%, white 18%);
+  }
+
+  .setup-step-index {
+    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--theme-text-strong);
+  }
+
+  .setup-step-index-floating {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+  }
+
+  .setup-status {
+    @apply inline-flex shrink-0 items-center justify-center rounded-full border px-2.5 py-1 text-center text-xs font-medium whitespace-nowrap;
+    min-width: 74px;
+    line-height: 1.2;
+  }
+
+  .setup-step-status {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+  }
+
+  .setup-step-card-body {
+    padding-top: 4.5rem;
+  }
+
+  .setup-status-done {
+    border-color: rgba(16, 185, 129, 0.3);
+    background: rgba(16, 185, 129, 0.1);
+    color: #b8f1d9;
+  }
+
+  .setup-status-attention {
+    border-color: rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.12);
+    color: #fde3ad;
+  }
+
+  .setup-status-todo {
+    border-color: var(--theme-border);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--theme-text-soft);
+  }
+
+  .setup-substep {
+    @apply flex items-center justify-between gap-3 rounded-xl border px-3 py-2;
+    border-color: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
   }
 
   .theme-service-card {
@@ -501,5 +613,162 @@
 
   :root[data-theme="light"] .theme-shell .bg-sky-500\/10 {
     background: rgba(37, 109, 155, 0.12) !important;
+  }
+
+  @media (max-width: 767px) {
+    .theme-header {
+      backdrop-filter: blur(14px);
+    }
+
+    .theme-header-inner {
+      min-height: auto;
+      gap: 0.75rem;
+    }
+
+    .theme-brand-link {
+      font-size: 1.7rem;
+      line-height: 1.15;
+    }
+
+    .theme-header-actions {
+      gap: 0.45rem;
+    }
+
+    .theme-topbar-nav-btn,
+    .theme-toolbar-segment {
+      min-height: 2.5rem;
+      border-radius: 0.9rem;
+      padding: 0.55rem 0.8rem;
+    }
+
+    .theme-topbar-nav-btn {
+      border: 1px solid var(--theme-border);
+      background: var(--theme-card-strong);
+    }
+
+    .theme-toolbar-shell {
+      gap: 0;
+      border: 1px solid var(--theme-border);
+      border-radius: 0.95rem;
+      background: var(--theme-card-strong);
+    }
+
+    .theme-toolbar-divider {
+      margin: 0;
+      height: 16px;
+    }
+
+    .setup-hero {
+      padding: 1.1rem;
+    }
+
+    .setup-step-card-compact {
+      min-height: 13rem;
+      border-radius: 1.15rem;
+      padding: 1rem;
+    }
+
+    .setup-step-index-floating,
+    .setup-step-status {
+      top: 0.9rem;
+    }
+
+    .setup-step-index-floating {
+      left: 0.9rem;
+    }
+
+    .setup-step-status {
+      right: 0.9rem;
+    }
+
+    .setup-step-card-body {
+      padding-top: 3.75rem;
+    }
+
+    .channel-setup-hero {
+      padding: 1rem;
+    }
+
+    .channel-setup-card {
+      border-radius: 1.15rem;
+      padding: 1rem;
+    }
+
+    .channel-setup-card .setup-status {
+      min-width: 0;
+    }
+
+    .channel-setup-card p {
+      line-height: 1.75;
+    }
+
+    .channel-setup-form {
+      gap: 0.75rem;
+    }
+
+    .channel-setup-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .channel-setup-actions > button {
+      width: 100%;
+    }
+
+    .wechat-login-shell {
+      padding: 0.75rem;
+      align-items: flex-end;
+    }
+
+    .wechat-login-dialog {
+      max-height: min(100vh - 1rem, 100dvh - 1rem);
+      border-radius: 1.5rem;
+    }
+
+    .wechat-login-header {
+      padding: 1rem;
+    }
+
+    .wechat-login-body {
+      max-height: calc(100dvh - 7.5rem);
+      padding: 1rem;
+    }
+
+    .wechat-login-card {
+      border-radius: 1.3rem;
+      padding: 1rem;
+    }
+
+    .wechat-login-layout {
+      gap: 1rem;
+    }
+
+    .wechat-login-panel {
+      order: 1;
+    }
+
+    .wechat-login-visual {
+      order: 2;
+    }
+
+    .wechat-login-stage {
+      min-height: 15rem;
+      padding: 1rem;
+      border-radius: 1.3rem;
+    }
+
+    .wechat-login-qr-image {
+      height: min(16rem, calc(100vw - 7rem));
+      width: min(16rem, calc(100vw - 7rem));
+    }
+
+    .wechat-login-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .wechat-login-actions > button {
+      width: 100%;
+    }
   }
 }

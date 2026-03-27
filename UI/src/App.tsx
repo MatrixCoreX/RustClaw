@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   BellRing,
@@ -8,18 +8,20 @@ import {
   LayoutDashboard,
   Loader2,
   MessageCircle,
-  Moon,
   RefreshCw,
   Sparkles,
   SquareTerminal,
   Server,
-  Sun,
   Timer,
   Trash2,
   Wrench,
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import {
+  countCompletedDashboardSteps,
+  getDashboardOverviewItems,
+} from "./lib/dashboard-home";
 import { hasUnsavedLlmDraftChanges } from "./lib/llm-config";
 
 interface ApiResponse<T> {
@@ -176,6 +178,33 @@ interface WechatConfigResponse {
   restart_required: boolean;
 }
 
+interface AgentConfigItem {
+  id: string;
+  name?: string;
+  description?: string;
+  persona_prompt?: string;
+  preferred_vendor?: string | null;
+  preferred_model?: string | null;
+  allowed_skills?: string[];
+}
+
+interface TelegramBotConfigItem {
+  name: string;
+  bot_token: string;
+  agent_id: string;
+  allowlist: number[];
+  access_mode: string;
+  allowed_telegram_usernames: string[];
+  is_primary: boolean;
+}
+
+interface TelegramConfigResponse {
+  config_path: string;
+  bots: TelegramBotConfigItem[];
+  agents: AgentConfigItem[];
+  restart_required: boolean;
+}
+
 interface ModelConfigItem {
   vendor: string;
   model: string;
@@ -275,9 +304,13 @@ interface ServiceStatusRow extends AdapterHealthRow {
   detail: string;
 }
 
+interface ServiceActionNotice {
+  tone: "success" | "error";
+  text: string;
+}
+
 type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" | "lark";
 type ConsolePage = "dashboard" | "chat" | "services" | "channels" | "models" | "skills" | "logs" | "tasks";
-type ThemeMode = "dark" | "light";
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "services", "channels", "models", "skills", "logs", "tasks"];
 
 const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
@@ -394,6 +427,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function buildDefaultTelegramBot(): TelegramBotConfigItem {
+  return {
+    name: "primary",
+    bot_token: "",
+    agent_id: "main",
+    allowlist: [],
+    access_mode: "public",
+    allowed_telegram_usernames: [],
+    is_primary: true,
+  };
+}
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -455,47 +500,10 @@ function extractTaskText(result: TaskQueryResponse): string {
   return JSON.stringify(result.result_json ?? null, null, 2);
 }
 
-function QuickActionCard({
-  title,
-  desc,
-  cta,
-  onClick,
-  icon,
-}: {
-  title: string;
-  desc?: string;
-  cta: string;
-  onClick: () => void;
-  icon: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3.5 text-left transition hover:bg-white/8"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-white/90">
-            <span className="theme-icon-soft">{icon}</span>
-            <span>{title}</span>
-          </div>
-          {desc ? <p className="mt-2 text-sm leading-6 text-white/60">{desc}</p> : null}
-        </div>
-        <span className="pt-0.5 text-xs font-medium text-[#ffb08a]">{cta}</span>
-      </div>
-    </button>
-  );
-}
-
 export default function App() {
   const [lang, setLang] = useState<"zh" | "en">(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.lang);
     return saved === "en" ? "en" : "zh";
-  });
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEYS.themeMode);
-    return saved === "light" ? "light" : "dark";
   });
   const [baseUrl, setBaseUrl] = useState(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.baseUrl);
@@ -551,6 +559,12 @@ export default function App() {
   const [wechatConfigDraft, setWechatConfigDraft] = useState<WechatConfigResponse | null>(null);
   const [wechatConfigSaving, setWechatConfigSaving] = useState(false);
   const [wechatConfigSaveMessage, setWechatConfigSaveMessage] = useState<string | null>(null);
+  const [telegramConfigLoading, setTelegramConfigLoading] = useState(false);
+  const [telegramConfigError, setTelegramConfigError] = useState<string | null>(null);
+  const [telegramConfigData, setTelegramConfigData] = useState<TelegramConfigResponse | null>(null);
+  const [telegramConfigDraft, setTelegramConfigDraft] = useState<TelegramConfigResponse | null>(null);
+  const [telegramConfigSaving, setTelegramConfigSaving] = useState(false);
+  const [telegramConfigSaveMessage, setTelegramConfigSaveMessage] = useState<string | null>(null);
   const [skillSwitchSaving, setSkillSwitchSaving] = useState(false);
   const [skillUninstallingName, setSkillUninstallingName] = useState<string | null>(null);
   const [skillSwitchSaveMessage, setSkillSwitchSaveMessage] = useState<string | null>(null);
@@ -580,6 +594,7 @@ export default function App() {
   const [multimodalDraft, setMultimodalDraft] = useState<Record<string, ModelConfigItem>>({});
   const [multimodalConfigSaving, setMultimodalConfigSaving] = useState(false);
   const [multimodalConfigSaveMessage, setMultimodalConfigSaveMessage] = useState<string | null>(null);
+  const [modelsAdvancedOpen, setModelsAdvancedOpen] = useState(false);
   const [systemRestarting, setSystemRestarting] = useState(false);
   const [systemRestartMessage, setSystemRestartMessage] = useState<string | null>(null);
 
@@ -620,7 +635,7 @@ export default function App() {
   const [chatSending, setChatSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [serviceActionLoading, setServiceActionLoading] = useState<Record<string, boolean>>({});
-  const [serviceActionMessage, setServiceActionMessage] = useState<string | null>(null);
+  const [serviceActionMessage, setServiceActionMessage] = useState<ServiceActionNotice | null>(null);
   const [waLoginDialogOpen, setWaLoginDialogOpen] = useState(false);
   const [waLoginLoading, setWaLoginLoading] = useState(false);
   const [waLoginError, setWaLoginError] = useState<string | null>(null);
@@ -633,7 +648,7 @@ export default function App() {
   const [wechatLoginStatus, setWechatLoginStatus] = useState<WechatLoginStatus | null>(null);
   const [wechatSessionKey, setWechatSessionKey] = useState<string | null>(null);
   const [wechatQrStarting, setWechatQrStarting] = useState(false);
-  const [wechatAdvancedOpen, setWechatAdvancedOpen] = useState(false);
+  const [wechatQrPreviewRequested, setWechatQrPreviewRequested] = useState(false);
   const [channelBindingChannel, setChannelBindingChannel] = useState<ChannelName>("telegram");
   const [channelBindingExternalUserId, setChannelBindingExternalUserId] = useState("");
   const [channelBindingExternalChatId, setChannelBindingExternalChatId] = useState("");
@@ -731,6 +746,47 @@ export default function App() {
       lark_bot: t("Lark 机器人", "Lark Bot"),
     };
     return labels[key];
+  };
+  const serviceActionLabel = (
+    serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "wechatd" | "feishud" | "larkd",
+  ) => {
+    const labels: Record<typeof serviceName, string> = {
+      telegramd: "Telegram",
+      whatsappd: "WhatsApp",
+      whatsapp_webd: "WhatsApp Web",
+      wechatd: t("微信", "WeChat"),
+      feishud: t("飞书", "Feishu"),
+      larkd: "Lark",
+    };
+    return labels[serviceName];
+  };
+  const formatServiceActionError = (
+    serviceName: "telegramd" | "whatsappd" | "whatsapp_webd" | "wechatd" | "feishud" | "larkd",
+    action: "start" | "stop" | "restart",
+    rawMessage: string,
+  ) => {
+    const serviceLabel = serviceActionLabel(serviceName);
+    const actionLabel =
+      action === "start" ? t("启动", "start") : action === "restart" ? t("重启", "restart") : t("停止", "stop");
+
+    if (rawMessage.includes("did not enter running state")) {
+      return t(
+        `${serviceLabel}服务还没有准备好，${actionLabel}暂时没有完成。请先确认配置已保存，稍等 2 到 3 秒后再试；如果还是失败，再到日志页面查看 ${serviceName}.log。`,
+        `${serviceLabel} is not ready yet, so the ${actionLabel} action did not finish. Make sure the configuration is saved, wait 2 to 3 seconds, and try again. If it still fails, check ${serviceName}.log on the Logs page.`,
+      );
+    }
+
+    if (rawMessage.includes("service disabled")) {
+      return t(
+        `${serviceLabel}服务当前没有启用，请先完成配置并保存后再试。`,
+        `${serviceLabel} is not enabled yet. Finish the configuration and save it before trying again.`,
+      );
+    }
+
+    return t(
+      `${serviceLabel}服务操作没有成功，请稍后再试。需要的话，可以到日志页面查看 ${serviceName}.log。`,
+      `The ${serviceLabel} action did not complete. Please try again shortly. If needed, check ${serviceName}.log on the Logs page.`,
+    );
   };
   const channelPresets = useMemo<Record<ChannelName, ChannelPreset>>(
     () => ({
@@ -1055,16 +1111,24 @@ export default function App() {
         throw new Error(body.error || `${action} ${serviceName} failed (${res.status})`);
       }
       setServiceActionMessage(
-        t(
-          `服务操作成功：${serviceName} -> ${action}`,
-          `Service action succeeded: ${serviceName} -> ${action}`,
-        ),
+        {
+          tone: "success",
+          text:
+            action === "restart"
+              ? t(`${serviceActionLabel(serviceName)}服务已重启。`, `${serviceActionLabel(serviceName)} was restarted.`)
+              : action === "start"
+                ? t(`${serviceActionLabel(serviceName)}服务已启动。`, `${serviceActionLabel(serviceName)} started.`)
+                : t(`${serviceActionLabel(serviceName)}服务已停止。`, `${serviceActionLabel(serviceName)} stopped.`),
+        },
       );
       await sleep(800);
       await fetchHealth();
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
-      setServiceActionMessage(`${t("服务操作失败", "Service action failed")}: ${message}`);
+      setServiceActionMessage({
+        tone: "error",
+        text: formatServiceActionError(serviceName, action, message),
+      });
     } finally {
       setServiceActionLoading((prev) => ({ ...prev, [serviceName]: false }));
     }
@@ -1112,7 +1176,10 @@ export default function App() {
       }
       await sleep(1200);
       await fetchWhatsappWebLoginStatus();
-      setServiceActionMessage(t("已发起 WhatsApp Web 退出登录", "WhatsApp Web logout requested"));
+      setServiceActionMessage({
+        tone: "success",
+        text: t("已发起 WhatsApp Web 退出登录。", "WhatsApp Web logout requested."),
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setWaLoginError(message);
@@ -1155,6 +1222,7 @@ export default function App() {
 
   const startWechatQrLogin = async (force = true) => {
     setWechatQrStarting(true);
+    setWechatQrPreviewRequested(true);
     setWechatLoginError(null);
     setWechatSessionKey(null);
     setWechatLoginStatus((prev) => ({
@@ -1505,6 +1573,25 @@ export default function App() {
     }
   };
 
+  const fetchTelegramConfig = async () => {
+    setTelegramConfigLoading(true);
+    setTelegramConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/telegram/config`);
+      const body = (await res.json()) as ApiResponse<TelegramConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `Telegram 配置获取失败 (${res.status})`);
+      }
+      setTelegramConfigData(body.data);
+      setTelegramConfigDraft(body.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setTelegramConfigError(message);
+    } finally {
+      setTelegramConfigLoading(false);
+    }
+  };
+
   const fetchLlmConfig = async () => {
     setLlmConfigLoading(true);
     setLlmConfigError(null);
@@ -1603,6 +1690,21 @@ export default function App() {
     setWechatConfigDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
   };
 
+  const setTelegramPrimaryBotDraftField = (key: keyof TelegramBotConfigItem, value: TelegramBotConfigItem[keyof TelegramBotConfigItem]) => {
+    setTelegramConfigDraft((prev) => {
+      if (!prev) return prev;
+      const bots = prev.bots.length > 0 ? [...prev.bots] : [buildDefaultTelegramBot()];
+      const primaryIndex = bots.findIndex((bot) => bot.is_primary);
+      const targetIndex = primaryIndex >= 0 ? primaryIndex : 0;
+      bots[targetIndex] = {
+        ...(bots[targetIndex] ?? buildDefaultTelegramBot()),
+        [key]: value,
+        is_primary: true,
+      };
+      return { ...prev, bots };
+    });
+  };
+
   const saveWechatConfig = async () => {
     if (!wechatConfigDraft) return;
     setWechatConfigSaving(true);
@@ -1645,15 +1747,58 @@ export default function App() {
     }
   };
 
+  const saveTelegramConfig = async () => {
+    if (!telegramConfigDraft) return;
+    setTelegramConfigSaving(true);
+    setTelegramConfigSaveMessage(null);
+    setTelegramConfigError(null);
+    try {
+      const bots = telegramConfigDraft.bots.length > 0 ? telegramConfigDraft.bots : [buildDefaultTelegramBot()];
+      const normalizedBots = bots.map((bot, index) => ({
+        ...bot,
+        name: bot.name?.trim() || (index === 0 ? "primary" : `bot-${index + 1}`),
+        bot_token: bot.bot_token?.trim() || "",
+        agent_id: bot.agent_id?.trim() || "main",
+        is_primary: index === 0 ? true : bot.is_primary,
+      }));
+      const res = await apiFetch(`/v1/telegram/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bots: normalizedBots,
+          agents: telegramConfigDraft.agents ?? [],
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<TelegramConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `Telegram 配置保存失败 (${res.status})`);
+      }
+      setTelegramConfigData(body.data);
+      setTelegramConfigDraft(body.data);
+      setTelegramConfigSaveMessage(
+        t(
+          "Telegram 配置已保存。下一步请启动 telegramd，然后发一条测试消息。",
+          "Telegram config was saved. Next, start telegramd and send a test message.",
+        ),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setTelegramConfigError(message);
+    } finally {
+      setTelegramConfigSaving(false);
+    }
+  };
+
   const openWechatLoginDialog = () => {
     setWechatLoginDialogOpen(true);
     setWechatLoginError(null);
-    setWechatAdvancedOpen(false);
+    setWechatQrPreviewRequested(false);
     void fetchWechatConfig();
   };
 
   const closeWechatLoginDialog = () => {
     setWechatLoginDialogOpen(false);
+    setWechatQrPreviewRequested(false);
   };
 
   const importExternalSkill = async () => {
@@ -2277,6 +2422,8 @@ export default function App() {
       })();
       return;
     }
+    if (uiAuthLoading) return;
+    if (uiAuthReady && authIdentity) return;
     if (!uiKey) {
       setUiAuthReady(false);
       setAuthIdentity(null);
@@ -2352,9 +2499,9 @@ export default function App() {
   }, [lang]);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEYS.themeMode, themeMode);
-    document.documentElement.dataset.theme = themeMode;
-  }, [themeMode]);
+    window.localStorage.setItem(STORAGE_KEYS.themeMode, "dark");
+    document.documentElement.dataset.theme = "dark";
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.currentPage, currentPage);
@@ -2371,6 +2518,7 @@ export default function App() {
     void fetchSkills();
     void fetchSkillsConfig();
     void fetchWechatConfig();
+    void fetchTelegramConfig();
     void fetchLlmConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2395,6 +2543,7 @@ export default function App() {
     if (currentPage === "channels") {
       void fetchAuthKeys();
       void fetchWechatConfig();
+      void fetchTelegramConfig();
     }
   }, [currentPage, uiAuthReady, isAdminIdentity]);
 
@@ -2498,7 +2647,23 @@ export default function App() {
     return maskStoredKey(uiKey);
   }, [uiKey, authMode]);
   const adapterHealthRows = useMemo<AdapterHealthRow[]>(() => {
+    const servicePriority: Record<AdapterHealthRow["key"], number> = {
+      wechat_bot: 0,
+      telegram_bot: 1,
+      feishu_bot: 2,
+      lark_bot: 3,
+      whatsapp_cloud: 4,
+      whatsapp_web: 5,
+    };
     const rows: AdapterHealthRow[] = [
+      {
+        key: "wechat_bot",
+        label: serviceDisplayName("wechat_bot"),
+        serviceName: "wechatd",
+        healthy: health?.wechatd_healthy,
+        processCount: health?.wechatd_process_count,
+        memoryRssBytes: health?.wechatd_memory_rss_bytes,
+      },
       {
         key: "telegram_bot",
         label: serviceDisplayName("telegram_bot"),
@@ -2506,22 +2671,6 @@ export default function App() {
         healthy: health?.telegram_bot_healthy ?? health?.telegramd_healthy,
         processCount: health?.telegram_bot_process_count ?? health?.telegramd_process_count,
         memoryRssBytes: health?.telegram_bot_memory_rss_bytes ?? health?.telegramd_memory_rss_bytes,
-      },
-      {
-        key: "whatsapp_web",
-        label: serviceDisplayName("whatsapp_web"),
-        serviceName: "whatsapp_webd",
-        healthy: health?.whatsapp_web_healthy,
-        processCount: health?.whatsapp_web_process_count,
-        memoryRssBytes: health?.whatsapp_web_memory_rss_bytes,
-      },
-      {
-        key: "whatsapp_cloud",
-        label: serviceDisplayName("whatsapp_cloud"),
-        serviceName: "whatsappd",
-        healthy: health?.whatsapp_cloud_healthy ?? health?.whatsappd_healthy,
-        processCount: health?.whatsapp_cloud_process_count ?? health?.whatsappd_process_count,
-        memoryRssBytes: health?.whatsapp_cloud_memory_rss_bytes ?? health?.whatsappd_memory_rss_bytes,
       },
       {
         key: "feishu_bot",
@@ -2532,14 +2681,6 @@ export default function App() {
         memoryRssBytes: health?.feishud_memory_rss_bytes,
       },
       {
-        key: "wechat_bot",
-        label: serviceDisplayName("wechat_bot"),
-        serviceName: "wechatd",
-        healthy: health?.wechatd_healthy,
-        processCount: health?.wechatd_process_count,
-        memoryRssBytes: health?.wechatd_memory_rss_bytes,
-      },
-      {
         key: "lark_bot",
         label: serviceDisplayName("lark_bot"),
         serviceName: "larkd",
@@ -2548,52 +2689,10 @@ export default function App() {
         memoryRssBytes: health?.larkd_memory_rss_bytes,
       },
     ];
-    // 运行的（healthy）排上面，未运行的排下面；同组内按 key 稳定排序
-    return [...rows].sort((a, b) => {
-      const aUp = a.healthy === true ? 1 : 0;
-      const bUp = b.healthy === true ? 1 : 0;
-      if (bUp !== aUp) return bUp - aUp;
-      return (a.key || "").localeCompare(b.key || "");
-    });
+    return [...rows].sort((a, b) => (servicePriority[a.key] ?? 999) - (servicePriority[b.key] ?? 999));
   }, [health, lang]);
   const serviceStatusRows = useMemo<ServiceStatusRow[]>(() => {
     return adapterHealthRows.map((row) => {
-      if (row.key === "whatsapp_web") {
-        if (row.healthy === true && waLoginStatus?.connected === true) {
-          return {
-            ...row,
-            category: "ready",
-            statusLabel: t("已登录可用", "Connected and ready"),
-            detail: t("进程正常，WhatsApp Web 已完成登录。", "Daemon is healthy and WhatsApp Web is connected."),
-          };
-        }
-        if (row.healthy === true) {
-          return {
-            ...row,
-            category: "attention",
-            statusLabel: t("进程已起，待登录", "Running, login required"),
-            detail:
-              waLoginStatus?.qr_ready
-                ? t("二维码已就绪，可以直接扫码。", "QR is ready and can be scanned now.")
-                : t("进程已启动，但还没有可用登录态。", "Daemon is up, but no active login session is available yet."),
-          };
-        }
-        if (row.healthy === false) {
-          return {
-            ...row,
-            category: "stopped",
-            statusLabel: t("进程未运行", "Daemon stopped"),
-            detail: t("先启动 whatsapp_webd，再检查二维码或登录态。", "Start whatsapp_webd first, then check QR or login state."),
-          };
-        }
-        return {
-          ...row,
-          category: "unknown",
-          statusLabel: t("状态未知", "Unknown"),
-          detail: t("暂时无法判断 whatsapp_webd 当前状态。", "Unable to determine the current whatsapp_webd state."),
-        };
-      }
-
       if (row.key === "wechat_bot") {
         if (row.healthy === true && wechatLoginStatus?.connected === true) {
           return {
@@ -2654,15 +2753,7 @@ export default function App() {
         detail: t("当前还拿不到足够的进程状态。", "There is not enough process state information yet."),
       };
     });
-  }, [adapterHealthRows, lang, waLoginStatus, wechatLoginStatus]);
-  const healthyServiceCount = useMemo(
-    () => adapterHealthRows.filter((row) => row.healthy === true).length,
-    [adapterHealthRows],
-  );
-  const unavailableServiceCount = useMemo(
-    () => adapterHealthRows.filter((row) => row.healthy === false).length,
-    [adapterHealthRows],
-  );
+  }, [adapterHealthRows, lang, wechatLoginStatus]);
   const serviceGroupCounts = useMemo(() => {
     return serviceStatusRows.reduce(
       (acc, row) => {
@@ -2759,18 +2850,6 @@ export default function App() {
         : null,
     );
   }, [llmConfigData, llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
-  const llmRuntimeLabel = useMemo(() => {
-    if (!llmConfigData?.runtime?.vendor || !llmConfigData.runtime.model) {
-      return t("当前还没有读到运行中的模型信息", "Runtime model info is not available yet");
-    }
-    return `${llmConfigData.runtime.vendor} / ${llmConfigData.runtime.model}`;
-  }, [llmConfigData, lang]);
-  const llmSavedLabel = useMemo(() => {
-    if (!llmConfigData?.selected_vendor || !llmConfigData.selected_model) {
-      return t("当前还没有保存好的模型配置", "No saved model config yet");
-    }
-    return `${llmConfigData.selected_vendor} / ${llmConfigData.selected_model}`;
-  }, [llmConfigData, lang]);
   const llmRestartPending = useMemo(() => {
     if (!llmConfigData) return false;
     const runtimeVendor = llmConfigData.runtime?.vendor?.trim() || "";
@@ -2779,6 +2858,70 @@ export default function App() {
     const savedModel = llmConfigData.selected_model?.trim() || "";
     return llmConfigData.restart_required || runtimeVendor !== savedVendor || runtimeModel !== savedModel;
   }, [llmConfigData]);
+  const savedLlmVendorInfo = useMemo(
+    () => llmConfigData?.vendors.find((vendor) => vendor.name === llmConfigData.selected_vendor) ?? null,
+    [llmConfigData],
+  );
+  const llmConfigured = useMemo(() => {
+    if (!llmConfigData?.selected_vendor || !llmConfigData.selected_model) return false;
+    if (!savedLlmVendorInfo) return false;
+    return savedLlmVendorInfo.api_key_configured;
+  }, [llmConfigData, savedLlmVendorInfo]);
+  const llmStepStatus = useMemo<"done" | "attention" | "todo">(() => {
+    if (!llmConfigured) return "todo";
+    return llmRestartPending ? "attention" : "done";
+  }, [llmConfigured, llmRestartPending]);
+  const primaryTelegramBot = useMemo(() => {
+    const bots = telegramConfigDraft?.bots ?? telegramConfigData?.bots ?? [];
+    return bots.find((bot) => bot.is_primary) ?? bots[0] ?? buildDefaultTelegramBot();
+  }, [telegramConfigData, telegramConfigDraft]);
+  const telegramBotTokenConfigured = useMemo(() => {
+    const token = primaryTelegramBot.bot_token?.trim() || "";
+    return token.length > 0 && token !== "REPLACE_ME";
+  }, [primaryTelegramBot]);
+  const hasUnsavedTelegramConfigChanges = useMemo(() => {
+    if (!telegramConfigData || !telegramConfigDraft) return false;
+    return JSON.stringify(telegramConfigData) !== JSON.stringify(telegramConfigDraft);
+  }, [telegramConfigData, telegramConfigDraft]);
+  const wechatStepStatus = useMemo<"done" | "attention" | "todo">(() => {
+    if (!wechatConfigData?.enabled) return "todo";
+    if (health?.wechatd_healthy === true && wechatLoginStatus?.connected) return "done";
+    return "attention";
+  }, [health?.wechatd_healthy, wechatConfigData?.enabled, wechatLoginStatus?.connected]);
+  const telegramStepStatus = useMemo<"done" | "attention" | "todo">(() => {
+    if (!telegramBotTokenConfigured) return "todo";
+    if (health?.telegramd_healthy === true) return "done";
+    return "attention";
+  }, [health?.telegramd_healthy, telegramBotTokenConfigured]);
+  const wechatStatusSummary = useMemo(() => {
+    if (wechatStepStatus === "done") {
+      return t("设置和登录都已完成，现在可以直接通过微信发送消息。", "Setup and sign-in are complete. You can now send messages through WeChat.");
+    }
+    if (wechatStepStatus === "attention") {
+      return t("微信已经接近可用。打开接入窗口后，完成剩下的启动或扫码即可。", "WeChat is almost ready. Open the setup window and finish the remaining service start or QR sign-in steps.");
+    }
+    return t("还没有开始微信接入。打开接入窗口后，按页面提示完成设置即可。", "WeChat setup has not started yet. Open the setup window and follow the prompts there.");
+  }, [lang, t, wechatStepStatus]);
+  const telegramStatusSummary = useMemo(() => {
+    if (telegramStepStatus === "done") {
+      return t("Telegram 已经可用。你可以直接在 Telegram 里收发消息。", "Telegram is ready. You can send and receive messages there now.");
+    }
+    if (hasUnsavedTelegramConfigChanges) {
+      return t("你刚改了 Telegram 设置，先保存，再启动服务。", "You changed the Telegram settings. Save them first, then start the service.");
+    }
+    if (telegramStepStatus === "attention") {
+      return t("Bot Token 已填好，再启动一次服务就可以了。", "The bot token is ready. Start the service once more to finish setup.");
+    }
+    return t("填入 Bot Token 后保存，再启动服务，就可以开始使用 Telegram。", "Enter the bot token, save it, and start the service to begin using Telegram.");
+  }, [hasUnsavedTelegramConfigChanges, lang, t, telegramStepStatus]);
+  const testMessageStepStatus = useMemo<"done" | "attention" | "todo">(() => {
+    const hasAssistantReply = chatMessages.some((msg) => msg.role === "assistant");
+    if (hasAssistantReply) return "done";
+    if (llmStepStatus === "done") {
+      return "attention";
+    }
+    return "todo";
+  }, [chatMessages, llmStepStatus]);
   const normalizedSkillsSearchQuery = useMemo(() => skillsSearchQuery.trim().toLowerCase(), [skillsSearchQuery]);
   const filteredManagedSkills = useMemo(
     () => managedSkills.filter((name) => !normalizedSkillsSearchQuery || name.toLowerCase().includes(normalizedSkillsSearchQuery)),
@@ -2865,19 +3008,19 @@ export default function App() {
       },
       chat: {
         title: t("对话交互", "Chat Interaction"),
-        desc: t("和 RustClaw 直接对话，快速确认回复是否正常。", "Chat with RustClaw directly to verify responses."),
+        desc: t("在这里发一条最简单的测试消息，确认模型和已接入渠道已经真正可用。", "Send a simple test message here to confirm the model and connected channel really work."),
       },
       services: {
-        title: t("连接状态", "Connections"),
-        desc: t("这里看 Telegram、WhatsApp、飞书这些连接服务有没有正常工作。", "Check whether Telegram, WhatsApp, Feishu, and similar connection services are working properly."),
+        title: t("频道接入", "Channel Setup"),
+        desc: t("微信和 Telegram 都在这里接入。按你要使用的渠道完成配置即可。", "Connect WeChat and Telegram here. Configure the channel you plan to use."),
       },
       channels: {
-        title: t("绑定账号", "Bind Accounts"),
-        desc: t("列出后端所有 Key，生成新 Key。仅 admin 可操作。使用 Key 绑定通信端。", "List all keys and generate new keys. Admin only. Use a key to bind channel accounts."),
+        title: t("账号绑定", "Account Binding"),
+        desc: t("这里用于生成访问 Key，以及处理账号绑定。", "Use this page to generate access keys and manage account bindings."),
       },
       models: {
-        title: t("模型设置", "Model Settings"),
-        desc: t("这里设置 RustClaw 主要用哪家模型、模型名，以及该厂商的接口地址和密钥。", "Choose RustClaw's main LLM vendor, model, endpoint, and API key here."),
+        title: t("大模型", "Models"),
+        desc: t("这是第一步。先把主模型配好，RustClaw 才能正常理解消息和执行大多数任务。", "This is step one. Configure the main LLM first so RustClaw can understand messages and run most tasks."),
       },
       skills: {
         title: t("技能设置", "Skill Settings"),
@@ -2904,27 +3047,27 @@ export default function App() {
       },
       {
         id: "chat" as const,
-        label: t("对话交互", "Chat Interaction"),
-        hint: t("发消息", "send message"),
+        label: t("对话测试", "Chat"),
+        hint: t("试消息", "test reply"),
         icon: <MessageCircle className="h-4 w-4" />,
       },
       {
-        id: "services" as const,
-        label: t("连接状态", "Connections"),
-        hint: t("查连接", "service health"),
-        icon: <Server className="h-4 w-4" />,
-      },
-      {
         id: "channels" as const,
-        label: t("绑定账号", "Bind Accounts"),
-        hint: t("连账号", "connect accounts"),
+        label: t("账号绑定", "Account Binding"),
+        hint: t("key 和绑定", "keys and bindings"),
         icon: <Database className="h-4 w-4" />,
       },
       {
         id: "models" as const,
-        label: t("模型设置", "Models"),
-        hint: t("选模型", "llm config"),
+        label: t("大模型", "Models"),
+        hint: t("先配置", "step one"),
         icon: <Sparkles className="h-4 w-4" />,
+      },
+      {
+        id: "services" as const,
+        label: t("频道接入", "Channel Setup"),
+        hint: t("连微信 TG", "connect channels"),
+        icon: <Server className="h-4 w-4" />,
       },
       {
         id: "skills" as const,
@@ -2947,43 +3090,44 @@ export default function App() {
     ],
     [lang],
   );
-  const currentPageMeta = pageMeta[currentPage];
-  const suggestedNextStep = useMemo(() => {
-    if (!isOnline) {
-      return {
-        title: t("先检查服务是否启动", "Check whether the service is running"),
-        desc: t("如果页面显示离线，先确认 clawd 地址是否正确，或者服务是否已经启动。", "If the console looks offline, first confirm the clawd address and whether the service is running."),
-        page: "dashboard" as const,
-        cta: t("查看首页提示", "Open Home"),
-      };
-    }
-    if ((health?.bound_channel_count ?? 0) === 0) {
-      return {
-        title: t("绑定你的账号", "Bind your account"),
-        desc: t("第一次使用时，先把 Telegram / WhatsApp / 微信 / 飞书 这些外部账号绑定到当前登录 key。", "For first-time setup, bind Telegram / WhatsApp / WeChat / Feishu identities to the current login key."),
-        page: "channels" as const,
-        cta: t("去绑定账号", "Bind account"),
-      };
-    }
-    if (healthyServiceCount === 0) {
-      return {
-        title: t("启动连接服务", "Start connection services"),
-        desc: t("如果一个服务都没运行，就先启动你需要用到的那几个渠道。", "If no connection service is running yet, start the channels you plan to use."),
+  const onboardingSteps = useMemo(
+    () => [
+      {
+        key: "llm",
+        title: t("先设置大模型", "Set up the LLM"),
+        description: t("选择厂商、模型并保存。没有这一步，大多数功能都还不能正常工作。", "Choose a vendor and model, then save it. Most RustClaw features depend on this step."),
+        status: llmStepStatus,
+        page: "models" as const,
+        cta: t("去设置模型", "Open Models"),
+      },
+      {
+        key: "chat",
+        title: t("发送测试消息", "Send a test message"),
+        description: t("先发一条简单消息，确认主模型已经能够正常回复。", "Send a simple message first to confirm the main model can reply normally."),
+        status: testMessageStepStatus,
+        page: "chat" as const,
+        cta: t("去测试消息", "Open Chat"),
+      },
+      {
+        key: "wechat",
+        title: t("连接机器人", "Connect the bot"),
+        description: t("如果你准备接入微信或 Telegram，就到频道接入页继续完成配置、启动服务和登录验证。", "If you are ready to connect WeChat or Telegram, continue in Channel Setup to finish configuration, start the service, and complete sign-in verification."),
+        status: wechatStepStatus,
         page: "services" as const,
-        cta: t("去看连接状态", "Check services"),
-      };
-    }
-    return {
-      title: t("可以开始试一条消息了", "You can try a message now"),
-      desc: t("基础状态已经差不多就绪，可以去对话交互页给 RustClaw 发一条简单消息。", "The basics look ready, so you can send a simple message on the Chat Interaction page."),
-      page: "chat" as const,
-      cta: t("去对话交互", "Open Chat"),
-    };
-  }, [healthyServiceCount, health?.bound_channel_count, isOnline, lang]);
-  const toggleThemeMode = () => {
-    setThemeMode((current) => (current === "dark" ? "light" : "dark"));
-  };
-
+        cta: t("去频道接入", "Open Channel Setup"),
+      },
+    ],
+    [lang, llmStepStatus, testMessageStepStatus, wechatStepStatus],
+  );
+  const dashboardOverviewItems = useMemo(
+    () =>
+      getDashboardOverviewItems({
+        isOnline,
+        memoryLabel: formatBytes(health?.memory_rss_bytes ?? null),
+        uptimeLabel: formatDuration(health?.uptime_seconds),
+      }),
+    [health?.memory_rss_bytes, health?.uptime_seconds, isOnline],
+  );
   const isDashboardPage = currentPage === "dashboard";
 
   if (!uiAuthReady) {
@@ -3192,14 +3336,6 @@ export default function App() {
                 )}
                 <button
                   type="button"
-                  onClick={toggleThemeMode}
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs hover:bg-white/10 sm:text-sm"
-                >
-                  {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                  {themeMode === "dark" ? t("日间模式", "Day mode") : t("夜间模式", "Night mode")}
-                </button>
-                <button
-                  type="button"
                   onClick={() => setLang((v) => (v === "zh" ? "en" : "zh"))}
                   className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
                 >
@@ -3215,22 +3351,25 @@ export default function App() {
 
   return (
     <div className="theme-shell min-h-screen">
-      <header className="theme-header sticky top-0 z-40 flex h-16 shrink-0 items-stretch border-b border-white/10 px-3 sm:px-6">
-        <div className="mx-auto flex w-full max-w-7xl items-stretch justify-between gap-3">
-          <div className="flex min-w-0 items-center py-0">
-            <h1 className="flex items-center gap-2 text-lg font-bold tracking-tight sm:text-2xl">
-              <span className="text-lg leading-none sm:text-2xl">🦞</span>
-              <span className="truncate">RustClaw</span>
-            </h1>
+      <header className="theme-header sticky top-0 z-40 border-b border-white/10 px-3 sm:px-6">
+        <div className="theme-header-inner mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-3 py-2">
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={() => setCurrentPage("dashboard")}
+              className="theme-brand-link truncate text-left text-lg font-bold tracking-tight transition hover:text-white/85 sm:text-2xl"
+            >
+              RustClaw
+            </button>
           </div>
 
-          <div className="flex h-full items-stretch gap-2">
+          <div className="theme-header-actions flex flex-wrap items-center justify-end gap-2">
             {/* 小屏下拉导航，仅在 lg 以下显示 */}
-            <div ref={navDropdownRef} className="relative flex h-full items-stretch lg:hidden">
+            <div ref={navDropdownRef} className="relative flex items-center lg:hidden">
               <button
                 type="button"
                 onClick={() => setNavDropdownOpen((v) => !v)}
-                className="theme-topbar-btn inline-flex h-full min-h-0 items-center gap-1.5 py-1.5"
+                className="theme-topbar-nav-btn"
                 aria-expanded={navDropdownOpen}
                 aria-haspopup="true"
               >
@@ -3261,34 +3400,29 @@ export default function App() {
                 </div>
               )}
             </div>
-            <button
-              onClick={toggleThemeMode}
-              className="theme-topbar-btn h-full min-h-0 py-1.5"
-              title={themeMode === "dark" ? t("日间模式", "Day mode") : t("夜间模式", "Night mode")}
-            >
-              {themeMode === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
-              <span className="hidden sm:inline">
-                {themeMode === "dark" ? t("日间模式", "Day mode") : t("夜间模式", "Night mode")}
-              </span>
-            </button>
-            <button
-              onClick={() => setLang((v) => (v === "zh" ? "en" : "zh"))}
-              className="theme-topbar-btn h-full min-h-0 py-1.5"
-            >
-              {lang === "zh" ? "中文" : "EN"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className="theme-topbar-btn h-full min-h-0 py-1.5"
-              title={
-                authMode === "webd"
-                  ? t("退出登录并清除 Web 会话", "Log out and clear web session")
-                  : t("退出登录，需重新输入 key", "Log out; key required to sign in again")
-              }
-            >
-              {t("退出", "Log out")}
-            </button>
+            <div className="theme-toolbar-shell">
+              <button
+                type="button"
+                onClick={() => setLang((v) => (v === "zh" ? "en" : "zh"))}
+                className="theme-toolbar-segment"
+                title={t("切换界面语言", "Switch interface language")}
+              >
+                {lang === "zh" ? "中文" : "English"}
+              </button>
+              <span className="theme-toolbar-divider" aria-hidden="true" />
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="theme-toolbar-segment theme-toolbar-segment-danger"
+                title={
+                  authMode === "webd"
+                    ? t("退出登录并清除 Web 会话", "Log out and clear web session")
+                    : t("退出登录，需重新输入 key", "Log out; key required to sign in again")
+                }
+              >
+                {t("退出", "Log out")}
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -3341,24 +3475,82 @@ export default function App() {
 
         <main className="mx-auto min-w-0 max-w-7xl space-y-4">
           {isDashboardPage ? (
-            <section className="theme-panel p-5 sm:p-6">
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-                <div>
-                  <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("页面", "Page")}</p>
-                  <h2 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">{currentPageMeta.title}</h2>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs text-white/70 sm:text-sm">
-                  <div className="theme-meta-pill">
-                    <span className="text-white/45">{t("下一步", "Next")}</span>
-                    <span className="ml-2 text-white/80">{suggestedNextStep.title}</span>
-                  </div>
-                </div>
-              </div>
-            </section>
-          ) : null}
-
-          {isDashboardPage ? (
             <>
+              <section className="theme-panel setup-hero p-5 sm:p-6">
+                <div className="max-w-3xl">
+                  <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("首次使用", "First run")}</p>
+                  <h3 className="mt-2 text-xl font-semibold tracking-tight sm:text-3xl">
+                    {t("开始使用 RustClaw", "Start using RustClaw")}
+                  </h3>
+                  <p className="mt-3 text-sm leading-7 text-white/70 sm:text-base">
+                    {t(
+                      "请先完成大模型配置和消息测试；如需通过微信使用 RustClaw，再继续完成微信接入。Telegram 仅在你需要时再补充配置。",
+                      "Please complete the model setup and a test message first. If you want to use RustClaw through WeChat, continue with the WeChat setup. Add Telegram later only if you need it.",
+                    )}
+                  </p>
+                </div>
+
+                <div className="mt-6 grid gap-3 xl:grid-cols-3">
+                  {onboardingSteps.map((step, index) => (
+                    <button
+                      key={step.key}
+                      type="button"
+                      onClick={() => setCurrentPage(step.page)}
+                      className="setup-step-card setup-step-card-compact text-left"
+                    >
+                      <span className="setup-step-index setup-step-index-floating">{index + 1}</span>
+                      {step.key !== "chat" ? (
+                        <span
+                          className={
+                            step.status === "done"
+                              ? "setup-status setup-step-status setup-status-done"
+                              : step.status === "attention"
+                              ? "setup-status setup-step-status setup-status-attention"
+                              : "setup-status setup-step-status setup-status-todo"
+                          }
+                        >
+                          {step.status === "done"
+                            ? t("已完成", "Done")
+                            : step.status === "attention"
+                              ? t("待完成", "Needs attention")
+                              : t("未开始", "Not started")}
+                        </span>
+                      ) : null}
+                      <div className="setup-step-card-body">
+                        <h4 className="text-base font-semibold text-white">{step.title}</h4>
+                        <p className="mt-2 text-sm leading-7 text-white/65">{step.description}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="theme-panel-soft rounded-[22px] border border-white/10 px-4 py-3 sm:px-5">
+                <div className="grid gap-3 md:grid-cols-3">
+                  {dashboardOverviewItems.map((item, index) => (
+                    <div
+                      key={item.key}
+                      className={`py-2 ${
+                        index > 0 ? "md:border-l md:border-white/8 md:pl-5" : ""
+                      }`}
+                    >
+                      <p className="text-[11px] tracking-[0.16em] text-white/42">{item.label}</p>
+                      <p
+                        className={`mt-2 text-base font-semibold ${
+                          item.tone === "good"
+                            ? "text-emerald-200"
+                            : item.tone === "warning"
+                            ? "text-amber-200"
+                            : "text-white/92"
+                        }`}
+                      >
+                        {item.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
               {(queuePressureHigh || runningTooOld || !isOnline) && (
                 <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
                   <div className="flex items-start gap-3">
@@ -3379,202 +3571,6 @@ export default function App() {
                 </section>
               )}
 
-              <section className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_320px]">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                  <h3 className="text-lg font-semibold sm:text-xl">{t("常用操作", "Common actions")}</h3>
-                  <div className="mt-4 space-y-2.5">
-                    {[
-                      {
-                        title: t("先看首页状态", "Check Home first"),
-                      },
-                      {
-                        title: t("绑定通信端账号", "Bind channel account"),
-                      },
-                      {
-                        title: t("试一条最简单的消息", "Send one simple test message"),
-                      },
-                    ].map((step, index) => (
-                      <div key={step.title} className="flex gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-xs font-semibold text-white/85">
-                          {index + 1}
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-white">{step.title}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
-                  <h3 className="text-xl font-semibold">{suggestedNextStep.title}</h3>
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(suggestedNextStep.page)}
-                    className="mt-4 w-full theme-accent-btn"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    {suggestedNextStep.cta}
-                  </button>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-                <div className="flex items-center gap-2 text-base font-semibold text-white">
-                  <Wrench className="theme-icon-accent h-4 w-4" />
-                  <span>{t("基础设置", "Basic Settings")}</span>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr_1fr]">
-                  <label className="space-y-2">
-                    <span className="text-[10px] uppercase tracking-widest text-white/50">{t("clawd API 地址", "clawd API URL")}</span>
-                    <input
-                      className="theme-input"
-                      value={baseUrl}
-                      onChange={(e) => setBaseUrl(e.target.value)}
-                      placeholder="http://127.0.0.1:8787"
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] uppercase tracking-widest text-white/50">{t("自动刷新", "Auto Refresh")}</span>
-                    <select
-                      className="theme-input"
-                      value={pollingSeconds}
-                      onChange={(e) => setPollingSeconds(Number(e.target.value))}
-                    >
-                      <option value={3}>{t("3 秒", "3s")}</option>
-                      <option value={5}>{t("5 秒", "5s")}</option>
-                      <option value={10}>{t("10 秒", "10s")}</option>
-                      <option value={0}>{t("关闭", "Off")}</option>
-                    </select>
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] uppercase tracking-widest text-white/50">{t("队列阈值", "Queue Alert")}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      className="theme-input"
-                      value={queueWarn}
-                      onChange={(e) => setQueueWarn(Math.max(1, Number(e.target.value) || 1))}
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-[10px] uppercase tracking-widest text-white/50">{t("运行告警(秒)", "Runtime Alert(s)")}</span>
-                    <input
-                      type="number"
-                      min={10}
-                      className="theme-input"
-                      value={ageWarnSeconds}
-                      onChange={(e) => setAgeWarnSeconds(Math.max(10, Number(e.target.value) || 10))}
-                    />
-                  </label>
-                </div>
-                {error ? (
-                  <p className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                    {t("接口错误", "API error")}: {error}
-                  </p>
-                ) : null}
-              </section>
-
-              <section className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-[10px] uppercase tracking-widest text-sky-200/70">{t("整体状态", "Overall status")}</p>
-                  <p className={`mt-2 text-lg font-semibold ${isOnline ? "text-emerald-300" : "text-red-300"}`}>
-                    {isOnline ? t("服务在线", "Service online") : t("当前离线", "Currently offline")}
-                  </p>
-                  <div className="mt-3 space-y-2 text-sm">
-                    <p className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-2">
-                      <span className="text-white/45">{t("版本", "Version")}</span>
-                      <span className="font-medium text-sky-200">{health?.version || "--"}</span>
-                    </p>
-                    <p className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-2">
-                      <span className="text-white/45">{t("Worker", "Worker")}</span>
-                      <span className="font-medium text-violet-200">{health?.worker_state || "--"}</span>
-                    </p>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-[10px] uppercase tracking-widest text-amber-200/70">{t("任务负载", "Task load")}</p>
-                  <p className="mt-2 text-lg font-semibold text-amber-100">
-                    {t("排队 {{queue}} / 运行 {{running}}", "Queued {{queue}} / Running {{running}}")
-                      .replace("{{queue}}", String(health?.queue_length ?? "--"))
-                      .replace("{{running}}", String(health?.running_length ?? "--"))}
-                  </p>
-                  <div className="mt-3 space-y-2 text-sm">
-                    <p className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-2">
-                      <span className="text-white/45">{t("最久运行", "Oldest task")}</span>
-                      <span className="font-medium text-amber-200">{formatDuration(health?.running_oldest_age_seconds)}</span>
-                    </p>
-                    <p className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-2">
-                      <span className="text-white/45">{t("超时阈值", "Timeout")}</span>
-                      <span className="font-medium text-orange-200">{formatDuration(health?.task_timeout_seconds)}</span>
-                    </p>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-[10px] uppercase tracking-widest text-emerald-200/70">{t("资源占用", "Resources")}</p>
-                  <p className="mt-2 text-lg font-semibold text-emerald-100">{formatBytes(health?.memory_rss_bytes ?? null)}</p>
-                  <div className="mt-3 space-y-2 text-sm">
-                    <p className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-2">
-                      <span className="text-white/45">{t("运行时长", "Uptime")}</span>
-                      <span className="font-medium text-emerald-200">{formatDuration(health?.uptime_seconds)}</span>
-                    </p>
-                    <p className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-2">
-                      <span className="text-white/45">{t("刷新频率", "Refresh")}</span>
-                      <span className="font-medium text-cyan-200">{pollingSeconds > 0 ? t(`每 ${pollingSeconds} 秒`, `Every ${pollingSeconds}s`) : t("已关闭", "Off")}</span>
-                    </p>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <p className="text-[10px] uppercase tracking-widest text-white/45">{t("建议处理顺序", "Suggested order")}</p>
-                  <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-white/65">
-                    <li>{t("先看是否在线。", "Check whether the service is online.")}</li>
-                    <li>{t("再看有没有积压任务。", "Then check whether tasks are backing up.")}</li>
-                    <li>{t("最后再决定要不要进高级页。", "Only then decide whether you need advanced pages.")}</li>
-                  </ol>
-                </div>
-              </section>
-
-              <div className="space-y-4">
-                <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-                  <h3 className="mb-2 text-base font-semibold">{t("你现在最可能要做的事", "What you probably want to do next")}</h3>
-                  <div className="mt-4 grid gap-3">
-                    <QuickActionCard
-                      title={t("绑定通信端账号", "Bind channel account")}
-                      cta={t("打开绑定账号页", "Open Bind Accounts")}
-                      onClick={() => setCurrentPage("channels")}
-                      icon={<Database className="h-4 w-4" />}
-                    />
-                    <QuickActionCard
-                      title={t("看看连接是不是正常", "Check whether connections are healthy")}
-                      cta={t("打开连接状态页", "Open Connections")}
-                      onClick={() => setCurrentPage("services")}
-                      icon={<Server className="h-4 w-4" />}
-                    />
-                    <QuickActionCard
-                      title={t("试一条消息", "Try a message")}
-                      cta={t("打开对话交互", "Open Chat")}
-                      onClick={() => setCurrentPage("chat")}
-                      icon={<MessageCircle className="h-4 w-4" />}
-                    />
-                  </div>
-                </section>
-
-                <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-                  <details className="group">
-                    <summary className="flex cursor-pointer list-none items-center gap-2 text-base font-semibold text-white">
-                      <span>{t("高级调试数据", "Advanced Debug Data")}</span>
-                      <span className="ml-auto text-xs font-medium text-white/45">
-                        <span className="group-open:hidden">{t("点击展开", "Click to expand")}</span>
-                        <span className="hidden group-open:inline">{t("点击收起", "Click to collapse")}</span>
-                      </span>
-                      <ChevronDown className="h-4 w-4 text-white/55 transition group-open:rotate-180" />
-                    </summary>
-                    <pre className="mt-4 max-h-72 overflow-auto rounded-xl border border-white/10 bg-[#12151f] p-3 text-xs text-white/80">
-                      {JSON.stringify(health, null, 2)}
-                    </pre>
-                  </details>
-                </section>
-              </div>
             </>
           ) : null}
 
@@ -3716,164 +3712,130 @@ export default function App() {
           {currentPage === "services" ? (
             <div className="space-y-5">
               {serviceActionMessage ? (
-                <p className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80">
-                  {serviceActionMessage}
+                <p
+                  className={
+                    serviceActionMessage.tone === "error"
+                      ? "rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
+                      : "rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100"
+                  }
+                >
+                  {serviceActionMessage.text}
                 </p>
               ) : null}
 
-              <section className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-                <div className="theme-panel-soft p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-[0.28em] text-white/45">{t("整体状态", "System")}</p>
-                      <h3 className="mt-2 text-xl font-semibold">{isOnline ? t("服务在线", "Service online") : t("当前离线", "Currently offline")}</h3>
-                    </div>
-                    <span className={isOnline ? "rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200" : "rounded-full border border-red-500/25 bg-red-500/10 px-3 py-1 text-xs text-red-200"}>
-                      {isOnline ? t("可访问", "Reachable") : t("不可访问", "Offline")}
-                    </span>
+              <section className="theme-panel-soft channel-setup-hero p-5">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="max-w-2xl">
+                    <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("渠道接入", "Channel setup")}</p>
+                    <h3 className="mt-2 text-xl font-semibold tracking-tight">
+                      {t("微信和 Telegram 都可以在这里接入。", "You can connect both WeChat and Telegram here.")}
+                    </h3>
+                    <p className="mt-3 text-sm leading-7 text-white/70">
+                      {t(
+                        "按你要使用的渠道完成配置即可。需要微信时，打开接入窗口完成设置和扫码；需要 Telegram 时，填好 Bot Token 后保存并启动服务。",
+                        "Configure the channel you plan to use. For WeChat, open the setup window to finish configuration and QR sign-in. For Telegram, enter the bot token, save it, and start the service.",
+                      )}
+                    </p>
                   </div>
-
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                    <p className="text-sm font-medium">{t("RustClaw 主服务", "RustClaw core service")}</p>
-                    <p className="mt-1 break-all text-xs text-white/45">{apiBase}</p>
-                  </div>
-
-                  <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                    <div className="theme-service-kpi">
-                      {t("已就绪", "Ready")} {serviceGroupCounts.ready}
-                    </div>
-                    <div className="theme-service-kpi">
-                      {t("待处理", "Needs attention")} {serviceGroupCounts.attention}
-                    </div>
-                    <div className="theme-service-kpi">
-                      {t("未运行", "Stopped")} {serviceGroupCounts.stopped}
-                    </div>
-                    <div className="theme-service-kpi">
-                      {t("已绑定渠道", "Bound channels")} {health?.bound_channel_count ?? "--"}
-                      {boundChannelsLabel ? <span className="ml-2 text-xs text-white/45">{boundChannelsLabel}</span> : null}
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                      <p className="text-[10px] uppercase tracking-widest text-white/45">{t("任务负载", "Task load")}</p>
-                      <p className="mt-2 text-base font-semibold text-white/88">
-                        {t("排队 {{queue}} / 运行 {{running}}", "Queued {{queue}} / Running {{running}}")
-                          .replace("{{queue}}", String(health?.queue_length ?? "--"))
-                          .replace("{{running}}", String(health?.running_length ?? "--"))}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                      <p className="text-[10px] uppercase tracking-widest text-white/45">{t("异常服务", "Problem services")}</p>
-                      <p className="mt-2 text-base font-semibold text-white/88">{unavailableServiceCount}</p>
-                    </div>
-                  </div>
-
-                  <button onClick={() => void fetchHealth()} disabled={loading} className="theme-accent-soft-btn mt-4">
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    {t("刷新状态", "Refresh")}
-                  </button>
                 </div>
 
-                <section className="theme-panel-soft p-5">
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <Server className="theme-icon-accent h-4 w-4" />
-                      <h3 className="text-base font-semibold">{t("连接服务", "Services")}</h3>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <span className="theme-service-kpi">{t("已就绪", "Ready")} {serviceGroupCounts.ready}</span>
-                      <span className="theme-service-kpi">{t("未运行", "Stopped")} {serviceGroupCounts.stopped}</span>
-                    </div>
-                  </div>
-                  <div className="grid gap-3 xl:grid-cols-2">
-                    {serviceStatusRows.map((row) => (
-                      <div key={row.key} className="theme-service-card">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <Server className="h-4 w-4 shrink-0 text-white/70" />
-                              <span className="truncate text-sm font-medium text-white/90">{row.label}</span>
-                            </div>
-                            <p className="mt-2 text-xs leading-6 text-white/60">{row.detail}</p>
-                          </div>
-                          <span
-                            className={
-                              row.category === "ready"
-                                ? "inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200"
-                                : row.category === "attention"
-                                  ? "inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200"
-                                  : row.category === "stopped"
-                                    ? "inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200"
-                                : "inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/55"
-                            }
-                          >
-                            {row.category === "ready" || row.category === "attention" ? (
-                              <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 animate-pulse" title={row.statusLabel} aria-label={row.statusLabel} />
-                            ) : row.category === "stopped" ? (
-                              <span className="h-2 w-2 shrink-0 rounded-full bg-red-400" title={row.statusLabel} aria-label={row.statusLabel} />
-                            ) : (
-                              <span className="h-2 w-2 shrink-0 rounded-full bg-white/50" title={row.statusLabel} aria-label={row.statusLabel} />
-                            )}
-                          </span>
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <span className="theme-service-kpi">{t("进程", "Processes")} {row.processCount == null ? "--" : row.processCount}</span>
-                          <span className="theme-service-kpi">RSS {formatBytes(row.memoryRssBytes ?? null)}</span>
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {row.key === "whatsapp_web" && waLoginStatus?.connected !== true ? (
-                            <button
-                              onClick={() => setWaLoginDialogOpen(true)}
-                              className="theme-service-action theme-service-action-extra"
-                            >
-                              {tSlash("扫码登录 / QR Login")}
-                            </button>
-                          ) : null}
-                          {row.key === "wechat_bot" ? (
-                            <button
-                              onClick={() => openWechatLoginDialog()}
-                              className="theme-service-action theme-service-action-extra"
-                            >
-                              {tSlash("微信登录 / WeChat Login")}
-                            </button>
-                          ) : null}
-                          {row.key === "whatsapp_web" && waLoginStatus?.connected === true ? (
-                            <button
-                              onClick={() => void logoutWhatsappWeb()}
-                              disabled={waLogoutLoading}
-                              className="theme-service-action theme-service-action-stop"
-                            >
-                              {waLogoutLoading ? tSlash("处理中 / Working") : tSlash("退出登录 / Logout")}
-                            </button>
-                          ) : null}
-                          <button
-                            onClick={() => void controlService(row.serviceName, "start")}
-                            disabled={Boolean(serviceActionLoading[row.serviceName]) || row.healthy === true}
-                            className="theme-service-action theme-service-action-start"
-                          >
-                            {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("启动 / Start")}
-                          </button>
-                          <button
-                            onClick={() => void controlService(row.serviceName, "stop")}
-                            disabled={Boolean(serviceActionLoading[row.serviceName]) || row.healthy !== true}
-                            className="theme-service-action theme-service-action-stop"
-                          >
-                            {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("停止 / Stop")}
-                          </button>
-                          <button
-                            onClick={() => void controlService(row.serviceName, "restart")}
-                            disabled={Boolean(serviceActionLoading[row.serviceName])}
-                            className="theme-service-action theme-service-action-restart"
-                            title={tSlash("先停止再启动 / Stop then start")}
-                          >
-                            {serviceActionLoading[row.serviceName] ? tSlash("处理中 / Working") : tSlash("重启 / Restart")}
-                          </button>
-                        </div>
+                <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                  <div className="setup-channel-card channel-setup-card flex h-full flex-col">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-lg font-semibold text-white">{t("微信", "WeChat")}</h4>
+                        <p className="mt-2 text-sm leading-7 text-white/65">
+                          {t(
+                            "打开微信接入窗口后，就可以在里面完成设置、启动服务和扫码登录。",
+                            "Open the WeChat setup window to complete configuration, start the service, and sign in with a QR code.",
+                          )}
+                        </p>
                       </div>
-                    ))}
+                      <span className={wechatStepStatus === "done" ? "setup-status setup-status-done" : wechatStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
+                        {wechatStepStatus === "done" ? t("已可用", "Ready") : wechatStepStatus === "attention" ? t("还差一步", "In progress") : t("还没开始", "Not started")}
+                      </span>
+                    </div>
+
+                    <p className="mt-4 text-sm leading-7 text-white/65">{wechatStatusSummary}</p>
+
+                    <div className="channel-setup-actions mt-auto flex flex-wrap gap-2 pt-5">
+                      <button type="button" onClick={() => openWechatLoginDialog()} className="theme-accent-btn px-3 py-2 text-sm">
+                        <RefreshCw className="h-4 w-4" />
+                        {t("打开微信接入", "Open WeChat setup")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void controlService("wechatd", health?.wechatd_healthy === true ? "restart" : "start")}
+                        disabled={Boolean(serviceActionLoading.wechatd) || !wechatConfigDraft?.enabled}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        {serviceActionLoading.wechatd ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
+                        {health?.wechatd_healthy === true ? t("重启微信服务", "Restart the WeChat service") : t("启动微信服务", "Start the WeChat service")}
+                      </button>
+                    </div>
                   </div>
-                </section>
+
+                  <div className="setup-channel-card channel-setup-card flex h-full flex-col">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-lg font-semibold text-white">Telegram</h4>
+                        <p className="mt-2 text-sm leading-7 text-white/65">
+                          {t(
+                            "如果你要用 Telegram，只需要填好 Bot Token，然后保存并启动服务。",
+                            "If you plan to use Telegram, just enter the bot token, save it, and start the service.",
+                          )}
+                        </p>
+                      </div>
+                      <span className={telegramStepStatus === "done" ? "setup-status setup-status-done" : telegramStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
+                        {telegramStepStatus === "done" ? t("已可用", "Ready") : telegramStepStatus === "attention" ? t("还差一步", "In progress") : t("还没开始", "Not started")}
+                      </span>
+                    </div>
+
+                    <p className="mt-4 text-sm leading-7 text-white/65">{telegramStatusSummary}</p>
+
+                    <div className="channel-setup-form mt-4 grid gap-3">
+                      <label className="block space-y-2">
+                        <span className="text-xs uppercase tracking-widest text-white/50">{t("Bot Token", "Bot Token")}</span>
+                        <input
+                          className="theme-input"
+                          value={primaryTelegramBot.bot_token}
+                          onChange={(e) => setTelegramPrimaryBotDraftField("bot_token", e.target.value)}
+                          placeholder="123456789:AA..."
+                        />
+                        <p className="text-xs text-white/45">
+                          {t("这里只填 Bot Token 就够了。更复杂的设置以后再说。", "Only the Bot Token is needed here. More advanced settings can wait until later.")}
+                        </p>
+                      </label>
+                    </div>
+
+                    {telegramConfigError ? (
+                      <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{telegramConfigError}</p>
+                    ) : null}
+                    {telegramConfigSaveMessage ? (
+                      <p className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{telegramConfigSaveMessage}</p>
+                    ) : null}
+                    <div className="channel-setup-actions mt-auto flex flex-wrap gap-2 pt-5">
+                      <button
+                        type="button"
+                        onClick={() => void saveTelegramConfig()}
+                        disabled={telegramConfigSaving || telegramConfigLoading || !hasUnsavedTelegramConfigChanges}
+                        className="theme-accent-btn px-3 py-2 text-sm"
+                      >
+                        {telegramConfigSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+                        {t("保存 Telegram", "Save Telegram")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void controlService("telegramd", health?.telegramd_healthy === true ? "restart" : "start")}
+                        disabled={Boolean(serviceActionLoading.telegramd) || !telegramBotTokenConfigured}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        {serviceActionLoading.telegramd ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
+                        {health?.telegramd_healthy === true ? t("重启 Telegram 服务", "Restart the Telegram service") : t("启动 Telegram 服务", "Start the Telegram service")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </section>
 
             </div>
@@ -3882,10 +3844,14 @@ export default function App() {
           {currentPage === "channels" ? (
             <div className="space-y-4">
               <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-                <h3 className="text-base font-semibold">{t("绑定账号", "Bind Accounts")}</h3>
-                <p className="mt-2 text-sm text-white/65">
-                  {t("列出后端所有 Key，并生成新 Key。仅 admin 可查看与生成。使用 Key 绑定通信端。", "List all keys from the backend and generate new keys. Admin only. Use a key to bind channel accounts.")}
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-semibold">{t("账号绑定与 Key 管理", "Account binding and key management")}</h3>
+                    <p className="mt-2 text-sm text-white/65">
+                      {t("微信和 Telegram 的快捷接入已经移到频道接入页。这里现在只保留账号绑定、访问 Key 生成与管理。", "Quick WeChat and Telegram setup moved to Channel Setup. This page now keeps account bindings plus access key generation and management.")}
+                    </p>
+                  </div>
+                </div>
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -4008,71 +3974,24 @@ export default function App() {
                   </table>
                 </div>
               </section>
-              <aside className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-[10px] uppercase tracking-widest text-white/45">{t("当前登录身份", "Current identity")}</p>
-                <p className="mt-2 text-sm text-white/85">
-                  {authIdentity ? authIdentity.role : authMeLoading ? t("读取中...", "Loading...") : t("暂无数据", "No data")}
-                </p>
-                <p className="mt-1 break-all font-mono text-xs text-white/55">{maskStoredKey(authIdentity?.user_key ?? "", 8) || "--"}</p>
-              </aside>
             </div>
           ) : null}
 
           {currentPage === "models" ? (
             <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-              <div
-                className={`mb-5 rounded-2xl border px-4 py-4 sm:px-5 ${
-                  llmRestartPending ? "border-amber-500/25 bg-amber-500/10" : "border-emerald-500/25 bg-emerald-500/10"
-                }`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-[0.28em] text-white/50">{t("模型状态", "Model status")}</p>
-                    <h3 className="mt-2 text-base font-semibold">
-                      {llmRestartPending
-                        ? t("配置已经改好，还差重启才能生效", "The config is saved, but a restart is still needed")
-                        : t("当前运行中的模型和已保存配置一致", "The running model matches the saved config")}
-                    </h3>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={
-                        llmRestartPending
-                          ? "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-200"
-                          : "rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200"
-                      }
-                    >
-                      {llmRestartPending ? t("待重启生效", "Restart required") : t("已同步", "In sync")}
-                    </span>
-                    {llmRestartPending ? (
-                      <button
-                        type="button"
-                        onClick={() => void restartSystem()}
-                        disabled={systemRestarting}
-                        className="theme-accent-btn px-3 py-2 text-xs"
-                      >
-                        {systemRestarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                        {t("立即重启", "Restart now")}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                    <p className="text-[10px] uppercase tracking-widest text-white/45">{t("当前运行中", "Running now")}</p>
-                    <p className="mt-2 text-sm font-semibold text-white/90">{llmRuntimeLabel}</p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                    <p className="text-[10px] uppercase tracking-widest text-white/45">{t("已保存配置", "Saved config")}</p>
-                    <p className="mt-2 text-sm font-semibold text-white/90">{llmSavedLabel}</p>
-                  </div>
-                </div>
-                {systemRestartMessage ? (
-                  <p className="mt-4 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80">
-                    {systemRestartMessage}
+              <div className="mb-5">
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                  <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("第一步", "Step one")}</p>
+                  <h3 className="mt-2 text-xl font-semibold tracking-tight">
+                    {t("先把主模型配好，后面的微信和 Telegram 才能真正工作。", "Configure the main model first so WeChat and Telegram can actually work afterward.")}
+                  </h3>
+                  <p className="mt-3 max-w-2xl text-sm leading-7 text-white/70">
+                    {t(
+                      "这里只处理 RustClaw 的主大模型。第一次使用时，先选厂商、模型、接口地址和 API Key，保存后如果提示需要重启，就再重启一次。",
+                      "This section only handles RustClaw's main LLM. For first-time setup, choose the vendor, model, endpoint, and API key. After saving, restart if the page tells you to.",
+                    )}
                   </p>
-                ) : null}
+                </div>
               </div>
 
               <div className="mb-5 rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -4091,14 +4010,6 @@ export default function App() {
                       </button>
                     ) : null}
                     <button
-                      onClick={() => { void fetchLlmConfig(); void fetchMultimodalConfig(); }}
-                      disabled={llmConfigLoading || multimodalConfigLoading}
-                      className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {(llmConfigLoading || multimodalConfigLoading) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                      {tSlash("刷新模型配置 / Refresh LLM Config")}
-                    </button>
-                    <button
                       onClick={() => void saveLlmConfig()}
                       disabled={llmConfigSaving || llmConfigLoading || !hasUnsavedLlmChanges || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
                       className="theme-accent-btn px-3 py-2 text-xs"
@@ -4109,8 +4020,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
-                  <div className="space-y-4">
+                <div className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="block space-y-2">
                         <span className="text-xs uppercase tracking-widest text-white/50">{t("模型厂商", "Vendor")}</span>
@@ -4174,9 +4084,6 @@ export default function App() {
                             <option value="openai_compat">{t("OpenAI（默认）", "OpenAI (Default)")}</option>
                             <option value="anthropic_claude">{t("Anthropic", "Anthropic")}</option>
                           </select>
-                          <p className="text-xs text-white/45">
-                            {t("MiniMax 默认走 OpenAI 兼容接口；只有你填的是 Anthropic 风格地址时，再切到 Anthropic。", "MiniMax uses the OpenAI-compatible API by default. Switch to Anthropic only when your base URL is an Anthropic-style endpoint.")}
-                          </p>
                         </label>
                       ) : (
                       <label className="block space-y-2">
@@ -4241,177 +4148,157 @@ export default function App() {
                         {t("你有未保存的大模型变更，请点击“保存模型设置”。", "You have unsaved LLM changes. Click \"Save LLM Settings\".")}
                       </p>
                     ) : null}
-                  </div>
-
-                  <div className="space-y-3 rounded-xl border border-white/10 bg-[#12151f] p-4 text-sm">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-widest text-white/45">{t("当前厂商信息", "Current vendor info")}</p>
-                      {selectedLlmVendorInfo ? (
-                        <div className="mt-2 space-y-2 text-xs text-white/65">
-                          <p>
-                            <span className="text-white/45">{t("默认模型", "Default model")}</span>
-                            <span className="ml-2 text-white/80">{selectedLlmVendorInfo.default_model || "--"}</span>
-                          </p>
-                          <p className="break-all">
-                            <span className="text-white/45">Base URL</span>
-                            <span className="ml-2 text-white/80">{selectedLlmVendorInfo.base_url || "--"}</span>
-                          </p>
-                          {selectedLlmVendorInfo.name === "minimax" ? (
-                            <p>
-                              <span className="text-white/45">{t("接口协议", "Protocol")}</span>
-                              <span className="ml-2 text-white/80">
-                                {(selectedLlmVendorInfo.api_format || "openai_compat") === "anthropic_claude" ? "Anthropic" : "OpenAI"}
-                              </span>
-                            </p>
-                          ) : null}
-                          <p>
-                            <span className="text-white/45">{t("API Key", "API Key")}</span>
-                            <span className={`ml-2 ${selectedLlmVendorInfo.api_key_configured ? "text-emerald-200" : "text-amber-200"}`}>
-                              {selectedLlmVendorInfo.api_key_configured ? t("已配置", "Configured") : t("未配置", "Missing")}
-                            </span>
-                          </p>
-                          {selectedLlmVendorInfo.api_key ? (
-                            <p className="break-all">
-                              <span className="text-white/45">{t("当前 API Key", "Current API Key")}</span>
-                              <span className="ml-2 text-white/80">{selectedLlmVendorInfo.api_key}</span>
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p className="mt-2 text-xs text-white/50">{t("先选择一个厂商。", "Choose a vendor first.")}</p>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
 
               <div className="mt-6 space-y-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-base font-semibold">{t("图像与语音模块", "Image & Audio Modules")}</h3>
-                  <div className="flex items-center gap-2">
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold">{t("图像与语音模块", "Image & Audio Modules")}</h3>
+                      <p className="mt-2 text-sm text-white/55">
+                        {t("以下是高级模块。第一次使用可以先不配置，等主模型和机器人接入跑通后再补。", "These are advanced modules. You can skip them on the first run and come back after the main model and bot setup are working.")}
+                      </p>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => void fetchMultimodalConfig()}
-                      disabled={multimodalConfigLoading}
-                      className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setModelsAdvancedOpen((open) => !open)}
+                      className="theme-topbar-btn px-3 py-2 text-xs font-medium"
                     >
-                      {multimodalConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                      {t("刷新", "Refresh")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void saveMultimodalConfig()}
-                      disabled={multimodalConfigSaving || multimodalConfigLoading || !hasUnsavedMultimodalChanges}
-                      className="theme-accent-btn px-3 py-2 text-xs"
-                    >
-                      {multimodalConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
-                      {t("保存图像/语音配置", "Save Image/Audio Config")}
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${modelsAdvancedOpen ? "rotate-180" : ""}`} />
+                      {modelsAdvancedOpen ? t("收起图像与语音模块", "Hide image/audio modules") : t("展开图像与语音模块", "Show image/audio modules")}
                     </button>
                   </div>
-                </div>
-                {multimodalConfigError ? (
-                  <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{multimodalConfigError}</p>
-                ) : null}
-                {multimodalConfigSaveMessage ? (
-                  <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{multimodalConfigSaveMessage}</p>
-                ) : null}
-                {hasUnsavedMultimodalChanges ? (
-                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                    {t("你有未保存的图像/语音配置变更。", "You have unsaved image/audio config changes.")}
-                  </p>
-                ) : null}
 
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <h4 className="mb-3 text-sm font-medium text-white/90">{t("图像模块", "Image Modules")}</h4>
-                  <p className="mb-4 text-xs text-white/50">
-                    {t("图像编辑、文生图、图像理解可分别配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/image.toml）。", "Configure vendor, model, base URL and API key per image module. Saved to configs/image.toml.")}
-                  </p>
-                  <div className="space-y-4">
-                    {[
-                      { key: "image_edit" as const, label: t("图像编辑", "Image Edit") },
-                      { key: "image_generation" as const, label: t("文生图", "Image Generate") },
-                      { key: "image_vision" as const, label: t("图像理解", "Image Vision") },
-                    ].map(({ key, label }) => (
-                      <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
-                          <input
-                            className="theme-input w-28 shrink-0 text-xs"
-                            placeholder={t("厂商", "Vendor")}
-                            value={multimodalDraft[key]?.vendor ?? ""}
-                            onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
-                          />
-                          <input
-                            className="theme-input min-w-[140px] flex-1 text-xs"
-                            placeholder={t("模型", "Model")}
-                            value={multimodalDraft[key]?.model ?? ""}
-                            onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
-                          />
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
-                          <input
-                            className="theme-input min-w-[200px] flex-1 text-xs"
-                            placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
-                            value={multimodalDraft[key]?.base_url ?? ""}
-                            onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
-                          />
-                          <input
-                            className="theme-input min-w-[160px] flex-1 text-xs"
-                            type="password"
-                            placeholder={t("API Key", "API Key")}
-                            value={multimodalDraft[key]?.api_key ?? ""}
-                            onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
-                          />
+                  {modelsAdvancedOpen ? (
+                    <div className="mt-5 space-y-6 border-t border-white/10 pt-5">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void fetchMultimodalConfig()}
+                          disabled={multimodalConfigLoading}
+                          className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {multimodalConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                          {t("刷新", "Refresh")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void saveMultimodalConfig()}
+                          disabled={multimodalConfigSaving || multimodalConfigLoading || !hasUnsavedMultimodalChanges}
+                          className="theme-accent-btn px-3 py-2 text-xs"
+                        >
+                          {multimodalConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
+                          {t("保存图像/语音配置", "Save Image/Audio Config")}
+                        </button>
+                      </div>
+
+                      {multimodalConfigError ? (
+                        <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{multimodalConfigError}</p>
+                      ) : null}
+                      {multimodalConfigSaveMessage ? (
+                        <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{multimodalConfigSaveMessage}</p>
+                      ) : null}
+                      {hasUnsavedMultimodalChanges ? (
+                        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                          {t("你有未保存的图像/语音配置变更。", "You have unsaved image/audio config changes.")}
+                        </p>
+                      ) : null}
+
+                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <h4 className="mb-3 text-sm font-medium text-white/90">{t("图像模块", "Image Modules")}</h4>
+                        <p className="mb-4 text-xs text-white/50">
+                          {t("图像编辑、文生图、图像理解可分别配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/image.toml）。", "Configure vendor, model, base URL and API key per image module. Saved to configs/image.toml.")}
+                        </p>
+                        <div className="space-y-4">
+                          {[
+                            { key: "image_edit" as const, label: t("图像编辑", "Image Edit") },
+                            { key: "image_generation" as const, label: t("文生图", "Image Generate") },
+                            { key: "image_vision" as const, label: t("图像理解", "Image Vision") },
+                          ].map(({ key, label }) => (
+                            <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
+                                <input
+                                  className="theme-input w-28 shrink-0 text-xs"
+                                  placeholder={t("厂商", "Vendor")}
+                                  value={multimodalDraft[key]?.vendor ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
+                                />
+                                <input
+                                  className="theme-input min-w-[140px] flex-1 text-xs"
+                                  placeholder={t("模型", "Model")}
+                                  value={multimodalDraft[key]?.model ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
+                                />
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
+                                <input
+                                  className="theme-input min-w-[200px] flex-1 text-xs"
+                                  placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
+                                  value={multimodalDraft[key]?.base_url ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
+                                />
+                                <input
+                                  className="theme-input min-w-[160px] flex-1 text-xs"
+                                  type="password"
+                                  placeholder={t("API Key", "API Key")}
+                                  value={multimodalDraft[key]?.api_key ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
 
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <h4 className="mb-3 text-sm font-medium text-white/90">{t("声音模块", "Audio Modules")}</h4>
-                  <p className="mb-4 text-xs text-white/50">
-                    {t("语音合成、语音转写可分别配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/audio.toml）。", "Configure vendor, model, base URL and API key per audio module. Saved to configs/audio.toml.")}
-                  </p>
-                  <div className="space-y-4">
-                    {[
-                      { key: "audio_synthesize" as const, label: t("语音合成", "Audio TTS") },
-                      { key: "audio_transcribe" as const, label: t("语音转写", "Audio STT") },
-                    ].map(({ key, label }) => (
-                      <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
-                          <input
-                            className="theme-input w-28 shrink-0 text-xs"
-                            placeholder={t("厂商", "Vendor")}
-                            value={multimodalDraft[key]?.vendor ?? ""}
-                            onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
-                          />
-                          <input
-                            className="theme-input min-w-[140px] flex-1 text-xs"
-                            placeholder={t("模型", "Model")}
-                            value={multimodalDraft[key]?.model ?? ""}
-                            onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
-                          />
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
-                          <input
-                            className="theme-input min-w-[200px] flex-1 text-xs"
-                            placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
-                            value={multimodalDraft[key]?.base_url ?? ""}
-                            onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
-                          />
-                          <input
-                            className="theme-input min-w-[160px] flex-1 text-xs"
-                            type="password"
-                            placeholder={t("API Key", "API Key")}
-                            value={multimodalDraft[key]?.api_key ?? ""}
-                            onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
-                          />
+                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <h4 className="mb-3 text-sm font-medium text-white/90">{t("声音模块", "Audio Modules")}</h4>
+                        <p className="mb-4 text-xs text-white/50">
+                          {t("语音合成、语音转写可分别配置厂商、模型及该厂商的 API 地址与密钥（写入 configs/audio.toml）。", "Configure vendor, model, base URL and API key per audio module. Saved to configs/audio.toml.")}
+                        </p>
+                        <div className="space-y-4">
+                          {[
+                            { key: "audio_synthesize" as const, label: t("语音合成", "Audio TTS") },
+                            { key: "audio_transcribe" as const, label: t("语音转写", "Audio STT") },
+                          ].map(({ key, label }) => (
+                            <div key={key} className="space-y-2 rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className="w-24 shrink-0 text-xs font-medium text-white/80">{label}</span>
+                                <input
+                                  className="theme-input w-28 shrink-0 text-xs"
+                                  placeholder={t("厂商", "Vendor")}
+                                  value={multimodalDraft[key]?.vendor ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "vendor", e.target.value)}
+                                />
+                                <input
+                                  className="theme-input min-w-[140px] flex-1 text-xs"
+                                  placeholder={t("模型", "Model")}
+                                  value={multimodalDraft[key]?.model ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "model", e.target.value)}
+                                />
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 pl-[7.5rem]">
+                                <input
+                                  className="theme-input min-w-[200px] flex-1 text-xs"
+                                  placeholder={t("API 地址 (base_url)", "API URL (base_url)")}
+                                  value={multimodalDraft[key]?.base_url ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "base_url", e.target.value)}
+                                />
+                                <input
+                                  className="theme-input min-w-[160px] flex-1 text-xs"
+                                  type="password"
+                                  placeholder={t("API Key", "API Key")}
+                                  value={multimodalDraft[key]?.api_key ?? ""}
+                                  onChange={(e) => setMultimodalDraftKey(key, "api_key", e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </section>
@@ -4621,9 +4508,10 @@ export default function App() {
                     );
                   };
                   const renderSkillRow = (name: string) => {
-                    const runtimeEnabled = visibleRuntimeSkills.includes(name);
                     const configuredEnabled = configuredEnabledSkills.has(name);
-                    const pendingApply = runtimeEnabled !== configuredEnabled;
+                    const persistedSwitchValue = skillsConfigData?.skill_switches?.[name];
+                    const draftSwitchValue = skillSwitchDraft[name];
+                    const pendingApply = persistedSwitchValue !== draftSwitchValue;
                     const isRecentImport = recentImportedSkillName === name;
                     const isExternalSkill = externalSkillNamesSet.has(name);
                     const isUninstalling = skillUninstallingName === name;
@@ -4822,19 +4710,6 @@ export default function App() {
           {currentPage === "tasks" ? (
             <>
               <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                <div className="flex flex-wrap gap-3">
-                  <button type="button" onClick={() => setCurrentPage("chat")} className="theme-accent-soft-btn">
-                    <MessageCircle className="h-4 w-4" />
-                    {t("先去对话交互", "Open Chat")}
-                  </button>
-                  <button type="button" onClick={() => setCurrentPage("channels")} className="theme-accent-soft-btn">
-                    <Database className="h-4 w-4" />
-                    {t("先去绑定账号", "Open Bind Accounts")}
-                  </button>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
                 <h3 className="mb-4 text-lg font-semibold">{t("手动提交一条任务", "Submit a task manually")}</h3>
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2">
@@ -5017,19 +4892,18 @@ export default function App() {
           className="fixed inset-0 z-50 bg-slate-950/78 backdrop-blur-sm"
           onClick={() => closeWechatLoginDialog()}
         >
-          <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+          <div className="wechat-login-shell flex min-h-full items-center justify-center p-4 sm:p-6">
             <div
-              className="w-full max-w-6xl overflow-hidden rounded-[28px] border border-white/10 bg-[#0f131c] shadow-2xl"
+              className="wechat-login-dialog w-full max-w-6xl overflow-hidden rounded-[28px] border border-white/10 bg-[#0f131c] shadow-2xl"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-white/5 px-5 py-4 sm:px-6">
+              <div className="wechat-login-header flex items-start justify-between gap-4 border-b border-white/10 bg-white/5 px-5 py-4 sm:px-6">
                 <div>
-                  <p className="text-[10px] uppercase tracking-[0.28em] text-white/45">{t("微信登录", "WeChat Login")}</p>
-                  <h3 className="mt-2 text-lg font-semibold text-white/95">{t("打开弹窗后，直接扫码登录微信", "Open the dialog and scan to log in to WeChat")}</h3>
-                  <p className="mt-1 text-sm text-white/60">
+                  <h3 className="text-lg font-semibold text-white/95">{t("扫码登录微信", "Sign in to WeChat with a QR code")}</h3>
+                  <p className="mt-2 text-sm text-white/60">
                     {t(
-                      "默认只保留扫码所需的步骤。需要排障或改配置时，再展开下面的高级设置。",
-                      "Only the steps needed for scanning stay visible by default. Expand advanced settings only when you need to troubleshoot or adjust config.",
+                      "先启动微信服务，再生成二维码用手机扫码。连接成功后，就可以直接开始使用。",
+                      "Start the WeChat service, generate a QR code, and scan it with your phone. Once connected, you can start using it right away.",
                     )}
                   </p>
                 </div>
@@ -5043,126 +4917,105 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="theme-scrollbar max-h-[calc(100vh-7rem)] overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
-                <section className="rounded-[26px] border border-white/10 bg-white/5 p-5 sm:p-6">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-[0.28em] text-white/45">{t("扫码优先", "Scan-first")}</p>
-                      <h4 className="mt-2 text-xl font-semibold text-white/95">{t("启动服务后，直接生成二维码扫码", "Start the daemon, then generate a QR code and scan it")}</h4>
-                      <p className="mt-2 max-w-2xl text-sm leading-6 text-white/60">
-                        {t(
-                          "界面会自动刷新扫码状态。大多数情况下，你只需要点下面两个按钮。",
-                          "The dialog refreshes the scan status automatically. In most cases, you only need the two buttons below.",
-                        )}
-                      </p>
+              <div className="theme-scrollbar wechat-login-body max-h-[calc(100vh-7rem)] overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+                <section className="wechat-login-card rounded-[26px] border border-white/10 bg-white/5 p-5 sm:p-6">
+                  <div className="wechat-login-layout mt-5 grid gap-5 xl:grid-cols-[minmax(19rem,24rem)_minmax(0,1fr)]">
+                    <div className="wechat-login-visual space-y-3">
+                      {wechatLoginStatus?.connected ? (
+                        <div className="wechat-login-stage flex min-h-[23rem] items-center justify-center rounded-[28px] border border-emerald-500/20 bg-emerald-500/8">
+                          <div className="max-w-sm text-center">
+                            <p className="text-base font-semibold text-emerald-100">{t("微信已经连接成功", "WeChat is connected")}</p>
+                            <p className="mt-3 text-sm leading-7 text-emerald-100/75">
+                              {t("现在可以直接在微信里给 RustClaw 发消息了。需要重新扫码时，再手动生成新的二维码。", "You can now message RustClaw from WeChat. Generate a new QR code manually only when you need to sign in again.")}
+                            </p>
+                          </div>
+                        </div>
+                      ) : wechatQrStarting || wechatLoginStatus?.qr_status === "generating" ? (
+                        <div className="wechat-login-stage flex min-h-[23rem] items-center justify-center rounded-[28px] border border-dashed border-sky-500/25 bg-sky-500/6">
+                          <div className="flex flex-col items-center gap-3 text-center">
+                            <Loader2 className="h-8 w-8 animate-spin text-sky-200" />
+                            <p className="text-sm font-medium text-sky-100">{t("正在生成二维码", "Generating QR code")}</p>
+                            <p className="max-w-sm text-xs leading-6 text-sky-100/70">
+                              {t("生成完成后，这里会自动切换成可扫码的二维码。", "This panel will switch to a scannable QR code automatically once generation finishes.")}
+                            </p>
+                          </div>
+                        </div>
+                      ) : wechatQrPreviewRequested && wechatLoginStatus?.qrcode_url ? (
+                        <div className="space-y-3">
+                          <div className="inline-block rounded-[28px] border border-white/12 bg-white p-5 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
+                            <img src={wechatLoginStatus.qrcode_url} alt="WeChat QR" className="wechat-login-qr-image h-72 w-72" />
+                          </div>
+                          <p className="text-xs text-white/52">
+                            {t("二维码有效期较短，过期后点击“刷新二维码”即可。", "The QR code expires quickly. Click Refresh QR if it expires.")}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="wechat-login-stage flex min-h-[23rem] items-center justify-center rounded-[28px] border border-dashed border-white/12 bg-black/15">
+                          <div className="max-w-sm text-center">
+                            <p className="text-sm font-medium text-white/82">{t("还没有显示二维码", "No QR code shown yet")}</p>
+                            <p className="mt-2 text-xs leading-6 text-white/50">
+                              {t("需要登录时，点击右侧“生成二维码”，这里才会显示可扫码的二维码。", "When you need to sign in, click Generate QR on the right and the scannable code will appear here.")}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <span
-                      className={
-                        wechatLoginStatus?.connected
-                          ? "rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200"
-                          : wechatQrStarting || wechatLoginStatus?.qr_status === "generating"
-                            ? "rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-200"
-                          : wechatLoginStatus?.qr_status === "scaned"
-                            ? "rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-200"
-                          : wechatLoginStatus?.qrcode_url
-                            ? "rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200"
-                            : "rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/65"
-                      }
-                    >
-                      {wechatLoginStatus?.connected
-                        ? t("已登录", "Connected")
-                        : wechatQrStarting || wechatLoginStatus?.qr_status === "generating"
-                          ? t("生成中", "Generating")
-                        : wechatLoginStatus?.qr_status === "scaned"
-                          ? t("已扫码待确认", "Scanned")
-                          : wechatLoginStatus?.qrcode_url
-                            ? t("二维码已就绪", "QR ready")
-                            : t("等待生成", "Waiting")}
-                    </span>
-                  </div>
 
-                  <div className="mt-5 flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={() => void controlService("wechatd", health?.wechatd_healthy === true ? "restart" : "start")}
-                      disabled={Boolean(serviceActionLoading.wechatd) || !wechatConfigDraft?.enabled}
-                      className="theme-secondary-btn px-4 py-2.5 text-sm"
-                    >
-                      {serviceActionLoading.wechatd ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      {health?.wechatd_healthy === true ? t("重启 wechatd", "Restart wechatd") : t("启动 wechatd", "Start wechatd")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void startWechatQrLogin(true)}
-                      disabled={Boolean(serviceActionLoading.wechatd) || wechatQrStarting || health?.wechatd_healthy !== true}
-                      className="theme-accent-btn px-4 py-2.5 text-sm"
-                    >
-                      {wechatQrStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      {wechatLoginStatus?.qrcode_url ? t("刷新二维码", "Refresh QR") : t("生成二维码", "Generate QR")}
-                    </button>
-                  </div>
-
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/72">
-                    {health?.wechatd_healthy !== true
-                      ? t("先点击“启动 wechatd”，等服务起来后再生成二维码。", "Start wechatd first, then generate the QR code.")
-                      : wechatQrStarting || wechatLoginStatus?.qr_status === "generating"
-                        ? t("正在生成新的二维码，界面会马上更新。", "Generating a fresh QR code now. The panel will update in a moment.")
-                        : wechatLoginStatus?.connected
-                          ? t("微信已经连接成功，可以直接收发消息。", "WeChat is connected and ready to send or receive messages.")
-                          : wechatLoginStatus?.qr_status === "scaned"
-                            ? t("二维码已被扫描，请在手机上确认登录。", "The QR code was scanned. Please confirm the login on your phone.")
-                            : wechatLoginStatus?.message || t("点击“生成二维码”后，用手机微信扫码即可。", "Click Generate QR, then scan it with the WeChat app.")}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/58">
-                    <button
-                      type="button"
-                      onClick={() => void fetchWechatLoginStatus()}
-                      disabled={wechatLoginLoading}
-                      className="inline-flex items-center gap-2 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {wechatLoginLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                      {t("手动刷新状态", "Refresh status manually")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setWechatAdvancedOpen((open) => !open)}
-                      className="inline-flex items-center gap-2 transition hover:text-white"
-                    >
-                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${wechatAdvancedOpen ? "rotate-180" : ""}`} />
-                      {wechatAdvancedOpen ? t("收起高级设置", "Hide advanced settings") : t("高级设置", "Advanced settings")}
-                    </button>
-                  </div>
-
-                  {wechatQrStarting || wechatLoginStatus?.qr_status === "generating" ? (
-                    <div className="mt-5 flex min-h-[23rem] items-center justify-center rounded-[28px] border border-dashed border-sky-500/25 bg-sky-500/6">
-                      <div className="flex flex-col items-center gap-3 text-center">
-                        <Loader2 className="h-8 w-8 animate-spin text-sky-200" />
-                        <p className="text-sm font-medium text-sky-100">{t("正在生成二维码", "Generating QR code")}</p>
-                        <p className="max-w-sm text-xs leading-6 text-sky-100/70">
-                          {t("生成完成后，这里会自动切换成可扫码的二维码。", "This panel will switch to a scannable QR code automatically once generation finishes.")}
+                    <div className="wechat-login-panel space-y-4">
+                      <div className="rounded-2xl border border-white/10 bg-black/18 p-4">
+                        <p className="text-base font-medium text-white/92">
+                          {health?.wechatd_healthy !== true
+                            ? t("先启动微信服务，再生成二维码。", "Start the WeChat service before generating a QR code.")
+                            : wechatQrStarting || wechatLoginStatus?.qr_status === "generating"
+                              ? t("新的二维码正在生成。", "A new QR code is being generated.")
+                              : wechatLoginStatus?.connected
+                                ? t("微信已经连接成功，可以直接收发消息。", "WeChat is connected and ready to send or receive messages.")
+                              : wechatLoginStatus?.qr_status === "scaned"
+                                  ? t("二维码已被扫描，请在手机上确认登录。", "The QR code was scanned. Please confirm the login on your phone.")
+                                  : wechatQrPreviewRequested && wechatLoginStatus?.qrcode_url
+                                    ? t("请使用手机微信扫描左侧二维码。", "Please scan the QR code on the left with WeChat.")
+                                    : t("服务就绪后，生成二维码即可开始扫码登录。", "Once the service is ready, generate a QR code to begin sign-in.")}
                         </p>
-                      </div>
-                    </div>
-                  ) : wechatLoginStatus?.qrcode_url ? (
-                    <div className="mt-5 space-y-3">
-                      <div className="inline-block rounded-[28px] border border-white/12 bg-white p-5 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
-                        <img src={wechatLoginStatus.qrcode_url} alt="WeChat QR" className="h-72 w-72" />
-                      </div>
-                      <p className="text-xs text-white/52">
-                        {t("二维码有效期较短，过期后点击“刷新二维码”即可。", "The QR code expires quickly. Click Refresh QR if it expires.")}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="mt-5 flex min-h-[23rem] items-center justify-center rounded-[28px] border border-dashed border-white/12 bg-black/15">
-                      <div className="max-w-sm text-center">
-                        <p className="text-sm font-medium text-white/82">{t("还没有二维码", "No QR code yet")}</p>
-                        <p className="mt-2 text-xs leading-6 text-white/50">
-                          {t("服务启动后，点一次“生成二维码”，这里就会立刻出现二维码。", "Once the daemon is running, click Generate QR and the QR code will appear here immediately.")}
+                        <p className="mt-2 text-sm leading-7 text-white/60">
+                          {wechatLoginStatus?.connected
+                            ? t("保持当前登录状态即可，不需要再重复扫码。", "Keep the current session as is. There is no need to scan again.")
+                            : wechatLoginStatus?.message || t("界面会自动刷新扫码状态；如果长时间没有变化，可以手动刷新。", "The dialog refreshes scan status automatically. If nothing changes for a while, you can refresh it manually.")}
                         </p>
+                        <div className="wechat-login-actions mt-3 flex flex-wrap gap-3">
+                          <button
+                            type="button"
+                            onClick={() => void controlService("wechatd", health?.wechatd_healthy === true ? "restart" : "start")}
+                            disabled={Boolean(serviceActionLoading.wechatd) || !wechatConfigDraft?.enabled}
+                            className="theme-secondary-btn px-4 py-2.5 text-sm"
+                          >
+                            {serviceActionLoading.wechatd ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                            {health?.wechatd_healthy === true ? t("重启微信服务", "Restart the WeChat service") : t("启动微信服务", "Start the WeChat service")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void startWechatQrLogin(true)}
+                            disabled={Boolean(serviceActionLoading.wechatd) || wechatQrStarting || health?.wechatd_healthy !== true}
+                            className="theme-accent-btn px-4 py-2.5 text-sm"
+                          >
+                            {wechatQrStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                            {wechatQrPreviewRequested && wechatLoginStatus?.qrcode_url ? t("刷新二维码", "Refresh QR") : t("生成二维码", "Generate QR")}
+                          </button>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/58">
+                          <button
+                            type="button"
+                            onClick={() => void fetchWechatLoginStatus()}
+                            disabled={wechatLoginLoading}
+                            className="inline-flex items-center gap-2 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {wechatLoginLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                            {t("手动刷新状态", "Refresh status manually")}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  )}
+                  </div>
 
                   {wechatLoginStatus?.last_error ? (
                     <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
@@ -5175,123 +5028,6 @@ export default function App() {
                     </p>
                   ) : null}
 
-                  <div className="mt-5 border-t border-white/8 pt-4">
-                    {wechatAdvancedOpen ? (
-                      <div className="mt-4 space-y-4 rounded-2xl border border-white/10 bg-black/18 p-4">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void fetchWechatConfig()}
-                            disabled={wechatConfigLoading}
-                            className="theme-topbar-btn px-3 py-2 text-xs"
-                          >
-                            {wechatConfigLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                            {t("刷新配置", "Refresh config")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void saveWechatConfig()}
-                            disabled={wechatConfigSaving || !wechatConfigDraft || !hasUnsavedWechatConfigChanges}
-                            className="theme-accent-btn px-3 py-2 text-xs"
-                          >
-                            {wechatConfigSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
-                            {t("保存配置", "Save config")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCurrentPage("channels");
-                              closeWechatLoginDialog();
-                            }}
-                            className="theme-secondary-btn px-3 py-2 text-xs"
-                          >
-                            {t("打开 Channels", "Open Channels")}
-                          </button>
-                        </div>
-
-                        {wechatConfigSaveMessage ? (
-                          <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
-                            {wechatConfigSaveMessage}
-                          </p>
-                        ) : null}
-                        {hasUnsavedWechatConfigChanges ? (
-                          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                            {t("你有未保存的微信配置变更。保存后再重启 wechatd。", "You have unsaved WeChat config changes. Save them before restarting wechatd.")}
-                          </p>
-                        ) : null}
-                        {wechatConfigData?.restart_required ? (
-                          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                            {t("当前保存的配置需要重启 wechatd 才会完全生效。", "The saved config still needs a wechatd restart to fully apply.")}
-                          </p>
-                        ) : null}
-                        {wechatConfigError ? (
-                          <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                            {wechatConfigError}
-                          </p>
-                        ) : null}
-
-                        {wechatConfigDraft ? (
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 md:col-span-2">
-                              <span className="text-sm font-medium text-white/85">{t("启用微信通道", "Enable WeChat channel")}</span>
-                              <div className="mt-3 flex items-center gap-3">
-                                <input
-                                  type="checkbox"
-                                  checked={wechatConfigDraft.enabled}
-                                  onChange={(e) => setWechatConfigDraftField("enabled", e.target.checked)}
-                                />
-                                <span className="text-sm text-white/65">
-                                  {wechatConfigDraft.enabled
-                                    ? t("已启用，保存后即可使用。", "Enabled. Save it and the channel can be used.")
-                                    : t("已关闭，保存后 wechatd 不会使用这组配置。", "Disabled. wechatd will ignore this config after saving.")}
-                                </span>
-                              </div>
-                            </label>
-
-                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                              <span className="text-sm font-medium text-white/85">{t("监听地址", "Listen address")}</span>
-                              <input
-                                className="theme-input mt-3 w-full"
-                                value={wechatConfigDraft.listen}
-                                onChange={(e) => setWechatConfigDraftField("listen", e.target.value)}
-                                placeholder="0.0.0.0:8792"
-                              />
-                            </label>
-
-                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                              <span className="text-sm font-medium text-white/85">{t("clawd 地址", "clawd base URL")}</span>
-                              <input
-                                className="theme-input mt-3 w-full"
-                                value={wechatConfigDraft.clawd_base_url}
-                                onChange={(e) => setWechatConfigDraftField("clawd_base_url", e.target.value)}
-                                placeholder="http://127.0.0.1:8787"
-                              />
-                            </label>
-
-                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                              <span className="text-sm font-medium text-white/85">{t("微信后端地址", "WeChat backend URL")}</span>
-                              <input
-                                className="theme-input mt-3 w-full"
-                                value={wechatConfigDraft.api_base_url}
-                                onChange={(e) => setWechatConfigDraftField("api_base_url", e.target.value)}
-                                placeholder="https://ilinkai.weixin.qq.com"
-                              />
-                            </label>
-
-                            <label className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                              <span className="text-sm font-medium text-white/85">{t("X-WECHAT-UIN（可选）", "X-WECHAT-UIN (optional)")}</span>
-                              <input
-                                className="theme-input mt-3 w-full"
-                                value={wechatConfigDraft.wechat_uin_base64}
-                                onChange={(e) => setWechatConfigDraftField("wechat_uin_base64", e.target.value)}
-                                placeholder={t("留空时会自动生成", "Leave blank to auto-generate")}
-                              />
-                            </label>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
                 </section>
               </div>
             </div>

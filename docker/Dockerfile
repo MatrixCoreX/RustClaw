@@ -26,6 +26,7 @@ COPY . /build
 RUN cargo build --release \
     -p clawd \
     -p skill-runner \
+    -p webd \
     -p telegramd \
     -p wechatd \
     -p whatsappd \
@@ -85,6 +86,7 @@ RUN mkdir -p /app/target/release /app/UI/dist /app/docker/config
 
 COPY --from=builder /build/target/release/clawd /app/target/release/
 COPY --from=builder /build/target/release/skill-runner /app/target/release/
+COPY --from=builder /build/target/release/webd /app/target/release/
 COPY --from=builder /build/target/release/telegramd /app/target/release/
 COPY --from=builder /build/target/release/wechatd /app/target/release/
 COPY --from=builder /build/target/release/whatsappd /app/target/release/
@@ -98,20 +100,31 @@ COPY prompts/ /app/prompts/
 COPY services/ /app/services/
 COPY scripts/ /app/scripts/
 COPY start-all-bin.sh /app/start-all-bin.sh
+COPY start-telegramd.sh /app/start-telegramd.sh
 COPY start-wechatd.sh /app/start-wechatd.sh
+COPY start-whatsappd.sh /app/start-whatsappd.sh
+COPY start-whatsapp-webd.sh /app/start-whatsapp-webd.sh
+COPY start-feishud.sh /app/start-feishud.sh
+COPY start-larkd.sh /app/start-larkd.sh
 COPY start-future-adapters.sh /app/start-future-adapters.sh
 COPY stop-rustclaw.sh /app/stop-rustclaw.sh
 COPY docker/docker-entrypoint.sh /app/docker/docker-entrypoint.sh
 
 RUN chmod +x \
     /app/start-all-bin.sh \
+    /app/start-telegramd.sh \
     /app/start-wechatd.sh \
+    /app/start-whatsappd.sh \
+    /app/start-whatsapp-webd.sh \
+    /app/start-feishud.sh \
+    /app/start-larkd.sh \
     /app/start-future-adapters.sh \
     /app/stop-rustclaw.sh \
     /app/docker/docker-entrypoint.sh \
     /app/scripts/auth-key.sh \
     /app/target/release/clawd \
     /app/target/release/skill-runner \
+    /app/target/release/webd \
     /app/target/release/telegramd \
     /app/target/release/wechatd \
     /app/target/release/whatsappd \
