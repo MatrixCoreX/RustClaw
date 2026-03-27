@@ -30,6 +30,8 @@
 - Missing or empty package list.
 - Unsupported manager/action values.
 - Install command failures return readable stderr/system errors.
+- Non-zero install command exit codes are returned as `status=error` with `error_text=package install failed: exit=<code>\n<stdout/stderr>`.
+- Successful responses also mirror structured metadata into `extra`, including `action`, `manager`, `packages`, and `output`.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -39,7 +41,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"dry-run install plan: ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"dry_run=1 command: apt-get install -y jq","extra":{"action":"smart_install","manager":"apt-get","packages":["jq"],"dry_run":true,"command":"apt-get install -y jq","output":"dry_run=1 command: apt-get install -y jq"},"error_text":null}
 ```
 
 ## Output Contract

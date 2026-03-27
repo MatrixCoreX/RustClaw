@@ -1,0 +1,7 @@
+index=10
+case_name=clarify_pronoun_that_log
+chat_id=1985997000
+turn1_task_id=591aab9b-69ec-48ce-a148-c53bc9a13af3
+turn1_prompt=看下那个最近 10 行
+turn2_task_id=73ec2ee4-f830-4379-8e5e-774c7097a94e
+turn2_prompt=/home/guagua/test/logs/model_io.log

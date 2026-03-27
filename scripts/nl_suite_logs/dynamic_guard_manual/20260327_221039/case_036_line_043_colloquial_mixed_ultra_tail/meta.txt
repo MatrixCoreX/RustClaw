@@ -1,0 +1,6 @@
+ordinal=36
+source_line=43
+case_name=colloquial_mixed_ultra_tail
+chat_id=17746206527
+task_id=ae85d2f5-6cf8-4009-921f-4f37e6a2d270
+prompt=quick看下 /home/guagua/test/logs/app.log 最后 6 行

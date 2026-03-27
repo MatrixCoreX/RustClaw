@@ -6,9 +6,9 @@ pub(crate) mod service;
 
 use anyhow::anyhow;
 use claw_core::config::MemoryConfig;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
-use super::{extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix, AppState};
+use super::{AppState, extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix};
 
 pub(crate) const LLM_SHORT_TERM_MEMORY_PREFIX: &str = "[LLM_REPLY] ";
 
@@ -535,6 +535,84 @@ pub(crate) fn build_last_turn_full_context(
         }
     } else {
         formatted
+    }
+}
+
+/// Build a compact recent assistant-replies block for ordinal follow-up anchoring.
+/// Output format:
+/// ### RECENT_ASSISTANT_REPLIES
+/// - turn_id=assistant[-1] relative_index=-1 short_preview=... has_code_block=true|false
+pub(crate) fn build_recent_assistant_replies_context(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    max_replies: usize,
+    preview_chars: usize,
+) -> String {
+    let max_replies = max_replies.max(1);
+    let preview_chars = preview_chars.max(48);
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = match state.db.lock() {
+        Ok(db) => db,
+        Err(_) => return "<none>".to_string(),
+    };
+
+    let mut rows =
+        query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, max_replies * 6)
+            .unwrap_or_default();
+    if rows.is_empty() {
+        if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
+            rows = query_recent_memories_for_chat(
+                &db,
+                user_id,
+                legacy_chat_id,
+                &user_key,
+                max_replies * 6,
+            )
+            .unwrap_or_default();
+        }
+    }
+    if rows.is_empty() {
+        return "<none>".to_string();
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    for (role, content, safety_flag) in rows {
+        if role != "assistant" {
+            continue;
+        }
+        if state.memory.safety_filter_enabled && safety_flag == "injection_like" {
+            continue;
+        }
+        let reply_index = lines.len() + 1;
+        let relative_index = -(reply_index as i64);
+        let preview = utf8_safe_prefix(content.trim(), preview_chars)
+            .replace('\n', " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if preview.is_empty() {
+            continue;
+        }
+        let has_code_block = if content.contains("```") {
+            "true"
+        } else {
+            "false"
+        };
+        lines.push(format!(
+            "- turn_id=assistant[{}] relative_index={} short_preview={} has_code_block={}",
+            relative_index, relative_index, preview, has_code_block
+        ));
+        if lines.len() >= max_replies {
+            break;
+        }
+    }
+
+    if lines.is_empty() {
+        "<none>".to_string()
+    } else {
+        format!("### RECENT_ASSISTANT_REPLIES\n{}", lines.join("\n"))
     }
 }
 

@@ -51,12 +51,8 @@ impl CapabilityDomain {
             CapabilityDomain::ImageMedia => {
                 "analyze images and perform image generation or editing"
             }
-            CapabilityDomain::AudioMedia => {
-                "transcribe audio and synthesize spoken output"
-            }
-            CapabilityDomain::Publishing => {
-                "draft or send outbound social content"
-            }
+            CapabilityDomain::AudioMedia => "transcribe audio and synthesize spoken output",
+            CapabilityDomain::Publishing => "draft or send outbound social content",
             CapabilityDomain::GeneralChat => {
                 "provide conversational explanation, rewriting, and smalltalk when external retrieval is not needed"
             }

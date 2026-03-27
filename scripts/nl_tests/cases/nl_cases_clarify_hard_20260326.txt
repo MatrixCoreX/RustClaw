@@ -1,0 +1,15 @@
+# Clarify-focused NL cases that should trigger a follow-up question when the model is unsure.
+# Format: case_name|turn1|turn2
+
+clarify_which_readme|读一下那个 README 开头并用一句话总结|/home/guagua/test/README.md
+clarify_which_config_file|把那个配置文件发给我|/home/guagua/test/configs/app_config.toml
+clarify_which_log_tail|帮我看一下那个日志最近 20 行|/home/guagua/test/logs/app.log
+clarify_which_db|查一下那个 sqlite 里有哪些表|/home/guagua/test/data/test_contract.sqlite
+clarify_which_archive_unpack|把那个压缩包解压到 /home/guagua/test/tmp/clarify_unpack_case 然后告诉我结果|/home/guagua/test/tmp/test_bundle.zip
+clarify_which_json_name|读一下那个 JSON 里的 name 字段，只输出值|/home/guagua/test/package.json
+clarify_which_dir_count|数一下那个目录里有多少个直接子项，只输出数字|/home/guagua/test/docs
+clarify_which_dir_list|列出那个目录下前 5 个文件名|/home/guagua/test/logs
+clarify_pronoun_it_file|把它发给我|/home/guagua/test/README.md
+clarify_pronoun_that_log|看下那个最近 10 行|/home/guagua/test/logs/model_io.log
+clarify_missing_target_then_file|把那个文件发给我，不要贴内容|/home/guagua/test/docs/definitely_missing_clarify_hard_001.txt
+clarify_missing_target_then_dir|看看那个目录下面都有什么|/home/guagua/test/docs

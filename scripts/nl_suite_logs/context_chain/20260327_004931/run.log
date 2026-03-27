@@ -1,0 +1,175 @@
+NL suite: context_chain
+  run_dir:   /home/guagua/git_upload/scripts/nl_suite_logs/context_chain/20260327_004931
+  run_log:   /home/guagua/git_upload/scripts/nl_suite_logs/context_chain/20260327_004931/run.log
+  case_file: /home/guagua/git_upload/scripts/nl_cases_context_chain_20260326.txt
+  base_url:  http://127.0.0.1:8787
+  user_id:   1985996990
+  chat_id:   1985996990
+
+============================================================
+[CASE]   1
+[NAME]   context_last_turn_file_chain
+[CHAT]   1985996991
+[TURN1]  先记一下，后面我说“那个文件”就是 /home/guagua/test/README.md
+[TASK1]  725b36d4-9a6a-4e41-8762-9579defa0dce
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  您希望我在后续对话中将“那个文件”指向 /home/guagua/test/README.md 吗？
+[TURN2]  把那个文件开头读 10 行
+[TASK2]  db91ba5d-ac08-4156-a058-d0e8ffeeb6ee
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  未找到文件 /home/guagua/test/README.md。
+[TURN3]  把它再用一句人话总结
+[TASK3]  f7b77a8e-bee1-43e9-bd8f-95c50ef12c08
+  [status] <none> -> running
+  [status] running -> failed
+[TEXT3]  
+
+============================================================
+[CASE]   2
+[NAME]   context_last_turn_log_chain
+[CHAT]   1985996992
+[TURN1]  先记一下，“那个日志”指 /home/guagua/test/logs/app.log
+[TASK1]  f6f144d5-81e5-4bb7-92cb-e339bfcbd143
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住：`那个日志` → `/home/guagua/test/logs/app.log`
+[TURN2]  看一下那个日志最近 20 行
+[TASK2]  d7b5e29b-2a8f-44c5-a6b9-f38213544c3e
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  ```\n[2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic\n```
+[TURN3]  从里面挑一个最值得注意的点
+[TASK3]  61ab0764-e4b1-4dd5-9b07-4828e5623ee4
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  ERROR：`sample downstream timeout recovered`（下游超时已恢复）\n\n虽然是恢复状态，但说明系统曾经历过一次下游服务超时，值得后续关注是否频繁发生。
+
+============================================================
+[CASE]   3
+[NAME]   context_two_hops_dir_chain
+[CHAT]   1985996993
+[TURN1]  先看一下 /home/guagua/test/docs 目录有多少个直接子项
+[TASK1]  a0b91a3d-09a8-4800-bd97-36271a173f0d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  3
+[TURN2]  再看一下 /home/guagua/test/logs 目录有多少个直接子项
+[TASK2]  913a3299-9346-4a58-a7b3-e2bcff53c362
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  2
+[TURN3]  把上上个和上个结果比较一下，哪个更多
+[TASK3]  08123bad-96b9-4673-ba2b-003ecc12a754
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  `/home/guagua/test/docs` 更多（3 > 2）。
+
+============================================================
+[CASE]   4
+[NAME]   context_two_hops_file_chain
+[CHAT]   1985996994
+[TURN1]  先读取 /home/guagua/test/README.md 开头 10 行
+[TASK1]  881a41cb-288c-4a35-bb48-061f36a5fd4d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  # Test Workspace\n\nThis directory is reserved for NL regression test artifacts and wrapper scripts.\n\nNotes:\n- The runner inputs and logs can live here.\n- The tested `clawd` runtime still uses its own configured workspace root; changing this directory alone does not change the agent's internal working directory.
+[TURN2]  再读取 /home/guagua/test/docs/service_notes.md 开头 10 行
+[TASK2]  a7c55c42-93e0-446d-9270-9bae67af2cd3
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  # Service Notes\n\nThis fixture document describes a pretend local service used only for testing.\nIt should never restart real RustClaw services or touch system state.
+[TURN3]  把上上个文件和上个文件用一句话对比
+[TASK3]  5a6a9780-7c9a-4740-bd62-387a089118f2
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  当前目录只有一个文件 test_contract.sqlite，无法对比上上个文件和上个文件。
+
+============================================================
+[CASE]   5
+[NAME]   context_two_hops_json_chain
+[CHAT]   1985996995
+[TURN1]  先把这个 JSON 数组按 score 排序：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+[TASK1]  87d65793-9d28-48d6-b9a5-20b82eb71d03
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  [{"name":"alpha","score":7},{"name":"gamma","score":9},{"name":"beta","score":12}]
+[TURN2]  再把它转成 markdown 表格
+[TASK2]  f771df63-3b3c-4614-a465-1db483ccaf66
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  | name | score |\n| --- | --- |\n| alpha | 7 |\n| gamma | 9 |\n| beta | 12 |
+[TURN3]  把上一步那个表格里分数最高的名字单独告诉我
+[TASK3]  25d21601-09e3-420d-b03e-bb418f33efb9
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  beta
+
+============================================================
+[CASE]   6
+[NAME]   context_reference_switch_chain
+[CHAT]   1985996996
+[TURN1]  先记一下“甲”指 /home/guagua/test/README.md
+[TASK1]  fe00bf81-f032-419f-a7e9-4fb52c5f7833
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  抱歉，我没有持久化存储 arbitrary key-value mapping（变量名→路径）的技能。我没有 memory/knowledge-base write 能力可以保存「甲 → /home/guagua/test/README.md」这类绑定。如需后续引用，建议直接提供完整路径。
+[TURN2]  再记一下“乙”指 /home/guagua/test/docs/service_notes.md
+[TASK2]  9fc8b3f7-d2ee-49fd-8157-bd570f2b97db
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  我无法持久化存储这类映射。当前会话内可记录：\n\n**乙 → `/home/guagua/test/docs/service_notes.md`**\n\n但重启后会话后这个绑定不会被保留。如需跨会话引用，建议把路径直接写在任务文件或笔记里。
+[TURN3]  读一下乙的开头，然后顺手说甲是干什么的
+[TASK3]  3f85a63a-9a46-46fe-9e07-288241f105c5
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  根据已读取的文件内容：\n\n**/home/guagua/test/docs/service_notes.md 开头部分：**\n> # Service Notes\n> This fixture document describes a pretend local service used only for testing.\n> It should never restart real RustClaw services or touch system state.\n\n**/home/guagua/test/README.md 的用途：**\n该文件说明 `/home/guagua/test` 目录是专为 NL 回归测试预留的工作空间，用于存放测试工件和包装脚本。runner 的输入和日志可以放在这里。需要注意的是，被测试的 `clawd` 运行时仍然使用自己配置的 workspace root，仅改变此目录不会改变 agent 的内部工作目录。
+
+============================================================
+[CASE]   7
+[NAME]   context_pronoun_switch_chain
+[CHAT]   1985996997
+[TURN1]  先看一下 /home/guagua/test/logs 目录最新的 3 个文件
+[TASK1]  b35426bd-c7c5-4043-9b00-5ce07cc90003
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  app.log\nmodel_io.log
+[TURN2]  再看一下 /home/guagua/test/docs 目录直接子项数量
+[TASK2]  21738612-1729-46b3-bfa9-505cf0a0e280
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  3
+[TURN3]  上一个结果里说的“第一个文件”是什么，上上个动作查的又是什么目录
+[TASK3]  ff242b31-94a3-454b-bb20-297929eab388
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  1. 第一个文件：`app.log`\n2. 上上个动作查的目录：`/home/guagua/test/docs`
+
+============================================================
+[CASE]   8
+[NAME]   context_ambiguous_should_ask_chain
+[CHAT]   1985996998
+[TURN1]  先看一下 /home/guagua/test/docs 目录下有哪些文件
+[TASK1]  a9243aaa-f2c5-4321-b3b1-47bce94007ec
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  guide.txt\nnotes.txt\nservice_notes.md
+[TURN2]  再看一下 /home/guagua/test/logs 目录下有哪些文件
+[TASK2]  4407fa6c-1677-4319-94d7-ac2975f6b765
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  app.log\nmodel_io.log
+[TURN3]  把那个最大的发给我
+[TASK3]  2d6919d6-38a1-49d0-a9f2-83c52d6b0689
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  文件 `/home/guagua/test/logs/model_io.log` 的内容如下：\n\n```\n[2026-03-26 23:01:02] request_id=demo-1 prompt_tokens=44 completion_tokens=18\n[2026-03-26 23:01:05] request_id=demo-2 prompt_tokens=61 completion_tokens=27\n[2026-03-26 23:02:40] request_id=demo-3 prompt_tokens=38 completion_tokens=11\n[2026-03-26 23:03:59] request_id=demo-4 prompt_tokens=73 completion_tokens=21\n[2026-03-26 23:05:14] request_id=demo-5 prompt_tokens=52 completion_tokens=19\n```
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/context_chain/20260327_004931
+  - /home/guagua/git_upload/scripts/nl_suite_logs/context_chain/20260327_004931/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/context_chain/20260327_004931/summary.jsonl

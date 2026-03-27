@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{AppState, AskReply, ClaimedTask, RoutedMode};
 
@@ -184,6 +184,7 @@ pub(crate) async fn execute_ask_routed(
                 task,
                 resolved_prompt,
                 "router_selected_ask_clarify",
+                None,
             )
             .await;
             Ok(AskReply::non_llm(clarify))

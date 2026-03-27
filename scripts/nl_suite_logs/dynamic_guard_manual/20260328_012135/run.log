@@ -1,0 +1,782 @@
+Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_manual_20260327.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       17746321051
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 4
+[NAME]        explicit_path_readme_summary
+[CHAT]        17746321052
+[PROMPT]      读一下 /home/guagua/test/README.md 开头并用一句话总结
+[TASK]        880906c0-8b61-41e9-a378-e80048fe9f1b
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该目录用于存放NL回归测试的工件和包装脚本。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 5
+[NAME]        explicit_path_readme_send
+[CHAT]        17746321053
+[PROMPT]      把 /home/guagua/test/README.md 发给我
+[TASK]        10592a29-f003-4d4e-bda8-254aa0b94cea
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/README.md
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 6
+[NAME]        explicit_config_send
+[CHAT]        17746321054
+[PROMPT]      把 /home/guagua/test/configs/app_config.toml 发给我
+[TASK]        f3282a10-8726-4414-bae5-8d7ca7554afe
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/configs/app_config.toml
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 7
+[NAME]        explicit_log_tail
+[CHAT]        17746321055
+[PROMPT]      看下 /home/guagua/test/logs/app.log 最近 10 行
+[TASK]        ba11857c-95b5-4422-91c9-1ebe5aa6d659
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] ``` [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] ERROR sample downstream timeout recovered [202...(truncated)
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 8
+[NAME]        explicit_db_tables
+[CHAT]        17746321056
+[PROMPT]      查一下 /home/guagua/test/data/test_contract.sqlite 里有哪些表
+[TASK]        8e8e2340-0c5c-476c-b047-9bed9024e394
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] accounts, audit_log
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 9
+[NAME]        explicit_archive_unpack
+[CHAT]        17746321057
+[PROMPT]      把 /home/guagua/test/tmp/test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack 然后告诉我结果
+[TASK]        8263bd0d-a2f6-42ed-8c15-27f880705d17
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 成功解压 test_bundle.zip 到 manual_dynamic_guard_unpack，提取了以下文件： - file_one.txt - file_two.txt
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 10
+[NAME]        current_dir_count_scalar
+[CHAT]        17746321058
+[PROMPT]      数一下当前目录有多少个直接子项，只输出数字
+[TASK]        26b827d8-0b2f-4fb7-8191-6d7f4b912436
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 79
+
+============================================================
+[CASE]        8
+[SOURCE_LINE] 11
+[NAME]        explicit_path_two_part
+[CHAT]        17746321059
+[PROMPT]      先读 /home/guagua/test/README.md 开头，再用一句话总结
+[TASK]        1a8b84fb-7068-4437-82f0-7f8f3205d220
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该 README 文件介绍了项目的基本用途和快速上手方法。
+
+============================================================
+[CASE]        9
+[SOURCE_LINE] 12
+[NAME]        english_explicit_readme_summary
+[CHAT]        17746321060
+[PROMPT]      Read the beginning of /home/guagua/test/README.md and summarize it in one sentence.
+[TASK]        78555d37-362e-412d-a1e8-4358aff82cf8
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] This directory is reserved for storing NL regression test artifacts and scripts, though it does not change the agent's internal working directory.
+
+============================================================
+[CASE]        10
+[SOURCE_LINE] 13
+[NAME]        english_explicit_send
+[CHAT]        17746321061
+[PROMPT]      Send me /home/guagua/test/README.md
+[TASK]        1747c189-a3bd-4e1d-b79f-8b85869caffd
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/README.md
+
+============================================================
+[CASE]        11
+[SOURCE_LINE] 14
+[NAME]        explicit_service_notes_send
+[CHAT]        17746321062
+[PROMPT]      把 /home/guagua/test/docs/service_notes.md 发给我
+[TASK]        750e89ed-37ba-42b1-aa30-e8f96beeb724
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/docs/service_notes.md
+
+============================================================
+[CASE]        12
+[SOURCE_LINE] 15
+[NAME]        explicit_docs_list_names_only
+[CHAT]        17746321063
+[PROMPT]      列出 /home/guagua/test/docs 下的直接子项，只列名字
+[TASK]        4f48256c-cd30-42d8-852a-977f11689d6d
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] guide.txt notes.txt service_notes.md
+
+============================================================
+[CASE]        13
+[SOURCE_LINE] 16
+[NAME]        explicit_docs_count_scalar
+[CHAT]        17746321064
+[PROMPT]      统计 /home/guagua/test/docs 下直接子项数量，只输出数字
+[TASK]        57316c0e-99ad-4c4e-b2c6-27f1e1eec077
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 3
+
+============================================================
+[CASE]        14
+[SOURCE_LINE] 17
+[NAME]        explicit_missing_file_graceful
+[CHAT]        17746321065
+[PROMPT]      把 /home/guagua/test/docs/not_exists_case_003.md 发给我，不要编造
+[TASK]        73376b54-e7dd-4284-a7ab-2d0013ae8392
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] File not found.
+
+============================================================
+[CASE]        15
+[SOURCE_LINE] 18
+[NAME]        explicit_log_tail_focus_cn
+[CHAT]        17746321066
+[PROMPT]      看下 /home/guagua/test/logs/app.log 最近 15 行，然后一句话指出最可疑点
+[TASK]        d77fee6a-6d9b-4b58-9544-b7ba360cce08
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 最近 15 行日志中最可疑的是 `[2026-03-26 23:07:10] ERROR sample downstream timeout recovered`，表明存在下游服务超时错误（尽管已恢复），说明有服务依赖不稳定的问题。
+
+============================================================
+[CASE]        16
+[SOURCE_LINE] 19
+[NAME]        explicit_db_schema_version_cn
+[CHAT]        17746321067
+[PROMPT]      查一下 /home/guagua/test/data/test_contract.sqlite 的 schema version，只输出值
+[TASK]        3c1e51ed-815a-4e50-ba68-502809122515
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 0
+
+============================================================
+[CASE]        17
+[SOURCE_LINE] 20
+[NAME]        explicit_archive_unpack_alt
+[CHAT]        17746321068
+[PROMPT]      把 /home/guagua/test/tmp/test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack_alt 并告诉我结果
+[TASK]        78315924-4b6d-42f3-a718-b4269e9c6ee4
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 解压成功。 已提取 2 个文件到 `/home/guagua/test/tmp/manual_dynamic_guard_unpack_alt/`: - file_one.txt - file_two.txt
+
+============================================================
+[CASE]        18
+[SOURCE_LINE] 21
+[NAME]        english_explicit_log_tail
+[CHAT]        17746321069
+[PROMPT]      Show the last 12 lines of /home/guagua/test/logs/app.log.
+[TASK]        469678c8-abd8-4194-b453-1a3e7bb03e91
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] ``` [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] ERROR sample downstream timeout recovered [202...(truncated)
+
+============================================================
+[CASE]        19
+[SOURCE_LINE] 22
+[NAME]        english_explicit_db_tables
+[CHAT]        17746321070
+[PROMPT]      List tables from /home/guagua/test/data/test_contract.sqlite.
+[TASK]        23c7a2b7-7cb4-414b-970a-652f8cf432da
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] accounts audit_log
+
+============================================================
+[CASE]        20
+[SOURCE_LINE] 23
+[NAME]        mixed_lang_explicit_file_summary
+[CHAT]        17746321071
+[PROMPT]      read /home/guagua/test/README.md 开头，然后用中文一句话总结
+[TASK]        d86b4bf3-b544-4a62-a1cc-b10e18d2d65a
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] step 2 failed (skill(chat)): chat skill llm returned empty content
+  [text] step 2 failed (skill(chat)): chat skill llm returned empty content
+
+============================================================
+[CASE]        21
+[SOURCE_LINE] 26
+[NAME]        colloquial_cn_readme_oneliner
+[CHAT]        17746321072
+[PROMPT]      帮我瞅一眼 /home/guagua/test/README.md 前几行，然后一句话说重点
+[TASK]        a13a52d7-0072-4b71-84bc-5cb8340677a6
+  [status] <none> -> running
+Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_manual_20260327.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       17746321051
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+  resume_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  resume_line:   19
+
+[SKIP] source_line=4 name=explicit_path_readme_summary already covered by --resume-line 19
+[SKIP] source_line=5 name=explicit_path_readme_send already covered by --resume-line 19
+[SKIP] source_line=6 name=explicit_config_send already covered by --resume-line 19
+[SKIP] source_line=7 name=explicit_log_tail already covered by --resume-line 19
+[SKIP] source_line=8 name=explicit_db_tables already covered by --resume-line 19
+[SKIP] source_line=9 name=explicit_archive_unpack already covered by --resume-line 19
+[SKIP] source_line=10 name=current_dir_count_scalar already covered by --resume-line 19
+[SKIP] source_line=11 name=explicit_path_two_part already covered by --resume-line 19
+[SKIP] source_line=12 name=english_explicit_readme_summary already covered by --resume-line 19
+[SKIP] source_line=13 name=english_explicit_send already covered by --resume-line 19
+[SKIP] source_line=14 name=explicit_service_notes_send already covered by --resume-line 19
+[SKIP] source_line=15 name=explicit_docs_list_names_only already covered by --resume-line 19
+[SKIP] source_line=16 name=explicit_docs_count_scalar already covered by --resume-line 19
+[SKIP] source_line=17 name=explicit_missing_file_graceful already covered by --resume-line 19
+[SKIP] source_line=18 name=explicit_log_tail_focus_cn already covered by --resume-line 19
+[SKIP] source_line=19 name=explicit_db_schema_version_cn already covered by --resume-line 19
+
+============================================================
+[CASE]        17
+[SOURCE_LINE] 20
+[NAME]        explicit_archive_unpack_alt
+[CHAT]        17746321068
+[PROMPT]      把 /home/guagua/test/tmp/test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack_alt 并告诉我结果
+[TASK]        80f97e83-e9a0-4ffd-97b5-923d73d15c84
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 解压完成。已将 test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack_alt，包含以下 2 个文件： - file_one.txt - file_two.txt
+
+============================================================
+[CASE]        18
+[SOURCE_LINE] 21
+[NAME]        english_explicit_log_tail
+[CHAT]        17746321069
+[PROMPT]      Show the last 12 lines of /home/guagua/test/logs/app.log.
+[TASK]        a8bfecc4-ed34-4a29-be38-f94cd181c137
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] ERROR sample downstream timeout recovered [2026-03...(truncated)
+
+============================================================
+[CASE]        19
+[SOURCE_LINE] 22
+[NAME]        english_explicit_db_tables
+[CHAT]        17746321070
+[PROMPT]      List tables from /home/guagua/test/data/test_contract.sqlite.
+[TASK]        74d49733-14d3-4725-b5e4-46c405151dce
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] accounts audit_log
+
+============================================================
+[CASE]        20
+[SOURCE_LINE] 23
+[NAME]        mixed_lang_explicit_file_summary
+[CHAT]        17746321071
+[PROMPT]      read /home/guagua/test/README.md 开头，然后用中文一句话总结
+[TASK]        8fbabdb1-dee7-4651-8a87-a4248dd05cf8
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这是一个用于存放自然语言回归测试产物和包装脚本的测试工作区目录。
+
+============================================================
+[CASE]        21
+[SOURCE_LINE] 26
+[NAME]        colloquial_cn_readme_oneliner
+[CHAT]        17746321072
+[PROMPT]      帮我瞅一眼 /home/guagua/test/README.md 前几行，然后一句话说重点
+[TASK]        fb73e2db-da50-4b05-8b61-842d8c0580d2
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 文件 `/home/guagua/test/README.
+
+============================================================
+[CASE]        22
+[SOURCE_LINE] 27
+[NAME]        colloquial_cn_send_no_paste
+[CHAT]        17746321073
+[PROMPT]      别贴正文，直接把 /home/guagua/test/docs/service_notes.md 发我
+[TASK]        81420587-a4d6-476f-8940-8d13fae4a51e
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/docs/service_notes.md
+
+============================================================
+[CASE]        23
+[SOURCE_LINE] 28
+[NAME]        colloquial_cn_log_tail
+[CHAT]        17746321074
+[PROMPT]      麻烦看下 /home/guagua/test/logs/app.log 最后 8 行给我
+[TASK]        f2c72fa6-d3cd-4a77-9ba4-392fb594df97
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] ``` [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] ERROR sample downstream timeout recovered [202...(truncated)
+
+============================================================
+[CASE]        24
+[SOURCE_LINE] 29
+[NAME]        colloquial_cn_db_tables
+[CHAT]        17746321075
+[PROMPT]      帮我看下 /home/guagua/test/data/test_contract.sqlite 里都有哪些表哈
+[TASK]        f5f1d3e0-c02d-4c01-ba2d-244aba980daa
+  [status] <none> -> running
+Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_manual_20260327.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       17746321051
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+  resume_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  resume_line:   20
+
+[SKIP] source_line=4 name=explicit_path_readme_summary already covered by --resume-line 20
+[SKIP] source_line=5 name=explicit_path_readme_send already covered by --resume-line 20
+[SKIP] source_line=6 name=explicit_config_send already covered by --resume-line 20
+[SKIP] source_line=7 name=explicit_log_tail already covered by --resume-line 20
+[SKIP] source_line=8 name=explicit_db_tables already covered by --resume-line 20
+[SKIP] source_line=9 name=explicit_archive_unpack already covered by --resume-line 20
+[SKIP] source_line=10 name=current_dir_count_scalar already covered by --resume-line 20
+[SKIP] source_line=11 name=explicit_path_two_part already covered by --resume-line 20
+[SKIP] source_line=12 name=english_explicit_readme_summary already covered by --resume-line 20
+[SKIP] source_line=13 name=english_explicit_send already covered by --resume-line 20
+[SKIP] source_line=14 name=explicit_service_notes_send already covered by --resume-line 20
+[SKIP] source_line=15 name=explicit_docs_list_names_only already covered by --resume-line 20
+[SKIP] source_line=16 name=explicit_docs_count_scalar already covered by --resume-line 20
+[SKIP] source_line=17 name=explicit_missing_file_graceful already covered by --resume-line 20
+[SKIP] source_line=18 name=explicit_log_tail_focus_cn already covered by --resume-line 20
+[SKIP] source_line=19 name=explicit_db_schema_version_cn already covered by --resume-line 20
+[SKIP] source_line=20 name=explicit_archive_unpack_alt already covered by --resume-line 20
+
+============================================================
+[CASE]        18
+[SOURCE_LINE] 21
+[NAME]        english_explicit_log_tail
+[CHAT]        17746321069
+[PROMPT]      Show the last 12 lines of /home/guagua/test/logs/app.log.
+[TASK]        f0e6df51-09fa-4943-b63d-a5c03be914f7
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] ``` [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] ERROR sample downstream timeout recovered [202...(truncated)
+
+============================================================
+[CASE]        19
+[SOURCE_LINE] 22
+[NAME]        english_explicit_db_tables
+[CHAT]        17746321070
+[PROMPT]      List tables from /home/guagua/test/data/test_contract.sqlite.
+[TASK]        09f6c2bc-8aec-4ae6-8503-2343253ff0be
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] accounts audit_log
+
+============================================================
+[CASE]        20
+[SOURCE_LINE] 23
+[NAME]        mixed_lang_explicit_file_summary
+[CHAT]        17746321071
+[PROMPT]      read /home/guagua/test/README.md 开头，然后用中文一句话总结
+[TASK]        4d91826e-695d-479b-ab5c-9f46031086de
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] [TOOL_CALL]
+
+============================================================
+[CASE]        21
+[SOURCE_LINE] 26
+[NAME]        colloquial_cn_readme_oneliner
+[CHAT]        17746321072
+[PROMPT]      帮我瞅一眼 /home/guagua/test/README.md 前几行，然后一句话说重点
+[TASK]        2e8ca7d4-0799-4631-8176-bd11ad20c24b
+  [status] <none> -> running
+Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_manual_20260327.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       17746321051
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+  resume_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  resume_line:   20
+
+[SKIP] source_line=4 name=explicit_path_readme_summary already covered by --resume-line 20
+[SKIP] source_line=5 name=explicit_path_readme_send already covered by --resume-line 20
+[SKIP] source_line=6 name=explicit_config_send already covered by --resume-line 20
+[SKIP] source_line=7 name=explicit_log_tail already covered by --resume-line 20
+[SKIP] source_line=8 name=explicit_db_tables already covered by --resume-line 20
+[SKIP] source_line=9 name=explicit_archive_unpack already covered by --resume-line 20
+[SKIP] source_line=10 name=current_dir_count_scalar already covered by --resume-line 20
+[SKIP] source_line=11 name=explicit_path_two_part already covered by --resume-line 20
+[SKIP] source_line=12 name=english_explicit_readme_summary already covered by --resume-line 20
+[SKIP] source_line=13 name=english_explicit_send already covered by --resume-line 20
+[SKIP] source_line=14 name=explicit_service_notes_send already covered by --resume-line 20
+[SKIP] source_line=15 name=explicit_docs_list_names_only already covered by --resume-line 20
+[SKIP] source_line=16 name=explicit_docs_count_scalar already covered by --resume-line 20
+[SKIP] source_line=17 name=explicit_missing_file_graceful already covered by --resume-line 20
+[SKIP] source_line=18 name=explicit_log_tail_focus_cn already covered by --resume-line 20
+[SKIP] source_line=19 name=explicit_db_schema_version_cn already covered by --resume-line 20
+[SKIP] source_line=20 name=explicit_archive_unpack_alt already covered by --resume-line 20
+
+============================================================
+[CASE]        18
+[SOURCE_LINE] 21
+[NAME]        english_explicit_log_tail
+[CHAT]        17746321069
+[PROMPT]      Show the last 12 lines of /home/guagua/test/logs/app.log.
+[TASK]        f85a9834-a45b-47ed-a578-1e27316c5fed
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The file `/home/guagua/test/logs/app.log` contains fewer than 12 lines. Here are all 5 lines available: ``` [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23...(truncated)
+
+============================================================
+[CASE]        19
+[SOURCE_LINE] 22
+[NAME]        english_explicit_db_tables
+[CHAT]        17746321070
+[PROMPT]      List tables from /home/guagua/test/data/test_contract.sqlite.
+[TASK]        675bd185-a1aa-4651-b03c-75a64f38b37f
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] accounts audit_log
+
+============================================================
+[CASE]        20
+[SOURCE_LINE] 23
+[NAME]        mixed_lang_explicit_file_summary
+[CHAT]        17746321071
+[PROMPT]      read /home/guagua/test/README.md 开头，然后用中文一句话总结
+[TASK]        f1f2cf66-7f76-47c0-baa4-4c251b2222b5
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该文件描述了一个用于存放自然语言回归测试工件和日志的测试工作区目录，并说明更改此目录不会改变被测运行时的内部工作目录设置。
+
+============================================================
+[CASE]        21
+[SOURCE_LINE] 26
+[NAME]        colloquial_cn_readme_oneliner
+[CHAT]        17746321072
+[PROMPT]      帮我瞅一眼 /home/guagua/test/README.md 前几行，然后一句话说重点
+[TASK]        9bcc845c-c5d9-4444-8c53-bbe85054d5ec
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这是一个基于 Java 21 + Spring Boot 3.
+
+============================================================
+[CASE]        22
+[SOURCE_LINE] 27
+[NAME]        colloquial_cn_send_no_paste
+[CHAT]        17746321073
+[PROMPT]      别贴正文，直接把 /home/guagua/test/docs/service_notes.md 发我
+[TASK]        0bb05962-1e9a-4ff6-a124-9ef9a8d030a4
+  [status] <none> -> running
+Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_manual_20260327.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       17746321051
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+  resume_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  resume_line:   21
+
+[SKIP] source_line=4 name=explicit_path_readme_summary already covered by --resume-line 21
+[SKIP] source_line=5 name=explicit_path_readme_send already covered by --resume-line 21
+[SKIP] source_line=6 name=explicit_config_send already covered by --resume-line 21
+[SKIP] source_line=7 name=explicit_log_tail already covered by --resume-line 21
+[SKIP] source_line=8 name=explicit_db_tables already covered by --resume-line 21
+[SKIP] source_line=9 name=explicit_archive_unpack already covered by --resume-line 21
+[SKIP] source_line=10 name=current_dir_count_scalar already covered by --resume-line 21
+[SKIP] source_line=11 name=explicit_path_two_part already covered by --resume-line 21
+[SKIP] source_line=12 name=english_explicit_readme_summary already covered by --resume-line 21
+[SKIP] source_line=13 name=english_explicit_send already covered by --resume-line 21
+[SKIP] source_line=14 name=explicit_service_notes_send already covered by --resume-line 21
+[SKIP] source_line=15 name=explicit_docs_list_names_only already covered by --resume-line 21
+[SKIP] source_line=16 name=explicit_docs_count_scalar already covered by --resume-line 21
+[SKIP] source_line=17 name=explicit_missing_file_graceful already covered by --resume-line 21
+[SKIP] source_line=18 name=explicit_log_tail_focus_cn already covered by --resume-line 21
+[SKIP] source_line=19 name=explicit_db_schema_version_cn already covered by --resume-line 21
+[SKIP] source_line=20 name=explicit_archive_unpack_alt already covered by --resume-line 21
+[SKIP] source_line=21 name=english_explicit_log_tail already covered by --resume-line 21
+
+============================================================
+[CASE]        19
+[SOURCE_LINE] 22
+[NAME]        english_explicit_db_tables
+[CHAT]        17746321070
+[PROMPT]      List tables from /home/guagua/test/data/test_contract.sqlite.
+[TASK]        419dd08b-dcc7-4e77-b5ee-30d06279bd87
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] accounts audit_log
+
+============================================================
+[CASE]        20
+[SOURCE_LINE] 23
+[NAME]        mixed_lang_explicit_file_summary
+[CHAT]        17746321071
+[PROMPT]      read /home/guagua/test/README.md 开头，然后用中文一句话总结
+[TASK]        06a632fa-78a1-49f3-8b1c-1fc66e935799
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该文件描述了一个用于存放自然语言回归测试工件和日志的测试工作区目录，并说明更改此目录不会改变被测运行时的内部工作目录设置。
+
+============================================================
+[CASE]        21
+[SOURCE_LINE] 26
+[NAME]        colloquial_cn_readme_oneliner
+[CHAT]        17746321072
+[PROMPT]      帮我瞅一眼 /home/guagua/test/README.md 前几行，然后一句话说重点
+[TASK]        a3e97af5-7673-4f55-b707-893aea8f670e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这是一个基于 Java 21 + Spring Boot 3 的项目。
+
+============================================================
+[CASE]        22
+[SOURCE_LINE] 27
+[NAME]        colloquial_cn_send_no_paste
+[CHAT]        17746321073
+[PROMPT]      别贴正文，直接把 /home/guagua/test/docs/service_notes.md 发我
+[TASK]        9afa383e-f163-4f6a-8afe-ae1cce86fb4e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/docs/service_notes.md
+
+============================================================
+[CASE]        23
+[SOURCE_LINE] 28
+[NAME]        colloquial_cn_log_tail
+[CHAT]        17746321074
+[PROMPT]      麻烦看下 /home/guagua/test/logs/app.log 最后 8 行给我
+[TASK]        96f22192-1b4e-4534-8935-256e88ce99ef
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] ERROR sample downstream timeout recovered [2026-03...(truncated)
+
+============================================================
+[CASE]        24
+[SOURCE_LINE] 29
+[NAME]        colloquial_cn_db_tables
+[CHAT]        17746321075
+[PROMPT]      帮我看下 /home/guagua/test/data/test_contract.sqlite 里都有哪些表哈
+[TASK]        81bddb8e-993c-4808-b920-fdda7e89cc57
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该数据库包含以下表： - accounts - audit_log
+
+============================================================
+[CASE]        25
+[SOURCE_LINE] 30
+[NAME]        colloquial_en_send_file
+[CHAT]        17746321076
+[PROMPT]      Hey, just send me /home/guagua/test/README.md as a file, no pasted content.
+[TASK]        6e97760a-a032-4e35-a50e-b71fd317449d
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/README.md
+
+============================================================
+[CASE]        26
+[SOURCE_LINE] 31
+[NAME]        colloquial_en_log_focus
+[CHAT]        17746321077
+[PROMPT]      Could you quickly tail /home/guagua/test/logs/app.log for 9 lines and give me a one-liner takeaway?
+[TASK]        16d5a367-d0ff-4d12-8e20-63d7a86ee4c1
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] **Log takeaway:** System started, loaded 3 documents, hit a cache miss and a recoverable downstream timeout, and is now serving test traffic.
+
+============================================================
+[CASE]        27
+[SOURCE_LINE] 32
+[NAME]        colloquial_en_docs_count_scalar
+[CHAT]        17746321078
+[PROMPT]      How many direct items are in /home/guagua/test/docs? Output number only.
+[TASK]        085542f8-4034-45bc-be70-50dee85d1099
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 3
+
+============================================================
+[CASE]        28
+[SOURCE_LINE] 33
+[NAME]        colloquial_mixed_send_config
+[CHAT]        17746321079
+[PROMPT]      把 /home/guagua/test/configs/app_config.toml send me，别贴内容
+[TASK]        41a86c0f-2ed3-45a6-bce1-de6a23b87307
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/configs/app_config.toml
+
+============================================================
+[CASE]        29
+[SOURCE_LINE] 36
+[NAME]        colloquial_cn_ultra_send_readme
+[CHAT]        17746321080
+[PROMPT]      把 /home/guagua/test/README.md 直接甩我，别贴字
+[TASK]        92706f22-f39d-40d8-87a3-109c1c23bcae
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/README.md
+
+============================================================
+[CASE]        30
+[SOURCE_LINE] 37
+[NAME]        colloquial_cn_ultra_peek_readme
+[CHAT]        17746321081
+[PROMPT]      瞅下 /home/guagua/test/README.md 开头，给我一句人话总结
+[TASK]        6f775a5c-b897-4225-bfe9-3bc08097ffe2
+  [status] <none> -> running

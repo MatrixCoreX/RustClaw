@@ -1,0 +1,9 @@
+index=7
+case_name=context_pronoun_switch_chain
+chat_id=1985996997
+turn1_task_id=b35426bd-c7c5-4043-9b00-5ce07cc90003
+turn1_prompt=先看一下 /home/guagua/test/logs 目录最新的 3 个文件
+turn2_task_id=21738612-1729-46b3-bfa9-505cf0a0e280
+turn2_prompt=再看一下 /home/guagua/test/docs 目录直接子项数量
+turn3_task_id=ff242b31-94a3-454b-bb20-297929eab388
+turn3_prompt=上一个结果里说的“第一个文件”是什么，上上个动作查的又是什么目录

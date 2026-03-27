@@ -1,0 +1,9 @@
+index=3
+case_name=context_bound_config_delivery_20260327
+chat_id=17746206694
+turn1_task_id=e38a0772-b436-4113-931f-d67fc22ad457
+turn1_prompt=先记一下，“那个配置文件”就是 /home/guagua/test/configs/app_config.toml
+turn2_task_id=c53ab6b9-0358-4901-ac1c-ca90698c6278
+turn2_prompt=把那个配置文件发给我
+turn3_task_id=bebefd60-dd4f-42e2-90e5-58ed7ca89b2d
+turn3_prompt=再用一句话说它主要是干嘛的

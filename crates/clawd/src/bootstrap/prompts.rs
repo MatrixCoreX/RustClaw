@@ -3,7 +3,7 @@ use std::path::Path;
 use claw_core::config::PersonaConfig;
 use tracing::warn;
 
-use crate::{llm_vendor_name, AppState};
+use crate::{AppState, llm_vendor_name};
 
 fn builtin_persona_prompt(profile: &str) -> &'static str {
     match profile {

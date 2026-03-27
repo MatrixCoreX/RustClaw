@@ -1,0 +1,43 @@
+# Manual one-turn regression cases for functions that might be affected by the dynamic prompt guard changes.
+# Format accepted by run_manual_test.sh: suite|name|tags|prompt
+
+dynamic_guard|explicit_path_readme_summary|path,file,summary|读一下 /home/guagua/test/README.md 开头并用一句话总结
+dynamic_guard|explicit_path_readme_send|path,file,delivery|把 /home/guagua/test/README.md 发给我
+dynamic_guard|explicit_config_send|path,config,delivery|把 /home/guagua/test/configs/app_config.toml 发给我
+dynamic_guard|explicit_log_tail|path,log,read|看下 /home/guagua/test/logs/app.log 最近 10 行
+dynamic_guard|explicit_db_tables|path,db,read|查一下 /home/guagua/test/data/test_contract.sqlite 里有哪些表
+dynamic_guard|explicit_archive_unpack|path,archive,act|把 /home/guagua/test/tmp/test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack 然后告诉我结果
+dynamic_guard|current_dir_count_scalar|dir,count,scalar|数一下当前目录有多少个直接子项，只输出数字
+dynamic_guard|explicit_path_two_part|path,file,summary|先读 /home/guagua/test/README.md 开头，再用一句话总结
+dynamic_guard|english_explicit_readme_summary|path,file,en|Read the beginning of /home/guagua/test/README.md and summarize it in one sentence.
+dynamic_guard|english_explicit_send|path,file,en|Send me /home/guagua/test/README.md
+dynamic_guard|explicit_service_notes_send|path,file,delivery|把 /home/guagua/test/docs/service_notes.md 发给我
+dynamic_guard|explicit_docs_list_names_only|path,dir,list|列出 /home/guagua/test/docs 下的直接子项，只列名字
+dynamic_guard|explicit_docs_count_scalar|path,dir,count|统计 /home/guagua/test/docs 下直接子项数量，只输出数字
+dynamic_guard|explicit_missing_file_graceful|path,file,missing|把 /home/guagua/test/docs/not_exists_case_003.md 发给我，不要编造
+dynamic_guard|explicit_log_tail_focus_cn|path,log,analyze|看下 /home/guagua/test/logs/app.log 最近 15 行，然后一句话指出最可疑点
+dynamic_guard|explicit_db_schema_version_cn|path,db,scalar|查一下 /home/guagua/test/data/test_contract.sqlite 的 schema version，只输出值
+dynamic_guard|explicit_archive_unpack_alt|path,archive,act|把 /home/guagua/test/tmp/test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack_alt 并告诉我结果
+dynamic_guard|english_explicit_log_tail|path,log,en|Show the last 12 lines of /home/guagua/test/logs/app.log.
+dynamic_guard|english_explicit_db_tables|path,db,en|List tables from /home/guagua/test/data/test_contract.sqlite.
+dynamic_guard|mixed_lang_explicit_file_summary|path,file,mixed|read /home/guagua/test/README.md 开头，然后用中文一句话总结
+
+# Colloquial extensions (CN/EN/mixed)
+dynamic_guard|colloquial_cn_readme_oneliner|path,file,summary,colloquial|帮我瞅一眼 /home/guagua/test/README.md 前几行，然后一句话说重点
+dynamic_guard|colloquial_cn_send_no_paste|path,file,delivery,colloquial|别贴正文，直接把 /home/guagua/test/docs/service_notes.md 发我
+dynamic_guard|colloquial_cn_log_tail|path,log,read,colloquial|麻烦看下 /home/guagua/test/logs/app.log 最后 8 行给我
+dynamic_guard|colloquial_cn_db_tables|path,db,read,colloquial|帮我看下 /home/guagua/test/data/test_contract.sqlite 里都有哪些表哈
+dynamic_guard|colloquial_en_send_file|path,file,en,colloquial|Hey, just send me /home/guagua/test/README.md as a file, no pasted content.
+dynamic_guard|colloquial_en_log_focus|path,log,en,colloquial|Could you quickly tail /home/guagua/test/logs/app.log for 9 lines and give me a one-liner takeaway?
+dynamic_guard|colloquial_en_docs_count_scalar|path,dir,count,en,colloquial|How many direct items are in /home/guagua/test/docs? Output number only.
+dynamic_guard|colloquial_mixed_send_config|path,config,mixed,colloquial|把 /home/guagua/test/configs/app_config.toml send me，别贴内容
+
+# Ultra colloquial / short-chat extensions
+dynamic_guard|colloquial_cn_ultra_send_readme|path,file,delivery,colloquial|把 /home/guagua/test/README.md 直接甩我，别贴字
+dynamic_guard|colloquial_cn_ultra_peek_readme|path,file,summary,colloquial|瞅下 /home/guagua/test/README.md 开头，给我一句人话总结
+dynamic_guard|colloquial_cn_ultra_tail_log|path,log,read,colloquial|/home/guagua/test/logs/app.log 最后 5 行给我看下
+dynamic_guard|colloquial_cn_ultra_count_docs|path,dir,count,colloquial|/home/guagua/test/docs 里头有几个直接子项？只回数字
+dynamic_guard|colloquial_en_ultra_send|path,file,en,colloquial|pls send /home/guagua/test/docs/service_notes.md as file only
+dynamic_guard|colloquial_en_ultra_read|path,file,en,colloquial|take a quick look at /home/guagua/test/README.md top lines, one-liner only
+dynamic_guard|colloquial_en_ultra_db|path,db,en,colloquial|yo, what tables are in /home/guagua/test/data/test_contract.sqlite ?
+dynamic_guard|colloquial_mixed_ultra_tail|path,log,mixed,colloquial|quick看下 /home/guagua/test/logs/app.log 最后 6 行

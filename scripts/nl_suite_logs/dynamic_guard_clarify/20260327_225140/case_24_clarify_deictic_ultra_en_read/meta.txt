@@ -1,0 +1,7 @@
+index=24
+case_name=clarify_deictic_ultra_en_read
+chat_id=17746206615
+turn1_task_id=3dc230e2-a82d-4892-913c-18f56ffe5450
+turn1_prompt=read that readme top part n gimme one-line summary
+turn2_task_id=cf15b94c-2556-45d2-b24b-9d4d8a4c8dca
+turn2_prompt=/home/guagua/test/README.md

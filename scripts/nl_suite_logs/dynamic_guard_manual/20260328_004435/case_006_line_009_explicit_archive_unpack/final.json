@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"74932efd-327e-475a-9a48-38e0e555e8a8","status":"succeeded","result_json":{"messages":["解压成功。\n\n提取的文件：\n- file_one.txt\n- file_two.txt\n\n目标目录：`/home/guagua/test/tmp/manual_dynamic_guard_unpack`"],"text":"解压成功。\n\n提取的文件：\n- file_one.txt\n- file_two.txt\n\n目标目录：`/home/guagua/test/tmp/manual_dynamic_guard_unpack`"},"error_text":null},"error":null}

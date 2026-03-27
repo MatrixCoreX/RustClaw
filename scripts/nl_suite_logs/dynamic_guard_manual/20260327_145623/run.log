@@ -1,0 +1,207 @@
+Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_manual_20260327.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260327_145623
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260327_145623/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260327_145623/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 4
+[NAME]        explicit_path_readme_summary
+[CHAT]        1985996991
+[PROMPT]      读一下 /home/guagua/test/README.md 开头并用一句话总结
+[TASK]        003433d0-ed0d-4fac-9dd6-6e4b9f3daa9e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该目录用于存放 NL 回归测试的产物和脚本，且更改此目录不会影响代理内部的工作区根目录。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 5
+[NAME]        explicit_path_readme_send
+[CHAT]        1985996992
+[PROMPT]      把 /home/guagua/test/README.md 发给我
+[TASK]        6bc91805-0f3a-4b43-bbac-3e88081757a0
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] # Test Workspace This directory is reserved for NL regression test artifacts and wrapper scripts. Notes: - The runner inputs and logs can live here. - The tested `clawd` runtime still uses its own configured workspace ro...(truncated)
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 6
+[NAME]        explicit_config_send
+[CHAT]        1985996993
+[PROMPT]      把 /home/guagua/test/configs/app_config.toml 发给我
+[TASK]        fe20e6cc-5794-40a9-89ea-88eb9185138e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/configs/app_config.toml
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 7
+[NAME]        explicit_log_tail
+[CHAT]        1985996994
+[PROMPT]      看下 /home/guagua/test/logs/app.log 最近 10 行
+[TASK]        8bf523c0-ad81-4f92-9e9e-3dab9ca3e936
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 以下是 /home/guagua/test/logs/app.log 的最后 10 行： ``` [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] E...(truncated)
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 8
+[NAME]        explicit_db_tables
+[CHAT]        1985996995
+[PROMPT]      查一下 /home/guagua/test/data/test_contract.sqlite 里有哪些表
+[TASK]        73892012-b863-439d-b493-383659c40528
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 根据对 `/home/guagua/test/data/test_contract.sqlite` 数据库的查询，该数据库包含以下表： - accounts - audit_log
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 9
+[NAME]        explicit_archive_unpack
+[CHAT]        1985996996
+[PROMPT]      把 /home/guagua/test/tmp/test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack 然后告诉我结果
+[TASK]        168bc15e-7996-42fa-a5db-ee2789d0f167
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 解压成功，文件已提取到 /home/guagua/test/tmp/manual_dynamic_guard_unpack，包含 file_one.txt 和 file_two.txt。
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 10
+[NAME]        current_dir_count_scalar
+[CHAT]        1985996997
+[PROMPT]      数一下当前目录有多少个直接子项，只输出数字
+[TASK]        db29a1a2-4d5d-48e4-a05d-74d18313c101
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 73
+
+============================================================
+[CASE]        8
+[SOURCE_LINE] 11
+[NAME]        explicit_path_two_part
+[CHAT]        1985996998
+[PROMPT]      先读 /home/guagua/test/README.md 开头，再用一句话总结
+[TASK]        1c99aea8-ad5c-4ffb-a064-f1086e8f06c7
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该文件开头介绍了一个基于 Rust + React 的自托管服务管理平台，支持 Docker 容器化部署，提供进程管理、日志监控、定时任务和开放 API 等核心功能。
+
+============================================================
+[CASE]        9
+[SOURCE_LINE] 12
+[NAME]        english_explicit_readme_summary
+[CHAT]        1985996999
+[PROMPT]      Read the beginning of /home/guagua/test/README.md and summarize it in one sentence.
+[TASK]        52d1423c-0715-47c5-b451-99ceb078c263
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The README indicates that this directory is a reserved workspace for NL regression test artifacts and wrapper scripts.
+
+============================================================
+[CASE]        10
+[SOURCE_LINE] 13
+[NAME]        english_explicit_send
+[CHAT]        1985997000
+[PROMPT]      Send me /home/guagua/test/README.md
+[TASK]        2a65b361-59a2-4cd1-80c4-8c783b684049
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 文件未找到。
+
+============================================================
+[CASE]        11
+[SOURCE_LINE] 14
+[NAME]        explicit_service_notes_send
+[CHAT]        1985997001
+[PROMPT]      把 /home/guagua/test/docs/service_notes.md 发给我
+[TASK]        03f2e86e-9b38-4a53-9410-50f419c80d60
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/docs/service_notes.md
+
+============================================================
+[CASE]        12
+[SOURCE_LINE] 15
+[NAME]        explicit_docs_list_names_only
+[CHAT]        1985997002
+[PROMPT]      列出 /home/guagua/test/docs 下的直接子项，只列名字
+[TASK]        513759cb-1fc1-4f7d-b8d7-21f88e83fc49
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] guide.txt notes.txt service_notes.md
+
+============================================================
+[CASE]        13
+[SOURCE_LINE] 16
+[NAME]        explicit_docs_count_scalar
+[CHAT]        1985997003
+[PROMPT]      统计 /home/guagua/test/docs 下直接子项数量，只输出数字
+[TASK]        54a38b76-579a-4b39-bdc8-62a0df374e63
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 3
+
+============================================================
+[CASE]        14
+[SOURCE_LINE] 17
+[NAME]        explicit_missing_file_graceful
+[CHAT]        1985997004
+[PROMPT]      把 /home/guagua/test/docs/not_exists_case_003.md 发给我，不要编造
+[TASK]        316a9ebc-2202-4bc0-965b-9217ba2d9696
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 文件不存在：/home/guagua/test/docs/not_exists_case_003.md 未找到
+
+============================================================
+[CASE]        15
+[SOURCE_LINE] 18
+[NAME]        explicit_log_tail_focus_cn
+[CHAT]        1985997005
+[PROMPT]      看下 /home/guagua/test/logs/app.log 最近 15 行，然后一句话指出最可疑点
+[TASK]        5f64fe9e-3460-4750-8e20-745691d1d76d
+  [status] <none> -> queued
+  [status] queued -> running

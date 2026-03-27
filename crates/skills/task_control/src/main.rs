@@ -10,6 +10,10 @@ struct Req {
     args: Value,
     user_id: i64,
     chat_id: i64,
+    #[serde(default)]
+    user_key: Option<String>,
+    #[serde(default)]
+    context: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,6 +134,7 @@ fn execute(
     let request_id = req.request_id.clone();
     let user_id = req.user_id;
     let chat_id = req.chat_id;
+    let user_key = effective_user_key(req);
     Ok(async move {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
@@ -138,23 +143,23 @@ fn execute(
         match input.action.as_str() {
             "list" => {
                 let tasks =
-                    fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id).await?;
+                    fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id, user_key.as_deref()).await?;
                 Ok(render_task_list(&tasks))
             }
             "cancel_all" => {
                 let tasks =
-                    fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id).await?;
+                    fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id, user_key.as_deref()).await?;
                 if tasks.is_empty() {
                     return Ok("当前没有可结束的未完成任务。".to_string());
                 }
                 let canceled =
-                    cancel_all_tasks(&client, &base_url, user_id, chat_id, &request_id).await?;
+                    cancel_all_tasks(&client, &base_url, user_id, chat_id, &request_id, user_key.as_deref()).await?;
                 Ok(render_cancel_all(tasks, canceled))
             }
             "cancel_one" => {
                 let index = input.index.unwrap_or(0);
                 let task =
-                    cancel_one_task(&client, &base_url, user_id, chat_id, &request_id, index)
+                    cancel_one_task(&client, &base_url, user_id, chat_id, &request_id, index, user_key.as_deref())
                         .await?;
                 Ok(render_cancel_one(&task))
             }
@@ -191,13 +196,13 @@ async fn fetch_active_tasks(
     user_id: i64,
     chat_id: i64,
     exclude_task_id: &str,
+    user_key: Option<&str>,
 ) -> Result<Vec<ActiveTaskItem>, String> {
-    let resp = client
-        .post(format!(
-            "{}/v1/tasks/active",
-            base_url.trim_end_matches('/')
-        ))
-        .json(&json!({
+    let mut req = client.post(format!("{}/v1/tasks/active", base_url.trim_end_matches('/')));
+    if let Some(key) = user_key {
+        req = req.header("x-rustclaw-key", key);
+    }
+    let resp = req.json(&json!({
             "user_id": user_id,
             "chat_id": chat_id,
             "exclude_task_id": exclude_task_id,
@@ -217,13 +222,13 @@ async fn cancel_all_tasks(
     user_id: i64,
     chat_id: i64,
     exclude_task_id: &str,
+    user_key: Option<&str>,
 ) -> Result<usize, String> {
-    let resp = client
-        .post(format!(
-            "{}/v1/tasks/cancel",
-            base_url.trim_end_matches('/')
-        ))
-        .json(&json!({
+    let mut req = client.post(format!("{}/v1/tasks/cancel", base_url.trim_end_matches('/')));
+    if let Some(key) = user_key {
+        req = req.header("x-rustclaw-key", key);
+    }
+    let resp = req.json(&json!({
             "user_id": user_id,
             "chat_id": chat_id,
             "exclude_task_id": exclude_task_id,
@@ -242,13 +247,16 @@ async fn cancel_one_task(
     chat_id: i64,
     exclude_task_id: &str,
     index: usize,
+    user_key: Option<&str>,
 ) -> Result<ActiveTaskItem, String> {
-    let resp = client
-        .post(format!(
-            "{}/v1/tasks/cancel-one",
-            base_url.trim_end_matches('/')
-        ))
-        .json(&json!({
+    let mut req = client.post(format!(
+        "{}/v1/tasks/cancel-one",
+        base_url.trim_end_matches('/')
+    ));
+    if let Some(key) = user_key {
+        req = req.header("x-rustclaw-key", key);
+    }
+    let resp = req.json(&json!({
             "user_id": user_id,
             "chat_id": chat_id,
             "index": index,
@@ -265,6 +273,20 @@ async fn cancel_one_task(
             .ok_or_else(|| "cancel-one response missing task".to_string())?,
     )
     .map_err(|e| format!("decode canceled task failed: {e}"))
+}
+
+fn effective_user_key(req: &Req) -> Option<String> {
+    req.user_key
+        .clone()
+        .or_else(|| {
+            req.context
+                .as_ref()
+                .and_then(|ctx| ctx.get("user_key"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 async fn parse_api_response<T: for<'de> Deserialize<'de>>(

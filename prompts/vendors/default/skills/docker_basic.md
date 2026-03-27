@@ -33,6 +33,8 @@
 - Missing required `container` for container-specific actions.
 - Unsupported action names.
 - Docker daemon/CLI errors must be returned with readable output.
+- Non-zero `docker` command exit codes are returned as `status=error` with `error_text=docker command failed: exit=<code>\n<stdout/stderr>`.
+- Successful responses also mirror structured metadata into `extra`, including `action`, `exit_code`, `docker_args`, and `output`.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -42,7 +44,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"...container logs...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"exit=0\n...container logs...","extra":{"action":"logs","exit_code":0,"docker_args":["logs","--tail","100","clawd"],"output":"exit=0\n...container logs..."},"error_text":null}
 ```
 
 ## Output Contract

@@ -1,0 +1,9 @@
+index=3
+case_name=context_two_hops_dir_chain
+chat_id=1985996993
+turn1_task_id=db2ee63c-82ad-4182-862b-4bf07cabc740
+turn1_prompt=先看一下 /home/guagua/test/docs 目录有多少个直接子项
+turn2_task_id=59b9722e-487c-47b2-9b71-8f90ec3145f0
+turn2_prompt=再看一下 /home/guagua/test/logs 目录有多少个直接子项
+turn3_task_id=bba5932a-87e8-440a-8c03-b10579277b23
+turn3_prompt=把上上个和上个结果比较一下，哪个更多

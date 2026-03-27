@@ -1,0 +1,159 @@
+NL suite: clarify
+  run_dir:   /home/guagua/git_upload/scripts/nl_suite_logs/clarify_hard/20260326_232750
+  run_log:   /home/guagua/git_upload/scripts/nl_suite_logs/clarify_hard/20260326_232750/run.log
+  case_file: /home/guagua/git_upload/scripts/nl_cases_clarify_hard_20260326.txt
+  base_url:  http://127.0.0.1:8787
+  user_id:   1985996990
+  chat_id:   1985996990
+
+============================================================
+[CASE]   1
+[NAME]   clarify_which_readme
+[CHAT]   1985996991
+[TURN1]  读一下那个 README 开头并用一句话总结
+[TASK1]  1e232193-024c-47fd-bbc7-c1f9b3fd11de
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  RustClaw 是一个基于 Rust 的本地智能体运行时，支持通过 Telegram、WhatsApp、飞书和浏览器 UI 等多渠道进行日常任务操作，集成了任务路由、工具执行、记忆管理、调度、多模态技能和基于 user_key 的身份认证等功能。
+[TURN2]  README.md
+[TASK2]  89f7638a-c865-42ef-b852-b2d6cd4fa631
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  # RustClaw\n\n<img src="./RustClaw.png" width="420" />\n\nChinese version: `README.zh-CN.md`\n\nRustClaw is a local Rust-based agent runtime for everyday operations through Telegram, WhatsApp, Feishu/Lark, and a browser UI. It combines task routing, tool execution, memory, scheduling, multimodal skills, and `user_key` based identity into one deployable stack.\n\n## What It Is For\n\nRustClaw is designed to let you:\n\n- chat with an agent from multiple channels\n- run built-in skills such as file, HTTP, crypto, image, and service tasks\n- manage users and permissions with `user_key`\n- use a local UI for monitoring and daily administration\n- keep conversation memory and resumable multi-step tasks\n\n## Quick Start\n\n### 1. Prerequisites\n\n```bash\nrustup default stable\npython3 --version\n```\n\nPython `3.11+` is recommended.\n\n### 2. Install the `rustclaw` command\n\n```bash\n# Standard install\nbash install-rustclaw-cmd.sh\n\n# Install without sudo\nbash install-rustclaw-cmd.sh --user\n```\n\nVerify:\n\n```bash\ncommand -v rustclaw\nrustclaw -h\nrustclaw -status\n```\n\n### 3. Configure your model and channels\n\nMain config: `configs/config.toml`\n\nChannel configs:\n\n- `configs/channels/telegram.toml`\n- `configs/channels/whatsapp.toml`\n- `configs/channels/feishu.toml`\n\nCommon split configs:\n\n- `configs/image.toml`\n- `configs/audio.toml`\n- `configs/crypto.toml`\n\n### 4. Start RustClaw\n\n```bash\n# Full start with UI\nrustclaw -start --vendor openai --model gpt-4.1 --profile release --channels all --with-ui --quick\n\n# Another vendor example\nrustclaw -start --vendor qwen --model qwen-max-latest --profile release --channels all --quick\n\n# Simple mode\nrustclaw -start release all\n```\n\n### 5. Daily operations\n\n```bash\nrustclaw -status\nrustclaw -logs clawd 200 --follow\nrustclaw -health\nrustclaw -stop\n```\n\nLegacy scripts are still available:\n\n```bash\n./start-all.sh\n./stop-rustclaw.sh\n```\n\n## Keys, Identity, and Permissions\n\nRustClaw uses `user_key` as the primary identity across UI and messaging channels.\n\n- permissions are resolved by `user_key`\n- channel conversations are resolved by `channel + external_chat_id`\n- the UI uses the same auth model as Telegram and WhatsApp\n- `clawd` can bootstrap the first admin key when the auth table is empty\n\nKey management:\n\n```bash\nrustclaw -key list\nrustclaw -key generate user\nrustclaw -key generate admin\nscripts/auth-key.sh list\n```\n\n## Local UI and API\n\nThe listen address is configured in `configs/config.toml`, usually `127.0.0.1:8787` or `0.0.0.0:8787`.\n\nUI:\n\n- URL: `http://127.0.0.1:8787/`\n- static files: `UI/dist`\n- override UI directory with `RUSTCLAW_UI_DIST`\n- the browser stores a valid `user_key` locally and sends it with `X-RustClaw-Key`\n\nImportant API endpoints:\n\n- `GET /v1/health`\n- `POST /v1/tasks`\n- `GET /v1/tasks/{task_id}`\n- `POST /v1/tasks/cancel`\n- `GET /v1/auth/me`\n- `POST /v1/auth/channel/bind`\n- `GET/POST /v1/auth/crypto-credentials`\n\nExamples:\n\n```bash\ncurl http://127.0.0.1:8787/v1/health \\n  -H "X-RustClaw-Key: rk-xxxx"\n\ncurl -X POST http://127.0.0.1:8787/v1/tasks \\n  -H "Content-Type: application/json" \\n  -H "X-RustClaw-Key: rk-xxxx" \\n  -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello","agent_mode":true}}'\n```\n\n## Common Telegram Commands\n\n- `/start`\n- `/help`\n- `/agent on|off`\n- `/status`\n- `/cancel`\n- `/skills`\n- `/run <skill> <args>`\n- `/sendfile <path>`\n- `/voicemode show|voice|text|both|reset`\n- `/openclaw config show|vendors|set <vendor> <model>`\n- `/cryptoapi show`\n- `/cryptoapi set binance <api_key> <api_secret>`\n- `/cryptoapi set okx <api_key> <api_secret> <passphrase>`\n\n## Crypto Credentials\n\nExchange credentials are stored per `user_key`, not as one shared global secret for all users.\n\n- supported live exchanges: `binance`, `okx`\n- risk controls are defined in `configs/crypto.toml`\n- credentials are stored in `exchange_api_credentials`\n- each `user_key` has its own exchange credential record\n\nYou can manage crypto credentials through:\n\n- `GET/POST /v1/auth/crypto-credentials`\n- Telegram `/cryptoapi ...` commands\n- `scripts/import-crypto-credentials.sh` for legacy migration\n\n## Built-in Skills\n\nCommon built-in skills include:\n\n- `archive_basic`\n- `audio_synthesize`\n- `audio_transcribe`\n- `chat`\n- `config_guard`\n- `crypto`\n- `db_basic`\n- `docker_basic`\n- `fs_search`\n- `git_basic`\n- `health_check`\n- `http_basic`\n- `image_edit`\n- `image_generate`\n- `image_vision`\n- `log_analyze`\n- `package_manager`\n- `process_basic`\n- `rss_fetch`\n- `service_control`\n- `system_basic`\n- `x`\n\n## Important Files and Directories\n\n- `configs/config.toml`: main runtime config\n- `configs/channels/*.toml`: channel-specific config\n- `configs/image.toml`: image skill config\n- `configs/audio.toml`: audio skill config\n- `configs/crypto.toml`: crypto risk and exchange config\n- `configs/i18n/*.toml`: text resources\n- `prompts/`: prompt templates\n- `migrations/`: database migrations\n- `UI/`: browser UI\n- `pi_app/`: desktop mini app and small-screen monitor\n- `systemd/`: service templates\n- `crates/clawd`: API, routing, queue, memory, scheduling\n- `crates/skills/*`: skill implementations\n\n## Small-Screen Desktop App\n\nThe small-screen desktop app lives in `pi_app/`.\n\n```bash\ncd pi_app && ./run-small-screen.sh\ncd pi_app && ./install-desktop.sh\ncd pi_app && ./enable-autostart.sh\ncd pi_app && ./open-small-screen.sh\n```\n\nIt reads `GET /v1/health`, so `clawd` must already be running.\n\n## Notes\n\n- review and sanitize configs before production deployment\n- if `/usr/local/bin` is not writable, use `bash install-rustclaw-cmd.sh --user`\n- if `~/.local/bin` is not in `PATH`, add `export PATH="$HOME/.local/bin:$PATH"`\n- for service deployment, use `systemd/` as the starting point\n\n## License\n\nThis project uses a non-commercial source-available license.\n\n- English legal text: `LICENSE`\n- Chinese reference translation: `LICENSE.zh-CN.md`
+
+============================================================
+[CASE]   2
+[NAME]   clarify_which_config_file
+[CHAT]   1985996992
+[TURN1]  把那个配置文件发给我
+[TASK1]  73fff4f9-2459-420d-b500-c5f27d604b9d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我需要发送的配置文件名称或路径。
+[TURN2]  configs/config.toml
+[TASK2]  c88c6cd1-d837-4ff8-a60f-19e65138448d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  ```toml\n# 用途/Purpose: 命令意图识别与规则目录配置.\n# 建议修改/Recommended change: 可按部署语言与规则目录调整.\n# 风险/Risk: locale 或 rules_dir 配错会导致意图识别退化.\n[command_intent]\n# 默认语言 / Default locale for intent parsing.\ndefault_locale = "zh-CN"\n# 当主链路失败时是否启用 LLM 回退 / Enable LLM fallback when rule match fails.\nllm_fallback_enabled = true\n# 规则目录 / Rule files directory.\nrules_dir = "configs/command_intent"\n\n# 用途/Purpose: 数据库连接基础参数.\n# 建议修改/Recommended change: 可改（尤其是路径）.\n# 风险/Risk: 超时太短会频繁 busy；路径错误会导致服务无法启动/读写.\n[database]\n# SQLite busy 超时（毫秒） / SQLite busy timeout in milliseconds.\nbusy_timeout_ms = 2000\n# SQLite 文件路径 / SQLite file path.\nsqlite_path = "data/rustclaw.db"\n\n# 用途/Purpose: 文档/文件生成默认输出目录.\n# 建议修改/Recommended change: 可改.\n# 风险/Risk: 目录不可写会导致文件生成失败.\n[file_generation]\ndefault_output_dir = "document"\n\n# Image skill config moved to configs/image.toml (supports default_model + <vendor>_models fallback) / 图片技能配置已拆分到 configs/image.toml（支持 default_model + 按厂商备选模型）\n\n# Audio skill config moved to configs/audio.toml (supports default_model + <vendor>_models fallback) / 语音技能配置已拆分到 configs/audio.toml（支持 default_model + 按厂商备选模型）\n\n# 用途/Purpose: 全局与单用户限流.\n# 建议修改/Recommended change: 可改，建议结合流量观测渐进调整.\n# 风险/Risk: 太低会限流过严；太高可能触发上游配额或成本飙升.\n[limits]\n# 全局每分钟请求数 / Global requests per minute.\nglobal_rpm = 60\n# 单用户每分钟请求数 / Per-user requests per minute.\nuser_rpm = 20\n\n# 用途/Purpose: LLM 路由默认选择（厂商与模型）.\n# 建议修改/Recommended change: 可改.\n# 风险/Risk: vendor/model 不匹配会导致调用失败.\n[llm]\n# 默认模型名 / Default selected model.\nselected_model = "MiniMax-M2.7"\n# 默认厂商标识 / Default selected vendor.\nselected_vendor = "minimax"\n\n# 用途/Purpose: Anthropic 提供商连接与模型池.\n# 建议修改/Recommended change: 可改，需保证 key/base_url/model 对齐.\n# 风险/Risk: key 无效或 URL 错误会直接失败；并发过高可能触发限流.\n[llm.anthropic]\napi_key = ""\nbase_url = "https://api.anthropic.com/v1"\n# 该提供商最大并发 / Max concurrency for this provider.\nmax_concurrency = 1\n# 默认模型 / Default model for this provider.\nmodel = "claude-sonnet-4-6"\n# 可选模型池 / Allowed model candidates.\nmodels = [\n    # 4.6 (latest / 最新)\n    "claude-opus-4-6",           # Top intelligence, agent/coding 最强智能 $5/$25\n    "claude-sonnet-4-6",         # Balanced speed/intelligence 均衡推荐 $3/$15\n    # 4.5\n    "claude-haiku-4-5-20251001", # Fastest, high-throughput 最快低延迟 $1/$5\n    # Legacy / 旧版\n    "claude-3-7-sonnet-latest",\n    "claude-3-5-haiku-latest",\n]\n# 单次请求超时（秒） / Request timeout in seconds.\ntimeout_seconds = 60\n\n# 用途/Purpose: Google 提供商连接与模型池.\n# 建议修改/Recommended change: 可改.\n# 风险/Risk: 预览模型可能变更快，需关注兼容性与稳定性.\n[llm.google]\napi_key = ""\nbase_url = "https://generativelanguage.googleapis.com/v1beta"\nmax_concurrency = 1\nmodel = "gemini-2.5-pro"\nmodels = [\n    # 3.x (latest preview / 最新预览)\n    "gemini-3.1-pro-preview",  # Flagship reasoning+agent 旗舰推理 preview\n    "gemini-3-flash-preview",  # Frontier low-cost 前沿低成本 preview\n    # 2.5 (stable / 稳定版)\n    "gemini-2.5-pro",          # Advanced reasoning w/ thinking 高级推理\n    "gemini-2.5-flash",        # Fast & cost-effective 高性价比低延迟\n    "gemini-2.5-flash-lite",   # Cheapest & fastest 最快最便宜\n]\ntimeout_seconds = 90\n\n# 用途/Purpose: Grok 提供商连接与模型池.\n# 建议修改/Recommended change: 可改，模型上下线较快，建议保留至少一个稳定回退模型.\n# 风险/Risk: 模型名与官方上线节奏变化较快，建议保留一个稳态回退模型.\n[llm.grok]\napi_key = ""\nbase_url = "https://api.x.ai/v1"\nmax_concurrency = 1\nmodel = "grok-3"\nmodels = [\n    # Grok 4\n    "grok-4-0709",                 # Flagship reasoning 旗舰推理 256k $3/$15\n    "grok-4-1-fast-reasoning",     # Fast reasoning 快速推理 2M ctx $0.2/$0.5\n    "grok-4-1-fast-non-reasoning", # Fast non-reasoning 快速非推理 2M ctx $0.2/$0.5\n    # Grok 3\n    "grok-3",                      # General purpose 通用 131k $3/$15\n    "grok-3-mini",                 # Lightweight 轻量高性价比 131k $0.3/$0.5\n    # Specialized / 专用\n    "grok-code-fast-1",            # Code-dedicated 代码专用 256k\n    # Legacy / 旧版\n    "grok-2-vision-1212",          # Vision model 视觉 32k\n]\ntimeout_seconds = 60\n\n# 用途/Purpose: DeepSeek 提供商连接与模型池（OpenAI-compatible）.\n# 建议修改/Recommended change: 可改，适合补充高性价比推理/编码模型.\n# 风险/Risk: 模型名与官方上线节奏变化较快，建议保留一个稳态回退模型.\n[llm.deepseek]\napi_key = ""\nbase_url = "https://api.deepseek.com/v1"\nmax_concurrency = 1\nmodel = "deepseek-chat"\nmodels = [\n    "deepseek-chat",\n    "deepseek-reasoner",\n]\ntimeout_seconds = 60\n\n# 用途/Purpose: Qwen 提供商连接与模型池.\n# 建议修改/Recommended change: 可改.\n# 风险/Risk: base_url 或鉴权不匹配会导致 401/404.\n[llm.qwen]\napi_key = ""\nbase_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"\nmax_concurrency = 1\nmodel = "qwen-max-latest"\nmodels = [\n    "qwen-max-latest",\n    "qwen-plus-latest",\n    "qwen-turbo-latest",\n]\ntimeout_seconds = 60\n\n# 用途/Purpose: MiniMax 提供商连接与模型池（OpenAI-compatible）.\n# 建议修改/Recommended change: 可改，建议按官方最新兼容模型名维护.\n# api_format：省略或空则默认 openai_compat（/chat/completions + Bearer）；设为 anthropic_claude 则 /messages + x-api-key（clawd 合成 vendor-minimax）.\n# 风险/Risk: 音频/图片相关能力与 OpenAI 兼容接口的覆盖范围可能有限，必要时需补原生适配.\n[llm.minimax]\napi_key = ""\nbase_url = "https://api.minimaxi.com/v1"\nmax_concurrency = 1\nmodel = "MiniMax-M2.7"\nmodels = [\n    "MiniMax-M2.7",\n    "MiniMax-M2.5",\n    "MiniMax-M2.5-thinking",\n    "MiniMax-M2.5-coder",\n]\ntimeout_seconds = 60\n\n# 用途/Purpose: 自定义 OpenAI-compatible 提供商.\n# 建议修改/Recommended change: 可改，适合接入私有网关.\n# 风险/Risk: 协议不兼容会出现模型列表可见但调用失败.\n[llm.custom]\napi_key = ""\nbase_url = "https://api.example.com/v1"\nmax_concurrency = 1\nmodel = "custom-model"\nmodels = [\n    "custom-model",\n]\ntimeout_seconds = 60\n\n# 用途/Purpose: OpenAI 提供商连接与模型池.\n# 建议修改/Recommended change: 可改.\n# 风险/Risk: 模型名下线会报错；并发与超时需与上游配额匹配.\n[llm.openai]\napi_key = ""\nbase_url = "https://api.openai.com/v1"\nmax_concurrency = 1\nmodel = "gpt-4o-mini"\nmodels = [\n    "gpt-5.2",\n    "gpt-5.2-chat-latest",\n    "gpt-5.1-chat-latest",\n    "gpt-5.1",\n    "gpt-5-chat-latest",\n    "gpt-5",\n    "gpt-4.1",\n    "gpt-4.1-mini",\n    "gpt-4o",\n    "gpt-4o-mini",\n]\ntimeout_seconds = 60\n\n# 用途/Purpose: 清理/审计保留策略.\n# 建议修改/Recommended change: 可改，建议与磁盘容量和审计需求匹配.\n# 风险/Risk: 保留太短会丢排障证据；太长会膨胀存储.\n[maintenance]\n# 审计表保留最大行数 / Max rows retained for audit logs.\naudit_max_rows = 10000\n# 审计保留天数 / Audit retention days.\naudit_retention_days = 14\n# 清理任务执行周期（秒） / Cleanup interval in seconds.\ncleanup_interval_seconds = 300\n# 任务表保留最大行数 / Max rows retained for tasks table.\ntasks_max_rows = 2000\n# 任务保留天数 / Task retention days.\ntasks_retention_days = 7\n\n# 用途/Purpose: 记忆模块独立配置入口.\n# 建议修改/Recommended change: 一般不改，除非你迁移了路径.\n# 风险/Risk: 路径错误会导致记忆模块配置加载失败.\n[memory]\nconfig_path = "configs/memory.toml"\n\n# 用途/Purpose: 人设模板目录与默认 profile.\n# 建议修改/Recommended change: 可改.\n# 风险/Risk: profile 不存在会回退或导致提示词装配失败.\n[persona]\ndir = "prompts/personas"\nprofile = "executor"\n\n# 用途/Purpose: 路由调试开关.\n# 建议修改/Recommended change: 线上建议 false，排障时临时开启.\n# 风险/Risk: 开启会增加日志噪音，可能暴露更多 prompt 细节.\n[routing]\ndebug_log_prompt = false\n\n# 用途/Purpose: 日程相关 i18n 与意图提示词配置.\n# 建议修改/Recommended change: 可改.\n# 风险/Risk: 路径不一致会导致 schedule 意图识别/回复异常.\n[schedule]\ni18n_dir = "configs/i18n"\nintent_prompt_path = "prompts/schedule_intent_prompt.md"\nintent_rules_path = "prompts/schedule_intent_rules.md"\nlocale = "zh-CN"\ntimezone = "Asia/Shanghai"\n\n# 用途/Purpose: HTTP 服务监听与请求超时.\n# 建议修改/Recommended change: 可改.\n# 风险/Risk: 监听地址改为 0.0.0.0 会暴露外网；超时过低会误中断.\n# listen 填 0.0.0.0:8787 可公网访问；同机 telegramd/whatsappd 会连 127.0.0.1:8787。\n# clawd_base_url（可选）：telegramd/whatsappd 连 clawd 的地址；未设则用 http://{listen}。\n#clawd_base_url = "http://127.0.0.1:8787"\n[server]\nlisten = "0.0.0.0:8787"\nrequest_timeout_seconds = 30\n# 用途/Purpose: 技能执行并发/超时与启用基线.\n# 建议修改/Recommended change: 可改，但建议优先用 skill_switches 管理开关.\n# 风险/Risk: 并发过高可能争用资源；超时过低会误判失败.\n[skills]\n# 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches\nregistry_path = "configs/skills_registry.toml"\nskill_switches = { browser_web = true, doc_parse = true, kb = true, reference_resolver = true, schedule = true, stock = true, task_control = true, transform = true, weather = true, web_search_extract = true }\nskill_max_concurrency = 1\nskill_timeout_seconds = 86400\n# 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):\n# - 设为 false: 强制关闭该技能（含 core-floor，不会进入二层路由提示词，也不可执行）/ Set false: force disable this skill (including core-floor).\n# - 设为 true : 强制开启该技能（会进入二层路由提示词，且可执行）/ Set true: force enable this skill.\n# 建议用 skill_switches 控制开关，尽量不要直接改 skills_list，避免启用基线被误改。/ Prefer skill_switches for toggles; avoid editing baseline list directly.\n# 例子/Example:\n# skill_switches = { image_generate = false, rss_fetch = true }\n# 技能基线列表（建议少改）/ Baseline enabled skills (avoid frequent edits).\n# 与 configs/skills_registry.toml 中全部 [[skills]].name 一致（未启用 registry 时作 fallback 基线）。\nskills_list = [\n    "run_cmd",\n    "read_file",\n    "write_file",\n    "list_dir",\n    "make_dir",\n    "remove_file",\n    "schedule",\n    "x",\n    "system_basic",\n    "http_basic",\n    "git_basic",\n    "install_module",\n    "process_basic",\n    "package_manager",\n    "archive_basic",\n    "db_basic",\n    "docker_basic",\n    "fs_search",\n    "rss_fetch",\n    "image_vision",\n    "image_generate",\n    "image_edit",\n    "audio_transcribe",\n    "audio_synthesize",\n    "health_check",\n    "log_analyze",\n    "service_control",\n    "task_control",\n    "config_guard",\n    "crypto",\n    "chat",\n    "stock",\n    "weather",\n    "reference_resolver",\n    "doc_parse",\n    "transform",\n    "web_search_extract",\n    "kb",\n    "browser_web",\n]\n\n# 渠道配置已拆分到以下文件 / Channel configs are split into:\n# - configs/channels/telegram.toml（Telegram）/ Telegram channel settings\n# - configs/channels/whatsapp-cloud.toml（WhatsApp Cloud / webhook）/ WhatsApp Cloud settings\n# - configs/channels/whatsapp-web.toml（WhatsApp Web / QR login）/ WhatsApp Web settings\n# - configs/channels/whatsapp.toml 仅作为旧混合配置兼容入口，建议不要再写实际配置\n\n# 用途/Purpose: 预留 Slack 适配器配置（当前占位）.\n# 建议修改/Recommended change: 未接入前可保持默认.\n# 风险/Risk: 提前启用但 endpoint 无效会导致投递失败.\n[adapters.slack]\nenabled = false\nendpoint = ""\nnote = "placeholder"\n\n# 用途/Purpose: 预留 Discord 适配器配置（当前占位）.\n# 建议修改/Recommended change: 未接入前可保持默认.\n# 风险/Risk: 提前启用但 endpoint 无效会导致投递失败.\n[adapters.discord]\nenabled = false\nendpoint = ""\nnote = "placeholder"\n\n# 用途/Purpose: 工具执行白名单/黑名单与权限配置.\n# 建议修改/Recommended change: 生产环境建议收紧 allow/deny 与 sudo.\n# 风险/Risk: 当前 `allow=*` + `allow_sudo=true` 权限非常高，误调用风险显著.\n[tools]\nallow = ["*"]\nallow_path_outside_workspace = true\nallow_sudo = true\ncmd_timeout_seconds = 60\ndeny = []\nmax_cmd_length = 2400\nprofile = "full"\n\n# 用途/Purpose: 按模型提供商细化工具 allow/deny 覆盖.\n# 建议修改/Recommended change: 可改，建议用于高风险提供商最小权限化.\n# 风险/Risk: 配置冲突会导致行为与预期不一致（被拒/过放开）.\n[tools.by_provider.anthropic]\nallow = []\ndeny = []\n\n[tools.by_provider.google]\nallow = []\ndeny = []\n\n[tools.by_provider.grok]\nallow = []\ndeny = []\n\n[tools.by_provider.openai]\nallow = []\ndeny = []\n\n# 用途/Purpose: worker 拉取队列并发与超时.\n# 建议修改/Recommended change: 可改，需结合机器资源与任务负载.\n# 风险/Risk: 并发太高会争用 CPU/IO；队列太小会丢积压能力.\n[worker]\n# worker 并发数 / Number of concurrent workers.\nconcurrency = 3\n# 轮询间隔（毫秒） / Queue polling interval in milliseconds.\npoll_interval_ms = 500\n# 队列上限 / Max queued tasks in memory.\nqueue_limit = 128\n# 运行中心跳间隔（秒）：执行长任务时周期刷新 updated_at，避免误判"卡死"。\ntask_heartbeat_seconds = 30\n# 运行中"无进展"超时（秒）：status=running 且 updated_at 长时间不变会自动收尾为 failed。\nrunning_no_progress_timeout_seconds = 1200\n# 无进展清理检查间隔（秒）。\nrunning_recovery_check_interval_seconds = 60\n#
+
+============================================================
+[CASE]   3
+[NAME]   clarify_which_service_status
+[CHAT]   1985996993
+[TURN1]  看看那个服务现在是不是在运行
+[TASK1]  c8988e58-8210-4162-ac9b-e187df2c8648
+  [status] <none> -> running
+  [status] running -> failed
+[TEXT1]  step 1 failed (skill(service_control)): ambiguous: multiple matching services
+[TURN2]  telegramd
+[TASK2]  aa9f38a5-8859-4dd8-a31c-2b3c6f52db69
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  telegramd=running
+
+============================================================
+[CASE]   4
+[NAME]   clarify_which_log_tail
+[CHAT]   1985996994
+[TURN1]  帮我看一下那个日志最近 20 行
+[TASK1]  1b33dbeb-fc1e-4988-9dc8-8f44f60b322a
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请问您想查看哪个日志文件的最后 20 行？
+[TURN2]  logs/clawd.log
+[TASK2]  56bc961d-8c56-48ef-a967-71a8386a0d38
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  <minimax:tool_call>\n<invoke name="read_range">\n<parameter name="start_line">7201</parameter>\n<parameter name="end_line">7220</parameter>\n<parameter name="path">logs/clawd.log</parameter>\n<parameter name="resolved_path">/home/guagua/git_upload/logs/clawd.log</parameter>\n</invoke>\n</minimax:tool_call>
+
+============================================================
+[CASE]   5
+[NAME]   clarify_which_db
+[CHAT]   1985996995
+[TURN1]  查一下那个 sqlite 里有哪些表
+[TASK1]  9989e194-bc00-4df1-b944-dd707084af93
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供要查询的 SQLite 数据库的文件路径或名称。
+[TURN2]  data/db-basic-contract.sqlite
+[TASK2]  fcd4b65e-8abf-404f-a1bd-7a1c641f8891
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  数据库 `data/db-basic-contract.sqlite` 中没有找到任何表，结果为空。
+
+============================================================
+[CASE]   6
+[NAME]   clarify_which_archive_unpack
+[CHAT]   1985996996
+[TURN1]  把那个压缩包解压到 tmp/clarify_unpack_case 然后告诉我结果
+[TASK1]  fcdb9072-69e8-4fcd-9cd3-99b67fa46064
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供要解压的压缩包的文件名或路径。
+[TURN2]  tmp/nl_archive_case.zip
+[TASK2]  5b607f1f-88f3-44c9-9599-3d766b616fea
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  解压成功。`tmp/nl_archive_case.zip` 已解压到 `tmp/clarify_unpack_case`，包含以下文件：\n\n- `home/guagua/git_upload/scripts/skill_calls/` 目录及其下的 31 个脚本文件：\n  - `call_config_guard.sh`、`call_chat.sh`、`call_image_generate.sh`、`call_doc_parse.sh`、`call_log_analyze.sh`、`call_rss_fetch.sh`、`call_package_manager.sh`、`call_service_control.sh`、`call_health_check.sh`、`call_stock.sh`、`call_git_basic.sh`、`call_weather.sh`、`call_task_control.sh`、`call_browser_web.sh`、`call_install_module.sh`、`call_kb.sh`、`call_reference_resolver.sh`、`call_crypto.sh`、`call_process_basic.sh`、`call_image_edit.sh`、`call_transform.sh`、`call_fs_search.sh`、`call_db_basic.sh`、`call_x.sh`、`call_web_search_extract.sh`、`call_image_vision.sh`、`call_system_basic.sh`、`call_docker_basic.sh`、`call_archive_basic.sh`、`call_audio_transcribe.sh`、`call_http_basic.sh`、`call_audio_synthesize.sh`\n- `_run_skill.sh`
+
+============================================================
+[CASE]   7
+[NAME]   clarify_which_json_name
+[CHAT]   1985996997
+[TURN1]  读一下那个 JSON 里的 name 字段，只输出值
+[TASK1]  0b1b1f96-72d2-4878-a63b-8c2bedadef3c
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  package.json 中未找到 `name` 字段。该文件只包含 `dependencies` 字段。
+[TURN2]  package.json
+[TASK2]  ff37faef-ba06-4bd0-b7d3-62f296d15115
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  ```json\n{\n  "dependencies": {\n    "@xdevplatform/xurl": "^1.0.3"\n  }\n}\n```
+
+============================================================
+[CASE]   8
+[NAME]   clarify_which_dir_count
+[CHAT]   1985996998
+[TURN1]  数一下那个目录里有多少个直接子项，只输出数字
+[TASK1]  49ea8916-19f7-443e-9182-f7d211688e4f
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  72
+[TURN2]  scripts
+[TASK2]  361334d4-c9cc-4d7a-8e88-68246d3fc3da
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  ```\n__pycache__/\nauth-key.sh\ncheck-secrets.sh\ncheck_base_skill_response_contracts.sh\ncheck_browser_runtime.sh\ncheck_skill_prompts.py\ncodex_autofix_from_log.sh\ncodex_autofix_prompt_from_log.sh\ncodex_fix.sh\ncount_lines.sh\ncrypto-cli.sh\ndb_schema_and_content.py\ndb_schema_and_content.sh\nexport_runtime_env_from_configs.sh\nimport-crypto-credentials.sh\nlib.sh\nnl_cases_clarify.txt\nnl_cases_clarify_hard_20260326.txt\nnl_cases_context_chain_20260326.txt\nnl_cases_failed_rerun_20260326.txt\nnl_cases_full.txt\nnl_cases_health_rerun_20260326.txt\nnl_cases_manual.txt\nnl_cases_suspicious_success_20260326.txt\nnl_cases_text_match.txt\nnl_cases_trace.txt\nnl_full_suite_cases.txt\nnl_full_suite_trace_cases.txt\nnl_manual_cases.txt\nnl_suite_index.md\nnl_suite_logs/\nnl_test_logs/\nnl_text_match_regression_cases.txt\nredact_configs.py\nregression_clawd_crypto_trigger.sh\nregression_crypto_skill.sh\nregression_generated_crypto_safe_cases.txt\nregression_generated_mixed_cases.txt\nregression_resume_continue.sh\nregression_skills_upgrade_suite.sh\nregression_trace_ask.sh\nregression_trace_ask_cases_minimax_think.txt\nregression_trace_ask_cases_real.txt\nregression_trace_ask_full.log\nregression_trace_ask_full_analysis.md\nregression_user_instruction.sh\nregression_user_instruction_cases.txt\nresize_images_240.py\nrestart_clawd_latest.sh\nrouting_replay_metrics.py\nrun_nl_clarify_and_context_then_print_codex_prompt.sh\nrun_nl_full_suite.sh\nrun_nl_manual_test.sh\nrun_nl_suite_all.sh\nrun_nl_suite_clarify.sh\nrun_nl_suite_context_chain.sh\nrun_nl_suite_full.sh\nrun_nl_suite_manual.sh\nrun_nl_suite_resume.sh\nrun_nl_suite_text_match.sh\nrun_nl_suite_trace.sh\nskill_calls/\nsmoke_skill_calls.sh\nswitch-main-llm.sh\nsync_skill_docs.py\ntask_termination_logs/\ntest.txt\ntest_audio_all.sh\ntest_binance_buy_once.py\ntest_crypto_apis.sh\ntest_image_all.sh\ntest_image_module.sh\ntest_minimax_connectivity.py\ntest_minimax_curl.sh\ntest_qwen_5_channels.py\ntest_qwen_api.sh\nverify_task_termination.sh\n```
+
+============================================================
+[CASE]   9
+[NAME]   clarify_which_dir_list
+[CHAT]   1985996999
+[TURN1]  列出那个目录下前 5 个文件名
+[TASK1]  ea1d76ec-b091-484d-a13c-eb5fb3751b01
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  根据执行结果，logs 目录不存在。当前目录下前 5 个文件/目录名为：\n\n1. act_plan.log\n2. base_skill_contracts_20260326_132233/\n3. base_skill_contracts_20260326_132711/\n4. base_skill_contracts_20260326_133016/\n5. base_skill_contracts_20260326_133423/
+[TURN2]  logs
+[TASK2]  09213f71-6b6d-42c8-a1d3-14091306b5ac
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  logs 目录下包含以下文件和子目录：\n\n**日志文件 (.log)：**\n- act_plan.log\n- clawd.log\n- feishud.log\n- install_ops.log\n- model_io.log\n- service_ops.log\n- telegramd.log\n- webd.log\n- wechatd.log\n\n**Markdown 文档 (.md)：**\n- regression_skills_upgrade_20260321_031137.md\n- regression_skills_upgrade_20260321_031610.md\n\n**子目录：**\n- base_skill_contracts_20260326_132233/\n- base_skill_contracts_20260326_132711/\n- base_skill_contracts_20260326_133016/\n- base_skill_contracts_20260326_133423/\n- base_skill_contracts_20260326_133645/\n- base_skill_contracts_20260326_134714/\n- run_nl_manual_test/\n- run_nl_manual_test_health_fix/\n- run_nl_manual_test_suspicious/\n\n共计 9 个日志文件、2 个 Markdown 文档和 9 个子目录。
+
+============================================================
+[CASE]   10
+[NAME]   clarify_which_script_run
+[CHAT]   1985997000
+[TURN1]  执行一下那个重启脚本，然后简短告诉我结果
+[TASK1]  cef36105-7f27-4d3b-8e13-9d96c3806522
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请问您想执行哪个重启脚本？
+[TURN2]  scripts/restart_clawd_latest.sh
+[TASK2]  49b87593-0808-4db3-b4af-7aefc723b627
+  [status] <none> -> running

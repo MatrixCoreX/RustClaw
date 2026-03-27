@@ -1,0 +1,7 @@
+index=5
+case_name=clarify_which_archive_unpack
+chat_id=1985996995
+turn1_task_id=c953658b-a41e-479f-81f5-388eff98e1b6
+turn1_prompt=把那个压缩包解压到 /home/guagua/test/tmp/clarify_unpack_case 然后告诉我结果
+turn2_task_id=7d54d8cf-2028-4cb4-b381-49a37a18d73d
+turn2_prompt=/home/guagua/test/tmp/test_bundle.zip

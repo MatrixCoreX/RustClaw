@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"de478ccf-4887-4a0c-b634-2fb6bca590e7","status":"succeeded","result_json":{"text":"已设置会话别名：\n\n- `那个目录` → `/home/guagua/test/docs`\n- `那个日志` → `/home/guagua/test/logs/app.log`\n\n后续可直接引用这些别名进行操作。"},"error_text":null},"error":null}

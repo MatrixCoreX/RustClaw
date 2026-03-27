@@ -9,10 +9,10 @@ use toml::Value as TomlValue;
 use tracing::info;
 use uuid::Uuid;
 
-use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
+use claw_core::channel_chunk::{SEGMENT_PREFIX_MAX_CHARS, chunk_text_for_channel};
 use claw_core::wechat_reply_media::{
-    extract_wechat_outbound_media, strip_wechat_delivery_lines, WechatOutboundKind,
-    WechatOutboundMedia, WechatOutboundSource,
+    WechatOutboundKind, WechatOutboundMedia, WechatOutboundSource, extract_wechat_outbound_media,
+    strip_wechat_delivery_lines,
 };
 
 use crate::AppState;

@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"b0f7e1c7-9a99-49c5-96de-4bf3c469c8c9","status":"succeeded","result_json":{"messages":["未找到 /home/guagua/test/logs/app.log 文件，或当前执行上下文未包含该文件的内容。请确认文件路径是否正确。"],"text":"未找到 /home/guagua/test/logs/app.log 文件，或当前执行上下文未包含该文件的内容。请确认文件路径是否正确。"},"error_text":null},"error":null}

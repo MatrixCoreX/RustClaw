@@ -13,7 +13,7 @@ use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::{
-    llm_gateway, memory, routing_context, schedule_service, AppState, ClaimedTask, RoutedMode,
+    AppState, ClaimedTask, RoutedMode, llm_gateway, memory, routing_context, schedule_service,
 };
 
 // --- Fallback router only (not used when normalizer provides mode) ---
@@ -32,8 +32,7 @@ const INTENT_NORMALIZER_PROMPT_PATH: &str = "prompts/intent_normalizer_prompt.md
 const RESUME_FOLLOWUP_INTENT_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/resume_followup_intent_prompt.md");
 const RESUME_FOLLOWUP_INTENT_PROMPT_PATH: &str = "prompts/resume_followup_intent_prompt.md";
-const ROUTING_POLICY_PERSONA_PROMPT: &str =
-    "Neutral routing policy classifier. Ignore style/persona preferences and optimize for correct intent resolution, clarification, and guard decisions.";
+const ROUTING_POLICY_PERSONA_PROMPT: &str = "Neutral routing policy classifier. Ignore style/persona preferences and optimize for correct intent resolution, clarification, and guard decisions.";
 // --- End fallback-only constants ---
 
 #[derive(Debug)]
@@ -69,11 +68,39 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) resolved_user_intent: String,
     pub(crate) resume_behavior: ResumeBehavior,
     pub(crate) schedule_kind: ScheduleKind,
+    pub(crate) wants_file_delivery: bool,
     pub(crate) needs_clarify: bool,
     pub(crate) reason: String,
     pub(crate) confidence: f64,
+    pub(crate) output_contract: IntentOutputContract,
     /// Terminal mode: chat / act / ask_clarify / chat_act. Used to skip the separate router LLM.
     pub(crate) routed_mode: RoutedMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum OutputResponseShape {
+    #[default]
+    Free,
+    OneSentence,
+    Scalar,
+    FileToken,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum OutputLocatorKind {
+    #[default]
+    None,
+    Path,
+    Url,
+    Filename,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct IntentOutputContract {
+    pub(crate) response_shape: OutputResponseShape,
+    pub(crate) requires_content_evidence: bool,
+    pub(crate) delivery_required: bool,
+    pub(crate) locator_kind: OutputLocatorKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +143,8 @@ struct IntentNormalizerOut {
     #[serde(default)]
     schedule_kind: String,
     #[serde(default)]
+    wants_file_delivery: bool,
+    #[serde(default)]
     needs_clarify: bool,
     #[serde(default)]
     reason: String,
@@ -123,6 +152,20 @@ struct IntentNormalizerOut {
     confidence: f64,
     #[serde(default)]
     mode: String,
+    #[serde(default)]
+    output_contract: Option<IntentOutputContractOut>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct IntentOutputContractOut {
+    #[serde(default)]
+    response_shape: String,
+    #[serde(default)]
+    requires_content_evidence: bool,
+    #[serde(default)]
+    delivery_required: bool,
+    #[serde(default)]
+    locator_kind: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +206,47 @@ fn parse_schedule_kind(s: &str) -> ScheduleKind {
     }
 }
 
+fn parse_output_response_shape(s: &str) -> OutputResponseShape {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "one_sentence" => OutputResponseShape::OneSentence,
+        "scalar" => OutputResponseShape::Scalar,
+        "file_token" => OutputResponseShape::FileToken,
+        _ => OutputResponseShape::Free,
+    }
+}
+
+fn parse_output_locator_kind(s: &str) -> OutputLocatorKind {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "path" => OutputLocatorKind::Path,
+        "url" => OutputLocatorKind::Url,
+        "filename" => OutputLocatorKind::Filename,
+        _ => OutputLocatorKind::None,
+    }
+}
+
+fn parse_output_contract(
+    out: Option<IntentOutputContractOut>,
+    wants_file_delivery: bool,
+) -> IntentOutputContract {
+    let mut contract = IntentOutputContract::default();
+    if let Some(raw) = out {
+        contract.response_shape = parse_output_response_shape(&raw.response_shape);
+        contract.requires_content_evidence = raw.requires_content_evidence;
+        contract.delivery_required = raw.delivery_required;
+        contract.locator_kind = parse_output_locator_kind(&raw.locator_kind);
+    }
+    if wants_file_delivery {
+        contract.delivery_required = true;
+        if matches!(contract.response_shape, OutputResponseShape::Free) {
+            contract.response_shape = OutputResponseShape::FileToken;
+        }
+        if matches!(contract.locator_kind, OutputLocatorKind::None) {
+            contract.locator_kind = OutputLocatorKind::Path;
+        }
+    }
+    contract
+}
+
 /// Unified intent normalizer: one LLM call for resume decision + intent completion + schedule classification + needs_clarify + routed_mode.
 pub(crate) async fn run_intent_normalizer(
     state: &AppState,
@@ -185,6 +269,14 @@ pub(crate) async fn run_intent_normalizer(
         .unwrap_or_else(|| "<none>".to_string());
     let recent_execution_context = routing_context::build_recent_execution_context(state, task, 8);
     let capability_map = crate::capability_map::build_capability_map_for_task(state, task);
+    let recent_assistant_replies = memory::build_recent_assistant_replies_context(
+        state,
+        task.user_key.as_deref(),
+        task.user_id,
+        task.chat_id,
+        3,
+        220,
+    );
     let memory_context = if state.memory.route_memory_enabled {
         let structured = memory::service::recall_structured_memory_context(
             state,
@@ -231,6 +323,7 @@ pub(crate) async fn run_intent_normalizer(
             ("__RECENT_EXECUTION_CONTEXT__", &recent_execution_context),
             ("__MEMORY_CONTEXT__", &memory_context),
             ("__LAST_TURN_FULL__", &last_turn_full_context),
+            ("__RECENT_ASSISTANT_REPLIES__", &recent_assistant_replies),
             ("__NOW__", now_iso),
             ("__TIMEZONE__", timezone),
             ("__SCHEDULE_RULES__", schedule_rules),
@@ -257,9 +350,11 @@ pub(crate) async fn run_intent_normalizer(
                     resolved_user_intent: req.to_string(),
                     resume_behavior: ResumeBehavior::None,
                     schedule_kind: ScheduleKind::None,
+                    wants_file_delivery: false,
                     needs_clarify: false,
                     reason: "llm_failed".to_string(),
                     confidence: 0.0,
+                    output_contract: IntentOutputContract::default(),
                     routed_mode: RoutedMode::AskClarify,
                 };
             }
@@ -281,12 +376,20 @@ pub(crate) async fn run_intent_normalizer(
     }
     if let Some(out) = parsed {
         let resolved = out.resolved_user_intent.trim();
-        let resume_behavior = parse_resume_behavior(&out.resume_behavior);
+        let mut resume_behavior = parse_resume_behavior(&out.resume_behavior);
+        if resume_context.is_none() && resume_behavior != ResumeBehavior::None {
+            warn!(
+                "intent_normalizer override resume_behavior to none: task_id={} raw_resume_behavior={}",
+                task.task_id, out.resume_behavior
+            );
+            resume_behavior = ResumeBehavior::None;
+        }
         let schedule_kind = parse_schedule_kind(&out.schedule_kind);
         let confidence = out.confidence.clamp(0.0, 1.0);
         let routed_mode = parse_mode_text(&out.mode).unwrap_or(RoutedMode::AskClarify);
+        let output_contract = parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
         info!(
-            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} mode={:?} needs_clarify={} reason={} confidence={}",
+            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} mode={:?} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(req),
@@ -294,9 +397,14 @@ pub(crate) async fn run_intent_normalizer(
             resume_behavior,
             schedule_kind,
             routed_mode,
+            out.wants_file_delivery,
             out.needs_clarify,
             crate::truncate_for_log(&out.reason),
-            confidence
+            confidence,
+            output_contract.response_shape,
+            output_contract.delivery_required,
+            output_contract.requires_content_evidence,
+            output_contract.locator_kind
         );
         return IntentNormalizerOutput {
             resolved_user_intent: if resolved.is_empty() {
@@ -306,9 +414,11 @@ pub(crate) async fn run_intent_normalizer(
             },
             resume_behavior,
             schedule_kind,
+            wants_file_delivery: out.wants_file_delivery,
             needs_clarify: out.needs_clarify,
             reason: out.reason,
             confidence,
+            output_contract,
             routed_mode,
         };
     }
@@ -321,9 +431,11 @@ pub(crate) async fn run_intent_normalizer(
         resolved_user_intent: req.to_string(),
         resume_behavior: ResumeBehavior::None,
         schedule_kind: ScheduleKind::None,
+        wants_file_delivery: false,
         needs_clarify: false,
         reason: "parse_failed".to_string(),
         confidence: 0.0,
+        output_contract: IntentOutputContract::default(),
         routed_mode: RoutedMode::AskClarify,
     }
 }
@@ -333,6 +445,7 @@ pub(crate) async fn generate_clarify_question(
     task: &ClaimedTask,
     user_request: &str,
     resolver_reason: &str,
+    candidate_context: Option<&str>,
 ) -> String {
     let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
         state,
@@ -345,6 +458,13 @@ pub(crate) async fn generate_clarify_question(
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
             ("__REQUEST__", user_request.trim()),
             ("__RESOLVER_REASON__", resolver_reason.trim()),
+            (
+                "__CANDIDATE_CONTEXT__",
+                candidate_context
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("<none>"),
+            ),
         ],
     );
     crate::log_prompt_render(&task.task_id, "clarify_question_prompt", &prompt_file, None);

@@ -851,21 +851,28 @@ pub(crate) async fn execute_external_http_json(
         Ok(Some((name, value))) => {
             tracing::info!(
                 "skill_dispatch external skill={} external_kind={} external_endpoint={} auth_ref_type=env auth_header={} auth_resolved=ok",
-                canonical_skill_name, config.kind, endpoint_masked, name
+                canonical_skill_name,
+                config.kind,
+                endpoint_masked,
+                name
             );
             Some((name, value))
         }
         Ok(None) => {
             tracing::info!(
                 "skill_dispatch external skill={} external_kind={} external_endpoint={} auth_ref=none",
-                canonical_skill_name, config.kind, endpoint_masked
+                canonical_skill_name,
+                config.kind,
+                endpoint_masked
             );
             None
         }
         Err(e) => {
             tracing::warn!(
                 "skill_dispatch external skill={} external_endpoint={} auth_ref_type=env auth_resolved=fail err={}",
-                canonical_skill_name, endpoint_masked, e
+                canonical_skill_name,
+                endpoint_masked,
+                e
             );
             return Err(e);
         }

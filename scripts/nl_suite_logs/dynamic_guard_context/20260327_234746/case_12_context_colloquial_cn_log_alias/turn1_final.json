@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"47a3471f-377d-4642-826f-08f9a119ba90","status":"succeeded","result_json":{"text":"别名绑定已记录：`那份日志` → `/home/guagua/test/logs/app.log`\n\n需要我把这个绑定持久化保存到某个配置文件（如 `.bashrc`、`.zshrc` 或专用别名文件）吗？"},"error_text":null},"error":null}

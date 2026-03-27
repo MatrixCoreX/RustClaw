@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"f35d3277-d1e0-455f-a8d6-31ecc49434b0","status":"succeeded","result_json":{"messages":["文件 `/home/guagua/test/configs/app_config.toml` 读取成功，但未返回具体内容。请提供该文件的具体内容，或确认文件路径是否正确。"],"text":"文件 `/home/guagua/test/configs/app_config.toml` 读取成功，但未返回具体内容。请提供该文件的具体内容，或确认文件路径是否正确。"},"error_text":null},"error":null}

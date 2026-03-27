@@ -45,11 +45,21 @@ Skill behavior notes (file/path):
 - When answering from a directory listing, mention only entry names that appear verbatim in that listing.
 - If the user explicitly asks to send/deliver a named existing file (for example `把 readme.md 发给我`, `send me README.md`), prefer file delivery with `FILE:<resolved-path>` rather than pasting file contents.
 - Apply this to any explicit filename or file path the user names, not only README-like examples.
+- If the user already supplies an explicit absolute path or exact relative path to a file, treat that path itself as the concrete target. Do not downgrade it into unresolved filename matching or deictic clarification logic.
 - If the requested filename differs only by case from an observed entry/path (for example `readme.md` vs `README.md`), you may conservatively resolve to the exact observed path and deliver that file.
 - After a named-file delivery request resolves to one concrete existing file, do not return the bare filename/path text by itself. The final delivery output must be `FILE:<resolved-path>`.
 - After such a case-only resolution, use the resolved exact path consistently for every later step (`read_file`, `FILE:<path>`, etc.). Do not keep using the user-typed casing once a concrete observed path is available.
 - If no case-insensitive match can be resolved to one concrete file, respond directly that the file was not found. Do not substitute a directory listing for the requested file.
 - For named-file delivery, do not use `read_file` as a speculative existence probe on an unresolved raw filename. First resolve to one concrete observed path (from history or listing), then use that exact path; otherwise respond that the file was not found.
+- For repo-local file inspection requests where the user explicitly names a concrete filename/path such as `读取 AGENTS.md 前 30 行`, `看 README.md 开头`, or `读取 rustclaw.service`, prefer the exact workspace-relative path the user named (`AGENTS.md`, `README.md`, `rustclaw.service`). Do not silently rewrite it to guessed paths like `systemd/rustclaw.service`.
+- For explicit-path inspection requests such as `读一下 /abs/path 开头并总结`, `看下 ./file 最近 20 行`, or `读取 /path 再解释`, execute directly against that exact path. Do not reply with planner artifacts, fake execution status, or a repeated request for the same path.
+- A deictic wrapper plus artifact type is still ambiguous: requests like `那个 README`, `那个配置文件`, `那个日志`, or `that README` do **not** count as naming a concrete file by themselves. Resolve them from a unique prior binding/path first; otherwise ask a concise clarification.
+- For repo-local directory requests such as `docs 目录`, `logs 目录`, or `scripts 目录`, verify existence from the current workspace instead of guessing from older memory or stale summaries.
+- For inline JSON/data transformation requests where the user already pasted the array/object in the message, extract and transform that inline data directly. Do not answer with a generic `please provide JSON` when the JSON is already present.
+- For service runtime status questions such as `telegramd 现在是不是在运行`, prefer `service_control` (`status`/`verify`) or `process_basic` over checking whether the binary file exists.
+- For log analysis requests targeting a log directory, either select a concrete log file first or use `log_analyze` with the directory path only when the skill contract explicitly supports directory resolution. Do not pass a directory path to a file-only reader.
+- After a `list_dir` or directory-listing `run_cmd` step, do not treat the directory path itself as readable file content. If the task now depends on content, first resolve concrete file paths from the observed listing; otherwise answer directly from the listing.
+- When the user asks for a generic baseline health check and no narrower target is required, prefer `health_check` with minimal args instead of asking which service to inspect.
 
 ### image_vision
 - action: `describe|extract|compare|screenshot_summary`
@@ -258,6 +268,8 @@ Skill behavior notes (file/path):
   - `list`: `archive`
   - `pack`: `source`, `archive` (optional `format`, default `zip`)
   - `unpack`: `archive`, `dest`
+- relative paths resolve from workspace; explicit absolute paths are also valid when the user already supplied them exactly
+- reject `..` traversal; do not invent alternate archive or destination paths
 
 #### archive_basic JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"archive_basic","args":{...}}`

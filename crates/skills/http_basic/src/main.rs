@@ -10,6 +10,8 @@ use serde_json::{json, Value};
 struct Req {
     request_id: String,
     args: Value,
+    context: Option<Value>,
+    user_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -29,22 +31,25 @@ fn main() -> anyhow::Result<()> {
         let line = line?;
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
-            Ok(req) => match execute(req.args) {
-                Ok((text, extra)) => Resp {
-                    request_id: req.request_id,
-                    status: "ok".to_string(),
-                    text,
-                    extra: Some(extra),
-                    error_text: None,
-                },
-                Err(err) => Resp {
-                    request_id: req.request_id,
-                    status: "error".to_string(),
-                    text: String::new(),
-                    extra: None,
-                    error_text: Some(err),
-                },
-            },
+            Ok(req) => {
+                let req_ui_key = request_ui_key(&req);
+                match execute(req.args, req_ui_key.as_deref()) {
+                    Ok((text, extra)) => Resp {
+                        request_id: req.request_id,
+                        status: "ok".to_string(),
+                        text,
+                        extra: Some(extra),
+                        error_text: None,
+                    },
+                    Err(err) => Resp {
+                        request_id: req.request_id,
+                        status: "error".to_string(),
+                        text: String::new(),
+                        extra: None,
+                        error_text: Some(err),
+                    },
+                }
+            }
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
@@ -60,7 +65,31 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<(String, Value), String> {
+fn request_ui_key(req: &Req) -> Option<String> {
+    req.user_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            req.context
+                .as_ref()
+                .and_then(|v| v.as_object())
+                .and_then(|m| m.get("user_key"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+}
+
+fn should_inject_rustclaw_key(url: &str) -> bool {
+    url.starts_with("http://127.0.0.1:8787/")
+        || url.starts_with("http://localhost:8787/")
+        || url.starts_with("http://0.0.0.0:8787/")
+}
+
+fn execute(args: Value, req_user_key: Option<&str>) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -106,6 +135,12 @@ fn execute(args: Value) -> Result<(String, Value), String> {
 
     for (k, v) in headers {
         req = req.header(k, v);
+    }
+
+    if should_inject_rustclaw_key(url) {
+        if let Some(user_key) = req_user_key.map(str::trim).filter(|v| !v.is_empty()) {
+            req = req.header("X-RustClaw-Key", user_key);
+        }
     }
 
     if action == "post_json" {

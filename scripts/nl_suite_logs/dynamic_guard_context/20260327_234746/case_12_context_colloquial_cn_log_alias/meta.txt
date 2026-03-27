@@ -1,0 +1,9 @@
+index=12
+case_name=context_colloquial_cn_log_alias
+chat_id=17746206703
+turn1_task_id=47a3471f-377d-4642-826f-08f9a119ba90
+turn1_prompt=先记一下，“那份日志”指 /home/guagua/test/logs/app.log
+turn2_task_id=08ab6b2a-bf7d-4142-bfc3-4112e6a586bf
+turn2_prompt=把那份日志最后 12 行甩我
+turn3_task_id=fc2aa840-d958-4f78-8d9f-6c5314aa6071
+turn3_prompt=再说一个你觉得最可疑的点

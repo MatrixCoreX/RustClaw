@@ -1,0 +1,3 @@
+{"suite": "clarify", "case_name": "clarify_deictic_readme_again", "pass": false, "reasons": ["turn2 locator path exists but output says not found/unreadable"]}
+{"suite": "clarify", "case_name": "clarify_deictic_config_send_again", "pass": false, "reasons": ["turn1 should clarify first but does not look like a clarification"]}
+{"suite": "clarify", "case_name": "clarify_deictic_log_tail_again", "pass": false, "reasons": ["turn2 should execute after locator but re-asks generic question"]}

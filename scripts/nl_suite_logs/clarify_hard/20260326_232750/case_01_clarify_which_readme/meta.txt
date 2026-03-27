@@ -1,0 +1,7 @@
+index=1
+case_name=clarify_which_readme
+chat_id=1985996991
+turn1_task_id=1e232193-024c-47fd-bbc7-c1f9b3fd11de
+turn1_prompt=读一下那个 README 开头并用一句话总结
+turn2_task_id=89f7638a-c865-42ef-b852-b2d6cd4fa631
+turn2_prompt=README.md

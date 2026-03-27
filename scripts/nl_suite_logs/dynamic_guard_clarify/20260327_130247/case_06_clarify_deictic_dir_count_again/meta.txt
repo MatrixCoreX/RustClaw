@@ -1,0 +1,7 @@
+index=6
+case_name=clarify_deictic_dir_count_again
+chat_id=2990040006
+turn1_task_id=dfba268e-e0f0-4484-812d-6592c366c41c
+turn1_prompt=数一下那个目录里有多少个直接子项，只输出数字
+turn2_task_id=5db47ab0-d7a6-4a74-b0ef-edb2c75b1dad
+turn2_prompt=/home/guagua/test/docs
