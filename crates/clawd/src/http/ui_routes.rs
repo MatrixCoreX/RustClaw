@@ -1048,74 +1048,11 @@ async fn update_telegram_config(
             );
         }
     };
-    let telegram_table = match ensure_toml_table(&mut value, &["telegram"]) {
-        Ok(table) => table,
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("prepare telegram config failed: {err}")),
-                }),
-            );
-        }
-    };
-
     let primary = normalized.iter().find(|bot| bot.is_primary).cloned();
-    telegram_table.insert(
-        "bot_token".to_string(),
-        toml::Value::String(
-            primary
-                .as_ref()
-                .map(|bot| bot.bot_token.clone())
-                .unwrap_or_default(),
-        ),
-    );
-    telegram_table.insert(
-        "agent_id".to_string(),
-        toml::Value::String(
-            primary
-                .as_ref()
-                .map(|bot| bot.agent_id.clone())
-                .unwrap_or_else(|| "main".to_string()),
-        ),
-    );
-    telegram_table.insert(
-        "allowlist".to_string(),
-        toml::Value::Array(
-            primary
-                .as_ref()
-                .map(|bot| bot.allowlist.as_slice())
-                .unwrap_or(&[])
-                .iter()
-                .copied()
-                .map(|id| toml::Value::Integer(id))
-                .collect(),
-        ),
-    );
-    telegram_table.insert(
-        "access_mode".to_string(),
-        toml::Value::String(
-            primary
-                .as_ref()
-                .map(|bot| bot.access_mode.clone())
-                .unwrap_or_else(|| "public".to_string()),
-        ),
-    );
-    telegram_table.insert(
-        "allowed_usernames".to_string(),
-        toml::Value::Array(
-            primary
-                .as_ref()
-                .map(|bot| bot.allowed_telegram_usernames.as_slice())
-                .unwrap_or(&[])
-                .iter()
-                .cloned()
-                .map(toml::Value::String)
-                .collect(),
-        ),
-    );
+    let primary_bot_token_enabled = primary
+        .as_ref()
+        .map(|bot| !bot.bot_token.trim().is_empty())
+        .unwrap_or(false);
 
     let extra_bots = normalized
         .iter()
@@ -1158,7 +1095,94 @@ async fn update_telegram_config(
             toml::Value::Table(table)
         })
         .collect::<Vec<_>>();
-    telegram_table.insert("bots".to_string(), toml::Value::Array(extra_bots));
+    {
+        let telegram_table = match ensure_toml_table(&mut value, &["telegram"]) {
+            Ok(table) => table,
+            Err(err) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!("prepare telegram config failed: {err}")),
+                    }),
+                );
+            }
+        };
+
+        telegram_table.insert(
+            "bot_token".to_string(),
+            toml::Value::String(
+                primary
+                    .as_ref()
+                    .map(|bot| bot.bot_token.clone())
+                    .unwrap_or_default(),
+            ),
+        );
+        telegram_table.insert(
+            "agent_id".to_string(),
+            toml::Value::String(
+                primary
+                    .as_ref()
+                    .map(|bot| bot.agent_id.clone())
+                    .unwrap_or_else(|| "main".to_string()),
+            ),
+        );
+        telegram_table.insert(
+            "allowlist".to_string(),
+            toml::Value::Array(
+                primary
+                    .as_ref()
+                    .map(|bot| bot.allowlist.as_slice())
+                    .unwrap_or(&[])
+                    .iter()
+                    .copied()
+                    .map(|id| toml::Value::Integer(id))
+                    .collect(),
+            ),
+        );
+        telegram_table.insert(
+            "access_mode".to_string(),
+            toml::Value::String(
+                primary
+                    .as_ref()
+                    .map(|bot| bot.access_mode.clone())
+                    .unwrap_or_else(|| "public".to_string()),
+            ),
+        );
+        telegram_table.insert(
+            "allowed_usernames".to_string(),
+            toml::Value::Array(
+                primary
+                    .as_ref()
+                    .map(|bot| bot.allowed_telegram_usernames.as_slice())
+                    .unwrap_or(&[])
+                    .iter()
+                    .cloned()
+                    .map(toml::Value::String)
+                    .collect(),
+            ),
+        );
+        telegram_table.insert("bots".to_string(), toml::Value::Array(extra_bots));
+    }
+
+    let telegram_bot_table = match ensure_toml_table(&mut value, &["telegram_bot"]) {
+        Ok(table) => table,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("prepare telegram compat config failed: {err}")),
+                }),
+            );
+        }
+    };
+    telegram_bot_table.insert(
+        "enabled".to_string(),
+        toml::Value::Boolean(primary_bot_token_enabled),
+    );
     if let Some(root_table) = value.as_table_mut() {
         root_table.insert(
             "agents".to_string(),
@@ -1221,20 +1245,11 @@ async fn update_telegram_config(
             );
         }
     };
-    let path = telegram_config_path(&state);
-    if let Some(parent) = path.parent() {
-        if let Err(err) = std::fs::create_dir_all(parent) {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("prepare telegram config dir failed: {err}")),
-                }),
-            );
-        }
-    }
-    if let Err(err) = std::fs::write(&path, output) {
+    if let Err(err) = write_workspace_and_mounted_file(
+        &state.workspace_root,
+        "configs/channels/telegram.toml",
+        &output,
+    ) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -2634,7 +2649,8 @@ fn parse_service_action(raw: &str) -> Option<ServiceAction> {
 
 fn service_start_script(service: &str) -> Option<&'static str> {
     match service {
-        "channel-gateway" | "channel_gateway" | "telegramd" => Some("start-channel-gateway.sh"),
+        "channel-gateway" | "channel_gateway" => Some("start-channel-gateway.sh"),
+        "telegramd" => Some("start-telegramd.sh"),
         "whatsappd" => Some("start-whatsappd.sh"),
         "whatsapp_webd" => Some("start-whatsapp-webd.sh"),
         "wechatd" => Some("start-wechatd.sh"),
@@ -2682,10 +2698,15 @@ fn service_is_running(service: &str) -> bool {
         "channel-gateway" | "channel_gateway" => channel_gateway_process_stats()
             .map(|(count, _)| count > 0)
             .unwrap_or(false),
-        "telegramd" => channel_gateway_process_stats()
-            .or_else(telegramd_process_stats)
-            .map(|(count, _)| count > 0)
-            .unwrap_or(false),
+        "telegramd" => {
+            let channel_gateway_running = channel_gateway_process_stats()
+                .map(|(count, _)| count > 0)
+                .unwrap_or(false);
+            let legacy_telegramd_running = telegramd_process_stats()
+                .map(|(count, _)| count > 0)
+                .unwrap_or(false);
+            channel_gateway_running || legacy_telegramd_running
+        }
         "whatsappd" => whatsappd_process_stats()
             .map(|(count, _)| count > 0)
             .unwrap_or(false),
@@ -2840,7 +2861,7 @@ async fn control_service(
             }
             // The start command may return success even if script preflight exits quickly
             // (for example, service disabled or missing required config). Verify process is up.
-            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
             if !service_is_running(service.as_str()) {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -3032,7 +3053,7 @@ async fn control_service(
                     }),
                 );
             }
-            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
             if !service_is_running(service.as_str()) {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
