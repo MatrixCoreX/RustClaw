@@ -9,7 +9,6 @@ services:
     environment:
       RUST_LOG: warn
       RUSTCLAW_PROFILE: release
-      RUSTCLAW_SKIP_TELEGRAMD: "1"
     ports:
       - "8787:8787"
     restart: unless-stopped

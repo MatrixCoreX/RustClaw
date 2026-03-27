@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { hasUnsavedLlmDraftChanges } from "./llm-config";
+import { hasUnsavedLlmDraftChanges } from "./llm-config.ts";
 
 test("marks api key edits as unsaved for the current vendor", () => {
   assert.equal(
