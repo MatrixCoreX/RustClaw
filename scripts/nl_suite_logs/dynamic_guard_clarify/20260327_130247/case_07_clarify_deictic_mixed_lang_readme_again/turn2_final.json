@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"5c484a17-bfd5-4af9-9027-a1974253b8d1","status":"succeeded","result_json":{"messages":["文件内容描述了 `/home/guagua/test` 目录是一个用于存放 NL 回归测试产物和脚本的测试工作区，但该目录本身不会改变 `clawd` 运行时的内部工作目录设置。"],"text":"文件内容描述了 `/home/guagua/test` 目录是一个用于存放 NL 回归测试产物和脚本的测试工作区，但该目录本身不会改变 `clawd` 运行时的内部工作目录设置。"},"error_text":null},"error":null}

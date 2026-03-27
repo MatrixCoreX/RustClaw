@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"cde01d92-6fcf-4d24-ac9f-db0cfb995a69","status":"succeeded","result_json":{"text":"ERROR: `sample downstream timeout recovered`\n\n下游服务曾超时（23:07:10），已自动恢复。需关注是否有持续超时或影响服务稳定性。"},"error_text":null},"error":null}

@@ -1,8 +1,8 @@
 use claw_core::config::MemoryConfig;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
-use super::retrieval::{build_topic_tags, embed_text_locally, vector_to_json};
 use super::LLM_SHORT_TERM_MEMORY_PREFIX;
+use super::retrieval::{build_topic_tags, embed_text_locally, vector_to_json};
 
 pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(

@@ -1,16 +1,16 @@
-use std::fs::{create_dir_all, OpenOptions};
+use std::fs::{OpenOptions, create_dir_all};
 use std::io::{IsTerminal, Write as IoWrite};
 use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{Local, TimeZone};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::warn;
 
 use super::client::LlmUsageSnapshot;
 use crate::{
-    llm_model_kind, llm_vendor_name, now_ts_u64, truncate_for_log, AppState, ClaimedTask,
-    LlmProviderRuntime,
+    AppState, ClaimedTask, LlmProviderRuntime, llm_model_kind, llm_vendor_name, now_ts_u64,
+    truncate_for_log,
 };
 
 fn strip_think_blocks(raw: &str) -> String {

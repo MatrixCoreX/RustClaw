@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"9bfa31af-d77c-4810-9fdf-6ca700d9cfbf","status":"succeeded","result_json":{"text":"`accounts` 更像业务数据。\n\n`accounts` 表通常存储账户主体信息，属于核心业务实体；`audit_log` 是审计日志，属于系统操作记录，通常不算业务数据。"},"error_text":null},"error":null}

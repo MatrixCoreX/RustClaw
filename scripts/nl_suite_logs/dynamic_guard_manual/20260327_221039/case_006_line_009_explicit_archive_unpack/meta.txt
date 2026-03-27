@@ -1,0 +1,6 @@
+ordinal=6
+source_line=9
+case_name=explicit_archive_unpack
+chat_id=17746206497
+task_id=3c3e4c65-0f0b-47b8-bb68-c8325e5f94b6
+prompt=把 /home/guagua/test/tmp/test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack 然后告诉我结果

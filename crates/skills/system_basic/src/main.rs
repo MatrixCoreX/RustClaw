@@ -1371,19 +1371,21 @@ fn same_file_content(left: &Path, right: &Path) -> Result<bool, String> {
 }
 
 fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
-    let base = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        workspace_root.join(input)
-    };
-    if base.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err("path with '..' is not allowed".to_string());
+    let raw = Path::new(input);
+    let mut normalized = PathBuf::new();
+    for comp in raw.components() {
+        match comp {
+            Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
+            Component::CurDir => {}
+            other => normalized.push(other.as_os_str()),
+        }
     }
-    let normalized = base;
-    if !normalized.starts_with(workspace_root) {
-        return Err("path is outside workspace".to_string());
+
+    if raw.is_absolute() {
+        return Ok(normalized);
     }
-    Ok(normalized)
+
+    Ok(workspace_root.join(normalized))
 }
 
 fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), String> {

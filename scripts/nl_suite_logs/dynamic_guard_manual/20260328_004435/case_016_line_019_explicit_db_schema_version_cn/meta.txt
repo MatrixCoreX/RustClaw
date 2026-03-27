@@ -1,0 +1,6 @@
+ordinal=16
+source_line=19
+case_name=explicit_db_schema_version_cn
+chat_id=17746298867
+task_id=1163e462-0939-460e-ad85-b8230ecc1aa9
+prompt=查一下 /home/guagua/test/data/test_contract.sqlite 的 schema version，只输出值

@@ -16,9 +16,9 @@ use claw_core::types::{
     TaskStatus,
 };
 use reqwest::Client;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
@@ -46,6 +46,7 @@ mod repo;
 mod routing_context;
 mod runtime;
 mod schedule_service;
+mod semantic_judge;
 mod skills;
 mod system_health;
 mod worker;
@@ -82,6 +83,7 @@ use providers::{
     maybe_sanitize_llm_text_output, truncate_text, utf8_safe_prefix,
 };
 pub(crate) use repo::{
+    SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
     bind_channel_identity, build_conversation_chat_id, build_submit_task_payload,
     cancel_one_task_for_user_chat, cancel_tasks_for_user_chat, check_submit_task_access,
     check_submit_task_limits, check_task_view_access, create_auth_key, delete_auth_key_by_id,
@@ -91,16 +93,15 @@ pub(crate) use repo::{
     resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
     stable_i64_from_key, submit_task_audit_detail, task_count_by_status, task_kind_name,
     update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
-    upsert_webd_login_account, verify_webd_password_login, SubmitTaskAccessError,
-    SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
+    upsert_webd_login_account, verify_webd_password_login,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 pub(crate) use runtime::{
-    build_skill_views, llm_model_kind, llm_vendor_name, reload_skill_views, AgentAction,
-    AgentRuntimeConfig, AppState, AskReply, ClaimedTask, CommandIntentRules, CommandIntentRuntime,
-    LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper, RateLimiter, RoutedMode,
-    RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue, SkillViewsSnapshot,
-    ToolsPolicy, WhatsappDeliveryRoute,
+    AgentAction, AgentRuntimeConfig, AppState, AskReply, ClaimedTask, CommandIntentRules,
+    CommandIntentRuntime, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
+    RateLimiter, RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime,
+    ScheduledJobDue, SkillViewsSnapshot, ToolsPolicy, WhatsappDeliveryRoute, build_skill_views,
+    llm_model_kind, llm_vendor_name, reload_skill_views,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};

@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"fcd4b65e-8abf-404f-a1bd-7a1c641f8891","status":"succeeded","result_json":{"messages":["数据库 `data/db-basic-contract.sqlite` 中没有找到任何表，结果为空。"],"text":"数据库 `data/db-basic-contract.sqlite` 中没有找到任何表，结果为空。"},"error_text":null},"error":null}

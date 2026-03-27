@@ -1,11 +1,11 @@
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDateTime, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
 use rusqlite::params;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::{llm_gateway, memory, AppState, ClaimedTask, ScheduleIntentOutput};
+use crate::{AppState, ClaimedTask, ScheduleIntentOutput, llm_gateway, memory};
 use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 
 // ---------- Schedule skill catalog & validation (dynamic from registry) ----------
@@ -1221,7 +1221,9 @@ output_kind = "text"
             concat!("Cr", "ypto", "Price", "Alert", "Profile"),
             concat!("Existing", "Cr", "ypto", "Price", "Alert", "Job"),
             concat!("extract_", "cryp", "to", "_price", "_alert", "_profile"),
-            concat!("load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"),
+            concat!(
+                "load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"
+            ),
             concat!("schedule_", "content", "_matches"),
             concat!("normalize_", "direction"),
             concat!("normalize_", "threshold", "_pct"),
@@ -1279,7 +1281,9 @@ output_kind = "text"
             concat!("Existing", "Cr", "ypto", "Price", "Alert", "Job"),
             concat!("extract_", "cryp", "to", "_price", "_alert", "_profile"),
             concat!("schedule_", "content", "_matches"),
-            concat!("load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"),
+            concat!(
+                "load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"
+            ),
             concat!("normalize_", "direction"),
             concat!("normalize_", "threshold", "_pct"),
         ];

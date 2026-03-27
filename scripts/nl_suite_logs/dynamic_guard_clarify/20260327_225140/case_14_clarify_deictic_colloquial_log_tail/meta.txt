@@ -1,0 +1,7 @@
+index=14
+case_name=clarify_deictic_colloquial_log_tail
+chat_id=17746206605
+turn1_task_id=015444ea-5cd5-4e8b-9501-696ec2d4e46c
+turn1_prompt=帮我瞄一眼那个日志最后十行呗
+turn2_task_id=b0f7e1c7-9a99-49c5-96de-4bf3c469c8c9
+turn2_prompt=/home/guagua/test/logs/app.log

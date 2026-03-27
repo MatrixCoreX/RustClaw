@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"1ee9e707-7553-4257-a597-139539847874","status":"succeeded","result_json":{"messages":["RustClaw 是一个基于 Rust 的本地智能体运行时，通过 Telegram、WhatsApp、飞书/Lark 和浏览器 UI 等多渠道提供任务路由、工具执行、记忆管理、定时调度和多模态技能等一体化功能。"],"text":"RustClaw 是一个基于 Rust 的本地智能体运行时，通过 Telegram、WhatsApp、飞书/Lark 和浏览器 UI 等多渠道提供任务路由、工具执行、记忆管理、定时调度和多模态技能等一体化功能。"},"error_text":null},"error":null}

@@ -1,0 +1,7 @@
+index=11
+case_name=clarify_deictic_dir_list_names_again
+chat_id=17746206602
+turn1_task_id=1f0e382c-2077-4307-bd29-556796d7e769
+turn1_prompt=看看那个目录下面有什么，只列名字
+turn2_task_id=b55f7493-ef30-4882-81c7-79c078833610
+turn2_prompt=/home/guagua/test/docs

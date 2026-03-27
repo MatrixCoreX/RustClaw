@@ -16,12 +16,23 @@
 - **Security**: Target validation; no arbitrary shell; RustClaw whitelist for HTTP path; safe unit names for systemd/service.
 
 ## Actions (from interface)
-- TODO: list supported `action` values.
+- `status` — Get running state (one or all for rustclaw).
+- `start`, `stop`, `restart`, `reload` — Lifecycle (reload → restart for rustclaw).
+- `logs` — Bounded recent logs (rustclaw: fixed log files; systemd: journalctl).
+- `verify` — Explicit post-check (running/stopped/unknown).
+- `diagnose_start_failure`, `diagnose_unhealthy_state` — status + logs + evidence summary.
 
 ## Parameter Contract (from interface)
-| Action | Param | Required | Type | Default | Description |
-|---|---|---|---|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO |
+| Param         | Required | Type   | Default | Description |
+|---------------|----------|--------|---------|-------------|
+| `action`      | yes      | string | -       | One of: `status`, `start`, `stop`, `restart`, `reload`, `logs`, `verify`, `diagnose_start_failure`, `diagnose_unhealthy_state`. |
+| `target`      | yes*     | string | -       | Service/unit name. *Optional for `status` (all services when manager is rustclaw). |
+| `service`     | no       | string | -       | Alias for `target` (backward compatible). |
+| `manager_type`| no       | string | -       | One of: `systemd`, `service`, `docker_compose`, `docker_container`, `supervisor`, `process_only`, `rustclaw`, `unknown`. Auto when target in rustclaw whitelist. |
+| `tail_lines`  | no       | number | 100     | Max 500. For `logs` and for auto-logs on failure. |
+| `lines`       | no       | number | 100     | Alias for `tail_lines`. |
+| `verify`      | no       | bool   | true    | After start/restart/reload, run verify step. |
+| `allow_risky` | no       | bool   | false   | If true, allow stop/restart even when target is ambiguous (not recommended). |
 
 ## Error Contract (from interface)
 - Missing or invalid `action` / unknown `target` → clear `failure_reason`.
@@ -71,6 +82,8 @@ Response (concept): skill returns `{"request_id":"...","status":"ok","text":"{..
 - Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
 - On uncertainty, prefer safe/readonly behavior first.
+- For runtime status questions such as `telegramd 现在是不是在运行`, prefer `action="status"` or `action="verify"` against the concrete service target.
+- Do not answer a service-status request by checking whether the binary file exists. Service runtime state must come from this skill's status/verify path or another real process/runtime check.
 
 ## Addendum (2026-03)
 - You may pass generic suggestions via `args.suggested_params` (recommended, cross-skill format).

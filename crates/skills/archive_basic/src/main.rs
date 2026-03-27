@@ -67,7 +67,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
     match action {
         "list" => {
             let archive = required_str(obj, "archive")?;
-            let archive = resolve_path(&root, archive)?;
+            let archive = resolve_path(&root, archive, false)?;
             list_archive(&archive).map(|text| {
                 (
                     text.clone(),
@@ -77,8 +77,8 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         }
         "pack" => {
             let format = obj.get("format").and_then(|v| v.as_str()).unwrap_or("zip");
-            let source = resolve_path(&root, required_str(obj, "source")?)?;
-            let archive = resolve_path(&root, required_str(obj, "archive")?)?;
+            let source = resolve_path(&root, required_str(obj, "source")?, false)?;
+            let archive = resolve_path(&root, required_str(obj, "archive")?, true)?;
             pack_archive(format, &source, &archive).map(|text| {
                 (
                     text.clone(),
@@ -93,8 +93,8 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             })
         }
         "unpack" => {
-            let archive = resolve_path(&root, required_str(obj, "archive")?)?;
-            let dest = resolve_path(&root, required_str(obj, "dest")?)?;
+            let archive = resolve_path(&root, required_str(obj, "archive")?, false)?;
+            let dest = resolve_path(&root, required_str(obj, "dest")?, true)?;
             unpack_archive(&archive, &dest).map(|text| {
                 (
                     text.clone(),
@@ -141,9 +141,20 @@ fn unpack_archive(archive: &Path, dest: &Path) -> Result<String, String> {
     let arc = archive.to_string_lossy().to_string();
     let dst = dest.to_string_lossy().to_string();
     if arc.ends_with(".zip") {
-        run("unzip", &[arc, String::from("-d"), dst])
+        // Non-interactive default: overwrite existing files to avoid hanging on prompts.
+        run("unzip", &[String::from("-o"), arc, String::from("-d"), dst])
     } else if arc.ends_with(".tar.gz") || arc.ends_with(".tgz") {
-        run("tar", &[String::from("-xzf"), arc, String::from("-C"), dst])
+        // Non-interactive default: overwrite existing files when extracting.
+        run(
+            "tar",
+            &[
+                String::from("-xzf"),
+                arc,
+                String::from("-C"),
+                dst,
+                String::from("--overwrite"),
+            ],
+        )
     } else {
         Err("unsupported archive format for unpack".to_string())
     }
@@ -191,17 +202,21 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
-    let base = if Path::new(input).is_absolute() {
-        PathBuf::from(input)
-    } else {
-        workspace_root.join(input)
-    };
-    if base.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err("path with '..' is not allowed".to_string());
+fn resolve_path(workspace_root: &Path, input: &str, allow_absolute: bool) -> Result<PathBuf, String> {
+    let raw = Path::new(input);
+    let mut normalized = PathBuf::new();
+    for comp in raw.components() {
+        match comp {
+            Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
+            Component::CurDir => {}
+            other => normalized.push(other.as_os_str()),
+        }
     }
-    if !base.starts_with(workspace_root) {
-        return Err("path is outside workspace".to_string());
+    if raw.is_absolute() {
+        if !allow_absolute {
+            return Ok(normalized);
+        }
+        return Ok(normalized);
     }
-    Ok(base)
+    Ok(workspace_root.join(normalized))
 }

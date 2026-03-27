@@ -1,0 +1,6 @@
+ordinal=12
+source_line=15
+case_name=explicit_docs_list_names_only
+chat_id=1985997002
+task_id=d452036c-08cd-4e8f-8ea8-be1e019739e1
+prompt=列出 /home/guagua/test/docs 下的直接子项，只列名字

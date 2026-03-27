@@ -70,7 +70,6 @@ skill_bin_name() {
     chat) echo "chat-skill" ;;
     stock) echo "stock-skill" ;;
     weather) echo "weather-skill" ;;
-    reference_resolver) echo "reference-resolver-skill" ;;
     doc_parse) echo "doc-parse-skill" ;;
     transform) echo "transform-skill" ;;
     web_search_extract) echo "web-search-extract-skill" ;;

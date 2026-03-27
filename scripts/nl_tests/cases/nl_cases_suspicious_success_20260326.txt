@@ -1,0 +1,11 @@
+# Succeeded in summary, but output quality looked suspicious during review.
+# Original source lines from scripts/nl_tests/cases/nl_cases_full.txt: 15, 23, 24, 26, 28, 29, 105
+
+# suite|name|tags|prompt
+act|act_find_service_file||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+act|act_show_package_json_name||读取 package.json 里的 name 字段，只输出值
+act|act_show_cargo_package_name||读取 Cargo.toml 的 package.name，只输出值
+act|act_hostname_only||只输出当前机器 hostname
+act|fs_package_name_scalar_semantic||去 package.json 里找 name，只把值给我
+chat_act|followup_extract_username_semantic||只输出当前用户名，不要解释
+act|act_show_package_json_name_variant_cn_2||package.json 里的 name 到底是什么，只给值

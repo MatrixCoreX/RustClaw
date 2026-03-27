@@ -1,0 +1,7 @@
+index=3
+case_name=clarify_which_log_tail
+chat_id=1985996993
+turn1_task_id=b046e6e3-833b-49a7-a0bc-103e6248977c
+turn1_prompt=帮我看一下那个日志最近 20 行
+turn2_task_id=770ae823-e6ac-4def-8a36-37b37b3f012b
+turn2_prompt=/home/guagua/test/logs/app.log

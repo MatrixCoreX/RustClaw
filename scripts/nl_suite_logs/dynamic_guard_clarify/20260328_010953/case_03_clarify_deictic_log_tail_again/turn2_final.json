@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"5c8b491f-e907-4858-aa33-eef25bb3909b","status":"succeeded","result_json":{"messages":["我无法直接访问文件系统来读取 `/home/guagua/test/logs/app.log`。如果您需要查看该文件的内容，请提供文件路径或运行相应的命令来获取输出。"],"text":"我无法直接访问文件系统来读取 `/home/guagua/test/logs/app.log`。如果您需要查看该文件的内容，请提供文件路径或运行相应的命令来获取输出。"},"error_text":null},"error":null}

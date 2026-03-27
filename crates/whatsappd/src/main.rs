@@ -27,6 +27,11 @@ use sha2::Sha256;
 use tracing::{info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
+const WA_BIND_REQUIRED_FOR_CHAT: &str = "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
+const WA_BIND_SUCCESS: &str =
+    "Key 绑定成功，请重新发送刚才的消息。\nKey bound successfully. Please send your previous message again.";
+const WA_BIND_INVALID: &str = "Key 无效，请重新输入。\nInvalid key. Please try again.";
+const WA_BIND_HELP: &str = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定，然后再继续聊天或使用功能。\nWelcome to RustClaw.\nPlease send /key <your_key> first to bind this account before chatting or using features.";
 
 #[derive(Clone)]
 struct AppState {
@@ -287,6 +292,32 @@ fn bound_user_key_for_wa(state: &AppState, wa_id: &str) -> Option<String> {
         .and_then(|map| map.get(wa_id).map(|identity| identity.user_key.clone()))
 }
 
+fn is_unbound_allowed_command(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("/start") || trimmed.starts_with("/help")
+}
+
+fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> Option<String> {
+    let trimmed = text.trim();
+    trimmed
+        .strip_prefix("/key")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            if expect_key_reply && !trimmed.is_empty() && !trimmed.starts_with('/') {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+}
+
+async fn send_bind_required_prompt(state: &AppState, wa_id: &str) -> anyhow::Result<()> {
+    set_expect_key_reply(state, wa_id, true);
+    send_whatsapp_text(state, wa_id, WA_BIND_REQUIRED_FOR_CHAT).await
+}
+
 async fn resolve_whatsapp_identity(
     state: &AppState,
     wa_id: &str,
@@ -393,61 +424,39 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
     if msg.from.trim().is_empty() {
         return Ok(());
     }
+    let inbound_text = msg
+        .text
+        .as_ref()
+        .map(|v| v.body.trim().to_string())
+        .unwrap_or_default();
     let identity = match resolve_whatsapp_identity(state, &msg.from).await? {
         Some(identity) => {
             set_expect_key_reply(state, &msg.from, false);
             identity
         }
         None => {
-            let text = msg
-                .text
-                .as_ref()
-                .map(|v| v.body.trim().to_string())
-                .unwrap_or_default();
-            let maybe_candidate = text
-                .strip_prefix("/key")
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(ToString::to_string)
-                .or_else(|| {
-                    if should_expect_key_reply(state, &msg.from) && !text.is_empty() {
-                        Some(text.clone())
-                    } else {
-                        None
-                    }
-                });
+            let trimmed_text = inbound_text.trim();
+            if is_unbound_allowed_command(trimmed_text) {
+                set_expect_key_reply(state, &msg.from, true);
+                let _ = send_whatsapp_text(state, &msg.from, WA_BIND_HELP).await;
+                return Ok(());
+            }
+            let maybe_candidate =
+                extract_bind_key_candidate(trimmed_text, should_expect_key_reply(state, &msg.from));
             if let Some(candidate) = maybe_candidate {
                 if let Some(identity) = bind_whatsapp_identity(state, &msg.from, &candidate).await?
                 {
                     set_expect_key_reply(state, &msg.from, false);
                     store_bound_identity(state, &msg.from, &identity);
-                    let _ = send_whatsapp_text(
-                        state,
-                        &msg.from,
-                        "Key 绑定成功，请重新发送刚才的消息。\nKey bound successfully. Please send your previous message again.",
-                    )
-                    .await;
-                    identity
+                    let _ = send_whatsapp_text(state, &msg.from, WA_BIND_SUCCESS).await;
                 } else {
                     set_expect_key_reply(state, &msg.from, true);
-                    let _ = send_whatsapp_text(
-                        state,
-                        &msg.from,
-                        "Key 无效，请重新输入。\nInvalid key. Please try again.",
-                    )
-                    .await;
-                    return Ok(());
+                    let _ = send_whatsapp_text(state, &msg.from, WA_BIND_INVALID).await;
                 }
-            } else {
-                set_expect_key_reply(state, &msg.from, true);
-                let _ = send_whatsapp_text(
-                    state,
-                    &msg.from,
-                    "请先发送你的 key 进行绑定。\nPlease send your key first to bind this account.",
-                )
-                .await;
                 return Ok(());
             }
+            let _ = send_bind_required_prompt(state, &msg.from).await;
+            return Ok(());
         }
     };
     store_bound_identity(state, &msg.from, &identity);
@@ -1074,4 +1083,49 @@ async fn send_whatsapp_text(state: &AppState, wa_id: &str, text: &str) -> anyhow
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_bind_key_candidate, is_unbound_allowed_command};
+
+    #[test]
+    fn unbound_plain_text_requires_binding_prompt() {
+        assert!(!is_unbound_allowed_command("hello"));
+        assert_eq!(extract_bind_key_candidate("hello", false), None);
+    }
+
+    #[test]
+    fn unbound_key_command_keeps_binding_flow_available() {
+        assert_eq!(
+            extract_bind_key_candidate("/key rk_live_123", false).as_deref(),
+            Some("rk_live_123")
+        );
+    }
+
+    #[test]
+    fn unbound_start_and_help_are_allowed_without_task_submission() {
+        assert!(is_unbound_allowed_command("/start"));
+        assert!(is_unbound_allowed_command("/help"));
+    }
+
+    #[test]
+    fn waiting_key_state_accepts_plain_key_reply() {
+        assert_eq!(
+            extract_bind_key_candidate("rk_live_abc", true).as_deref(),
+            Some("rk_live_abc")
+        );
+    }
+
+    #[test]
+    fn waiting_key_state_does_not_treat_business_commands_as_key() {
+        assert_eq!(extract_bind_key_candidate("/run weather {}", true), None);
+        assert_eq!(extract_bind_key_candidate("/crypto btc", true), None);
+    }
+
+    #[test]
+    fn unbound_media_like_empty_text_requires_binding_prompt() {
+        assert!(!is_unbound_allowed_command(""));
+        assert_eq!(extract_bind_key_candidate("", false), None);
+    }
 }

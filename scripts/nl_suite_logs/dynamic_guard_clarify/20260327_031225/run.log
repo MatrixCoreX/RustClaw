@@ -1,0 +1,15 @@
+NL suite: clarify
+  run_dir:   scripts/nl_suite_logs/dynamic_guard_clarify/20260327_031225
+  run_log:   scripts/nl_suite_logs/dynamic_guard_clarify/20260327_031225/run.log
+  case_file: scripts/nl_cases_dynamic_guard_clarify_20260327.txt
+  base_url:  http://127.0.0.1:8787
+  user_id:   1985996990
+  chat_id:   1985996990
+
+============================================================
+[CASE]   1
+[NAME]   clarify_deictic_readme_again
+[CHAT]   1985996991
+[TURN1]  读一下那个 README 开头并用一句话总结
+[TASK1]  14bcbe41-3102-4145-afb5-d7a3f723fa0c
+  [status] <none> -> running

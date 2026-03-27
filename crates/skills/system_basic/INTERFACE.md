@@ -86,7 +86,9 @@
 
 ## Error Contract
 - Unsupported actions return a readable error and list allowed actions.
-- Workspace paths reject `..` traversal and paths outside workspace.
+- Paths reject `..` traversal.
+- Relative paths resolve under workspace.
+- Explicit absolute paths are allowed for these read-only actions and are resolved as provided.
 - `extract_field` / `extract_fields` return explicit parse errors for unsupported/invalid JSON, TOML, or YAML.
 - `dir_compare` requires both target paths to be directories and reports summary diffs instead of a full recursive listing.
 - `read_range` and `compare_paths` return explicit read/metadata errors for missing or unreadable target paths.

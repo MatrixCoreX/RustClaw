@@ -1,0 +1,32 @@
+# Dynamic-guard clarify regression cases for deictic targets that should ask first, then execute after a concrete locator is provided.
+# Format: case_name|turn1|turn2
+
+clarify_deictic_readme_again|读一下那个 README 开头并用一句话总结|/home/guagua/test/README.md
+clarify_deictic_config_send_again|把那个配置文件发给我|/home/guagua/test/configs/app_config.toml
+clarify_deictic_log_tail_again|看下那个日志最近 20 行|/home/guagua/test/logs/app.log
+clarify_deictic_db_tables_again|查一下那个 sqlite 里有哪些表|/home/guagua/test/data/test_contract.sqlite
+clarify_deictic_archive_unpack_again|把那个压缩包解压到 /home/guagua/test/tmp/dynamic_guard_unpack_case 然后告诉我结果|/home/guagua/test/tmp/test_bundle.zip
+clarify_deictic_dir_count_again|数一下那个目录里有多少个直接子项，只输出数字|/home/guagua/test/docs
+clarify_deictic_mixed_lang_readme_again|Can you read that README header and summarize it in one sentence?|/home/guagua/test/README.md
+clarify_deictic_file_delivery_cn_en_again|把那个 file 发给我，不要贴内容|/home/guagua/test/docs/service_notes.md
+clarify_deictic_missing_file_after_target_again|把那个文件发我|/home/guagua/test/docs/not_exists_case_001.md
+clarify_deictic_log_tail_focus_again|把那个日志最后 10 行给我，再指出一个可疑点|/home/guagua/test/logs/app.log
+clarify_deictic_dir_list_names_again|看看那个目录下面有什么，只列名字|/home/guagua/test/docs
+clarify_deictic_db_schema_version_again|看看那个 sqlite 的 schema version 是多少|/home/guagua/test/data/test_contract.sqlite
+
+# Colloquial extensions (CN/EN/mixed)
+clarify_deictic_colloquial_readme_send|那个 README 直接发我呗，别贴正文|/home/guagua/test/README.md
+clarify_deictic_colloquial_log_tail|帮我瞄一眼那个日志最后十行呗|/home/guagua/test/logs/app.log
+clarify_deictic_colloquial_db_tables|那个 sqlite 里有啥表，给我过一眼|/home/guagua/test/data/test_contract.sqlite
+clarify_deictic_colloquial_docs_count|那个目录里头有多少个直接子项，只给数字|/home/guagua/test/docs
+clarify_deictic_colloquial_en_send|Can you shoot me that config file real quick, no paste?|/home/guagua/test/configs/app_config.toml
+clarify_deictic_colloquial_en_read|Mind reading that README header and giving me a one-liner?|/home/guagua/test/README.md
+clarify_deictic_colloquial_mixed_log|that log 给我 tail 一下最后 6 行|/home/guagua/test/logs/app.log
+
+# Ultra colloquial / short-chat extensions
+clarify_deictic_ultra_cn_send|那个 README 快发我，别粘贴|/home/guagua/test/README.md
+clarify_deictic_ultra_cn_tail|那个日志最后五行，快点给我|/home/guagua/test/logs/app.log
+clarify_deictic_ultra_cn_db|那个数据库有啥表，直接说|/home/guagua/test/data/test_contract.sqlite
+clarify_deictic_ultra_en_send|send me that file pls, no paste|/home/guagua/test/docs/service_notes.md
+clarify_deictic_ultra_en_read|read that readme top part n gimme one-line summary|/home/guagua/test/README.md
+clarify_deictic_ultra_mixed_dir_count|that docs 目录有几个直接子项，只回数字|/home/guagua/test/docs

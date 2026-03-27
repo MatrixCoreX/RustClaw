@@ -1,0 +1,16 @@
+NL multi-turn suite: context_chain
+  run_dir:    scripts/nl_suite_logs/dynamic_guard_context/20260327_095759
+  run_log:    scripts/nl_suite_logs/dynamic_guard_context/20260327_095759/run.log
+  case_file:  scripts/nl_tests/cases/nl_cases_dynamic_guard_context_20260327.txt
+  turn_count: 3
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    2990050000
+
+============================================================
+[CASE]   1
+[NAME]   context_bound_readme_followup_20260327
+[CHAT]   2990050001
+[TURN1]  先记一下，后面我说“那个 README”就是 /home/guagua/test/README.md
+[TASK1]  f687d91a-237a-40e4-a431-758aec72443f
+  [status] <none> -> running

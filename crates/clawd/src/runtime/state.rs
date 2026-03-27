@@ -121,7 +121,10 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
 
     tracing::info!(
         "reload_skill_views: success path={} registry_entries={} execution_skills_count={} planner_visible_count={}",
-        path_display, registry_entries, execution_count, planner_count
+        path_display,
+        registry_entries,
+        execution_count,
+        planner_count
     );
     Ok(ReloadSkillViewsResult {
         registry_entries,

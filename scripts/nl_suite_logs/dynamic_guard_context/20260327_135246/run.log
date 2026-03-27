@@ -1,0 +1,22 @@
+NL multi-turn suite: context_chain
+  run_dir:    scripts/nl_suite_logs/dynamic_guard_context/20260327_135246
+  run_log:    scripts/nl_suite_logs/dynamic_guard_context/20260327_135246/run.log
+  case_file:  scripts/nl_tests/cases/nl_cases_dynamic_guard_context_20260327.txt
+  turn_count: 3
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985996990
+
+============================================================
+[CASE]   1
+[NAME]   context_bound_readme_followup_20260327
+[CHAT]   1985996991
+[TURN1]  先记一下，后面我说“那个 README”就是 /home/guagua/test/README.md
+[TASK1]  305c7676-8e85-414c-8313-9b35c5505859
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住：`别那个 README` = /home/guagua/test/README.md
+[TURN2]  读一下那个 README 开头 5 行
+[TASK2]  d9a1a84d-b8f7-4a99-965b-00a1c50f719f
+  [status] <none> -> running
+curl: (7) Failed to connect to 127.0.0.1 port 8787 after 0 ms: Could not connect to server

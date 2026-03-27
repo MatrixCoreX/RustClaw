@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"bdd825de-fc5d-4f06-b052-ef1a0c24b91a","status":"succeeded","result_json":{"messages":["这是一份测试用假本地服务的说明文档，强调它仅用于测试，不会重启或影响真实的 RustClaw 服务。"],"text":"这是一份测试用假本地服务的说明文档，强调它仅用于测试，不会重启或影响真实的 RustClaw 服务。"},"error_text":null},"error":null}

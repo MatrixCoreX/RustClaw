@@ -1,0 +1,9 @@
+index=10
+case_name=context_two_targets_disambiguate_20260327
+chat_id=1985997000
+turn1_task_id=9067fd65-83ba-4393-a06c-edbede36e5d1
+turn1_prompt=先记一下，“那个目录”是 /home/guagua/test/docs，“那个日志”是 /home/guagua/test/logs/app.log
+turn2_task_id=d516905e-fc13-4692-9e2b-94255e3713b4
+turn2_prompt=看下那个目录里有什么
+turn3_task_id=7fbc1670-ed0f-4913-a37a-4b0244946fd8
+turn3_prompt=再看那个日志最后 5 行

@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"9c7c8f20-2dc5-4483-954d-af6c9f7472ef","status":"succeeded","result_json":{"messages":["Tables in /home/guagua/test/data/test_contract.sqlite:\n- accounts\n- audit_log"],"text":"Tables in /home/guagua/test/data/test_contract.sqlite:\n- accounts\n- audit_log"},"error_text":null},"error":null}

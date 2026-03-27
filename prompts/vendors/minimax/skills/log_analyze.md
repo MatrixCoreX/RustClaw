@@ -19,7 +19,8 @@ Vendor tuning for MiniMax M2.5:
 
 ## Capability Summary (from interface)
 - `log_analyze` scans logs for notable errors/events and summarizes key findings.
-- It can target a specific path and narrow results with keyword filters.
+- It can target a specific log file, or a directory path whose newest log-like file will be analyzed automatically.
+- It can narrow results with keyword filters.
 
 ## Actions (from interface)
 - No action field is required for baseline analysis.
@@ -28,12 +29,13 @@ Vendor tuning for MiniMax M2.5:
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| analyze | `path` | no | string(path) | impl default | Log file or directory path. |
+| analyze | `path` | no | string(path) | impl default | Log file path, or a directory path whose newest log-like file will be analyzed. |
 | analyze | `keywords` | no | array/string | - | Keyword filters for matching lines. |
 | analyze | `max_matches` | no | number | impl default | Cap for returned evidence rows. |
 
 ## Error Contract (from interface)
 - Invalid/missing log path when path is provided.
+- Directory path with no readable files should return a clear error.
 - Read/parse errors should return clear filesystem/runtime details.
 - Oversized/unbounded scans should be summarized safely.
 

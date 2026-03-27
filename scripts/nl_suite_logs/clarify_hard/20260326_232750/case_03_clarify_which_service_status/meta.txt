@@ -1,0 +1,7 @@
+index=3
+case_name=clarify_which_service_status
+chat_id=1985996993
+turn1_task_id=c8988e58-8210-4162-ac9b-e187df2c8648
+turn1_prompt=看看那个服务现在是不是在运行
+turn2_task_id=aa9f38a5-8859-4dd8-a31c-2b3c6f52db69
+turn2_prompt=telegramd

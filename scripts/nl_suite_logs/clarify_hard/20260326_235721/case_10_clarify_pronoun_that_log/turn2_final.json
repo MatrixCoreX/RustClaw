@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"b6d93c51-d4d2-437a-9b60-49017e99e531","status":"succeeded","result_json":{"messages":["查看 `/home/guagua/test/logs/model_io.log` 最近 10 行的请求已在执行上下文中记录，但未包含该文件的实际内容输出。请确认日志文件是否存在，或提供文件内容以便查看。"],"text":"查看 `/home/guagua/test/logs/model_io.log` 最近 10 行的请求已在执行上下文中记录，但未包含该文件的实际内容输出。请确认日志文件是否存在，或提供文件内容以便查看。"},"error_text":null},"error":null}
