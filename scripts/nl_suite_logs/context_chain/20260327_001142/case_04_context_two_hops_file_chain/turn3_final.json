@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"60e83fb8-4765-462e-b342-9438fd4febb2","status":"succeeded","result_json":{"messages":["当前目录只有一个文件 test_contract.sqlite，无法对比上上个文件和上个文件。"],"text":"当前目录只有一个文件 test_contract.sqlite，无法对比上上个文件和上个文件。"},"error_text":null},"error":null}

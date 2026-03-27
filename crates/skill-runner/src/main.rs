@@ -12,6 +12,7 @@ struct SkillRequest {
     request_id: String,
     user_id: i64,
     chat_id: i64,
+    user_key: Option<String>,
     skill_name: String,
     args: Value,
     context: Option<Value>,
@@ -92,6 +93,7 @@ fn execute_skill(req: SkillRequest) -> SkillResponse {
         "context": req.context,
         "user_id": req.user_id,
         "chat_id": req.chat_id,
+        "user_key": req.user_key,
     });
 
     match run_child_skill(

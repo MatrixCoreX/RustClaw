@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/scripts/lib.sh"
 
-DEFAULT_CASE_FILE="${SCRIPT_DIR}/regression_user_instruction_cases.txt"
+DEFAULT_CASE_FILE="${SCRIPT_DIR}/nl_tests/cases/regression_user_instruction_cases.txt"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-1}"
 MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-180}"
 PRINT_FULL_TEXT=0
@@ -61,7 +61,7 @@ Artifacts:
 
 Default flow:
   - auto-detect first enabled admin key when --user-key is not provided
-  - run single-turn user-operation cases from scripts/regression_user_instruction_cases.txt
+  - run single-turn user-operation cases from scripts/nl_tests/cases/regression_user_instruction_cases.txt
   - run a dedicated multi-turn resume/follow-up suite
   - classify findings into prompt / guard / unresolved buckets
 EOF

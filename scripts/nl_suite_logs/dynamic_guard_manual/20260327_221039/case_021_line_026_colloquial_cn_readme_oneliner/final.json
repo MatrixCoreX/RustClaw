@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"9fcaa240-71af-435f-b0b1-2f83be583084","status":"succeeded","result_json":{"messages":["该文件说明 **Test Workspace** 目录用于存放 NL 回归测试的工件和脚本，并且该目录的位置不会影响代理的内部工作目录。"],"text":"该文件说明 **Test Workspace** 目录用于存放 NL 回归测试的工件和脚本，并且该目录的位置不会影响代理的内部工作目录。"},"error_text":null},"error":null}

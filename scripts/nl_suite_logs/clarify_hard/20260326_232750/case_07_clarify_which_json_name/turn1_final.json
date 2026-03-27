@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"0b1b1f96-72d2-4878-a63b-8c2bedadef3c","status":"succeeded","result_json":{"messages":["package.json 中未找到 `name` 字段。该文件只包含 `dependencies` 字段。"],"text":"package.json 中未找到 `name` 字段。该文件只包含 `dependencies` 字段。"},"error_text":null},"error":null}

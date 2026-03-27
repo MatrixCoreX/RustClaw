@@ -1,6 +1,6 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
-use crate::{now_ts, AppState};
+use crate::{AppState, now_ts};
 
 pub(crate) fn insert_audit_log(
     state: &AppState,

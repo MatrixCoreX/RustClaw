@@ -1,0 +1,7 @@
+index=9
+case_name=clarify_pronoun_it_file
+chat_id=1985996999
+turn1_task_id=012a8f1b-af48-4083-83da-e5bec7bed964
+turn1_prompt=把它发给我
+turn2_task_id=9d4ec255-a147-40bf-8965-b39d639305e2
+turn2_prompt=/home/guagua/test/README.md

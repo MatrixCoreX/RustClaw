@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"171cdc81-2c15-4791-81a1-94c82895d4d6","status":"succeeded","result_json":{"messages":["{\n  \"cmd\": \"tail -n 6 /home/guagua/test/logs/app.log\"\n}"],"text":"{\n  \"cmd\": \"tail -n 6 /home/guagua/test/logs/app.log\"\n}"},"error_text":null},"error":null}

@@ -3,8 +3,9 @@
 //! 文本 / 图片 / 文件 / 音频 / 视频等媒体：下载落盘（可配置目录）后提交 clawd ask。
 //! API 与长连接均使用国际版端点（默认 open.larksuite.com），与 feishud 的 open.feishu.cn 分开。
 
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
@@ -32,6 +33,8 @@ struct AppState {
     token_cache: Arc<RwLock<Option<(String, u64)>>>,
     /// 工作区根目录（用于解析相对落盘路径）
     workspace_root: PathBuf,
+    /// 未绑定用户等待 key 回填状态（按 chat_id）
+    pending_key_bind_by_chat: Arc<Mutex<HashSet<String>>>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -392,7 +395,53 @@ async fn bind_lark_identity(
     Ok(body.data)
 }
 
-/// 入站文本统一入口：先 resolve 绑定，已绑定则提交 ask；未绑定则尝试用当前文本 bind。
+const LARK_BIND_REQUIRED_FOR_CHAT: &str = "Please send your key first to bind this account before chatting or using features.\n请先发送你的 key 进行绑定，然后再继续聊天或使用功能。";
+const LARK_BIND_HELP: &str = "Welcome to RustClaw.\nPlease send /key <your_key> first to bind this account.\n欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。";
+const LARK_BIND_SUCCESS: &str =
+    "Bound successfully. Please send your previous message again.\n绑定成功，请重新发送刚才的消息。";
+const LARK_BIND_INVALID: &str =
+    "Invalid key. Please try again.\nkey 无效或绑定失败，请发送有效 key 完成绑定。";
+
+fn should_expect_key_reply(state: &AppState, chat_id: &str) -> bool {
+    state
+        .pending_key_bind_by_chat
+        .lock()
+        .ok()
+        .is_some_and(|set| set.contains(chat_id))
+}
+
+fn set_expect_key_reply(state: &AppState, chat_id: &str, enabled: bool) {
+    if let Ok(mut set) = state.pending_key_bind_by_chat.lock() {
+        if enabled {
+            set.insert(chat_id.to_string());
+        } else {
+            set.remove(chat_id);
+        }
+    }
+}
+
+fn is_unbound_allowed_command(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("/start") || trimmed.starts_with("/help")
+}
+
+fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> Option<String> {
+    let trimmed = text.trim();
+    trimmed
+        .strip_prefix("/key")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            if expect_key_reply && !trimmed.is_empty() && !trimmed.starts_with('/') {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+}
+
+/// 入站文本统一入口：先 resolve 绑定，已绑定则提交 ask；未绑定仅允许 /start /help /key 和等待态回 key，其他文本统一提示先绑定。
 async fn handle_incoming_lark_text(
     state: AppState,
     open_id: String,
@@ -422,6 +471,7 @@ async fn handle_incoming_lark_text(
     };
 
     if let Some(ident) = identity {
+        set_expect_key_reply(&state, &chat_id, false);
         info!(
             "larkd: binding resolve result bound=true external_chat_id={}",
             chat_id
@@ -435,68 +485,66 @@ async fn handle_incoming_lark_text(
         chat_id
     );
     let trimmed = text.trim();
+    if is_unbound_allowed_command(trimmed) {
+        set_expect_key_reply(&state, &chat_id, true);
+        let _ = send_lark_text(&config, &client, &token_cache, &chat_id, LARK_BIND_HELP).await;
+        return;
+    }
+    let maybe_candidate = extract_bind_key_candidate(trimmed, should_expect_key_reply(&state, &chat_id));
+    if let Some(candidate) = maybe_candidate {
+        info!(
+            "larkd: bind attempt external_chat_id={} key_len={}",
+            chat_id,
+            candidate.len()
+        );
+        match bind_lark_identity(&client, &base, &open_id, &chat_id, &candidate).await {
+            Ok(Some(_)) => {
+                set_expect_key_reply(&state, &chat_id, false);
+                info!("larkd: bind success external_chat_id={}", chat_id);
+                let _ =
+                    send_lark_text(&config, &client, &token_cache, &chat_id, LARK_BIND_SUCCESS)
+                        .await;
+            }
+            Ok(None) => {
+                set_expect_key_reply(&state, &chat_id, true);
+                warn!("larkd: bind failure (invalid key) external_chat_id={}", chat_id);
+                let _ =
+                    send_lark_text(&config, &client, &token_cache, &chat_id, LARK_BIND_INVALID)
+                        .await;
+            }
+            Err(e) => {
+                set_expect_key_reply(&state, &chat_id, true);
+                warn!(
+                    "larkd: bind request failed err={} external_chat_id={}",
+                    e, chat_id
+                );
+                let _ = send_lark_text(
+                    &config,
+                    &client,
+                    &token_cache,
+                    &chat_id,
+                    "Bind request failed, please try again later.\n绑定请求失败，请稍后重试。",
+                )
+                .await;
+            }
+        }
+        return;
+    }
     if trimmed.is_empty() {
         info!(
             "larkd: unbound user prompted for key (empty text) external_chat_id={}",
             chat_id
         );
-        let _ = send_lark_text(
-            &config,
-            &client,
-            &token_cache,
-            &chat_id,
-            "Please send your RustClaw key to bind first.",
-        )
-        .await;
-        return;
     }
-
-    info!(
-        "larkd: bind attempt external_chat_id={} key_len={}",
-        chat_id,
-        trimmed.len()
-    );
-    match bind_lark_identity(&client, &base, &open_id, &chat_id, trimmed).await {
-        Ok(Some(_)) => {
-            info!("larkd: bind success external_chat_id={}", chat_id);
-            let _ = send_lark_text(
-                &config,
-                &client,
-                &token_cache,
-                &chat_id,
-                "Bound successfully. Please send your question again.",
-            )
-            .await;
-        }
-        Ok(None) => {
-            warn!(
-                "larkd: bind failure (invalid key) external_chat_id={}",
-                chat_id
-            );
-            let _ = send_lark_text(
-                &config,
-                &client,
-                &token_cache,
-                &chat_id,
-                "Invalid key or bind failed. Please send a valid key.",
-            )
-            .await;
-        }
-        Err(e) => {
-            warn!(
-                "larkd: bind request failed err={} external_chat_id={}",
-                e, chat_id
-            );
-            let _ = send_lark_text(
-                &config,
-                &client,
-                &token_cache,
-                &chat_id,
-                "Bind request failed, please try again later.",
-            )
-            .await;
-        }
-    }
+    set_expect_key_reply(&state, &chat_id, true);
+    let _ = send_lark_text(
+        &config,
+        &client,
+        &token_cache,
+        &chat_id,
+        LARK_BIND_REQUIRED_FOR_CHAT,
+    )
+    .await;
 }
 
 /// 入站媒体：下载并落盘后，将提示文本交给 clawd ask（与文本链路一致）。
@@ -529,12 +577,13 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
     };
 
     let Some(ident) = identity else {
+        set_expect_key_reply(&state, &ctx.chat_id, true);
         let _ = send_lark_text(
             &config,
             &client,
             &token_cache,
             &ctx.chat_id,
-            "Please send your RustClaw key in a text message to bind first.",
+            LARK_BIND_REQUIRED_FOR_CHAT,
         )
         .await;
         return;
@@ -1326,6 +1375,7 @@ async fn main() -> anyhow::Result<()> {
         client: client.clone(),
         token_cache: Arc::new(RwLock::new(None)),
         workspace_root,
+        pending_key_bind_by_chat: Arc::new(Mutex::new(HashSet::new())),
     };
 
     match config.lark.mode {
@@ -1372,4 +1422,49 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_bind_key_candidate, is_unbound_allowed_command};
+
+    #[test]
+    fn unbound_plain_text_requires_binding_prompt() {
+        assert!(!is_unbound_allowed_command("hello"));
+        assert_eq!(extract_bind_key_candidate("hello", false), None);
+    }
+
+    #[test]
+    fn unbound_key_command_keeps_binding_flow_available() {
+        assert_eq!(
+            extract_bind_key_candidate("/key rk_live_123", false).as_deref(),
+            Some("rk_live_123")
+        );
+    }
+
+    #[test]
+    fn unbound_help_and_start_are_allowed() {
+        assert!(is_unbound_allowed_command("/start"));
+        assert!(is_unbound_allowed_command("/help"));
+    }
+
+    #[test]
+    fn waiting_key_state_accepts_plain_key_reply() {
+        assert_eq!(
+            extract_bind_key_candidate("rk_live_abc", true).as_deref(),
+            Some("rk_live_abc")
+        );
+    }
+
+    #[test]
+    fn waiting_key_state_rejects_non_binding_commands() {
+        assert_eq!(extract_bind_key_candidate("/run image_vision {}", true), None);
+        assert_eq!(extract_bind_key_candidate("/crypto btc", true), None);
+    }
+
+    #[test]
+    fn unbound_media_like_empty_text_requires_binding_prompt() {
+        assert!(!is_unbound_allowed_command(""));
+        assert_eq!(extract_bind_key_candidate("", false), None);
+    }
 }

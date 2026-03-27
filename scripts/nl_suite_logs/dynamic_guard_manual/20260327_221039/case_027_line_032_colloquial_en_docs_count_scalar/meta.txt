@@ -1,0 +1,6 @@
+ordinal=27
+source_line=32
+case_name=colloquial_en_docs_count_scalar
+chat_id=17746206518
+task_id=76567d26-aaf6-4ebe-86f0-3eaf98487b16
+prompt=How many direct items are in /home/guagua/test/docs? Output number only.

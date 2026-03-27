@@ -1,0 +1,6 @@
+ordinal=23
+source_line=28
+case_name=colloquial_cn_log_tail
+chat_id=17746321074
+task_id=96f22192-1b4e-4534-8935-256e88ce99ef
+prompt=麻烦看下 /home/guagua/test/logs/app.log 最后 8 行给我

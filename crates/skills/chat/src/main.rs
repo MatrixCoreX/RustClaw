@@ -38,21 +38,6 @@ struct ChatInput {
     temperature: f64,
 }
 
-#[derive(Debug, Deserialize)]
-struct OpenAiChatMessage {
-    content: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiChoice {
-    message: Option<OpenAiChatMessage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiChatResponse {
-    choices: Option<Vec<OpenAiChoice>>,
-}
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
@@ -263,18 +248,18 @@ async fn run_chat(input: ChatInput) -> Result<(String, Value), String> {
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("chat skill llm failed status={status}: {body}"));
     }
-    let parsed: OpenAiChatResponse = resp
+    let parsed: Value = resp
         .json()
         .await
         .map_err(|e| format!("parse llm response failed: {e}"))?;
-    let text = parsed
-        .choices
-        .and_then(|choices| choices.into_iter().next())
-        .and_then(|c| c.message)
-        .and_then(|m| m.content)
-        .map(|s| strip_think_blocks(&s).trim().to_string())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "chat skill llm returned empty content".to_string())?;
+    let text = extract_assistant_text(&parsed).ok_or_else(|| {
+        let raw = serde_json::to_string(&parsed).unwrap_or_default();
+        let mut preview = raw.chars().take(320).collect::<String>();
+        if raw.chars().count() > 320 {
+            preview.push_str("...");
+        }
+        format!("chat skill llm returned empty content (preview={preview})")
+    })?;
     let extra = json!({
         "llm": {
             "prompt_name": "chat_skill_prompt",
@@ -305,6 +290,64 @@ fn strip_think_blocks(raw: &str) -> String {
         break;
     }
     out.trim().to_string()
+}
+
+fn extract_assistant_text(parsed: &Value) -> Option<String> {
+    let mut candidates: Vec<String> = Vec::new();
+
+    if let Some(choice) = parsed
+        .get("choices")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.first())
+    {
+        if let Some(message) = choice.get("message") {
+            if let Some(content) = message.get("content") {
+                append_text_candidates(content, &mut candidates);
+            }
+            if let Some(reasoning) = message.get("reasoning_content") {
+                append_text_candidates(reasoning, &mut candidates);
+            }
+        }
+        if let Some(legacy_text) = choice.get("text") {
+            append_text_candidates(legacy_text, &mut candidates);
+        }
+    }
+
+    if let Some(output_text) = parsed.get("output_text") {
+        append_text_candidates(output_text, &mut candidates);
+    }
+
+    if let Some(output_items) = parsed.get("output") {
+        append_text_candidates(output_items, &mut candidates);
+    }
+
+    candidates
+        .into_iter()
+        .map(|s| strip_think_blocks(&s).trim().to_string())
+        .find(|s| !s.is_empty())
+}
+
+fn append_text_candidates(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(s) => {
+            if !s.trim().is_empty() {
+                out.push(s.clone());
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                append_text_candidates(item, out);
+            }
+        }
+        Value::Object(obj) => {
+            for key in ["text", "content", "input_text", "output_text"] {
+                if let Some(v) = obj.get(key) {
+                    append_text_candidates(v, out);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn default_chat_max_tokens(style: &str, text: &str) -> u64 {

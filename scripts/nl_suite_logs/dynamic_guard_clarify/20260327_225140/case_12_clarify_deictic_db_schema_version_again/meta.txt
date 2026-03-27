@@ -1,0 +1,7 @@
+index=12
+case_name=clarify_deictic_db_schema_version_again
+chat_id=17746206603
+turn1_task_id=0abf636c-21f7-49a0-8894-ce3e7b191df5
+turn1_prompt=看看那个 sqlite 的 schema version 是多少
+turn2_task_id=6539725b-67d1-49ad-a568-249cb7fa0cea
+turn2_prompt=/home/guagua/test/data/test_contract.sqlite

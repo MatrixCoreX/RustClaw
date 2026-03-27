@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use anyhow::anyhow;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::AppState;
 

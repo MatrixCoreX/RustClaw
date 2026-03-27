@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -70,7 +72,9 @@ fn execute(args: Value) -> Result<String, String> {
         .unwrap_or(20)
         .min(200) as usize;
 
-    let text = std::fs::read_to_string(&path).map_err(|err| format!("read log failed: {err}"))?;
+    let resolved_path = resolve_log_path(&path)?;
+    let text =
+        std::fs::read_to_string(&resolved_path).map_err(|err| format!("read log failed: {err}"))?;
     let default_keywords = [
         "error",
         "failed",
@@ -111,12 +115,68 @@ fn execute(args: Value) -> Result<String, String> {
     }
 
     Ok(json!({
-        "path": path.display().to_string(),
+        "requested_path": path.display().to_string(),
+        "path": resolved_path.display().to_string(),
         "total_lines": text.lines().count(),
         "keyword_counts": counts,
         "recent_matches": matches
     })
     .to_string())
+}
+
+fn resolve_log_path(path: &PathBuf) -> Result<PathBuf, String> {
+    if path.is_file() {
+        return Ok(path.clone());
+    }
+    if !path.exists() {
+        return Err(format!("log path not found: {}", path.display()));
+    }
+    if !path.is_dir() {
+        return Err(format!("log path is neither file nor directory: {}", path.display()));
+    }
+
+    let mut candidates: Vec<(u8, SystemTime, PathBuf)> = Vec::new();
+    let entries = fs::read_dir(path).map_err(|err| format!("read log dir failed: {err}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read log dir entry failed: {err}"))?;
+        let candidate_path = entry.path();
+        if !candidate_path.is_file() {
+            continue;
+        }
+        let metadata = entry
+            .metadata()
+            .map_err(|err| format!("read log file metadata failed: {err}"))?;
+        let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        candidates.push((candidate_priority(&candidate_path), modified, candidate_path));
+    }
+    if candidates.is_empty() {
+        return Err(format!(
+            "log directory contains no readable files: {}",
+            path.display()
+        ));
+    }
+    candidates.sort_by(|a, b| b.cmp(a));
+    Ok(candidates.remove(0).2)
+}
+
+fn candidate_priority(path: &std::path::Path) -> u8 {
+    let file_name = path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|v| v.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if ext == "log" {
+        3
+    } else if ["txt", "out", "err"].contains(&ext.as_str()) || file_name.contains("log") {
+        2
+    } else {
+        1
+    }
 }
 
 fn workspace_root() -> PathBuf {

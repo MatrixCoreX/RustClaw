@@ -1,0 +1,8 @@
+# Failed-only rerun set extracted from scripts/nl_tests/cases/nl_cases_full.txt on 2026-03-26.
+# Original source lines: 51, 133, 134, 156
+
+# suite|name|tags|prompt
+chat_act|followup_logs_then_conclusion_en_variant_2||check the latest three files under logs and tell me whether they look more like test logs or real runtime outputs
+chat_act|act_http_local_health_cn||请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
+chat_act|act_http_local_health_en||call http://127.0.0.1:8787/v1/health and briefly summarize the result if it is reachable
+chat_act|act_mixed_cn_en_db_variant||look at data/db-basic-contract.sqlite 的 schema version，直接简短告诉我

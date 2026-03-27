@@ -1,0 +1,7 @@
+index=4
+case_name=clarify_which_log_tail
+chat_id=1985996994
+turn1_task_id=1b33dbeb-fc1e-4988-9dc8-8f44f60b322a
+turn1_prompt=帮我看一下那个日志最近 20 行
+turn2_task_id=56bc961d-8c56-48ef-a967-71a8386a0d38
+turn2_prompt=logs/clawd.log

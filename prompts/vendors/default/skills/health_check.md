@@ -23,6 +23,8 @@
 ## Error Contract (from interface)
 - Invalid log path should return clear filesystem errors.
 - Diagnostic execution/runtime failures should return explicit error text.
+- `log_dir` rejects `..` traversal and paths outside workspace.
+- Successful responses also mirror the parsed diagnostic object into the optional `extra` field.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -32,10 +34,11 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"health diagnostics: ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"workspace_root\":\"/workspace\",\"log_dir\":\"/workspace/logs\",\"clawd_process_count\":1}","extra":{"workspace_root":"/workspace","log_dir":"/workspace/logs","clawd_process_count":1},"error_text":null}
 ```
 
 ## Output Contract
 - Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
 - On uncertainty, prefer safe/readonly behavior first.
+- If the user asks for a generic or baseline health check without narrowing to one specific service, use the default `check` behavior directly with empty/minimal args instead of asking which service to inspect.

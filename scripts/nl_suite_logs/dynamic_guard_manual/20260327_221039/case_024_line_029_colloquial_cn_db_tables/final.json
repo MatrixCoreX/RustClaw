@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"9bad3910-571e-45d5-ac1f-a12605799f01","status":"succeeded","result_json":{"messages":["数据库 `/home/guagua/test/data/test_contract.sqlite` 中包含以下表：\n\n- accounts\n- audit_log"],"text":"数据库 `/home/guagua/test/data/test_contract.sqlite` 中包含以下表：\n\n- accounts\n- audit_log"},"error_text":null},"error":null}

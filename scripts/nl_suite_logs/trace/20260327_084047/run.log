@@ -1,0 +1,34 @@
+NL suite: trace
+  run_dir: /home/guagua/git_upload/scripts/nl_suite_logs/trace/20260327_084047
+  run_log: /home/guagua/git_upload/scripts/nl_suite_logs/trace/20260327_084047/run.log
+
+Usage:
+  bash scripts/regression_trace_ask.sh [options]
+
+Options:
+  --base-url URL         Task API base url (default from BASE_URL or lib.sh)
+  --user-id ID           User id used when submitting tasks
+  --chat-id ID           Chat id used when submitting tasks
+  --user-key KEY         User key used for submit/query auth and identity
+  --wait-seconds N       Max wait seconds per case (default: 180)
+  --poll-seconds N       Poll interval seconds (default: 1)
+  --prompt TEXT          Add one custom case (can repeat)
+  --case-file PATH       Read cases from file: "name|prompt" or just "prompt"
+  --no-defaults          Run only custom/file cases
+  --full-text            Print full text instead of compact summary
+  -h, --help             Show this help
+
+Default cases:
+  - loaded from scripts/regression_trace_ask_cases_real.txt
+
+What it prints:
+  - submit / polling progress
+  - progress_messages 增量
+  - final status / text / messages
+  - clawd.log 路由与执行摘要
+  - model_io.log 每次 LLM prompt/response/error 摘要
+  - 简单问题提示（如：命令请求却路由到 Chat）
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/trace/20260327_084047
+  - /home/guagua/git_upload/scripts/nl_suite_logs/trace/20260327_084047/run.log

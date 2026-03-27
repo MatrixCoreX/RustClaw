@@ -1,0 +1,6 @@
+ordinal=4
+source_line=7
+case_name=explicit_log_tail
+chat_id=1985996994
+task_id=8bf523c0-ad81-4f92-9e9e-3dab9ca3e936
+prompt=看下 /home/guagua/test/logs/app.log 最近 10 行

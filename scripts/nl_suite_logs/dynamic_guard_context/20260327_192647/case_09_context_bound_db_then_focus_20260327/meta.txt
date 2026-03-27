@@ -1,0 +1,9 @@
+index=9
+case_name=context_bound_db_then_focus_20260327
+chat_id=1985996999
+turn1_task_id=ef61dfcf-af36-4527-befd-00f87bdbe952
+turn1_prompt=先记一下，“那个数据库”指 /home/guagua/test/data/test_contract.sqlite
+turn2_task_id=6a3e7491-8366-43b0-9c63-060c6d9996a5
+turn2_prompt=看下那个数据库有哪些表
+turn3_task_id=9bfa31af-d77c-4810-9fdf-6ca700d9cfbf
+turn3_prompt=再告诉我最像业务数据的是哪一张

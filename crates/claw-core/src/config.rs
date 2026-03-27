@@ -1105,7 +1105,6 @@ fn default_skills_list() -> Vec<String> {
         "chat".to_string(),
         "stock".to_string(),
         "weather".to_string(),
-        "reference_resolver".to_string(),
         "doc_parse".to_string(),
         "transform".to_string(),
         "web_search_extract".to_string(),

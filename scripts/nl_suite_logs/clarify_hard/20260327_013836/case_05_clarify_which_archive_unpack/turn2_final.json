@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"5f9861a7-9852-4cec-ae03-b90dafbfce8b","status":"succeeded","result_json":{"messages":["Extracted from `/home/guagua/test/tmp/test_bundle.zip`:\n- `file_one.txt`\n- `file_two.txt`"],"text":"Extracted from `/home/guagua/test/tmp/test_bundle.zip`:\n- `file_one.txt`\n- `file_two.txt`"},"error_text":null},"error":null}

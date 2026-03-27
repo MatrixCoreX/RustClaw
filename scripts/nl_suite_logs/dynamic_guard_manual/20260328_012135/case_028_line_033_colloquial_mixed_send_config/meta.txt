@@ -1,0 +1,6 @@
+ordinal=28
+source_line=33
+case_name=colloquial_mixed_send_config
+chat_id=17746321079
+task_id=41a86c0f-2ed3-45a6-bce1-de6a23b87307
+prompt=把 /home/guagua/test/configs/app_config.toml send me，别贴内容

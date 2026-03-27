@@ -10,7 +10,7 @@ POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-1}"
 MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-180}"
 PRINT_FULL_TEXT=0
 USE_DEFAULT_CASES=1
-DEFAULT_CASE_FILE="${SCRIPT_DIR}/regression_trace_ask_cases_real.txt"
+DEFAULT_CASE_FILE="${SCRIPT_DIR}/nl_tests/cases/regression_trace_ask_cases_real.txt"
 
 CASE_NAMES=()
 CASE_PROMPTS=()
@@ -41,7 +41,7 @@ Options:
   -h, --help             Show this help
 
 Default cases:
-  - loaded from scripts/regression_trace_ask_cases_real.txt
+  - loaded from scripts/nl_tests/cases/regression_trace_ask_cases_real.txt
 
 What it prints:
   - submit / polling progress

@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"fc2aa840-d958-4f78-8d9f-6c5314aa6071","status":"succeeded","result_json":{"text":"`ERROR sample downstream timeout recovered` 日志级别与消息内容矛盾。\n\nERROR 表示出错，但消息里写着 \"recovered\"（已恢复）。成功恢复通常是 INFO 级别，这里混用了错误级别和成功状态，容易误导监控告警。建议检查日志代码，确认是记录错误还是恢复状态，二选一。"},"error_text":null},"error":null}

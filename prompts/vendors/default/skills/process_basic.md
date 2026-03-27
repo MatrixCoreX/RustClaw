@@ -32,6 +32,8 @@
 - Missing required `pid`/`path` for action-specific operations.
 - Invalid PID/signal/path values.
 - OS command failures are returned with readable error text.
+- Non-zero subprocess exit codes are returned as `status=error` with `error_text=process command failed: exit=<code>\n<stdout/stderr>`.
+- Successful responses also mirror structured metadata into `extra`, including fields like `action`, `exit_code`, and `output`.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -41,7 +43,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"PID ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"exit=0\nPID ...","extra":{"action":"ps","exit_code":0,"limit":20,"output":"exit=0\nPID ..."},"error_text":null}
 ```
 
 ## Output Contract

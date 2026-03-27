@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"37ebca6c-f20b-4f15-9ecd-96b78b4b28a5","status":"succeeded","result_json":{"messages":["RustClaw 是一个本地运行的 Rust 代理运行时，通过 Telegram、WhatsApp、飞书/Lark 和浏览器 UI 等多个渠道实现日常任务操作。"],"text":"RustClaw 是一个本地运行的 Rust 代理运行时，通过 Telegram、WhatsApp、飞书/Lark 和浏览器 UI 等多个渠道实现日常任务操作。"},"error_text":null},"error":null}

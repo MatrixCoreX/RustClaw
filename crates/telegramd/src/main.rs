@@ -155,6 +155,38 @@ fn set_expect_key_reply(state: &BotState, chat_id: i64, enabled: bool) {
     }
 }
 
+fn is_unbound_allowed_command(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("/start") || trimmed.starts_with("/help")
+}
+
+fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> Option<String> {
+    let trimmed = text.trim();
+    trimmed
+        .strip_prefix("/key")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            if expect_key_reply && !trimmed.is_empty() && !trimmed.starts_with('/') {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+}
+
+async fn send_bind_key_required_prompt(bot: &Bot, msg: &Message, state: &BotState) -> anyhow::Result<()> {
+    set_expect_key_reply(state, msg.chat.id.0, true);
+    bot.send_message(
+        msg.chat.id,
+        state.i18n.t("telegram.msg.bind_key_required_for_chat"),
+    )
+    .await
+    .context("send key bind required prompt failed")?;
+    Ok(())
+}
+
 fn store_bound_identity(state: &BotState, chat_id: i64, identity: &AuthIdentity) {
     if let Ok(mut map) = state.bound_identity_by_chat.lock() {
         map.insert(chat_id, identity.clone());
@@ -1077,19 +1109,8 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             Some(identity)
         }
         None => {
-            let trimmed = text.trim();
-            let maybe_candidate = trimmed
-                .strip_prefix("/key")
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(ToString::to_string)
-                .or_else(|| {
-                    if should_expect_key_reply(&state, platform_chat_id) && !trimmed.is_empty() {
-                        Some(trimmed.to_string())
-                    } else {
-                        None
-                    }
-                });
+            let maybe_candidate =
+                extract_bind_key_candidate(text, should_expect_key_reply(&state, platform_chat_id));
             if let Some(candidate) = maybe_candidate {
                 if let Some(identity) =
                     bind_telegram_identity(&state, platform_user_id, platform_chat_id, &candidate)
@@ -1118,6 +1139,14 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             None
         }
     };
+    if bound_identity.is_none() {
+        if is_unbound_allowed_command(text) {
+            send_bind_key_required_prompt(&bot, &msg, &state).await?;
+            return Ok(());
+        }
+        send_bind_key_required_prompt(&bot, &msg, &state).await?;
+        return Ok(());
+    }
     let user_id = bound_identity
         .as_ref()
         .map(|identity| identity.user_id)
@@ -1202,13 +1231,9 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
 
     if text.starts_with("/cryptoapi") {
         let Some(identity) = bound_identity.as_ref() else {
-            set_expect_key_reply(&state, platform_chat_id, true);
-            bot.send_message(
-                msg.chat.id,
-                "请先发送你的 key 进行绑定。\nPlease send your key first to bind this account.",
-            )
-            .await
-            .context("send key prompt for /cryptoapi failed")?;
+            send_bind_key_required_prompt(&bot, &msg, &state)
+                .await
+                .context("send key prompt for /cryptoapi failed")?;
             return Ok(());
         };
         let raw = text.strip_prefix("/cryptoapi").unwrap_or_default().trim();
@@ -1423,13 +1448,9 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
                 return Ok(());
             }
             let Some(identity) = bound_identity.as_ref() else {
-                set_expect_key_reply(&state, platform_chat_id, true);
-                bot.send_message(
-                    msg.chat.id,
-                    "请先发送你的 key 进行绑定。\nPlease send your key first to bind this account.",
-                )
-                .await
-                .context("send key prompt for /crypto add failed")?;
+                send_bind_key_required_prompt(&bot, &msg, &state)
+                    .await
+                    .context("send key prompt for /crypto add failed")?;
                 return Ok(());
             };
             match handle_cryptoapi_command(&state, identity, raw).await {
@@ -5519,5 +5540,50 @@ selected_model = "gpt-4o-mini"
             minimax.get("base_url").and_then(|x| x.as_str()),
             Some("https://api.minimax.io/v1")
         );
+    }
+}
+
+#[cfg(test)]
+mod bind_gate_tests {
+    use super::{extract_bind_key_candidate, is_unbound_allowed_command};
+
+    #[test]
+    fn unbound_plain_text_requires_key_binding() {
+        assert!(!is_unbound_allowed_command("hello rustclaw"));
+        assert_eq!(extract_bind_key_candidate("hello rustclaw", false), None);
+    }
+
+    #[test]
+    fn unbound_key_command_is_accepted_for_binding() {
+        assert_eq!(
+            extract_bind_key_candidate("/key rk_live_123", false).as_deref(),
+            Some("rk_live_123")
+        );
+    }
+
+    #[test]
+    fn bound_gate_allows_help_commands() {
+        assert!(is_unbound_allowed_command("/start"));
+        assert!(is_unbound_allowed_command("/help"));
+    }
+
+    #[test]
+    fn waiting_bind_state_accepts_plain_key_reply() {
+        assert_eq!(
+            extract_bind_key_candidate("rk_live_abc", true).as_deref(),
+            Some("rk_live_abc")
+        );
+    }
+
+    #[test]
+    fn waiting_bind_state_does_not_treat_other_commands_as_key() {
+        assert_eq!(extract_bind_key_candidate("/run weather {}", true), None);
+        assert_eq!(extract_bind_key_candidate("/crypto btc", true), None);
+    }
+
+    #[test]
+    fn unbound_media_like_empty_text_requires_binding_prompt() {
+        assert!(!is_unbound_allowed_command(""));
+        assert_eq!(extract_bind_key_candidate("", false), None);
     }
 }

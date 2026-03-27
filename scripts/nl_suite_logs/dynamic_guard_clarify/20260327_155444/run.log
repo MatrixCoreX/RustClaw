@@ -1,0 +1,67 @@
+NL multi-turn suite: clarify
+  run_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260327_155444
+  run_log:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260327_155444/run.log
+  case_file:  /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_clarify_20260327.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985996990
+
+============================================================
+[CASE]   1
+[NAME]   clarify_deictic_readme_again
+[CHAT]   1985996991
+[TURN1]  读一下那个 README 开头并用一句话总结
+[TASK1]  33165816-b3d8-42b7-90aa-9c977d3e7c6d
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  该文件是测试工作区的说明文档，介绍了该目录用于存放NL回归测试的产物和包装脚本，同时指出被测试的`clawd`运行时仍使用其自己配置的工作区根目录。
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  0a60234f-a056-4865-9355-3cfc5f8fde61
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  # Test Workspace\n\nThis directory is reserved for NL regression test artifacts and wrapper scripts.\n\nNotes:\n- The runner inputs and logs can live here.\n- The tested `clawd` runtime still uses its own configured workspace root; changing this directory alone does not change the agent's internal working directory.
+
+============================================================
+[CASE]   2
+[NAME]   clarify_deictic_config_send_again
+[CHAT]   1985996992
+[TURN1]  把那个配置文件发给我
+[TASK1]  a8a618ad-a0b2-4ea0-aa0c-cf6d0a45f135
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  您想要我读取 /home/guagua/test/configs/app_config.toml 吗？
+[TURN2]  /home/guagua/test/configs/app_config.toml
+[TASK2]  e4dbc76d-7c26-44f8-b51c-9d8682347014
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/configs/app_config.toml
+
+============================================================
+[CASE]   3
+[NAME]   clarify_deictic_log_tail_again
+[CHAT]   1985996993
+[TURN1]  看下那个日志最近 20 行
+[TASK1]  1d2c6ac3-4674-4223-a9a9-f04862da2d6d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  需要我查看 /home/guagua/test/logs/app.log 的最近 20 行吗？
+[TURN2]  /home/guagua/test/logs/app.log
+[TASK2]  5210249b-25ac-4f58-8e6c-5d4920642f9a
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+
+============================================================
+[CASE]   4
+[NAME]   clarify_deictic_db_tables_again
+[CHAT]   1985996994
+[TURN1]  查一下那个 sqlite 里有哪些表
+[TASK1]  4bc0623c-19f7-4245-a32b-f0c3a828e571
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  您指的是 `/home/guagua/test/data/test_contract.sqlite` 吗？
+[TURN2]  /home/guagua/test/data/test_contract.sqlite
+[TASK2]  872e0631-1629-461a-b3e4-a00b4aac12ad
+  [status] <none> -> running

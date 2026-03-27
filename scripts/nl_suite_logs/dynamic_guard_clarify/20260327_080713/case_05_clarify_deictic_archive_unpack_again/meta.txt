@@ -1,0 +1,7 @@
+index=5
+case_name=clarify_deictic_archive_unpack_again
+chat_id=1985996995
+turn1_task_id=59f5dd72-ef29-43b9-99d8-ffab22ae1d8e
+turn1_prompt=把那个压缩包解压到 /home/guagua/test/tmp/dynamic_guard_unpack_case 然后告诉我结果
+turn2_task_id=ac9f4d57-870b-452b-8164-e605e7951c33
+turn2_prompt=/home/guagua/test/tmp/test_bundle.zip

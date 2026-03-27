@@ -5,6 +5,7 @@
 - `task_control` lets the current user inspect unfinished tasks in the current chat and cancel them safely.
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Supports natural-language task operations such as "看看我现在有哪些任务", "结束当前任务", and "结束第 2 个任务".
+- When a `user_key` is present in the runner request/context, it is forwarded to `clawd` for authenticated task queries and cancellations.
 
 ## Actions
 
@@ -36,6 +37,7 @@ Notes:
 - Unknown action -> readable error text.
 - `cancel_one` without valid `index` -> readable error text.
 - Invalid index -> readable error text telling the user to query tasks first.
+- Missing/invalid auth for task APIs -> readable error text from `clawd` (for example unauthorized user or invalid user key).
 
 ## Request/Response Examples
 

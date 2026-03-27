@@ -1,0 +1,6 @@
+dynamic_guard|explicit_path_readme_summary|path,file,summary|读一下 /home/guagua/test/README.md 开头并用一句话总结
+dynamic_guard|explicit_path_readme_send|path,file,delivery|把 /home/guagua/test/README.md 发给我
+dynamic_guard|explicit_path_two_part|path,file,summary|先读 /home/guagua/test/README.md 开头，再用一句话总结
+dynamic_guard|clarify_deictic_readme_again|clarify,deictic|读一下那个 README 开头并用一句话总结
+dynamic_guard|clarify_deictic_config_send_again|clarify,deictic|把那个配置文件发给我
+dynamic_guard|context_bound_config_delivery_20260327|context,binding|先记一下，“那个配置文件”就是 /home/guagua/test/configs/app_config.toml；然后把那个配置文件发给我；最后再用一句话说它主要是干嘛的

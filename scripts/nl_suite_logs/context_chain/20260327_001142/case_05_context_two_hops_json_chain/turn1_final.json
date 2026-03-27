@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"053e8c15-2f4b-4b6b-9e55-400bfd6ae691","status":"succeeded","result_json":{"messages":["请提供需要排序的 JSON 数组，例如：[{\"name\":\"a\",\"score\":3},{\"name\":\"b\",\"score\":1}]"],"text":"请提供需要排序的 JSON 数组，例如：[{\"name\":\"a\",\"score\":3},{\"name\":\"b\",\"score\":1}]"},"error_text":null},"error":null}

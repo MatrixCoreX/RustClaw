@@ -1,0 +1,12 @@
+# Multi-turn context-chain cases for pronoun/reference resolution.
+# Proposed format: case_name|turn1|turn2|turn3
+# This file is for manual or future harness use if the current runner only supports 2 turns.
+
+context_last_turn_file_chain|先记一下，后面我说“那个文件”就是 /home/guagua/test/README.md|把那个文件开头读 10 行|把它再用一句人话总结
+context_last_turn_log_chain|先记一下，“那个日志”指 /home/guagua/test/logs/app.log|看一下那个日志最近 20 行|从里面挑一个最值得注意的点
+context_two_hops_dir_chain|先看一下 /home/guagua/test/docs 目录有多少个直接子项|再看一下 /home/guagua/test/logs 目录有多少个直接子项|把上上个和上个结果比较一下，哪个更多
+context_two_hops_file_chain|先读取 /home/guagua/test/README.md 开头 10 行|再读取 /home/guagua/test/docs/service_notes.md 开头 10 行|把上上个文件和上个文件用一句话对比
+context_two_hops_json_chain|先把这个 JSON 数组按 score 排序：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]|再把它转成 markdown 表格|把上一步那个表格里分数最高的名字单独告诉我
+context_reference_switch_chain|先记一下“甲”指 /home/guagua/test/README.md|再记一下“乙”指 /home/guagua/test/docs/service_notes.md|读一下乙的开头，然后顺手说甲是干什么的
+context_pronoun_switch_chain|先看一下 /home/guagua/test/logs 目录最新的 3 个文件|再看一下 /home/guagua/test/docs 目录直接子项数量|上一个结果里说的“第一个文件”是什么，上上个动作查的又是什么目录
+context_ambiguous_should_ask_chain|先看一下 /home/guagua/test/docs 目录下有哪些文件|再看一下 /home/guagua/test/logs 目录下有哪些文件|把那个最大的发给我

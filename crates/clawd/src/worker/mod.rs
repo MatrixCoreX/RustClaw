@@ -1,12 +1,12 @@
 use std::time::Duration;
 
 use anyhow::anyhow;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{Instrument, debug, error, info, info_span, warn};
 use uuid::Uuid;
 
-use crate::{now_ts, now_ts_u64, repo, schedule_service, AppState, ScheduledJobDue};
+use crate::{AppState, ScheduledJobDue, now_ts, now_ts_u64, repo, schedule_service};
 
 fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Result<Vec<String>> {
     let timeout_secs = state.worker_running_no_progress_timeout_seconds.max(60);
@@ -689,10 +689,19 @@ pub(crate) async fn process_ask_task(
     } else {
         None
     };
+    let failed_resume_context_ts = payload
+        .get("failed_resume_context_ts")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let has_newer_successful_ask_after_failed_task = payload
+        .get("has_newer_successful_ask_after_failed_task")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let binding_context_json = json!({
-        "source": "resume_continue_source",
-        "failed_resume_context_ts": Value::Null,
-        "has_newer_successful_ask_after_failed_task": false,
+        "source": source.trim(),
+        "is_resume_continue_source": is_resume_continue,
+        "failed_resume_context_ts": failed_resume_context_ts,
+        "has_newer_successful_ask_after_failed_task": has_newer_successful_ask_after_failed_task,
     });
     let normalizer_out = crate::intent_router::run_intent_normalizer(
         state,
@@ -786,10 +795,12 @@ pub(crate) async fn process_ask_task(
     }
     let recent_execution_anchor_context =
         crate::routing_context::build_recent_execution_anchor_context(state, task);
+    let recent_execution_context =
+        crate::routing_context::build_recent_execution_context(state, task, 8);
     if recent_execution_anchor_context != "<none>" {
         prompt_with_memory_for_execution.push_str(
             "\n\n### RECENT_EXECUTION_CONTEXT\n\
-Use this block as the primary anchor for short follow-up requests. If the current request does not explicitly name a new target, continue from this latest successful subject/domain instead of switching to older memory.\n",
+Use this block only as supporting evidence for genuinely short follow-up requests. Reuse a previous target only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this block override a needed clarification, and do not treat an artifact type word alone (for example README / config / log) as a concrete target.\n",
         );
         prompt_with_memory_for_execution.push_str(&recent_execution_anchor_context);
     }
@@ -880,6 +891,7 @@ Use this block as the primary anchor for short follow-up requests. If the curren
         .iter()
         .any(|s| s == &source.to_ascii_lowercase());
     let force_clarify = context_resolution.needs_clarify;
+    let clarify_reason = context_resolution.reason.clone();
     let has_schedule_intent =
         normalizer_out.schedule_kind != crate::intent_router::ScheduleKind::None;
     let should_route_schedule_direct =
@@ -889,8 +901,9 @@ Use this block as the primary anchor for short follow-up requests. If the curren
         let clarify = crate::intent_router::generate_clarify_question(
             state,
             task,
-            &resolved_prompt_for_execution,
-            &context_resolution.reason,
+            prompt,
+            &clarify_reason,
+            Some(&recent_execution_context),
         )
         .await;
         Ok(crate::AskReply::non_llm(clarify))
@@ -1032,8 +1045,14 @@ Use this block as the primary anchor for short follow-up requests. If the curren
                 );
                 return Ok(());
             }
-            let (answer_text, answer_messages) =
-                crate::intercept_response_payload_for_delivery(state, answer.text, answer.messages);
+            let (answer_text, answer_messages) = crate::intercept_response_payload_for_delivery(
+                state,
+                &resolved_prompt_for_execution,
+                normalizer_out.wants_file_delivery,
+                &normalizer_out.output_contract,
+                answer.text,
+                answer.messages,
+            );
             let result = if answer_messages.is_empty() {
                 json!({ "text": answer_text.clone() })
             } else {

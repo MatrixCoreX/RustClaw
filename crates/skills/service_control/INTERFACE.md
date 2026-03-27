@@ -7,6 +7,7 @@
 - `service_control` performs service lifecycle operations and diagnosis with **structured input/output**.
 - **Managers implemented**: `rustclaw` (HTTP to clawd), `systemd`, `service`. Others return "not implemented".
 - **Behavior**: Read-only first; high-risk (stop/restart) blocked for ambiguous targets; auto-verify after start/restart/reload; auto logs on failure.
+- **Status questions**: Runtime status must come from `status` / `verify` (or another real runtime check), not from binary-file existence.
 - **Security**: Target validation; no arbitrary shell; RustClaw whitelist for HTTP path; safe unit names for systemd/service.
 
 ## Actions

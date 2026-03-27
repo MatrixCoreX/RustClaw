@@ -313,15 +313,6 @@ output_kind = "text"
 # output_kind = "text"
 
 [[skills]]
-name = "reference_resolver"
-enabled = true
-kind = "runner"
-aliases = ["resolve_reference", "reference", "context_reference"]
-timeout_seconds = 15
-prompt_file = "prompts/skills/reference_resolver.md"
-output_kind = "text"
-
-[[skills]]
 name = "doc_parse"
 enabled = true
 kind = "runner"

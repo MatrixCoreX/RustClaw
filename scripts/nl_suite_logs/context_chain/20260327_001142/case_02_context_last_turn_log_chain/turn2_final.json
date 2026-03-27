@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"3677665d-3a55-4f71-8ab1-113ab94646ef","status":"succeeded","result_json":{"messages":["文件 /home/guagua/test/logs/app.log 的内容未在当前执行上下文中返回。"],"text":"文件 /home/guagua/test/logs/app.log 的内容未在当前执行上下文中返回。"},"error_text":null},"error":null}

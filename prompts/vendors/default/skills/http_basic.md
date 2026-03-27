@@ -28,6 +28,8 @@
 - Missing/invalid URL or unsupported action.
 - Network/timeouts/HTTP errors should return readable error text.
 - Invalid JSON body serialization errors should be surfaced explicitly.
+- Non-2xx HTTP responses are returned as `status=error` with `error_text=http request returned non-success status=<code>\n<body preview>`.
+- Successful responses also mirror structured metadata into `extra`, including `action`, `url`, `status_code`, and `body_preview`.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -37,7 +39,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"{\"ok\":true}","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"status=200\n{\"ok\":true}","extra":{"action":"get","url":"https://example.com/api/ping","status_code":200,"body_preview":"{\"ok\":true}"},"error_text":null}
 ```
 
 ## Output Contract
