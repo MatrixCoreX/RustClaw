@@ -1,0 +1,21 @@
+{"suite": "context_chain", "case_name": "context_bound_readme_followup_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_log_followup_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_config_delivery_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_ambiguous_after_two_files_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_explicit_path_after_clarify_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_alias_rebind_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_en_pronoun_log_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_missing_file_followup_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_db_then_focus_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_two_targets_disambiguate_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_colloquial_cn_readme_alias", "pass": false, "reasons": ["turn3 one-sentence requirement violated"]}
+{"suite": "context_chain", "case_name": "context_colloquial_cn_log_alias", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_colloquial_cn_send_config_alias", "pass": false, "reasons": ["turn3 one-sentence requirement violated"]}
+{"suite": "context_chain", "case_name": "context_colloquial_en_readme_alias", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_colloquial_en_log_alias", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_colloquial_mixed_docs_alias", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_ultra_cn_readme_alias", "pass": false, "reasons": ["turn3 one-sentence requirement violated"]}
+{"suite": "context_chain", "case_name": "context_ultra_cn_log_alias", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_ultra_en_config_alias", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_ultra_en_db_alias", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_ultra_mixed_docs_alias", "pass": true, "reasons": []}

@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"b046e6e3-833b-49a7-a0bc-103e6248977c","status":"succeeded","result_json":{"messages":["```bash\ntail -n 20 /home/guagua/test/logs/app.log\n```"],"text":"```bash\ntail -n 20 /home/guagua/test/logs/app.log\n```"},"error_text":null},"error":null}

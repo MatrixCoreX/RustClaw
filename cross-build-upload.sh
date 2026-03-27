@@ -8,6 +8,7 @@ set -e
 SKIP_REMOTE_ENV="${SKIP_REMOTE_ENV:-}"
 CROSS_PULL_ALL_ARTIFACTS="${CROSS_PULL_ALL_ARTIFACTS:-}"
 CLEAN_REMOTE_TMP_FIRST="${CLEAN_REMOTE_TMP_FIRST:-0}"
+SHOW_RSYNC_PROGRESS="${SHOW_RSYNC_PROGRESS:-1}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REMOTE_USER="${REMOTE_USER:-root}"
@@ -30,6 +31,10 @@ format_mib() { awk -v bytes="${1:-0}" 'BEGIN { printf "%.2f", bytes / 1048576 }'
 
 SSH_OPTS=(-i "${REMOTE_SSH_KEY}")
 RSYNC_SSH="ssh -i ${REMOTE_SSH_KEY}"
+RSYNC_PROGRESS_OPTS=()
+if [[ "${SHOW_RSYNC_PROGRESS}" != "0" ]]; then
+	RSYNC_PROGRESS_OPTS=(--info=progress2 --human-readable)
+fi
 REMOTE_CARGO_ENV='source ~/.cargo/env 2>/dev/null; export PATH="$HOME/.cargo/bin:$PATH"; '
 # bindgen 在 aarch64 交叉编译时需要显式看到目标头文件，否则 silk-rs 会报 float.h not found
 REMOTE_BINDGEN_ENV='GCC_INCLUDE_DIR="$(aarch64-linux-gnu-gcc -print-file-name=include 2>/dev/null)"; TARGET_INCLUDE_DIR="/usr/aarch64-linux-gnu/include"; if [[ -n "$GCC_INCLUDE_DIR" && -d "$TARGET_INCLUDE_DIR" ]]; then export BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu="--target=aarch64-linux-gnu -I$GCC_INCLUDE_DIR -I$TARGET_INCLUDE_DIR"; fi; '
@@ -100,6 +105,7 @@ pull_remote_release_executables() {
 	echo "[$(date)] ${label} 预计拉回大小: $(format_mib "$total_bytes") MiB"
 	echo "[$(date)] 直接同步可执行 bin 到本地 target (${#remote_bins[@]} files)..."
 	rsync -az -e "${RSYNC_SSH}" \
+		"${RSYNC_PROGRESS_OPTS[@]}" \
 		--files-from=<(printf '%s\n' "${remote_bins[@]}") \
 		"${REMOTE_USER}@${REMOTE_HOST}:${remote_release_dir}/" \
 		"${local_release_dir}/"
@@ -210,11 +216,13 @@ do_upload() {
 		echo "[$(date)] 上传（仅指定路径）: ${UPLOAD_PATHS}"
 		cd "${LOCAL_SOURCE}"
 		rsync -az -R -e "${RSYNC_SSH}" \
+			"${RSYNC_PROGRESS_OPTS[@]}" \
 			$(for p in ${UPLOAD_PATHS}; do echo "./${p}"; done) \
 			"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 	else
 		echo "[$(date)] 上传（全部，排除 target/.git）"
 		rsync -az --delete -e "${RSYNC_SSH}" \
+			"${RSYNC_PROGRESS_OPTS[@]}" \
 			--exclude 'target' \
 			--exclude '.git' \
 			"${LOCAL_SOURCE}/" \
@@ -244,11 +252,11 @@ all)
 		RSYNC_EXCLUDE=(--exclude='deps/' --exclude='build/' --exclude='incremental/' --exclude='*.rlib' --exclude='*.d')
 		REMOTE_RELEASE_BYTES=$(ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "du -sb $(printf '%q' "${REMOTE_DIR}/target/${TARGET}/release") | cut -f1" 2>/dev/null || echo 0)
 		echo "[$(date)] release 预计拉回大小: $(format_mib "$REMOTE_RELEASE_BYTES") MiB"
-		echo "[$(date)] pulling full release directory (slower)..."
-		rsync -az -e "${RSYNC_SSH}" "${RSYNC_EXCLUDE[@]}" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/target/${TARGET}/release/" "${RELEASE_DIR}/"
-		echo "[$(date)] full release pull completed."
-		echo "[$(date)] release saved to: $(abs_path "${RELEASE_DIR}")"
-		print_pull_stats "${RELEASE_DIR}" "release"
+			echo "[$(date)] pulling full release directory (slower)..."
+			rsync -az -e "${RSYNC_SSH}" "${RSYNC_PROGRESS_OPTS[@]}" "${RSYNC_EXCLUDE[@]}" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/target/${TARGET}/release/" "${RELEASE_DIR}/"
+			echo "[$(date)] full release pull completed."
+			echo "[$(date)] release saved to: $(abs_path "${RELEASE_DIR}")"
+			print_pull_stats "${RELEASE_DIR}" "release"
 	else
 		pull_remote_release_executables "${REMOTE_DIR}/target/${TARGET}/release" "${RELEASE_DIR}" "release"
 	fi
@@ -295,11 +303,12 @@ dir)
 		PULL_TO="${PULL_LOCAL:-.}"
 		[[ "$PULL_TO" != /* ]] && PULL_TO="${LOCAL_OUTPUT}/${PULL_TO}"
 		if ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "test -d ${REMOTE_DIR}/${PULL_REMOTE}" 2>/dev/null; then
-			mkdir -p "${PULL_TO}"
-			rsync -az -e "${RSYNC_SSH}" \
-				"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${PULL_REMOTE}/" \
-				"${PULL_TO}/"
-			echo "[$(date)] 保存到: $(abs_path "${PULL_TO}")"
+				mkdir -p "${PULL_TO}"
+				rsync -az -e "${RSYNC_SSH}" \
+					"${RSYNC_PROGRESS_OPTS[@]}" \
+					"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${PULL_REMOTE}/" \
+					"${PULL_TO}/"
+				echo "[$(date)] 保存到: $(abs_path "${PULL_TO}")"
 			print_pull_stats "${PULL_TO}" "拉回"
 		else
 			pull_remote_file_direct \

@@ -1,0 +1,9 @@
+index=5
+case_name=context_two_hops_json_chain
+chat_id=1985996995
+turn1_task_id=053e8c15-2f4b-4b6b-9e55-400bfd6ae691
+turn1_prompt=先把这个 JSON 数组按 score 排序：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+turn2_task_id=29239a8b-f1e8-4f31-b23f-14b6da5a1306
+turn2_prompt=再把它转成 markdown 表格
+turn3_task_id=46cc5b79-da76-44df-865f-7c735d94d5d3
+turn3_prompt=把上一步那个表格里分数最高的名字单独告诉我

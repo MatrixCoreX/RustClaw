@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"f771df63-3b3c-4614-a465-1db483ccaf66","status":"succeeded","result_json":{"messages":["| name | score |\n| --- | --- |\n| alpha | 7 |\n| gamma | 9 |\n| beta | 12 |"],"text":"| name | score |\n| --- | --- |\n| alpha | 7 |\n| gamma | 9 |\n| beta | 12 |"},"error_text":null},"error":null}

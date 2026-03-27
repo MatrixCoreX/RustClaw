@@ -1,13 +1,13 @@
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Component, Path};
 use toml::Value as TomlValue;
 use tracing::{debug, info, warn};
 
 use crate::{
-    execution_adapters, llm_gateway, repo, run_skill_with_runner_outcome, AgentAction, AppState,
-    AskReply, ClaimedTask,
+    AgentAction, AppState, AskReply, ClaimedTask, execution_adapters, llm_gateway, repo,
+    run_skill_with_runner_outcome,
 };
 
 const AGENT_TOOL_SPEC_TEMPLATE: &str =
@@ -19,6 +19,9 @@ const SINGLE_PLAN_EXECUTION_PROMPT_PATH: &str = "prompts/single_plan_execution_p
 const LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/vendors/default/loop_incremental_plan_prompt.md");
 const LOOP_INCREMENTAL_PLAN_PROMPT_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
+const PLAN_REPAIR_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/vendors/default/plan_repair_prompt.md");
+const PLAN_REPAIR_PROMPT_PATH: &str = "prompts/plan_repair_prompt.md";
 pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
 
 fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), String> {
@@ -390,79 +393,17 @@ fn build_incremental_plan_prompt(
     )
 }
 
-fn is_meta_respond_instruction(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    let starts_with_meta = [
-        "请基于",
-        "基于",
-        "根据上述",
-        "根据上面的输出",
-        "请根据",
-        "based on the",
-        "please analyze",
-        "please explain",
-        "use the above output",
-    ]
-    .iter()
-    .any(|marker| {
-        if marker.is_ascii() {
-            lower.starts_with(marker)
-        } else {
-            trimmed.starts_with(marker)
-        }
-    });
-    let has_instruction_phrases = [
-        "请考虑以下因素",
-        "不需要询问",
-        "请查看上述",
-        "重点关注",
-        "如果需要我",
-        "判断标准",
-        "without seeing the actual output",
-        "please run the command first",
-        "please provide",
-        "do not ask",
-        "consider the following factors",
-    ]
-    .iter()
-    .any(|marker| {
-        if marker.is_ascii() {
-            lower.contains(marker)
-        } else {
-            trimmed.contains(marker)
-        }
-    });
-    starts_with_meta || has_instruction_phrases
+fn parse_plan_action_step(step: &Value, state: &AppState) -> Option<AgentAction> {
+    let raw_step = serde_json::to_string(step).ok()?;
+    let normalized = crate::parse_agent_action_json_with_repair(&raw_step, state).ok()?;
+    serde_json::from_value::<AgentAction>(normalized).ok()
 }
 
-fn parse_single_plan_actions(raw: &str, state: &AppState) -> Option<Vec<AgentAction>> {
-    fn parse_action_steps_from_values(values: Vec<Value>, state: &AppState) -> Vec<AgentAction> {
-        let mut actions = Vec::new();
-        for step in values {
-            let Ok(raw_step) = serde_json::to_string(&step) else {
-                continue;
-            };
-            let Ok(normalized) = crate::parse_agent_action_json_with_repair(&raw_step, state)
-            else {
-                continue;
-            };
-            let Ok(action) = serde_json::from_value::<AgentAction>(normalized) else {
-                continue;
-            };
-            match action {
-                AgentAction::Think { .. } => {}
-                AgentAction::Respond { content }
-                    if !actions.is_empty() && is_meta_respond_instruction(&content) => {}
-                _ => actions.push(action),
-            }
-        }
-        actions
-    }
-
+async fn parse_single_plan_actions(
+    raw: &str,
+    state: &AppState,
+    task: &ClaimedTask,
+) -> Option<Vec<AgentAction>> {
     let mut step_values = Vec::new();
     if let Some(value) = crate::parse_llm_json_raw_or_any::<Value>(raw) {
         match value {
@@ -485,34 +426,35 @@ fn parse_single_plan_actions(raw: &str, state: &AppState) -> Option<Vec<AgentAct
         }
     }
     if step_values.is_empty() {
+        let value = crate::parse_llm_json_raw_or_any::<Value>(raw)?;
+        let env = serde_json::from_value::<SinglePlanEnvelope>(value).ok()?;
+        step_values.extend(env.steps);
+    }
+    if step_values.is_empty() {
         return None;
     }
 
-    let actions = parse_action_steps_from_values(step_values, state);
-    if !actions.is_empty() {
-        return Some(actions);
-    }
-
-    let value = crate::parse_llm_json_raw_or_any::<Value>(raw)?;
-    let env = serde_json::from_value::<SinglePlanEnvelope>(value).ok()?;
-    if env.steps.is_empty() {
-        return None;
-    }
     let mut actions = Vec::new();
-    for step in env.steps {
-        let Ok(raw_step) = serde_json::to_string(&step) else {
-            continue;
-        };
-        let Ok(normalized) = crate::parse_agent_action_json_with_repair(&raw_step, state) else {
-            continue;
-        };
-        let Ok(action) = serde_json::from_value::<AgentAction>(normalized) else {
+    for step in step_values {
+        let Some(action) = parse_plan_action_step(&step, state) else {
             continue;
         };
         match action {
             AgentAction::Think { .. } => {}
-            AgentAction::Respond { content }
-                if !actions.is_empty() && is_meta_respond_instruction(&content) => {}
+            AgentAction::Respond { content } => {
+                if !actions.is_empty()
+                    && crate::semantic_judge::is_meta_respond_instruction(state, task, &content)
+                        .await
+                {
+                    debug!(
+                        "plan_meta_respond_suppressed task_id={} content={}",
+                        task.task_id,
+                        crate::truncate_for_log(&content)
+                    );
+                    continue;
+                }
+                actions.push(AgentAction::Respond { content });
+            }
             _ => actions.push(action),
         }
     }
@@ -759,19 +701,51 @@ fn register_step_output(
         key_prefix, global_step, round_step
     );
     let value = trimmed.to_string();
+    let output_kind = classify_observed_output_kind(trimmed);
+    let content_status = classify_observed_content_status(trimmed);
     loop_state.last_output = Some(value.clone());
     loop_state
         .output_vars
         .insert("last_output".to_string(), value.clone());
     loop_state
         .output_vars
+        .insert("last_output_kind".to_string(), output_kind.to_string());
+    loop_state.output_vars.insert(
+        "last_content_status".to_string(),
+        content_status.to_string(),
+    );
+    loop_state
+        .output_vars
         .insert(format!("s{global_step}.output"), value.clone());
     loop_state
         .output_vars
         .insert(format!("s{round_step}.output"), value.clone());
+    loop_state.output_vars.insert(
+        format!("s{global_step}.output_kind"),
+        output_kind.to_string(),
+    );
+    loop_state.output_vars.insert(
+        format!("s{round_step}.output_kind"),
+        output_kind.to_string(),
+    );
+    loop_state.output_vars.insert(
+        format!("s{global_step}.content_status"),
+        content_status.to_string(),
+    );
+    loop_state.output_vars.insert(
+        format!("s{round_step}.content_status"),
+        content_status.to_string(),
+    );
     loop_state
         .output_vars
         .insert(format!("{key_prefix}.last_output"), value);
+    loop_state
+        .output_vars
+        .insert(format!("{key_prefix}.output_kind"), output_kind.to_string());
+    loop_state.output_vars.insert(
+        format!("{key_prefix}.content_status"),
+        content_status.to_string(),
+    );
 }
 
 fn remember_written_file_alias(
@@ -826,6 +800,10 @@ fn register_file_path_output(
     loop_state
         .output_vars
         .insert(format!("{key_prefix}.path"), value);
+    loop_state.output_vars.insert(
+        "last_file_kind".to_string(),
+        infer_file_target_kind(trimmed).to_string(),
+    );
 }
 
 fn register_failed_step_output(
@@ -845,10 +823,24 @@ fn register_failed_step_output(
             .insert("last_output".to_string(), trimmed.to_string());
         loop_state
             .output_vars
+            .insert("last_output_kind".to_string(), "error".to_string());
+        loop_state
+            .output_vars
+            .insert("last_content_status".to_string(), "failed".to_string());
+        loop_state
+            .output_vars
             .insert("last_error".to_string(), trimmed.to_string());
         loop_state
             .output_vars
             .insert("failed_step.error".to_string(), trimmed.to_string());
+        loop_state.output_vars.insert(
+            format!("s{global_step}.content_status"),
+            "failed".to_string(),
+        );
+        loop_state.output_vars.insert(
+            format!("s{round_step}.content_status"),
+            "failed".to_string(),
+        );
         loop_state
             .output_vars
             .insert(format!("s{global_step}.error"), trimmed.to_string());
@@ -858,6 +850,9 @@ fn register_failed_step_output(
         loop_state
             .output_vars
             .insert(format!("{key_prefix}.error"), trimmed.to_string());
+        loop_state
+            .output_vars
+            .insert(format!("{key_prefix}.content_status"), "failed".to_string());
     }
     loop_state.output_vars.insert(
         "failed_step.action".to_string(),
@@ -947,18 +942,42 @@ fn classify_skill_failure_recovery(
     current_idx: usize,
     max_steps: usize,
     normalized_skill: &str,
+    call_args: Option<&Value>,
     err: &str,
 ) -> Option<&'static str> {
     if crate::skills::is_recoverable_skill_error(normalized_skill, err) {
         if has_remaining_action_after(actions, current_idx, max_steps) {
-            return Some("recoverable_failure_continue_round");
+            return Some("recoverable_failure_continue_in_round");
         }
         return Some("recoverable_failure_finalize");
     }
+    if has_remaining_action_after(actions, current_idx, max_steps)
+        && call_args
+            .map(|args| is_read_only_skill_invocation(normalized_skill, args))
+            .unwrap_or(false)
+    {
+        return Some("recoverable_failure_continue_in_round");
+    }
     if remaining_actions_are_discussion_only(state, actions, current_idx, max_steps) {
-        return Some("recoverable_failure_continue_round");
+        return Some("recoverable_failure_continue_in_round");
     }
     None
+}
+
+fn is_read_only_skill_invocation(normalized_skill: &str, args: &Value) -> bool {
+    match normalized_skill {
+        "read_file" | "list_dir" | "fs_search" | "system_basic" | "log_analyze" | "doc_parse"
+        | "git_basic" | "http_basic" | "stock" | "weather" | "web_search_extract"
+        | "health_check" | "task_control" | "chat" => true,
+        "db_basic" => args
+            .get("action")
+            .and_then(|v| v.as_str())
+            .map(|a| {
+                a.eq_ignore_ascii_case("sqlite_query") || a.eq_ignore_ascii_case("schema_version")
+            })
+            .unwrap_or(true),
+        _ => false,
+    }
 }
 
 fn rewrite_run_cmd_with_written_aliases(command: &str, loop_state: &LoopState) -> String {
@@ -1043,15 +1062,6 @@ fn attach_recent_execution_context_to_chat_args(args: &mut Value, loop_state: &L
     {
         context_lines.push(format!("last_written_file_path: {path}"));
     }
-    if let Some(path) = loop_state
-        .output_vars
-        .get("last_file_path")
-        .map(String::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        context_lines.push(format!("last_observed_file_path: {path}"));
-    }
     if let Some(last_error) = loop_state
         .output_vars
         .get("last_error")
@@ -1065,7 +1075,7 @@ fn attach_recent_execution_context_to_chat_args(args: &mut Value, loop_state: &L
         return;
     }
     let execution_context = format!(
-        "Recent execution context for this same user request (use it when relevant; do not claim the user failed to provide it if it already appears below).\nStay grounded in the supplied execution context. If the subtask says to base the answer on a directory listing / file content / command output, do not invent unseen files, directories, paths, lines, or results:\n{}",
+        "Recent execution context for this same user request (use it when relevant; do not claim the user failed to provide it if it already appears below).\nStay grounded in the supplied user-visible execution context. If the subtask says to base the answer on a directory listing / file content / command output, do not invent unseen files, directories, paths, lines, or results. Do not expose internal bookkeeping labels or meta-status words in the final answer:\n{}",
         context_lines.join("\n")
     );
     let merged_system_prompt = obj
@@ -1277,8 +1287,29 @@ async fn plan_round_actions(
         loop_state.round_no,
         crate::truncate_for_log(&plan_raw)
     );
-    let plan_actions = parse_single_plan_actions(&plan_raw, state)
-        .ok_or_else(|| "single plan parser failed: no executable steps".to_string())?;
+    let plan_actions = match parse_single_plan_actions(&plan_raw, state, task).await {
+        Some(actions) => actions,
+        None => {
+            warn!(
+                "plan_parse_failed task_id={} round={} attempting_repair",
+                task.task_id, loop_state.round_no
+            );
+            let repaired = repair_plan_actions(
+                state,
+                task,
+                goal,
+                user_text,
+                &tool_spec_template,
+                &skill_playbooks,
+                &plan_raw,
+                loop_state.round_no,
+            )
+            .await?;
+            parse_single_plan_actions(&repaired, state, task)
+                .await
+                .ok_or_else(|| "single plan parser failed: no executable steps".to_string())?
+        }
+    };
     let labels: Vec<String> = plan_actions.iter().map(plan_step_label).collect();
     info!(
         "act_split_trace task_id={} round={} split_steps={}",
@@ -1287,6 +1318,48 @@ async fn plan_round_actions(
         serde_json::to_string(&labels).unwrap_or_else(|_| "[]".to_string())
     );
     Ok(plan_actions)
+}
+
+async fn repair_plan_actions(
+    state: &AppState,
+    task: &ClaimedTask,
+    goal: &str,
+    user_text: &str,
+    tool_spec: &str,
+    skill_playbooks: &str,
+    raw_plan: &str,
+    round_no: usize,
+) -> Result<String, String> {
+    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+        state,
+        PLAN_REPAIR_PROMPT_PATH,
+        PLAN_REPAIR_PROMPT_TEMPLATE,
+    );
+    let prompt = crate::render_prompt_template(
+        &prompt_template,
+        &[
+            ("__GOAL__", goal),
+            ("__USER_REQUEST__", user_text),
+            ("__TOOL_SPEC__", tool_spec),
+            ("__SKILL_PLAYBOOKS__", skill_playbooks),
+            ("__RAW_PLAN__", raw_plan),
+        ],
+    );
+    crate::log_prompt_render(
+        &task.task_id,
+        "plan_repair_prompt",
+        &prompt_file,
+        Some(round_no),
+    );
+    let repaired =
+        llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file).await?;
+    info!(
+        "plan_llm_repair_response task_id={} round={} raw={}",
+        task.task_id,
+        round_no,
+        crate::truncate_for_log(&repaired)
+    );
+    Ok(repaired)
 }
 
 /// Decide if this respond should enter delivery. Avoid duplicate: do not publish when respond
@@ -1451,7 +1524,9 @@ async fn execute_actions_once(
                     Ok(outcome) => {
                         ensure_task_running(state, task)?;
                         let out = outcome.text.clone();
-                        if normalized_skill == "chat" && is_publishable_raw(&out) {
+                        if normalized_skill == "chat"
+                            && crate::semantic_judge::is_publishable_raw(state, task, &out).await
+                        {
                             loop_state.last_publishable_chat_output = Some(out.clone());
                         }
                         if let Some((original_path, _effective_path, user_visible_path)) =
@@ -1560,6 +1635,7 @@ async fn execute_actions_once(
                             idx,
                             policy.max_steps,
                             &normalized_skill,
+                            Some(&resolved_args),
                             &err,
                         ) {
                             register_failed_step_output(
@@ -1579,6 +1655,9 @@ async fn execute_actions_once(
                             ));
                             executed_actions += 1;
                             loop_state.total_steps_executed += 1;
+                            if stop_reason == "recoverable_failure_continue_in_round" {
+                                continue;
+                            }
                             stop_signal = Some(stop_reason.to_string());
                             break;
                         }
@@ -1601,6 +1680,7 @@ async fn execute_actions_once(
                 let mut resolved_args = resolve_arg_value(args, loop_state);
                 loop_state.tool_calls_total += 1;
                 let normalized_skill = state.resolve_canonical_skill_name(skill);
+                let recovery_args = resolved_args.clone();
                 let read_file_requested_path = if normalized_skill == "read_file" {
                     resolved_args
                         .get("path")
@@ -1752,6 +1832,7 @@ async fn execute_actions_once(
                             idx,
                             policy.max_steps,
                             &normalized_skill,
+                            Some(&recovery_args),
                             &err,
                         ) {
                             register_failed_step_output(
@@ -1771,6 +1852,9 @@ async fn execute_actions_once(
                             ));
                             executed_actions += 1;
                             loop_state.total_steps_executed += 1;
+                            if stop_reason == "recoverable_failure_continue_in_round" {
+                                continue;
+                            }
                             stop_signal = Some(stop_reason.to_string());
                             break;
                         }
@@ -1831,9 +1915,7 @@ async fn execute_actions_once(
                 if !publish_respond && !text.is_empty() {
                     debug!(
                         "executor_step_skip task_id={} round={} step={} type=respond reason=respond_not_publishable trace_only",
-                        task.task_id,
-                        loop_state.round_no,
-                        step_in_round
+                        task.task_id, loop_state.round_no, step_in_round
                     );
                 }
                 register_step_output(loop_state, global_step, step_in_round, "respond", &text);
@@ -1898,41 +1980,88 @@ fn should_synthesize_final_response(loop_state: &LoopState) -> bool {
         && loop_state.last_user_visible_respond.is_none()
 }
 
-/// Minimal filter: only allow raw outputs that look like publishable user-facing content.
-/// Excludes empty, pure process hints, and obvious internal confirmation text.
-fn is_publishable_raw(s: &str) -> bool {
-    let t = s.trim();
-    if t.is_empty() || t.len() <= 2 {
-        return false;
+fn classify_observed_output_kind(text: &str) -> &'static str {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        "empty"
+    } else if looks_like_planner_artifact(trimmed) {
+        "planner_artifact"
+    } else if trimmed.starts_with("FILE:") || trimmed.starts_with("IMAGE_FILE:") {
+        "delivery_token"
+    } else if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        "structured"
+    } else {
+        "content"
     }
-    let lower = t.to_ascii_lowercase();
-    const INTERNAL_PHRASES: &[&str] = &[
-        "ok",
-        "done",
-        "success",
-        "completed",
-        "yes",
-        "no",
-        "完成",
-        "成功",
-        "已执行",
-        "执行完成",
-        "好的",
-        "command completed",
-        "success.",
-    ];
-    if INTERNAL_PHRASES
-        .iter()
-        .any(|p| lower == *p || (lower.starts_with(p) && t.len() <= p.len() + 2))
+}
+
+fn classify_observed_content_status(text: &str) -> &'static str {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        "no_content"
+    } else if looks_like_planner_artifact(trimmed)
+        || trimmed.starts_with("FILE:")
+        || trimmed.starts_with("IMAGE_FILE:")
     {
+        "mentioned_only"
+    } else {
+        "content_available"
+    }
+}
+
+fn looks_like_planner_artifact(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
         return false;
     }
-    if t.chars()
-        .all(|c| c.is_ascii_digit() || c.is_ascii_punctuation() || c.is_whitespace())
+    if trimmed.starts_with("[TOOL_CALL]")
+        || trimmed.contains("[/TOOL_CALL]")
+        || (trimmed.contains("{tool =>") && trimmed.contains("args =>"))
     {
-        return false;
+        return true;
     }
-    true
+    if crate::prompt_utils::extract_agent_action_objects(trimmed)
+        .into_iter()
+        .next()
+        .is_some()
+    {
+        return true;
+    }
+    let Some(value) = crate::parse_llm_json_raw_or_any::<Value>(trimmed) else {
+        return false;
+    };
+    match value {
+        Value::Object(map) => {
+            map.contains_key("type")
+                || map.contains_key("tool")
+                || map.contains_key("skill")
+                || map.contains_key("action")
+                || map.get("steps").and_then(|v| v.as_array()).is_some()
+        }
+        _ => false,
+    }
+}
+
+fn infer_file_target_kind(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".log") {
+        "log_file"
+    } else if lower.ends_with(".json") {
+        "json_file"
+    } else if lower.ends_with(".sqlite") || lower.ends_with(".db") {
+        "db_file"
+    } else if lower.ends_with(".zip") || lower.ends_with(".tgz") || lower.ends_with(".tar.gz") {
+        "archive_file"
+    } else if Path::new(path)
+        .file_name()
+        .and_then(|v| v.to_str())
+        .map(|name| !name.contains('.'))
+        .unwrap_or(false)
+    {
+        "directory"
+    } else {
+        "file"
+    }
 }
 
 /// Build final delivery list and final_text with priority: last_user_visible_respond > delivery_messages (deduped).
@@ -1970,26 +2099,27 @@ pub(crate) fn build_final_delivery_with_priority(
 
 /// Build a single final delivery string from raw subtask results (no LLM). Only include publishable raw;
 /// process/internal lines are filtered out so they are not exposed as final delivery.
-fn fallback_finalize_from_raw(subtask_results: &[String]) -> String {
+async fn fallback_finalize_from_raw(
+    state: &AppState,
+    task: &ClaimedTask,
+    subtask_results: &[String],
+) -> String {
     if subtask_results.is_empty() {
         return String::new();
     }
     const MAX_FALLBACK_ITEMS: usize = 5;
     let take = subtask_results.len().min(MAX_FALLBACK_ITEMS);
     let slice = &subtask_results[subtask_results.len().saturating_sub(take)..];
-    let filtered: Vec<String> = slice
-        .iter()
-        .filter_map(|s| {
-            let t = normalize_user_visible_text(s);
-            if t.is_empty() {
-                None
-            } else if is_publishable_raw(t) {
-                Some(t.to_string())
-            } else {
-                None
-            }
-        })
-        .collect();
+    let mut filtered: Vec<String> = Vec::new();
+    for s in slice {
+        let t = normalize_user_visible_text(s);
+        if t.is_empty() {
+            continue;
+        }
+        if crate::semantic_judge::is_publishable_raw(state, task, t).await {
+            filtered.push(t.to_string());
+        }
+    }
     filtered.join("\n\n")
 }
 
@@ -2029,8 +2159,82 @@ async fn synthesize_final_response(
     let trimmed = out.trim().to_string();
     if trimmed.is_empty() {
         Ok(None)
+    } else if looks_like_planner_artifact(&trimmed) {
+        Ok(None)
+    } else if looks_like_missing_file_claim(&trimmed)
+        && extract_latest_successful_read_file_output(loop_state).is_some()
+    {
+        // If this turn already has a successful read_file result, avoid drifting into
+        // "file not found" text and retry synthesis grounded only on observed content.
+        if let Some(recovered) =
+            synthesize_from_observed_read_output(state, task, user_text, loop_state).await?
+        {
+            Ok(Some(recovered))
+        } else {
+            Ok(Some(trimmed))
+        }
     } else {
         Ok(Some(trimmed))
+    }
+}
+
+fn extract_latest_successful_read_file_output(loop_state: &LoopState) -> Option<String> {
+    for item in loop_state.subtask_results.iter().rev() {
+        let lower = item.to_ascii_lowercase();
+        if !lower.contains("skill(read_file): success") {
+            continue;
+        }
+        let body = normalize_user_visible_text(item).trim();
+        if body.is_empty() {
+            continue;
+        }
+        return Some(body.to_string());
+    }
+    None
+}
+
+fn looks_like_missing_file_claim(text: &str) -> bool {
+    let lower = text.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+    [
+        "not found",
+        "file not found",
+        "unable to read",
+        "cannot read",
+        "未找到",
+        "不存在",
+        "无法读取",
+        "不可读取",
+    ]
+    .iter()
+    .any(|m| lower.contains(m))
+}
+
+async fn synthesize_from_observed_read_output(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &LoopState,
+) -> Result<Option<String>, String> {
+    let Some(observed) = extract_latest_successful_read_file_output(loop_state) else {
+        return Ok(None);
+    };
+    let mut args = json!({
+        "text": format!(
+            "Original user request:\n{}\n\nObserved file content from a successful read_file step (authoritative):\n{}\n\nReturn the final user-facing answer directly based on the observed content. Do not claim missing/unreadable file because the read_file step already succeeded. Keep the reply concise and preserve requested format constraints from the user request.",
+            user_text,
+            crate::truncate_for_agent_trace(&observed)
+        )
+    });
+    attach_recent_execution_context_to_chat_args(&mut args, loop_state);
+    let retry = execution_adapters::run_skill(state, task, "chat", args).await?;
+    let trimmed = retry.trim();
+    if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed.to_string()))
     }
 }
 
@@ -2216,7 +2420,8 @@ async fn run_agent_with_loop(
 
     // Raw fallback: only when synthesis did not yield anything usable.
     if loop_state.delivery_messages.is_empty() && !loop_state.subtask_results.is_empty() {
-        let fallback = fallback_finalize_from_raw(loop_state.subtask_results.as_slice());
+        let fallback =
+            fallback_finalize_from_raw(state, task, loop_state.subtask_results.as_slice()).await;
         if !fallback.trim().is_empty() {
             append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, fallback);
             info!(

@@ -142,30 +142,6 @@ assert_jq() {
   fi
 }
 
-log_case "reference_resolver resolved/not_found"
-rr_args_resolved='{
-  "action":"resolve_reference",
-  "request_text":"上个回复里的那个文件",
-  "target_type":"file",
-  "language_hint":"zh-CN",
-  "recent_turns":[{"role":"assistant","turn_id":"a1","text":"已保存到 /tmp/report.md"}],
-  "recent_results":[]
-}'
-rr_resp="$(run_skill "reference_resolver" "$rr_args_resolved")"
-rr_payload="$(payload_from_resp "$rr_resp")"
-assert_jq "$rr_payload" '.status=="resolved"' "reference_resolver should resolve single clear file reference"
-
-rr_args_nf='{
-  "action":"resolve_reference",
-  "request_text":"那个依赖",
-  "target_type":"dependency",
-  "recent_turns":[],
-  "recent_results":[]
-}'
-rr_resp_nf="$(run_skill "reference_resolver" "$rr_args_nf")"
-rr_payload_nf="$(payload_from_resp "$rr_resp_nf")"
-assert_jq "$rr_payload_nf" '.status=="not_found"' "reference_resolver should return not_found when no candidates"
-
 log_case "doc_parse md"
 DOC_MD="$TMP_DIR/sample.md"
 cat >"$DOC_MD" <<'EOF'

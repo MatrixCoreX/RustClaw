@@ -1,17 +1,17 @@
 <!--
 用途: 在上下文不足时，生成一条简短澄清问句。
 组件: clawd（crates/clawd/src/intent_router.rs）函数 generate_clarify_question
-占位符: __PERSONA_PROMPT__, __REQUEST__, __RESOLVER_REASON__
+占位符: __PERSONA_PROMPT__, __REQUEST__, __RESOLVER_REASON__, __CANDIDATE_CONTEXT__
 -->
 
 
-Vendor tuning for DeepSeek models:
-- Make one decisive classification; do not hedge between multiple modes.
+Vendor tuning for OpenAI-compatible models:
+- Make one decisive classification and commit to it.
 - Output exactly the required JSON or label and nothing else.
 - Never output <think>, explanations, markdown fences, or prose before/after the required JSON or label.
+- Prefer ask_clarify when a missing key field would make execution unsafe or materially incomplete.
 - Resolve follow-up intent from recent execution context first, then memory; keep memory non-authoritative.
-- Prefer ask_clarify when one missing key field blocks safe execution.
-- Keep reasons short, concrete, and tightly grounded in observable evidence.
+- Keep reasons compact, explicit, and tightly grounded in observable evidence.
 
 You generate one short clarification question.
 
@@ -21,6 +21,7 @@ __PERSONA_PROMPT__
 Input:
 - Current user message: __REQUEST__
 - Resolver reason: __RESOLVER_REASON__
+- Candidate context (recent bindings / recent execution / recent turn evidence): __CANDIDATE_CONTEXT__
 
 Rules:
 1) Output exactly one concise question sentence.
@@ -29,3 +30,11 @@ Rules:
 4) No markdown, no bullet points, no explanation.
 5) Do not answer the original task.
 6) Never ask the user to prioritize among multiple requests when those requests are already explicit and self-contained.
+7) You may use candidate context to make the question more helpful, but only as confirmation. If recent context suggests one or two plausible targets, mention them briefly as options to confirm. Do not silently choose one on the user's behalf.
+8) If there is exactly one strong candidate target, ask confirmation in execution form (for example "Do you want me to execute this request on <candidate>?") instead of asking a generic "what do you want to do" question.
+9) Follow the language of the current user message (`__REQUEST__`) strictly. Ignore candidate-context language drift. If `__REQUEST__` is English, output English only; if it is Chinese, output Chinese only.
+
+10) Fresh deictic first-turn rule: when the request is deictic and target is not uniquely bound, ask for the concrete locator first; never output execution results, FILE tokens, or not-found claims.
+11) Locator handoff rule: if current message itself already is a concrete locator answer (path/url/filename/directory), do not ask a second generic clarification.
+12) Do not output generic re-ask forms like "what would you like me to do with <path>" when locator is already provided.
+13) Keep the question action-bound: ask for the missing locator for the user's original operation, not a new generic operation-choice question.

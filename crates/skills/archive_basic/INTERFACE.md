@@ -4,9 +4,12 @@
 > Keep this spec aligned with `crates/skills/archive_basic/src/main.rs`.
 
 ## Capability Summary
-- `archive_basic` provides workspace-scoped archive operations for listing archive contents, packing files/folders into an archive, and unpacking archives into a destination directory.
+- `archive_basic` provides archive operations for listing archive contents, packing files/folders into an archive, and unpacking archives into a destination directory.
 - Supported archive types are `zip` and `tar.gz`/`tgz`.
-- All input paths are validated to stay inside `WORKSPACE_ROOT` and reject `..` traversal.
+- `unpack` uses a non-interactive default overwrite strategy (zip: `unzip -o`; tar: `tar --overwrite`) to avoid hanging on interactive replace prompts.
+- Relative paths are resolved against `WORKSPACE_ROOT`.
+- Explicit absolute paths are accepted when they are already concrete user-provided paths.
+- All paths reject `..` traversal.
 
 ## Actions
 - `list`: list entries in an archive file.
@@ -17,14 +20,14 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | `list` | `action` | yes | string | - | Must be `list`. |
-| `list` | `archive` | yes | string(path) | - | Archive file path (relative to workspace or absolute in workspace). |
+| `list` | `archive` | yes | string(path) | - | Archive file path (relative to workspace or explicit absolute path). |
 | `pack` | `action` | yes | string | - | Must be `pack`. |
 | `pack` | `source` | yes | string(path) | - | Source file or directory to archive. |
 | `pack` | `archive` | yes | string(path) | - | Output archive file path. Parent dir is auto-created. |
 | `pack` | `format` | no | string | `zip` | Supported: `zip`, `tar.gz`, `tgz` (`tgz` handled as `tar.gz`). |
 | `unpack` | `action` | yes | string | - | Must be `unpack`. |
 | `unpack` | `archive` | yes | string(path) | - | Input archive file path. |
-| `unpack` | `dest` | yes | string(path) | - | Extraction destination directory (auto-created). |
+| `unpack` | `dest` | yes | string(path) | - | Extraction destination directory (auto-created; relative to workspace or explicit absolute path). |
 
 ## Error Contract
 - Input/shape errors:
@@ -37,7 +40,6 @@
   - `unsupported archive format for unpack`
 - Path safety errors:
   - `path with '..' is not allowed`
-  - `path is outside workspace`
 - Runtime/system errors:
   - `mkdir failed: <error>`
   - `run <bin> failed: <error>`

@@ -1,0 +1,7 @@
+index=18
+case_name=clarify_deictic_colloquial_en_read
+chat_id=17746206609
+turn1_task_id=7952d438-625f-4ca0-89f0-7e02376955f7
+turn1_prompt=Mind reading that README header and giving me a one-liner?
+turn2_task_id=447834f4-1a21-40c1-9106-a58dc12f32dc
+turn2_prompt=/home/guagua/test/README.md

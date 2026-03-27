@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"d02a2c11-f799-420a-ab0c-ac3329091f62","status":"succeeded","result_json":{"messages":["文件 /home/guagua/test/README.md 的读取操作已成功完成，文件类型为普通文件，内容状态为可用（content_available）。"],"text":"文件 /home/guagua/test/README.md 的读取操作已成功完成，文件类型为普通文件，内容状态为可用（content_available）。"},"error_text":null},"error":null}

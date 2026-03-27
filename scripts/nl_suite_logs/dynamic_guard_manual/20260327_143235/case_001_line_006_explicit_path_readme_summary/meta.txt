@@ -1,0 +1,8 @@
+ordinal=1
+source_line=6
+case_name=explicit_path_readme_summary
+chat_id=1985996991
+task_id=e9d112cf-af0c-4115-946c-cc9910d37207
+prompt=读一下 /home/guagua/test/README.md 开头并用一句话总结（如果文件可读，不要回答未找到）
+expect_regex=reserved for NL regression test artifacts
+reject_regex=未找到|无法读取|can't read

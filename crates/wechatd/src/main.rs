@@ -3,7 +3,7 @@ mod config_section;
 mod ilink;
 mod wechat_silk_wav;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -169,6 +169,7 @@ struct State {
     session: Arc<RwLock<Option<PersistedSession>>>,
     active_logins: Arc<RwLock<HashMap<String, ActiveLogin>>>,
     context_tokens: Arc<RwLock<HashMap<String, String>>>,
+    pending_key_bind_by_user: Arc<RwLock<HashSet<String>>>,
     sync_buf_path: Arc<PathBuf>,
     config_cache: Arc<Mutex<WeixinConfigManager>>,
 }
@@ -1451,6 +1452,140 @@ async fn bind_wechat_identity(
     Ok(body.data)
 }
 
+const WECHAT_BIND_REQUIRED_FOR_CHAT: &str = "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
+const WECHAT_BIND_HELP: &str = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。\nWelcome to RustClaw.\nPlease send /key <your_key> first to bind this account.";
+const WECHAT_BIND_SUCCESS: &str =
+    "绑定成功，请重新发送刚才的消息。\nKey bound successfully. Please send your previous message again.";
+const WECHAT_BIND_INVALID: &str = "key 无效，请重新输入。\nInvalid key. Please try again.";
+
+fn is_unbound_allowed_command(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("/start") || trimmed.starts_with("/help")
+}
+
+fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> Option<String> {
+    let trimmed = text.trim();
+    trimmed
+        .strip_prefix("/key")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            if expect_key_reply && !trimmed.is_empty() && !trimmed.starts_with('/') {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+}
+
+async fn should_expect_key_reply(state: &State, external_user_id: &str) -> bool {
+    state
+        .pending_key_bind_by_user
+        .read()
+        .await
+        .contains(external_user_id)
+}
+
+async fn set_expect_key_reply(state: &State, external_user_id: &str, enabled: bool) {
+    let mut guard = state.pending_key_bind_by_user.write().await;
+    if enabled {
+        guard.insert(external_user_id.to_string());
+    } else {
+        guard.remove(external_user_id);
+    }
+}
+
+async fn ensure_bound_before_task(
+    state: &State,
+    from_user_id: &str,
+    context_token: Option<&str>,
+    text_for_binding: Option<&str>,
+) -> Option<AuthIdentity> {
+    let identity = match resolve_wechat_identity(
+        &state.client,
+        &state.config.clawd_base_url,
+        from_user_id,
+        from_user_id,
+    )
+    .await
+    {
+        Ok(identity) => identity,
+        Err(err) => {
+            warn!("wechatd: resolve identity failed err={}", err);
+            return None;
+        }
+    };
+    if let Some(identity) = identity {
+        set_expect_key_reply(state, from_user_id, false).await;
+        return Some(identity);
+    }
+
+    if let Some(text) = text_for_binding {
+        let trimmed = text.trim();
+        if is_unbound_allowed_command(trimmed) {
+            set_expect_key_reply(state, from_user_id, true).await;
+            send_text_reply_via_session(state, from_user_id, context_token, WECHAT_BIND_HELP).await;
+            return None;
+        }
+        let expect_key_reply = should_expect_key_reply(state, from_user_id).await;
+        if let Some(candidate) = extract_bind_key_candidate(trimmed, expect_key_reply) {
+            match bind_wechat_identity(
+                &state.client,
+                &state.config.clawd_base_url,
+                from_user_id,
+                from_user_id,
+                &candidate,
+            )
+            .await
+            {
+                Ok(Some(_)) => {
+                    set_expect_key_reply(state, from_user_id, false).await;
+                    send_text_reply_via_session(
+                        state,
+                        from_user_id,
+                        context_token,
+                        WECHAT_BIND_SUCCESS,
+                    )
+                    .await;
+                }
+                Ok(None) => {
+                    set_expect_key_reply(state, from_user_id, true).await;
+                    send_text_reply_via_session(
+                        state,
+                        from_user_id,
+                        context_token,
+                        WECHAT_BIND_INVALID,
+                    )
+                    .await;
+                }
+                Err(err) => {
+                    warn!("wechatd: bind request failed err={}", err);
+                    set_expect_key_reply(state, from_user_id, true).await;
+                    send_text_reply_via_session(
+                        state,
+                        from_user_id,
+                        context_token,
+                        "绑定请求失败，请稍后重试。\nBind request failed, please try again later.",
+                    )
+                    .await;
+                }
+            }
+            return None;
+        }
+    }
+
+    set_expect_key_reply(state, from_user_id, true).await;
+    send_text_reply_via_session(
+        state,
+        from_user_id,
+        context_token,
+        WECHAT_BIND_REQUIRED_FOR_CHAT,
+    )
+    .await;
+    None
+}
+
 fn task_success_text(task: &TaskQueryResponse) -> String {
     if let Some(messages) = task
         .result_json
@@ -1976,65 +2111,18 @@ async fn spawn_inbound_ask_flow(
     from_user_id: String,
     msg: WeixinMessage,
     ask_text: String,
+    user_key: String,
     prefetched_typing_ticket: Option<String>,
 ) {
-    let identity = match resolve_wechat_identity(
-        &state.client,
-        &state.config.clawd_base_url,
-        &from_user_id,
-        &from_user_id,
-    )
-    .await
-    {
-        Ok(identity) => identity,
-        Err(err) => {
-            warn!("wechatd: resolve identity failed err={}", err);
-            return;
-        }
-    };
-    if let Some(identity) = identity {
-        let typing_ticket = prefetched_typing_ticket.filter(|ticket| !ticket.trim().is_empty());
-        tokio::spawn(submit_wechat_task_and_reply(
-            state,
-            from_user_id,
-            ask_text,
-            msg.context_token,
-            Some(identity.user_key),
-            typing_ticket,
-        ));
-        return;
-    }
-    match bind_wechat_identity(
-        &state.client,
-        &state.config.clawd_base_url,
-        &from_user_id,
-        &from_user_id,
-        "",
-    )
-    .await
-    {
-        Ok(Some(_)) => {
-            send_text_reply_via_session(
-                &state,
-                &from_user_id,
-                msg.context_token.as_deref(),
-                "绑定成功。请再发一次该媒体以便处理。",
-            )
-            .await;
-        }
-        Ok(None) => {
-            send_text_reply_via_session(
-                &state,
-                &from_user_id,
-                msg.context_token.as_deref(),
-                "请先发送你的 RustClaw key 完成绑定（文本消息）。",
-            )
-            .await;
-        }
-        Err(err) => {
-            warn!("wechatd: bind request failed err={}", err);
-        }
-    }
+    let typing_ticket = prefetched_typing_ticket.filter(|ticket| !ticket.trim().is_empty());
+    tokio::spawn(submit_wechat_task_and_reply(
+        state,
+        from_user_id,
+        ask_text,
+        msg.context_token,
+        Some(user_key),
+        typing_ticket,
+    ));
 }
 
 async fn spawn_inbound_skill_flow(
@@ -2043,66 +2131,19 @@ async fn spawn_inbound_skill_flow(
     msg: WeixinMessage,
     skill_name: &'static str,
     args: Value,
+    user_key: String,
     prefetched_typing_ticket: Option<String>,
 ) {
-    let identity = match resolve_wechat_identity(
-        &state.client,
-        &state.config.clawd_base_url,
-        &from_user_id,
-        &from_user_id,
-    )
-    .await
-    {
-        Ok(identity) => identity,
-        Err(err) => {
-            warn!("wechatd: resolve identity failed err={}", err);
-            return;
-        }
-    };
-    if let Some(identity) = identity {
-        let typing_ticket = prefetched_typing_ticket.filter(|ticket| !ticket.trim().is_empty());
-        tokio::spawn(submit_wechat_run_skill_and_reply(
-            state,
-            from_user_id,
-            msg.context_token,
-            Some(identity.user_key),
-            typing_ticket,
-            skill_name,
-            args,
-        ));
-        return;
-    }
-    match bind_wechat_identity(
-        &state.client,
-        &state.config.clawd_base_url,
-        &from_user_id,
-        &from_user_id,
-        "",
-    )
-    .await
-    {
-        Ok(Some(_)) => {
-            send_text_reply_via_session(
-                &state,
-                &from_user_id,
-                msg.context_token.as_deref(),
-                "绑定成功。请再发一次该媒体以便处理。",
-            )
-            .await;
-        }
-        Ok(None) => {
-            send_text_reply_via_session(
-                &state,
-                &from_user_id,
-                msg.context_token.as_deref(),
-                "请先发送你的 RustClaw key 完成绑定（文本消息）。",
-            )
-            .await;
-        }
-        Err(err) => {
-            warn!("wechatd: bind request failed err={}", err);
-        }
-    }
+    let typing_ticket = prefetched_typing_ticket.filter(|ticket| !ticket.trim().is_empty());
+    tokio::spawn(submit_wechat_run_skill_and_reply(
+        state,
+        from_user_id,
+        msg.context_token,
+        Some(user_key),
+        typing_ticket,
+        skill_name,
+        args,
+    ));
 }
 
 async fn handle_incoming_message(state: State, msg: WeixinMessage) {
@@ -2134,6 +2175,17 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     };
 
     if extract_text_message(&msg).is_none() {
+        let Some(identity) = ensure_bound_before_task(
+            &state,
+            &from_user_id,
+            msg.context_token.as_deref(),
+            None,
+        )
+        .await
+        else {
+            return;
+        };
+        let bound_user_key = identity.user_key;
         if let Some((ep, key)) = inbound_image_decrypt_params(&msg) {
             let cdn = state.config.cdn_base_url.trim();
             match download_decrypted_media(&state.client, &ep, &key, cdn, "inbound-image").await {
@@ -2173,6 +2225,7 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                             "images": [{"path": rel}],
                             "detail_level": "normal"
                         }),
+                        bound_user_key.clone(),
                         prefetched_typing_ticket.clone(),
                     )
                     .await;
@@ -2220,6 +2273,7 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         from_user_id,
                         msg,
                         hint,
+                        bound_user_key.clone(),
                         prefetched_typing_ticket.clone(),
                     )
                     .await;
@@ -2271,6 +2325,7 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                                 "include_metadata": true,
                                 "table_mode": "basic"
                             }),
+                            bound_user_key.clone(),
                             prefetched_typing_ticket.clone(),
                         )
                         .await;
@@ -2284,6 +2339,7 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         from_user_id,
                         msg,
                         hint,
+                        bound_user_key.clone(),
                         prefetched_typing_ticket.clone(),
                     )
                     .await;
@@ -2344,6 +2400,7 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         msg,
                         "audio_transcribe",
                         json!({ "audio": { "path": rel } }),
+                        bound_user_key.clone(),
                         prefetched_typing_ticket.clone(),
                     )
                     .await;
@@ -2379,63 +2436,24 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     })
     .await;
 
-    let identity = match resolve_wechat_identity(
-        &state.client,
-        &state.config.clawd_base_url,
+    let Some(identity) = ensure_bound_before_task(
+        &state,
         &from_user_id,
-        &from_user_id,
+        msg.context_token.as_deref(),
+        Some(text.as_str()),
     )
     .await
-    {
-        Ok(identity) => identity,
-        Err(err) => {
-            warn!("wechatd: resolve identity failed err={}", err);
-            return;
-        }
-    };
-    if let Some(identity) = identity {
-        tokio::spawn(submit_wechat_task_and_reply(
-            state,
-            from_user_id,
-            text,
-            msg.context_token,
-            Some(identity.user_key),
-            prefetched_typing_ticket,
-        ));
+    else {
         return;
-    }
-
-    match bind_wechat_identity(
-        &state.client,
-        &state.config.clawd_base_url,
-        &from_user_id,
-        &from_user_id,
-        text.trim(),
-    )
-    .await
-    {
-        Ok(Some(_)) => {
-            send_text_reply_via_session(
-                &state,
-                &from_user_id,
-                msg.context_token.as_deref(),
-                "绑定成功，请重新发送你的问题。",
-            )
-            .await;
-        }
-        Ok(None) => {
-            send_text_reply_via_session(
-                &state,
-                &from_user_id,
-                msg.context_token.as_deref(),
-                "请先发送你的 RustClaw key 完成绑定。",
-            )
-            .await;
-        }
-        Err(err) => {
-            warn!("wechatd: bind request failed err={}", err);
-        }
-    }
+    };
+    tokio::spawn(submit_wechat_task_and_reply(
+        state,
+        from_user_id,
+        text,
+        msg.context_token,
+        Some(identity.user_key),
+        prefetched_typing_ticket,
+    ));
 }
 
 async fn monitor_wechat_loop(state: State) {
@@ -2598,6 +2616,7 @@ async fn main() -> anyhow::Result<()> {
         session: Arc::new(RwLock::new(persisted_session)),
         active_logins: Arc::new(RwLock::new(HashMap::new())),
         context_tokens: Arc::new(RwLock::new(HashMap::new())),
+        pending_key_bind_by_user: Arc::new(RwLock::new(HashSet::new())),
         sync_buf_path,
         config_cache: Arc::new(Mutex::new(WeixinConfigManager::new())),
     };
@@ -2634,7 +2653,8 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_login_status_response, extract_text_message, qr_render_content, qr_svg_data_url,
+        build_login_status_response, extract_bind_key_candidate, extract_text_message,
+        is_unbound_allowed_command, qr_render_content, qr_svg_data_url,
         wechat_runtime_status_file_path, workspace_root_from_config_path, ActiveLogin, MessageItem,
         QRCodeResponse, TextItem, VoiceItem, WechatRuntimeStatus, WeixinMessage,
     };
@@ -2776,5 +2796,45 @@ mod tests {
             context_token: None,
         };
         assert_eq!(extract_text_message(&msg).as_deref(), Some("voice text"));
+    }
+
+    #[test]
+    fn unbound_plain_text_requires_binding_prompt() {
+        assert!(!is_unbound_allowed_command("hello"));
+        assert_eq!(extract_bind_key_candidate("hello", false), None);
+    }
+
+    #[test]
+    fn unbound_key_command_keeps_binding_flow_available() {
+        assert_eq!(
+            extract_bind_key_candidate("/key rk_live_123", false).as_deref(),
+            Some("rk_live_123")
+        );
+    }
+
+    #[test]
+    fn unbound_help_and_start_are_allowed() {
+        assert!(is_unbound_allowed_command("/start"));
+        assert!(is_unbound_allowed_command("/help"));
+    }
+
+    #[test]
+    fn waiting_key_state_accepts_plain_key_reply() {
+        assert_eq!(
+            extract_bind_key_candidate("rk_live_abc", true).as_deref(),
+            Some("rk_live_abc")
+        );
+    }
+
+    #[test]
+    fn waiting_key_state_rejects_non_binding_commands() {
+        assert_eq!(extract_bind_key_candidate("/run image_vision {}", true), None);
+        assert_eq!(extract_bind_key_candidate("/crypto btc", true), None);
+    }
+
+    #[test]
+    fn unbound_media_like_empty_text_requires_binding_prompt() {
+        assert!(!is_unbound_allowed_command(""));
+        assert_eq!(extract_bind_key_candidate("", false), None);
     }
 }

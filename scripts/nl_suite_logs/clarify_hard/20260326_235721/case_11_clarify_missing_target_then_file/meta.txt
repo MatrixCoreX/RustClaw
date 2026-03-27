@@ -1,0 +1,7 @@
+index=11
+case_name=clarify_missing_target_then_file
+chat_id=1985997001
+turn1_task_id=3c7fb028-8909-43cf-8bec-e483c1ada94d
+turn1_prompt=把那个文件发给我，不要贴内容
+turn2_task_id=29d9c2f4-b564-42cd-9b1f-fe65f7fd6fd5
+turn2_prompt=/home/guagua/test/docs/definitely_missing_clarify_hard_001.txt

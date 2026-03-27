@@ -1,0 +1,9 @@
+index=8
+case_name=context_ambiguous_should_ask_chain
+chat_id=1985996998
+turn1_task_id=729868d2-b598-4a1e-ad25-ded309cbed35
+turn1_prompt=先看一下 /home/guagua/test/docs 目录下有哪些文件
+turn2_task_id=e2b343d8-a117-4c05-8c6d-967d85f55384
+turn2_prompt=再看一下 /home/guagua/test/logs 目录下有哪些文件
+turn3_task_id=872c4671-fe11-469f-a5c1-b13d33f679f5
+turn3_prompt=把那个最大的发给我

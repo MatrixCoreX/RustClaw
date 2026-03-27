@@ -1,0 +1,6 @@
+ordinal=14
+source_line=17
+case_name=explicit_missing_file_graceful
+chat_id=17746298865
+task_id=76fa3ea9-ec6b-46d3-a8ac-e2f83de3602c
+prompt=把 /home/guagua/test/docs/not_exists_case_003.md 发给我，不要编造

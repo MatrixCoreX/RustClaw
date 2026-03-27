@@ -17,9 +17,10 @@ Vendor tuning for OpenAI-compatible models:
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
-- `archive_basic` provides workspace-scoped archive operations for listing archive contents, packing files/folders into an archive, and unpacking archives into a destination directory.
+- `archive_basic` provides archive operations for listing archive contents, packing files/folders into an archive, and unpacking archives into a destination directory.
 - Supported archive types are `zip` and `tar.gz`/`tgz`.
-- All input paths are validated to stay inside `WORKSPACE_ROOT` and reject `..` traversal.
+- Relative paths resolve from `WORKSPACE_ROOT`; explicit absolute paths are also allowed when the user already supplied them exactly.
+- All input paths reject `..` traversal.
 
 ## Actions (from interface)
 - `list`: list entries in an archive file.
@@ -30,14 +31,14 @@ Vendor tuning for OpenAI-compatible models:
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | `list` | `action` | yes | string | - | Must be `list`. |
-| `list` | `archive` | yes | string(path) | - | Archive file path (relative to workspace or absolute in workspace). |
+| `list` | `archive` | yes | string(path) | - | Archive file path (relative to workspace or explicit absolute path). |
 | `pack` | `action` | yes | string | - | Must be `pack`. |
 | `pack` | `source` | yes | string(path) | - | Source file or directory to archive. |
 | `pack` | `archive` | yes | string(path) | - | Output archive file path. Parent dir is auto-created. |
 | `pack` | `format` | no | string | `zip` | Supported: `zip`, `tar.gz`, `tgz` (`tgz` handled as `tar.gz`). |
 | `unpack` | `action` | yes | string | - | Must be `unpack`. |
 | `unpack` | `archive` | yes | string(path) | - | Input archive file path. |
-| `unpack` | `dest` | yes | string(path) | - | Extraction destination directory (auto-created). |
+| `unpack` | `dest` | yes | string(path) | - | Extraction destination directory (auto-created; relative to workspace or explicit absolute path). |
 
 ## Error Contract (from interface)
 - Input/shape errors:
@@ -50,7 +51,6 @@ Vendor tuning for OpenAI-compatible models:
   - `unsupported archive format for unpack`
 - Path safety errors:
   - `path with '..' is not allowed`
-  - `path is outside workspace`
 - Runtime/system errors:
   - `mkdir failed: <error>`
   - `run <bin> failed: <error>`

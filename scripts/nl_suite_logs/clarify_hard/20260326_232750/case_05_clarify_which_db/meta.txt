@@ -1,0 +1,7 @@
+index=5
+case_name=clarify_which_db
+chat_id=1985996995
+turn1_task_id=9989e194-bc00-4df1-b944-dd707084af93
+turn1_prompt=查一下那个 sqlite 里有哪些表
+turn2_task_id=fcd4b65e-8abf-404f-a1bd-7a1c641f8891
+turn2_prompt=data/db-basic-contract.sqlite

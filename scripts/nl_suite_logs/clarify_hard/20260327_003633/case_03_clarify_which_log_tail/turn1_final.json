@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"e34c7959-b173-4bf9-b9e4-9691f4245dbc","status":"succeeded","result_json":{"messages":["{\"path\": \"/home/guagua/test/logs/app.log\", \"lines\": 20}"],"text":"{\"path\": \"/home/guagua/test/logs/app.log\", \"lines\": 20}"},"error_text":null},"error":null}

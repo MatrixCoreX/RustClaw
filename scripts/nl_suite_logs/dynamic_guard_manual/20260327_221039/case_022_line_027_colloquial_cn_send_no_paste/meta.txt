@@ -1,0 +1,6 @@
+ordinal=22
+source_line=27
+case_name=colloquial_cn_send_no_paste
+chat_id=17746206513
+task_id=02686f57-acbd-4f3c-b4a6-eb597496cdc6
+prompt=别贴正文，直接把 /home/guagua/test/docs/service_notes.md 发我

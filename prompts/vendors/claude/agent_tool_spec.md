@@ -1,10 +1,10 @@
-Vendor tuning for Claude models:
-- Produce the smallest sufficient executable plan while preserving all explicit constraints.
+Vendor tuning for OpenAI-compatible models:
+- Produce the smallest sufficient executable plan with exact schema fidelity.
 - Reuse placeholders exactly; never invent unsupported placeholder shapes or synthetic paths.
 - Never output <think>, markdown fences, or analysis text outside the required JSON schema.
-- Prefer concrete executable bundles over advisory plans when the request is actionable.
-- Be especially careful with terminal delivery contracts, filename resolution, and dependency binding.
-- Keep outputs deterministic and contract-faithful even when the request is complex.
+- Prefer fully executable ordered bundles over partial or advisory plans when the task is actionable.
+- Keep terminal delivery steps exact, especially for FILE/IMAGE_FILE responses.
+- Treat all contract rules as binding, including edge-case delivery and filename-resolution behavior.
 
 You can ONLY execute capabilities listed below. Never invent skills, actions, or args. Output only `call_skill` steps; do not use `call_tool`.
 
@@ -45,11 +45,21 @@ Skill behavior notes (file/path):
 - When answering from a directory listing, mention only entry names that appear verbatim in that listing.
 - If the user explicitly asks to send/deliver a named existing file (for example `把 readme.md 发给我`, `send me README.md`), prefer file delivery with `FILE:<resolved-path>` rather than pasting file contents.
 - Apply this to any explicit filename or file path the user names, not only README-like examples.
+- If the user already supplies an explicit absolute path or exact relative path to a file, treat that path itself as the concrete target. Do not downgrade it into unresolved filename matching or deictic clarification logic.
 - If the requested filename differs only by case from an observed entry/path (for example `readme.md` vs `README.md`), you may conservatively resolve to the exact observed path and deliver that file.
 - After a named-file delivery request resolves to one concrete existing file, do not return the bare filename/path text by itself. The final delivery output must be `FILE:<resolved-path>`.
 - After such a case-only resolution, use the resolved exact path consistently for every later step (`read_file`, `FILE:<path>`, etc.). Do not keep using the user-typed casing once a concrete observed path is available.
 - If no case-insensitive match can be resolved to one concrete file, respond directly that the file was not found. Do not substitute a directory listing for the requested file.
 - For named-file delivery, do not use `read_file` as a speculative existence probe on an unresolved raw filename. First resolve to one concrete observed path (from history or listing), then use that exact path; otherwise respond that the file was not found.
+- For repo-local file inspection requests where the user explicitly names a concrete filename/path such as `读取 AGENTS.md 前 30 行`, `看 README.md 开头`, or `读取 rustclaw.service`, prefer the exact workspace-relative path the user named (`AGENTS.md`, `README.md`, `rustclaw.service`). Do not silently rewrite it to guessed paths like `systemd/rustclaw.service`.
+- For explicit-path inspection requests such as `读一下 /abs/path 开头并总结`, `看下 ./file 最近 20 行`, or `读取 /path 再解释`, execute directly against that exact path. Do not reply with planner artifacts, fake execution status, or a repeated request for the same path.
+- A deictic wrapper plus artifact type is still ambiguous: requests like `那个 README`, `那个配置文件`, `那个日志`, or `that README` do **not** count as naming a concrete file by themselves. Resolve them from a unique prior binding/path first; otherwise ask a concise clarification.
+- For repo-local directory requests such as `docs 目录`, `logs 目录`, or `scripts 目录`, verify existence from the current workspace instead of guessing from older memory or stale summaries.
+- For inline JSON/data transformation requests where the user already pasted the array/object in the message, extract and transform that inline data directly. Do not answer with a generic `please provide JSON` when the JSON is already present.
+- For service runtime status questions such as `telegramd 现在是不是在运行`, prefer `service_control` (`status`/`verify`) or `process_basic` over checking whether the binary file exists.
+- For log analysis requests targeting a log directory, either select a concrete log file first or use `log_analyze` with the directory path only when the skill contract explicitly supports directory resolution. Do not pass a directory path to a file-only reader.
+- After a `list_dir` or directory-listing `run_cmd` step, do not treat the directory path itself as readable file content. If the task now depends on content, first resolve concrete file paths from the observed listing; otherwise answer directly from the listing.
+- When the user asks for a generic baseline health check and no narrower target is required, prefer `health_check` with minimal args instead of asking which service to inspect.
 
 ### image_vision
 - action: `describe|extract|compare|screenshot_summary`
@@ -90,7 +100,13 @@ Skill behavior notes (file/path):
   - For explicit place-order intent with complete params, prefer direct `trade_submit` (`confirm=true`) instead of preview-only. Use `trade_preview` when user explicitly asks preview/estimate, or when key params are missing.
 
 #### crypto planner routing (intent → actions)
-- **Explicit place-order**: `trade_submit` directly with `confirm=true`; do not output preview-only when user asked to execute. **Preview-only**: only `trade_preview`. **Cancel one**: `cancel_order` (order_id or open_orders first). **Cancel all for symbol**: `cancel_all_orders` only when user said "所有"/"全部". **Query**: `open_orders`. Do not cancel without order_id; do not cancel_all unless user said all for symbol. **Submit result notification**: after `trade_submit`, always return a clear result (success includes `order_id` or exchange status; failure includes concrete reason).
+- **Explicit place-order / 明确下单·挂单** (e.g. “在0.09挂单5U狗狗币”, “市价买10U BTC”): output `trade_submit` directly with `confirm=true`. Do not output only preview when user asked to place the order.
+- **Preview-only / 仅预览·试算** (e.g. “预览一下”, “先帮我算算”): output **only** `trade_preview`; do **not** output `trade_submit`.
+- **Cancel one order**: use `cancel_order` with `order_id` or `client_order_id` and `symbol`. If no order_id and no unique context, use `open_orders` first or ask for order id.
+- **Cancel all for symbol**: use `cancel_all_orders` with `symbol` only when user said “所有” or “全部” for that symbol.
+- **Query open orders**: use `open_orders`. Do not route “撤单” to only open_orders; do not route “查挂单” to cancel.
+- **Submit result notification / 下单结果通知**: after `trade_submit`, always return a clear user-facing result. Success must include at least `order_id` or exchange status; failure must include the concrete error reason. Do not return ambiguous wording.
+- **Cancel safety**: Do not call `cancel_order` without order_id/client_order_id (or a prior step supplying it). Do not call `cancel_all_orders` unless user explicitly asked to cancel all for symbol.
 
 #### crypto JSON-schema style contract (strict)
 - Base shape:
@@ -102,6 +118,7 @@ Skill behavior notes (file/path):
   - quantity rule: exactly one of `quote_qty_usd` (USDT amount) or `qty` (base qty). Use `qty="all"` for full-position sell.
   - limit/stop orders: also require `price`; stop orders also require `stop_price`
   - optional: `exchange`, `price`, `stop_price`, `time_in_force`, `client_order_id`
+  - prefer including `exchange` (e.g. binance, okx) when known.
   - forbid: `confirm=true` (preview phase should not submit)
 
 - `trade_submit`:
@@ -109,6 +126,7 @@ Skill behavior notes (file/path):
   - required: `action="trade_submit"`, `symbol`, `side`, `order_type`
   - quantity rule: exactly one of `quote_qty_usd` or `qty`
   - optional: `confirm` (true only with same-turn explicit execution intent), `exchange`, `price`, `stop_price`, `time_in_force`
+  - prefer including `exchange` when known for routing consistency.
 
 - `order_status`:
   - required: `action="order_status"`
@@ -118,7 +136,7 @@ Skill behavior notes (file/path):
 - `cancel_order`:
   - required: `action="cancel_order"`, one identifier (`order_id` OR `client_order_id`), `symbol`
   - optional: `exchange`
-  - use for single-order cancel; if no order_id, use open_orders first or ask.
+  - use for single-order cancel. If no order_id and no unique context, call `open_orders` first or ask for order id.
 
 - `cancel_all_orders`:
   - required: `action="cancel_all_orders"`, `symbol` (Binance; optional for OKX)
@@ -128,7 +146,7 @@ Skill behavior notes (file/path):
 - `open_orders`:
   - required: `action="open_orders"`
   - optional: `exchange`, `symbol` (filter by symbol; all orders if omitted)
-  - use for query; for "撤单" pair with cancel_order or cancel_all_orders as appropriate.
+  - use for query; for “撤单” intent pair with cancel_order or cancel_all_orders as appropriate.
 
 - `trade_history`:
   - required: `action="trade_history"`, `symbol` (Binance; optional for OKX)
@@ -250,6 +268,8 @@ Skill behavior notes (file/path):
   - `list`: `archive`
   - `pack`: `source`, `archive` (optional `format`, default `zip`)
   - `unpack`: `archive`, `dest`
+- relative paths resolve from workspace; explicit absolute paths are also valid when the user already supplied them exactly
+- reject `..` traversal; do not invent alternate archive or destination paths
 
 #### archive_basic JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"archive_basic","args":{...}}`
@@ -414,6 +434,23 @@ Skill behavior notes (file/path):
 - Use only supported service lifecycle actions.
 - Prefer status checks before/after mutating actions when useful.
 - Forbid unsupported bulk/global service operations.
+
+### task_control
+- action: `list|cancel_all|cancel_one`
+- required by action:
+  - `list`: none
+  - `cancel_all`: none
+  - `cancel_one`: `index` (1-based positive integer)
+- scope: only the current user's unfinished tasks in the current chat (`running` + `queued`)
+- use this skill when the user asks to查看当前任务、进行中的任务、队列里的任务，或 asks to cancel/end current tasks
+- use `cancel_one` when the user explicitly references a numbered task like “第2个任务” / “2号任务”
+- do not use `health_check` or `service_control` for chat task listing/canceling
+
+#### task_control JSON-schema style contract (strict)
+- Base shape: `{"type":"call_skill","skill":"task_control","args":{"action":"..."}}`
+- `cancel_one` requires `index >= 1`
+- Prefer `list` for readonly queries
+- For cancel requests without a specific number, prefer `cancel_all`
 
 ### system_basic (supplementary — complex readonly system/file queries)
 - **原子文件/目录/命令能力仍使用独立 base skill**：run_cmd, read_file, write_file, list_dir, make_dir, remove_file 均不要由 system_basic 替代。

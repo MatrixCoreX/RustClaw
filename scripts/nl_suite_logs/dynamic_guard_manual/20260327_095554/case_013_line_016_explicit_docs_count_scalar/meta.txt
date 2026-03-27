@@ -1,0 +1,6 @@
+ordinal=13
+source_line=16
+case_name=explicit_docs_count_scalar
+chat_id=2990030013
+task_id=de0808f3-2780-4321-a5af-5e1b0ea13b59
+prompt=统计 /home/guagua/test/docs 下直接子项数量，只输出数字

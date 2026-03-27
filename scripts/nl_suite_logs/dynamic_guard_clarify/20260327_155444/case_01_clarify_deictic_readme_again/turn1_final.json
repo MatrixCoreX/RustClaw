@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"33165816-b3d8-42b7-90aa-9c977d3e7c6d","status":"succeeded","result_json":{"messages":["该文件是测试工作区的说明文档，介绍了该目录用于存放NL回归测试的产物和包装脚本，同时指出被测试的`clawd`运行时仍使用其自己配置的工作区根目录。"],"text":"该文件是测试工作区的说明文档，介绍了该目录用于存放NL回归测试的产物和包装脚本，同时指出被测试的`clawd`运行时仍使用其自己配置的工作区根目录。"},"error_text":null},"error":null}

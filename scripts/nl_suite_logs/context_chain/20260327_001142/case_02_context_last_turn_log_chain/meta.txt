@@ -1,0 +1,9 @@
+index=2
+case_name=context_last_turn_log_chain
+chat_id=1985996992
+turn1_task_id=2bfcc3d1-c7f8-42c6-8a82-caef739beb84
+turn1_prompt=先记一下，“那个日志”指 /home/guagua/test/logs/app.log
+turn2_task_id=3677665d-3a55-4f71-8ab1-113ab94646ef
+turn2_prompt=看一下那个日志最近 20 行
+turn3_task_id=6b68647d-3d51-49fd-8072-641d71c277a1
+turn3_prompt=从里面挑一个最值得注意的点
