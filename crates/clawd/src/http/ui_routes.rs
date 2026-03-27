@@ -4,7 +4,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom};
@@ -14,14 +14,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 
 use super::super::{
-    bind_channel_identity, channel_gateway_process_stats, create_auth_key, current_rss_bytes,
-    delete_auth_key_by_id, exchange_credential_status_for_user_key, feishud_process_stats,
-    larkd_process_stats, list_auth_keys, mask_secret, oldest_running_task_age_seconds,
-    reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
-    task_count_by_status, telegramd_process_stats, update_auth_key_by_id,
-    upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
-    wa_webd_process_stats, webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
-    ApiResponse, AppState, HealthResponse, LocalInteractionContext,
+    ApiResponse, AppState, HealthResponse, LocalInteractionContext, bind_channel_identity,
+    channel_gateway_process_stats, create_auth_key, current_rss_bytes, delete_auth_key_by_id,
+    exchange_credential_status_for_user_key, feishud_process_stats, larkd_process_stats,
+    list_auth_keys, mask_secret, oldest_running_task_age_seconds, reload_skill_views,
+    resolve_auth_identity_by_key, resolve_channel_binding_identity, task_count_by_status,
+    telegramd_process_stats, update_auth_key_by_id, upsert_exchange_credential_for_user_key,
+    upsert_webd_login_account, verify_webd_password_login, wa_webd_process_stats,
+    webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
 };
 use claw_core::skill_registry::SkillKind;
 use claw_core::types::{
@@ -5869,7 +5869,9 @@ async fn update_llm_config(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("model is not in the configured pool for vendor {selected_vendor}: {selected_model}")),
+                error: Some(format!(
+                    "model is not in the configured pool for vendor {selected_vendor}: {selected_model}"
+                )),
             }),
         );
     }
