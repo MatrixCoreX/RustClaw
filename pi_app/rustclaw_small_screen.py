@@ -1698,11 +1698,12 @@ class SmallScreenApp:
         except Exception:
             self.lobster_label.configure(text="🦞", font=("", 28), fg=self._c("fg"))
         # 标题 RustClaw
-        top_text = tk.Frame(top, bg=self._c("bg"))
+        top_text = tk.Frame(top, bg=self._c("bg"), bd=0, highlightthickness=0)
         top_text.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
         self._top_title_label = tk.Label(
             top_text, text="RustClaw", font=("", 20, "bold"),
-            bg=self._c("bg"), fg=self._c("accent"), anchor="w"
+            bg=self._c("bg"), fg=self._c("accent"), anchor="w",
+            bd=0, relief=tk.FLAT, highlightthickness=0
         )
         self._top_title_label.pack(anchor=tk.W)
         self._top_recent_message_var = tk.StringVar(value="")
