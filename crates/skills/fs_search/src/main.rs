@@ -20,6 +20,31 @@ struct Resp {
     error_text: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ScanLimits {
+    max_depth: usize,
+    max_files: usize,
+}
+
+fn parse_env_usize(name: &str) -> Option<usize> {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+}
+
+fn scan_limits_from_env() -> ScanLimits {
+    let max_depth = parse_env_usize("RUSTCLAW_LOCATOR_SCAN_MAX_DEPTH")
+        .unwrap_or(6)
+        .max(1);
+    let max_files = parse_env_usize("RUSTCLAW_LOCATOR_SCAN_MAX_FILES")
+        .unwrap_or(6000)
+        .max(1);
+    ScanLimits {
+        max_depth,
+        max_files,
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -88,6 +113,7 @@ fn execute(args: Value) -> Result<Value, String> {
         &root,
         obj.get("root").and_then(|v| v.as_str()).unwrap_or("."),
     )?;
+    let scan_limits = scan_limits_from_env();
 
     let mut results = Vec::new();
     match action.as_str() {
@@ -104,7 +130,7 @@ fn execute(args: Value) -> Result<Value, String> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("any")
                 .to_ascii_lowercase();
-            walk_collect_nodes(&search_root, &mut |p| {
+            walk_collect_nodes(&search_root, scan_limits, &mut |p| {
                 let name = p
                     .file_name()
                     .map(|s| s.to_string_lossy().to_ascii_lowercase())
@@ -139,7 +165,7 @@ fn execute(args: Value) -> Result<Value, String> {
                 .ok_or_else(|| "ext is required".to_string())?
                 .trim_start_matches('.')
                 .to_ascii_lowercase();
-            walk_collect(&search_root, &mut |p| {
+            walk_collect(&search_root, scan_limits, &mut |p| {
                 let got = p
                     .extension()
                     .map(|s| s.to_string_lossy().to_ascii_lowercase())
@@ -162,7 +188,7 @@ fn execute(args: Value) -> Result<Value, String> {
                 .get("query")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "query is required".to_string())?;
-            walk_collect(&search_root, &mut |p| {
+            walk_collect(&search_root, scan_limits, &mut |p| {
                 if let Ok(text) = std::fs::read_to_string(p) {
                     if text.contains(query) {
                         results.push(to_rel(&root, p));
@@ -212,7 +238,7 @@ fn execute(args: Value) -> Result<Value, String> {
                     .collect()
                 });
 
-            walk_collect(&search_root, &mut |p| {
+            walk_collect(&search_root, scan_limits, &mut |p| {
                 let ext = p
                     .extension()
                     .map(|s| s.to_string_lossy().to_ascii_lowercase())
@@ -254,9 +280,31 @@ fn execute(args: Value) -> Result<Value, String> {
     }
 }
 
-fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), String> {
+fn walk_collect(
+    path: &Path,
+    limits: ScanLimits,
+    f: &mut dyn FnMut(&Path) -> bool,
+) -> Result<(), String> {
+    let mut scanned_files = 0usize;
+    walk_collect_inner(path, 0, limits, &mut scanned_files, f)
+}
+
+fn walk_collect_inner(
+    path: &Path,
+    depth: usize,
+    limits: ScanLimits,
+    scanned_files: &mut usize,
+    f: &mut dyn FnMut(&Path) -> bool,
+) -> Result<(), String> {
     if path.is_file() {
+        if *scanned_files >= limits.max_files {
+            return Ok(());
+        }
+        *scanned_files += 1;
         let _ = f(path);
+        return Ok(());
+    }
+    if depth > limits.max_depth {
         return Ok(());
     }
     let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
@@ -264,30 +312,68 @@ fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), Str
         let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
         let p = entry.path();
         if p.is_dir() {
-            walk_collect(&p, f)?;
-        } else if f(&p) {
-            return Ok(());
+            if depth < limits.max_depth {
+                walk_collect_inner(&p, depth + 1, limits, scanned_files, f)?;
+            }
+        } else {
+            if *scanned_files >= limits.max_files {
+                return Ok(());
+            }
+            *scanned_files += 1;
+            if f(&p) {
+                return Ok(());
+            }
         }
     }
     Ok(())
 }
 
-fn walk_collect_nodes(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), String> {
+fn walk_collect_nodes(
+    path: &Path,
+    limits: ScanLimits,
+    f: &mut dyn FnMut(&Path) -> bool,
+) -> Result<(), String> {
+    let mut scanned_files = 0usize;
+    walk_collect_nodes_inner(path, 0, limits, &mut scanned_files, f)
+}
+
+fn walk_collect_nodes_inner(
+    path: &Path,
+    depth: usize,
+    limits: ScanLimits,
+    scanned_files: &mut usize,
+    f: &mut dyn FnMut(&Path) -> bool,
+) -> Result<(), String> {
     if path.is_file() {
+        if *scanned_files >= limits.max_files {
+            return Ok(());
+        }
+        *scanned_files += 1;
         let _ = f(path);
         return Ok(());
     }
     if path.is_dir() && f(path) {
         return Ok(());
     }
+    if depth > limits.max_depth {
+        return Ok(());
+    }
     let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
     for entry in iter {
         let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
         let p = entry.path();
         if p.is_dir() {
-            walk_collect_nodes(&p, f)?;
-        } else if f(&p) {
-            return Ok(());
+            if depth < limits.max_depth {
+                walk_collect_nodes_inner(&p, depth + 1, limits, scanned_files, f)?;
+            }
+        } else {
+            if *scanned_files >= limits.max_files {
+                return Ok(());
+            }
+            *scanned_files += 1;
+            if f(&p) {
+                return Ok(());
+            }
         }
     }
     Ok(())

@@ -5,5 +5,5 @@ Vendor tuning for Google/Gemini models:
 - Keep output dense, concrete, and schema-faithful.
 - Do not add commentary beyond the requested fields.
 
-Follow the user's language preference from context.
-If preference is unknown, reply in the same language as the task instruction/user request.
+Use remembered response language from context preferences first (response_language or language).
+If preference is unknown, use config.toml default language. Do not infer language from task instruction/user request text.

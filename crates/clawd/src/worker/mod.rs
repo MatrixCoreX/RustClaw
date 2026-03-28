@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::{path::Path, path::PathBuf};
 
 use anyhow::anyhow;
 use serde_json::{Value, json};
@@ -82,6 +83,278 @@ fn has_concrete_locator_hint(text: &str) -> bool {
     text.split_whitespace()
         .map(trim_locator_token)
         .any(|token| looks_like_filename_locator(&token))
+}
+
+fn collect_files_for_locator_scan(root: &Path, max_depth: usize, max_files: usize) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        let mut entries = match std::fs::read_dir(&dir) {
+            Ok(iter) => iter
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>(),
+            Err(_) => continue,
+        };
+        entries.sort();
+        for path in entries {
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let file_type = meta.file_type();
+            if file_type.is_file() || (file_type.is_symlink() && path.is_file()) {
+                out.push(path);
+                if out.len() >= max_files {
+                    return out;
+                }
+                continue;
+            }
+            if file_type.is_dir() && depth < max_depth {
+                stack.push((path, depth + 1));
+            }
+        }
+    }
+    out
+}
+
+fn extract_locator_keywords(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let push_token = |token: &str, acc: &mut Vec<String>| {
+        let t = token.trim();
+        if t.chars().count() < 2 {
+            return;
+        }
+        if t.chars().all(|ch| ch.is_ascii_digit()) {
+            return;
+        }
+        if !acc.iter().any(|v| v == t) {
+            acc.push(t.to_string());
+        }
+    };
+    for ch in text.chars() {
+        let is_cjk = ('\u{4E00}'..='\u{9FFF}').contains(&ch);
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') || is_cjk {
+            cur.push(ch.to_ascii_lowercase());
+        } else if !cur.is_empty() {
+            push_token(&cur, &mut out);
+            cur.clear();
+        }
+        if out.len() >= 12 {
+            break;
+        }
+    }
+    if !cur.is_empty() && out.len() < 12 {
+        push_token(&cur, &mut out);
+    }
+    out
+}
+
+fn score_locator_candidate(
+    keywords: &[String],
+    rel_lower: &str,
+    file_name_lower: &str,
+) -> i32 {
+    let mut score = 0i32;
+
+    for kw in keywords {
+        if rel_lower.contains(kw) {
+            score += 4;
+        }
+        if file_name_lower.contains(kw) {
+            score += 5;
+        }
+        let dist = levenshtein_distance_with_limit(kw, file_name_lower, 2);
+        if dist <= 2 {
+            score += (4 - dist as i32).max(1);
+        }
+    }
+
+    score
+}
+
+#[derive(Debug)]
+enum LocatorAutoResolution {
+    Direct(String),
+    Fuzzy(Vec<String>),
+}
+
+fn extract_filename_like_tokens(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in text.split_whitespace() {
+        let token = trim_locator_token(raw);
+        if looks_like_filename_locator(&token) && !out.iter().any(|v| v == &token) {
+            out.push(token);
+        }
+        if out.len() >= 8 {
+            break;
+        }
+    }
+    out
+}
+
+fn levenshtein_distance_with_limit(a: &str, b: &str, limit: usize) -> usize {
+    if a == b {
+        return 0;
+    }
+    if a.is_empty() || b.is_empty() {
+        return a.chars().count().max(b.chars().count());
+    }
+    let a_chars = a.chars().collect::<Vec<_>>();
+    let b_chars = b.chars().collect::<Vec<_>>();
+    if a_chars.len().abs_diff(b_chars.len()) > limit {
+        return limit + 1;
+    }
+    let mut prev = (0..=b_chars.len()).collect::<Vec<_>>();
+    let mut curr = vec![0usize; b_chars.len() + 1];
+    for (i, ca) in a_chars.iter().enumerate() {
+        curr[0] = i + 1;
+        let mut row_min = curr[0];
+        for (j, cb) in b_chars.iter().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+            row_min = row_min.min(curr[j + 1]);
+        }
+        if row_min > limit {
+            return limit + 1;
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b_chars.len()]
+}
+
+fn collect_fuzzy_locator_suggestions(
+    search_root: &Path,
+    files: &[PathBuf],
+    token: &str,
+) -> Vec<String> {
+    let token_lower = token.to_ascii_lowercase();
+    let mut scored = Vec::<(i32, String)>::new();
+    for path in files {
+        let rel = path.strip_prefix(search_root).unwrap_or(path);
+        let rel_text = rel.to_string_lossy().to_string();
+        let rel_lower = rel_text.to_ascii_lowercase();
+        let file_name_lower = path
+            .file_name()
+            .map(|v| v.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let mut score = 0i32;
+        if file_name_lower.contains(&token_lower) || token_lower.contains(&file_name_lower) {
+            score += 6;
+        }
+        let dist = levenshtein_distance_with_limit(&token_lower, &file_name_lower, 2);
+        if dist <= 2 {
+            score += (5 - dist as i32).max(1);
+        }
+        if rel_lower.contains(&token_lower) {
+            score += 2;
+        }
+        if score > 0 {
+            scored.push((score, rel_text));
+        }
+    }
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    let mut out = Vec::new();
+    for (_, item) in scored {
+        if !out.iter().any(|v| v == &item) {
+            out.push(item);
+        }
+        if out.len() >= 3 {
+            break;
+        }
+    }
+    out
+}
+
+fn try_resolve_implicit_locator_path(
+    state: &AppState,
+    raw_text: &str,
+    resolved_text: &str,
+    context_hint: Option<&str>,
+) -> Option<LocatorAutoResolution> {
+    let search_root = &state.default_locator_search_dir;
+    if !search_root.is_dir() {
+        return None;
+    }
+    let mut query_text = format!("{raw_text}\n{resolved_text}");
+    if let Some(ctx) = context_hint {
+        if !ctx.trim().is_empty() && ctx.trim() != "<none>" {
+            query_text.push('\n');
+            query_text.push_str(ctx);
+        }
+    }
+    let keywords = extract_locator_keywords(&query_text);
+    let files = collect_files_for_locator_scan(
+        search_root,
+        state.locator_scan_max_depth,
+        state.locator_scan_max_files,
+    );
+    if files.is_empty() {
+        return None;
+    }
+    let filename_tokens = extract_filename_like_tokens(&query_text);
+    for token in &filename_tokens {
+        let mut ci_matches = files
+            .iter()
+            .filter(|path| {
+                path.file_name()
+                    .map(|v| v.to_string_lossy().eq_ignore_ascii_case(token))
+                    .unwrap_or(false)
+            })
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        ci_matches.sort();
+        ci_matches.dedup();
+        if ci_matches.len() == 1 {
+            return Some(LocatorAutoResolution::Direct(
+                ci_matches.into_iter().next().unwrap_or_default(),
+            ));
+        }
+        if ci_matches.len() > 1 {
+            return Some(LocatorAutoResolution::Fuzzy(ci_matches.into_iter().take(3).collect()));
+        }
+        let fuzzy = collect_fuzzy_locator_suggestions(search_root, &files, token);
+        if !fuzzy.is_empty() {
+            return Some(LocatorAutoResolution::Fuzzy(fuzzy));
+        }
+    }
+
+    let mut best: Option<(i32, PathBuf)> = None;
+    let mut tied = false;
+    for path in files {
+        let rel = path.strip_prefix(search_root).unwrap_or(&path);
+        let rel_lower = rel.to_string_lossy().to_ascii_lowercase();
+        let file_name_lower = path
+            .file_name()
+            .map(|v| v.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let score = score_locator_candidate(&keywords, &rel_lower, &file_name_lower);
+        if score <= 0 {
+            continue;
+        }
+        match &best {
+            None => {
+                best = Some((score, path));
+                tied = false;
+            }
+            Some((best_score, _)) if score > *best_score => {
+                best = Some((score, path));
+                tied = false;
+            }
+            Some((best_score, _)) if score == *best_score => {
+                tied = true;
+            }
+            _ => {}
+        }
+    }
+    let Some((_, path)) = best else {
+        return None;
+    };
+    if tied {
+        return None;
+    }
+    Some(LocatorAutoResolution::Direct(path.display().to_string()))
 }
 
 fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Result<Vec<String>> {
@@ -966,7 +1239,8 @@ Use this block only as supporting evidence for genuinely short follow-up request
         .classifier_direct_sources
         .iter()
         .any(|s| s == &source.to_ascii_lowercase());
-    let missing_locator_for_path_scoped_content = !context_resolution.needs_clarify
+    let mut fuzzy_locator_suggestions: Vec<String> = Vec::new();
+    let mut missing_locator_for_path_scoped_content = !context_resolution.needs_clarify
         && matches!(
             normalizer_out.routed_mode,
             crate::RoutedMode::Act | crate::RoutedMode::ChatAct
@@ -978,6 +1252,53 @@ Use this block only as supporting evidence for genuinely short follow-up request
         )
         && !has_concrete_locator_hint(prompt)
         && !has_concrete_locator_hint(&resolved_prompt);
+    let locator_guard_active = !context_resolution.needs_clarify
+        && matches!(
+            normalizer_out.routed_mode,
+            crate::RoutedMode::Act | crate::RoutedMode::ChatAct
+        )
+        && normalizer_out.output_contract.requires_content_evidence
+        && matches!(
+            normalizer_out.output_contract.locator_kind,
+            crate::intent_router::OutputLocatorKind::Path
+        );
+    if locator_guard_active {
+        match try_resolve_implicit_locator_path(
+            state,
+            prompt,
+            &resolved_prompt,
+            Some(&recent_execution_context),
+        ) {
+            Some(LocatorAutoResolution::Direct(path)) => {
+                let hint = format!(
+                    "\n\n[AUTO_LOCATOR]\nResolved concrete path from default locator directory: {path}\nUse this path as the target unless user explicitly overrides it.\n"
+                );
+                resolved_prompt_for_execution.push_str(&hint);
+                prompt_with_memory_for_execution.push_str(&hint);
+                if missing_locator_for_path_scoped_content {
+                    missing_locator_for_path_scoped_content = false;
+                }
+                info!(
+                    "{} worker_once: ask auto_locator_resolved task_id={} path={} raw_text={} resolved_text={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    path,
+                    crate::truncate_for_log(prompt),
+                    crate::truncate_for_log(&resolved_prompt)
+                );
+            }
+            Some(LocatorAutoResolution::Fuzzy(candidates)) => {
+                fuzzy_locator_suggestions = candidates;
+                info!(
+                    "{} worker_once: ask auto_locator_fuzzy_candidates task_id={} candidates={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    crate::truncate_for_log(&fuzzy_locator_suggestions.join(" | "))
+                );
+            }
+            None => {}
+        }
+    }
     if missing_locator_for_path_scoped_content {
         info!(
             "{} worker_once: ask force_clarify_by_locator_guard task_id={} reason=missing_concrete_locator_for_path_scoped_content raw_text={} resolved_text={}",
@@ -987,7 +1308,9 @@ Use this block only as supporting evidence for genuinely short follow-up request
             crate::truncate_for_log(&resolved_prompt)
         );
     }
-    let force_clarify = context_resolution.needs_clarify || missing_locator_for_path_scoped_content;
+    let force_clarify = context_resolution.needs_clarify
+        || missing_locator_for_path_scoped_content
+        || !fuzzy_locator_suggestions.is_empty();
     let clarify_reason = if missing_locator_for_path_scoped_content {
         if context_resolution.reason.trim().is_empty() {
             "missing_concrete_locator_for_path_scoped_content".to_string()
@@ -996,6 +1319,13 @@ Use this block only as supporting evidence for genuinely short follow-up request
                 "{}; missing_concrete_locator_for_path_scoped_content",
                 context_resolution.reason
             )
+        }
+    } else if !fuzzy_locator_suggestions.is_empty() {
+        let joined = fuzzy_locator_suggestions.join(" | ");
+        if context_resolution.reason.trim().is_empty() {
+            format!("fuzzy_locator_candidates={joined}")
+        } else {
+            format!("{}; fuzzy_locator_candidates={joined}", context_resolution.reason)
         }
     } else {
         context_resolution.reason.clone()
@@ -1006,12 +1336,36 @@ Use this block only as supporting evidence for genuinely short follow-up request
         has_schedule_intent && !direct_resume_execution && !direct_resume_discussion;
 
     let result = if force_clarify {
+        let clarify_context = if fuzzy_locator_suggestions.is_empty() {
+            recent_execution_context.clone()
+        } else if recent_execution_context.trim().is_empty()
+            || recent_execution_context.trim() == "<none>"
+        {
+            format!(
+                "### LOCATOR_FUZZY_CANDIDATES\n{}\n",
+                fuzzy_locator_suggestions
+                    .iter()
+                    .map(|v| format!("- {v}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        } else {
+            format!(
+                "{}\n\n### LOCATOR_FUZZY_CANDIDATES\n{}\n",
+                recent_execution_context,
+                fuzzy_locator_suggestions
+                    .iter()
+                    .map(|v| format!("- {v}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        };
         let clarify = crate::intent_router::generate_clarify_question(
             state,
             task,
             prompt,
             &clarify_reason,
-            Some(&recent_execution_context),
+            Some(&clarify_context),
         )
         .await;
         Ok(crate::AskReply::non_llm(clarify))
@@ -1483,6 +1837,7 @@ async fn send_task_channel_message(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use std::path::PathBuf;
 
     #[test]
     fn wechat_payload_shape_keeps_context_token_available() {
@@ -1518,6 +1873,36 @@ mod tests {
             "读一下那个 README 开头并用一句话总结"
         ));
         assert!(!super::has_concrete_locator_hint("that config please"));
+    }
+
+    #[test]
+    fn filename_like_tokens_extracts_expected_items() {
+        let tokens = super::extract_filename_like_tokens("please open Config.toml and README.md");
+        assert!(tokens.iter().any(|v| v == "Config.toml"));
+        assert!(tokens.iter().any(|v| v == "README.md"));
+    }
+
+    #[test]
+    fn levenshtein_with_limit_short_circuit() {
+        assert_eq!(super::levenshtein_distance_with_limit("config", "config", 2), 0);
+        assert_eq!(
+            super::levenshtein_distance_with_limit("config", "cnfig", 2),
+            1
+        );
+        assert!(super::levenshtein_distance_with_limit("config", "very-long-name", 2) > 2);
+    }
+
+    #[test]
+    fn fuzzy_suggestions_return_close_candidates() {
+        let root = PathBuf::from("/tmp");
+        let files = vec![
+            PathBuf::from("/tmp/config.toml"),
+            PathBuf::from("/tmp/configs/app_config.toml"),
+            PathBuf::from("/tmp/readme.md"),
+        ];
+        let out = super::collect_fuzzy_locator_suggestions(&root, &files, "cnfig.toml");
+        assert!(!out.is_empty());
+        assert!(out.iter().any(|v| v.to_ascii_lowercase().contains("config.toml")));
     }
 }
 

@@ -980,12 +980,21 @@ impl Default for ImageSkillConfig {
 pub struct RoutingConfig {
     #[serde(default)]
     pub debug_log_prompt: bool,
+    #[serde(default = "default_routing_default_locator_search_dir")]
+    pub default_locator_search_dir: String,
+    #[serde(default = "default_routing_locator_scan_max_depth")]
+    pub locator_scan_max_depth: usize,
+    #[serde(default = "default_routing_locator_scan_max_files")]
+    pub locator_scan_max_files: usize,
 }
 
 impl Default for RoutingConfig {
     fn default() -> Self {
         Self {
             debug_log_prompt: false,
+            default_locator_search_dir: default_routing_default_locator_search_dir(),
+            locator_scan_max_depth: default_routing_locator_scan_max_depth(),
+            locator_scan_max_files: default_routing_locator_scan_max_files(),
         }
     }
 }
@@ -1651,6 +1660,18 @@ fn default_schedule_locale() -> String {
 
 fn default_schedule_i18n_dir() -> String {
     "configs/i18n".to_string()
+}
+
+fn default_routing_default_locator_search_dir() -> String {
+    ".".to_string()
+}
+
+fn default_routing_locator_scan_max_depth() -> usize {
+    6
+}
+
+fn default_routing_locator_scan_max_files() -> usize {
+    6000
 }
 
 fn default_persona_profile() -> String {
