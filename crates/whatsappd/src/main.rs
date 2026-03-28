@@ -38,6 +38,8 @@ const WA_I18N_PROCESS_FAILED_WITH_ERROR_KEY: &str =
 const WA_I18N_TASK_DONE_FALLBACK_TEXT_KEY: &str = "whatsapp_cloud.msg.task_done_fallback_text";
 const WA_I18N_TASK_FAILED_FALLBACK_ERROR_KEY: &str =
     "whatsapp_cloud.msg.task_failed_fallback_error";
+const WA_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str =
+    "whatsapp_cloud.msg.request_timeout_retry_later";
 
 const WA_BIND_REQUIRED_FALLBACK: &str =
     "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
@@ -49,6 +51,8 @@ const WA_RUN_USAGE_FALLBACK: &str = "Usage: /run <skill_name> <args>";
 const WA_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str = "处理失败：{error}";
 const WA_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "done";
 const WA_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str = "task failed";
+const WA_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
+    "你的任务正在持续执行（任务编号：{task_id}），执行完了给你回复。";
 
 #[derive(Clone)]
 struct AppState {
@@ -188,7 +192,7 @@ async fn main() -> anyhow::Result<()> {
         verify_token: config.whatsapp.verify_token.clone(),
         phone_number_id: config.whatsapp.phone_number_id.clone(),
         poll_interval_ms: config.worker.poll_interval_ms.max(100),
-        task_wait_seconds: config.worker.task_timeout_seconds.max(1),
+        task_wait_seconds: config.whatsapp.task_delivery_timeout_seconds.max(1),
         quick_result_wait_seconds: config.whatsapp.quick_result_wait_seconds.max(1),
         image_inbox_dir: config.whatsapp.image_inbox_dir.clone(),
         audio_inbox_dir: config.whatsapp.audio_inbox_dir.clone(),
@@ -870,6 +874,102 @@ async fn poll_task_result(
     Err(anyhow!("task_result_wait_timeout"))
 }
 
+async fn poll_task_result_with_soft_timeout(
+    state: &AppState,
+    wa_id: &str,
+    task_id: &str,
+    user_key: Option<&str>,
+    wait_override_seconds: Option<u64>,
+) -> anyhow::Result<String> {
+    let poll_interval_ms = state.poll_interval_ms.max(1);
+    let delivery_timeout_secs = wait_override_seconds
+        .unwrap_or(state.task_wait_seconds)
+        .max(1);
+    let running_notice_text = wa_t_with(
+        state,
+        WA_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY,
+        &[("task_id", task_id)],
+        WA_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK,
+    );
+    info!(
+        "whatsappd: task delivery started task_id={} wa_id={} task_delivery_timeout_seconds={}",
+        task_id, wa_id, delivery_timeout_secs
+    );
+    let started = std::time::Instant::now();
+    let mut timeout_notice_sent = false;
+    let mut last_seen_status: Option<TaskStatus> = None;
+
+    loop {
+        let task = match query_task_status(state, task_id, user_key).await {
+            Ok(task) => task,
+            Err(err) => {
+                warn!("whatsappd: poll failed task_id={} err={}", task_id, err);
+                if started.elapsed() > Duration::from_secs(delivery_timeout_secs)
+                    && !timeout_notice_sent
+                {
+                    warn!(
+                        "whatsappd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=poll_failed (continue_polling=true)",
+                        task_id,
+                        started.elapsed().as_secs(),
+                        delivery_timeout_secs,
+                        last_seen_status
+                    );
+                    let _ = send_whatsapp_text(state, wa_id, &running_notice_text).await;
+                    timeout_notice_sent = true;
+                }
+                tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
+                continue;
+            }
+        };
+
+        last_seen_status = Some(task.status.clone());
+        match task.status {
+            TaskStatus::Queued | TaskStatus::Running => {
+                if started.elapsed() > Duration::from_secs(delivery_timeout_secs)
+                    && !timeout_notice_sent
+                {
+                    warn!(
+                        "whatsappd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} (continue_polling=true)",
+                        task_id,
+                        started.elapsed().as_secs(),
+                        delivery_timeout_secs,
+                        last_seen_status
+                    );
+                    let _ = send_whatsapp_text(state, wa_id, &running_notice_text).await;
+                    timeout_notice_sent = true;
+                }
+                tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
+            }
+            TaskStatus::Succeeded => {
+                let answer = task
+                    .result_json
+                    .as_ref()
+                    .and_then(|v| v.get("text"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        wa_t(
+                            state,
+                            WA_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
+                            WA_TASK_DONE_FALLBACK_TEXT_FALLBACK,
+                        )
+                    });
+                return Ok(answer);
+            }
+            TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
+                let err = task.error_text.unwrap_or_else(|| {
+                    wa_t(
+                        state,
+                        WA_I18N_TASK_FAILED_FALLBACK_ERROR_KEY,
+                        WA_TASK_FAILED_FALLBACK_ERROR_FALLBACK,
+                    )
+                });
+                return Err(anyhow!("{}", err));
+            }
+        }
+    }
+}
+
 async fn try_deliver_quick_result(
     state: &AppState,
     wa_id: &str,
@@ -910,8 +1010,9 @@ fn spawn_task_result_delivery(
     wait_override_seconds: Option<u64>,
 ) {
     tokio::spawn(async move {
-        let out = poll_task_result(
+        let out = poll_task_result_with_soft_timeout(
             &state,
+            &wa_id,
             &task_id,
             bound_user_key_for_wa(&state, &wa_id).as_deref(),
             wait_override_seconds,

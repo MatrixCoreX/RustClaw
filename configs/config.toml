@@ -374,4 +374,5 @@ running_no_progress_timeout_seconds = 1200
 # 无进展清理检查间隔（秒）。
 running_recovery_check_interval_seconds = 60
 # 单任务硬超时（秒） / Hard timeout per task in seconds.
+# 注意：这是 clawd 后台任务生命周期上限，不作为 Telegram/WhatsApp 的用户侧投递等待时长。
 task_timeout_seconds = 86400
