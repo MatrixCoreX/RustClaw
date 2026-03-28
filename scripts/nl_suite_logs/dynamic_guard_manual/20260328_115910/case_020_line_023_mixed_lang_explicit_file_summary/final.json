@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"89af82b7-1ebe-4082-8deb-0879c41dd25d","status":"succeeded","result_json":{"messages":["该 README.md 描述了 Test Workspace 目录的用途，它是专门为 NL 回归测试工件和包装脚本保留的测试工作区，并说明了 clawd 运行时的配置细节。"],"text":"该 README.md 描述了 Test Workspace 目录的用途，它是专门为 NL 回归测试工件和包装脚本保留的测试工作区，并说明了 clawd 运行时的配置细节。"},"error_text":null},"error":null}

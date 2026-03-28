@@ -1,0 +1,9 @@
+index=4
+case_name=context_ambiguous_after_two_files_20260327
+chat_id=17746743785
+turn1_task_id=e9b991fd-f7f4-4caf-ad1a-ba6d3bb4fc40
+turn1_prompt=先读取 /home/guagua/test/README.md 开头 3 行
+turn2_task_id=98db5d4f-9ad6-429b-8502-4afd438bab88
+turn2_prompt=再读取 /home/guagua/test/docs/service_notes.md 开头 3 行
+turn3_task_id=423459e5-e2e5-4b01-adb5-5921f21cb27c
+turn3_prompt=把那个文件发给我

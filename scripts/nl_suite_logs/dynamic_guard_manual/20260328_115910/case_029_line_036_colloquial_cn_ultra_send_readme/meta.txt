@@ -1,0 +1,6 @@
+ordinal=29
+source_line=36
+case_name=colloquial_cn_ultra_send_readme
+chat_id=17746703630
+task_id=3bc5d281-b099-4380-b360-6f5cea376b6c
+prompt=把 /home/guagua/test/README.md 直接甩我，别贴字

@@ -1,0 +1,7 @@
+index=21
+case_name=clarify_deictic_ultra_cn_tail
+chat_id=17746743702
+turn1_task_id=fbd2c750-13e2-4b7d-86b9-56ced7debc9f
+turn1_prompt=那个日志最后五行，快点给我
+turn2_task_id=981350d0-ad00-47bc-9ac7-463a8fdec943
+turn2_prompt=/home/guagua/test/logs/app.log

@@ -1,0 +1,9 @@
+index=20
+case_name=context_ultra_en_db_alias
+chat_id=17746743801
+turn1_task_id=217960c4-b3e7-4187-80cc-3a919ebeaa77
+turn1_prompt=When I say "that db", I mean /home/guagua/test/data/test_contract.sqlite
+turn2_task_id=7b9ef62b-7255-428e-8824-0c16ce190549
+turn2_prompt=show tables in that db
+turn3_task_id=57f88ada-031d-4366-bbf0-69cad31bea58
+turn3_prompt=pick one table that looks business-related

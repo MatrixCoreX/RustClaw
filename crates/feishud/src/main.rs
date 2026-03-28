@@ -3,7 +3,7 @@
 //! 文本 / 图片 / 文件 / 音频 / 视频等媒体：下载落盘（可配置目录）后提交 clawd ask。
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -12,6 +12,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
@@ -79,6 +80,10 @@ struct FeishuSection {
     task_delivery_timeout_seconds: u64,
     #[serde(default = "default_text_chunk_chars")]
     text_chunk_chars: usize,
+    #[serde(default = "default_feishu_language")]
+    language: String,
+    #[serde(default = "default_feishu_i18n_path")]
+    i18n_path: String,
     #[serde(default = "default_feishu_image_inbox_dir")]
     image_inbox_dir: String,
     #[serde(default = "default_feishu_video_inbox_dir")]
@@ -103,6 +108,14 @@ fn default_task_delivery_timeout() -> u64 {
 }
 fn default_text_chunk_chars() -> usize {
     4000
+}
+
+fn default_feishu_language() -> String {
+    "zh-CN".to_string()
+}
+
+fn default_feishu_i18n_path() -> String {
+    "configs/i18n/feishud.zh-CN.toml".to_string()
 }
 
 fn default_feishu_api_base_url() -> String {
@@ -146,6 +159,27 @@ fn apply_env_overrides(config: &mut FeishuConfig) {
         "FEISHU_VERIFICATION_TOKEN",
     );
     apply_string_env(&mut config.feishu.encrypt_key, "FEISHU_ENCRYPT_KEY");
+    apply_string_env(&mut config.feishu.language, "FEISHU_I18N_LANGUAGE");
+    apply_string_env(&mut config.feishu.i18n_path, "FEISHU_I18N_PATH");
+}
+
+fn resolve_i18n_path(language: &str, configured_path: &str) -> String {
+    let lang = language.trim();
+    if !lang.is_empty() {
+        let candidate = format!("configs/i18n/feishud.{lang}.toml");
+        if Path::new(&candidate).exists() {
+            return candidate;
+        }
+    }
+    configured_path.to_string()
+}
+
+fn feishu_t(config: &FeishuConfig, key: &str, fallback: &str) -> String {
+    text_from_path(&config.feishu.i18n_path, key, fallback)
+}
+
+fn feishu_t_with(config: &FeishuConfig, key: &str, vars: &[(&str, &str)], fallback: &str) -> String {
+    text_with_vars_from_path(&config.feishu.i18n_path, key, vars, fallback)
 }
 
 fn current_ts_ms() -> u64 {
@@ -400,11 +434,36 @@ async fn bind_feishu_identity(
     Ok(body.data)
 }
 
-const FEISHU_BIND_REQUIRED_FOR_CHAT: &str = "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
-const FEISHU_BIND_HELP: &str = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。\nWelcome to RustClaw.\nPlease send /key <your_key> first to bind this account.";
-const FEISHU_BIND_SUCCESS: &str = "绑定成功，请重新发送你的问题。\nKey bound successfully. Please send your previous message again.";
-const FEISHU_BIND_INVALID: &str =
+const FEISHU_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY: &str = "feishu.msg.identity_check_unavailable";
+const FEISHU_I18N_BIND_REQUIRED_KEY: &str = "feishu.msg.bind_key_required_for_chat";
+const FEISHU_I18N_BIND_HELP_KEY: &str = "feishu.msg.bind_help";
+const FEISHU_I18N_BIND_SUCCESS_KEY: &str = "feishu.msg.bind_success";
+const FEISHU_I18N_BIND_INVALID_KEY: &str = "feishu.msg.bind_invalid";
+const FEISHU_I18N_BIND_REQUEST_FAILED_KEY: &str = "feishu.msg.bind_request_failed";
+const FEISHU_I18N_MEDIA_DOWNLOAD_FAILED_KEY: &str = "feishu.msg.media_download_failed";
+const FEISHU_I18N_MEDIA_FILE_TOO_LARGE_KEY: &str = "feishu.msg.media_file_too_large";
+const FEISHU_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str = "feishu.msg.request_timeout_retry_later";
+const FEISHU_I18N_TASK_DONE_FALLBACK_TEXT_KEY: &str = "feishu.msg.task_done_fallback_text";
+const FEISHU_I18N_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "feishu.msg.task_failed_fallback_error";
+const FEISHU_I18N_PROCESS_FAILED_WITH_ERROR_KEY: &str = "feishu.msg.process_failed_with_error";
+
+const FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK: &str = "身份校验暂时不可用，请稍后重试。";
+const FEISHU_BIND_REQUIRED_FALLBACK: &str =
+    "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
+const FEISHU_BIND_HELP_FALLBACK: &str =
+    "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。\nWelcome to RustClaw.\nPlease send /key <your_key> first to bind this account.";
+const FEISHU_BIND_SUCCESS_FALLBACK: &str =
+    "绑定成功，请重新发送你的问题。\nKey bound successfully. Please send your previous message again.";
+const FEISHU_BIND_INVALID_FALLBACK: &str =
     "key 无效或绑定失败，请发送有效 key 完成绑定。\nInvalid key. Please try again.";
+const FEISHU_BIND_REQUEST_FAILED_FALLBACK: &str =
+    "绑定请求失败，请稍后重试。\nBind request failed, please try again later.";
+const FEISHU_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "媒体下载失败，请稍后重试。";
+const FEISHU_MEDIA_FILE_TOO_LARGE_FALLBACK: &str = "媒体文件过大，已拒绝保存。";
+const FEISHU_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str = "请求处理超时，请稍后重试。";
+const FEISHU_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "处理完成。";
+const FEISHU_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str = "任务失败";
+const FEISHU_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str = "处理失败：{error}";
 
 fn should_expect_key_reply(state: &AppState, chat_id: &str) -> bool {
     state
@@ -466,12 +525,17 @@ async fn handle_incoming_feishu_text(
         Ok(ident) => ident,
         Err(e) => {
             warn!("feishud: binding resolve failed err={}", e);
+            let msg = feishu_t(
+                &config,
+                FEISHU_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
+                FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
+            );
             let _ = send_feishu_text(
                 &config,
                 &client,
                 &token_cache,
                 &chat_id,
-                "身份校验暂时不可用，请稍后重试。",
+                &msg,
             )
             .await;
             return;
@@ -495,12 +559,17 @@ async fn handle_incoming_feishu_text(
     let trimmed = text.trim();
     if is_unbound_allowed_command(trimmed) {
         set_expect_key_reply(&state, &chat_id, true);
+        let msg = feishu_t(
+            &config,
+            FEISHU_I18N_BIND_HELP_KEY,
+            FEISHU_BIND_HELP_FALLBACK,
+        );
         let _ = send_feishu_text(
             &config,
             &client,
             &token_cache,
             &chat_id,
-            FEISHU_BIND_HELP,
+            &msg,
         )
         .await;
         return;
@@ -516,9 +585,12 @@ async fn handle_incoming_feishu_text(
             Ok(Some(_)) => {
                 set_expect_key_reply(&state, &chat_id, false);
                 info!("feishud: bind success external_chat_id={}", chat_id);
-                let _ =
-                    send_feishu_text(&config, &client, &token_cache, &chat_id, FEISHU_BIND_SUCCESS)
-                        .await;
+                let msg = feishu_t(
+                    &config,
+                    FEISHU_I18N_BIND_SUCCESS_KEY,
+                    FEISHU_BIND_SUCCESS_FALLBACK,
+                );
+                let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
             }
             Ok(None) => {
                 set_expect_key_reply(&state, &chat_id, true);
@@ -526,9 +598,12 @@ async fn handle_incoming_feishu_text(
                     "feishud: bind failure (invalid key) external_chat_id={}",
                     chat_id
                 );
-                let _ =
-                    send_feishu_text(&config, &client, &token_cache, &chat_id, FEISHU_BIND_INVALID)
-                        .await;
+                let msg = feishu_t(
+                    &config,
+                    FEISHU_I18N_BIND_INVALID_KEY,
+                    FEISHU_BIND_INVALID_FALLBACK,
+                );
+                let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
             }
             Err(e) => {
                 set_expect_key_reply(&state, &chat_id, true);
@@ -536,12 +611,17 @@ async fn handle_incoming_feishu_text(
                     "feishud: bind request failed err={} external_chat_id={}",
                     e, chat_id
                 );
+                let msg = feishu_t(
+                    &config,
+                    FEISHU_I18N_BIND_REQUEST_FAILED_KEY,
+                    FEISHU_BIND_REQUEST_FAILED_FALLBACK,
+                );
                 let _ = send_feishu_text(
                     &config,
                     &client,
                     &token_cache,
                     &chat_id,
-                    "绑定请求失败，请稍后重试。\nBind request failed, please try again later.",
+                    &msg,
                 )
                 .await;
             }
@@ -555,12 +635,17 @@ async fn handle_incoming_feishu_text(
         );
     }
     set_expect_key_reply(&state, &chat_id, true);
+    let msg = feishu_t(
+        &config,
+        FEISHU_I18N_BIND_REQUIRED_KEY,
+        FEISHU_BIND_REQUIRED_FALLBACK,
+    );
     let _ = send_feishu_text(
         &config,
         &client,
         &token_cache,
         &chat_id,
-        FEISHU_BIND_REQUIRED_FOR_CHAT,
+        &msg,
     )
     .await;
 }
@@ -582,12 +667,17 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
         Ok(ident) => ident,
         Err(e) => {
             warn!("feishud: media binding resolve failed err={}", e);
+            let msg = feishu_t(
+                &config,
+                FEISHU_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
+                FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
+            );
             let _ = send_feishu_text(
                 &config,
                 &client,
                 &token_cache,
                 &ctx.chat_id,
-                "身份校验暂时不可用，请稍后重试。",
+                &msg,
             )
             .await;
             return;
@@ -596,12 +686,17 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
 
     let Some(ident) = identity else {
         set_expect_key_reply(&state, &ctx.chat_id, true);
+        let msg = feishu_t(
+            &config,
+            FEISHU_I18N_BIND_REQUIRED_KEY,
+            FEISHU_BIND_REQUIRED_FALLBACK,
+        );
         let _ = send_feishu_text(
             &config,
             &client,
             &token_cache,
             &ctx.chat_id,
-            FEISHU_BIND_REQUIRED_FOR_CHAT,
+            &msg,
         )
         .await;
         return;
@@ -629,12 +724,17 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
         Ok(b) => b,
         Err(e) => {
             warn!("feishud: media download failed err={}", e);
+            let msg = feishu_t(
+                &config,
+                FEISHU_I18N_MEDIA_DOWNLOAD_FAILED_KEY,
+                FEISHU_MEDIA_DOWNLOAD_FAILED_FALLBACK,
+            );
             let _ = send_feishu_text(
                 &config,
                 &client,
                 &token_cache,
                 &ctx.chat_id,
-                "媒体下载失败，请稍后重试。",
+                &msg,
             )
             .await;
             return;
@@ -652,12 +752,17 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
             bytes.len(),
             max_len
         );
+        let msg = feishu_t(
+            &config,
+            FEISHU_I18N_MEDIA_FILE_TOO_LARGE_KEY,
+            FEISHU_MEDIA_FILE_TOO_LARGE_FALLBACK,
+        );
         let _ = send_feishu_text(
             &config,
             &client,
             &token_cache,
             &ctx.chat_id,
-            "媒体文件过大，已拒绝保存。",
+            &msg,
         )
         .await;
         return;
@@ -701,7 +806,7 @@ fn dispatch_im_incoming_event(state: AppState, body: Value) {
 }
 
 /// 从成功任务的 result_json 取回复正文：优先 messages 数组（与 telegramd 一致），其次 text，否则占位。
-fn feishu_task_success_text(task: &TaskQueryResponse) -> String {
+fn feishu_task_success_text(task: &TaskQueryResponse, config: &FeishuConfig) -> String {
     if let Some(messages) = task
         .result_json
         .as_ref()
@@ -726,7 +831,13 @@ fn feishu_task_success_text(task: &TaskQueryResponse) -> String {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| "处理完成。".to_string())
+        .unwrap_or_else(|| {
+            feishu_t(
+                config,
+                FEISHU_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
+                FEISHU_TASK_DONE_FALLBACK_TEXT_FALLBACK,
+            )
+        })
 }
 
 /// 共享主链：提交任务并 spawn 轮询与回发。供 webhook 与 long_connection 复用。
@@ -769,6 +880,12 @@ fn handle_text_message_to_clawd(
     let user_key_poll = user_key.clone();
 
     tokio::spawn(async move {
+        let request_timeout_text = feishu_t(
+            &config,
+            FEISHU_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY,
+            FEISHU_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK,
+        );
+
         let submit_resp = match client.post(&submit_url).json(&submit_req).send().await {
             Ok(r) => r,
             Err(e) => {
@@ -835,7 +952,7 @@ fn handle_text_message_to_clawd(
                             &client,
                             &token_cache,
                             &chat_id_delivery,
-                            "请求处理超时，请稍后重试。",
+                            &request_timeout_text,
                         )
                         .await;
                         break;
@@ -867,7 +984,7 @@ fn handle_text_message_to_clawd(
                         &client,
                         &token_cache,
                         &chat_id_delivery,
-                        "请求处理超时，请稍后重试。",
+                        &request_timeout_text,
                     )
                     .await;
                     break;
@@ -886,7 +1003,7 @@ fn handle_text_message_to_clawd(
                             &client,
                             &token_cache,
                             &chat_id_delivery,
-                            "请求处理超时，请稍后重试。",
+                            &request_timeout_text,
                         )
                         .await;
                         break;
@@ -908,7 +1025,7 @@ fn handle_text_message_to_clawd(
                         &client,
                         &token_cache,
                         &chat_id_delivery,
-                        "请求处理超时，请稍后重试。",
+                        &request_timeout_text,
                     )
                     .await;
                     break;
@@ -941,7 +1058,7 @@ fn handle_text_message_to_clawd(
                             &client,
                             &token_cache,
                             &chat_id_delivery,
-                            "请求处理超时，请稍后重试。",
+                            &request_timeout_text,
                         )
                         .await;
                         break;
@@ -950,7 +1067,7 @@ fn handle_text_message_to_clawd(
                     continue;
                 }
                 TaskStatus::Succeeded => {
-                    let to_send = feishu_task_success_text(task);
+                    let to_send = feishu_task_success_text(task, &config);
                     for chunk in chunk_text_utf8(to_send.as_str(), chunk_chars) {
                         if let Err(e) = send_feishu_text(
                             &config,
@@ -974,13 +1091,25 @@ fn handle_text_message_to_clawd(
                     break;
                 }
                 TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
-                    let detail = task.error_text.as_deref().unwrap_or("任务失败").to_string();
+                    let detail = task.error_text.clone().unwrap_or_else(|| {
+                        feishu_t(
+                            &config,
+                            FEISHU_I18N_TASK_FAILED_FALLBACK_ERROR_KEY,
+                            FEISHU_TASK_FAILED_FALLBACK_ERROR_FALLBACK,
+                        )
+                    });
+                    let msg = feishu_t_with(
+                        &config,
+                        FEISHU_I18N_PROCESS_FAILED_WITH_ERROR_KEY,
+                        &[("error", &detail)],
+                        FEISHU_PROCESS_FAILED_WITH_ERROR_FALLBACK,
+                    );
                     let _ = send_feishu_text(
                         &config,
                         &client,
                         &token_cache,
                         &chat_id_delivery,
-                        &format!("处理失败：{}", detail),
+                        &msg,
                     )
                     .await;
                     info!(
@@ -1395,6 +1524,7 @@ async fn main() -> anyhow::Result<()> {
         toml::from_str(&raw).map_err(|e| anyhow::anyhow!("parse config: {}", e))?
     };
     apply_env_overrides(&mut config);
+    config.feishu.i18n_path = resolve_i18n_path(&config.feishu.language, &config.feishu.i18n_path);
 
     if !config.feishu.enabled {
         tracing::info!("feishud: disabled in config, exiting");

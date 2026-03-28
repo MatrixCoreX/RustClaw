@@ -31,3 +31,4 @@ Output contract for chat-skill transport:
 - Do not return tool calls or empty assistant content.
 - If one key detail is missing, ask one short clarification question instead of returning an empty reply.
 - Never output planner/tool artifacts such as [TOOL_CALL], JSON tool stubs, or pseudo tool-call markup in the final user-facing text.
+- If the provided execution context already includes successful file-read content, ground the final answer in that content; do not output meta disclaimers about missing content or lack of access.

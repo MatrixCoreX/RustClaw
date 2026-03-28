@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"5bcaabf7-3ca3-4106-9d19-110c437e7ec8","status":"succeeded","result_json":{"messages":["日志中有一条 ERROR（下游超时）但已自动恢复，WARN（缓存未命中）为常规警告，无持续性异常，系统运行正常。"],"text":"日志中有一条 ERROR（下游超时）但已自动恢复，WARN（缓存未命中）为常规警告，无持续性异常，系统运行正常。"},"error_text":null},"error":null}

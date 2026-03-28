@@ -780,3 +780,94 @@ Natural-language manual regression
 [PROMPT]      瞅下 /home/guagua/test/README.md 开头，给我一句人话总结
 [TASK]        6f775a5c-b897-4225-bfe9-3bc08097ffe2
   [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这个目录是用于NL回归测试的工件和脚本的测试工作区，虽然可以存放运行器的输入和日志，但改变此目录不会影响`clawd`运行时的内部工作目录配置。
+
+============================================================
+[CASE]        31
+[SOURCE_LINE] 38
+[NAME]        colloquial_cn_ultra_tail_log
+[CHAT]        17746321082
+[PROMPT]      /home/guagua/test/logs/app.log 最后 5 行给我看下
+[TASK]        05477036-8b71-484e-867f-194dffa8b94d
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] ``` [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] ERROR sample downstream timeout recovered [2026-03-26 23:08:55] INFO serving local test tr...(truncated)
+
+============================================================
+[CASE]        32
+[SOURCE_LINE] 39
+[NAME]        colloquial_cn_ultra_count_docs
+[CHAT]        17746321083
+[PROMPT]      /home/guagua/test/docs 里头有几个直接子项？只回数字
+[TASK]        b2037780-f0c7-4a76-82fb-a2d72e490aa0
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 3
+
+============================================================
+[CASE]        33
+[SOURCE_LINE] 40
+[NAME]        colloquial_en_ultra_send
+[CHAT]        17746321084
+[PROMPT]      pls send /home/guagua/test/docs/service_notes.md as file only
+[TASK]        6af8f382-d0d7-4475-b460-d1ab2560fa92
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/docs/service_notes.md
+
+============================================================
+[CASE]        34
+[SOURCE_LINE] 41
+[NAME]        colloquial_en_ultra_read
+[CHAT]        17746321085
+[PROMPT]      take a quick look at /home/guagua/test/README.md top lines, one-liner only
+[TASK]        79df41d5-2ece-40eb-848d-81c21d9aa241
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The file was read successfully, but its content was not provided in the output, so I cannot summarize it.
+
+============================================================
+[CASE]        35
+[SOURCE_LINE] 42
+[NAME]        colloquial_en_ultra_db
+[CHAT]        17746321086
+[PROMPT]      yo, what tables are in /home/guagua/test/data/test_contract.sqlite ?
+[TASK]        1257ff9a-e222-414a-9ce8-02cec865214f
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The tables in `/home/guagua/test/data/test_contract.sqlite` are: - `accounts` - `audit_log`
+
+============================================================
+[CASE]        36
+[SOURCE_LINE] 43
+[NAME]        colloquial_mixed_ultra_tail
+[CHAT]        17746321087
+[PROMPT]      quick看下 /home/guagua/test/logs/app.log 最后 6 行
+[TASK]        800ce673-a15d-4ac7-bf6a-f301176f367e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] ERROR sample downstream timeout recovered [2026-03...(truncated)
+
+================ Final Summary ================
+TOTAL_CASES=52 SUCCEEDED=51 FAILED=1 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_012135/summary.jsonl

@@ -1,0 +1,9 @@
+index=16
+case_name=context_colloquial_mixed_docs_alias
+chat_id=17746743797
+turn1_task_id=b5c0d582-974e-4b99-b063-14fa7967c258
+turn1_prompt=先记一下，that docs dir 就是 /home/guagua/test/docs
+turn2_task_id=99383cda-7ac4-424a-9c80-1b9003be4632
+turn2_prompt=look at that docs dir, names only
+turn3_task_id=e0388e9e-2784-46c9-b237-ea0393e5f85f
+turn3_prompt=然后告诉我一共有多少个直接子项，只输出数字
