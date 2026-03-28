@@ -662,7 +662,7 @@ fn build_bot_state(
         clawd_base_url: clawd_base_url_from_config(config),
         client,
         poll_interval_ms: config.worker.poll_interval_ms,
-        task_wait_seconds: config.worker.task_timeout_seconds,
+        task_wait_seconds: bot_config.task_delivery_timeout_seconds.max(1),
         queue_limit: config.worker.queue_limit,
         auto_vision_on_image_only: config.telegram.auto_vision_on_image_only,
         pending_image_by_chat: Arc::new(Mutex::new(HashMap::new())),
@@ -4036,9 +4036,13 @@ fn spawn_task_result_delivery(
                                 chat_id.0,
                                 soft_notice_seconds
                             );
+                            let soft_seconds = soft_notice_seconds.to_string();
                             let msg = state.i18n.t_with(
                                 "telegram.msg.task_still_running_background",
-                                &[("seconds", &soft_notice_seconds.to_string())],
+                                &[
+                                    ("seconds", soft_seconds.as_str()),
+                                    ("task_id", task_id.as_str()),
+                                ],
                             );
                             let _ = bot.send_message(chat_id, msg).await;
                             soft_notice_sent = true;
@@ -4054,9 +4058,13 @@ fn spawn_task_result_delivery(
                                 chat_id.0,
                                 hard_notice_seconds
                             );
+                            let hard_seconds = hard_notice_seconds.to_string();
                             let msg = state.i18n.t_with(
                                 "telegram.msg.task_still_running_worker_timeout",
-                                &[("seconds", &hard_notice_seconds.to_string())],
+                                &[
+                                    ("seconds", hard_seconds.as_str()),
+                                    ("task_id", task_id.as_str()),
+                                ],
                             );
                             let _ = bot.send_message(chat_id, msg).await;
                             hard_notice_sent = true;

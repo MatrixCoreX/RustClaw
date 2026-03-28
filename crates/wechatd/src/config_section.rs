@@ -6,6 +6,10 @@ fn default_typing_refresh_secs() -> u64 {
     5
 }
 
+fn default_task_delivery_timeout_seconds() -> u64 {
+    600
+}
+
 fn default_cdn_base_url() -> String {
     "https://novac2c.cdn.weixin.qq.com/c2c".to_string()
 }
@@ -42,6 +46,10 @@ pub struct WechatSection {
     #[serde(default)]
     pub wechat_uin_base64: String,
     pub request_timeout_seconds: u64,
+    /// Soft timeout threshold for task delivery polling (seconds).
+    /// Once exceeded, we notify the user that execution is still in progress and keep polling.
+    #[serde(default = "default_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
     pub longpoll_timeout_ms: u64,
     pub text_chunk_chars: usize,
     /// Optional `SKRouteTag` header (same as OpenClaw weixin plugin / `openclaw.json` routeTag).

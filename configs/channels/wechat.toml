@@ -25,6 +25,8 @@ bot_token = ""
 # Random uint32 encoded as base64 when required by upstream protocol.
 wechat_uin_base64 = ""
 request_timeout_seconds = 30
+# 任务结果投递软超时阈值（秒）；超过后提示“仍在执行”，并继续轮询
+task_delivery_timeout_seconds = 600
 longpoll_timeout_ms = 35000
 text_chunk_chars = 1200
 # 与 OpenClaw 微信插件一致：部分部署需在请求头携带 SKRouteTag（留空则不发）。

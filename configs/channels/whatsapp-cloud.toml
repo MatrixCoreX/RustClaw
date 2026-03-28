@@ -40,6 +40,8 @@ language = "en-US"
 i18n_path = "configs/i18n/whatsapp-cloud.en-US.toml"
 # 快速结果等待秒数；超时后转为异步回传
 quick_result_wait_seconds = 3
+# 任务结果投递软超时阈值（秒）；超过后提示“仍在执行”，并继续轮询
+task_delivery_timeout_seconds = 600
 # 图片落盘目录
 image_inbox_dir = "image/upload"
 # 音频落盘目录

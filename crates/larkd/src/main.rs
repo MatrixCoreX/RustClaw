@@ -76,7 +76,7 @@ struct LarkSection {
     encrypt_key: String,
     #[serde(default = "default_request_timeout")]
     request_timeout_seconds: u64,
-    /// 整条任务轮询最长等待时间（秒），与 request_timeout_seconds 分离
+    /// 任务投递软超时阈值（秒）；超过后提示“仍在执行”，并继续轮询
     #[serde(default = "default_task_delivery_timeout")]
     task_delivery_timeout_seconds: u64,
     #[serde(default = "default_text_chunk_chars")]
@@ -109,7 +109,7 @@ fn default_request_timeout() -> u64 {
     30
 }
 fn default_task_delivery_timeout() -> u64 {
-    180
+    600
 }
 fn default_text_chunk_chars() -> usize {
     4000
@@ -457,7 +457,7 @@ const LARK_BIND_REQUEST_FAILED_FALLBACK: &str =
 const LARK_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "Media download failed, please try again later.";
 const LARK_MEDIA_FILE_TOO_LARGE_FALLBACK: &str = "Media file is too large and was not saved.";
 const LARK_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
-    "Request timed out, please try again later.";
+    "你的任务正在持续执行（任务编号：{task_id}），执行完了给你回复。";
 const LARK_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "Done.";
 const LARK_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str = "Task failed";
 const LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str = "Failed: {error}";
@@ -845,12 +845,6 @@ fn handle_text_message_to_clawd(
     let user_key_poll = user_key.clone();
 
     tokio::spawn(async move {
-        let request_timeout_text = lark_t(
-            &config,
-            LARK_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY,
-            LARK_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK,
-        );
-
         let submit_resp = match client.post(&submit_url).json(&submit_req).send().await {
             Ok(r) => r,
             Err(e) => {
@@ -887,6 +881,12 @@ fn handle_text_message_to_clawd(
             "larkd: bound user task submitted task_id={} external_chat_id={}",
             task_id, chat_id
         );
+        let running_notice_text = lark_t_with(
+            &config,
+            LARK_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY,
+            &[("task_id", task_id.as_str())],
+            LARK_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK,
+        );
 
         let clawd_base = config.lark.clawd_base_url.clone();
         let chat_id_delivery = chat_id.clone();
@@ -897,6 +897,7 @@ fn handle_text_message_to_clawd(
         );
         let started = std::time::Instant::now();
         let mut last_seen_status: Option<TaskStatus> = None;
+        let mut timeout_logged = false;
         loop {
             let url = format!("{}/v1/tasks/{}", clawd_base, task_id);
             let mut req = client.get(&url);
@@ -911,16 +912,18 @@ fn handle_text_message_to_clawd(
                 Err(e) => {
                     warn!("larkd: poll failed task_id={} err={}", task_id, e);
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                        warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=poll_failed", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_lark_text(
-                            &config,
-                            &client,
-                            &token_cache,
-                            &chat_id_delivery,
-                            &request_timeout_text,
-                        )
-                        .await;
-                        break;
+                        if !timeout_logged {
+                            warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=poll_failed (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
+                            let _ = send_lark_text(
+                                &config,
+                                &client,
+                                &token_cache,
+                                &chat_id_delivery,
+                                &running_notice_text,
+                            )
+                            .await;
+                            timeout_logged = true;
+                        }
                     }
                     tokio::time::sleep(poll_interval).await;
                     continue;
@@ -943,16 +946,18 @@ fn handle_text_message_to_clawd(
                     );
                 }
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                    warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=http status={}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, status);
-                    let _ = send_lark_text(
-                        &config,
-                        &client,
-                        &token_cache,
-                        &chat_id_delivery,
-                        &request_timeout_text,
-                    )
-                    .await;
-                    break;
+                    if !timeout_logged {
+                        warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=http status={} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, status);
+                        let _ = send_lark_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            &running_notice_text,
+                        )
+                        .await;
+                        timeout_logged = true;
+                    }
                 }
                 tokio::time::sleep(poll_interval).await;
                 continue;
@@ -962,16 +967,18 @@ fn handle_text_message_to_clawd(
                 Err(e) => {
                     debug!("larkd: poll parse failed task_id={} err={}", task_id, e);
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                        warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=parse_failed", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_lark_text(
-                            &config,
-                            &client,
-                            &token_cache,
-                            &chat_id_delivery,
-                            &request_timeout_text,
-                        )
-                        .await;
-                        break;
+                        if !timeout_logged {
+                            warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=parse_failed (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
+                            let _ = send_lark_text(
+                                &config,
+                                &client,
+                                &token_cache,
+                                &chat_id_delivery,
+                                &running_notice_text,
+                            )
+                            .await;
+                            timeout_logged = true;
+                        }
                     }
                     tokio::time::sleep(poll_interval).await;
                     continue;
@@ -984,16 +991,18 @@ fn handle_text_message_to_clawd(
                     task_id, body.ok, err_msg
                 );
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                    warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=no_task_data error={}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, err_msg);
-                    let _ = send_lark_text(
-                        &config,
-                        &client,
-                        &token_cache,
-                        &chat_id_delivery,
-                        &request_timeout_text,
-                    )
-                    .await;
-                    break;
+                    if !timeout_logged {
+                        warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=no_task_data error={} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, err_msg);
+                        let _ = send_lark_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            &running_notice_text,
+                        )
+                        .await;
+                        timeout_logged = true;
+                    }
                 }
                 tokio::time::sleep(poll_interval).await;
                 continue;
@@ -1002,16 +1011,18 @@ fn handle_text_message_to_clawd(
             match task.status {
                 TaskStatus::Queued | TaskStatus::Running => {
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                        warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_lark_text(
-                            &config,
-                            &client,
-                            &token_cache,
-                            &chat_id_delivery,
-                            &request_timeout_text,
-                        )
-                        .await;
-                        break;
+                        if !timeout_logged {
+                            warn!("larkd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
+                            let _ = send_lark_text(
+                                &config,
+                                &client,
+                                &token_cache,
+                                &chat_id_delivery,
+                                &running_notice_text,
+                            )
+                            .await;
+                            timeout_logged = true;
+                        }
                     }
                     tokio::time::sleep(poll_interval).await;
                     continue;
