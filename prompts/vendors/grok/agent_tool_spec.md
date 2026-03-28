@@ -341,6 +341,8 @@ Skill behavior notes (file/path):
 - When the user gives an unclear, partial, or approximate directory name, first use `system_basic.find_path` with `target_kind="dir"` and a broad `contains` match before asking for clarification.
 - Use `fs_search.find_name` with `target_kind="dir"` when the task is explicitly a name search over files/directories rather than a direct path-resolution request.
 - Prefer `system_basic.inventory_dir` for immediate directory listing / hidden-file / names-only inventory tasks.
+- When the user specifies a folder/directory and asks to find files inside it, treat search as recursive under `root` (traverse all subdirectories).
+- Path matching rule for file search: case-insensitive exact basename match can be used directly; if only fuzzy/approximate matches exist, ask one concise clarification with 1-3 candidate paths before execution.
 
 #### fs_search JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"fs_search","args":{...}}`

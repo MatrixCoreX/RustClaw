@@ -1,0 +1,11 @@
+/home/guagua/git_upload/target/debug/deps/yaml_rust2-332967b0d7b2a15b.d: /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/lib.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/char_traits.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/debug.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/emitter.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/parser.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/scanner.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/yaml.rs
+
+/home/guagua/git_upload/target/debug/deps/libyaml_rust2-332967b0d7b2a15b.rmeta: /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/lib.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/char_traits.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/debug.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/emitter.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/parser.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/scanner.rs /home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/yaml.rs
+
+/home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/lib.rs:
+/home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/char_traits.rs:
+/home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/debug.rs:
+/home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/emitter.rs:
+/home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/parser.rs:
+/home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/scanner.rs:
+/home/guagua/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yaml-rust2-0.10.4/src/yaml.rs:
