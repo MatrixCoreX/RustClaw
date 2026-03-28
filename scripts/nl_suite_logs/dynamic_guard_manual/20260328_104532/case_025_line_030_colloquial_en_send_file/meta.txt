@@ -1,0 +1,6 @@
+ordinal=25
+source_line=30
+case_name=colloquial_en_send_file
+chat_id=17746659446
+task_id=f392052e-f8df-4502-bbab-6f596909995d
+prompt=Hey, just send me /home/guagua/test/README.md as a file, no pasted content.

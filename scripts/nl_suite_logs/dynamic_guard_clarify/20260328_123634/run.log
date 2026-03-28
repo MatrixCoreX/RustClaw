@@ -1,0 +1,36 @@
+NL multi-turn suite: clarify
+  run_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260328_123634
+  run_log:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260328_123634/run.log
+  case_file:  /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_clarify_20260327.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    17746703701
+
+============================================================
+[CASE]   1
+[NAME]   clarify_deictic_readme_again
+[CHAT]   17746703702
+[TURN1]  读一下那个 README 开头并用一句话总结
+[TASK1]  a70a8186-5acf-4f1e-aa4b-094440137f97
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供你想读取的 README 文件的路径。
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  f48e3ab8-e770-4305-9c1f-3f350d055e8c
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  This is a test workspace directory reserved for NL regression test artifacts and wrapper scripts.
+
+============================================================
+[CASE]   2
+[NAME]   clarify_deictic_config_send_again
+[CHAT]   17746703703
+[TURN1]  把那个配置文件发给我
+[TASK1]  805dbead-6e6d-4fa8-9bfe-c6bf2368c1f1
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  File not found.
+[TURN2]  /home/guagua/test/configs/app_config.toml
+[TASK2]  9abfaec0-a184-4e1a-a7eb-7ae640920a3f
+  [status] <none> -> running

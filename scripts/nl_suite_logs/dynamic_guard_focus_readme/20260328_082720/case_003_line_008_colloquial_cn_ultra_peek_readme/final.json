@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"bea485bc-2979-47a5-b91e-521f9849b9cd","status":"succeeded","result_json":{"messages":["这是一个用于NL回归测试产物和脚本存放的测试工作区目录，clawd运行时拥有独立的workspace根目录配置。"],"text":"这是一个用于NL回归测试产物和脚本存放的测试工作区目录，clawd运行时拥有独立的workspace根目录配置。"},"error_text":null},"error":null}

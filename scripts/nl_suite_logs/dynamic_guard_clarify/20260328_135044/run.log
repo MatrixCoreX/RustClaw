@@ -1,0 +1,397 @@
+NL multi-turn suite: clarify
+  run_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260328_135044
+  run_log:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260328_135044/run.log
+  case_file:  /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_clarify_20260327.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    17746743681
+
+============================================================
+[CASE]   1
+[NAME]   clarify_deictic_readme_again
+[CHAT]   17746743682
+[TURN1]  读一下那个 README 开头并用一句话总结
+[TASK1]  83b091c5-b06d-4334-b791-03f38ed3e197
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我您想读取的 README 文件的完整路径或文件名。
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  74c2c911-ece6-4155-a503-98310e006ea9
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  This directory is reserved for NL regression test artifacts and wrapper scripts.
+
+============================================================
+[CASE]   2
+[NAME]   clarify_deictic_config_send_again
+[CHAT]   17746743683
+[TURN1]  把那个配置文件发给我
+[TASK1]  ad225803-276f-4be7-993f-911b624c4d77
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我配置文件的路径或名称？
+[TURN2]  /home/guagua/test/configs/app_config.toml
+[TASK2]  45c9ed2c-19c3-4800-a171-a0c9d3a7cd8f
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/configs/app_config.toml
+
+============================================================
+[CASE]   3
+[NAME]   clarify_deictic_log_tail_again
+[CHAT]   17746743684
+[TURN1]  看下那个日志最近 20 行
+[TASK1]  c0ff64aa-482b-4541-b639-b160a01c7ac6
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我您要查看的日志文件路径。
+[TURN2]  /home/guagua/test/logs/app.log
+[TASK2]  039d1457-7201-4bec-ae83-39f9d13d92fe
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+
+============================================================
+[CASE]   4
+[NAME]   clarify_deictic_db_tables_again
+[CHAT]   17746743685
+[TURN1]  查一下那个 sqlite 里有哪些表
+[TASK1]  cffd9165-1948-4ae1-9b4c-e6fa8eae1327
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请问要查询的 SQLite 数据库文件路径是什么？
+[TURN2]  /home/guagua/test/data/test_contract.sqlite
+[TASK2]  61b8d910-12b0-47fc-9e8c-a625a7f0a6f5
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  该数据库中有以下表：\n1. accounts\n2. audit_log
+
+============================================================
+[CASE]   5
+[NAME]   clarify_deictic_archive_unpack_again
+[CHAT]   17746743686
+[TURN1]  把那个压缩包解压到 /home/guagua/test/tmp/dynamic_guard_unpack_case 然后告诉我结果
+[TASK1]  e80d056c-b619-4875-a920-20a2fdd49c59
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供要解压的压缩包文件路径。
+[TURN2]  /home/guagua/test/tmp/test_bundle.zip
+[TASK2]  1c550d87-7003-4236-ade0-cda8e85129cb
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  成功解压 /home/guagua/test/tmp/test_bundle.zip 到 /home/guagua/test/tmp/dynamic_guard_unpack_case，提取了以下文件：file_one.txt、file_two.txt
+
+============================================================
+[CASE]   6
+[NAME]   clarify_deictic_dir_count_again
+[CHAT]   17746743687
+[TURN1]  数一下那个目录里有多少个直接子项，只输出数字
+[TASK1]  f2b9fbbe-91d2-4039-979e-f194a27c198f
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  需要统计哪个目录的子项数量？
+[TURN2]  /home/guagua/test/docs
+[TASK2]  ba997072-891b-4559-a0a8-a10c7156865f
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  3
+
+============================================================
+[CASE]   7
+[NAME]   clarify_deictic_mixed_lang_readme_again
+[CHAT]   17746743688
+[TURN1]  Can you read that README header and summarize it in one sentence?
+[TASK1]  24a830db-4e82-4ae9-83d6-9d0f3c475a43
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  Which README file would you like me to read?
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  9f84d66b-e298-4ab6-93a8-867291ac7364
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  该 README.md 表明此目录是专门为自然语言回归测试的脚本和日志文件预留的工作区。
+
+============================================================
+[CASE]   8
+[NAME]   clarify_deictic_file_delivery_cn_en_again
+[CHAT]   17746743689
+[TURN1]  把那个 file 发给我，不要贴内容
+[TASK1]  96ce9189-3757-48ef-b983-4a658d07185e
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我你要发送的文件路径或文件名。
+[TURN2]  /home/guagua/test/docs/service_notes.md
+[TASK2]  cd8b54fd-a486-4b5b-9788-91264cf65281
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/docs/service_notes.md
+
+============================================================
+[CASE]   9
+[NAME]   clarify_deictic_missing_file_after_target_again
+[CHAT]   17746743690
+[TURN1]  把那个文件发我
+[TASK1]  d8154ab4-b6c2-4372-8196-70927ad30d0d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请问您想发送的具体文件路径是什么？
+[TURN2]  /home/guagua/test/docs/not_exists_case_001.md
+[TASK2]  f74dfa53-6970-4828-800e-89e63f967ed8
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  File not found.
+
+============================================================
+[CASE]   10
+[NAME]   clarify_deictic_log_tail_focus_again
+[CHAT]   17746743691
+[TURN1]  把那个日志最后 10 行给我，再指出一个可疑点
+[TASK1]  bc9faec5-0bb2-44df-a3a0-722225495898
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供日志文件的完整路径或名称。
+[TURN2]  /home/guagua/test/logs/app.log
+[TASK2]  eb02fc7d-b988-4703-bf64-14c9a2e16c1b
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  最后 10 行内容：\n[2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic\n\n可疑点：23:07:10 出现 ERROR 级别的「sample downstream timeout recovered」，表示下游服务曾发生超时异常，虽然已自行恢复，但这类错误通常意味着存在潜在的依赖服务不稳定问题，可能需要进一步排查 sample 服务的可用性和响应延迟。
+
+============================================================
+[CASE]   11
+[NAME]   clarify_deictic_dir_list_names_again
+[CHAT]   17746743692
+[TURN1]  看看那个目录下面有什么，只列名字
+[TASK1]  a166698f-98bd-4931-995f-d6278694521a
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我具体是哪个目录？
+[TURN2]  /home/guagua/test/docs
+[TASK2]  3c9f8bfe-2eda-4746-b276-ced79c8a84cf
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  guide.txt\nnotes.txt\nservice_notes.md
+
+============================================================
+[CASE]   12
+[NAME]   clarify_deictic_db_schema_version_again
+[CHAT]   17746743693
+[TURN1]  看看那个 sqlite 的 schema version 是多少
+[TASK1]  25c2ebe9-30e0-4f83-b5c3-bb373b30e364
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请问您要查询的 SQLite 数据库文件路径是什么？
+[TURN2]  /home/guagua/test/data/test_contract.sqlite
+[TASK2]  85f9bf96-fbd2-4134-a8eb-357adcde99e6
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  2
+
+============================================================
+[CASE]   13
+[NAME]   clarify_deictic_colloquial_readme_send
+[CHAT]   17746743694
+[TURN1]  那个 README 直接发我呗，别贴正文
+[TASK1]  bb52ecf5-81d5-4441-8ef4-902fb7bb4506
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我您需要的 README 的文件路径。
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  c8c4e867-3b65-4f71-94e9-b79be144d235
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/README.md
+
+============================================================
+[CASE]   14
+[NAME]   clarify_deictic_colloquial_log_tail
+[CHAT]   17746743695
+[TURN1]  帮我瞄一眼那个日志最后十行呗
+[TASK1]  cd97d7c6-69bb-43f7-94d7-538812396219
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供日志文件的路径。
+[TURN2]  /home/guagua/test/logs/app.log
+[TASK2]  2e88b591-8a3a-4d8e-9629-99f831ea9ca7
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+
+============================================================
+[CASE]   15
+[NAME]   clarify_deictic_colloquial_db_tables
+[CHAT]   17746743696
+[TURN1]  那个 sqlite 里有啥表，给我过一眼
+[TASK1]  856a4c65-ad4f-4bf7-9d9d-2481b0bbe84f
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供 SQLite 数据库的文件路径。
+[TURN2]  /home/guagua/test/data/test_contract.sqlite
+[TASK2]  c1666211-ebd6-4613-a96d-335aca8d8f89
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  accounts\naudit_log
+
+============================================================
+[CASE]   16
+[NAME]   clarify_deictic_colloquial_docs_count
+[CHAT]   17746743697
+[TURN1]  那个目录里头有多少个直接子项，只给数字
+[TASK1]  31cf7e40-6aa9-46d3-9077-952f19471dcb
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我您要查询的目录路径？
+[TURN2]  /home/guagua/test/docs
+[TASK2]  576a1cdd-8d73-496b-8125-3a15087a7c04
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  3
+
+============================================================
+[CASE]   17
+[NAME]   clarify_deictic_colloquial_en_send
+[CHAT]   17746743698
+[TURN1]  Can you shoot me that config file real quick, no paste?
+[TASK1]  0bea3f36-9667-4f56-9245-31d8ec9b70a2
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  Which config file do you need?
+[TURN2]  /home/guagua/test/configs/app_config.toml
+[TASK2]  ad075e5f-d4ba-4a26-bfd8-2426139561e5
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/configs/app_config.toml
+
+============================================================
+[CASE]   18
+[NAME]   clarify_deictic_colloquial_en_read
+[CHAT]   17746743699
+[TURN1]  Mind reading that README header and giving me a one-liner?
+[TASK1]  f67c2ccf-3d4f-4412-9fb2-96f45e1e624a
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  Which README file are you referring to?
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  7524c576-54c9-4204-9350-ad2e553cc83e
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  这是一个用于NL回归测试工件和包装脚本的测试工作区目录。
+
+============================================================
+[CASE]   19
+[NAME]   clarify_deictic_colloquial_mixed_log
+[CHAT]   17746743700
+[TURN1]  that log 给我 tail 一下最后 6 行
+[TASK1]  45373c23-8874-4b68-b738-260da8f68b74
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请提供要 tail 的日志文件路径？
+[TURN2]  /home/guagua/test/logs/app.log
+[TASK2]  ba74b0cb-b413-4cc6-9469-ee61cb7a1e7c
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+
+============================================================
+[CASE]   20
+[NAME]   clarify_deictic_ultra_cn_send
+[CHAT]   17746743701
+[TURN1]  那个 README 快发我，别粘贴
+[TASK1]  6226c7e9-8c1d-45e9-9985-296d1b6406cf
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请提供你想获取的 README 文件的具体路径或名称。
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  1c4cd194-302f-48c7-977e-cf94242773a3
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/README.md
+
+============================================================
+[CASE]   21
+[NAME]   clarify_deictic_ultra_cn_tail
+[CHAT]   17746743702
+[TURN1]  那个日志最后五行，快点给我
+[TASK1]  fbd2c750-13e2-4b7d-86b9-56ced7debc9f
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供日志文件的路径或名称。
+[TURN2]  /home/guagua/test/logs/app.log
+[TASK2]  981350d0-ad00-47bc-9ac7-463a8fdec943
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+
+============================================================
+[CASE]   22
+[NAME]   clarify_deictic_ultra_cn_db
+[CHAT]   17746743703
+[TURN1]  那个数据库有啥表，直接说
+[TASK1]  3f5392fa-8954-464a-86af-699f3b397a66
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请问您指的是哪个数据库？
+[TURN2]  /home/guagua/test/data/test_contract.sqlite
+[TASK2]  daba7a1e-886d-4872-8f08-1911939c3681
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  accounts, audit_log
+
+============================================================
+[CASE]   23
+[NAME]   clarify_deictic_ultra_en_send
+[CHAT]   17746743704
+[TURN1]  send me that file pls, no paste
+[TASK1]  adb152ee-dd40-45d5-80ef-908c0573ac0d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  Which file do you want me to send?
+[TURN2]  /home/guagua/test/docs/service_notes.md
+[TASK2]  3e4abc05-20cd-4a27-82a6-983332712fa6
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/docs/service_notes.md
+
+============================================================
+[CASE]   24
+[NAME]   clarify_deictic_ultra_en_read
+[CHAT]   17746743705
+[TURN1]  read that readme top part n gimme one-line summary
+[TASK1]  f770c9be-156f-4e5d-9b23-1dda2bd320c0
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  Which readme file do you want me to read?
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  ba7f5f4e-8afd-4f85-a04b-d3fcb0e88e88
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  这是一个用于存放NL回归测试产物和脚本的测试工作区目录，用于存放运行器输入和日志文件。
+
+============================================================
+[CASE]   25
+[NAME]   clarify_deictic_ultra_mixed_dir_count
+[CHAT]   17746743706
+[TURN1]  that docs 目录有几个直接子项，只回数字
+[TASK1]  06e86bcf-81fa-4499-9183-5dab60a85712
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供 docs 目录的完整路径？
+[TURN2]  /home/guagua/test/docs
+[TASK2]  57928f33-447a-4bee-a3a8-48942a0de986
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  3
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260328_135044
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260328_135044/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260328_135044/summary.jsonl

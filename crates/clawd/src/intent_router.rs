@@ -247,6 +247,28 @@ fn parse_output_contract(
     contract
 }
 
+fn enforce_content_evidence_execution_mode(
+    mode: RoutedMode,
+    contract: &IntentOutputContract,
+    needs_clarify: bool,
+) -> RoutedMode {
+    if needs_clarify
+        || mode != RoutedMode::Chat
+        || !contract.requires_content_evidence
+        || matches!(contract.locator_kind, OutputLocatorKind::None)
+    {
+        return mode;
+    }
+    if matches!(
+        contract.response_shape,
+        OutputResponseShape::Scalar | OutputResponseShape::FileToken
+    ) {
+        RoutedMode::Act
+    } else {
+        RoutedMode::ChatAct
+    }
+}
+
 /// Unified intent normalizer: one LLM call for resume decision + intent completion + schedule classification + needs_clarify + routed_mode.
 pub(crate) async fn run_intent_normalizer(
     state: &AppState,
@@ -360,15 +382,12 @@ pub(crate) async fn run_intent_normalizer(
             }
         };
     let trimmed = llm_out.trim();
-    let parsed_raw = serde_json::from_str::<IntentNormalizerOut>(trimmed).ok();
-    let raw_parse_ok = parsed_raw.is_some();
-    let parsed = parsed_raw.or_else(|| {
-        crate::extract_first_json_object_any(&llm_out)
-            .and_then(|json| serde_json::from_str::<IntentNormalizerOut>(&json).ok())
-    });
+    let raw_parse_ok = serde_json::from_str::<IntentNormalizerOut>(trimmed).is_ok();
+    let parsed =
+        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<IntentNormalizerOut>(&llm_out);
     if !raw_parse_ok && parsed.is_some() {
         info!(
-            "{} intent_normalizer task_id={} parse_recovery=fenced_json input={}",
+            "{} intent_normalizer task_id={} parse_recovery=extract_or_repair input={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(req)
@@ -386,8 +405,27 @@ pub(crate) async fn run_intent_normalizer(
         }
         let schedule_kind = parse_schedule_kind(&out.schedule_kind);
         let confidence = out.confidence.clamp(0.0, 1.0);
-        let routed_mode = parse_mode_text(&out.mode).unwrap_or(RoutedMode::AskClarify);
-        let output_contract = parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
+        let routed_mode_raw = parse_mode_text(&out.mode).unwrap_or(RoutedMode::AskClarify);
+        let mut output_contract =
+            parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
+        if out.needs_clarify {
+            // Clarification turns must remain plain questions; do not enforce delivery/scalar
+            // contracts on this turn even if the eventual resolved action is file-oriented.
+            output_contract = IntentOutputContract::default();
+        }
+        let routed_mode =
+            enforce_content_evidence_execution_mode(routed_mode_raw, &output_contract, out.needs_clarify);
+        if routed_mode != routed_mode_raw {
+            info!(
+                "{} intent_normalizer task_id={} mode_override={:?} -> {:?} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                routed_mode_raw,
+                routed_mode,
+                output_contract.locator_kind,
+                output_contract.response_shape
+            );
+        }
         info!(
             "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} mode={:?} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?}",
             crate::highlight_tag("routing"),
@@ -546,12 +584,11 @@ pub(crate) async fn classify_resume_followup_intent(
             }
         };
     let trimmed = llm_out.trim();
-    let parsed_raw = serde_json::from_str::<ResumeFollowupIntentOut>(trimmed).ok();
-    let raw_parse_ok = parsed_raw.is_some();
-    let parsed = parsed_raw.or_else(|| {
-        crate::extract_first_json_object_any(&llm_out)
-            .and_then(|json| serde_json::from_str::<ResumeFollowupIntentOut>(&json).ok())
-    });
+    let raw_parse_ok = serde_json::from_str::<ResumeFollowupIntentOut>(trimmed).is_ok();
+    let parsed =
+        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<ResumeFollowupIntentOut>(
+            &llm_out,
+        );
     if let Some(out) = parsed {
         let intent = ResumeFollowupIntent {
             decision: parse_resume_followup_decision(&out.decision),
@@ -570,7 +607,7 @@ pub(crate) async fn classify_resume_followup_intent(
             if raw_parse_ok {
                 ""
             } else {
-                " parse_recovery=fenced_json"
+                " parse_recovery=extract_or_repair"
             },
             crate::truncate_for_log(&llm_out)
         );

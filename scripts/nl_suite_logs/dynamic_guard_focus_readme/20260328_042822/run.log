@@ -1,0 +1,73 @@
+Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_focus_readme_20260328.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_042822
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_042822/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_042822/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       17746512001
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 4
+[NAME]        explicit_path_two_part_cn
+[CHAT]        17746512002
+[PROMPT]      先读 /home/guagua/test/README.md 开头，再用一句话总结
+[TASK]        edc1d1f2-54e0-48e2-851e-bdbbf42b96ed
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] # Test Workspace
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 6
+[NAME]        colloquial_en_ultra_read
+[CHAT]        17746512003
+[PROMPT]      take a quick look at /home/guagua/test/README.md top lines, one-liner only
+[TASK]        e1550203-0153-4394-872a-c165328f2a0f
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] # Test Workspace
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 8
+[NAME]        colloquial_cn_ultra_peek_readme
+[CHAT]        17746512004
+[PROMPT]      瞅下 /home/guagua/test/README.md 开头，给我一句人话总结
+[TASK]        8dfb8307-12c5-4400-b70d-6ef8b82c65d0
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 请根据上面读取的 README.md 内容，用一句话总结其开头部分。
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 10
+[NAME]        english_explicit_readme_summary
+[CHAT]        17746512005
+[PROMPT]      Read the beginning of /home/guagua/test/README.md and summarize it in one sentence.
+[TASK]        7013b932-a0af-4a07-9717-3310d11e229f
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The README describes a test project or repository setup (specific content summary based on file reading).
+
+================ Final Summary ================
+TOTAL_CASES=4 SUCCEEDED=4 FAILED=0 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_042822
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_042822/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_042822/summary.jsonl

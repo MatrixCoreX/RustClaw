@@ -1,0 +1,447 @@
+NL multi-turn suite: context_chain
+  run_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context/20260328_144907
+  run_log:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context/20260328_144907/run.log
+  case_file:  /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_context_20260327.txt
+  turn_count: 3
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    17746743781
+
+============================================================
+[CASE]   1
+[NAME]   context_bound_readme_followup_20260327
+[CHAT]   17746743782
+[TURN1]  先记一下，后面我说“那个 README”就是 /home/guagua/test/README.md
+[TASK1]  5f933bb6-cc69-401e-ae30-a099a9c1153d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住：`那个 README` → `/home/guagua/test/README.md`
+[TURN2]  读一下那个 README 开头 5 行
+[TASK2]  3c860f96-3901-41bb-ae20-c9d5f4d2b344
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  # Test Workspace\n\nThis directory is reserved for NL regression test artifacts and wrapper scripts.\n\nNotes:
+[TURN3]  再用一句话总结它
+[TASK3]  6621e4a8-d055-4432-9330-78f844be9b69
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  该目录用于存放自然语言回归测试的产物和脚本。
+
+============================================================
+[CASE]   2
+[NAME]   context_bound_log_followup_20260327
+[CHAT]   17746743783
+[TURN1]  先记一下，“那个日志”指 /home/guagua/test/logs/app.log
+[TASK1]  2e3be74d-8d90-4949-901f-344ddc94efb4
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  已记录：在本会话中，“那个日志”指代 `/home/guagua/test/logs/app.log`。
+[TURN2]  看一下那个日志最近 20 行
+[TASK2]  37818a14-2f32-4630-89b5-e1d7765cc1df
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+[TURN3]  再从里面挑一个最值得注意的点
+[TASK3]  9d966c5f-7672-4eec-8b82-567bab8184ac
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  **最值得注意：** 第 4 行的 `ERROR sample downstream timeout recovered`
+
+============================================================
+[CASE]   3
+[NAME]   context_bound_config_delivery_20260327
+[CHAT]   17746743784
+[TURN1]  先记一下，“那个配置文件”就是 /home/guagua/test/configs/app_config.toml
+[TASK1]  83795cd4-3846-49ee-8e1e-0de3607046d5
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记录。「那个配置文件」= `/home/guagua/test/configs/app_config.toml`
+[TURN2]  把那个配置文件发给我
+[TASK2]  db9e7e39-a8f6-4487-a3b6-6d289cf568e4
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/configs/app_config.toml
+[TURN3]  再用一句话说它主要是干嘛的
+[TASK3]  7375e3f2-e3dd-412f-b64e-12e24f1a6d10
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  该配置文件定义了 rustclaw-test-fixture 应用的基础元数据、运行模式和关键路径映射。
+
+============================================================
+[CASE]   4
+[NAME]   context_ambiguous_after_two_files_20260327
+[CHAT]   17746743785
+[TURN1]  先读取 /home/guagua/test/README.md 开头 3 行
+[TASK1]  e9b991fd-f7f4-4caf-ad1a-ba6d3bb4fc40
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  README.md 的开头 3 行内容：\n\n1. # Test Workspace\n2. This directory is reserved for NL regression test artifacts and wrapper scripts.\n3. Notes:
+[TURN2]  再读取 /home/guagua/test/docs/service_notes.md 开头 3 行
+[TASK2]  98db5d4f-9ad6-429b-8502-4afd438bab88
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  # Service Notes\n\nThis fixture document describes a pretend local service used only for testing.
+[TURN3]  把那个文件发给我
+[TASK3]  423459e5-e2e5-4b01-adb5-5921f21cb27c
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  FILE:/home/guagua/test/docs/service_notes.md
+
+============================================================
+[CASE]   5
+[NAME]   context_explicit_path_after_clarify_20260327
+[CHAT]   17746743786
+[TURN1]  先记一下，如果我后面没说清楚你就先反问
+[TASK1]  5a71baab-4929-414c-9709-68655a685def
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记录。如果后续表述不明确，我会先确认。
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  28ee8ff9-3767-4074-acd3-cf01bc3fb27e
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  Do you want me to read, edit, or send /home/guagua/test/README.md?
+[TURN3]  读一下这个路径开头并用一句话总结
+[TASK3]  3cfaa9cd-e1e4-4316-b033-800e36b2af49
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT3]  This directory serves as a workspace reserved for NL regression test artifacts and wrapper scripts, separate from the agent's internal working directory.
+
+============================================================
+[CASE]   6
+[NAME]   context_bound_alias_rebind_20260327
+[CHAT]   17746743787
+[TURN1]  先记一下，“那个文档”是 /home/guagua/test/README.md
+[TASK1]  76166c7a-150b-4de7-af96-f95c277ca76b
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  记住了。后续“那个文档”指 `/home/guagua/test/README.md`。
+[TURN2]  再记一下，“那个文档”改成 /home/guagua/test/docs/service_notes.md
+[TASK2]  dd955f70-7c76-4943-9f31-ca0789ac391c
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  已更新。后续“那个文档”指 `/home/guagua/test/docs/service_notes.md`。
+[TURN3]  读一下那个文档开头并一句话总结
+[TASK3]  bc250eb7-868e-497e-bc7e-6b8c73e1602f
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  该文档是一个仅用于测试的模拟本地服务说明文件，明确指出它永远不应重启真实的 RustClaw 服务或修改系统状态。
+
+============================================================
+[CASE]   7
+[NAME]   context_bound_en_pronoun_log_20260327
+[CHAT]   17746743788
+[TURN1]  Remember this: "that log" means /home/guagua/test/logs/app.log
+[TASK1]  18ef8323-3c73-481e-aed5-7e1c2268b553
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  Understood. "that log" → `/home/guagua/test/logs/app.log`.
+[TURN2]  tail that log 10 lines
+[TASK2]  c5bf56d0-5b4f-4608-8e4d-c8e01679b3d7
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+[TURN3]  in one sentence tell me if anything looks abnormal
+[TASK3]  7fb435cf-4508-48cc-b984-b0108149dc9c
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  The ERROR entry about "downstream timeout recovered" indicates a transient failure occurred but the system self-healed, while the WARN about a cache miss on the demo key may warrant investigation if caching is expected for that key.
+
+============================================================
+[CASE]   8
+[NAME]   context_bound_missing_file_followup_20260327
+[CHAT]   17746743789
+[TURN1]  先记一下，“那个文件”就是 /home/guagua/test/docs/not_exists_case_002.md
+[TASK1]  f0391bdc-28fa-48d6-b912-21e841d816e3
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住。别名“那个文件”对应路径 `/home/guagua/test/docs/not_exists_case_002.md`。
+[TURN2]  把那个文件发给我
+[TASK2]  c590317e-0795-4587-bd05-3c38d58550ce
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  File not found.
+[TURN3]  如果不存在就简短说明原因
+[TASK3]  b22a074f-43a9-4a52-b607-b17b1877299b
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  File not found.
+
+============================================================
+[CASE]   9
+[NAME]   context_bound_db_then_focus_20260327
+[CHAT]   17746743790
+[TURN1]  先记一下，“那个数据库”指 /home/guagua/test/data/test_contract.sqlite
+[TASK1]  30567ed1-db27-4549-81f4-557a35fccb50
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住：`那个数据库` = `/home/guagua/test/data/test_contract.sqlite`
+[TURN2]  看下那个数据库有哪些表
+[TASK2]  28866d06-d0db-4fab-b482-d1041b75f8a8
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  该数据库包含以下表：accounts、audit_log
+[TURN3]  再告诉我最像业务数据的是哪一张
+[TASK3]  393bf61b-c1f2-4461-a12e-b1e70f1e5b85
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT3]  基于表名和结构语义分析，accounts 表更像是业务数据表：
+
+============================================================
+[CASE]   10
+[NAME]   context_two_targets_disambiguate_20260327
+[CHAT]   17746743791
+[TURN1]  先记一下，“那个目录”是 /home/guagua/test/docs，“那个日志”是 /home/guagua/test/logs/app.log
+[TASK1]  8028965f-d721-4fd2-8fbd-9739fadacaff
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记录会话别名绑定：\n\n- `那个目录` → `/home/guagua/test/docs`\n- `那个日志` → `/home/guagua/test/logs/app.log`\n\n后续对话中可直接引用这些别名。
+[TURN2]  看下那个目录里有什么
+[TASK2]  00e88dd3-ce95-4c78-a185-b0ec78de1d19
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  guide.txt\nnotes.txt\nservice_notes.md
+[TURN3]  再看那个日志最后 5 行
+[TASK3]  6ca96535-16d7-46d2-b986-0f16d62c3893
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+
+============================================================
+[CASE]   11
+[NAME]   context_colloquial_cn_readme_alias
+[CHAT]   17746743792
+[TURN1]  先记住哈，我说“那个README”就是 /home/guagua/test/README.md
+[TASK1]  b9adc141-466b-4b7e-8883-8c01c939b857
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  已记住。"那个README" → `/home/guagua/test/README.md`
+[TURN2]  帮我瞅瞅那个README开头几行
+[TASK2]  c32bf345-6478-41fd-b71c-31c51af0142d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  README.md 的开头内容表明这是一个测试工作区目录，用于 NL 回归测试产物和包装脚本。文件还提到运行器输入和日志可以存放在此目录中。
+[TURN3]  最后一句话讲重点
+[TASK3]  22aee64d-168d-42e8-9417-da2b09b7f627
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  此目录的用途：**存放运行器输入和日志。
+
+============================================================
+[CASE]   12
+[NAME]   context_colloquial_cn_log_alias
+[CHAT]   17746743793
+[TURN1]  先记一下，“那份日志”指 /home/guagua/test/logs/app.log
+[TASK1]  326ebb87-5edb-4ca3-959e-c9cacb1f4621
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住：`那份日志` → `/home/guagua/test/logs/app.log`
+[TURN2]  把那份日志最后 12 行甩我
+[TASK2]  f284690b-36e7-4d8c-98d8-45417031bf27
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+[TURN3]  再说一个你觉得最可疑的点
+[TASK3]  98b93ef1-5e75-4b57-a7a6-19ff6c4a9954
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  最可疑：`[2026-03-26 23:07:10] ERROR sample downstream timeout recovered`
+
+============================================================
+[CASE]   13
+[NAME]   context_colloquial_cn_send_config_alias
+[CHAT]   17746743794
+[TURN1]  先记一下，“那份配置”就是 /home/guagua/test/configs/app_config.toml
+[TASK1]  bf017e55-b3d0-4617-a9ad-4c4fbdd451f5
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  已记住。\n\n别名映射：`那份配置` → `/home/guagua/test/configs/app_config.toml`
+[TURN2]  那份配置直接发我，别贴正文
+[TASK2]  59728d23-3e99-48ec-8c89-1015c68536da
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/configs/app_config.toml
+[TURN3]  再一句话说主要用途
+[TASK3]  7366091a-a96f-4529-8970-942e6a464d82
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  无法直接读取该文件内容。
+
+============================================================
+[CASE]   14
+[NAME]   context_colloquial_en_readme_alias
+[CHAT]   17746743795
+[TURN1]  Quick note: when I say "that README", I mean /home/guagua/test/README.md
+[TASK1]  6469ab15-f1da-42a0-8a54-08288276ca81
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  Understood. From this point forward, "that README" refers to `/home/guagua/test/README.md`.
+[TURN2]  Could you read that README header for me?
+[TASK2]  fe3a29e7-3954-4f48-84bc-5d0a3948c491
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  README.md 的开头（header）部分为：\n\n# Test Workspace\n\n此目录专为 NL 回归测试的工件和包装脚本预留。\n\nNotes:\n- 运行器的输入和日志可存放于此。\n- 被测试的 `clawd` 运行时仍使用其自己配置的工作区根目录；仅更改此目录不会改变 agent 的内部工作目录。
+[TURN3]  Then give me a one-line summary.
+[TASK3]  d601fde6-e522-4a49-91cf-1a6a0efc9567
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  此目录是用于 NL 回归测试的工件和脚本预留工作区。
+
+============================================================
+[CASE]   15
+[NAME]   context_colloquial_en_log_alias
+[CHAT]   17746743796
+[TURN1]  FYI, "that log" = /home/guagua/test/logs/app.log
+[TASK1]  3a97fc5b-3800-4418-95f9-9233b90f3a49
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  已记录别名：`that log` → `/home/guagua/test/logs/app.log`，后续可直接使用该引用。
+[TURN2]  tail that log 7 lines real quick
+[TASK2]  45318169-41ca-437c-8cc2-dea7532d47bf
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+[TURN3]  and tell me in one sentence if anything looks off
+[TASK3]  172db14e-2ef9-4c13-bd77-185a915dc46e
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  有异常：存在一条已恢复的ERROR（下游超时）和一条WARN（缓存未命中）。
+
+============================================================
+[CASE]   16
+[NAME]   context_colloquial_mixed_docs_alias
+[CHAT]   17746743797
+[TURN1]  先记一下，that docs dir 就是 /home/guagua/test/docs
+[TASK1]  b5c0d582-974e-4b99-b063-14fa7967c258
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住，docs dir 即 `/home/guagua/test/docs`。
+[TURN2]  look at that docs dir, names only
+[TASK2]  99383cda-7ac4-424a-9c80-1b9003be4632
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  guide.txt\nnotes.txt\nservice_notes.md
+[TURN3]  然后告诉我一共有多少个直接子项，只输出数字
+[TASK3]  e0388e9e-2784-46c9-b237-ea0393e5f85f
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  3
+
+============================================================
+[CASE]   17
+[NAME]   context_ultra_cn_readme_alias
+[CHAT]   17746743798
+[TURN1]  记住哈，“那玩意README”就是 /home/guagua/test/README.md
+[TASK1]  ae297597-d13a-4ef8-a7e7-6f8016906342
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住：`那玩意README` → `/home/guagua/test/README.md`。后续可直接引用该路径。
+[TURN2]  那玩意开头给我看两眼
+[TASK2]  c4fb1345-22c2-45f6-ad96-b7b27b96663a
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  This directory is reserved for NL regression test artifacts and wrapper scripts.
+[TURN3]  最后一句话讲重点
+[TASK3]  90243f41-b638-4946-9952-983ddf9b74be
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT3]  上一句话的核心要点：
+
+============================================================
+[CASE]   18
+[NAME]   context_ultra_cn_log_alias
+[CHAT]   17746743799
+[TURN1]  记一下，“那条日志”= /home/guagua/test/logs/app.log
+[TASK1]  c2b40a1b-efa5-4a03-ba7e-a7c12727b76b
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记录：`那日志 = /home/guagua/test/logs/app.log`，后续可直接引用该路径。
+[TURN2]  那条日志最后 6 行甩我
+[TASK2]  0549bdda-e892-4b7d-a7df-926b1affac5d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  [2026-03-26 23:00:01] INFO startup complete\n[2026-03-26 23:04:12] INFO loaded 3 fixture documents\n[2026-03-26 23:06:33] WARN cache miss on demo key\n[2026-03-26 23:07:10] ERROR sample downstream timeout recovered\n[2026-03-26 23:08:55] INFO serving local test traffic
+[TURN3]  一句话说有没有异常
+[TASK3]  5bcaabf7-3ca3-4106-9d19-110c437e7ec8
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  日志中有一条 ERROR（下游超时）但已自动恢复，WARN（缓存未命中）为常规警告，无持续性异常，系统运行正常。
+
+============================================================
+[CASE]   19
+[NAME]   context_ultra_en_config_alias
+[CHAT]   17746743800
+[TURN1]  Note: "that config" means /home/guagua/test/configs/app_config.toml
+[TASK1]  9f87def9-3b8f-41ff-99ff-cf3fcd59b195
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  Alias set: **that config** → `/home/guagua/test/configs/app_config.toml`
+[TURN2]  send that config as file only
+[TASK2]  9a8121f7-2b9d-49ea-b0ec-2c0fd5443022
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/configs/app_config.toml
+[TURN3]  one-line what it is for
+[TASK3]  42d4fbea-819a-4447-88bf-178e80eb4e7e
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  Do you want me to explain what /home/guagua/test/configs/app_config.toml is for?
+
+============================================================
+[CASE]   20
+[NAME]   context_ultra_en_db_alias
+[CHAT]   17746743801
+[TURN1]  When I say "that db", I mean /home/guagua/test/data/test_contract.sqlite
+[TASK1]  217960c4-b3e7-4187-80cc-3a919ebeaa77
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  Done. "that db" now refers to `/home/guagua/test/data/test_contract.sqlite`.
+[TURN2]  show tables in that db
+[TASK2]  7b9ef62b-7255-428e-8824-0c16ce190549
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  accounts\naudit_log
+[TURN3]  pick one table that looks business-related
+[TASK3]  57f88ada-031d-4366-bbf0-69cad31bea58
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  `accounts`。核心业务实体表，通常比审计日志更直接反映业务数据。
+
+============================================================
+[CASE]   21
+[NAME]   context_ultra_mixed_docs_alias
+[CHAT]   17746743802
+[TURN1]  先记住，that folder 是 /home/guagua/test/docs
+[TASK1]  17be7353-cbbe-4e1b-b467-3c9c374a5cb4
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  好的，已记住：`/home/guagua/test/docs`
+[TURN2]  that folder names only
+[TASK2]  19d93021-9a92-4585-b983-5a325ddeb1dc
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  There are no subdirectories in /home/guagua/test/docs
+[TURN3]  再回我总数，number only
+[TASK3]  4949f2b2-8586-4bde-8979-087b942d7b5a
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT3]  3
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context/20260328_144907
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context/20260328_144907/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context/20260328_144907/summary.jsonl

@@ -201,6 +201,17 @@ fn bound_user_key_for_chat(state: &BotState, chat_id: i64) -> Option<String> {
         .and_then(|map| map.get(&chat_id).map(|identity| identity.user_key.clone()))
 }
 
+fn maybe_with_user_key_header(
+    req: reqwest::RequestBuilder,
+    user_key: Option<&str>,
+) -> reqwest::RequestBuilder {
+    if let Some(k) = user_key.map(str::trim).filter(|v| !v.is_empty()) {
+        req.header("X-RustClaw-Key", k)
+    } else {
+        req
+    }
+}
+
 fn normalize_telegram_username(raw: &str) -> Option<String> {
     let trimmed = raw.trim().trim_start_matches('@').trim();
     if trimmed.is_empty() {
@@ -988,13 +999,17 @@ async fn register_telegram_commands_and_menu(
         "commands": [
             { "command": "start", "description": i18n.t("telegram.menu.start_desc") },
             { "command": "help", "description": i18n.t("telegram.menu.help_desc") },
+            { "command": "ask", "description": i18n.t("telegram.menu.ask_desc") },
             { "command": "agent", "description": i18n.t("telegram.menu.agent_desc") },
             { "command": "status", "description": i18n.t("telegram.menu.status_desc") },
             { "command": "cancel", "description": i18n.t("telegram.menu.cancel_desc") },
             { "command": "skills", "description": i18n.t("telegram.menu.skills_desc") },
             { "command": "run", "description": i18n.t("telegram.menu.run_desc") },
+            { "command": "sendfile", "description": i18n.t("telegram.menu.sendfile_desc") },
             { "command": "voicemode", "description": i18n.t("telegram.menu.voicemode_desc") },
+            { "command": "rustclaw", "description": i18n.t("telegram.menu.rustclaw_desc") },
             { "command": "crypto", "description": i18n.t("telegram.menu.crypto_desc") },
+            { "command": "cryptoapi", "description": i18n.t("telegram.menu.cryptoapi_desc") },
         ]
     });
 
@@ -1192,7 +1207,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         return Ok(());
     }
 
-    if text.starts_with("/rustclaw") || text.starts_with("/openclaw") {
+    if text.starts_with("/rustclaw") {
         if !is_admin {
             bot.send_message(
                 msg.chat.id,
@@ -1370,7 +1385,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
     }
 
     if text.starts_with("/status") {
-        match fetch_status_text(&state).await {
+        match fetch_status_text(&state, msg.chat.id.0).await {
             Ok(status_text) => {
                 bot.send_message(msg.chat.id, status_text)
                     .await
@@ -1499,7 +1514,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             }
         };
 
-        let queue_len = match fetch_queue_length(&state).await {
+        let queue_len = match fetch_queue_length(&state, msg.chat.id.0).await {
             Ok(v) => v,
             Err(_) => 0,
         };
@@ -1569,7 +1584,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             return Ok(());
         }
 
-        let queue_len = match fetch_queue_length(&state).await {
+        let queue_len = match fetch_queue_length(&state, msg.chat.id.0).await {
             Ok(v) => v,
             Err(_) => 0,
         };
@@ -1729,7 +1744,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
             .ok()
             .and_then(|m| m.get(&msg.chat.id.0).cloned());
         if let Some(image_path) = pending_image {
-            let queue_len = match fetch_queue_length(&state).await {
+            let queue_len = match fetch_queue_length(&state, msg.chat.id.0).await {
                 Ok(v) => v,
                 Err(_) => 0,
             };
@@ -1792,7 +1807,7 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
         }
     }
 
-    let queue_len = match fetch_queue_length(&state).await {
+    let queue_len = match fetch_queue_length(&state, msg.chat.id.0).await {
         Ok(v) => v,
         Err(_) => 0,
     };
@@ -1876,7 +1891,7 @@ async fn handle_image_only_message(
     file_id: String,
     ext: &str,
 ) -> anyhow::Result<()> {
-    let queue_len = match fetch_queue_length(state).await {
+    let queue_len = match fetch_queue_length(state, msg.chat.id.0).await {
         Ok(v) => v,
         Err(_) => 0,
     };
@@ -3360,7 +3375,6 @@ fn looks_like_general_command_token(core: &str) -> bool {
     matches!(
         lower.as_str(),
         "rustclaw"
-            | "openclaw"
             | "cargo"
             | "npm"
             | "pnpm"
@@ -3532,7 +3546,6 @@ fn looks_like_shell_command_line(text: &str) -> bool {
         "yarn",
         "cargo",
         "rustclaw",
-        "openclaw",
         "git",
         "curl",
         "wget",
@@ -4378,11 +4391,10 @@ async fn query_task_status(
     user_key: Option<&str>,
 ) -> anyhow::Result<TaskQueryResponse> {
     let url = format!("{}/v1/tasks/{task_id}", state.clawd_base_url);
-    let mut req = state.client.get(&url);
-    if let Some(user_key) = user_key.map(str::trim).filter(|v| !v.is_empty()) {
-        req = req.header("X-RustClaw-Key", user_key);
-    }
-    let resp = req.send().await.context("query task status failed")?;
+    let resp = maybe_with_user_key_header(state.client.get(&url), user_key)
+        .send()
+        .await
+        .context("query task status failed")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -4439,6 +4451,7 @@ async fn submit_task_only(
         .lock()
         .ok()
         .and_then(|map| map.get(&chat_id).map(|identity| identity.user_key.clone()));
+    let user_key_header = user_key.clone();
     let payload_compact = payload.to_string();
     let payload_fp = text_fingerprint_hex(&payload_compact);
     let payload_preview = text_preview_for_log(&payload_compact, 180);
@@ -4467,9 +4480,10 @@ async fn submit_task_only(
         "submit_task_only: url={} user_id={} chat_id={} kind={:?}",
         submit_url, user_id, chat_id, submit_req.kind
     );
-    let submit_resp = state
-        .client
-        .post(&submit_url)
+    let submit_resp = maybe_with_user_key_header(
+        state.client.post(&submit_url),
+        user_key_header.as_deref(),
+    )
         .json(&submit_req)
         .send()
         .await
@@ -4564,9 +4578,10 @@ async fn cancel_tasks_for_chat(
         "user_id": user_id,
         "chat_id": chat_id,
     });
-    let resp = state
-        .client
-        .post(&url)
+    let resp = maybe_with_user_key_header(
+        state.client.post(&url),
+        bound_user_key_for_chat(state, chat_id).as_deref(),
+    )
         .json(&payload)
         .send()
         .await
@@ -4594,11 +4609,12 @@ async fn cancel_tasks_for_chat(
         .unwrap_or(0);
     Ok(canceled)
 }
-async fn fetch_status_text(state: &BotState) -> anyhow::Result<String> {
+async fn fetch_status_text(state: &BotState, chat_id: i64) -> anyhow::Result<String> {
     let url = format!("{}/v1/health", state.clawd_base_url);
-    let resp = state
-        .client
-        .get(&url)
+    let resp = maybe_with_user_key_header(
+        state.client.get(&url),
+        bound_user_key_for_chat(state, chat_id).as_deref(),
+    )
         .send()
         .await
         .context("request health failed")?;
@@ -4656,11 +4672,12 @@ async fn fetch_status_text(state: &BotState) -> anyhow::Result<String> {
     ))
 }
 
-async fn fetch_queue_length(state: &BotState) -> anyhow::Result<usize> {
+async fn fetch_queue_length(state: &BotState, chat_id: i64) -> anyhow::Result<usize> {
     let url = format!("{}/v1/health", state.clawd_base_url);
-    let resp = state
-        .client
-        .get(&url)
+    let resp = maybe_with_user_key_header(
+        state.client.get(&url),
+        bound_user_key_for_chat(state, chat_id).as_deref(),
+    )
         .send()
         .await
         .context("request health failed")?;
@@ -4813,7 +4830,6 @@ fn persist_chat_voice_mode_to_config(
 fn handle_openclaw_config_command(state: &BotState, text: &str) -> anyhow::Result<String> {
     let cmd = text
         .strip_prefix("/rustclaw")
-        .or_else(|| text.strip_prefix("/openclaw"))
         .unwrap_or_default()
         .trim();
     if cmd.is_empty() {

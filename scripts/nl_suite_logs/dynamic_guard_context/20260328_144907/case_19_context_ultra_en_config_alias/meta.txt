@@ -1,0 +1,9 @@
+index=19
+case_name=context_ultra_en_config_alias
+chat_id=17746743800
+turn1_task_id=9f87def9-3b8f-41ff-99ff-cf3fcd59b195
+turn1_prompt=Note: "that config" means /home/guagua/test/configs/app_config.toml
+turn2_task_id=9a8121f7-2b9d-49ea-b0ec-2c0fd5443022
+turn2_prompt=send that config as file only
+turn3_task_id=42d4fbea-819a-4447-88bf-178e80eb4e7e
+turn3_prompt=one-line what it is for

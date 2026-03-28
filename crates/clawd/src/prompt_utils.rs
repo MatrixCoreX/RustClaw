@@ -58,6 +58,12 @@ pub(crate) fn parse_llm_json_raw_or_any<T: DeserializeOwned>(raw: &str) -> Optio
     })
 }
 
+pub(crate) fn parse_llm_json_raw_or_any_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
+    parse_json_with_repair(raw.trim()).or_else(|| {
+        extract_first_json_object_any(raw).and_then(|s| parse_json_with_repair::<T>(&s))
+    })
+}
+
 pub(crate) fn extract_first_json_object_any(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let mut i = 0usize;
@@ -223,6 +229,76 @@ fn repair_invalid_json_escapes(raw: &str) -> String {
     out
 }
 
+fn repair_unescaped_inner_quotes(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::with_capacity(raw.len() + 16);
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let ch = chars[i];
+        if !in_string {
+            if ch == '"' {
+                in_string = true;
+            }
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if escaped {
+            out.push(ch);
+            escaped = false;
+            i += 1;
+            continue;
+        }
+
+        match ch {
+            '\\' => {
+                out.push(ch);
+                escaped = true;
+            }
+            '"' => {
+                let mut j = i + 1;
+                while j < chars.len() && chars[j].is_whitespace() {
+                    j += 1;
+                }
+                let looks_like_string_end = j >= chars.len()
+                    || matches!(chars[j], ',' | '}' | ']' | ':');
+                if looks_like_string_end {
+                    out.push(ch);
+                    in_string = false;
+                } else {
+                    out.push('\\');
+                    out.push('"');
+                }
+            }
+            _ => out.push(ch),
+        }
+        i += 1;
+    }
+
+    out
+}
+
+fn parse_json_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
+    serde_json::from_str::<T>(raw)
+        .ok()
+        .or_else(|| {
+            let repaired = repair_invalid_json_escapes(raw);
+            serde_json::from_str::<T>(&repaired).ok()
+        })
+        .or_else(|| {
+            let repaired = repair_unescaped_inner_quotes(raw);
+            serde_json::from_str::<T>(&repaired).ok()
+        })
+        .or_else(|| {
+            let repaired = repair_unescaped_inner_quotes(&repair_invalid_json_escapes(raw));
+            serde_json::from_str::<T>(&repaired).ok()
+        })
+}
+
 fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
     let Some(obj) = value.as_object() else {
         return value;
@@ -309,4 +385,34 @@ fn collect_bare_action_args(obj: &serde_json::Map<String, Value>) -> Value {
         args.insert(key.clone(), value.clone());
     }
     Value::Object(args)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    #[test]
+    fn parse_llm_json_raw_or_any_with_repair_handles_unescaped_quotes() {
+        let raw = r#"{"resolved_user_intent":"记住："那玩意README"指向 /home/guagua/test/README.md","reason":"用户定义了"那玩意README"映射","confidence":1.0}"#;
+        let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
+            .expect("should parse repaired json");
+        assert_eq!(
+            parsed
+                .get("resolved_user_intent")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
+            "记住：\"那玩意README\"指向 /home/guagua/test/README.md"
+        );
+    }
+
+    #[test]
+    fn parse_llm_json_raw_or_any_with_repair_keeps_valid_json() {
+        let raw = r#"{"mode":"chat","confidence":0.9}"#;
+        let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
+            .expect("valid json should parse");
+        assert_eq!(
+            parsed.get("mode").and_then(|v| v.as_str()).unwrap_or_default(),
+            "chat"
+        );
+    }
 }

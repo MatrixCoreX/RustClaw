@@ -1,0 +1,74 @@
+Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_focus_readme_20260328.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_082720
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_082720/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_082720/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       17746750001
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 4
+[NAME]        explicit_path_two_part_cn
+[CHAT]        17746750002
+[PROMPT]      先读 /home/guagua/test/README.md 开头，再用一句话总结
+[TASK]        58edabaa-a3e8-488f-8f00-88f4ce5ae3e9
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这是一个测试工作区目录，用于存放自然语言回归测试的脚本和日志文件。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 6
+[NAME]        colloquial_en_ultra_read
+[CHAT]        17746750003
+[PROMPT]      take a quick look at /home/guagua/test/README.md top lines, one-liner only
+[TASK]        b9ae0903-287e-4cd0-8f28-eacee6c8c9bb
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] A test workspace directory for NL regression test artifacts and scripts, with notes on runner inputs/logs and clawd runtime workspace configuration.
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 8
+[NAME]        colloquial_cn_ultra_peek_readme
+[CHAT]        17746750004
+[PROMPT]      瞅下 /home/guagua/test/README.md 开头，给我一句人话总结
+[TASK]        bea485bc-2979-47a5-b91e-521f9849b9cd
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这是一个用于NL回归测试产物和脚本存放的测试工作区目录，clawd运行时拥有独立的workspace根目录配置。
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 10
+[NAME]        english_explicit_readme_summary
+[CHAT]        17746750005
+[PROMPT]      Read the beginning of /home/guagua/test/README.md and summarize it in one sentence.
+[TASK]        cfb5aec3-9417-4a2d-8054-ad33b49755bc
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The test workspace directory is reserved for NL regression test artifacts and wrapper scripts, with notes that runner inputs and logs can be stored here while the tested clawd runtime maintains its own separate configure...(truncated)
+
+================ Final Summary ================
+TOTAL_CASES=4 SUCCEEDED=4 FAILED=0 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_082720
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_082720/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_focus_readme/20260328_082720/summary.jsonl

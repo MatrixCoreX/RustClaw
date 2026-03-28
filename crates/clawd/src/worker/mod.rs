@@ -8,6 +8,82 @@ use uuid::Uuid;
 
 use crate::{AppState, ScheduledJobDue, now_ts, now_ts_u64, repo, schedule_service};
 
+fn trim_locator_token(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches(|c: char| {
+            matches!(
+                c,
+                '"'
+                    | '\''
+                    | '`'
+                    | ','
+                    | '.'
+                    | '，'
+                    | '。'
+                    | ':'
+                    | '：'
+                    | ';'
+                    | '；'
+                    | ')'
+                    | '('
+                    | ']'
+                    | '['
+                    | '）'
+                    | '（'
+                    | '】'
+                    | '【'
+                    | '>'
+                    | '<'
+                    | '》'
+                    | '《'
+            )
+        })
+        .to_string()
+}
+
+fn has_explicit_path_or_url_locator(text: &str) -> bool {
+    text.split_whitespace().map(trim_locator_token).any(|token| {
+        if token.is_empty() {
+            return false;
+        }
+        token.starts_with('/')
+            || token.starts_with("./")
+            || token.starts_with("../")
+            || token.starts_with("~/")
+            || token.starts_with("http://")
+            || token.starts_with("https://")
+            || token.contains(":\\")
+    })
+}
+
+fn looks_like_filename_locator(token: &str) -> bool {
+    if token.is_empty()
+        || token.contains('/')
+        || token.contains('\\')
+        || token.starts_with("http://")
+        || token.starts_with("https://")
+    {
+        return false;
+    }
+    let Some((base, ext)) = token.rsplit_once('.') else {
+        return false;
+    };
+    if base.is_empty() || ext.is_empty() {
+        return false;
+    }
+    ext.chars().all(|ch| ch.is_ascii_alphanumeric()) && ext.len() <= 12
+}
+
+fn has_concrete_locator_hint(text: &str) -> bool {
+    if has_explicit_path_or_url_locator(text) {
+        return true;
+    }
+    text.split_whitespace()
+        .map(trim_locator_token)
+        .any(|token| looks_like_filename_locator(&token))
+}
+
 fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Result<Vec<String>> {
     let timeout_secs = state.worker_running_no_progress_timeout_seconds.max(60);
     let now = now_ts_u64() as i64;
@@ -890,8 +966,40 @@ Use this block only as supporting evidence for genuinely short follow-up request
         .classifier_direct_sources
         .iter()
         .any(|s| s == &source.to_ascii_lowercase());
-    let force_clarify = context_resolution.needs_clarify;
-    let clarify_reason = context_resolution.reason.clone();
+    let missing_locator_for_path_scoped_content = !context_resolution.needs_clarify
+        && matches!(
+            normalizer_out.routed_mode,
+            crate::RoutedMode::Act | crate::RoutedMode::ChatAct
+        )
+        && normalizer_out.output_contract.requires_content_evidence
+        && matches!(
+            normalizer_out.output_contract.locator_kind,
+            crate::intent_router::OutputLocatorKind::Path
+        )
+        && !has_concrete_locator_hint(prompt)
+        && !has_concrete_locator_hint(&resolved_prompt);
+    if missing_locator_for_path_scoped_content {
+        info!(
+            "{} worker_once: ask force_clarify_by_locator_guard task_id={} reason=missing_concrete_locator_for_path_scoped_content raw_text={} resolved_text={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            crate::truncate_for_log(prompt),
+            crate::truncate_for_log(&resolved_prompt)
+        );
+    }
+    let force_clarify = context_resolution.needs_clarify || missing_locator_for_path_scoped_content;
+    let clarify_reason = if missing_locator_for_path_scoped_content {
+        if context_resolution.reason.trim().is_empty() {
+            "missing_concrete_locator_for_path_scoped_content".to_string()
+        } else {
+            format!(
+                "{}; missing_concrete_locator_for_path_scoped_content",
+                context_resolution.reason
+            )
+        }
+    } else {
+        context_resolution.reason.clone()
+    };
     let has_schedule_intent =
         normalizer_out.schedule_kind != crate::intent_router::ScheduleKind::None;
     let should_route_schedule_direct =
@@ -1045,14 +1153,21 @@ Use this block only as supporting evidence for genuinely short follow-up request
                 );
                 return Ok(());
             }
-            let (answer_text, answer_messages) = crate::intercept_response_payload_for_delivery(
-                state,
-                &resolved_prompt_for_execution,
-                normalizer_out.wants_file_delivery,
-                &normalizer_out.output_contract,
-                answer.text,
-                answer.messages,
-            );
+            let (answer_text, answer_messages) = if force_clarify {
+                (
+                    crate::intercept_response_text_for_delivery(&answer.text),
+                    answer.messages,
+                )
+            } else {
+                crate::intercept_response_payload_for_delivery(
+                    state,
+                    &resolved_prompt_for_execution,
+                    normalizer_out.wants_file_delivery,
+                    &normalizer_out.output_contract,
+                    answer.text,
+                    answer.messages,
+                )
+            };
             let result = if answer_messages.is_empty() {
                 json!({ "text": answer_text.clone() })
             } else {
@@ -1384,6 +1499,25 @@ mod tests {
             payload.get("context_token").and_then(|v| v.as_str()),
             Some("ctx-123")
         );
+    }
+
+    #[test]
+    fn concrete_locator_hint_detects_explicit_path_and_filename() {
+        assert!(super::has_concrete_locator_hint(
+            "read /home/guagua/test/README.md and summarize"
+        ));
+        assert!(super::has_concrete_locator_hint("send Cargo.toml"));
+        assert!(super::has_concrete_locator_hint(
+            "open https://example.com/file.txt"
+        ));
+    }
+
+    #[test]
+    fn concrete_locator_hint_rejects_deictic_without_locator() {
+        assert!(!super::has_concrete_locator_hint(
+            "读一下那个 README 开头并用一句话总结"
+        ));
+        assert!(!super::has_concrete_locator_hint("that config please"));
     }
 }
 

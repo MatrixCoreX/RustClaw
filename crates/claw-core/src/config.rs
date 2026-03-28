@@ -233,6 +233,10 @@ pub struct WhatsappConfig {
     pub allowlist: Vec<String>,
     #[serde(default)]
     pub bindings: Vec<ChannelBindingConfig>,
+    #[serde(default = "default_whatsapp_language")]
+    pub language: String,
+    #[serde(default = "default_whatsapp_i18n_path")]
+    pub i18n_path: String,
     #[serde(default = "default_whatsapp_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
     #[serde(default = "default_whatsapp_image_inbox_dir")]
@@ -308,6 +312,8 @@ impl Default for WhatsappConfig {
             admins: Vec::new(),
             allowlist: Vec::new(),
             bindings: Vec::new(),
+            language: default_whatsapp_language(),
+            i18n_path: default_whatsapp_i18n_path(),
             quick_result_wait_seconds: default_whatsapp_quick_result_wait_seconds(),
             image_inbox_dir: default_whatsapp_image_inbox_dir(),
             audio_inbox_dir: default_whatsapp_audio_inbox_dir(),
@@ -329,6 +335,10 @@ pub struct WhatsappWebConfig {
     pub auth_dir: String,
     #[serde(default = "default_whatsapp_web_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_whatsapp_web_language")]
+    pub language: String,
+    #[serde(default = "default_whatsapp_web_i18n_path")]
+    pub i18n_path: String,
     #[serde(default)]
     pub admins: Vec<String>,
     #[serde(default)]
@@ -357,6 +367,8 @@ impl Default for WhatsappWebConfig {
             bridge_base_url: default_whatsapp_web_bridge_base_url(),
             auth_dir: default_whatsapp_web_auth_dir(),
             quick_result_wait_seconds: default_whatsapp_web_quick_result_wait_seconds(),
+            language: default_whatsapp_web_language(),
+            i18n_path: default_whatsapp_web_i18n_path(),
             admins: Vec::new(),
             allowlist: Vec::new(),
             bindings: Vec::new(),
@@ -1447,6 +1459,14 @@ fn default_whatsapp_quick_result_wait_seconds() -> u64 {
     3
 }
 
+fn default_whatsapp_i18n_path() -> String {
+    "configs/i18n/whatsapp-cloud.en-US.toml".to_string()
+}
+
+fn default_whatsapp_language() -> String {
+    "en-US".to_string()
+}
+
 fn default_whatsapp_image_inbox_dir() -> String {
     "image/upload".to_string()
 }
@@ -1473,6 +1493,14 @@ fn default_whatsapp_web_auth_dir() -> String {
 
 fn default_whatsapp_web_quick_result_wait_seconds() -> u64 {
     3
+}
+
+fn default_whatsapp_web_i18n_path() -> String {
+    "configs/i18n/whatsapp-webd.en-US.toml".to_string()
+}
+
+fn default_whatsapp_web_language() -> String {
+    "en-US".to_string()
 }
 
 fn default_telegram_i18n_path() -> String {

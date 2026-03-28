@@ -1,0 +1,142 @@
+Natural-language manual regression
+  case_file:     /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_manual_20260327.txt
+  run_dir:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_032630
+  run_log:       /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_032630/run.log
+  summary_jsonl: /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_manual/20260328_032630/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       17746395991
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 4
+[NAME]        explicit_path_readme_summary
+[CHAT]        17746395992
+[PROMPT]      读一下 /home/guagua/test/README.md 开头并用一句话总结
+[TASK]        de82f44d-92f2-44c0-9db5-319979eefa67
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这个 README.
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 5
+[NAME]        explicit_path_readme_send
+[CHAT]        17746395993
+[PROMPT]      把 /home/guagua/test/README.md 发给我
+[TASK]        c41a3f37-be9b-44cf-a0cd-22b4869554ec
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/README.md
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 6
+[NAME]        explicit_config_send
+[CHAT]        17746395994
+[PROMPT]      把 /home/guagua/test/configs/app_config.toml 发给我
+[TASK]        cd6da072-6f56-4abf-935a-8019afc59974
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/home/guagua/test/configs/app_config.toml
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 7
+[NAME]        explicit_log_tail
+[CHAT]        17746395995
+[PROMPT]      看下 /home/guagua/test/logs/app.log 最近 10 行
+[TASK]        272f59c3-1257-4f55-9973-81ffbd986476
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] [2026-03-26 23:00:01] INFO startup complete [2026-03-26 23:04:12] INFO loaded 3 fixture documents [2026-03-26 23:06:33] WARN cache miss on demo key [2026-03-26 23:07:10] ERROR sample downstream timeout recovered [2026-03...(truncated)
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 8
+[NAME]        explicit_db_tables
+[CHAT]        17746395996
+[PROMPT]      查一下 /home/guagua/test/data/test_contract.sqlite 里有哪些表
+[TASK]        ead2bd74-2b00-4c84-9f7d-b1f4d832151e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] accounts, audit_log
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 9
+[NAME]        explicit_archive_unpack
+[CHAT]        17746395997
+[PROMPT]      把 /home/guagua/test/tmp/test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack 然后告诉我结果
+[TASK]        efd67204-09ee-4c93-a3b5-5e1274982a1e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 已成功解压 `/home/guagua/test/tmp/test_bundle.zip` 到 `/home/guagua/test/tmp/manual_dynamic_guard_unpack`。 解压出的文件： - file_one.txt - file_two.txt
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 10
+[NAME]        current_dir_count_scalar
+[CHAT]        17746395998
+[PROMPT]      数一下当前目录有多少个直接子项，只输出数字
+[TASK]        9b731322-f203-489e-8d76-925e19547802
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 79
+
+============================================================
+[CASE]        8
+[SOURCE_LINE] 11
+[NAME]        explicit_path_two_part
+[CHAT]        17746395999
+[PROMPT]      先读 /home/guagua/test/README.md 开头，再用一句话总结
+[TASK]        c3480988-28e3-46ae-b41d-57d32ca47c85
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 未能读取到该文件的内容。
+
+============================================================
+[CASE]        9
+[SOURCE_LINE] 12
+[NAME]        english_explicit_readme_summary
+[CHAT]        17746396000
+[PROMPT]      Read the beginning of /home/guagua/test/README.md and summarize it in one sentence.
+[TASK]        a41c4369-cde3-4581-9bff-e7d302bd1062
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] # Test Workspace
+
+============================================================
+[CASE]        10
+[SOURCE_LINE] 13
+[NAME]        english_explicit_send
+[CHAT]        17746396001
+[PROMPT]      Send me /home/guagua/test/README.md
+[TASK]        bbe6bb63-5ca6-4361-829b-e7cdf4d98b29
+  [status] <none> -> running
+Exception ignored on flushing sys.stdout:
+BrokenPipeError: [Errno 32] Broken pipe

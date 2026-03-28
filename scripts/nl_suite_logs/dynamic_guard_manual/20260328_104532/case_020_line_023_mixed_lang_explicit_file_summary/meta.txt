@@ -1,0 +1,6 @@
+ordinal=20
+source_line=23
+case_name=mixed_lang_explicit_file_summary
+chat_id=17746659441
+task_id=ab7fe265-926e-4edf-a796-6416b35f7569
+prompt=read /home/guagua/test/README.md 开头，然后用中文一句话总结

@@ -1,0 +1,7 @@
+index=4
+case_name=clarify_deictic_db_tables_again
+chat_id=17746743685
+turn1_task_id=cffd9165-1948-4ae1-9b4c-e6fa8eae1327
+turn1_prompt=查一下那个 sqlite 里有哪些表
+turn2_task_id=61b8d910-12b0-47fc-9e8c-a625a7f0a6f5
+turn2_prompt=/home/guagua/test/data/test_contract.sqlite

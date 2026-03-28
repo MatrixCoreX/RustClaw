@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"eb4b1dcf-aebb-47c1-adf3-d6ffbb200aec","status":"succeeded","result_json":{"messages":["该配置文件定义了 `rustclaw-test-fixture` 应用的基本运行参数、所属者为 `guagua`，并配置了文档、日志和数据存储的路径。"],"text":"该配置文件定义了 `rustclaw-test-fixture` 应用的基本运行参数、所属者为 `guagua`，并配置了文档、日志和数据存储的路径。"},"error_text":null},"error":null}

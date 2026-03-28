@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"56564980-12a1-4cb5-8901-404a7d8a3769","status":"succeeded","result_json":{"messages":["文件 /home/guagua/test/docs/service_notes.md 的内容已读取。该文件是服务说明文档，用于测试目的的模拟本地服务描述。","FILE:/home/guagua/test/docs/service_notes.md"],"text":"FILE:/home/guagua/test/docs/service_notes.md"},"error_text":null},"error":null}

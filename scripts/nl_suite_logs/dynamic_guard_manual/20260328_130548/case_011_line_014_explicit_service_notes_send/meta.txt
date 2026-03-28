@@ -1,0 +1,6 @@
+ordinal=11
+source_line=14
+case_name=explicit_service_notes_send
+chat_id=17746743592
+task_id=5800e46e-9082-47e0-ad1e-3fd990afcec1
+prompt=把 /home/guagua/test/docs/service_notes.md 发给我
