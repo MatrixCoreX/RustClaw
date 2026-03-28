@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"61b8d910-12b0-47fc-9e8c-a625a7f0a6f5","status":"succeeded","result_json":{"messages":["该数据库中有以下表：\n1. accounts\n2. audit_log"],"text":"该数据库中有以下表：\n1. accounts\n2. audit_log"},"error_text":null},"error":null}

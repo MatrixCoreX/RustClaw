@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"a04d8c1c-dadc-4bce-bb11-3bc4f8864c11","status":"succeeded","result_json":{"messages":["这是一个用于NL回归测试脚本和工件的测试工作区目录，用于存放runner输入和日志，但改变此目录本身不会改变agent的内部工作目录。"],"text":"这是一个用于NL回归测试脚本和工件的测试工作区目录，用于存放runner输入和日志，但改变此目录本身不会改变agent的内部工作目录。"},"error_text":null},"error":null}

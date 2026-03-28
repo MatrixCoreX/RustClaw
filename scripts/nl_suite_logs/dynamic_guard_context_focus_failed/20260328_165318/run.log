@@ -1,0 +1,73 @@
+NL multi-turn suite: context_chain
+  run_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_165318
+  run_log:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_165318/run.log
+  case_file:  /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_context_failed_focus_20260328.txt
+  turn_count: 3
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985996990
+
+============================================================
+[CASE]   1
+[NAME]   context_colloquial_cn_send_config_alias
+[CHAT]   1985996991
+[TURN1]  先记一下，“那份配置”就是 /home/guagua/test/configs/app_config.toml
+[TASK1]  134ffa2e-84e4-459e-a21b-946e4887f52c
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住：`那份配置` = /home/guagua/test/configs/app_config.toml
+[TURN2]  那份配置直接发我，别贴正文
+[TASK2]  8be62c59-3ca4-476b-80e0-d1455cc29669
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/configs/app_config.toml
+[TURN3]  再一句话说主要用途
+[TASK3]  57f8809c-ff07-411d-b958-1e3e55016bfe
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  没有该文件内容，无法概括。
+
+============================================================
+[CASE]   2
+[NAME]   context_ultra_cn_readme_alias
+[CHAT]   1985996992
+[TURN1]  记住哈，“那玩意README”就是 /home/guagua/test/README.md
+[TASK1]  06750cb4-4b39-4b0d-a5de-57a718369d26
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  记住了。
+[TURN2]  那玩意开头给我看两眼
+[TASK2]  132a9bc1-42a9-4e87-8d5b-c25aef1cc43c
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  README.md 开头内容：这是一个测试工作目录（Test Workspace），专门为自然语言回归测试的产物和包装脚本保留。
+[TURN3]  最后一句话讲重点
+[TASK3]  dc7fea09-df9a-4314-a631-ee114a1d00be
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  Test Workspace，专为 NL 回归测试产物和包装脚本保留
+
+============================================================
+[CASE]   3
+[NAME]   context_ultra_mixed_docs_alias
+[CHAT]   1985996993
+[TURN1]  先记住，that folder 是 /home/guagua/test/docs
+[TASK1]  3dd01db4-1d18-4a99-85b4-501d46f66fc8
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记录。that folder 即指 `/home/guagua/test/docs`。
+[TURN2]  that folder names only
+[TASK2]  0893a649-26a1-4360-8b94-57916038f9df
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  guide.txt\nnotes.txt\nservice_notes.md
+[TURN3]  再回我总数，number only
+[TASK3]  4da8f5ef-d776-4ce1-931b-52a993745082
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  3
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_165318
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_165318/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_165318/summary.jsonl

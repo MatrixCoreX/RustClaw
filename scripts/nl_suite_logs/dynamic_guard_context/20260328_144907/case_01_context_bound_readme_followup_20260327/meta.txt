@@ -1,0 +1,9 @@
+index=1
+case_name=context_bound_readme_followup_20260327
+chat_id=17746743782
+turn1_task_id=5f933bb6-cc69-401e-ae30-a099a9c1153d
+turn1_prompt=先记一下，后面我说“那个 README”就是 /home/guagua/test/README.md
+turn2_task_id=3c860f96-3901-41bb-ae20-c9d5f4d2b344
+turn2_prompt=读一下那个 README 开头 5 行
+turn3_task_id=6621e4a8-d055-4432-9330-78f844be9b69
+turn3_prompt=再用一句话总结它

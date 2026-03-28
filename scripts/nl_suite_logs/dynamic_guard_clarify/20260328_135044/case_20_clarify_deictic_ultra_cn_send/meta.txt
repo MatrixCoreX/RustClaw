@@ -1,0 +1,7 @@
+index=20
+case_name=clarify_deictic_ultra_cn_send
+chat_id=17746743701
+turn1_task_id=6226c7e9-8c1d-45e9-9985-296d1b6406cf
+turn1_prompt=那个 README 快发我，别粘贴
+turn2_task_id=1c4cd194-302f-48c7-977e-cf94242773a3
+turn2_prompt=/home/guagua/test/README.md

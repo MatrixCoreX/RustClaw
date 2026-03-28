@@ -12,6 +12,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
+use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::config::AppConfig;
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
@@ -27,15 +28,32 @@ use sha2::Sha256;
 use tracing::{info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
-const WA_BIND_REQUIRED_FOR_CHAT: &str = "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
-const WA_BIND_SUCCESS: &str =
+const WA_I18N_BIND_REQUIRED_KEY: &str = "whatsapp_cloud.msg.bind_key_required_for_chat";
+const WA_I18N_BIND_SUCCESS_KEY: &str = "whatsapp_cloud.msg.bind_success";
+const WA_I18N_BIND_INVALID_KEY: &str = "whatsapp_cloud.msg.bind_invalid";
+const WA_I18N_BIND_HELP_KEY: &str = "whatsapp_cloud.msg.bind_help";
+const WA_I18N_RUN_USAGE_KEY: &str = "whatsapp_cloud.msg.run_usage";
+const WA_I18N_PROCESS_FAILED_WITH_ERROR_KEY: &str =
+    "whatsapp_cloud.msg.process_failed_with_error";
+const WA_I18N_TASK_DONE_FALLBACK_TEXT_KEY: &str = "whatsapp_cloud.msg.task_done_fallback_text";
+const WA_I18N_TASK_FAILED_FALLBACK_ERROR_KEY: &str =
+    "whatsapp_cloud.msg.task_failed_fallback_error";
+
+const WA_BIND_REQUIRED_FALLBACK: &str =
+    "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
+const WA_BIND_SUCCESS_FALLBACK: &str =
     "Key 绑定成功，请重新发送刚才的消息。\nKey bound successfully. Please send your previous message again.";
-const WA_BIND_INVALID: &str = "Key 无效，请重新输入。\nInvalid key. Please try again.";
-const WA_BIND_HELP: &str = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定，然后再继续聊天或使用功能。\nWelcome to RustClaw.\nPlease send /key <your_key> first to bind this account before chatting or using features.";
+const WA_BIND_INVALID_FALLBACK: &str = "Key 无效，请重新输入。\nInvalid key. Please try again.";
+const WA_BIND_HELP_FALLBACK: &str = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定，然后再继续聊天或使用功能。\nWelcome to RustClaw.\nPlease send /key <your_key> first to bind this account before chatting or using features.";
+const WA_RUN_USAGE_FALLBACK: &str = "Usage: /run <skill_name> <args>";
+const WA_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str = "处理失败：{error}";
+const WA_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "done";
+const WA_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str = "task failed";
 
 #[derive(Clone)]
 struct AppState {
     clawd_base_url: String,
+    i18n_path: String,
     client: Client,
     api_base: String,
     access_token: String,
@@ -50,6 +68,14 @@ struct AppState {
     inbound_dedup: Arc<Mutex<HashMap<String, u64>>>,
     pending_key_bind: Arc<Mutex<HashSet<String>>>,
     bound_identity_by_user: Arc<Mutex<HashMap<String, AuthIdentity>>>,
+}
+
+fn wa_t(state: &AppState, key: &str, fallback: &str) -> String {
+    text_from_path(&state.i18n_path, key, fallback)
+}
+
+fn wa_t_with(state: &AppState, key: &str, vars: &[(&str, &str)], fallback: &str) -> String {
+    text_with_vars_from_path(&state.i18n_path, key, vars, fallback)
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,8 +172,10 @@ async fn main() -> anyhow::Result<()> {
         };
         format!("http://{}", host)
     });
+    let i18n_path = resolve_i18n_path(&config.whatsapp.language, &config.whatsapp.i18n_path);
     let state = AppState {
         clawd_base_url,
+        i18n_path,
         client: Client::builder()
             .timeout(Duration::from_secs(
                 config.server.request_timeout_seconds.max(5),
@@ -192,6 +220,17 @@ fn normalize_webhook_path(path: &str) -> String {
     } else {
         format!("/{p}")
     }
+}
+
+fn resolve_i18n_path(language: &str, configured_path: &str) -> String {
+    let lang = language.trim();
+    if !lang.is_empty() {
+        let candidate = format!("configs/i18n/whatsapp-cloud.{lang}.toml");
+        if Path::new(&candidate).exists() {
+            return candidate;
+        }
+    }
+    configured_path.to_string()
 }
 
 async fn verify_webhook(
@@ -315,7 +354,8 @@ fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> Option<Stri
 
 async fn send_bind_required_prompt(state: &AppState, wa_id: &str) -> anyhow::Result<()> {
     set_expect_key_reply(state, wa_id, true);
-    send_whatsapp_text(state, wa_id, WA_BIND_REQUIRED_FOR_CHAT).await
+    let text = wa_t(state, WA_I18N_BIND_REQUIRED_KEY, WA_BIND_REQUIRED_FALLBACK);
+    send_whatsapp_text(state, wa_id, &text).await
 }
 
 async fn resolve_whatsapp_identity(
@@ -438,7 +478,8 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
             let trimmed_text = inbound_text.trim();
             if is_unbound_allowed_command(trimmed_text) {
                 set_expect_key_reply(state, &msg.from, true);
-                let _ = send_whatsapp_text(state, &msg.from, WA_BIND_HELP).await;
+                let text = wa_t(state, WA_I18N_BIND_HELP_KEY, WA_BIND_HELP_FALLBACK);
+                let _ = send_whatsapp_text(state, &msg.from, &text).await;
                 return Ok(());
             }
             let maybe_candidate =
@@ -448,10 +489,12 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
                 {
                     set_expect_key_reply(state, &msg.from, false);
                     store_bound_identity(state, &msg.from, &identity);
-                    let _ = send_whatsapp_text(state, &msg.from, WA_BIND_SUCCESS).await;
+                    let text = wa_t(state, WA_I18N_BIND_SUCCESS_KEY, WA_BIND_SUCCESS_FALLBACK);
+                    let _ = send_whatsapp_text(state, &msg.from, &text).await;
                 } else {
                     set_expect_key_reply(state, &msg.from, true);
-                    let _ = send_whatsapp_text(state, &msg.from, WA_BIND_INVALID).await;
+                    let text = wa_t(state, WA_I18N_BIND_INVALID_KEY, WA_BIND_INVALID_FALLBACK);
+                    let _ = send_whatsapp_text(state, &msg.from, &text).await;
                 }
                 return Ok(());
             }
@@ -519,14 +562,16 @@ async fn handle_run_command(
 ) -> anyhow::Result<()> {
     let rest = text.trim().strip_prefix("/run").unwrap_or_default().trim();
     if rest.is_empty() {
-        send_whatsapp_text(state, wa_id, "Usage: /run <skill_name> <args>").await?;
+        let text = wa_t(state, WA_I18N_RUN_USAGE_KEY, WA_RUN_USAGE_FALLBACK);
+        send_whatsapp_text(state, wa_id, &text).await?;
         return Ok(());
     }
     let mut parts = rest.splitn(2, ' ');
     let skill_name = parts.next().unwrap_or_default().trim();
     let args = parts.next().unwrap_or_default().trim();
     if skill_name.is_empty() {
-        send_whatsapp_text(state, wa_id, "Usage: /run <skill_name> <args>").await?;
+        let text = wa_t(state, WA_I18N_RUN_USAGE_KEY, WA_RUN_USAGE_FALLBACK);
+        send_whatsapp_text(state, wa_id, &text).await?;
         return Ok(());
     }
     let payload = json!({
@@ -800,12 +845,24 @@ async fn poll_task_result(
                     .as_ref()
                     .and_then(|v| v.get("text"))
                     .and_then(|v| v.as_str())
-                    .unwrap_or("done")
-                    .to_string();
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        wa_t(
+                            state,
+                            WA_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
+                            WA_TASK_DONE_FALLBACK_TEXT_FALLBACK,
+                        )
+                    });
                 return Ok(answer);
             }
             TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
-                let err = task.error_text.unwrap_or_else(|| "task failed".to_string());
+                let err = task.error_text.unwrap_or_else(|| {
+                    wa_t(
+                        state,
+                        WA_I18N_TASK_FAILED_FALLBACK_ERROR_KEY,
+                        WA_TASK_FAILED_FALLBACK_ERROR_FALLBACK,
+                    )
+                });
                 return Err(anyhow!("{}", err));
             }
         }
@@ -834,7 +891,13 @@ async fn try_deliver_quick_result(
         }
         Err(err) if err.to_string() == "task_result_wait_timeout" => Ok(false),
         Err(err) => {
-            send_whatsapp_text(state, wa_id, &format!("处理失败：{}", err)).await?;
+            let msg = wa_t_with(
+                state,
+                WA_I18N_PROCESS_FAILED_WITH_ERROR_KEY,
+                &[("error", &err.to_string())],
+                WA_PROCESS_FAILED_WITH_ERROR_FALLBACK,
+            );
+            send_whatsapp_text(state, wa_id, &msg).await?;
             Ok(true)
         }
     }
@@ -859,7 +922,13 @@ fn spawn_task_result_delivery(
                 let _ = send_answer(&state, &wa_id, &answer).await;
             }
             Err(err) => {
-                let _ = send_whatsapp_text(&state, &wa_id, &format!("处理失败：{}", err)).await;
+                let msg = wa_t_with(
+                    &state,
+                    WA_I18N_PROCESS_FAILED_WITH_ERROR_KEY,
+                    &[("error", &err.to_string())],
+                    WA_PROCESS_FAILED_WITH_ERROR_FALLBACK,
+                );
+                let _ = send_whatsapp_text(&state, &wa_id, &msg).await;
             }
         }
     });

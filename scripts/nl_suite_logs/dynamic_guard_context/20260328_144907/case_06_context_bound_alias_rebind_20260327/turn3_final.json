@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"bc250eb7-868e-497e-bc7e-6b8c73e1602f","status":"succeeded","result_json":{"messages":["该文档是一个仅用于测试的模拟本地服务说明文件，明确指出它永远不应重启真实的 RustClaw 服务或修改系统状态。"],"text":"该文档是一个仅用于测试的模拟本地服务说明文件，明确指出它永远不应重启真实的 RustClaw 服务或修改系统状态。"},"error_text":null},"error":null}

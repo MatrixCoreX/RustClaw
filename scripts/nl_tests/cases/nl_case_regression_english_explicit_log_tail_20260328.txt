@@ -1,0 +1,1 @@
+dynamic_guard|english_explicit_log_tail|path,log,en|Show the last 12 lines of /home/guagua/test/logs/app.log.

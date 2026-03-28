@@ -1,0 +1,9 @@
+index=11
+case_name=context_colloquial_cn_readme_alias
+chat_id=17746743792
+turn1_task_id=b9adc141-466b-4b7e-8883-8c01c939b857
+turn1_prompt=先记住哈，我说“那个README”就是 /home/guagua/test/README.md
+turn2_task_id=c32bf345-6478-41fd-b71c-31c51af0142d
+turn2_prompt=帮我瞅瞅那个README开头几行
+turn3_task_id=22aee64d-168d-42e8-9417-da2b09b7f627
+turn3_prompt=最后一句话讲重点

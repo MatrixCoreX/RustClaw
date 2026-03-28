@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"8a9a1526-08a0-4bda-a4a5-8d53f6c0fb36","status":"succeeded","result_json":{"messages":["这是用于 NL 回归测试工件和包装脚本的专用测试工作区目录，但修改此目录不会改变代理的内部工作区根目录。"],"text":"这是用于 NL 回归测试工件和包装脚本的专用测试工作区目录，但修改此目录不会改变代理的内部工作区根目录。"},"error_text":null},"error":null}

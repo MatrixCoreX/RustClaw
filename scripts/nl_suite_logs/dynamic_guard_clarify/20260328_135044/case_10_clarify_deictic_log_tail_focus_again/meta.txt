@@ -1,0 +1,7 @@
+index=10
+case_name=clarify_deictic_log_tail_focus_again
+chat_id=17746743691
+turn1_task_id=bc9faec5-0bb2-44df-a3a0-722225495898
+turn1_prompt=把那个日志最后 10 行给我，再指出一个可疑点
+turn2_task_id=eb02fc7d-b988-4703-bf64-14c9a2e16c1b
+turn2_prompt=/home/guagua/test/logs/app.log

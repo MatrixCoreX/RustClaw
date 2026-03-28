@@ -1,0 +1,11 @@
+locale = "en-US"
+
+[dict]
+"whatsapp_cloud.msg.bind_key_required_for_chat" = "Please send your key first to bind this account before chatting or using features.\n请先发送你的 key 进行绑定，然后再继续聊天或使用功能。"
+"whatsapp_cloud.msg.bind_help" = "Welcome to RustClaw.\nPlease send /key <your_key> first to bind this account before chatting or using features.\n欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定，然后再继续聊天或使用功能。"
+"whatsapp_cloud.msg.bind_success" = "Key bound successfully. Please send your previous message again.\nKey 绑定成功，请重新发送刚才的消息。"
+"whatsapp_cloud.msg.bind_invalid" = "Invalid key. Please try again.\nKey 无效，请重新输入。"
+"whatsapp_cloud.msg.run_usage" = "Usage: /run <skill_name> <args>"
+"whatsapp_cloud.msg.process_failed_with_error" = "Failed: {error}"
+"whatsapp_cloud.msg.task_done_fallback_text" = "done"
+"whatsapp_cloud.msg.task_failed_fallback_error" = "task failed"

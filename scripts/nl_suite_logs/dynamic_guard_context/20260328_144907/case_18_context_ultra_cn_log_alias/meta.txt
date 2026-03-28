@@ -1,0 +1,9 @@
+index=18
+case_name=context_ultra_cn_log_alias
+chat_id=17746743799
+turn1_task_id=c2b40a1b-efa5-4a03-ba7e-a7c12727b76b
+turn1_prompt=记一下，“那条日志”= /home/guagua/test/logs/app.log
+turn2_task_id=0549bdda-e892-4b7d-a7df-926b1affac5d
+turn2_prompt=那条日志最后 6 行甩我
+turn3_task_id=5bcaabf7-3ca3-4106-9d19-110c437e7ec8
+turn3_prompt=一句话说有没有异常

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -7,6 +7,7 @@ use anyhow::{anyhow, Context};
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
+use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::config::AppConfig;
 use serde_json::json;
 use tokio::process::Command;
@@ -18,6 +19,30 @@ struct BridgeHealth {
     restarts: u64,
     last_exit_code: Option<i32>,
     last_error: Option<String>,
+}
+
+const WA_WEB_I18N_BRIDGE_PROCESS_EXITED_KEY: &str = "whatsapp_web.msg.bridge_process_exited";
+const WA_WEB_I18N_BRIDGE_WAIT_FAILED_KEY: &str = "whatsapp_web.msg.bridge_wait_failed";
+const WA_WEB_BRIDGE_PROCESS_EXITED_FALLBACK: &str = "bridge process exited";
+const WA_WEB_BRIDGE_WAIT_FAILED_FALLBACK: &str = "bridge wait failed: {error}";
+
+fn resolve_i18n_path(language: &str, configured_path: &str) -> String {
+    let lang = language.trim();
+    if !lang.is_empty() {
+        let candidate = format!("configs/i18n/whatsapp-webd.{lang}.toml");
+        if Path::new(&candidate).exists() {
+            return candidate;
+        }
+    }
+    configured_path.to_string()
+}
+
+fn wa_web_t(i18n_path: &str, key: &str, fallback: &str) -> String {
+    text_from_path(i18n_path, key, fallback)
+}
+
+fn wa_web_t_with(i18n_path: &str, key: &str, vars: &[(&str, &str)], fallback: &str) -> String {
+    text_with_vars_from_path(i18n_path, key, vars, fallback)
 }
 
 #[tokio::main]
@@ -45,15 +70,18 @@ async fn main() -> anyhow::Result<()> {
 
     let health = Arc::new(Mutex::new(BridgeHealth::default()));
     let stop = Arc::new(AtomicBool::new(false));
+    let i18n_path = resolve_i18n_path(&config.whatsapp_web.language, &config.whatsapp_web.i18n_path);
 
     let supervisor_health = health.clone();
     let supervisor_stop = stop.clone();
     let supervisor_workspace = workspace_root.clone();
     let supervisor_bridge = bridge_path.clone();
+    let supervisor_i18n = i18n_path.clone();
     tokio::spawn(async move {
         if let Err(err) = supervise_bridge(
             supervisor_workspace,
             supervisor_bridge,
+            supervisor_i18n,
             supervisor_health,
             supervisor_stop,
         )
@@ -136,6 +164,7 @@ async fn health_handler(State(health): State<Arc<Mutex<BridgeHealth>>>) -> Json<
 async fn supervise_bridge(
     workspace_root: PathBuf,
     bridge_path: PathBuf,
+    i18n_path: String,
     health: Arc<Mutex<BridgeHealth>>,
     stop: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
@@ -174,7 +203,11 @@ async fn supervise_bridge(
                         h.running = false;
                         h.last_exit_code = code;
                         h.restarts = h.restarts.saturating_add(1);
-                        h.last_error = Some("bridge process exited".to_string());
+                        h.last_error = Some(wa_web_t(
+                            &i18n_path,
+                            WA_WEB_I18N_BRIDGE_PROCESS_EXITED_KEY,
+                            WA_WEB_BRIDGE_PROCESS_EXITED_FALLBACK,
+                        ));
                     }
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     break;
@@ -185,7 +218,12 @@ async fn supervise_bridge(
                 Err(err) => {
                     if let Ok(mut h) = health.lock() {
                         h.running = false;
-                        h.last_error = Some(format!("bridge wait failed: {err}"));
+                        h.last_error = Some(wa_web_t_with(
+                            &i18n_path,
+                            WA_WEB_I18N_BRIDGE_WAIT_FAILED_KEY,
+                            &[("error", &err.to_string())],
+                            WA_WEB_BRIDGE_WAIT_FAILED_FALLBACK,
+                        ));
                         h.restarts = h.restarts.saturating_add(1);
                     }
                     tokio::time::sleep(Duration::from_secs(2)).await;

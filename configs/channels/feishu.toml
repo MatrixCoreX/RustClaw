@@ -17,6 +17,10 @@ listen = "0.0.0.0:8789"
 clawd_base_url = "http://127.0.0.1:8787"
 # Open API 根 URL（国内默认 https://open.feishu.cn；国际 Lark 用 https://open.larksuite.com）
 # api_base_url = "https://open.feishu.cn"
+# i18n 语言（优先尝试 configs/i18n/feishud.<language>.toml）
+language = "zh-CN"
+# i18n 文件路径（当 language 对应文件不存在时回退到此路径）
+i18n_path = "configs/i18n/feishud.zh-CN.toml"
 # 入站媒体落盘根目录（相对 feishud 进程工作目录；实际路径为 <目录>/<chat_id>/<文件名>）
 # image_inbox_dir = "data/feishud/image"
 # video_inbox_dir = "data/feishud/video"
