@@ -1953,6 +1953,14 @@ async fn submit_wechat_task_with_payload(
     };
     let task_id = task_data.task_id.to_string();
     let started = std::time::Instant::now();
+    let delivery_timeout_secs = state.config.task_delivery_timeout_seconds.max(1);
+    let poll_interval = Duration::from_millis(1500);
+    let running_notice_text = format!(
+        "你的任务正在持续执行（任务编号：{}），执行完了给你回复。",
+        task_id
+    );
+    let mut timeout_notice_sent = false;
+    let mut last_seen_status: Option<TaskStatus> = None;
     let (poll_token, poll_base) = {
         let g = state.session.read().await;
         (
@@ -1991,40 +1999,127 @@ async fn submit_wechat_task_with_payload(
         let resp = match req.send().await {
             Ok(resp) => resp,
             Err(err) => {
-                if started.elapsed()
-                    > Duration::from_secs(state.config.request_timeout_seconds.max(30))
-                {
-                    warn!("wechatd: poll task timeout err={}", err);
-                    break;
+                if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
+                    if !timeout_notice_sent {
+                        warn!(
+                            "wechatd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=poll_failed (continue_polling=true) err={}",
+                            task_id,
+                            started.elapsed().as_secs(),
+                            delivery_timeout_secs,
+                            last_seen_status,
+                            err
+                        );
+                        send_text_reply_via_session(
+                            &state,
+                            &from_user_id,
+                            context_token.as_deref(),
+                            &running_notice_text,
+                        )
+                        .await;
+                        timeout_notice_sent = true;
+                    }
                 }
-                tokio::time::sleep(Duration::from_millis(1500)).await;
+                tokio::time::sleep(poll_interval).await;
                 continue;
             }
         };
         if !resp.status().is_success() {
-            if started.elapsed() > Duration::from_secs(state.config.request_timeout_seconds.max(30))
-            {
-                warn!("wechatd: poll task status timeout status={}", resp.status());
-                break;
+            if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
+                if !timeout_notice_sent {
+                    warn!(
+                        "wechatd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=http_status (continue_polling=true) status={}",
+                        task_id,
+                        started.elapsed().as_secs(),
+                        delivery_timeout_secs,
+                        last_seen_status,
+                        resp.status()
+                    );
+                    send_text_reply_via_session(
+                        &state,
+                        &from_user_id,
+                        context_token.as_deref(),
+                        &running_notice_text,
+                    )
+                    .await;
+                    timeout_notice_sent = true;
+                }
             }
-            tokio::time::sleep(Duration::from_millis(1500)).await;
+            tokio::time::sleep(poll_interval).await;
             continue;
         }
         let body: ApiResponse<TaskQueryResponse> = match resp.json().await {
             Ok(body) => body,
             Err(err) => {
                 warn!("wechatd: poll task parse failed err={}", err);
-                tokio::time::sleep(Duration::from_millis(1500)).await;
+                if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
+                    if !timeout_notice_sent {
+                        warn!(
+                            "wechatd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=parse_failed (continue_polling=true)",
+                            task_id,
+                            started.elapsed().as_secs(),
+                            delivery_timeout_secs,
+                            last_seen_status
+                        );
+                        send_text_reply_via_session(
+                            &state,
+                            &from_user_id,
+                            context_token.as_deref(),
+                            &running_notice_text,
+                        )
+                        .await;
+                        timeout_notice_sent = true;
+                    }
+                }
+                tokio::time::sleep(poll_interval).await;
                 continue;
             }
         };
         let Some(task) = body.data else {
-            tokio::time::sleep(Duration::from_millis(1500)).await;
+            if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
+                if !timeout_notice_sent {
+                    warn!(
+                        "wechatd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=no_task_data (continue_polling=true)",
+                        task_id,
+                        started.elapsed().as_secs(),
+                        delivery_timeout_secs,
+                        last_seen_status
+                    );
+                    send_text_reply_via_session(
+                        &state,
+                        &from_user_id,
+                        context_token.as_deref(),
+                        &running_notice_text,
+                    )
+                    .await;
+                    timeout_notice_sent = true;
+                }
+            }
+            tokio::time::sleep(poll_interval).await;
             continue;
         };
+        last_seen_status = Some(task.status.clone());
         match task.status {
             TaskStatus::Queued | TaskStatus::Running => {
-                tokio::time::sleep(Duration::from_millis(1500)).await;
+                if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
+                    if !timeout_notice_sent {
+                        warn!(
+                            "wechatd: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} (continue_polling=true)",
+                            task_id,
+                            started.elapsed().as_secs(),
+                            delivery_timeout_secs,
+                            last_seen_status
+                        );
+                        send_text_reply_via_session(
+                            &state,
+                            &from_user_id,
+                            context_token.as_deref(),
+                            &running_notice_text,
+                        )
+                        .await;
+                        timeout_notice_sent = true;
+                    }
+                }
+                tokio::time::sleep(poll_interval).await;
                 continue;
             }
             TaskStatus::Succeeded => {

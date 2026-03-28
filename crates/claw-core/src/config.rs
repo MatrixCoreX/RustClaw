@@ -83,6 +83,8 @@ pub struct TelegramConfig {
     pub i18n_path: String,
     #[serde(default = "default_telegram_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_telegram_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
     #[serde(default = "default_telegram_auto_vision_on_image_only")]
     pub auto_vision_on_image_only: bool,
     #[serde(default = "default_telegram_image_inbox_dir")]
@@ -125,6 +127,8 @@ pub struct TelegramBotConfig {
     pub i18n_path: String,
     #[serde(default = "default_telegram_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_telegram_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -147,6 +151,8 @@ pub struct TelegramRuntimeBotConfig {
     pub i18n_path: String,
     #[serde(default = "default_telegram_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_telegram_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +166,7 @@ pub struct ResolvedTelegramBotConfig {
     pub language: String,
     pub i18n_path: String,
     pub quick_result_wait_seconds: u64,
+    pub task_delivery_timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -205,6 +212,7 @@ impl Default for TelegramBotConfig {
             language: default_telegram_language(),
             i18n_path: default_telegram_i18n_path(),
             quick_result_wait_seconds: default_telegram_quick_result_wait_seconds(),
+            task_delivery_timeout_seconds: default_telegram_task_delivery_timeout_seconds(),
         }
     }
 }
@@ -239,6 +247,8 @@ pub struct WhatsappConfig {
     pub i18n_path: String,
     #[serde(default = "default_whatsapp_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_whatsapp_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
     #[serde(default = "default_whatsapp_image_inbox_dir")]
     pub image_inbox_dir: String,
     #[serde(default = "default_whatsapp_audio_inbox_dir")]
@@ -271,6 +281,8 @@ pub struct WhatsappCloudConfig {
     pub bindings: Vec<ChannelBindingConfig>,
     #[serde(default = "default_whatsapp_quick_result_wait_seconds")]
     pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_whatsapp_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
     #[serde(default = "default_whatsapp_image_inbox_dir")]
     pub image_inbox_dir: String,
     #[serde(default = "default_whatsapp_audio_inbox_dir")]
@@ -292,6 +304,7 @@ impl Default for WhatsappCloudConfig {
             allowlist: Vec::new(),
             bindings: Vec::new(),
             quick_result_wait_seconds: default_whatsapp_quick_result_wait_seconds(),
+            task_delivery_timeout_seconds: default_whatsapp_task_delivery_timeout_seconds(),
             image_inbox_dir: default_whatsapp_image_inbox_dir(),
             audio_inbox_dir: default_whatsapp_audio_inbox_dir(),
         }
@@ -315,6 +328,7 @@ impl Default for WhatsappConfig {
             language: default_whatsapp_language(),
             i18n_path: default_whatsapp_i18n_path(),
             quick_result_wait_seconds: default_whatsapp_quick_result_wait_seconds(),
+            task_delivery_timeout_seconds: default_whatsapp_task_delivery_timeout_seconds(),
             image_inbox_dir: default_whatsapp_image_inbox_dir(),
             audio_inbox_dir: default_whatsapp_audio_inbox_dir(),
         }
@@ -1443,6 +1457,10 @@ fn default_telegram_quick_result_wait_seconds() -> u64 {
     3
 }
 
+fn default_telegram_task_delivery_timeout_seconds() -> u64 {
+    600
+}
+
 fn default_whatsapp_api_base() -> String {
     "https://graph.facebook.com".to_string()
 }
@@ -1457,6 +1475,10 @@ fn default_whatsapp_webhook_path() -> String {
 
 fn default_whatsapp_quick_result_wait_seconds() -> u64 {
     3
+}
+
+fn default_whatsapp_task_delivery_timeout_seconds() -> u64 {
+    600
 }
 
 fn default_whatsapp_i18n_path() -> String {
@@ -1699,6 +1721,7 @@ impl AppConfig {
                 language: self.telegram.language.clone(),
                 i18n_path: self.telegram.i18n_path.clone(),
                 quick_result_wait_seconds: self.telegram.quick_result_wait_seconds,
+                task_delivery_timeout_seconds: self.telegram.task_delivery_timeout_seconds,
             });
         }
 
@@ -1752,6 +1775,7 @@ impl AppConfig {
                     bot.i18n_path.trim().to_string()
                 },
                 quick_result_wait_seconds: bot.quick_result_wait_seconds,
+                task_delivery_timeout_seconds: bot.task_delivery_timeout_seconds,
             });
         }
 
@@ -1794,6 +1818,7 @@ impl AppConfig {
                     self.telegram_bot.i18n_path.trim().to_string()
                 },
                 quick_result_wait_seconds: self.telegram_bot.quick_result_wait_seconds,
+                task_delivery_timeout_seconds: self.telegram_bot.task_delivery_timeout_seconds,
             });
         }
 

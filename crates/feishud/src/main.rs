@@ -75,7 +75,7 @@ struct FeishuSection {
     encrypt_key: String,
     #[serde(default = "default_request_timeout")]
     request_timeout_seconds: u64,
-    /// 整条任务轮询最长等待时间（秒），与 request_timeout_seconds 分离
+    /// 任务投递软超时阈值（秒）；超过后提示“仍在执行”，并继续轮询
     #[serde(default = "default_task_delivery_timeout")]
     task_delivery_timeout_seconds: u64,
     #[serde(default = "default_text_chunk_chars")]
@@ -104,7 +104,7 @@ fn default_request_timeout() -> u64 {
     30
 }
 fn default_task_delivery_timeout() -> u64 {
-    180
+    600
 }
 fn default_text_chunk_chars() -> usize {
     4000
@@ -460,7 +460,8 @@ const FEISHU_BIND_REQUEST_FAILED_FALLBACK: &str =
     "绑定请求失败，请稍后重试。\nBind request failed, please try again later.";
 const FEISHU_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "媒体下载失败，请稍后重试。";
 const FEISHU_MEDIA_FILE_TOO_LARGE_FALLBACK: &str = "媒体文件过大，已拒绝保存。";
-const FEISHU_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str = "请求处理超时，请稍后重试。";
+const FEISHU_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
+    "你的任务正在持续执行（任务编号：{task_id}），执行完了给你回复。";
 const FEISHU_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "处理完成。";
 const FEISHU_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str = "任务失败";
 const FEISHU_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str = "处理失败：{error}";
@@ -880,12 +881,6 @@ fn handle_text_message_to_clawd(
     let user_key_poll = user_key.clone();
 
     tokio::spawn(async move {
-        let request_timeout_text = feishu_t(
-            &config,
-            FEISHU_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY,
-            FEISHU_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK,
-        );
-
         let submit_resp = match client.post(&submit_url).json(&submit_req).send().await {
             Ok(r) => r,
             Err(e) => {
@@ -922,6 +917,12 @@ fn handle_text_message_to_clawd(
             "feishud: bound user task submitted task_id={} external_chat_id={}",
             task_id, chat_id
         );
+        let running_notice_text = feishu_t_with(
+            &config,
+            FEISHU_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY,
+            &[("task_id", task_id.as_str())],
+            FEISHU_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK,
+        );
 
         let clawd_base = config.feishu.clawd_base_url.clone();
         let chat_id_delivery = chat_id.clone();
@@ -932,6 +933,7 @@ fn handle_text_message_to_clawd(
         );
         let started = std::time::Instant::now();
         let mut last_seen_status: Option<TaskStatus> = None;
+        let mut timeout_logged = false;
         loop {
             let url = format!("{}/v1/tasks/{}", clawd_base, task_id);
             let mut req = client.get(&url);
@@ -946,16 +948,18 @@ fn handle_text_message_to_clawd(
                 Err(e) => {
                     warn!("feishud: poll failed task_id={} err={}", task_id, e);
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                        warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=poll_failed", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_feishu_text(
-                            &config,
-                            &client,
-                            &token_cache,
-                            &chat_id_delivery,
-                            &request_timeout_text,
-                        )
-                        .await;
-                        break;
+                        if !timeout_logged {
+                            warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=poll_failed (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
+                            let _ = send_feishu_text(
+                                &config,
+                                &client,
+                                &token_cache,
+                                &chat_id_delivery,
+                                &running_notice_text,
+                            )
+                            .await;
+                            timeout_logged = true;
+                        }
                     }
                     tokio::time::sleep(poll_interval).await;
                     continue;
@@ -978,16 +982,18 @@ fn handle_text_message_to_clawd(
                     );
                 }
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                    warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=http status={}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, status);
-                    let _ = send_feishu_text(
-                        &config,
-                        &client,
-                        &token_cache,
-                        &chat_id_delivery,
-                        &request_timeout_text,
-                    )
-                    .await;
-                    break;
+                    if !timeout_logged {
+                        warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=http status={} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, status);
+                        let _ = send_feishu_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            &running_notice_text,
+                        )
+                        .await;
+                        timeout_logged = true;
+                    }
                 }
                 tokio::time::sleep(poll_interval).await;
                 continue;
@@ -997,16 +1003,18 @@ fn handle_text_message_to_clawd(
                 Err(e) => {
                     debug!("feishud: poll parse failed task_id={} err={}", task_id, e);
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                        warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=parse_failed", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_feishu_text(
-                            &config,
-                            &client,
-                            &token_cache,
-                            &chat_id_delivery,
-                            &request_timeout_text,
-                        )
-                        .await;
-                        break;
+                        if !timeout_logged {
+                            warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=parse_failed (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
+                            let _ = send_feishu_text(
+                                &config,
+                                &client,
+                                &token_cache,
+                                &chat_id_delivery,
+                                &running_notice_text,
+                            )
+                            .await;
+                            timeout_logged = true;
+                        }
                     }
                     tokio::time::sleep(poll_interval).await;
                     continue;
@@ -1019,16 +1027,18 @@ fn handle_text_message_to_clawd(
                     task_id, body.ok, err_msg
                 );
                 if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                    warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=no_task_data error={}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, err_msg);
-                    let _ = send_feishu_text(
-                        &config,
-                        &client,
-                        &token_cache,
-                        &chat_id_delivery,
-                        &request_timeout_text,
-                    )
-                    .await;
-                    break;
+                    if !timeout_logged {
+                        warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} reason=no_task_data error={} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status, err_msg);
+                        let _ = send_feishu_text(
+                            &config,
+                            &client,
+                            &token_cache,
+                            &chat_id_delivery,
+                            &running_notice_text,
+                        )
+                        .await;
+                        timeout_logged = true;
+                    }
                 }
                 tokio::time::sleep(poll_interval).await;
                 continue;
@@ -1052,16 +1062,18 @@ fn handle_text_message_to_clawd(
             match task.status {
                 TaskStatus::Queued | TaskStatus::Running => {
                     if started.elapsed() > Duration::from_secs(delivery_timeout_secs) {
-                        warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?}", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
-                        let _ = send_feishu_text(
-                            &config,
-                            &client,
-                            &token_cache,
-                            &chat_id_delivery,
-                            &request_timeout_text,
-                        )
-                        .await;
-                        break;
+                        if !timeout_logged {
+                            warn!("feishud: task delivery timeout task_id={} elapsed_secs={} timeout_limit_secs={} last_seen_status={:?} (continue_polling=true)", task_id, started.elapsed().as_secs(), delivery_timeout_secs, last_seen_status);
+                            let _ = send_feishu_text(
+                                &config,
+                                &client,
+                                &token_cache,
+                                &chat_id_delivery,
+                                &running_notice_text,
+                            )
+                            .await;
+                            timeout_logged = true;
+                        }
                     }
                     tokio::time::sleep(poll_interval).await;
                     continue;
