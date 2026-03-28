@@ -404,6 +404,27 @@ async fn main() -> anyhow::Result<()> {
     if lark_send_config.is_some() {
         info!("lark send config loaded for schedule push (configs/channels/lark.toml)");
     }
+    let default_locator_search_dir = {
+        let raw = config.routing.default_locator_search_dir.trim();
+        if raw.is_empty() {
+            workspace_root.clone()
+        } else {
+            let path = std::path::Path::new(raw);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                workspace_root.join(path)
+            }
+        }
+    };
+    let locator_scan_max_depth = config.routing.locator_scan_max_depth.max(1);
+    let locator_scan_max_files = config.routing.locator_scan_max_files.max(1);
+    info!(
+        "routing default_locator_search_dir={} locator_scan_max_depth={} locator_scan_max_files={}",
+        default_locator_search_dir.display(),
+        locator_scan_max_depth,
+        locator_scan_max_files,
+    );
 
     let state = AppState {
         started_at: Instant::now(),
@@ -425,6 +446,9 @@ async fn main() -> anyhow::Result<()> {
         maintenance: config.maintenance.clone(),
         memory: memory_runtime,
         workspace_root,
+        default_locator_search_dir,
+        locator_scan_max_depth,
+        locator_scan_max_files,
         tools_policy: Arc::new(tools_policy),
         active_provider_type,
         cmd_timeout_seconds: config.tools.cmd_timeout_seconds.max(1),

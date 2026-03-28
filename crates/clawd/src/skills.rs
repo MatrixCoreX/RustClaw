@@ -1666,6 +1666,14 @@ pub(crate) async fn run_skill_with_runner_once(
         .env("OPENAI_MODEL", selected_openai_model.clone())
         .env("CHAT_SKILL_MODEL", selected_openai_model)
         .env("WORKSPACE_ROOT", state.workspace_root.display().to_string())
+        .env(
+            "RUSTCLAW_LOCATOR_SCAN_MAX_DEPTH",
+            state.locator_scan_max_depth.to_string(),
+        )
+        .env(
+            "RUSTCLAW_LOCATOR_SCAN_MAX_FILES",
+            state.locator_scan_max_files.to_string(),
+        )
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
