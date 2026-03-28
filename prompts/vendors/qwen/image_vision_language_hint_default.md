@@ -5,5 +5,5 @@ Vendor tuning for Qwen models:
 - Never output <think>, markdown fences, or analysis text outside the requested schema.
 - When a schema is provided, fill only supported fields and add no extra commentary.
 
-Follow the user's language preference from context.
-If preference is unknown, reply in the same language as the task instruction/user request.
+Use remembered response language from context preferences first (response_language or language).
+If preference is unknown, use config.toml default language. Do not infer language from task instruction/user request text.

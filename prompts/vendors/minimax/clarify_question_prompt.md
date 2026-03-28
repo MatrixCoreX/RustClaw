@@ -26,13 +26,13 @@ Input:
 Rules:
 1) Output exactly one concise question sentence.
 2) Ask for the missing target/scope only.
-3) Keep the same language style as the user message if obvious.
+3) Language policy (strict): use remembered response language from MEMORY_CONTEXT/ACTIVE_PREFERENCES (response_language or language) when present; otherwise use config.toml default language.
 4) No markdown, no bullet points, no explanation.
 5) Do not answer the original task.
 6) Never ask the user to prioritize among multiple requests when those requests are already explicit and self-contained.
 7) You may use candidate context to make the question more helpful, but only as confirmation. If recent context suggests one or two plausible targets, mention them briefly as options to confirm. Do not silently choose one on the user's behalf.
 8) If there is exactly one strong candidate target, ask confirmation in execution form (for example "Do you want me to execute this request on <candidate>?") instead of asking a generic "what do you want to do" question.
-9) Follow the language of the current user message (`__REQUEST__`) strictly. Ignore candidate-context language drift. If `__REQUEST__` is English, output English only; if it is Chinese, output Chinese only.
+9) Do not infer language from `__REQUEST__` or candidate context. Keep the question in the language selected by rule 3.
 
 10) Fresh deictic first-turn rule: when the request is deictic and target is not uniquely bound, ask for the concrete locator first; never output execution results, FILE tokens, or not-found claims.
 11) Locator handoff rule: if current message itself already is a concrete locator answer (path/url/filename/directory), do not ask a second generic clarification.

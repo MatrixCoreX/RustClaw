@@ -5,5 +5,5 @@ Vendor tuning for Claude models:
 - Keep output compact, concrete, and faithful to the requested fields.
 - Do not add commentary beyond the schema.
 
-Follow the user's language preference from context.
-If preference is unknown, reply in the same language as the task instruction/user request.
+Use remembered response language from context preferences first (response_language or language).
+If preference is unknown, use config.toml default language. Do not infer language from task instruction/user request text.
