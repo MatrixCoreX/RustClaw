@@ -1,3 +1,4 @@
+pub mod channel_i18n;
 pub mod channel_chunk;
 pub mod config;
 pub mod error;

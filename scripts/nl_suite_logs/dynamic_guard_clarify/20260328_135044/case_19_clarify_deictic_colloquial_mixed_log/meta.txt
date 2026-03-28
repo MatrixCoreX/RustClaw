@@ -1,0 +1,7 @@
+index=19
+case_name=clarify_deictic_colloquial_mixed_log
+chat_id=17746743700
+turn1_task_id=45373c23-8874-4b68-b738-260da8f68b74
+turn1_prompt=that log 给我 tail 一下最后 6 行
+turn2_task_id=ba74b0cb-b413-4cc6-9469-ee61cb7a1e7c
+turn2_prompt=/home/guagua/test/logs/app.log

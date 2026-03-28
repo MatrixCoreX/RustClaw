@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"b3595e5a-6c83-4f0d-af91-0669cd1f5388","status":"succeeded","result_json":{"messages":["这是 rustclaw-test-fixture 应用用于自然语言回归测试的配置，定义了所有者为 guagua，并指定了文档、日志和数据的存储路径。"],"text":"这是 rustclaw-test-fixture 应用用于自然语言回归测试的配置，定义了所有者为 guagua，并指定了文档、日志和数据的存储路径。"},"error_text":null},"error":null}

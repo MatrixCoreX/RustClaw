@@ -162,24 +162,116 @@ fn response_has_any_delivery_token(text: &str, messages: &[String]) -> bool {
             .any(|m| !extract_delivery_file_tokens(m).is_empty())
 }
 
+fn looks_like_leading_label_line(line: &str) -> bool {
+    let mut trimmed = line.trim();
+    loop {
+        let next = if let Some(inner) = trimmed
+            .strip_prefix("**")
+            .and_then(|v| v.strip_suffix("**"))
+        {
+            Some(inner.trim())
+        } else if let Some(inner) = trimmed
+            .strip_prefix("__")
+            .and_then(|v| v.strip_suffix("__"))
+        {
+            Some(inner.trim())
+        } else if let Some(inner) = trimmed.strip_prefix('*').and_then(|v| v.strip_suffix('*')) {
+            Some(inner.trim())
+        } else {
+            trimmed
+                .strip_prefix('_')
+                .and_then(|v| v.strip_suffix('_'))
+                .map(str::trim)
+        };
+        if let Some(next_trimmed) = next {
+            if next_trimmed == trimmed || next_trimmed.is_empty() {
+                break;
+            }
+            trimmed = next_trimmed;
+            continue;
+        }
+        break;
+    }
+    if trimmed.is_empty() {
+        return false;
+    }
+    let has_label_suffix = trimmed.ends_with(':') || trimmed.ends_with('：');
+    if !has_label_suffix {
+        return false;
+    }
+    let core = trimmed[..trimmed.len() - 1].trim();
+    if core.is_empty() {
+        return false;
+    }
+    let core_chars = core.chars().count();
+    core_chars <= 64
+        && !core
+            .chars()
+            .any(|ch| matches!(ch, '.' | '。' | '!' | '?' | '！' | '？'))
+}
+
 fn take_first_sentence(text: &str) -> String {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return String::new();
     }
+    let lines = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut source_idx = 0usize;
+    if lines[source_idx].starts_with('#') {
+        if let Some((idx, _)) = lines
+            .iter()
+            .enumerate()
+            .find(|(_, line)| !line.starts_with('#'))
+        {
+            source_idx = idx;
+        }
+    }
+    if looks_like_leading_label_line(lines[source_idx]) {
+        if let Some((idx, _)) = lines
+            .iter()
+            .enumerate()
+            .skip(source_idx + 1)
+            .find(|(_, line)| !line.starts_with('#'))
+        {
+            source_idx = idx;
+        }
+    }
+    let source = lines[source_idx];
+    let chars: Vec<char> = source.chars().collect();
     let mut buf = String::new();
-    for ch in trimmed.chars() {
-        if ch == '\n' || ch == '\r' {
+    for (idx, ch) in chars.iter().copied().enumerate() {
+        buf.push(ch);
+        if matches!(ch, '。' | '!' | '?' | '！' | '？') {
             break;
         }
-        buf.push(ch);
-        if matches!(ch, '。' | '.' | '!' | '?' | '！' | '？') {
-            break;
+        if ch == '.' {
+            let prev = idx.checked_sub(1).and_then(|i| chars.get(i)).copied();
+            let next = chars.get(idx + 1).copied();
+            // Keep dots that are inside tokens (e.g. README.md, v1.2, abc.def).
+            let in_token = prev
+                .map(|c| c.is_ascii_alphanumeric())
+                .unwrap_or(false)
+                && next
+                    .map(|c| c.is_ascii_alphanumeric())
+                    .unwrap_or(false);
+            if in_token {
+                continue;
+            }
+            if next.map(|c| c.is_whitespace()).unwrap_or(true) {
+                break;
+            }
         }
     }
     let out = buf.trim();
     if out.is_empty() {
-        trimmed.to_string()
+        source.to_string()
     } else {
         out.to_string()
     }
@@ -481,4 +573,66 @@ fn collect_image_paths_from_task_payload(
         return;
     };
     merge_image_candidate_paths_from_args(args, out, seen);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_first_sentence;
+
+    #[test]
+    fn take_first_sentence_keeps_dot_inside_filename() {
+        let text = "The file /home/guagua/test/README.md was read successfully. Summary follows.";
+        assert_eq!(
+            take_first_sentence(text),
+            "The file /home/guagua/test/README.md was read successfully."
+        );
+    }
+
+    #[test]
+    fn take_first_sentence_keeps_dot_inside_abbreviation() {
+        let text = "Use v1.2 config for rollout. Then restart service.";
+        assert_eq!(take_first_sentence(text), "Use v1.2 config for rollout.");
+    }
+
+    #[test]
+    fn take_first_sentence_handles_cjk_punctuation() {
+        let text = "这是第一句。这里是第二句。";
+        assert_eq!(take_first_sentence(text), "这是第一句。");
+    }
+
+    #[test]
+    fn take_first_sentence_skips_markdown_heading_line() {
+        let text = "# Test Workspace\nThis directory is reserved for NL regression test artifacts and wrapper scripts.\n\nNotes...";
+        assert_eq!(
+            take_first_sentence(text),
+            "This directory is reserved for NL regression test artifacts and wrapper scripts."
+        );
+    }
+
+    #[test]
+    fn take_first_sentence_skips_label_only_first_line() {
+        let text = "上一句话的核心要点：\n内容：该目录用于存放自动化测试脚本。";
+        assert_eq!(
+            take_first_sentence(text),
+            "内容：该目录用于存放自动化测试脚本。"
+        );
+    }
+
+    #[test]
+    fn take_first_sentence_skips_english_label_only_first_line() {
+        let text = "Summary:\nThe directory stores wrapper scripts and test artifacts.";
+        assert_eq!(
+            take_first_sentence(text),
+            "The directory stores wrapper scripts and test artifacts."
+        );
+    }
+
+    #[test]
+    fn take_first_sentence_skips_markdown_wrapped_label_line() {
+        let text = "**核心重点：**\n检查下游 sample 服务稳定性，若频繁出现超时需排查网络与连接池。";
+        assert_eq!(
+            take_first_sentence(text),
+            "检查下游 sample 服务稳定性，若频繁出现超时需排查网络与连接池。"
+        );
+    }
 }

@@ -4,7 +4,7 @@
 //! API 与长连接均使用国际版端点（默认 open.larksuite.com），与 feishud 的 open.feishu.cn 分开。
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -13,6 +13,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
@@ -80,6 +81,10 @@ struct LarkSection {
     task_delivery_timeout_seconds: u64,
     #[serde(default = "default_text_chunk_chars")]
     text_chunk_chars: usize,
+    #[serde(default = "default_lark_language")]
+    language: String,
+    #[serde(default = "default_lark_i18n_path")]
+    i18n_path: String,
     #[serde(default = "default_lark_image_inbox_dir")]
     image_inbox_dir: String,
     #[serde(default = "default_lark_video_inbox_dir")]
@@ -108,6 +113,14 @@ fn default_task_delivery_timeout() -> u64 {
 }
 fn default_text_chunk_chars() -> usize {
     4000
+}
+
+fn default_lark_language() -> String {
+    "en-US".to_string()
+}
+
+fn default_lark_i18n_path() -> String {
+    "configs/i18n/larkd.en-US.toml".to_string()
 }
 
 fn default_lark_image_inbox_dir() -> String {
@@ -147,6 +160,27 @@ fn apply_env_overrides(config: &mut LarkConfig) {
         "LARK_VERIFICATION_TOKEN",
     );
     apply_string_env(&mut config.lark.encrypt_key, "LARK_ENCRYPT_KEY");
+    apply_string_env(&mut config.lark.language, "LARK_I18N_LANGUAGE");
+    apply_string_env(&mut config.lark.i18n_path, "LARK_I18N_PATH");
+}
+
+fn resolve_i18n_path(language: &str, configured_path: &str) -> String {
+    let lang = language.trim();
+    if !lang.is_empty() {
+        let candidate = format!("configs/i18n/larkd.{lang}.toml");
+        if Path::new(&candidate).exists() {
+            return candidate;
+        }
+    }
+    configured_path.to_string()
+}
+
+fn lark_t(config: &LarkConfig, key: &str, fallback: &str) -> String {
+    text_from_path(&config.lark.i18n_path, key, fallback)
+}
+
+fn lark_t_with(config: &LarkConfig, key: &str, vars: &[(&str, &str)], fallback: &str) -> String {
+    text_with_vars_from_path(&config.lark.i18n_path, key, vars, fallback)
 }
 
 fn current_ts_ms() -> u64 {
@@ -395,12 +429,38 @@ async fn bind_lark_identity(
     Ok(body.data)
 }
 
-const LARK_BIND_REQUIRED_FOR_CHAT: &str = "Please send your key first to bind this account before chatting or using features.\n请先发送你的 key 进行绑定，然后再继续聊天或使用功能。";
-const LARK_BIND_HELP: &str = "Welcome to RustClaw.\nPlease send /key <your_key> first to bind this account.\n欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。";
-const LARK_BIND_SUCCESS: &str =
+const LARK_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY: &str = "lark.msg.identity_check_unavailable";
+const LARK_I18N_BIND_REQUIRED_KEY: &str = "lark.msg.bind_key_required_for_chat";
+const LARK_I18N_BIND_HELP_KEY: &str = "lark.msg.bind_help";
+const LARK_I18N_BIND_SUCCESS_KEY: &str = "lark.msg.bind_success";
+const LARK_I18N_BIND_INVALID_KEY: &str = "lark.msg.bind_invalid";
+const LARK_I18N_BIND_REQUEST_FAILED_KEY: &str = "lark.msg.bind_request_failed";
+const LARK_I18N_MEDIA_DOWNLOAD_FAILED_KEY: &str = "lark.msg.media_download_failed";
+const LARK_I18N_MEDIA_FILE_TOO_LARGE_KEY: &str = "lark.msg.media_file_too_large";
+const LARK_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str = "lark.msg.request_timeout_retry_later";
+const LARK_I18N_TASK_DONE_FALLBACK_TEXT_KEY: &str = "lark.msg.task_done_fallback_text";
+const LARK_I18N_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "lark.msg.task_failed_fallback_error";
+const LARK_I18N_PROCESS_FAILED_WITH_ERROR_KEY: &str = "lark.msg.process_failed_with_error";
+
+const LARK_IDENTITY_CHECK_UNAVAILABLE_FALLBACK: &str =
+    "Identity check temporarily unavailable, please try again later.";
+const LARK_BIND_REQUIRED_FALLBACK: &str =
+    "Please send your key first to bind this account before chatting or using features.\n请先发送你的 key 进行绑定，然后再继续聊天或使用功能。";
+const LARK_BIND_HELP_FALLBACK: &str =
+    "Welcome to RustClaw.\nPlease send /key <your_key> first to bind this account.\n欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。";
+const LARK_BIND_SUCCESS_FALLBACK: &str =
     "Bound successfully. Please send your previous message again.\n绑定成功，请重新发送刚才的消息。";
-const LARK_BIND_INVALID: &str =
+const LARK_BIND_INVALID_FALLBACK: &str =
     "Invalid key. Please try again.\nkey 无效或绑定失败，请发送有效 key 完成绑定。";
+const LARK_BIND_REQUEST_FAILED_FALLBACK: &str =
+    "Bind request failed, please try again later.\n绑定请求失败，请稍后重试。";
+const LARK_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "Media download failed, please try again later.";
+const LARK_MEDIA_FILE_TOO_LARGE_FALLBACK: &str = "Media file is too large and was not saved.";
+const LARK_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
+    "Request timed out, please try again later.";
+const LARK_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "Done.";
+const LARK_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str = "Task failed";
+const LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str = "Failed: {error}";
 
 fn should_expect_key_reply(state: &AppState, chat_id: &str) -> bool {
     state
@@ -458,12 +518,17 @@ async fn handle_incoming_lark_text(
         Ok(ident) => ident,
         Err(e) => {
             warn!("larkd: binding resolve failed err={}", e);
+            let msg = lark_t(
+                &config,
+                LARK_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
+                LARK_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
+            );
             let _ = send_lark_text(
                 &config,
                 &client,
                 &token_cache,
                 &chat_id,
-                "Identity check temporarily unavailable, please try again later.",
+                &msg,
             )
             .await;
             return;
@@ -487,7 +552,8 @@ async fn handle_incoming_lark_text(
     let trimmed = text.trim();
     if is_unbound_allowed_command(trimmed) {
         set_expect_key_reply(&state, &chat_id, true);
-        let _ = send_lark_text(&config, &client, &token_cache, &chat_id, LARK_BIND_HELP).await;
+        let msg = lark_t(&config, LARK_I18N_BIND_HELP_KEY, LARK_BIND_HELP_FALLBACK);
+        let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
         return;
     }
     let maybe_candidate = extract_bind_key_candidate(trimmed, should_expect_key_reply(&state, &chat_id));
@@ -501,16 +567,14 @@ async fn handle_incoming_lark_text(
             Ok(Some(_)) => {
                 set_expect_key_reply(&state, &chat_id, false);
                 info!("larkd: bind success external_chat_id={}", chat_id);
-                let _ =
-                    send_lark_text(&config, &client, &token_cache, &chat_id, LARK_BIND_SUCCESS)
-                        .await;
+                let msg = lark_t(&config, LARK_I18N_BIND_SUCCESS_KEY, LARK_BIND_SUCCESS_FALLBACK);
+                let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
             }
             Ok(None) => {
                 set_expect_key_reply(&state, &chat_id, true);
                 warn!("larkd: bind failure (invalid key) external_chat_id={}", chat_id);
-                let _ =
-                    send_lark_text(&config, &client, &token_cache, &chat_id, LARK_BIND_INVALID)
-                        .await;
+                let msg = lark_t(&config, LARK_I18N_BIND_INVALID_KEY, LARK_BIND_INVALID_FALLBACK);
+                let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
             }
             Err(e) => {
                 set_expect_key_reply(&state, &chat_id, true);
@@ -518,12 +582,17 @@ async fn handle_incoming_lark_text(
                     "larkd: bind request failed err={} external_chat_id={}",
                     e, chat_id
                 );
+                let msg = lark_t(
+                    &config,
+                    LARK_I18N_BIND_REQUEST_FAILED_KEY,
+                    LARK_BIND_REQUEST_FAILED_FALLBACK,
+                );
                 let _ = send_lark_text(
                     &config,
                     &client,
                     &token_cache,
                     &chat_id,
-                    "Bind request failed, please try again later.\n绑定请求失败，请稍后重试。",
+                    &msg,
                 )
                 .await;
             }
@@ -537,12 +606,17 @@ async fn handle_incoming_lark_text(
         );
     }
     set_expect_key_reply(&state, &chat_id, true);
+    let msg = lark_t(
+        &config,
+        LARK_I18N_BIND_REQUIRED_KEY,
+        LARK_BIND_REQUIRED_FALLBACK,
+    );
     let _ = send_lark_text(
         &config,
         &client,
         &token_cache,
         &chat_id,
-        LARK_BIND_REQUIRED_FOR_CHAT,
+        &msg,
     )
     .await;
 }
@@ -564,12 +638,17 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
         Ok(ident) => ident,
         Err(e) => {
             warn!("larkd: media binding resolve failed err={}", e);
+            let msg = lark_t(
+                &config,
+                LARK_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
+                LARK_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
+            );
             let _ = send_lark_text(
                 &config,
                 &client,
                 &token_cache,
                 &ctx.chat_id,
-                "Identity check temporarily unavailable, please try again later.",
+                &msg,
             )
             .await;
             return;
@@ -578,12 +657,17 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
 
     let Some(ident) = identity else {
         set_expect_key_reply(&state, &ctx.chat_id, true);
+        let msg = lark_t(
+            &config,
+            LARK_I18N_BIND_REQUIRED_KEY,
+            LARK_BIND_REQUIRED_FALLBACK,
+        );
         let _ = send_lark_text(
             &config,
             &client,
             &token_cache,
             &ctx.chat_id,
-            LARK_BIND_REQUIRED_FOR_CHAT,
+            &msg,
         )
         .await;
         return;
@@ -611,12 +695,17 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
         Ok(b) => b,
         Err(e) => {
             warn!("larkd: media download failed err={}", e);
+            let msg = lark_t(
+                &config,
+                LARK_I18N_MEDIA_DOWNLOAD_FAILED_KEY,
+                LARK_MEDIA_DOWNLOAD_FAILED_FALLBACK,
+            );
             let _ = send_lark_text(
                 &config,
                 &client,
                 &token_cache,
                 &ctx.chat_id,
-                "Media download failed, please try again later.",
+                &msg,
             )
             .await;
             return;
@@ -630,12 +719,17 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
     };
     if bytes.len() > max_len {
         warn!("larkd: media too large len={} max={}", bytes.len(), max_len);
+        let msg = lark_t(
+            &config,
+            LARK_I18N_MEDIA_FILE_TOO_LARGE_KEY,
+            LARK_MEDIA_FILE_TOO_LARGE_FALLBACK,
+        );
         let _ = send_lark_text(
             &config,
             &client,
             &token_cache,
             &ctx.chat_id,
-            "Media file is too large and was not saved.",
+            &msg,
         )
         .await;
         return;
@@ -678,7 +772,7 @@ fn dispatch_im_incoming_event(state: AppState, body: Value) {
     debug!("larkd: im.message.receive_v1 ignored (unsupported type or missing fields)");
 }
 
-fn lark_task_success_text(task: &TaskQueryResponse) -> String {
+fn lark_task_success_text(task: &TaskQueryResponse, config: &LarkConfig) -> String {
     if let Some(messages) = task
         .result_json
         .as_ref()
@@ -703,7 +797,13 @@ fn lark_task_success_text(task: &TaskQueryResponse) -> String {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| "Done.".to_string())
+        .unwrap_or_else(|| {
+            lark_t(
+                config,
+                LARK_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
+                LARK_TASK_DONE_FALLBACK_TEXT_FALLBACK,
+            )
+        })
 }
 
 /// 提交任务并 spawn 轮询与回发。
@@ -745,6 +845,12 @@ fn handle_text_message_to_clawd(
     let user_key_poll = user_key.clone();
 
     tokio::spawn(async move {
+        let request_timeout_text = lark_t(
+            &config,
+            LARK_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY,
+            LARK_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK,
+        );
+
         let submit_resp = match client.post(&submit_url).json(&submit_req).send().await {
             Ok(r) => r,
             Err(e) => {
@@ -811,7 +917,7 @@ fn handle_text_message_to_clawd(
                             &client,
                             &token_cache,
                             &chat_id_delivery,
-                            "Request timed out, please try again later.",
+                            &request_timeout_text,
                         )
                         .await;
                         break;
@@ -843,7 +949,7 @@ fn handle_text_message_to_clawd(
                         &client,
                         &token_cache,
                         &chat_id_delivery,
-                        "Request timed out, please try again later.",
+                        &request_timeout_text,
                     )
                     .await;
                     break;
@@ -862,7 +968,7 @@ fn handle_text_message_to_clawd(
                             &client,
                             &token_cache,
                             &chat_id_delivery,
-                            "Request timed out, please try again later.",
+                            &request_timeout_text,
                         )
                         .await;
                         break;
@@ -884,7 +990,7 @@ fn handle_text_message_to_clawd(
                         &client,
                         &token_cache,
                         &chat_id_delivery,
-                        "Request timed out, please try again later.",
+                        &request_timeout_text,
                     )
                     .await;
                     break;
@@ -902,7 +1008,7 @@ fn handle_text_message_to_clawd(
                             &client,
                             &token_cache,
                             &chat_id_delivery,
-                            "Request timed out, please try again later.",
+                            &request_timeout_text,
                         )
                         .await;
                         break;
@@ -911,7 +1017,7 @@ fn handle_text_message_to_clawd(
                     continue;
                 }
                 TaskStatus::Succeeded => {
-                    let to_send = lark_task_success_text(task);
+                    let to_send = lark_task_success_text(task, &config);
                     for chunk in chunk_text_utf8(to_send.as_str(), chunk_chars) {
                         if let Err(e) = send_lark_text(
                             &config,
@@ -935,17 +1041,25 @@ fn handle_text_message_to_clawd(
                     break;
                 }
                 TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
-                    let detail = task
-                        .error_text
-                        .as_deref()
-                        .unwrap_or("Task failed")
-                        .to_string();
+                    let detail = task.error_text.clone().unwrap_or_else(|| {
+                        lark_t(
+                            &config,
+                            LARK_I18N_TASK_FAILED_FALLBACK_ERROR_KEY,
+                            LARK_TASK_FAILED_FALLBACK_ERROR_FALLBACK,
+                        )
+                    });
+                    let msg = lark_t_with(
+                        &config,
+                        LARK_I18N_PROCESS_FAILED_WITH_ERROR_KEY,
+                        &[("error", &detail)],
+                        LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK,
+                    );
                     let _ = send_lark_text(
                         &config,
                         &client,
                         &token_cache,
                         &chat_id_delivery,
-                        &format!("Failed: {}", detail),
+                        &msg,
                     )
                     .await;
                     info!(
@@ -1359,6 +1473,7 @@ async fn main() -> anyhow::Result<()> {
         toml::from_str(&raw).map_err(|e| anyhow::anyhow!("parse config: {}", e))?
     };
     apply_env_overrides(&mut config);
+    config.lark.i18n_path = resolve_i18n_path(&config.lark.language, &config.lark.i18n_path);
 
     if !config.lark.enabled {
         tracing::info!("larkd: disabled in config, exiting");

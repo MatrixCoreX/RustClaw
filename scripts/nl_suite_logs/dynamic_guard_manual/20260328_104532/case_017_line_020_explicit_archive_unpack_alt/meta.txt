@@ -1,0 +1,6 @@
+ordinal=17
+source_line=20
+case_name=explicit_archive_unpack_alt
+chat_id=17746659438
+task_id=38c79d92-1e0a-4584-ab5d-2307d4804af5
+prompt=把 /home/guagua/test/tmp/test_bundle.zip 解压到 /home/guagua/test/tmp/manual_dynamic_guard_unpack_alt 并告诉我结果

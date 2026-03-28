@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"41349ccc-0be7-407b-90c2-ecb4a0100099","status":"succeeded","result_json":{"messages":["这是一个用于存放自然语言回归测试工件和脚本的测试工作区目录，同时说明被测试的 clawd 运行时仍使用自己配置的 workspace root，修改此目录不会改变代理的内部工作目录。"],"text":"这是一个用于存放自然语言回归测试工件和脚本的测试工作区目录，同时说明被测试的 clawd 运行时仍使用自己配置的 workspace root，修改此目录不会改变代理的内部工作目录。"},"error_text":null},"error":null}

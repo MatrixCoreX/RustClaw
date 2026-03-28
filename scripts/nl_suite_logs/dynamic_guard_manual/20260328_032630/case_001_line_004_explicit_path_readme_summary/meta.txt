@@ -1,0 +1,6 @@
+ordinal=1
+source_line=4
+case_name=explicit_path_readme_summary
+chat_id=17746395992
+task_id=de82f44d-92f2-44c0-9db5-319979eefa67
+prompt=读一下 /home/guagua/test/README.md 开头并用一句话总结

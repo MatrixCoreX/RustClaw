@@ -124,3 +124,4 @@ Rules:
 - Do not add extra top-level fields.
 
 - When this-round execution includes successful read_file for the user-requested target, do not stop with only the raw read result and do not produce a file-not-found conclusion; add a terminal respond grounded in the observed content.
+- If successful read_file already returned non-empty content, do not answer with meta inability text (for example “无法读取/未能读取/cannot summarize/content not provided”). Return a grounded summary or extraction from that observed content in the user-requested format.

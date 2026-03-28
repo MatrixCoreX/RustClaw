@@ -19,6 +19,10 @@ bridge_base_url = "http://127.0.0.1:8092"
 auth_dir = "data/wa-web-auth"
 # 快速结果等待秒数；超时后转为异步回传
 quick_result_wait_seconds = 3
+# i18n 语言（优先尝试 configs/i18n/whatsapp-webd.<language>.toml）
+language = "en-US"
+# i18n 文件路径（当 language 对应文件不存在时回退到此路径）
+i18n_path = "configs/i18n/whatsapp-webd.en-US.toml"
 # Legacy bootstrap admin list.
 # Kept for compatibility only; runtime access now depends on key binding.
 admins = []

@@ -1,0 +1,21 @@
+NL multi-turn suite: clarify
+  run_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260328_112414
+  run_log:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_clarify/20260328_112414/run.log
+  case_file:  /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_clarify_20260327.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    17746659521
+
+============================================================
+[CASE]   1
+[NAME]   clarify_deictic_readme_again
+[CHAT]   17746659522
+[TURN1]  读一下那个 README 开头并用一句话总结
+[TASK1]  04898bd8-d1bd-42f3-bf58-e2a5361f3e7d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  .cargo/
+[TURN2]  /home/guagua/test/README.md
+[TASK2]  e7668db5-5897-4fc2-a4d0-6c85386b78b1
+  [status] <none> -> running

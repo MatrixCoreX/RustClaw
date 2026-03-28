@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
 use toml::Value as TomlValue;
 use tracing::{debug, info, warn};
@@ -349,6 +349,26 @@ fn append_delivery_message(task_id: &str, delivery_messages: &mut Vec<String>, m
 struct SinglePlanEnvelope {
     #[serde(default)]
     steps: Vec<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FinalizerSchemaOut {
+    #[serde(default)]
+    answer: String,
+    #[serde(default)]
+    completion_ok: bool,
+    #[serde(default)]
+    grounded_ok: bool,
+    #[serde(default)]
+    format_ok: bool,
+    #[serde(default)]
+    needs_clarify: bool,
+    #[serde(default)]
+    confidence: f64,
+    #[serde(default)]
+    used_evidence_ids: Vec<String>,
+    #[serde(default)]
+    evidence_quotes: Vec<String>,
 }
 
 fn build_single_plan_prompt(
@@ -1883,8 +1903,18 @@ async fn execute_actions_once(
 
                 let has_remaining_actions =
                     has_remaining_action_after(actions, idx, policy.max_steps);
-                let publish_respond = should_publish_respond_message(loop_state, &text);
-                if !text.is_empty() && (publish_respond || !has_remaining_actions) {
+                // For terminal responds after successful read_file, defer user-visible delivery
+                // to observed-read synthesis so final text stays grounded in file evidence.
+                let terminal_read_grounding_override = !has_remaining_actions
+                    && extract_latest_successful_read_file_output(loop_state).is_some()
+                    && !text.trim_start().starts_with("FILE:")
+                    && !text.trim_start().starts_with("IMAGE_FILE:");
+                let publish_respond =
+                    should_publish_respond_message(loop_state, &text) && !terminal_read_grounding_override;
+                if !text.is_empty()
+                    && (publish_respond
+                        || (!has_remaining_actions && !terminal_read_grounding_override))
+                {
                     loop_state.last_user_visible_respond = Some(text.clone());
                 }
                 if publish_respond {
@@ -1918,6 +1948,12 @@ async fn execute_actions_once(
                         task.task_id, loop_state.round_no, step_in_round
                     );
                 }
+                if terminal_read_grounding_override {
+                    info!(
+                        "terminal_respond_deferred_to_observed_read task_id={} round={} step={}",
+                        task.task_id, loop_state.round_no, step_in_round
+                    );
+                }
                 register_step_output(loop_state, global_step, step_in_round, "respond", &text);
                 *loop_state
                     .successful_action_fingerprints
@@ -1943,7 +1979,11 @@ async fn execute_actions_once(
                 executed_actions += 1;
                 loop_state.total_steps_executed += 1;
                 if !has_remaining_actions {
-                    stop_signal = Some("respond".to_string());
+                    if terminal_read_grounding_override {
+                        stop_signal = Some("terminal_read_grounded_synthesis".to_string());
+                    } else {
+                        stop_signal = Some("respond".to_string());
+                    }
                     break;
                 }
                 continue;
@@ -2136,7 +2176,129 @@ fn normalize_user_visible_text(raw: &str) -> &str {
             return body;
         }
     }
-    trimmed
+    ""
+}
+
+fn parse_finalizer_schema_out(raw: &str) -> Option<FinalizerSchemaOut> {
+    crate::parse_llm_json_extract_or_any::<FinalizerSchemaOut>(raw)
+        .or_else(|| crate::parse_llm_json_raw_or_any::<FinalizerSchemaOut>(raw))
+}
+
+fn finalizer_contract_ok(schema: &FinalizerSchemaOut) -> bool {
+    schema.completion_ok
+        && schema.grounded_ok
+        && schema.format_ok
+        && !schema.answer.trim().is_empty()
+        && !looks_like_internal_trace_artifact(schema.answer.trim())
+}
+
+fn finalizer_schema_answer(raw: &str) -> Option<(String, FinalizerSchemaOut)> {
+    let schema = parse_finalizer_schema_out(raw)?;
+    let answer = schema.answer.trim().to_string();
+    if answer.is_empty() {
+        return None;
+    }
+    Some((answer, schema))
+}
+
+fn looks_like_internal_trace_artifact(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with("subtask#")
+        || trimmed.starts_with("round=")
+        || trimmed.starts_with("step=")
+}
+
+fn looks_like_structured_blob(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with('{') || trimmed.starts_with('[')
+}
+
+fn trim_request_path_token(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches(|c: char| {
+            matches!(
+                c,
+                '"' | '\'' | '`' | '，' | ',' | ':' | '：' | ';' | '。' | ')' | '(' | '）' | '（'
+            )
+        })
+        .to_string()
+}
+
+fn extract_explicit_paths_from_request(input: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for token in input.split_whitespace() {
+        let trimmed = trim_request_path_token(token);
+        if !(trimmed.starts_with('/') || trimmed.starts_with("./") || trimmed.starts_with("../")) {
+            continue;
+        }
+        if seen.insert(trimmed.clone()) {
+            out.push(trimmed);
+        }
+    }
+    out
+}
+
+fn extract_single_explicit_path_from_request(input: &str) -> Option<String> {
+    let paths = extract_explicit_paths_from_request(input);
+    if paths.len() == 1 {
+        paths.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn normalize_path_for_scope_compare(workspace_root: &Path, raw: &str) -> Option<String> {
+    let trimmed = trim_request_path_token(raw);
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut normalized = crate::ensure_default_file_path(workspace_root, &trimmed).replace('\\', "/");
+    while normalized.len() > 1 && normalized.ends_with('/') {
+        normalized.pop();
+    }
+    Some(normalized)
+}
+
+fn paths_equivalent_for_scope(workspace_root: &Path, expected: &str, actual: &str) -> bool {
+    let Some(left) = normalize_path_for_scope_compare(workspace_root, expected) else {
+        return false;
+    };
+    let Some(right) = normalize_path_for_scope_compare(workspace_root, actual) else {
+        return false;
+    };
+    left == right
+}
+
+fn observed_quotes_grounded(schema: &FinalizerSchemaOut, observed: &str) -> bool {
+    let mut any = false;
+    for quote in schema
+        .evidence_quotes
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        any = true;
+        if !observed.contains(quote) {
+            return false;
+        }
+    }
+    any
+}
+
+fn observed_read_path_matches_request(
+    workspace_root: &Path,
+    user_text: &str,
+    observed_read_path: Option<&str>,
+) -> bool {
+    let Some(expected_path) = extract_single_explicit_path_from_request(user_text) else {
+        return true;
+    };
+    let Some(actual_path) = observed_read_path else {
+        return true;
+    };
+    paths_equivalent_for_scope(workspace_root, &expected_path, actual_path)
 }
 
 async fn synthesize_final_response(
@@ -2148,31 +2310,61 @@ async fn synthesize_final_response(
     if !should_synthesize_final_response(loop_state) {
         return Ok(None);
     }
+    let observed_read_output = extract_latest_successful_read_file_output(loop_state);
+    if observed_read_output.is_some() {
+        if let Some(recovered) =
+            synthesize_from_observed_read_output(state, task, user_text, loop_state).await?
+        {
+            let trimmed = recovered.trim().to_string();
+            if trimmed.is_empty()
+                || looks_like_planner_artifact(&trimmed)
+                || looks_like_internal_trace_artifact(&trimmed)
+            {
+                return Ok(None);
+            }
+            return Ok(Some(trimmed));
+        }
+    }
     let mut args = json!({
         "text": format!(
-            "Original user request:\n{}\n\nWrite the final user-facing answer now. Use the recent execution context above. Complete any still-pending lightweight conclusion requested by the user, but do not invent unseen files, paths, lines, or command results. Treat the current turn's observed tool results as authoritative; do not let older memory or earlier execution snippets override a successful tool result from this turn. If the observed raw result already exactly satisfies the user request, return it unchanged. If the user asked for a boolean / scalar / path / filename / FILE token only, keep that exact compact format and do not wrap it in extra prose. If the user asked for only a number but the observed result is a plain newline-separated listing from this turn, answer with the count only. If the user asked for a field value and the observed extraction result is `undefined`, `null`, or empty, answer that the field was not found; do not turn that into a file-not-found claim. If execution already produced one concrete saved file path and the user asked to receive the file itself, return exactly FILE:<that-path>. If the observed execution context shows a requested file/path was not found, answer concisely that it was not found instead of asking the user to re-provide contents that were already attempted. Do not claim that you lack file access or cannot access files when the execution context already shows that file-access steps were attempted; in that case stay grounded in the observed file-not-found result. Keep the reply concise and direct.",
+            "Original user request:\n{}\n\nWrite the final user-facing answer now. Use the recent execution context above. Complete any still-pending lightweight conclusion requested by the user, but do not invent unseen files, paths, lines, or command results. Treat the current turn's observed tool results as authoritative; do not let older memory or earlier execution snippets override a successful tool result from this turn. If the observed raw result already exactly satisfies the user request, return it unchanged. If the user asked for a boolean / scalar / path / filename / FILE token only, keep that exact compact format and do not wrap it in extra prose. If the user asked for only a number but the observed result is a plain newline-separated listing from this turn, answer with the count only. If the user asked for a field value and the observed extraction result is `undefined`, `null`, or empty, answer that the field was not found; do not turn that into a file-not-found claim. If execution already produced one concrete saved file path and the user asked to receive the file itself, return exactly FILE:<that-path>. If the observed execution context shows a requested file/path was not found, answer concisely that it was not found instead of asking the user to re-provide contents that were already attempted. Do not claim that you lack file access or cannot access files when the execution context already shows that file-access steps were attempted; in that case stay grounded in the observed file-not-found result. Keep the reply concise and direct.\n\nReturn JSON only with this schema:\n{{\"answer\":\"<final user-facing text>\",\"completion_ok\":true|false,\"grounded_ok\":true|false,\"format_ok\":true|false,\"needs_clarify\":true|false,\"confidence\":0.0-1.0,\"used_evidence_ids\":[\"E1\",\"E2\"]}}",
             user_text
         )
     });
     attach_recent_execution_context_to_chat_args(&mut args, loop_state);
     let out = execution_adapters::run_skill(state, task, "chat", args).await?;
+    if let Some((answer, schema)) = finalizer_schema_answer(&out) {
+        let contract_ok = finalizer_contract_ok(&schema);
+        info!(
+            "finalizer_schema_eval task_id={} stage=general contract_ok={} completion_ok={} grounded_ok={} format_ok={} needs_clarify={} confidence={} used_evidence_ids_count={}",
+            task.task_id,
+            contract_ok,
+            schema.completion_ok,
+            schema.grounded_ok,
+            schema.format_ok,
+            schema.needs_clarify,
+            schema.confidence,
+            schema.used_evidence_ids.len()
+        );
+        if contract_ok && !looks_like_planner_artifact(&answer) {
+            return Ok(Some(answer));
+        }
+        return Ok(None);
+    }
     let trimmed = out.trim().to_string();
     if trimmed.is_empty() {
         Ok(None)
-    } else if looks_like_planner_artifact(&trimmed) {
-        Ok(None)
-    } else if looks_like_missing_file_claim(&trimmed)
-        && extract_latest_successful_read_file_output(loop_state).is_some()
+    } else if looks_like_planner_artifact(&trimmed)
+        || looks_like_internal_trace_artifact(&trimmed)
+        || looks_like_structured_blob(&trimmed)
     {
-        // If this turn already has a successful read_file result, avoid drifting into
-        // "file not found" text and retry synthesis grounded only on observed content.
-        if let Some(recovered) =
-            synthesize_from_observed_read_output(state, task, user_text, loop_state).await?
-        {
-            Ok(Some(recovered))
-        } else {
-            Ok(Some(trimmed))
+        if looks_like_structured_blob(&trimmed) {
+            warn!(
+                "finalizer_schema_eval task_id={} stage=general parse_failed=true structured_blob_rejected=true",
+                task.task_id
+            );
         }
+        Ok(None)
     } else {
         Ok(Some(trimmed))
     }
@@ -2188,28 +2380,47 @@ fn extract_latest_successful_read_file_output(loop_state: &LoopState) -> Option<
         if body.is_empty() {
             continue;
         }
+        if let Some((head, tail)) = body.split_once('\n') {
+            if head
+                .trim()
+                .to_ascii_lowercase()
+                .contains("skill(read_file): success")
+            {
+                let tail_trimmed = tail.trim();
+                if !tail_trimmed.is_empty() {
+                    return Some(tail_trimmed.to_string());
+                }
+            }
+        }
         return Some(body.to_string());
     }
     None
 }
 
-fn looks_like_missing_file_claim(text: &str) -> bool {
-    let lower = text.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return false;
+fn extract_latest_successful_read_file_path(loop_state: &LoopState) -> Option<String> {
+    loop_state
+        .output_vars
+        .get("skill.read_file.path")
+        .or_else(|| loop_state.output_vars.get("last_file_path"))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn deterministic_summary_from_observed(observed: &str) -> Option<String> {
+    if let Some(line) = first_non_heading_line(observed) {
+        return Some(line);
     }
-    [
-        "not found",
-        "file not found",
-        "unable to read",
-        "cannot read",
-        "未找到",
-        "不存在",
-        "无法读取",
-        "不可读取",
-    ]
-    .iter()
-    .any(|m| lower.contains(m))
+    observed
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| {
+            let mut out = line.to_string();
+            if out.chars().count() > 120 {
+                out = out.chars().take(120).collect::<String>() + "...";
+            }
+            out
+        })
 }
 
 async fn synthesize_from_observed_read_output(
@@ -2218,24 +2429,101 @@ async fn synthesize_from_observed_read_output(
     user_text: &str,
     loop_state: &LoopState,
 ) -> Result<Option<String>, String> {
-    let Some(observed) = extract_latest_successful_read_file_output(loop_state) else {
+    let Some(mut observed) = extract_latest_successful_read_file_output(loop_state) else {
         return Ok(None);
     };
+    let mut observed_read_path = extract_latest_successful_read_file_path(loop_state);
+
+    // If the user specified one explicit path but execution read another path, perform one
+    // corrective read on that explicit path before final synthesis.
+    if let (Some(expected_path), Some(actual_path)) = (
+        extract_single_explicit_path_from_request(user_text),
+        observed_read_path.as_deref(),
+    ) {
+        if !paths_equivalent_for_scope(&state.workspace_root, &expected_path, actual_path) {
+            info!(
+                "observed_read_path_mismatch task_id={} expected_path={} actual_path={}",
+                task.task_id, expected_path, actual_path
+            );
+            match run_skill_with_runner_outcome(
+                state,
+                task,
+                "read_file",
+                json!({ "path": expected_path.clone() }),
+            )
+            .await
+            {
+                Ok(outcome) => {
+                    let corrected = outcome.text.trim();
+                    if !corrected.is_empty() {
+                        observed = corrected.to_string();
+                        observed_read_path = Some(expected_path.clone());
+                        info!(
+                            "observed_read_path_corrected task_id={} corrected_path={} corrected_len={}",
+                            task.task_id,
+                            expected_path,
+                            corrected.len()
+                        );
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        "observed_read_path_correction_failed task_id={} expected_path={} err={}",
+                        task.task_id,
+                        expected_path,
+                        crate::truncate_for_log(&err)
+                    );
+                }
+            }
+        }
+    }
+
+    let observed_path_for_prompt = observed_read_path
+        .as_deref()
+        .unwrap_or("<unknown>");
     let mut args = json!({
         "text": format!(
-            "Original user request:\n{}\n\nObserved file content from a successful read_file step (authoritative):\n{}\n\nReturn the final user-facing answer directly based on the observed content. Do not claim missing/unreadable file because the read_file step already succeeded. Keep the reply concise and preserve requested format constraints from the user request.",
+            "Original user request:\n{}\n\nObserved read_file path from this turn:\n{}\n\nObserved file content from a successful read_file step (authoritative):\n{}\n\nReturn the final user-facing answer directly based on the observed content. Do not claim missing/unreadable file because the read_file step already succeeded. Keep the reply concise and preserve requested format constraints from the user request. Include 1-3 exact short quotes copied verbatim from the observed content as grounding evidence.\n\nReturn JSON only with this schema:\n{{\"answer\":\"<final user-facing text>\",\"completion_ok\":true|false,\"grounded_ok\":true|false,\"format_ok\":true|false,\"needs_clarify\":true|false,\"confidence\":0.0-1.0,\"used_evidence_ids\":[\"E1\"],\"evidence_quotes\":[\"<exact quote from observed content>\"]}}",
             user_text,
+            observed_path_for_prompt,
             crate::truncate_for_agent_trace(&observed)
         )
     });
     attach_recent_execution_context_to_chat_args(&mut args, loop_state);
     let retry = execution_adapters::run_skill(state, task, "chat", args).await?;
-    let trimmed = retry.trim();
-    if trimmed.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(trimmed.to_string()))
+    if let Some((answer, schema)) = finalizer_schema_answer(&retry) {
+        let evidence_ok = observed_quotes_grounded(&schema, &observed);
+        let path_ok = observed_read_path_matches_request(
+            &state.workspace_root,
+            user_text,
+            observed_read_path.as_deref(),
+        );
+        let contract_ok = finalizer_contract_ok(&schema) && evidence_ok && path_ok;
+        info!(
+            "finalizer_schema_eval task_id={} stage=observed_read contract_ok={} completion_ok={} grounded_ok={} format_ok={} needs_clarify={} confidence={} used_evidence_ids_count={} evidence_quotes_count={} evidence_ok={} path_ok={} observed_path={}",
+            task.task_id,
+            contract_ok,
+            schema.completion_ok,
+            schema.grounded_ok,
+            schema.format_ok,
+            schema.needs_clarify,
+            schema.confidence,
+            schema.used_evidence_ids.len(),
+            schema.evidence_quotes.len(),
+            evidence_ok,
+            path_ok,
+            observed_path_for_prompt
+        );
+        if contract_ok && !looks_like_planner_artifact(&answer) {
+            return Ok(Some(answer));
+        }
+        return Ok(deterministic_summary_from_observed(&observed));
     }
+    warn!(
+        "finalizer_schema_eval task_id={} stage=observed_read parse_failed=true; fallback=deterministic_summary",
+        task.task_id
+    );
+    Ok(deterministic_summary_from_observed(&observed))
 }
 
 fn evaluate_round_outcome(
@@ -2691,5 +2979,109 @@ mod tests {
         assert!(!used);
         assert!(deduped.is_empty());
         assert!(final_text.is_empty());
+    }
+
+    #[test]
+    fn test_deterministic_summary_from_observed_prefers_non_heading_line() {
+        let observed = "# Test Workspace\nThis directory is reserved for NL regression test artifacts.";
+        assert_eq!(
+            deterministic_summary_from_observed(observed).as_deref(),
+            Some("This directory is reserved for NL regression test artifacts.")
+        );
+    }
+
+    #[test]
+    fn test_extract_latest_successful_read_file_output_prefers_content_body() {
+        let mut loop_state = LoopState::default();
+        loop_state.subtask_results.push(
+            "subtask#2 skill(read_file): success\n# Test Workspace\nThis directory is reserved."
+                .to_string(),
+        );
+        let observed = extract_latest_successful_read_file_output(&loop_state);
+        assert_eq!(
+            observed.as_deref(),
+            Some("# Test Workspace\nThis directory is reserved.")
+        );
+    }
+
+    #[test]
+    fn test_finalizer_schema_answer_parse_ok() {
+        let raw = r#"{"answer":"hello","completion_ok":true,"grounded_ok":true,"format_ok":true,"needs_clarify":false,"confidence":0.9,"used_evidence_ids":["E1"]}"#;
+        let (answer, schema) = finalizer_schema_answer(raw).expect("schema parse");
+        assert_eq!(answer, "hello");
+        assert!(finalizer_contract_ok(&schema));
+    }
+
+    #[test]
+    fn test_finalizer_schema_answer_parse_fail_non_json() {
+        assert!(finalizer_schema_answer("plain text").is_none());
+    }
+
+    #[test]
+    fn test_finalizer_contract_not_ok_when_grounding_false() {
+        let raw = r#"{"answer":"hello","completion_ok":true,"grounded_ok":false,"format_ok":true}"#;
+        let (_answer, schema) = finalizer_schema_answer(raw).expect("schema parse");
+        assert!(!finalizer_contract_ok(&schema));
+    }
+
+    #[test]
+    fn test_internal_trace_artifact_detected() {
+        assert!(looks_like_internal_trace_artifact(
+            "subtask#1 skill(run_cmd): success"
+        ));
+    }
+
+    #[test]
+    fn test_structured_blob_detected() {
+        assert!(looks_like_structured_blob("{\"answer\":\"x\"}"));
+        assert!(looks_like_structured_blob("[1,2,3]"));
+        assert!(!looks_like_structured_blob("plain text"));
+    }
+
+    #[test]
+    fn test_extract_single_explicit_path_from_request_ok() {
+        let text = "先读 /home/guagua/test/README.md 开头，再用一句话总结";
+        assert_eq!(
+            extract_single_explicit_path_from_request(text).as_deref(),
+            Some("/home/guagua/test/README.md")
+        );
+    }
+
+    #[test]
+    fn test_observed_quotes_grounded_requires_exact_match() {
+        let observed = "# Test Workspace\nThis directory is reserved for NL regression test artifacts.";
+        let schema = FinalizerSchemaOut {
+            answer: "summary".to_string(),
+            completion_ok: true,
+            grounded_ok: true,
+            format_ok: true,
+            needs_clarify: false,
+            confidence: 0.8,
+            used_evidence_ids: vec!["E1".to_string()],
+            evidence_quotes: vec!["NL regression test artifacts".to_string()],
+        };
+        assert!(observed_quotes_grounded(&schema, observed));
+
+        let bad = FinalizerSchemaOut {
+            evidence_quotes: vec!["high-performance distributed scheduler".to_string()],
+            ..schema
+        };
+        assert!(!observed_quotes_grounded(&bad, observed));
+    }
+
+    #[test]
+    fn test_observed_read_path_matches_request() {
+        let ws = Path::new("/tmp/workspace");
+        let user_text = "Read /home/guagua/test/README.md and summarize.";
+        assert!(observed_read_path_matches_request(
+            ws,
+            user_text,
+            Some("/home/guagua/test/README.md")
+        ));
+        assert!(!observed_read_path_matches_request(
+            ws,
+            user_text,
+            Some("/home/guagua/git_upload/README.md")
+        ));
     }
 }

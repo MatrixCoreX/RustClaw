@@ -1,0 +1,6 @@
+ordinal=33
+source_line=40
+case_name=colloquial_en_ultra_send
+chat_id=17746659454
+task_id=048792d8-fb6d-4cd5-8cc2-f87341ee9a26
+prompt=pls send /home/guagua/test/docs/service_notes.md as file only

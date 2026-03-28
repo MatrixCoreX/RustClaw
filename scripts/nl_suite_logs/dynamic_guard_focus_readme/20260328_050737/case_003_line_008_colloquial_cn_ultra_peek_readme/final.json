@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"302f4c3e-04c1-43ad-ac54-0c14839f63b9","status":"succeeded","result_json":{"messages":["这是一个用于NL回归测试工件和包装脚本的测试工作区目录，笔记说明运行器输入和日志可存于此，但改变此目录不会改变被测clawd运行时的内部工作目录。"],"text":"这是一个用于NL回归测试工件和包装脚本的测试工作区目录，笔记说明运行器输入和日志可存于此，但改变此目录不会改变被测clawd运行时的内部工作目录。"},"error_text":null},"error":null}

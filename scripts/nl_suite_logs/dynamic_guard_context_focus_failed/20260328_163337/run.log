@@ -1,0 +1,77 @@
+NL multi-turn suite: context_chain
+  run_dir:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_163337
+  run_log:    /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_163337/run.log
+  case_file:  /home/guagua/git_upload/scripts/nl_tests/cases/nl_cases_dynamic_guard_context_failed_focus_20260328.txt
+  turn_count: 3
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985996990
+
+============================================================
+[CASE]   1
+[NAME]   context_colloquial_cn_send_config_alias
+[CHAT]   1985996991
+[TURN1]  先记一下，“那份配置”就是 /home/guagua/test/configs/app_config.toml
+[TASK1]  3837b793-3372-4471-989a-b028967268c9
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记住：`那份配置` = /home/guagua/test/configs/app_config.toml
+[TURN2]  那份配置直接发我，别贴正文
+[TASK2]  737b48b9-8f65-4760-ad8b-3aef95a5b747
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/home/guagua/test/configs/app_config.toml
+[TURN3]  再一句话说主要用途
+[TASK3]  b3595e5a-6c83-4f0d-af91-0669cd1f5388
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT3]  这是 rustclaw-test-fixture 应用用于自然语言回归测试的配置，定义了所有者为 guagua，并指定了文档、日志和数据的存储路径。
+
+============================================================
+[CASE]   2
+[NAME]   context_ultra_cn_readme_alias
+[CHAT]   1985996992
+[TURN1]  记住哈，“那玩意README”就是 /home/guagua/test/README.md
+[TASK1]  f0d26752-003c-4e6d-b171-4048f0edc274
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  你想让我对 /home/guagua/test/README.md 做啥操作？
+[TURN2]  那玩意开头给我看两眼
+[TASK2]  89ff8772-3ac2-409a-bb67-ded2764d2ddc
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  /home/guagua/test/README.md 的开头内容是关于"Test Workspace"的说明。该目录用于存放 NL 回归测试的工件和包装脚本。
+[TURN3]  最后一句话讲重点
+[TASK3]  cd7e8abd-f6be-46d4-97a4-1842c26b228e
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT3]  **核心重点：**
+
+============================================================
+[CASE]   3
+[NAME]   context_ultra_mixed_docs_alias
+[CHAT]   1985996993
+[TURN1]  先记住，that folder 是 /home/guagua/test/docs
+[TASK1]  5da232f0-c460-496e-afee-27778a0c426f
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  已记录。后续对话中，"that folder" 即指 `/home/guagua/test/docs`。
+[TURN2]  that folder names only
+[TASK2]  21b9366b-ce4a-4e04-9952-a4f8a8aa448f
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  guide.txt\nnotes.txt\nservice_notes.md
+[TURN3]  再回我总数，number only
+[TASK3]  b860b6be-d671-4e2e-8fde-e01565bfe10d
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT3]  3
+
+Artifacts:
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_163337
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_163337/run.log
+  - /home/guagua/git_upload/scripts/nl_suite_logs/dynamic_guard_context_focus_failed/20260328_163337/summary.jsonl

@@ -1,0 +1,9 @@
+index=13
+case_name=context_colloquial_cn_send_config_alias
+chat_id=17746743794
+turn1_task_id=bf017e55-b3d0-4617-a9ad-4c4fbdd451f5
+turn1_prompt=先记一下，“那份配置”就是 /home/guagua/test/configs/app_config.toml
+turn2_task_id=59728d23-3e99-48ec-8c89-1015c68536da
+turn2_prompt=那份配置直接发我，别贴正文
+turn3_task_id=7366091a-a96f-4529-8970-942e6a464d82
+turn3_prompt=再一句话说主要用途

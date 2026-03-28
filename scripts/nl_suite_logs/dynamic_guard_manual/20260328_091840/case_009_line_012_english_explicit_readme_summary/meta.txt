@@ -1,0 +1,6 @@
+ordinal=9
+source_line=12
+case_name=english_explicit_readme_summary
+chat_id=17746607310
+task_id=4ebfe2bd-fb4a-409c-a551-04006289f2c0
+prompt=Read the beginning of /home/guagua/test/README.md and summarize it in one sentence.

@@ -16,6 +16,10 @@ listen = "0.0.0.0:8790"
 clawd_base_url = "http://127.0.0.1:8787"
 # 国际版 Lark API 根地址（与 feishud 的 open.feishu.cn 分开，勿改为中国站）
 api_base_url = "https://open.larksuite.com"
+# i18n 语言（优先尝试 configs/i18n/larkd.<language>.toml）
+language = "en-US"
+# i18n 文件路径（当 language 对应文件不存在时回退到此路径）
+i18n_path = "configs/i18n/larkd.en-US.toml"
 # 入站媒体落盘根目录（相对 larkd 进程工作目录；实际路径为 <目录>/<chat_id>/<文件名>）
 # image_inbox_dir = "data/larkd/image"
 # video_inbox_dir = "data/larkd/video"
