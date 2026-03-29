@@ -1,7 +1,7 @@
 <!--
 用途: 前置理解层统一入口。一次完成：承接判断、意图补全、调度意图判断、是否需澄清。
 组件: clawd（crates/clawd/src/intent_router.rs）run_intent_normalizer
-占位符: __PERSONA_PROMPT__, __CAPABILITY_MAP__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __NOW__, __TIMEZONE__, __SCHEDULE_RULES__, __REQUEST__；可选：__RECENT_ASSISTANT_REPLIES__（近期 assistant turn 序号锚点，用于上个/上上个回复指代）
+占位符: __PERSONA_PROMPT__, __CAPABILITY_MAP__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __RECENT_TURNS_FULL__, __NOW__, __TIMEZONE__, __SCHEDULE_RULES__, __REQUEST__；可选：__RECENT_ASSISTANT_REPLIES__（近期 assistant turn 序号锚点，用于上个/上上个回复指代）
 -->
 
 Vendor tuning for OpenAI-compatible models:
@@ -41,6 +41,10 @@ You are a unified intent normalizer for a tool-using assistant. In a single pass
 
 2) **Intent completion**: Rewrite the current user message into a complete, context-grounded intent.
    - Use __RECENT_EXECUTION_CONTEXT__ and __MEMORY_CONTEXT__ to resolve short/follow-up messages (pronouns, "继续", "就这个", numbers, yes/no).
+   - **Recent full-dialog window priority (hard):** Use __RECENT_TURNS_FULL__ as the primary anchor for deictic follow-ups and pronoun references, with newest turn first as highest priority.
+   - **Reference fallback order (hard):** If recent full-dialog turns do not resolve the reference, then fallback in this order: __MEMORY_CONTEXT__.RECENT_RELATED_EVENTS -> __MEMORY_CONTEXT__.SIMILAR_TRIGGERS / RELEVANT_FACTS -> __MEMORY_CONTEXT__.FALLBACK_LONG_TERM_SUMMARY.
+   - **Explicit-reference override (hard):** Only when the user explicitly points to a non-default memory scope (for example explicitly asking about older/history/long-term memory) may you override the default fallback order.
+   - **Immediate-turn deictic anchor rule (hard):** If the immediately previous completed turn already executed a concrete target and returned a short scalar/status reply (for example a number-only count), deictic follow-ups (for example "他们/这些/those/them/it") must bind to that immediate turn target/result set first. Do not rebind to older memory triggers or unrelated historical paths.
    - **Last turn full context priority**: If __LAST_TURN_FULL__ shows the previous turn was a question, and the current input looks like a short answer/continuation (e.g. "可以/不行/那就这样/安装它"), prioritize interpreting it as "continuing the previous question". If it conflicts with a clear new goal in the current message, the current goal takes priority. When uncertain, ask a brief clarification instead of forcing an answer.
    - **Ordinal reply reference (上个/上上个/上上上个回复 — hard rule):** If the user says any of: 上个回复 / 上一条回复 / 上上个回复 / 上上条回复 / 上上上个回复 / previous reply / previous response / reply before that, you **must** bind by **assistant turn index** first (use __RECENT_ASSISTANT_REPLIES__ when provided):
      - 上个回复 / 上一条回复 / previous reply / previous response → **assistant[-1]** (most recent assistant turn).
@@ -90,7 +94,7 @@ You are a unified intent normalizer for a tool-using assistant. In a single pass
    - **Execution-mode contract guard (hard):** If `output_contract.requires_content_evidence=true` and `output_contract.locator_kind` is `path|url|filename`, and `needs_clarify=false`, mode must be executable (`act` or `chat_act`) rather than `chat`. Prefer `act` for scalar/file-token outcomes; prefer `chat_act` for user-facing explanation/summarization outcomes.
 
 Output a single raw JSON object only (no markdown, no extra text, no code fences):
-{"resolved_user_intent":"...","resume_behavior":"none|resume_execute|resume_discuss","schedule_kind":"none|create|update|delete|query","wants_file_delivery":false,"needs_clarify":false,"reason":"...","confidence":0.0,"mode":"chat|act|ask_clarify|chat_act","output_contract":{"response_shape":"free|one_sentence|scalar|file_token","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none|path|url|filename"}}
+{"resolved_user_intent":"...","resume_behavior":"none|resume_execute|resume_discuss","schedule_kind":"none|create|update|delete|query","wants_file_delivery":false,"needs_clarify":false,"reason":"...","confidence":0.0,"mode":"chat|act|ask_clarify|chat_act","output_contract":{"response_shape":"free|one_sentence|scalar|file_token","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none|path|url|filename","delivery_intent":"none|file_single|directory_lookup|directory_batch_files","locator_hint":""}}
 
 - confidence in [0, 1]. reason must mention which anchor or rule was used.
 - mode: prefer chat or act; use chat_act only when user explicitly wants both action and summary in one turn.
@@ -103,9 +107,19 @@ Output a single raw JSON object only (no markdown, no extra text, no code fences
 - output_contract.requires_content_evidence: true when later answer depends on actually reading/obtaining content (for example read-and-summarize / inspect-and-conclude), false otherwise.
 - output_contract.delivery_required: true when the final delivery contract requires file token style output rather than pasted prose.
 - output_contract.locator_kind: infer the primary locator semantics in this turn (path/url/filename/none).
+- output_contract.delivery_intent:
+  - none: not a delivery-directory special mode
+  - file_single: normal single-file delivery flow
+  - directory_lookup: user asks to find/locate/list a directory (not sending files)
+  - directory_batch_files: user asks to send files under a directory in batch
+- output_contract.locator_hint: provide the best concrete locator text (path / directory name / filename) extracted semantically from the user request. Keep original language/script (Chinese, English, mixed are all valid). Do not force English.
+- If user intent is "find/where/list this directory" (not sending files), set `delivery_intent=directory_lookup`.
+- If user intent is "send all files under this directory/folder", set `delivery_intent=directory_batch_files`.
+- In both cases, set `locator_hint` to the directory target text (explicit path when available; otherwise the directory name phrase).
 - Set output_contract from semantic intent and task shape, not by brittle fixed keyword matching.
 - Do not depend on special-case code overrides for filesystem tasks. If the request is self-contained and executable from local workspace context, choose the correct mode directly from semantics.
 - Treat lightweight local environment queries such as current username, hostname, current working directory, or reading one scalar from a local file/config as self-contained executable requests when one local step can answer them.
+- For multilingual users, never downgrade to `none` only because request wording is non-English. Base `delivery_intent` and `locator_hint` on semantics, not language.
 
 Rules:
 - resume_behavior: use "resume_execute" only when user clearly wants to continue unfinished steps now; "resume_discuss" when discussing the interruption or deferring; "none" when new standalone request or __RESUME_CONTEXT__ is empty.
@@ -136,6 +150,9 @@ __CAPABILITY_MAP__
 
 Recent assistant replies (optional; use for ordinal reply anchoring — 上个/上上个/上上上个回复). When present, each entry has: turn_id, relative_index (-1/-2/-3), short_preview (truncated), has_code_block (bool). Prefer this over memory for "上个回复/上上个回复/上上上个回复".
 __RECENT_ASSISTANT_REPLIES__
+
+Recent full dialogue window (recent 5-10 complete turns; primary anchor for deictic follow-ups):
+__RECENT_TURNS_FULL__
 
 Recent execution context:
 __RECENT_EXECUTION_CONTEXT__

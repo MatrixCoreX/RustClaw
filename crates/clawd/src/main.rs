@@ -8,8 +8,6 @@ use axum::routing::{get, get_service, post};
 use axum::{Json, Router};
 use claw_core::config::AppConfig;
 use claw_core::hard_rules::main_flow::load_main_flow_rules;
-use claw_core::hard_rules::trade as hard_trade;
-use claw_core::hard_rules::trade::CompiledTradeRules;
 use claw_core::hard_rules::types::MainFlowRules;
 use claw_core::types::{
     ApiResponse, HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse,
@@ -937,15 +935,6 @@ pub(crate) fn now_ts() -> String {
     now_ts_u64().to_string()
 }
 
-fn confirmation_rules(state: &AppState) -> &'static CompiledTradeRules {
-    static RULES: OnceLock<CompiledTradeRules> = OnceLock::new();
-    RULES.get_or_init(|| {
-        let path = state.workspace_root.join("configs/hard_rules/trade.toml");
-        let path_str = path.to_string_lossy().to_string();
-        hard_trade::load_compiled_trade_rules(&path_str)
-    })
-}
-
 pub(crate) fn main_flow_rules(state: &AppState) -> &'static MainFlowRules {
     static RULES: OnceLock<MainFlowRules> = OnceLock::new();
     RULES.get_or_init(|| {
@@ -961,8 +950,9 @@ fn normalize_affirmation_text(text: &str) -> String {
     text.trim().to_ascii_lowercase()
 }
 
-fn is_affirmation_click_text(state: &AppState, text: &str) -> bool {
-    hard_trade::is_yes_confirmation(text, confirmation_rules(state))
+fn is_affirmation_click_text(_state: &AppState, text: &str) -> bool {
+    let t = text.trim().to_ascii_lowercase();
+    matches!(t.as_str(), "y" | "yes")
 }
 
 async fn submit_task(

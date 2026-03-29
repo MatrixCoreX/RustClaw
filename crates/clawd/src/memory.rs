@@ -7,6 +7,7 @@ pub(crate) mod service;
 use anyhow::anyhow;
 use claw_core::config::MemoryConfig;
 use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::Value;
 
 use super::{AppState, extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix};
 
@@ -457,6 +458,243 @@ pub(crate) fn recall_memories_since_id(
     Ok(out)
 }
 
+fn extract_last_turn_user_text_from_payload(payload_json: &str) -> Option<String> {
+    let payload = serde_json::from_str::<Value>(payload_json).ok()?;
+    let text = payload.get("text").and_then(Value::as_str)?.trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+fn extract_last_turn_assistant_text_from_task(
+    status: &str,
+    result_json: Option<&str>,
+    error_text: Option<&str>,
+) -> Option<String> {
+    if status.eq_ignore_ascii_case("failed") {
+        if let Some(err) = error_text.map(str::trim).filter(|v| !v.is_empty()) {
+            return Some(err.to_string());
+        }
+    }
+    let result_json = result_json.map(str::trim).filter(|v| !v.is_empty())?;
+    let parsed = serde_json::from_str::<Value>(result_json).ok();
+    if let Some(val) = parsed.as_ref() {
+        if let Some(text) = val.get("text").and_then(Value::as_str).map(str::trim) {
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+        if let Some(text) = val.as_str().map(str::trim) {
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+    Some(result_json.to_string())
+}
+
+fn query_recent_terminal_ask_turn_for_chat(
+    db: &Connection,
+    user_id: i64,
+    chat_id: i64,
+    user_key: &str,
+) -> anyhow::Result<Option<(String, String)>> {
+    let mut stmt = db.prepare(
+        "SELECT payload_json, result_json, error_text, status
+         FROM tasks
+         WHERE user_id = ?1
+           AND chat_id = ?2
+           AND user_key = ?3
+           AND kind = 'ask'
+           AND status IN ('succeeded', 'failed')
+         ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC
+         LIMIT 8",
+    )?;
+    let rows = stmt.query_map(params![user_id, chat_id, user_key], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (payload_json, result_json, error_text, status) = row?;
+        let Some(user_text) = extract_last_turn_user_text_from_payload(&payload_json) else {
+            continue;
+        };
+        let Some(assistant_text) = extract_last_turn_assistant_text_from_task(
+            &status,
+            result_json.as_deref(),
+            error_text.as_deref(),
+        ) else {
+            continue;
+        };
+        if assistant_text.trim().is_empty() {
+            continue;
+        }
+        return Ok(Some((user_text, assistant_text)));
+    }
+    Ok(None)
+}
+
+fn query_recent_terminal_ask_turns_for_chat(
+    db: &Connection,
+    user_id: i64,
+    chat_id: i64,
+    user_key: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<(String, String)>> {
+    let limit = limit.max(1).min(12);
+    let mut stmt = db.prepare(
+        "SELECT payload_json, result_json, error_text, status
+         FROM tasks
+         WHERE user_id = ?1
+           AND chat_id = ?2
+           AND user_key = ?3
+           AND kind = 'ask'
+           AND status IN ('succeeded', 'failed')
+         ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC
+         LIMIT ?4",
+    )?;
+    let rows = stmt.query_map(params![user_id, chat_id, user_key, limit as i64], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    let mut out: Vec<(String, String)> = Vec::new();
+    for row in rows {
+        let (payload_json, result_json, error_text, status) = row?;
+        let Some(user_text) = extract_last_turn_user_text_from_payload(&payload_json) else {
+            continue;
+        };
+        let Some(assistant_text) = extract_last_turn_assistant_text_from_task(
+            &status,
+            result_json.as_deref(),
+            error_text.as_deref(),
+        ) else {
+            continue;
+        };
+        if assistant_text.trim().is_empty() {
+            continue;
+        }
+        out.push((user_text, assistant_text));
+    }
+    Ok(out)
+}
+
+fn format_last_turn_full_context(
+    state: &AppState,
+    user_content: &str,
+    assistant_content: &str,
+    max_segment_chars: usize,
+    max_total_chars: usize,
+) -> String {
+    let user_safety = classify_memory_safety_flag(user_content, &state.memory);
+    let assistant_safety = classify_memory_safety_flag(assistant_content, &state.memory);
+    let user_text = if state.memory.safety_filter_enabled && user_safety == "injection_like" {
+        "[safety_signal content omitted]".to_string()
+    } else {
+        utf8_safe_prefix(user_content.trim(), max_segment_chars).to_string()
+    };
+    let assistant_text =
+        if state.memory.safety_filter_enabled && assistant_safety == "injection_like" {
+            "[safety_signal content omitted]".to_string()
+        } else {
+            utf8_safe_prefix(assistant_content.trim(), max_segment_chars).to_string()
+        };
+    let formatted = format!(
+        "[LAST_TURN_FULL]\nUser: {}\nAssistant: {}\n[/LAST_TURN_FULL]",
+        user_text, assistant_text
+    );
+    if formatted.len() > max_total_chars {
+        let truncated = utf8_safe_prefix(&formatted, max_total_chars).to_string();
+        if !truncated.ends_with("[/LAST_TURN_FULL]") {
+            let mut out = truncated;
+            if out.len() + 18 <= max_total_chars {
+                out.push_str("[/LAST_TURN_FULL]");
+            }
+            out
+        } else {
+            truncated
+        }
+    } else {
+        formatted
+    }
+}
+
+pub(crate) fn build_recent_turns_full_context(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    max_turns: usize,
+    max_segment_chars: usize,
+    max_total_chars: usize,
+) -> String {
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = match state.db.lock() {
+        Ok(db) => db,
+        Err(_) => return "<none>".to_string(),
+    };
+    let max_turns = max_turns.max(1).min(10);
+    let max_segment_chars = max_segment_chars.max(128);
+    let max_total_chars = max_total_chars.max(512);
+    let mut turns =
+        query_recent_terminal_ask_turns_for_chat(&db, user_id, chat_id, &user_key, max_turns)
+            .unwrap_or_default();
+    if turns.is_empty() {
+        if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
+            turns = query_recent_terminal_ask_turns_for_chat(
+                &db,
+                user_id,
+                legacy_chat_id,
+                &user_key,
+                max_turns,
+            )
+            .unwrap_or_default();
+        }
+    }
+    if turns.is_empty() {
+        return "<none>".to_string();
+    }
+    let mut out = String::from("### RECENT_TURNS_FULL\n");
+    for (idx, (user_text, assistant_text)) in turns.iter().enumerate() {
+        let relative = -((idx as i64) + 1);
+        let user_safety = classify_memory_safety_flag(user_text, &state.memory);
+        let assistant_safety = classify_memory_safety_flag(assistant_text, &state.memory);
+        let user_view = if state.memory.safety_filter_enabled && user_safety == "injection_like" {
+            "[safety_signal content omitted]".to_string()
+        } else {
+            utf8_safe_prefix(user_text.trim(), max_segment_chars).to_string()
+        };
+        let assistant_view =
+            if state.memory.safety_filter_enabled && assistant_safety == "injection_like" {
+                "[safety_signal content omitted]".to_string()
+            } else {
+                utf8_safe_prefix(assistant_text.trim(), max_segment_chars).to_string()
+            };
+        let turn_block = format!(
+            "[TURN {}]\nUser: {}\nAssistant: {}\n[/TURN]\n",
+            relative, user_view, assistant_view
+        );
+        if out.len() + turn_block.len() > max_total_chars {
+            break;
+        }
+        out.push_str(&turn_block);
+    }
+    if out.trim() == "### RECENT_TURNS_FULL" {
+        "<none>".to_string()
+    } else {
+        out
+    }
+}
+
 /// Build last turn full context: query the most recent user+assistant pair (one complete Q&A turn).
 /// Returns formatted string with [LAST_TURN_FULL] tags, or "<none>" if not available.
 /// Truncates each segment to max_segment_chars (default 1200) and total to max_total_chars (default 2400).
@@ -473,6 +711,30 @@ pub(crate) fn build_last_turn_full_context(
         Ok(db) => db,
         Err(_) => return "<none>".to_string(),
     };
+    if let Ok(Some((user_text, assistant_text))) =
+        query_recent_terminal_ask_turn_for_chat(&db, user_id, chat_id, &user_key)
+    {
+        return format_last_turn_full_context(
+            state,
+            &user_text,
+            &assistant_text,
+            max_segment_chars,
+            max_total_chars,
+        );
+    }
+    if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
+        if let Ok(Some((user_text, assistant_text))) =
+            query_recent_terminal_ask_turn_for_chat(&db, user_id, legacy_chat_id, &user_key)
+        {
+            return format_last_turn_full_context(
+                state,
+                &user_text,
+                &assistant_text,
+                max_segment_chars,
+                max_total_chars,
+            );
+        }
+    }
     // Query recent memories, ordered by id DESC (most recent first)
     let recent = match query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, 10) {
         Ok(v) => v,
@@ -495,47 +757,21 @@ pub(crate) fn build_last_turn_full_context(
         }
     }
     // Need both user and assistant to form a complete turn
-    let (user_content, user_safety) = match found_user {
+    let (user_content, _) = match found_user {
         Some(v) => v,
         None => return "<none>".to_string(),
     };
-    let (assistant_content, assistant_safety) = match found_assistant {
+    let (assistant_content, _) = match found_assistant {
         Some(v) => v,
         None => return "<none>".to_string(),
     };
-    // Apply safety filter
-    let user_text = if state.memory.safety_filter_enabled && user_safety == "injection_like" {
-        "[safety_signal content omitted]".to_string()
-    } else {
-        utf8_safe_prefix(&user_content, max_segment_chars).to_string()
-    };
-    let assistant_text =
-        if state.memory.safety_filter_enabled && assistant_safety == "injection_like" {
-            "[safety_signal content omitted]".to_string()
-        } else {
-            utf8_safe_prefix(&assistant_content, max_segment_chars).to_string()
-        };
-    // Build formatted output
-    let formatted = format!(
-        "[LAST_TURN_FULL]\nUser: {}\nAssistant: {}\n[/LAST_TURN_FULL]",
-        user_text, assistant_text
-    );
-    // Truncate total if needed
-    if formatted.len() > max_total_chars {
-        let truncated = utf8_safe_prefix(&formatted, max_total_chars).to_string();
-        // Try to keep the closing tag
-        if !truncated.ends_with("[/LAST_TURN_FULL]") {
-            let mut out = truncated;
-            if out.len() + 18 <= max_total_chars {
-                out.push_str("[/LAST_TURN_FULL]");
-            }
-            out
-        } else {
-            truncated
-        }
-    } else {
-        formatted
-    }
+    format_last_turn_full_context(
+        state,
+        &user_content,
+        &assistant_content,
+        max_segment_chars,
+        max_total_chars,
+    )
 }
 
 /// Build a compact recent assistant-replies block for ordinal follow-up anchoring.

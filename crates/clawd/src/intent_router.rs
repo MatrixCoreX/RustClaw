@@ -95,12 +95,23 @@ pub(crate) enum OutputLocatorKind {
     Filename,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum OutputDeliveryIntent {
+    #[default]
+    None,
+    FileSingle,
+    DirectoryLookup,
+    DirectoryBatchFiles,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct IntentOutputContract {
     pub(crate) response_shape: OutputResponseShape,
     pub(crate) requires_content_evidence: bool,
     pub(crate) delivery_required: bool,
     pub(crate) locator_kind: OutputLocatorKind,
+    pub(crate) delivery_intent: OutputDeliveryIntent,
+    pub(crate) locator_hint: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +177,10 @@ struct IntentOutputContractOut {
     delivery_required: bool,
     #[serde(default)]
     locator_kind: String,
+    #[serde(default)]
+    delivery_intent: String,
+    #[serde(default)]
+    locator_hint: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,6 +239,17 @@ fn parse_output_locator_kind(s: &str) -> OutputLocatorKind {
     }
 }
 
+fn parse_output_delivery_intent(s: &str) -> OutputDeliveryIntent {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "file_single" | "single_file" | "file" => OutputDeliveryIntent::FileSingle,
+        "directory_lookup" | "dir_lookup" => OutputDeliveryIntent::DirectoryLookup,
+        "directory_batch_files" | "batch_directory_delivery" | "dir_batch" => {
+            OutputDeliveryIntent::DirectoryBatchFiles
+        }
+        _ => OutputDeliveryIntent::None,
+    }
+}
+
 fn parse_output_contract(
     out: Option<IntentOutputContractOut>,
     wants_file_delivery: bool,
@@ -234,6 +260,8 @@ fn parse_output_contract(
         contract.requires_content_evidence = raw.requires_content_evidence;
         contract.delivery_required = raw.delivery_required;
         contract.locator_kind = parse_output_locator_kind(&raw.locator_kind);
+        contract.delivery_intent = parse_output_delivery_intent(&raw.delivery_intent);
+        contract.locator_hint = raw.locator_hint.trim().to_string();
     }
     if wants_file_delivery {
         contract.delivery_required = true;
@@ -242,6 +270,9 @@ fn parse_output_contract(
         }
         if matches!(contract.locator_kind, OutputLocatorKind::None) {
             contract.locator_kind = OutputLocatorKind::Path;
+        }
+        if matches!(contract.delivery_intent, OutputDeliveryIntent::None) {
+            contract.delivery_intent = OutputDeliveryIntent::FileSingle;
         }
     }
     contract
@@ -299,6 +330,15 @@ pub(crate) async fn run_intent_normalizer(
         3,
         220,
     );
+    let recent_turns_full_context = memory::build_recent_turns_full_context(
+        state,
+        task.user_key.as_deref(),
+        task.user_id,
+        task.chat_id,
+        5,    // keep recent turns concise by default; reduce context noise
+        560,  // per turn segment budget
+        6400, // total prompt budget
+    );
     let memory_context = if state.memory.route_memory_enabled {
         let structured = memory::service::recall_structured_memory_context(
             state,
@@ -344,6 +384,7 @@ pub(crate) async fn run_intent_normalizer(
             ("__BINDING_CONTEXT__", &binding_context_str),
             ("__RECENT_EXECUTION_CONTEXT__", &recent_execution_context),
             ("__MEMORY_CONTEXT__", &memory_context),
+            ("__RECENT_TURNS_FULL__", &recent_turns_full_context),
             ("__LAST_TURN_FULL__", &last_turn_full_context),
             ("__RECENT_ASSISTANT_REPLIES__", &recent_assistant_replies),
             ("__NOW__", now_iso),
@@ -406,15 +447,13 @@ pub(crate) async fn run_intent_normalizer(
         let schedule_kind = parse_schedule_kind(&out.schedule_kind);
         let confidence = out.confidence.clamp(0.0, 1.0);
         let routed_mode_raw = parse_mode_text(&out.mode).unwrap_or(RoutedMode::AskClarify);
-        let mut output_contract =
+        let output_contract =
             parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
-        if out.needs_clarify {
-            // Clarification turns must remain plain questions; do not enforce delivery/scalar
-            // contracts on this turn even if the eventual resolved action is file-oriented.
-            output_contract = IntentOutputContract::default();
-        }
-        let routed_mode =
-            enforce_content_evidence_execution_mode(routed_mode_raw, &output_contract, out.needs_clarify);
+        let routed_mode = enforce_content_evidence_execution_mode(
+            routed_mode_raw,
+            &output_contract,
+            out.needs_clarify,
+        );
         if routed_mode != routed_mode_raw {
             info!(
                 "{} intent_normalizer task_id={} mode_override={:?} -> {:?} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
@@ -585,10 +624,9 @@ pub(crate) async fn classify_resume_followup_intent(
         };
     let trimmed = llm_out.trim();
     let raw_parse_ok = serde_json::from_str::<ResumeFollowupIntentOut>(trimmed).is_ok();
-    let parsed =
-        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<ResumeFollowupIntentOut>(
-            &llm_out,
-        );
+    let parsed = crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<
+        ResumeFollowupIntentOut,
+    >(&llm_out);
     if let Some(out) = parsed {
         let intent = ResumeFollowupIntent {
             decision: parse_resume_followup_decision(&out.decision),

@@ -230,9 +230,9 @@ debug_log_prompt = false
 # 当请求缺少明确路径时，会先在该目录下递归搜索子目录；命中唯一候选可直接执行。
 default_locator_search_dir = "."
 # 目录递归扫描最大深度（从根目录算 0 层）；用于默认目录定位与用户指定目录下的递归检索。
-locator_scan_max_depth = 2
+locator_scan_max_depth = 0
 # 单次递归扫描最多纳入的文件数（命中上限后停止继续向下扫描）。
-locator_scan_max_files = 1000
+locator_scan_max_files = 6000
 
 # 用途/Purpose: 日程相关 i18n 与意图提示词配置.
 # 建议修改/Recommended change: 可改.
