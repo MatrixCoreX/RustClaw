@@ -28,12 +28,8 @@ fn parse_alias_list(value: &TomlValue, key: &str, fallback: &[String]) -> Vec<St
         .unwrap_or_else(|| fallback.to_vec())
 }
 
-fn contains_any_alias(normalized: &str, aliases: &[String]) -> bool {
-    aliases.iter().any(|x| normalized.contains(x))
-}
-
 fn parse_mode_token(text: &str) -> Option<&'static str> {
-    match text.trim() {
+    match text.trim().to_ascii_lowercase().as_str() {
         "voice" => Some("voice"),
         "text" => Some("text"),
         "both" => Some("both"),
@@ -75,61 +71,6 @@ fn parse_json_mode_and_confidence(raw: &str) -> Option<(&'static str, Option<f64
     None
 }
 
-fn parse_voice_mode_intent_label_fallback(
-    normalized: &str,
-    aliases: &VoiceModeIntentAliases,
-) -> Option<&'static str> {
-    for token in ["voice", "text", "both", "reset", "show", "none"] {
-        if normalized == token {
-            return Some(token);
-        }
-    }
-
-    let first = normalized
-        .split(|c: char| !c.is_ascii_alphabetic())
-        .find(|p| !p.is_empty())
-        .unwrap_or("");
-    match first {
-        "voice" => Some("voice"),
-        "text" => Some("text"),
-        "both" => Some("both"),
-        "reset" => Some("reset"),
-        "show" => Some("show"),
-        "none" => Some("none"),
-        _ => {
-            if contains_any_alias(normalized, &aliases.none) {
-                return Some("none");
-            }
-            if contains_any_alias(normalized, &aliases.reset) {
-                return Some("reset");
-            }
-            if contains_any_alias(normalized, &aliases.show) {
-                return Some("show");
-            }
-            if contains_any_alias(normalized, &aliases.both) {
-                return Some("both");
-            }
-            if contains_any_alias(normalized, &aliases.voice) {
-                return Some("voice");
-            }
-            if contains_any_alias(normalized, &aliases.text) {
-                return Some("text");
-            }
-            if normalized.contains("voice") || normalized.contains("语音") {
-                return Some("voice");
-            }
-            if normalized.contains("text")
-                || normalized.contains("文字")
-                || normalized.contains("文本")
-                || normalized.contains("打字")
-            {
-                return Some("text");
-            }
-            None
-        }
-    }
-}
-
 pub fn load_voice_mode_intent_aliases(path: &str) -> VoiceModeIntentAliases {
     let defaults = VoiceModeIntentAliases::defaults();
     let Some(raw) = read_toml_text(path) else {
@@ -151,31 +92,22 @@ pub fn load_voice_mode_intent_aliases(path: &str) -> VoiceModeIntentAliases {
 
 pub fn parse_voice_mode_intent_decision(
     raw: &str,
-    aliases: &VoiceModeIntentAliases,
+    _aliases: &VoiceModeIntentAliases,
 ) -> Option<VoiceModeIntentDecision> {
-    let normalized = raw.trim().to_ascii_lowercase();
+    let normalized = raw.trim();
     if normalized.is_empty() {
         return None;
     }
 
-    if let Some((mode, confidence)) = parse_json_mode_and_confidence(&normalized) {
-        if let Some(score) = confidence {
-            if score >= VOICE_MODE_INTENT_CONFIDENCE_THRESHOLD {
-                return Some(VoiceModeIntentDecision {
-                    mode,
-                    confidence: Some(score),
-                    parser_path: "strict_json",
-                });
-            }
-        }
+    let (mode, confidence) = parse_json_mode_and_confidence(normalized)?;
+    let score = confidence?;
+    if score < VOICE_MODE_INTENT_CONFIDENCE_THRESHOLD {
+        return None;
     }
-
-    parse_voice_mode_intent_label_fallback(&normalized, aliases).map(|mode| {
-        VoiceModeIntentDecision {
-            mode,
-            confidence: None,
-            parser_path: "fallback",
-        }
+    Some(VoiceModeIntentDecision {
+        mode,
+        confidence: Some(score),
+        parser_path: "strict_json",
     })
 }
 
@@ -191,16 +123,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_alias_and_keyword_fallback() {
+    fn plain_text_without_json_is_rejected() {
         let aliases = VoiceModeIntentAliases::defaults();
-        assert_eq!(
-            parse_voice_mode_intent_label("请切到语音回复", &aliases),
-            Some("voice")
-        );
-        assert_eq!(
-            parse_voice_mode_intent_label("just text please", &aliases),
-            Some("text")
-        );
+        assert_eq!(parse_voice_mode_intent_label("请切到语音回复", &aliases), None);
+        assert_eq!(parse_voice_mode_intent_label("just text please", &aliases), None);
     }
 
     #[test]
@@ -216,28 +142,23 @@ mod tests {
     }
 
     #[test]
-    fn low_confidence_json_falls_back() {
+    fn low_confidence_json_returns_none() {
         let aliases = VoiceModeIntentAliases::defaults();
         let out = parse_voice_mode_intent_decision(
             r#"{"mode":"voice","confidence":0.20,"reason":"uncertain"}"#,
             &aliases,
-        )
-        .expect("decision");
-        assert_eq!(out.mode, "voice");
-        assert_eq!(out.parser_path, "fallback");
-        assert_eq!(out.confidence, None);
+        );
+        assert_eq!(out, None);
     }
 
     #[test]
-    fn invalid_json_mode_uses_fallback_from_text() {
+    fn invalid_json_mode_returns_none() {
         let aliases = VoiceModeIntentAliases::defaults();
         let out = parse_voice_mode_intent_decision(
             r#"{"mode":"chat","confidence":0.99} 切回文字回复"#,
             &aliases,
-        )
-        .expect("decision");
-        assert_eq!(out.mode, "text");
-        assert_eq!(out.parser_path, "fallback");
+        );
+        assert_eq!(out, None);
     }
 
     #[test]
