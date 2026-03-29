@@ -1714,12 +1714,8 @@ async fn handle_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Resu
 
     let prompt = if text.starts_with("/ask") {
         text.strip_prefix("/ask").unwrap_or_default().trim()
-    } else if text.starts_with('/') {
-        bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.unknown_command"))
-            .await
-            .context("send unknown command reply failed")?;
-        return Ok(());
     } else {
+        // Paths like /home/user/file and other non-command /-prefixed text go to ask unchanged.
         text.trim()
     };
 
