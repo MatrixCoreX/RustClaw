@@ -47,13 +47,23 @@ Skill behavior notes (file/path):
 - Apply this to any explicit filename or file path the user names, not only README-like examples.
 - If the user already supplies an explicit absolute path or exact relative path to a file, treat that path itself as the concrete target. Do not downgrade it into unresolved filename matching or deictic clarification logic.
 - If the requested filename differs only by case from an observed entry/path (for example `readme.md` vs `README.md`), you may conservatively resolve to the exact observed path and deliver that file.
+- If exact case-insensitive matching is not uniquely resolvable, apply prefix matching on the basename before the first dot: if the user token matches the beginning of that basename and only one file matches, deliver it directly and ignore the remaining dot-suffix/extension.
 - After a named-file delivery request resolves to one concrete existing file, do not return the bare filename/path text by itself. The final delivery output must be `FILE:<resolved-path>`.
 - After such a case-only resolution, use the resolved exact path consistently for every later step (`read_file`, `FILE:<path>`, etc.). Do not keep using the user-typed casing once a concrete observed path is available.
-- If no case-insensitive match can be resolved to one concrete file, respond directly that the file was not found. Do not substitute a directory listing for the requested file.
+- If basename-prefix matching yields multiple candidates (same prefix across multiple files), ask one concise clarification instead of guessing, and include similar file candidates as full absolute paths (top few) in that clarification.
+- If neither case-insensitive exact matching nor basename-prefix matching yields any candidate, respond directly that the file was not found. Do not substitute a directory listing for the requested file.
 - For named-file delivery, do not use `read_file` as a speculative existence probe on an unresolved raw filename. First resolve to one concrete observed path (from history or listing), then use that exact path; otherwise respond that the file was not found.
+- For pure delivery intents like `把 XXXX 发给我` / `send me XXXX`, do not read file content or generate summaries/explanations before delivery. Resolve the concrete path minimally, then return `FILE:<resolved-path>` directly (or one concise not-found reply).
+- Intent classification for send-vs-inspect should follow cue words, not vague intuition:
+  - Delivery-only cues (default to direct file delivery, no content read): `发给我`, `发我`, `发一下`, `发过来`, `传给我`, `传我`, `给我文件`, `把文件给我`, `直接发文件`, `只发文件`, `不要贴内容`, `不要贴正文`, `别贴内容`, `以文件形式发`, `作为文件发送`, `send/deliver/share/attach/upload the file`.
+  - Inspect cues (allow content read + explanation): `帮我看`, `看一下`, `查看`, `读一下`, `读取`, `打开看看`, `内容是什么`, `解释`, `解读`, `总结`, `摘要`, `分析`, `compare/explain/summarize`.
+  - Conflict priority: if inspect cues appear, treat as inspect request; but if the user explicitly adds `不要贴内容` / `直接发文件` / `只发文件`, force delivery and do not inspect first.
 - For repo-local file inspection requests where the user explicitly names a concrete filename/path such as `读取 AGENTS.md 前 30 行`, `看 README.md 开头`, or `读取 rustclaw.service`, prefer the exact workspace-relative path the user named (`AGENTS.md`, `README.md`, `rustclaw.service`). Do not silently rewrite it to guessed paths like `systemd/rustclaw.service`.
 - For explicit-path inspection requests such as `读一下 /abs/path 开头并总结`, `看下 ./file 最近 20 行`, or `读取 /path 再解释`, execute directly against that exact path. Do not reply with planner artifacts, fake execution status, or a repeated request for the same path.
 - A deictic wrapper plus artifact type is still ambiguous: requests like `那个 README`, `那个配置文件`, `那个日志`, or `that README` do **not** count as naming a concrete file by themselves. Resolve them from a unique prior binding/path first; otherwise ask a concise clarification.
+- When asking the user to clarify a file or directory target, include similar matches (files and directories) from observed candidates as full absolute paths in a short top list.
+- For path-scoped file requests where the user omits directory/path, first run a bounded locator search under `default_locator_search_dir`, constrained by `locator_scan_max_depth` and `locator_scan_max_files`. If exactly one concrete file resolves, execute with that path; if none or multiple candidates remain, ask for the exact directory/path with one concise clarification and include similar file or directory candidates as full absolute paths (top few).
+- After any file delivery, append one concise confirmation line after the `FILE:<resolved-path>` token: 我已经把<absolute-dir-path>目录的文件发给你了。 The directory in this note must be the full absolute parent directory of `<resolved-path>`. Keep the `FILE:` token first so attachment parsing still works.
 - For repo-local directory requests such as `docs 目录`, `logs 目录`, or `scripts 目录`, verify existence from the current workspace instead of guessing from older memory or stale summaries.
 - For inline JSON/data transformation requests where the user already pasted the array/object in the message, extract and transform that inline data directly. Do not answer with a generic `please provide JSON` when the JSON is already present.
 - For service runtime status questions such as `telegramd 现在是不是在运行`, prefer `service_control` (`status`/`verify`) or `process_basic` over checking whether the binary file exists.
@@ -342,7 +352,7 @@ Skill behavior notes (file/path):
 - Use `fs_search.find_name` with `target_kind="dir"` when the task is explicitly a name search over files/directories rather than a direct path-resolution request.
 - Prefer `system_basic.inventory_dir` for immediate directory listing / hidden-file / names-only inventory tasks.
 - When the user specifies a folder/directory and asks to find files inside it, treat search as recursive under `root` (traverse all subdirectories).
-- Path matching rule for file search: case-insensitive exact basename match can be used directly; if only fuzzy/approximate matches exist, ask one concise clarification with 1-3 candidate paths before execution.
+- Path matching rule for file search: case-insensitive exact basename match can be used directly; if only fuzzy/approximate matches exist, ask one concise clarification with 1-3 candidate full absolute paths before execution.
 
 #### fs_search JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"fs_search","args":{...}}`

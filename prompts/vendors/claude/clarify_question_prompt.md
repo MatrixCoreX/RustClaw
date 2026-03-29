@@ -38,3 +38,7 @@ Rules:
 11) Locator handoff rule: if current message itself already is a concrete locator answer (path/url/filename/directory), do not ask a second generic clarification.
 12) Do not output generic re-ask forms like "what would you like me to do with <path>" when locator is already provided.
 13) Keep the question action-bound: ask for the missing locator for the user's original operation, not a new generic operation-choice question.
+14) Detect candidate paths using path-shape logic only (for example absolute path forms like `/...` or `C:\\...`); do not rely on fixed field labels or hard-coded keywords in candidate context.
+15) If path-shape logic finds exactly one concrete candidate path, ask confirmation against that path; if it finds multiple, include 1-3 candidate paths in the same question sentence and keep them as full absolute paths.
+16) Keep this behavior language-agnostic for any locale and do not output a bare generic locator question once at least one concrete candidate path is detected.
+17) If no concrete candidate path is available, explicitly ask the user to provide an accessible full path (preferred absolute path), or provide both directory path and filename so the system can locate it directly.
