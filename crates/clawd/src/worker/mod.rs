@@ -2,12 +2,12 @@ use std::time::Duration;
 use std::{path::Path, path::PathBuf};
 
 use anyhow::anyhow;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::sync::oneshot;
-use tracing::{Instrument, debug, error, info, info_span, warn};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 use uuid::Uuid;
 
-use crate::{AppState, ScheduledJobDue, now_ts, now_ts_u64, repo, schedule_service};
+use crate::{now_ts, now_ts_u64, repo, schedule_service, AppState, ScheduledJobDue};
 
 fn trim_locator_token(token: &str) -> String {
     token
@@ -15,8 +15,7 @@ fn trim_locator_token(token: &str) -> String {
         .trim_matches(|c: char| {
             matches!(
                 c,
-                '"'
-                    | '\''
+                '"' | '\''
                     | '`'
                     | ','
                     | '.'
@@ -44,18 +43,20 @@ fn trim_locator_token(token: &str) -> String {
 }
 
 fn has_explicit_path_or_url_locator(text: &str) -> bool {
-    text.split_whitespace().map(trim_locator_token).any(|token| {
-        if token.is_empty() {
-            return false;
-        }
-        token.starts_with('/')
-            || token.starts_with("./")
-            || token.starts_with("../")
-            || token.starts_with("~/")
-            || token.starts_with("http://")
-            || token.starts_with("https://")
-            || token.contains(":\\")
-    })
+    text.split_whitespace()
+        .map(trim_locator_token)
+        .any(|token| {
+            if token.is_empty() {
+                return false;
+            }
+            token.starts_with('/')
+                || token.starts_with("./")
+                || token.starts_with("../")
+                || token.starts_with("~/")
+                || token.starts_with("http://")
+                || token.starts_with("https://")
+                || token.contains(":\\")
+        })
 }
 
 fn looks_like_filename_locator(token: &str) -> bool {
@@ -103,6 +104,16 @@ fn collect_files_for_locator_scan(root: &Path, max_depth: usize, max_files: usiz
                 Err(_) => continue,
             };
             let file_type = meta.file_type();
+            if file_type.is_dir() {
+                out.push(path.clone());
+                if out.len() >= max_files {
+                    return out;
+                }
+                if depth < max_depth {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
             if file_type.is_file() || (file_type.is_symlink() && path.is_file()) {
                 out.push(path);
                 if out.len() >= max_files {
@@ -110,52 +121,155 @@ fn collect_files_for_locator_scan(root: &Path, max_depth: usize, max_files: usiz
                 }
                 continue;
             }
-            if file_type.is_dir() && depth < max_depth {
-                stack.push((path, depth + 1));
-            }
         }
     }
     out
 }
 
+fn push_locator_keyword(token: &str, acc: &mut Vec<String>) {
+    let lowered = token.trim().to_ascii_lowercase();
+    if lowered.chars().count() < 2 {
+        return;
+    }
+    if lowered.chars().all(|ch| ch.is_ascii_digit()) {
+        return;
+    }
+    if !acc.iter().any(|v| v == &lowered) {
+        acc.push(lowered.clone());
+    }
+    if acc.len() >= 12 {
+        return;
+    }
+    for part in lowered.split(|ch: char| matches!(ch, '.' | '_' | '-')) {
+        let trimmed = part.trim();
+        if trimmed.is_empty() || trimmed == lowered || trimmed.chars().count() < 2 {
+            continue;
+        }
+        if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+            continue;
+        }
+        if !acc.iter().any(|v| v == trimmed) {
+            acc.push(trimmed.to_string());
+            if acc.len() >= 12 {
+                break;
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocatorKeywordClass {
+    AsciiLike,
+    Cjk,
+}
+
+fn classify_locator_keyword_char(ch: char) -> Option<LocatorKeywordClass> {
+    let is_cjk = ('\u{4E00}'..='\u{9FFF}').contains(&ch);
+    if is_cjk {
+        return Some(LocatorKeywordClass::Cjk);
+    }
+    if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+        return Some(LocatorKeywordClass::AsciiLike);
+    }
+    None
+}
+
 fn extract_locator_keywords(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
-    let push_token = |token: &str, acc: &mut Vec<String>| {
-        let t = token.trim();
-        if t.chars().count() < 2 {
-            return;
-        }
-        if t.chars().all(|ch| ch.is_ascii_digit()) {
-            return;
-        }
-        if !acc.iter().any(|v| v == t) {
-            acc.push(t.to_string());
-        }
-    };
+    let mut cur_class: Option<LocatorKeywordClass> = None;
     for ch in text.chars() {
-        let is_cjk = ('\u{4E00}'..='\u{9FFF}').contains(&ch);
-        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') || is_cjk {
+        if let Some(next_class) = classify_locator_keyword_char(ch) {
+            if cur_class.is_some() && cur_class != Some(next_class) && !cur.is_empty() {
+                push_locator_keyword(&cur, &mut out);
+                cur.clear();
+                if out.len() >= 12 {
+                    break;
+                }
+            }
+            cur_class = Some(next_class);
             cur.push(ch.to_ascii_lowercase());
         } else if !cur.is_empty() {
-            push_token(&cur, &mut out);
+            push_locator_keyword(&cur, &mut out);
             cur.clear();
+            cur_class = None;
+        } else {
+            cur_class = None;
         }
         if out.len() >= 12 {
             break;
         }
     }
     if !cur.is_empty() && out.len() < 12 {
-        push_token(&cur, &mut out);
+        push_locator_keyword(&cur, &mut out);
     }
     out
 }
 
-fn score_locator_candidate(
-    keywords: &[String],
-    rel_lower: &str,
-    file_name_lower: &str,
-) -> i32 {
+fn normalize_locator_match_text(token: &str) -> String {
+    trim_locator_token(token)
+        .chars()
+        .map(|ch| match ch {
+            '／' | '＼' => '/',
+            '－' => '-',
+            '＿' => '_',
+            '．' => '.',
+            '（' => '(',
+            '）' => ')',
+            '【' => '[',
+            '】' => ']',
+            '｛' => '{',
+            '｝' => '}',
+            '　' => ' ',
+            _ => ch,
+        })
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn try_resolve_direct_child_locator(search_root: &Path, keywords: &[String]) -> Option<String> {
+    if !search_root.is_dir() || keywords.is_empty() {
+        return None;
+    }
+    let normalized_keywords = keywords
+        .iter()
+        .map(|kw| normalize_locator_match_text(kw))
+        .filter(|kw| !kw.is_empty())
+        .collect::<Vec<_>>();
+    if normalized_keywords.is_empty() {
+        return None;
+    }
+
+    let mut matches = Vec::new();
+    let iter = std::fs::read_dir(search_root).ok()?;
+    for entry in iter.flatten() {
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .map(|v| v.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let normalized_name = normalize_locator_match_text(&name);
+        if normalized_name.is_empty() {
+            continue;
+        }
+        if normalized_keywords
+            .iter()
+            .any(|kw| kw == &normalized_name)
+        {
+            let canonical = path.canonicalize().unwrap_or(path);
+            matches.push(canonical.display().to_string());
+        }
+    }
+    matches.sort();
+    matches.dedup();
+    if matches.len() == 1 {
+        matches.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn score_locator_candidate(keywords: &[String], rel_lower: &str, file_name_lower: &str) -> i32 {
     let mut score = 0i32;
 
     for kw in keywords {
@@ -234,6 +348,7 @@ fn collect_fuzzy_locator_suggestions(
     for path in files {
         let rel = path.strip_prefix(search_root).unwrap_or(path);
         let rel_text = rel.to_string_lossy().to_string();
+        let abs_text = path.display().to_string();
         let rel_lower = rel_text.to_ascii_lowercase();
         let file_name_lower = path
             .file_name()
@@ -251,7 +366,7 @@ fn collect_fuzzy_locator_suggestions(
             score += 2;
         }
         if score > 0 {
-            scored.push((score, rel_text));
+            scored.push((score, abs_text));
         }
     }
     scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -285,6 +400,9 @@ fn try_resolve_implicit_locator_path(
         }
     }
     let keywords = extract_locator_keywords(&query_text);
+    if let Some(path) = try_resolve_direct_child_locator(search_root, &keywords) {
+        return Some(LocatorAutoResolution::Direct(path));
+    }
     let files = collect_files_for_locator_scan(
         search_root,
         state.locator_scan_max_depth,
@@ -312,7 +430,9 @@ fn try_resolve_implicit_locator_path(
             ));
         }
         if ci_matches.len() > 1 {
-            return Some(LocatorAutoResolution::Fuzzy(ci_matches.into_iter().take(3).collect()));
+            return Some(LocatorAutoResolution::Fuzzy(
+                ci_matches.into_iter().take(3).collect(),
+            ));
         }
         let fuzzy = collect_fuzzy_locator_suggestions(search_root, &files, token);
         if !fuzzy.is_empty() {
@@ -320,9 +440,8 @@ fn try_resolve_implicit_locator_path(
         }
     }
 
-    let mut best: Option<(i32, PathBuf)> = None;
-    let mut tied = false;
-    for path in files {
+    let mut scored_keywords: Vec<(i32, String)> = Vec::new();
+    for path in &files {
         let rel = path.strip_prefix(search_root).unwrap_or(&path);
         let rel_lower = rel.to_string_lossy().to_ascii_lowercase();
         let file_name_lower = path
@@ -333,28 +452,35 @@ fn try_resolve_implicit_locator_path(
         if score <= 0 {
             continue;
         }
-        match &best {
-            None => {
-                best = Some((score, path));
-                tied = false;
-            }
-            Some((best_score, _)) if score > *best_score => {
-                best = Some((score, path));
-                tied = false;
-            }
-            Some((best_score, _)) if score == *best_score => {
-                tied = true;
-            }
-            _ => {}
+        scored_keywords.push((score, path.display().to_string()));
+    }
+    if scored_keywords.is_empty() {
+        return None;
+    }
+    scored_keywords.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    let top_score = scored_keywords[0].0;
+    let top_paths = scored_keywords
+        .iter()
+        .filter(|(score, _)| *score == top_score)
+        .map(|(_, path)| path.clone())
+        .collect::<Vec<_>>();
+    if top_score >= 6 && top_paths.len() == 1 {
+        return Some(LocatorAutoResolution::Direct(top_paths[0].clone()));
+    }
+    let mut fuzzy = Vec::new();
+    for (_, path) in scored_keywords {
+        if !fuzzy.iter().any(|v| v == &path) {
+            fuzzy.push(path);
+        }
+        if fuzzy.len() >= 3 {
+            break;
         }
     }
-    let Some((_, path)) = best else {
-        return None;
-    };
-    if tied {
-        return None;
+    if fuzzy.is_empty() {
+        None
+    } else {
+        Some(LocatorAutoResolution::Fuzzy(fuzzy))
     }
-    Some(LocatorAutoResolution::Direct(path.display().to_string()))
 }
 
 fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Result<Vec<String>> {
@@ -1240,28 +1366,16 @@ Use this block only as supporting evidence for genuinely short follow-up request
         .iter()
         .any(|s| s == &source.to_ascii_lowercase());
     let mut fuzzy_locator_suggestions: Vec<String> = Vec::new();
-    let mut missing_locator_for_path_scoped_content = !context_resolution.needs_clarify
-        && matches!(
-            normalizer_out.routed_mode,
-            crate::RoutedMode::Act | crate::RoutedMode::ChatAct
-        )
-        && normalizer_out.output_contract.requires_content_evidence
-        && matches!(
-            normalizer_out.output_contract.locator_kind,
-            crate::intent_router::OutputLocatorKind::Path
-        )
-        && !has_concrete_locator_hint(prompt)
-        && !has_concrete_locator_hint(&resolved_prompt);
-    let locator_guard_active = !context_resolution.needs_clarify
-        && matches!(
-            normalizer_out.routed_mode,
-            crate::RoutedMode::Act | crate::RoutedMode::ChatAct
-        )
-        && normalizer_out.output_contract.requires_content_evidence
+    let path_scoped_content_request = normalizer_out.output_contract.requires_content_evidence
         && matches!(
             normalizer_out.output_contract.locator_kind,
             crate::intent_router::OutputLocatorKind::Path
         );
+    let mut auto_locator_resolved_direct = false;
+    let mut missing_locator_for_path_scoped_content = path_scoped_content_request
+        && !has_concrete_locator_hint(prompt)
+        && !has_concrete_locator_hint(&resolved_prompt);
+    let locator_guard_active = path_scoped_content_request;
     if locator_guard_active {
         match try_resolve_implicit_locator_path(
             state,
@@ -1275,6 +1389,7 @@ Use this block only as supporting evidence for genuinely short follow-up request
                 );
                 resolved_prompt_for_execution.push_str(&hint);
                 prompt_with_memory_for_execution.push_str(&hint);
+                auto_locator_resolved_direct = true;
                 if missing_locator_for_path_scoped_content {
                     missing_locator_for_path_scoped_content = false;
                 }
@@ -1308,7 +1423,34 @@ Use this block only as supporting evidence for genuinely short follow-up request
             crate::truncate_for_log(&resolved_prompt)
         );
     }
-    let force_clarify = context_resolution.needs_clarify
+    let routed_mode_after_locator = if auto_locator_resolved_direct
+        && path_scoped_content_request
+        && matches!(
+            normalizer_out.routed_mode,
+            crate::RoutedMode::AskClarify | crate::RoutedMode::Chat
+        ) {
+        if matches!(
+            normalizer_out.output_contract.response_shape,
+            crate::intent_router::OutputResponseShape::Scalar
+                | crate::intent_router::OutputResponseShape::FileToken
+        ) {
+            crate::RoutedMode::Act
+        } else {
+            crate::RoutedMode::ChatAct
+        }
+    } else {
+        normalizer_out.routed_mode
+    };
+    if routed_mode_after_locator != normalizer_out.routed_mode {
+        info!(
+            "{} worker_once: ask routed_mode_override_by_auto_locator task_id={} mode={:?}->{:?}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            normalizer_out.routed_mode,
+            routed_mode_after_locator
+        );
+    }
+    let force_clarify = (context_resolution.needs_clarify && !auto_locator_resolved_direct)
         || missing_locator_for_path_scoped_content
         || !fuzzy_locator_suggestions.is_empty();
     let clarify_reason = if missing_locator_for_path_scoped_content {
@@ -1325,7 +1467,10 @@ Use this block only as supporting evidence for genuinely short follow-up request
         if context_resolution.reason.trim().is_empty() {
             format!("fuzzy_locator_candidates={joined}")
         } else {
-            format!("{}; fuzzy_locator_candidates={joined}", context_resolution.reason)
+            format!(
+                "{}; fuzzy_locator_candidates={joined}",
+                context_resolution.reason
+            )
         }
     } else {
         context_resolution.reason.clone()
@@ -1464,7 +1609,7 @@ Use this block only as supporting evidence for genuinely short follow-up request
                 &resolved_prompt_for_execution,
                 agent_mode,
                 resume_should_discuss_context,
-                Some(normalizer_out.routed_mode),
+                Some(routed_mode_after_locator),
             )
             .await
         }
@@ -1493,7 +1638,7 @@ Use this block only as supporting evidence for genuinely short follow-up request
             &resolved_prompt_for_execution,
             agent_mode,
             false,
-            Some(normalizer_out.routed_mode),
+            Some(routed_mode_after_locator),
         )
         .await
     };
@@ -1837,7 +1982,32 @@ async fn send_task_channel_message(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time before unix epoch")
+                .as_nanos();
+            path.push(format!("clawd_worker_locator_{prefix}_{}_{}", std::process::id(), nanos));
+            fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
     fn wechat_payload_shape_keeps_context_token_available() {
@@ -1884,7 +2054,10 @@ mod tests {
 
     #[test]
     fn levenshtein_with_limit_short_circuit() {
-        assert_eq!(super::levenshtein_distance_with_limit("config", "config", 2), 0);
+        assert_eq!(
+            super::levenshtein_distance_with_limit("config", "config", 2),
+            0
+        );
         assert_eq!(
             super::levenshtein_distance_with_limit("config", "cnfig", 2),
             1
@@ -1902,7 +2075,36 @@ mod tests {
         ];
         let out = super::collect_fuzzy_locator_suggestions(&root, &files, "cnfig.toml");
         assert!(!out.is_empty());
-        assert!(out.iter().any(|v| v.to_ascii_lowercase().contains("config.toml")));
+        assert!(out.iter().all(|v| v.starts_with("/tmp/")));
+        assert!(out
+            .iter()
+            .any(|v| v.to_ascii_lowercase().contains("config.toml")));
+    }
+
+    #[test]
+    fn locator_keywords_split_mixed_script_tokens() {
+        let out = super::extract_locator_keywords("请在 doc目录 里找 App_Config.toml");
+        assert!(out.iter().any(|v| v == "doc"));
+        assert!(out.iter().any(|v| v == "目录"));
+        assert!(out.iter().any(|v| v == "app_config.toml"));
+    }
+
+    #[test]
+    fn direct_child_locator_prefers_project_root_exact_name() {
+        let root = TempDirGuard::new("direct_child");
+        fs::create_dir_all(root.path.join("scripts")).expect("create scripts");
+        fs::create_dir_all(root.path.join("nested/scripts")).expect("create nested/scripts");
+        let keywords = vec!["查看一下".to_string(), "scripts".to_string(), "目录下面文件".to_string()];
+
+        let out = super::try_resolve_direct_child_locator(&root.path, &keywords);
+        let expected = root
+            .path
+            .join("scripts")
+            .canonicalize()
+            .expect("canonical scripts")
+            .display()
+            .to_string();
+        assert_eq!(out, Some(expected));
     }
 }
 

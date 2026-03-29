@@ -45,6 +45,27 @@ fn scan_limits_from_env() -> ScanLimits {
     }
 }
 
+fn normalize_locator_text(text: &str) -> String {
+    text.trim()
+        .chars()
+        .map(|ch| match ch {
+            '／' | '＼' => '/',
+            '－' => '-',
+            '＿' => '_',
+            '．' => '.',
+            '（' => '(',
+            '）' => ')',
+            '【' => '[',
+            '】' => ']',
+            '｛' => '{',
+            '｝' => '}',
+            '　' => ' ',
+            _ => ch,
+        })
+        .collect::<String>()
+        .to_lowercase()
+}
+
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -124,7 +145,8 @@ fn execute(args: Value) -> Result<Value, String> {
                 .or_else(|| obj.get("keyword"))
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "pattern is required".to_string())?
-                .to_ascii_lowercase();
+                .to_string();
+            let pattern_norm = normalize_locator_text(&pattern);
             let target_kind = obj
                 .get("target_kind")
                 .and_then(|v| v.as_str())
@@ -133,9 +155,9 @@ fn execute(args: Value) -> Result<Value, String> {
             walk_collect_nodes(&search_root, scan_limits, &mut |p| {
                 let name = p
                     .file_name()
-                    .map(|s| s.to_string_lossy().to_ascii_lowercase())
+                    .map(|s| normalize_locator_text(&s.to_string_lossy()))
                     .unwrap_or_default();
-                if !name.contains(&pattern) {
+                if !name.contains(&pattern_norm) {
                     return false;
                 }
                 let kind = if p.is_dir() {
