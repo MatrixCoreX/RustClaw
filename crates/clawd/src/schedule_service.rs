@@ -12,6 +12,11 @@ use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 // `create` persists jobs generically; no per-skill subprocess preflight or merge-on-create paths live here.
 const SCHEDULE_INTENT_MIN_CONFIDENCE: f64 = 0.5;
 
+#[derive(Debug, Clone)]
+struct SkillContractHint {
+    summary: String,
+}
+
 /// Generic one-line hint for catalog (no business semantics; skill owns its own contract).
 fn schedule_skill_catalog_hint(
     entry: &claw_core::skill_registry::SkillRegistryEntry,
@@ -66,6 +71,108 @@ pub(crate) fn build_schedule_skill_catalog(state: &AppState) -> String {
 /// Same string as [`build_schedule_skill_catalog`]; name matches prompt assembly wording.
 pub(crate) fn render_schedule_skill_catalog(state: &AppState) -> String {
     build_schedule_skill_catalog(state)
+}
+
+fn split_markdown_table_row(line: &str) -> Vec<String> {
+    line.trim()
+        .trim_matches('|')
+        .split('|')
+        .map(|v| v.trim().to_string())
+        .collect()
+}
+
+fn parse_skill_contract_hint(markdown: &str) -> Option<SkillContractHint> {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let start = lines
+        .iter()
+        .position(|l| l.trim().starts_with("## Parameter Contract"))?;
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, l)| l.trim().starts_with("## "))
+        .map(|(i, _)| i)
+        .unwrap_or(lines.len());
+    let section = &lines[start + 1..end];
+
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
+    for line in section {
+        let t = line.trim();
+        if t.starts_with('|') && t.matches('|').count() >= 2 {
+            table_rows.push(split_markdown_table_row(t));
+        }
+    }
+    if table_rows.len() < 2 {
+        return None;
+    }
+
+    let header = &table_rows[0];
+    let mut param_idx = None;
+    let mut required_idx = None;
+    for (i, col) in header.iter().enumerate() {
+        let c = col.trim().to_ascii_lowercase();
+        if c == "param" {
+            param_idx = Some(i);
+        } else if c == "required" {
+            required_idx = Some(i);
+        }
+    }
+    let (Some(param_idx), Some(required_idx)) = (param_idx, required_idx) else {
+        return None;
+    };
+
+    let mut rows: Vec<String> = Vec::new();
+    for row in table_rows.iter().skip(2).take(6) {
+        if row.len() <= param_idx || row.len() <= required_idx {
+            continue;
+        }
+        let param = row[param_idx].trim();
+        if param.is_empty() {
+            continue;
+        }
+        rows.push(format!(
+            "{} (required: {})",
+            param,
+            row[required_idx].trim()
+        ));
+    }
+    if rows.is_empty() {
+        return None;
+    }
+    Some(SkillContractHint {
+        summary: rows.join("; "),
+    })
+}
+
+fn load_skill_contract_hint(
+    state: &AppState,
+    registry: &SkillsRegistry,
+    canonical_name: &str,
+) -> Option<SkillContractHint> {
+    let prompt_rel = registry.prompt_file(canonical_name)?;
+    let vendor = crate::bootstrap::prompts::active_prompt_vendor_name(state);
+    let resolved_rel = crate::bootstrap::prompts::resolve_prompt_rel_path_for_vendor(
+        &state.workspace_root,
+        &vendor,
+        prompt_rel,
+    );
+    let full_path = state.workspace_root.join(resolved_rel);
+    let markdown = std::fs::read_to_string(full_path).ok()?;
+    parse_skill_contract_hint(&markdown)
+}
+
+fn render_schedule_skill_contracts(state: &AppState) -> String {
+    let Some(registry_arc) = state.get_skills_registry() else {
+        return String::new();
+    };
+    let registry = registry_arc.as_ref();
+    let mut lines: Vec<String> = Vec::new();
+    for name in registry.enabled_names() {
+        if let Some(hint) = load_skill_contract_hint(state, registry, &name) {
+            lines.push(format!("- {name}: {}", hint.summary));
+        }
+    }
+    lines.join("\n")
 }
 
 /// Minimal validation for `run_skill` before persisting: skill exists, enabled, canonical name;
@@ -149,6 +256,7 @@ pub(crate) async fn parse_schedule_intent(
         state.memory.schedule_memory_max_chars.max(384),
     );
     let skill_catalog = render_schedule_skill_catalog(state);
+    let skill_contracts = render_schedule_skill_contracts(state);
     let prompt = crate::render_prompt_template(
         &state.schedule.intent_prompt_template,
         &[
@@ -160,6 +268,7 @@ pub(crate) async fn parse_schedule_intent(
             ("__RULES__", &state.schedule.intent_rules_template),
             ("__SKILL_CATALOG__", &skill_catalog),
             ("__SKILLS_CATALOG__", &skill_catalog),
+            ("__SKILL_CONTRACTS__", &skill_contracts),
             ("__MEMORY_CONTEXT__", &memory_context),
             ("__REQUEST__", request),
         ],
@@ -190,6 +299,9 @@ pub(crate) async fn parse_schedule_intent(
     };
 
     let parsed: ScheduleIntentOutput = crate::parse_llm_json_extract_or_any(&llm_out)?;
+    if parsed.needs_clarify && !parsed.clarify_question.trim().is_empty() {
+        return Some(parsed);
+    }
     let kind = parsed.kind.trim().to_ascii_lowercase();
     if kind.is_empty() || kind == "none" {
         return None;
@@ -489,6 +601,19 @@ pub(crate) async fn try_handle_schedule_request(
         Err(_) => return Ok(None),
     };
     let kind = clean_schedule_kind(&intent.kind);
+    if intent.needs_clarify {
+        let q = intent.clarify_question.trim();
+        if !q.is_empty() {
+            return Ok(Some(q.to_string()));
+        }
+        let reason = intent.reason.trim();
+        if !reason.is_empty() {
+            return Ok(Some(reason.to_string()));
+        }
+        return Ok(Some(
+            "请补充必要信息后，我再帮你创建这个定时任务。".to_string(),
+        ));
+    }
     if kind.is_empty() || kind == "none" {
         return Ok(None);
     }
