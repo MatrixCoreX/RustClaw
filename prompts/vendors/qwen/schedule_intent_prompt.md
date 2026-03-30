@@ -40,6 +40,11 @@ Task:
 Skill catalog (registry — use ONLY these for run_skill):
 __SKILL_CATALOG__
 
+Skill parameter contract hints (dynamic summary from each skill's prompt/interface):
+__SKILL_CONTRACTS__
+- For `task.kind=run_skill`, fill args to satisfy the chosen skill's contract when the user already provided those values.
+- If key schedule fields or required skill args are missing, set `needs_clarify=true` and provide one concise `clarify_question`. Do not create a placeholder task just to ask the question later.
+
 Output JSON only. Never output <think> tags, code fences, or extra explanation before/after the JSON:
 {
   "kind": "none|create|list|delete|pause|resume",
@@ -59,7 +64,9 @@ Output JSON only. Never output <think> tags, code fences, or extra explanation b
   "target_job_id": "",
   "raw": "__REQUEST__",
   "confidence": 0.0,
-  "reason": ""
+  "reason": "",
+  "needs_clarify": false,
+  "clarify_question": ""
 }
 
 Contract for action kinds:
@@ -69,6 +76,7 @@ Contract for action kinds:
 - For `kind=none`, keep schedule fields empty/default and task payload empty.
 - Do not guess a cron expression when the request is naturally representable as `once`, `daily`, `weekly`, or `interval`.
 - When time/date information is insufficient for `create`, lower confidence and use the most conservative supported parse rather than inventing missing calendar details.
+- When a schedule can be recognized but required information is missing, keep the best-known structure, set `needs_clarify=true`, and ask exactly one concise follow-up question in `clarify_question`.
 
 Few-shot examples:
 User: 删除所有定时任务
@@ -85,7 +93,15 @@ Output:
 
 User: 删除定时任务 job_9e289b4c73
 Output:
-{"kind":"delete","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"job_9e289b4c73","raw":"删除定时任务 job_9e289b4c73","confidence":0.93,"reason":"single job delete with explicit id"}
+{"kind":"delete","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"job_9e289b4c73","raw":"删除定时任务 job_9e289b4c73","confidence":0.93,"reason":"single job delete with explicit id","needs_clarify":false,"clarify_question":""}
+
+User: 每天早上8点告诉我今天和未来三天天气
+Output:
+{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{}}},"target_job_id":"","raw":"每天早上8点告诉我今天和未来三天天气","confidence":0.84,"reason":"weather schedule recognized but location missing","needs_clarify":true,"clarify_question":"你想查询哪个城市的天气？"}
+
+User: 每天早上8点告诉我南京市今天和未来三天天气
+Output:
+{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{"city":"南京市","days":4}}},"target_job_id":"","raw":"每天早上8点告诉我南京市今天和未来三天天气","confidence":0.9,"reason":"daily weather schedule with explicit city and forecast range","needs_clarify":false,"clarify_question":""}
 
 Rules:
 __RULES__
