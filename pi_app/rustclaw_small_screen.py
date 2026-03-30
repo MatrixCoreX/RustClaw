@@ -3,6 +3,7 @@
 # 需先启动 clawd（8787）。按 F11 或 Escape 退出全屏/关闭。
 
 import errno
+import http.client
 import json
 import os
 import random
@@ -25,12 +26,30 @@ except ModuleNotFoundError:
     tomllib = None
 
 API_BASE = "http://127.0.0.1:8787"
+# 复用至 clawd 的 HTTP 连接（多线程通过锁访问，减少本机 TCP 握手与 TIME_WAIT）
+_api_http_conn = None
+_api_http_lock = threading.Lock()
 HEALTH_REFRESH_SEC = 15
 LOGS_REFRESH_SEC = 5
 W, H = 480, 320
 ASSETS_DIR = None
 CRYPTOAUTHLIB_PYTHON = "/home/guagua/cryptoauthlib/python/.venv/bin/python"
 CRYPTOAUTHLIB_LIB_DIR = "/home/guagua/cryptoauthlib/build-pyfix"
+
+
+def _pi_app_dir():
+    """资源根：源码为 pi_app 目录；PyInstaller 打包后为 sys._MEIPASS。"""
+    if getattr(sys, "frozen", False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _writable_pi_app_dir():
+    """可写配置（语言/主题/key）：打包后与可执行文件同目录。"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
 
 # Matrix 主题下竖排随机字符（数字、拉丁、片假名等）
 MATRIX_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝｦｧｨｩｪｫｬｭｮｯｰ"
@@ -299,21 +318,17 @@ THEMES = {
 
 
 def find_assets():
-    import os
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, "assets")
+    return os.path.join(_pi_app_dir(), "assets")
 
 
 def find_splash_image():
     """启动图：脚本目录下 RustClaw480X320.png，若存在则用于全屏启动界面。"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(script_dir, "RustClaw480X320.png")
+    path = os.path.join(_pi_app_dir(), "RustClaw480X320.png")
     return path if os.path.isfile(path) else None
 
 
 def find_image_dir():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, "image")
+    return os.path.join(_pi_app_dir(), "image")
 
 
 def list_gallery_images():
@@ -330,21 +345,32 @@ def list_gallery_images():
 
 
 def _lang_file():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, ".rustclaw_small_screen_lang")
+    return os.path.join(_writable_pi_app_dir(), ".rustclaw_small_screen_lang")
 
 
 def _theme_file():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, ".rustclaw_small_screen_theme")
+    return os.path.join(_writable_pi_app_dir(), ".rustclaw_small_screen_theme")
 
 
 def _key_file():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, ".rustclaw_small_screen_key")
+    return os.path.join(_writable_pi_app_dir(), ".rustclaw_small_screen_key")
 
 
 def _root_dir():
+    """含 configs/、data/ 的仓库根。打包后从可执行文件位置向上探测 configs/config.toml。"""
+    if getattr(sys, "frozen", False):
+        exe = os.path.abspath(sys.executable)
+        cur = os.path.dirname(exe)
+        for _ in range(6):
+            trial = os.path.join(cur, "configs", "config.toml")
+            if os.path.isfile(trial):
+                return cur
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+        exe_dir = os.path.dirname(exe)
+        return os.path.normpath(os.path.join(exe_dir, "..", "..", ".."))
     script_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.dirname(script_dir)
 
@@ -469,11 +495,8 @@ def post_admin_webd_account(user_key, username, password):
     if not payload["username"] or not payload["password"] or not payload["user_key"]:
         return False, "missing username/password/user_key"
     body = json.dumps(payload).encode("utf-8")
-    req = _build_api_request("/v1/admin/webd-accounts", user_key)
-    req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, data=body, timeout=8) as r:
-            raw = r.read().decode()
+        raw = localhost_api_request("POST", "/v1/admin/webd-accounts", user_key, body=body).decode()
         parsed = json.loads(raw) if raw else {}
         if not isinstance(parsed, dict):
             return False, "invalid response"
@@ -712,7 +735,7 @@ def disconnect_wifi_network(ssid=""):
 
 
 def _run_signature_helper(args):
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signature.py")
+    script_path = os.path.join(_pi_app_dir(), "signature.py")
     if not os.path.isfile(script_path):
         return None, "helper script not found"
     if not os.path.isfile(CRYPTOAUTHLIB_PYTHON):
@@ -793,19 +816,62 @@ def save_lang(lang):
         pass
 
 
-def _build_api_request(path, user_key=""):
-    req = urllib.request.Request(API_BASE.rstrip("/") + path)
-    user_key = (user_key or "").strip()
-    if user_key:
-        req.add_header("X-RustClaw-Key", user_key)
-    return req
+def _api_host_port():
+    u = urllib.parse.urlparse(API_BASE)
+    host = u.hostname or "127.0.0.1"
+    port = u.port
+    if port is None:
+        port = 443 if (u.scheme or "http").lower() == "https" else 80
+    return host, port
+
+
+def _api_drop_connection_unlocked():
+    global _api_http_conn
+    if _api_http_conn is not None:
+        try:
+            _api_http_conn.close()
+        except Exception:
+            pass
+        _api_http_conn = None
+
+
+def localhost_api_request(method, path, user_key="", body=None):
+    """对 API_BASE 发 GET/POST，在同一条 HTTP/1.1 连接上复用（失败时自动重连一次）。"""
+    global _api_http_conn
+    if not path.startswith("/"):
+        path = "/" + path
+    headers = {}
+    uk = (user_key or "").strip()
+    if uk:
+        headers["X-RustClaw-Key"] = uk
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    host, port = _api_host_port()
+    last_err = None
+    with _api_http_lock:
+        for attempt in range(2):
+            try:
+                if _api_http_conn is None:
+                    _api_http_conn = http.client.HTTPConnection(host, port, timeout=8)
+                _api_http_conn.request(method, path, body=body, headers=headers)
+                resp = _api_http_conn.getresponse()
+                raw = resp.read()
+                if resp.status >= 400:
+                    _api_drop_connection_unlocked()
+                    raise OSError(f"HTTP {resp.status}")
+                return raw
+            except Exception as e:
+                last_err = e
+                _api_drop_connection_unlocked()
+                if attempt == 0:
+                    continue
+                raise last_err
 
 
 def fetch_health(user_key=""):
     try:
-        req = _build_api_request("/v1/health", user_key)
-        with urllib.request.urlopen(req, timeout=5) as r:
-            body = json.loads(r.read().decode())
+        raw = localhost_api_request("GET", "/v1/health", user_key)
+        body = json.loads(raw.decode())
         data = body.get("data") or body
         return data, None
     except Exception as e:
@@ -1213,9 +1279,8 @@ def _collect_recent_user_messages(raw_text, limit=5, lang="CN"):
 def fetch_clawd_logs(user_key="", lang="CN", lines=120, limit=24):
     try:
         query = urllib.parse.urlencode({"file": "clawd.log", "lines": lines})
-        req = _build_api_request("/v1/logs/latest?" + query, user_key)
-        with urllib.request.urlopen(req, timeout=5) as r:
-            body = json.loads(r.read().decode())
+        raw = localhost_api_request("GET", "/v1/logs/latest?" + query, user_key)
+        body = json.loads(raw.decode())
         data = body.get("data") or body or {}
         return _collect_clawd_log_items(data.get("text") or "", lang=lang, limit=limit), None
     except Exception as e:
@@ -1225,9 +1290,8 @@ def fetch_clawd_logs(user_key="", lang="CN", lines=120, limit=24):
 def fetch_clawd_activity(user_key="", lang="CN", lines=300, log_limit=24, message_limit=5):
     try:
         query = urllib.parse.urlencode({"file": "clawd.log", "lines": lines})
-        req = _build_api_request("/v1/logs/latest?" + query, user_key)
-        with urllib.request.urlopen(req, timeout=5) as r:
-            body = json.loads(r.read().decode())
+        raw = localhost_api_request("GET", "/v1/logs/latest?" + query, user_key)
+        body = json.loads(raw.decode())
         data = body.get("data") or body or {}
         raw_text = data.get("text") or ""
         return (
@@ -1279,8 +1343,7 @@ def _strip_trailing_zeros(price_str):
 
 
 def _small_screen_market_config_path():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, "small_screen_markets.toml")
+    return os.path.join(_pi_app_dir(), "small_screen_markets.toml")
 
 
 def _load_small_screen_market_config():
@@ -1468,18 +1531,17 @@ def fetch_a_share_quotes(stock_items=None):
 def fetch_skills_config(user_key=""):
     """GET /v1/skills/config，返回 (all_skills, enabled_set) 或 (None, None) 表示失败。"""
     try:
-        req = _build_api_request("/v1/skills/config", user_key)
-        with urllib.request.urlopen(req, timeout=5) as r:
-            body = json.loads(r.read().decode())
-            data = (body.get("data") or body) or {}
-            # 全部技能：managed_skills 或 skills_list + skill_switches 的 key
-            all_list = data.get("managed_skills") or data.get("skills_list") or []
-            switches = data.get("skill_switches") or {}
-            all_names = sorted(set(all_list) | set(switches.keys()))
-            # 当前开启的：runtime_enabled_skills
-            enabled_list = data.get("runtime_enabled_skills") or data.get("effective_enabled_skills_preview") or []
-            enabled_set = set(enabled_list)
-            return all_names, enabled_set
+        raw = localhost_api_request("GET", "/v1/skills/config", user_key)
+        body = json.loads(raw.decode())
+        data = (body.get("data") or body) or {}
+        # 全部技能：managed_skills 或 skills_list + skill_switches 的 key
+        all_list = data.get("managed_skills") or data.get("skills_list") or []
+        switches = data.get("skill_switches") or {}
+        all_names = sorted(set(all_list) | set(switches.keys()))
+        # 当前开启的：runtime_enabled_skills
+        enabled_list = data.get("runtime_enabled_skills") or data.get("effective_enabled_skills_preview") or []
+        enabled_set = set(enabled_list)
+        return all_names, enabled_set
     except Exception:
         return None, None
 
@@ -3505,6 +3567,9 @@ class SmallScreenApp:
         now = time.time()
         max_rows = getattr(self, "_llm_matrix_max_rows", 16)
         cols = getattr(self, "_llm_matrix_cols", [])
+        if not cols:
+            self._llm_lobster_job = None
+            return
         for col in cols:
             if now - col["last_add"] < col["interval"]:
                 continue
@@ -3519,7 +3584,20 @@ class SmallScreenApp:
                     lbl.config(text="\n".join(chars))
                 except tk.TclError:
                     pass
-        self._llm_lobster_job = self.root.after(80, self._llm_matrix_tick)
+        # 按「下一列到期」调度，避免固定 80ms 空转（节奏与随机间隔不变）
+        end = time.time()
+        min_rem = None
+        for col in cols:
+            rem = col["interval"] - (end - col["last_add"])
+            if min_rem is None or rem < min_rem:
+                min_rem = rem
+        if min_rem is None:
+            delay_ms = 80
+        elif min_rem <= 0:
+            delay_ms = 16
+        else:
+            delay_ms = max(80, min(250, int(min_rem * 1000)))
+        self._llm_lobster_job = self.root.after(delay_ms, self._llm_matrix_tick)
 
     def _llm_lobster_tick(self):
         """每 0.5 秒多画一个龙虾小图，按行网格排；画满 6 行后清空重新画；切页后也继续画。"""
@@ -4117,7 +4195,6 @@ class SmallScreenApp:
         self.adapters_rss_var.set(fmt_bytes(int(total)) if total else "--")
         self._update_user_summary_view()
         self._refresh_topbar()
-        from datetime import datetime
         self.foot_var.set(self._t("update_fmt").format(time=datetime.now().strftime("%H:%M:%S"), sec=LOGS_REFRESH_SEC))
 
     def _on_close(self):
@@ -4218,7 +4295,6 @@ class SmallScreenApp:
     def _tick_time(self):
         if getattr(self, "_closing", False):
             return
-        from datetime import datetime
         self.time_var.set(datetime.now().strftime("%H:%M:%S"))
         self.root.after(1000, self._tick_time)
 
