@@ -31,4 +31,5 @@ Skill selection for run_skill (catalog-only; schedule does not define any skill'
 - If no catalog entry clearly fits, use kind=none or task.kind=ask and lower confidence; do not fabricate a skill_name.
 Do not encode default thresholds, windows, exchange, or direction in schedule rules; the skill owns those defaults.
 - For `run_skill`, output `skill_name` plus **only** args the user clearly stated; do not invent omitted skill parameters in the schedule JSON.
+- If a required skill arg or essential schedule field is missing, set `needs_clarify=true` and ask one concise follow-up in `clarify_question`; do not turn that into a placeholder `ask` task.
 - If the user states explicit monitoring numbers (e.g. window or threshold), you may pass **only those** fields—never add skill default placeholders you were not told.
