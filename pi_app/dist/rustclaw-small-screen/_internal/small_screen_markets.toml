@@ -1,0 +1,127 @@
+[crypto]
+# 小屏加密货币页自动刷新间隔（秒）
+refresh_seconds = 15
+
+[[crypto.items]]
+name = "BTC"
+symbol = "BTCUSDT"
+
+[[crypto.items]]
+name = "ETH"
+symbol = "ETHUSDT"
+
+[[crypto.items]]
+name = "BCH"
+symbol = "BCHUSDT"
+
+[[crypto.items]]
+name = "LTC"
+symbol = "LTCUSDT"
+
+[[crypto.items]]
+name = "SOL"
+symbol = "SOLUSDT"
+
+[[crypto.items]]
+name = "BNB"
+symbol = "BNBUSDT"
+
+[[crypto.items]]
+name = "XRP"
+symbol = "XRPUSDT"
+
+[[crypto.items]]
+name = "DOGE"
+symbol = "DOGEUSDT"
+
+[[crypto.items]]
+name = "PEPE"
+symbol = "PEPEUSDT"
+
+[[crypto.items]]
+name = "SHIB"
+symbol = "SHIBUSDT"
+
+[stocks]
+# 小屏 A 股页自动刷新间隔（秒）
+refresh_seconds = 15
+
+[[stocks.items]]
+name = "中国移动"
+code = "600941"
+
+[[stocks.items]]
+name = "贵州茅台"
+code = "600519"
+
+[[stocks.items]]
+name = "宁德时代"
+code = "300750"
+
+[[stocks.items]]
+name = "比亚迪"
+code = "002594"
+
+[[stocks.items]]
+name = "五粮液"
+code = "000858"
+
+[[stocks.items]]
+name = "招商银行"
+code = "600036"
+
+[[stocks.items]]
+name = "中国平安"
+code = "601318"
+
+[[stocks.items]]
+name = "美的集团"
+code = "000333"
+
+[[stocks.items]]
+name = "东方财富"
+code = "300059"
+
+[[stocks.items]]
+name = "中国中免"
+code = "601888"
+
+[[stocks.items]]
+name = "药明康德"
+code = "603259"
+
+[[stocks.items]]
+name = "紫金矿业"
+code = "601899"
+
+[[stocks.items]]
+name = "长江电力"
+code = "600900"
+
+[[stocks.items]]
+name = "海康威视"
+code = "002415"
+
+[[stocks.items]]
+name = "泸州老窖"
+code = "000568"
+
+[[stocks.items]]
+name = "工商银行"
+code = "601398"
+
+[[stocks.items]]
+name = "中信证券"
+code = "600030"
+
+[[stocks.items]]
+name = "立讯精密"
+code = "002475"
+
+[[stocks.items]]
+name = "迈瑞医疗"
+code = "300760"
+
+[[stocks.items]]
+name = "隆基绿能"
+code = "601012"
