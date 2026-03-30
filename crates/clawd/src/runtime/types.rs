@@ -117,6 +117,14 @@ pub(crate) struct ScheduleIntentOutput {
     #[serde(default)]
     pub(crate) target_job_id: String,
     #[serde(default)]
+    pub(crate) raw: String,
+    #[serde(default)]
+    pub(crate) reason: String,
+    #[serde(default)]
+    pub(crate) needs_clarify: bool,
+    #[serde(default)]
+    pub(crate) clarify_question: String,
+    #[serde(default)]
     pub(crate) confidence: f64,
 }
 
