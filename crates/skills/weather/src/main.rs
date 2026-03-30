@@ -205,11 +205,22 @@ fn load_external_i18n(path: &Path) -> Option<HashMap<String, String>> {
     let dict = value.get("dict")?.as_table()?;
     let mut out = HashMap::new();
     for (k, v) in dict {
-        if let Some(text) = v.as_str() {
-            out.insert(k.to_string(), text.to_string());
-        }
+        collect_i18n_entries(k, v, &mut out);
     }
     Some(out)
+}
+
+fn collect_i18n_entries(prefix: &str, value: &TomlValue, out: &mut HashMap<String, String>) {
+    if let Some(text) = value.as_str() {
+        out.insert(prefix.to_string(), text.to_string());
+        return;
+    }
+    if let Some(table) = value.as_table() {
+        for (k, v) in table {
+            let next = format!("{prefix}.{k}");
+            collect_i18n_entries(&next, v, out);
+        }
+    }
 }
 
 fn default_embedded_strings() -> HashMap<String, String> {
