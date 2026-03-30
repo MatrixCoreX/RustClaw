@@ -200,13 +200,16 @@ Skill behavior notes (file/path):
 - for quote/price/realtime requests, a configured company name or alias such as `中国移动` may be passed to `stock`; for stock-code questions still prefer `chat`
 
 ### weather
-- 查询当前天气；数据来源 Open-Meteo，无需 API Key。
+- 查询天气；数据来源 Open-Meteo，无需 API Key；文案语言由 `configs/i18n/weather.<locale>.toml` 与 `configs/weather.toml` 控制，可用 `locale`/`lang` 或 `context.locale` 覆盖。
 - required（二选一）：
   - 城市/地名：`city` 或 `location` 或 `place` 或 `q`（如 北京、Shanghai）
   - 经纬度：`latitude` + `longitude`
-- optional: `action`（默认 query，可省略）
+- optional:
+  - `action`（默认 query，可省略）
+  - `days` 或 `forecast_days`（≥1）：提供时返回**未来 N 天**的每日预报；若超过接口上限会钳制到上限，并在响应 `extra` 中带 `forecast_days_requested` / `forecast_days_applied` / `forecast_days_capped`；不提供时仅返回**当前**天气。二者同时出现时以 `days` 为准。
+  - `locale` 或 `lang`（如 `zh-CN`、`en-US`）：输出语言。
 - 参数规范化：当用户输入中文城市/地名时，在调用 `weather` 前先转换为对应英文地名再写入 `city/location/place/q`（例如 北京 -> Beijing、上海 -> Shanghai），避免地理编码接口因中文命中失败。
-- 仅用于“当前天气/气温/今天天气”等查询；不用于天气预报讨论、气候知识等，此类用 `chat`。
+- 用于「当前天气」「未来几天/一周天气预报」等；纯气候知识或闲聊用 `chat`。
 
 ### schedule
 - action: `compile`
