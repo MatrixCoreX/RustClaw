@@ -220,11 +220,14 @@ do_upload() {
 			$(for p in ${UPLOAD_PATHS}; do echo "./${p}"; done) \
 			"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 	else
-		echo "[$(date)] 上传（全部，排除 target/.git）"
+		echo "[$(date)] 上传（全部，排除 target/.git/UI/services/根 node_modules）"
 		rsync -az --delete -e "${RSYNC_SSH}" \
 			"${RSYNC_PROGRESS_OPTS[@]}" \
 			--exclude 'target' \
 			--exclude '.git' \
+			--exclude '/UI' \
+			--exclude '/services' \
+			--exclude '/node_modules' \
 			"${LOCAL_SOURCE}/" \
 			"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 	fi
