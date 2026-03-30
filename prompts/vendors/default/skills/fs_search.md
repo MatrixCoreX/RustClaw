@@ -11,7 +11,6 @@
 - `fs_search` performs filesystem-level search by name, extension, text, or images.
 - It is intended for bounded queries with optional root scoping and result caps.
 - `find_name` can return directory names as well as file names; use `target_kind` to narrow when needed.
-- Search under `root` is recursive by default: it traverses subdirectories, not only direct children.
 
 ## Actions (from interface)
 - `find_name`

@@ -10,6 +10,7 @@
 ## Capability Summary (from interface)
 - `http_basic` performs simple HTTP requests for fetch and JSON post use cases.
 - It is intended for lightweight API calls with explicit URL and optional headers/body.
+- When called inside RustClaw with a valid `user_key`, requests to local RustClaw API endpoints on `http://127.0.0.1:8787/` automatically include `X-RustClaw-Key`.
 
 ## Actions (from interface)
 - `get`

@@ -41,4 +41,3 @@ Response:
 - Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
 - On uncertainty, prefer safe/readonly behavior first.
-- If the user asks for a generic or baseline health check without narrowing to one specific service, use the default `check` behavior directly with empty/minimal args instead of asking which service to inspect.

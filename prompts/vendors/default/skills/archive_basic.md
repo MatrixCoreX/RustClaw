@@ -10,8 +10,10 @@
 ## Capability Summary (from interface)
 - `archive_basic` provides archive operations for listing archive contents, packing files/folders into an archive, and unpacking archives into a destination directory.
 - Supported archive types are `zip` and `tar.gz`/`tgz`.
-- Relative paths resolve from `WORKSPACE_ROOT`; explicit absolute paths are also allowed when the user already supplied them exactly.
-- All input paths reject `..` traversal.
+- `unpack` uses a non-interactive default overwrite strategy (zip: `unzip -o`; tar: `tar --overwrite`) to avoid hanging on interactive replace prompts.
+- Relative paths are resolved against `WORKSPACE_ROOT`.
+- Explicit absolute paths are accepted when they are already concrete user-provided paths.
+- All paths reject `..` traversal.
 
 ## Actions (from interface)
 - `list`: list entries in an archive file.
