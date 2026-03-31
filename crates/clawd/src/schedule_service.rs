@@ -109,12 +109,15 @@ fn parse_skill_contract_hint(markdown: &str) -> Option<SkillContractHint> {
     let header = &table_rows[0];
     let mut param_idx = None;
     let mut required_idx = None;
+    let mut desc_idx = None;
     for (i, col) in header.iter().enumerate() {
         let c = col.trim().to_ascii_lowercase();
         if c == "param" {
             param_idx = Some(i);
         } else if c == "required" {
             required_idx = Some(i);
+        } else if c == "description" {
+            desc_idx = Some(i);
         }
     }
     let (Some(param_idx), Some(required_idx)) = (param_idx, required_idx) else {
@@ -130,11 +133,17 @@ fn parse_skill_contract_hint(markdown: &str) -> Option<SkillContractHint> {
         if param.is_empty() {
             continue;
         }
-        rows.push(format!(
-            "{} (required: {})",
-            param,
-            row[required_idx].trim()
-        ));
+        let required = row[required_idx].trim();
+        let desc = desc_idx
+            .and_then(|idx| row.get(idx))
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+            .unwrap_or("");
+        if desc.is_empty() {
+            rows.push(format!("{param} (required: {required})"));
+        } else {
+            rows.push(format!("{param} (required: {required}) - {desc}"));
+        }
     }
     if rows.is_empty() {
         return None;
