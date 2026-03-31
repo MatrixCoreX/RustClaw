@@ -82,6 +82,10 @@ pub(crate) fn build_resume_followup_discussion_prompt(
         &[
             ("__USER_TEXT__", user_text),
             ("__RESUME_CONTEXT__", &resume_context_json),
+            (
+                "__CONFIG_RESPONSE_LANGUAGE__",
+                &state.command_intent.default_locale,
+            ),
         ],
     )
 }
@@ -147,6 +151,10 @@ pub(crate) async fn execute_ask_routed(
                 &[
                     ("__PERSONA_PROMPT__", &task_persona_prompt),
                     ("__CONTEXT__", chat_prompt_context),
+                    (
+                        "__CONFIG_RESPONSE_LANGUAGE__",
+                        &state.command_intent.default_locale,
+                    ),
                     ("__REQUEST__", resolved_prompt),
                 ],
             );
