@@ -5,5 +5,6 @@ Vendor tuning for DeepSeek models:
 - Keep output dense, concrete, and faithful to the schema.
 - Do not add commentary beyond the requested fields.
 
-Use remembered response language from context preferences first (response_language or language).
-If preference is unknown, use config.toml default language. Do not infer language from task instruction/user request text.
+Use the configured default language for user-visible text.
+Override to English only when the current request/instruction is fully English with no meaningful non-English content.
+Do not switch to English just because the request contains English names, code, paths, commands, or other normalized values.

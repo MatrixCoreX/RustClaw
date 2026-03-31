@@ -1243,8 +1243,7 @@ pub(crate) fn inject_skill_memory_context(
     for (k, v) in &structured.preferences {
         pref_map.insert(k.clone(), Value::String(v.clone()));
     }
-    let lang_hint = crate::memory::service::preferred_response_language(&structured.preferences)
-        .unwrap_or_default();
+    let lang_hint = state.command_intent.default_locale.clone();
     obj.insert(
         "_memory".to_string(),
         serde_json::json!({

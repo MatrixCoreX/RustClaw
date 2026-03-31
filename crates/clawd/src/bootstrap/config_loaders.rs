@@ -15,6 +15,11 @@ pub(crate) fn load_command_intent_runtime(
     workspace_root: &Path,
     cfg: &CommandIntentConfig,
 ) -> CommandIntentRuntime {
+    let default_locale = if cfg.default_locale.trim().is_empty() {
+        "zh-CN".to_string()
+    } else {
+        cfg.default_locale.trim().to_string()
+    };
     let rules_dir = workspace_root.join(cfg.rules_dir.trim());
     for locale in ["zh-CN", "en-US"] {
         let path = rules_dir.join(format!("{locale}.toml"));
@@ -39,6 +44,7 @@ pub(crate) fn load_command_intent_runtime(
 
     CommandIntentRuntime {
         all_result_suffixes: Vec::new(),
+        default_locale,
     }
 }
 
@@ -226,6 +232,7 @@ pub(crate) fn load_schedule_runtime(
         intent_prompt_template,
         intent_prompt_file,
         intent_rules_template,
+        locale,
         i18n_dict,
     }
 }

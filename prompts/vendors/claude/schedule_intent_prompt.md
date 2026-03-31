@@ -1,7 +1,7 @@
 <!--
 Purpose: conversational schedule intent parsing prompt (natural language -> structured schedule plan)
 Component: clawd (crates/clawd/src/main.rs) ScheduleRuntime
-Placeholders: __NOW__, __TIMEZONE__, __RULES__, __SKILL_CATALOG__, __SKILLS_CATALOG__ (same content), __MEMORY_CONTEXT__, __REQUEST__
+Placeholders: __NOW__, __TIMEZONE__, __RULES__, __SKILL_CATALOG__, __SKILLS_CATALOG__ (same content), __MEMORY_CONTEXT__, __CONFIG_RESPONSE_LANGUAGE__, __REQUEST__
 -->
 
 Vendor tuning for Claude models:
@@ -43,6 +43,8 @@ Skill parameter contract hints (dynamic summary from each skill's prompt/interfa
 __SKILL_CONTRACTS__
 - For `task.kind=run_skill`, fill args to satisfy the chosen skill's contract when the user already provided those values.
 - If key schedule fields or required skill args are missing, set `needs_clarify=true` and provide one concise `clarify_question`. Do not create a placeholder task just to ask the question later.
+- Language policy (strict): use __CONFIG_RESPONSE_LANGUAGE__ as the highest-priority default for any user-visible text such as `clarify_question`. Override to English only when the current user request is fully English with no meaningful non-English content.
+- Do not switch `clarify_question` to English just because a downstream skill prefers normalized English arguments such as city names.
 
 Output JSON only. Never output <think> tags, code fences, or extra explanation before/after the JSON:
 {
