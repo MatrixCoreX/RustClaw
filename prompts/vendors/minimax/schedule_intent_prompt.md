@@ -99,11 +99,11 @@ Output:
 
 User: 每天早上8点告诉我今天和未来三天天气
 Output:
-{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{}}},"target_job_id":"","raw":"每天早上8点告诉我今天和未来三天天气","confidence":0.84,"reason":"weather schedule recognized but location missing","needs_clarify":true,"clarify_question":"你想查询哪个城市的天气？"}
+{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{}}},"target_job_id":"","raw":"每天早上8点告诉我今天和未来三天天气","confidence":0.84,"reason":"weather schedule recognized but english city name missing","needs_clarify":true,"clarify_question":"请提供该城市对应的英文地名（例如 Nanjing）。"}
 
 User: 每天早上8点告诉我南京市今天和未来三天天气
 Output:
-{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{"city":"南京市","days":4}}},"target_job_id":"","raw":"每天早上8点告诉我南京市今天和未来三天天气","confidence":0.9,"reason":"daily weather schedule with explicit city and forecast range","needs_clarify":false,"clarify_question":""}
+{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{"city":"Nanjing","days":4}}},"target_job_id":"","raw":"每天早上8点告诉我南京市今天和未来三天天气","confidence":0.9,"reason":"daily weather schedule with explicit city converted to english geocoding name and forecast range","needs_clarify":false,"clarify_question":""}
 
 Rules:
 __RULES__
