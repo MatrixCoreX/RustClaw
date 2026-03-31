@@ -536,6 +536,10 @@ pub(crate) async fn generate_clarify_question(
             ("__REQUEST__", user_request.trim()),
             ("__RESOLVER_REASON__", resolver_reason.trim()),
             (
+                "__CONFIG_RESPONSE_LANGUAGE__",
+                &state.command_intent.default_locale,
+            ),
+            (
                 "__CANDIDATE_CONTEXT__",
                 candidate_context
                     .map(str::trim)

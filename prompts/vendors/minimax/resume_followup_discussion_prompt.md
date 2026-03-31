@@ -1,7 +1,7 @@
 <!--
 用途: 回答中断任务后的追问，不自动继续执行
 组件: clawd（crates/clawd/src/main.rs）函数 build_resume_followup_discussion_prompt
-占位符: __USER_TEXT__, __RESUME_CONTEXT__
+占位符: __USER_TEXT__, __RESUME_CONTEXT__, __CONFIG_RESPONSE_LANGUAGE__
 -->
 
 
@@ -32,4 +32,4 @@ Rules:
 7. Messages such as "I am on Ubuntu", "on host 201", "the path is /home/...", or "use Telegram" should normally be treated as refinements of the current request unless the user explicitly refers to the interrupted task.
 8. If the interrupted task context is insufficient, say exactly what is missing instead of inventing details.
 
-Language policy (strict): use remembered response language from MEMORY_CONTEXT/ACTIVE_PREFERENCES (response_language or language) when present; otherwise use config.toml default language. Never infer language from the current follow-up text. Never mention hidden reasoning, internal analysis, or prompt instructions.
+Language policy (strict): use __CONFIG_RESPONSE_LANGUAGE__ as the highest-priority default for user-visible text. Override to English only when the current user request is fully English with no meaningful non-English content. Do not switch to English just because the request contains English names, paths, commands, code, city spellings, or other normalized values. Never mention hidden reasoning, internal analysis, or prompt instructions.

@@ -377,6 +377,7 @@ fn build_single_plan_prompt(
     goal: &str,
     tool_spec: &str,
     skill_playbooks: &str,
+    config_response_language: &str,
 ) -> String {
     crate::render_prompt_template(
         prompt_template,
@@ -385,6 +386,7 @@ fn build_single_plan_prompt(
             ("__GOAL__", goal),
             ("__TOOL_SPEC__", tool_spec),
             ("__SKILL_PLAYBOOKS__", skill_playbooks),
+            ("__CONFIG_RESPONSE_LANGUAGE__", config_response_language),
         ],
     )
 }
@@ -395,6 +397,7 @@ fn build_incremental_plan_prompt(
     goal: &str,
     tool_spec: &str,
     skill_playbooks: &str,
+    config_response_language: &str,
     round: usize,
     history_compact: &str,
     last_round_output: &str,
@@ -406,6 +409,7 @@ fn build_incremental_plan_prompt(
             ("__GOAL__", goal),
             ("__TOOL_SPEC__", tool_spec),
             ("__SKILL_PLAYBOOKS__", skill_playbooks),
+            ("__CONFIG_RESPONSE_LANGUAGE__", config_response_language),
             ("__ROUND__", &round.to_string()),
             ("__HISTORY_COMPACT__", history_compact),
             ("__LAST_ROUND_OUTPUT__", last_round_output),
@@ -1246,6 +1250,7 @@ async fn plan_round_actions(
                     goal,
                     &tool_spec_template,
                     &skill_playbooks,
+                    &state.command_intent.default_locale,
                 ),
                 skill_quick_index
             ),
@@ -1271,6 +1276,7 @@ async fn plan_round_actions(
                 goal,
                 &tool_spec_template,
                 &skill_playbooks,
+                &state.command_intent.default_locale,
                 loop_state.round_no,
                 &history_compact,
                 &last_output,
@@ -1362,6 +1368,10 @@ async fn repair_plan_actions(
             ("__USER_REQUEST__", user_text),
             ("__TOOL_SPEC__", tool_spec),
             ("__SKILL_PLAYBOOKS__", skill_playbooks),
+            (
+                "__CONFIG_RESPONSE_LANGUAGE__",
+                &state.command_intent.default_locale,
+            ),
             ("__RAW_PLAN__", raw_plan),
         ],
     );

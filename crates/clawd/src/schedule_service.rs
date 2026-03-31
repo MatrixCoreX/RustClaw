@@ -279,6 +279,7 @@ pub(crate) async fn parse_schedule_intent(
             ("__SKILLS_CATALOG__", &skill_catalog),
             ("__SKILL_CONTRACTS__", &skill_contracts),
             ("__MEMORY_CONTEXT__", &memory_context),
+            ("__CONFIG_RESPONSE_LANGUAGE__", &state.schedule.locale),
             ("__REQUEST__", request),
         ],
     );
