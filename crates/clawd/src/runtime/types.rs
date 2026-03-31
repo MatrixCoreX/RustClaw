@@ -81,6 +81,7 @@ pub(crate) struct CommandIntentRules {}
 #[derive(Clone)]
 pub(crate) struct CommandIntentRuntime {
     pub(crate) all_result_suffixes: Vec<String>,
+    pub(crate) default_locale: String,
 }
 
 #[derive(Clone)]
@@ -89,6 +90,7 @@ pub(crate) struct ScheduleRuntime {
     pub(crate) intent_prompt_template: String,
     pub(crate) intent_prompt_file: String,
     pub(crate) intent_rules_template: String,
+    pub(crate) locale: String,
     pub(crate) i18n_dict: HashMap<String, String>,
 }
 
