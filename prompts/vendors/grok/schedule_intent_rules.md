@@ -31,4 +31,5 @@ Skill selection for run_skill (catalog-only; schedule does not define any skill'
 Do not encode default thresholds, windows, exchange, or direction in schedule rules; the skill owns those defaults.
 - For `run_skill`, output `skill_name` plus **only** args the user clearly stated; do not invent omitted skill parameters in the schedule JSON.
 - If a required skill arg or essential schedule field is missing, set `needs_clarify=true` and ask one concise follow-up in `clarify_question`; do not turn that into a placeholder `ask` task.
+- If the chosen skill contract requires a normalized value (for example, an English city name for geocoding), first try to convert it and execute directly when you are confident. Ask the user only when you cannot determine the normalized value reliably, or when you expect the downstream lookup may still fail without clarification.
 - If the user states explicit monitoring numbers (e.g. window or threshold), you may pass **only those** fields—never add skill default placeholders you were not told.
