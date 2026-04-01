@@ -686,9 +686,16 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Normalizes legacy / alias action names to the dispatch name used in `match` below.
-fn normalize_crypto_dispatch_action(raw: &str) -> String {
+fn normalize_crypto_dispatch_action(raw: &str, obj: &serde_json::Map<String, Value>) -> String {
     let action = raw.trim().to_ascii_lowercase();
     match action.as_str() {
+        "price" => {
+            if obj.contains_key("symbols") {
+                "multi_quote".to_string()
+            } else {
+                "quote".to_string()
+            }
+        }
         "get_price" => "quote".to_string(),
         "get_multi_price" => "multi_quote".to_string(),
         "price_monitor" | "monitor_price" | "price_alert" | "volatility_alert" => {
@@ -798,7 +805,7 @@ fn execute(
         .get("action")
         .and_then(|v| v.as_str())
         .unwrap_or("quote");
-    let action = normalize_crypto_dispatch_action(action);
+    let action = normalize_crypto_dispatch_action(action, obj);
     if cfg
         .crypto
         .blocked_actions
@@ -4974,23 +4981,37 @@ mod tests {
 
     #[test]
     fn normalize_crypto_dispatch_action_maps_monitor_aliases() {
+        let empty = serde_json::Map::new();
         assert_eq!(
-            normalize_crypto_dispatch_action("price_monitor"),
+            normalize_crypto_dispatch_action("price_monitor", &empty),
             "price_alert_check"
         );
         assert_eq!(
-            normalize_crypto_dispatch_action("MONITOR_PRICE"),
+            normalize_crypto_dispatch_action("MONITOR_PRICE", &empty),
             "price_alert_check"
         );
         assert_eq!(
-            normalize_crypto_dispatch_action("volatility_alert"),
+            normalize_crypto_dispatch_action("volatility_alert", &empty),
             "price_alert_check"
         );
         assert_eq!(
-            normalize_crypto_dispatch_action("price_alert_check"),
+            normalize_crypto_dispatch_action("price_alert_check", &empty),
             "price_alert_check"
         );
-        assert_eq!(normalize_crypto_dispatch_action("quote"), "quote");
+        assert_eq!(normalize_crypto_dispatch_action("quote", &empty), "quote");
+    }
+
+    #[test]
+    fn normalize_crypto_dispatch_action_maps_price_alias_by_args_shape() {
+        let empty = serde_json::Map::new();
+        assert_eq!(normalize_crypto_dispatch_action("price", &empty), "quote");
+
+        let mut multi = serde_json::Map::new();
+        multi.insert("symbols".to_string(), json!(["BTC", "ETH", "DOGE"]));
+        assert_eq!(
+            normalize_crypto_dispatch_action("price", &multi),
+            "multi_quote"
+        );
     }
 
     #[test]
