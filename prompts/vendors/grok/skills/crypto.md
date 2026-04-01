@@ -16,14 +16,14 @@
 - Supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker` (Binance); `market`, `limit` (OKX).
 
 ## Actions (from interface)
-- Market/info: `quote`, `multi_quote`, `get_book_ticker` (alias `book_ticker`), `binance_symbol_check`, `normalize_symbol`, `healthcheck`, `candles`, `indicator`, `price_alert_check`, `onchain`
+- Market/info: `quote` (aliases `price`, `get_price` when querying one symbol), `multi_quote` (aliases `get_multi_price`; `price` when `symbols` is present), `get_book_ticker` (alias `book_ticker`), `binance_symbol_check`, `normalize_symbol`, `healthcheck`, `candles`, `indicator`, `price_alert_check`, `onchain`
 - **Price-alert aliases** (normalize to `price_alert_check` internally, no separate actions): `price_monitor`, `monitor_price`, `price_alert`, `volatility_alert`.
 - Trade/order: `trade_preview`, `trade_submit`, `order_status`, `cancel_order`, `cancel_all_orders` (alias `cancel_open_orders`), `open_orders` (alias `get_open_orders`, `pending_orders`), `trade_history` (alias `my_trades`, `recent_trades`), `positions`
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| all | `action` | yes | string | - | Action name from the list above. |
+| all | `action` | yes | string | - | Action name from the list above. `price` is accepted as a compatibility alias and normalizes to `quote` or `multi_quote` based on whether `symbols` is present. |
 | many actions | `exchange` | no | string | config default / `binance` | Exchange routing: `binance`, `okx`. |
 | many actions | `symbol` | depends | string | - | Trading pair symbol. Normalize to canonical form only when uniquely identifiable; if ambiguous, planner must clarify first—do not guess. |
 | `quote` | `symbol` | yes | string | - | Single symbol quote; aggregates Binance/OKX/Gate/Coinbase/Kraken/CoinGecko. |
@@ -115,6 +115,13 @@ Response:
 ```json
 {"request_id":"demo-1","status":"ok","text":"ETHUSDT price_usd=3200.0 ...","error_text":null}
 ```
+
+### Example 1b — Scheduled price alias with multiple symbols
+Request:
+```json
+{"request_id":"demo-1b","args":{"action":"price","symbols":["BTC","ETH","DOGE"]}}
+```
+Behavior: normalized internally to `multi_quote`.
 
 ### Example 2 — Candles with OHLCV
 Request:
