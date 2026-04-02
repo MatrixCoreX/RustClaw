@@ -1,13 +1,13 @@
 use std::hash::{Hash, Hasher};
 
 use claw_core::types::{AuthIdentity, ChannelKind, SubmitTaskRequest};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
-    AppState, is_affirmation_click_text, main_flow_rules, normalize_affirmation_text,
-    normalize_external_id_opt, now_ts,
+    is_affirmation_click_text, main_flow_rules, normalize_affirmation_text,
+    normalize_external_id_opt, now_ts, AppState,
 };
 
 pub(crate) struct SubmitTaskContext {

@@ -1,3 +1,5 @@
+use std::process::Command;
+
 use rusqlite::OptionalExtension;
 
 use crate::AppState;
@@ -53,7 +55,9 @@ pub(crate) fn larkd_process_stats() -> Option<(usize, u64)> {
 }
 
 fn daemon_process_stats(process_name: &str) -> Option<(usize, u64)> {
-    let entries = std::fs::read_dir("/proc").ok()?;
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return daemon_process_stats_from_ps(process_name);
+    };
     let mut count = 0usize;
     let mut total_rss_bytes = 0u64;
 
@@ -73,6 +77,43 @@ fn daemon_process_stats(process_name: &str) -> Option<(usize, u64)> {
         }
     }
 
+    Some((count, total_rss_bytes))
+}
+
+fn daemon_process_stats_from_ps(process_name: &str) -> Option<(usize, u64)> {
+    let output = Command::new("ps")
+        .args(["-axo", "pid=,rss=,command="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let self_pid = std::process::id().to_string();
+    let mut count = 0usize;
+    let mut total_rss_bytes = 0u64;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || !trimmed.contains(process_name) {
+            continue;
+        }
+        let mut parts = trimmed.split_whitespace();
+        let Some(pid) = parts.next() else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        let rss_kb = parts
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        let command = parts.collect::<Vec<_>>().join(" ");
+        if !command.contains(process_name) {
+            continue;
+        }
+        count += 1;
+        total_rss_bytes = total_rss_bytes.saturating_add(rss_kb.saturating_mul(1024));
+    }
     Some((count, total_rss_bytes))
 }
 

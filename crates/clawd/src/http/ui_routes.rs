@@ -3,6 +3,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use rusqlite::OptionalExtension;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
@@ -10,28 +11,43 @@ use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio as StdProcessStdio};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 
 use super::super::{
     ApiResponse, AppState, HealthResponse, LocalInteractionContext, bind_channel_identity,
-    channel_gateway_process_stats, create_auth_key, current_rss_bytes, delete_auth_key_by_id,
-    exchange_credential_status_for_user_key, feishud_process_stats, larkd_process_stats,
-    list_auth_keys, mask_secret, oldest_running_task_age_seconds, reload_skill_views,
+    attach_pending_channel_bind_session_install_flow, channel_gateway_process_stats,
+    create_auth_key, current_rss_bytes, delete_auth_key_by_id, create_pending_channel_bind_session,
+    exchange_credential_status_for_user_key, feishud_process_stats,
+    finalize_pending_channel_bind_session, get_auth_key_value_by_id,
+    get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token, larkd_process_stats,
+    list_active_pending_channel_bind_sessions, list_auth_keys,
+    mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
+    mark_pending_channel_bind_session_failed, mask_secret, oldest_running_task_age_seconds, reload_skill_views,
     resolve_auth_identity_by_key, resolve_channel_binding_identity, task_count_by_status,
     telegramd_process_stats, update_auth_key_by_id, upsert_exchange_credential_for_user_key,
     upsert_webd_login_account, verify_webd_password_login, wa_webd_process_stats,
-    webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
+    webd_process_stats, wechatd_process_stats, whatsappd_process_stats, LlmProviderRuntime,
+    PendingChannelBindSession,
 };
 use claw_core::skill_registry::SkillKind;
 use claw_core::types::{
-    AuthIdentity, BindChannelKeyRequest, ExchangeCredentialStatus, GatewayInstanceRuntimeStatus,
-    ResolveChannelBindingRequest, ResolveChannelBindingResponse, TelegramBotRuntimeStatus,
-    UiKeyVerifyRequest, UpsertExchangeCredentialRequest,
+    AuthIdentity, BindChannelKeyRequest, DetectFeishuBindSessionRequest,
+    DetectFeishuBindSessionResponse, ExchangeCredentialStatus, FeishuBindSessionStatusResponse,
+    GatewayInstanceRuntimeStatus, ResolveChannelBindingRequest, ResolveChannelBindingResponse,
+    StartFeishuBindSessionRequest, TelegramBotRuntimeStatus, UiKeyVerifyRequest,
+    UpsertExchangeCredentialRequest,
 };
 
 const UI_HIDDEN_SKILLS: &[&str] = &["chat"];
 const TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS: i64 = 45;
+const FEISHU_BIND_SESSION_DEFAULT_TTL_SECONDS: u64 = 600;
+const FEISHU_BIND_SESSION_MIN_TTL_SECONDS: u64 = 60;
+const FEISHU_BIND_SESSION_MAX_TTL_SECONDS: u64 = 1800;
+const FEISHU_OFFICIAL_ACCOUNTS_BASE_URL: &str = "https://accounts.feishu.cn";
+const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
 
 fn hide_skill_in_ui(state: &AppState, name: &str) -> bool {
     let canonical = state.resolve_canonical_skill_name(name);
@@ -130,6 +146,10 @@ fn wechat_config_path(state: &AppState) -> PathBuf {
     state.workspace_root.join("configs/channels/wechat.toml")
 }
 
+fn feishu_config_path(state: &AppState) -> PathBuf {
+    state.workspace_root.join("configs/channels/feishu.toml")
+}
+
 fn read_telegram_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
     let path = telegram_config_path(state);
     if !path.exists() {
@@ -144,6 +164,18 @@ fn read_telegram_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
 
 fn read_wechat_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
     let path = wechat_config_path(state);
+    if !path.exists() {
+        return Ok(toml::Value::Table(Default::default()));
+    }
+    let raw = std::fs::read_to_string(&path)?;
+    if raw.trim().is_empty() {
+        return Ok(toml::Value::Table(Default::default()));
+    }
+    Ok(toml::from_str(&raw)?)
+}
+
+fn read_feishu_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
+    let path = feishu_config_path(state);
     if !path.exists() {
         return Ok(toml::Value::Table(Default::default()));
     }
@@ -400,6 +432,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/auth/channel/resolve", post(resolve_channel_binding))
         .route("/auth/channel/bind", post(bind_channel_key))
         .route(
+            "/auth/channel-binds/feishu/detect",
+            post(detect_feishu_bind_session_handler),
+        )
+        .route(
             "/auth/crypto-credentials",
             get(get_crypto_credentials).post(upsert_crypto_credentials),
         )
@@ -417,10 +453,15 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/wechat/config",
             get(get_wechat_config).post(update_wechat_config),
         )
+        .route(
+            "/feishu/config",
+            get(get_feishu_config).post(update_feishu_config),
+        )
         .route("/skills/import", post(import_external_skill))
         .route("/skills/import/upload", post(import_external_skill_upload))
         .route("/skills/uninstall", post(uninstall_external_skill))
         .route("/llm/config", get(get_llm_config).post(update_llm_config))
+        .route("/llm/test", post(test_llm_config))
         .route("/logs/latest", get(logs_latest))
         .route("/debug/tasks/:task_id", get(task_debug_detail))
         .route("/debug/recent-robot-tasks", get(recent_robot_tasks))
@@ -446,6 +487,15 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route(
             "/admin/auth-keys",
             get(get_auth_keys).post(create_auth_key_handler),
+        )
+        .route("/admin/auth-keys/:key_id/full", get(get_auth_key_full_handler))
+        .route(
+            "/admin/channel-binds/feishu/start",
+            post(start_feishu_bind_session_handler),
+        )
+        .route(
+            "/admin/channel-binds/feishu/:session_id",
+            get(get_feishu_bind_session_handler),
         )
         .route(
             "/admin/auth-keys/:key_id",
@@ -574,6 +624,786 @@ async fn update_auth_key_handler(
             }),
         ),
     }
+}
+
+async fn get_auth_key_full_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(key_id): AxumPath<i64>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can reveal auth keys".to_string()),
+            }),
+        );
+    }
+
+    match get_auth_key_value_by_id(&state, key_id) {
+        Ok(Some(user_key)) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({ "user_key": user_key })),
+                error: None,
+            }),
+        ),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("auth key not found".to_string()),
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("get auth key failed: {err}")),
+            }),
+        ),
+    }
+}
+
+fn clamp_feishu_bind_ttl_seconds(raw: Option<u64>) -> u64 {
+    raw.unwrap_or(FEISHU_BIND_SESSION_DEFAULT_TTL_SECONDS)
+        .clamp(
+            FEISHU_BIND_SESSION_MIN_TTL_SECONDS,
+            FEISHU_BIND_SESSION_MAX_TTL_SECONDS,
+        )
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct FeishuOfficialRegistrationInitResponse {
+    #[serde(default)]
+    supported_auth_methods: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct FeishuOfficialRegistrationBeginResponse {
+    #[serde(default)]
+    device_code: String,
+    #[serde(default)]
+    verification_uri_complete: String,
+    #[serde(default)]
+    interval: Option<u64>,
+    #[serde(default)]
+    expire_in: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct FeishuOfficialRegistrationUserInfo {
+    #[serde(default)]
+    open_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct FeishuOfficialRegistrationPollResponse {
+    #[serde(default)]
+    client_id: Option<String>,
+    #[serde(default)]
+    client_secret: Option<String>,
+    #[serde(default)]
+    user_info: Option<FeishuOfficialRegistrationUserInfo>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    error_description: Option<String>,
+}
+
+fn feishu_accounts_base_url() -> String {
+    std::env::var("RUSTCLAW_FEISHU_ACCOUNTS_BASE_URL")
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| FEISHU_OFFICIAL_ACCOUNTS_BASE_URL.to_string())
+}
+
+async fn call_feishu_official_registration<T: DeserializeOwned>(
+    state: &AppState,
+    params: &[(&str, &str)],
+) -> anyhow::Result<T> {
+    let url = format!("{}/oauth/v1/app/registration", feishu_accounts_base_url());
+    let resp = state.http_client.post(url).form(params).send().await?;
+    let status = resp.status();
+    let body = resp.text().await?;
+    serde_json::from_str::<T>(&body).map_err(|err| {
+        anyhow::anyhow!(
+            "decode feishu registration response failed: status={} body={} err={}",
+            status,
+            body,
+            err
+        )
+    })
+}
+
+async fn begin_feishu_official_registration(
+    state: &AppState,
+) -> anyhow::Result<FeishuOfficialRegistrationBeginResponse> {
+    let init = call_feishu_official_registration::<FeishuOfficialRegistrationInitResponse>(
+        state,
+        &[("action", "init")],
+    )
+    .await?;
+    if !init
+        .supported_auth_methods
+        .iter()
+        .any(|method| method == "client_secret")
+    {
+        anyhow::bail!("feishu registration does not support client_secret auth");
+    }
+    let begin = call_feishu_official_registration::<FeishuOfficialRegistrationBeginResponse>(
+        state,
+        &[
+            ("action", "begin"),
+            ("archetype", "PersonalAgent"),
+            ("auth_method", "client_secret"),
+            ("request_user_info", "open_id"),
+        ],
+    )
+    .await?;
+    if begin.device_code.trim().is_empty() || begin.verification_uri_complete.trim().is_empty() {
+        anyhow::bail!("feishu registration did not return a device_code or verification url");
+    }
+    Ok(begin)
+}
+
+async fn poll_feishu_official_registration(
+    state: &AppState,
+    device_code: &str,
+) -> anyhow::Result<FeishuOfficialRegistrationPollResponse> {
+    call_feishu_official_registration::<FeishuOfficialRegistrationPollResponse>(
+        state,
+        &[("action", "poll"), ("device_code", device_code)],
+    )
+    .await
+}
+
+fn feishu_entry_url_for_app_id(app_id: &str) -> Option<String> {
+    let trimmed = app_id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "https://applink.feishu.cn/client/bot/open?appId={trimmed}"
+    ))
+}
+
+fn feishu_bind_entry_url(
+    state: &AppState,
+    session: Option<&PendingChannelBindSession>,
+) -> Option<String> {
+    if let Some(entry_url) = session
+        .and_then(|session| session.install_verification_url.clone())
+        .filter(|url| !url.trim().is_empty())
+    {
+        return Some(entry_url);
+    }
+    let config = load_feishu_config_response(state).ok()?;
+    if !config.bind_ready {
+        return None;
+    }
+    feishu_entry_url_for_app_id(&config.app_id)
+}
+
+fn feishu_bind_session_response(
+    state: &AppState,
+    session: PendingChannelBindSession,
+) -> FeishuBindSessionStatusResponse {
+    let entry_url = feishu_bind_entry_url(state, Some(&session));
+    FeishuBindSessionStatusResponse {
+        session_id: session.id,
+        channel: session.channel,
+        bind_token: session.bind_token,
+        status: session.status,
+        external_user_id: session.external_user_id,
+        external_chat_id: session.external_chat_id,
+        error_text: session.error_text,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        expires_at: session.expires_at,
+        entry_url,
+    }
+}
+
+fn maybe_expire_feishu_bind_session(
+    db: &mut rusqlite::Connection,
+    session: PendingChannelBindSession,
+) -> anyhow::Result<PendingChannelBindSession> {
+    if matches!(session.status.as_str(), "pending" | "detected") {
+        let expires_at = session.expires_at.parse::<i64>().unwrap_or_default();
+        if expires_at > 0 && expires_at <= current_unix_ts() {
+            return mark_pending_channel_bind_session_expired(db, session.id);
+        }
+    }
+    Ok(session)
+}
+
+fn write_feishu_generated_credentials(
+    state: &AppState,
+    app_id: &str,
+    app_secret: &str,
+) -> anyhow::Result<()> {
+    let mut value = read_feishu_config_value(state)?;
+    let feishu_table = ensure_toml_table(&mut value, &["feishu"])?;
+    feishu_table.insert("enabled".to_string(), toml::Value::Boolean(true));
+    feishu_table.insert(
+        "app_id".to_string(),
+        toml::Value::String(app_id.trim().to_string()),
+    );
+    feishu_table.insert(
+        "app_secret".to_string(),
+        toml::Value::String(app_secret.trim().to_string()),
+    );
+    feishu_table
+        .entry("mode".to_string())
+        .or_insert_with(|| toml::Value::String("long_connection".to_string()));
+    feishu_table
+        .entry("listen".to_string())
+        .or_insert_with(|| toml::Value::String("0.0.0.0:8789".to_string()));
+    feishu_table
+        .entry("clawd_base_url".to_string())
+        .or_insert_with(|| toml::Value::String("http://127.0.0.1:8787".to_string()));
+    feishu_table
+        .entry("api_base_url".to_string())
+        .or_insert_with(|| toml::Value::String("https://open.feishu.cn".to_string()));
+    feishu_table
+        .entry("verification_token".to_string())
+        .or_insert_with(|| toml::Value::String(String::new()));
+    feishu_table
+        .entry("encrypt_key".to_string())
+        .or_insert_with(|| toml::Value::String(String::new()));
+    let output = toml::to_string_pretty(&value)?;
+    write_workspace_and_mounted_file(&state.workspace_root, "configs/channels/feishu.toml", &output)?;
+    Ok(())
+}
+
+async fn start_service_if_needed(state: &AppState, service: &str) -> anyhow::Result<()> {
+    if service_is_running(service) {
+        return Ok(());
+    }
+    let profile = std::env::var("RUSTCLAW_START_PROFILE")
+        .ok()
+        .filter(|v| matches!(v.as_str(), "debug" | "release"))
+        .unwrap_or_else(|| runtime_profile_default().to_string());
+    let script_name = service_start_script(service)
+        .ok_or_else(|| anyhow::anyhow!("unsupported service: {service}"))?;
+    validate_service_start_readiness(state, service)
+        .map_err(|err| anyhow::anyhow!(err))?;
+    let workspace = state.workspace_root.to_string_lossy();
+    let log_file = format!("logs/{}.log", service);
+    let cmd = format!(
+        "cd {} && mkdir -p logs .pids && nohup ./{} {} > {} 2>&1 &",
+        shell_escape_arg(workspace.as_ref()),
+        script_name,
+        shell_escape_arg(profile.as_str()),
+        shell_escape_arg(log_file.as_str())
+    );
+    spawn_background_shell(&cmd)?;
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    if !service_is_running(service) {
+        anyhow::bail!(
+            "service did not enter running state: {service}. check logs/{service}.log and channel config"
+        );
+    }
+    Ok(())
+}
+
+async fn maybe_complete_feishu_official_scan(
+    state: &AppState,
+    session: PendingChannelBindSession,
+) -> anyhow::Result<PendingChannelBindSession> {
+    if !matches!(session.status.as_str(), "pending" | "detected") {
+        return Ok(session);
+    }
+    let Some(device_code) = session
+        .install_device_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(session);
+    };
+
+    let poll = poll_feishu_official_registration(state, device_code).await?;
+    if let (Some(client_id), Some(client_secret), Some(open_id)) = (
+        poll.client_id.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        poll.client_secret
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        poll.user_info
+            .as_ref()
+            .and_then(|user| user.open_id.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    ) {
+        write_feishu_generated_credentials(state, client_id, client_secret)?;
+        if let Err(err) = start_service_if_needed(state, "feishud").await {
+            let mut db = state
+                .db
+                .lock()
+                .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+            return mark_pending_channel_bind_session_failed(&mut db, session.id, &err.to_string());
+        }
+        let mut db = state
+            .db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        let detected =
+            mark_pending_channel_bind_session_detected(&mut db, session.id, open_id, open_id)?;
+        return finalize_pending_channel_bind_session(&mut db, detected.id);
+    }
+
+    let Some(error_code) = poll.error.as_deref().map(str::trim).filter(|value| !value.is_empty())
+    else {
+        return Ok(session);
+    };
+    let error_text = poll
+        .error_description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|detail| format!("{error_code}: {detail}"))
+        .unwrap_or_else(|| error_code.to_string());
+    let mut db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    match error_code {
+        "authorization_pending" | "slow_down" => Ok(session),
+        "expired_token" => mark_pending_channel_bind_session_expired(&mut db, session.id),
+        "access_denied" => mark_pending_channel_bind_session_failed(&mut db, session.id, &error_text),
+        _ => mark_pending_channel_bind_session_failed(&mut db, session.id, &error_text),
+    }
+}
+
+fn find_detectable_feishu_bind_session(
+    db: &rusqlite::Connection,
+    bind_token: Option<&str>,
+) -> anyhow::Result<Option<PendingChannelBindSession>> {
+    if let Some(bind_token) = bind_token.map(str::trim).filter(|token| !token.is_empty()) {
+        return get_pending_channel_bind_session_by_token(db, bind_token);
+    }
+
+    let mut sessions = list_active_pending_channel_bind_sessions(db, "feishu", current_unix_ts())?;
+    if sessions.len() == 1 {
+        return Ok(sessions.pop());
+    }
+    Ok(None)
+}
+
+async fn start_feishu_bind_session_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<StartFeishuBindSessionRequest>,
+) -> (StatusCode, Json<ApiResponse<FeishuBindSessionStatusResponse>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can start feishu binds".to_string()),
+            }),
+        );
+    }
+
+    let ttl_seconds = clamp_feishu_bind_ttl_seconds(req.expires_in_seconds);
+    let default_expires_at = current_unix_ts().saturating_add(ttl_seconds as i64).to_string();
+    let session = {
+        let mut db = match state.db.lock() {
+            Ok(db) => db,
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some("db lock poisoned".to_string()),
+                    }),
+                );
+            }
+        };
+        match create_pending_channel_bind_session(
+            &mut db,
+            "feishu",
+            &identity.user_key,
+            &default_expires_at,
+        ) {
+            Ok(session) => session,
+            Err(err) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!("create feishu bind session failed: {err}")),
+                    }),
+                );
+            }
+        }
+    };
+
+    let config = match load_feishu_config_response(&state) {
+        Ok(config) => config,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read feishu config failed: {err}")),
+                }),
+            );
+        }
+    };
+    if config.bind_ready {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(feishu_bind_session_response(&state, session)),
+                error: None,
+            }),
+        );
+    }
+
+    let begin = match begin_feishu_official_registration(&state).await {
+        Ok(begin) => begin,
+        Err(err) => {
+            let mut db = match state.db.lock() {
+                Ok(db) => db,
+                Err(_) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ApiResponse {
+                            ok: false,
+                            data: None,
+                            error: Some("db lock poisoned".to_string()),
+                        }),
+                    );
+                }
+            };
+            let _ = mark_pending_channel_bind_session_failed(&mut db, session.id, &err.to_string());
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("start feishu official registration failed: {err}")),
+                }),
+            );
+        }
+    };
+    let begin_expire_seconds = begin.expire_in.unwrap_or(ttl_seconds);
+    let session_expires_at = current_unix_ts()
+        .saturating_add(begin_expire_seconds.min(ttl_seconds) as i64)
+        .to_string();
+    let mut db = match state.db.lock() {
+        Ok(db) => db,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("db lock poisoned".to_string()),
+                }),
+            );
+        }
+    };
+    match attach_pending_channel_bind_session_install_flow(
+        &mut db,
+        session.id,
+        &begin.device_code,
+        &begin.verification_uri_complete,
+        begin.interval.unwrap_or(5) as i64,
+        &session_expires_at,
+    ) {
+        Ok(session) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(feishu_bind_session_response(&state, session)),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("persist feishu official registration failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn get_feishu_bind_session_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(session_id): AxumPath<i64>,
+) -> (StatusCode, Json<ApiResponse<FeishuBindSessionStatusResponse>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can inspect feishu binds".to_string()),
+            }),
+        );
+    }
+
+    let session = {
+        let mut db = match state.db.lock() {
+            Ok(db) => db,
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some("db lock poisoned".to_string()),
+                    }),
+                );
+            }
+        };
+        match get_pending_channel_bind_session_by_id(&db, session_id) {
+            Ok(Some(session)) => {
+                if session.user_key != identity.user_key {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(ApiResponse {
+                            ok: false,
+                            data: None,
+                            error: Some("feishu bind session not found".to_string()),
+                        }),
+                    );
+                }
+                match maybe_expire_feishu_bind_session(&mut db, session) {
+                    Ok(session) => session,
+                    Err(err) => {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ApiResponse {
+                                ok: false,
+                                data: None,
+                                error: Some(format!("refresh feishu bind session failed: {err}")),
+                            }),
+                        );
+                    }
+                }
+            }
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some("feishu bind session not found".to_string()),
+                    }),
+                );
+            }
+            Err(err) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!("get feishu bind session failed: {err}")),
+                    }),
+                );
+            }
+        }
+    };
+
+    match maybe_complete_feishu_official_scan(&state, session).await {
+        Ok(session) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(feishu_bind_session_response(&state, session)),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("refresh feishu bind session failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn detect_feishu_bind_session_handler(
+    State(state): State<AppState>,
+    Json(req): Json<DetectFeishuBindSessionRequest>,
+) -> (StatusCode, Json<ApiResponse<DetectFeishuBindSessionResponse>>) {
+    let external_user_id = req.external_user_id.trim();
+    let external_chat_id = req.external_chat_id.trim();
+    if external_user_id.is_empty() || external_chat_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("external_user_id and external_chat_id are required".to_string()),
+            }),
+        );
+    }
+
+    let mut db = match state.db.lock() {
+        Ok(db) => db,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some("db lock poisoned".to_string()),
+                }),
+            );
+        }
+    };
+    let Some(session) = (match find_detectable_feishu_bind_session(&db, req.bind_token.as_deref()) {
+        Ok(session) => session,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("load feishu bind session failed: {err}")),
+                }),
+            );
+        }
+    }) else {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(DetectFeishuBindSessionResponse {
+                    matched: false,
+                    session: None,
+                }),
+                error: None,
+            }),
+        );
+    };
+
+    let session = match maybe_expire_feishu_bind_session(&mut db, session) {
+        Ok(session) => session,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("refresh feishu bind session failed: {err}")),
+                }),
+            );
+        }
+    };
+    if session.status == "expired" {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(DetectFeishuBindSessionResponse {
+                    matched: false,
+                    session: Some(feishu_bind_session_response(&state, session)),
+                }),
+                error: None,
+            }),
+        );
+    }
+
+    let session = if session.status == "bound" {
+        session
+    } else {
+        let detected = match mark_pending_channel_bind_session_detected(
+            &mut db,
+            session.id,
+            external_user_id,
+            external_chat_id,
+        ) {
+            Ok(session) => session,
+            Err(err) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!("detect feishu bind session failed: {err}")),
+                    }),
+                );
+            }
+        };
+        match finalize_pending_channel_bind_session(&mut db, detected.id) {
+            Ok(session) => session,
+            Err(err) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(format!("finalize feishu bind session failed: {err}")),
+                    }),
+                );
+            }
+        }
+    };
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(DetectFeishuBindSessionResponse {
+                matched: true,
+                session: Some(feishu_bind_session_response(&state, session)),
+            }),
+            error: None,
+        }),
+    )
 }
 
 async fn delete_auth_key_handler(
@@ -1502,6 +2332,231 @@ async fn update_wechat_config(
                 ok: false,
                 data: None,
                 error: Some(format!("reload wechat config failed: {err}")),
+            }),
+        ),
+    }
+}
+
+fn load_feishu_config_response(state: &AppState) -> anyhow::Result<FeishuConfigResponse> {
+    let value = read_feishu_config_value(state)?;
+    let feishu = value
+        .get("feishu")
+        .and_then(|v| v.as_table())
+        .cloned()
+        .unwrap_or_default();
+    let app_id = feishu
+        .get("app_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let app_secret = feishu
+        .get("app_secret")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let verification_token = feishu
+        .get("verification_token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let encrypt_key = feishu
+        .get("encrypt_key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let enabled = feishu
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let mode = feishu
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("long_connection")
+        .trim()
+        .to_string();
+    let bind_ready = enabled && !app_id.is_empty() && !app_secret.is_empty();
+    Ok(FeishuConfigResponse {
+        config_path: "configs/channels/feishu.toml".to_string(),
+        enabled,
+        mode: if mode.is_empty() {
+            "long_connection".to_string()
+        } else {
+            mode
+        },
+        listen: feishu
+            .get("listen")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.0.0.0:8789")
+            .to_string(),
+        clawd_base_url: feishu
+            .get("clawd_base_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("http://127.0.0.1:8787")
+            .to_string(),
+        api_base_url: feishu
+            .get("api_base_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("https://open.feishu.cn")
+            .to_string(),
+        app_id,
+        app_secret,
+        verification_token_configured: !verification_token.is_empty(),
+        encrypt_key_configured: !encrypt_key.is_empty(),
+        bind_ready,
+        restart_required: true,
+    })
+}
+
+async fn get_feishu_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<FeishuConfigResponse>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+    match load_feishu_config_response(&state) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("read feishu config failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn update_feishu_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateFeishuConfigRequest>,
+) -> (StatusCode, Json<ApiResponse<FeishuConfigResponse>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+
+    let mut value = match read_feishu_config_value(&state) {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read feishu config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let feishu_table = match ensure_toml_table(&mut value, &["feishu"]) {
+        Ok(table) => table,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("prepare feishu config failed: {err}")),
+                }),
+            );
+        }
+    };
+
+    let app_id = req.app_id.trim().to_string();
+    let app_secret = req.app_secret.trim().to_string();
+    let enabled = !app_id.is_empty() && !app_secret.is_empty();
+
+    feishu_table.insert("enabled".to_string(), toml::Value::Boolean(enabled));
+    feishu_table.insert("app_id".to_string(), toml::Value::String(app_id));
+    feishu_table.insert("app_secret".to_string(), toml::Value::String(app_secret));
+    feishu_table
+        .entry("mode".to_string())
+        .or_insert_with(|| toml::Value::String("long_connection".to_string()));
+    feishu_table
+        .entry("listen".to_string())
+        .or_insert_with(|| toml::Value::String("0.0.0.0:8789".to_string()));
+    feishu_table
+        .entry("clawd_base_url".to_string())
+        .or_insert_with(|| toml::Value::String("http://127.0.0.1:8787".to_string()));
+    feishu_table
+        .entry("api_base_url".to_string())
+        .or_insert_with(|| toml::Value::String("https://open.feishu.cn".to_string()));
+    feishu_table
+        .entry("verification_token".to_string())
+        .or_insert_with(|| toml::Value::String(String::new()));
+    feishu_table
+        .entry("encrypt_key".to_string())
+        .or_insert_with(|| toml::Value::String(String::new()));
+
+    let output = match toml::to_string_pretty(&value) {
+        Ok(output) => output,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("serialize feishu config failed: {err}")),
+                }),
+            );
+        }
+    };
+    if let Err(err) = write_workspace_and_mounted_file(
+        &state.workspace_root,
+        "configs/channels/feishu.toml",
+        &output,
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("write feishu config failed: {err}")),
+            }),
+        );
+    }
+
+    match load_feishu_config_response(&state) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("reload feishu config failed: {err}")),
             }),
         ),
     }
@@ -2727,7 +3782,35 @@ fn service_is_running(service: &str) -> bool {
 }
 
 fn daemon_process_pids(process_name: &str) -> Option<Vec<u32>> {
-    let entries = std::fs::read_dir("/proc").ok()?;
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        let output = StdCommand::new("ps")
+            .args(["-axo", "pid=,command="])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let self_pid = std::process::id();
+        let mut pids = Vec::new();
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || !trimmed.contains(process_name) {
+                continue;
+            }
+            let mut parts = trimmed.split_whitespace();
+            let Some(pid) = parts.next().and_then(|value| value.parse::<u32>().ok()) else {
+                continue;
+            };
+            if pid == self_pid {
+                continue;
+            }
+            let command = parts.collect::<Vec<_>>().join(" ");
+            if command.contains(process_name) {
+                pids.push(pid);
+            }
+        }
+        return Some(pids);
+    };
     let mut pids = Vec::new();
     let self_pid = std::process::id();
     for entry in entries.flatten() {
@@ -2775,6 +3858,32 @@ fn spawn_background_shell(cmd: &str) -> std::io::Result<()> {
         .stderr(StdProcessStdio::null())
         .spawn()?;
     Ok(())
+}
+
+fn validate_service_start_readiness(state: &AppState, service: &str) -> Result<(), String> {
+    match service {
+        "feishud" => {
+            let config = load_feishu_config_response(state)
+                .map_err(|err| format!("read feishu config failed: {err}"))?;
+            if !config.enabled {
+                return Err("service disabled".to_string());
+            }
+            if config.app_id.trim().is_empty() || config.app_secret.trim().is_empty() {
+                return Err("feishu app_id/app_secret are required".to_string());
+            }
+            if config.mode.eq_ignore_ascii_case("webhook")
+                && !config.verification_token_configured
+                && !config.encrypt_key_configured
+            {
+                return Err(
+                    "feishu webhook mode requires verification_token or encrypt_key"
+                        .to_string(),
+                );
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 async fn control_service(
@@ -2840,6 +3949,16 @@ async fn control_service(
                     }),
                 );
             };
+            if let Err(err) = validate_service_start_readiness(&state, service.as_str()) {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(err),
+                    }),
+                );
+            }
             let workspace = state.workspace_root.to_string_lossy();
             let log_file = format!("logs/{}.log", service);
             let cmd = format!(
@@ -3034,6 +4153,16 @@ async fn control_service(
                     }),
                 );
             };
+            if let Err(err) = validate_service_start_readiness(&state, service.as_str()) {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiResponse {
+                        ok: false,
+                        data: None,
+                        error: Some(err),
+                    }),
+                );
+            }
             let workspace = state.workspace_root.to_string_lossy();
             let log_file = format!("logs/{}.log", service);
             let cmd = format!(
@@ -3833,6 +4962,30 @@ struct UpdateWechatConfigRequest {
     request_timeout_seconds: u64,
     longpoll_timeout_ms: u64,
     text_chunk_chars: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FeishuConfigResponse {
+    config_path: String,
+    enabled: bool,
+    mode: String,
+    listen: String,
+    clawd_base_url: String,
+    api_base_url: String,
+    app_id: String,
+    app_secret: String,
+    verification_token_configured: bool,
+    encrypt_key_configured: bool,
+    bind_ready: bool,
+    restart_required: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateFeishuConfigRequest {
+    #[serde(default)]
+    app_id: String,
+    #[serde(default)]
+    app_secret: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5462,6 +6615,47 @@ fn saved_llm_vendor_runtime_fields(
     (base_url, api_key, provider_type)
 }
 
+fn llm_provider_type_for_vendor(selected_vendor: &str, vendor_api_format: Option<&str>) -> String {
+    if selected_vendor.trim().eq_ignore_ascii_case("minimax") {
+        normalize_minimax_api_format(vendor_api_format)
+    } else if selected_vendor.trim().eq_ignore_ascii_case("google") {
+        "google_gemini".to_string()
+    } else if selected_vendor.trim().eq_ignore_ascii_case("anthropic") {
+        "anthropic_claude".to_string()
+    } else {
+        "openai_compat".to_string()
+    }
+}
+
+fn build_llm_test_runtime(
+    selected_vendor: &str,
+    selected_model: &str,
+    vendor_base_url: &str,
+    vendor_api_key: &str,
+    vendor_api_format: Option<&str>,
+) -> Result<Arc<LlmProviderRuntime>, String> {
+    let provider_type = llm_provider_type_for_vendor(selected_vendor, vendor_api_format);
+    let config = claw_core::config::LlmProviderConfig {
+        name: format!("vendor-{}", selected_vendor.trim().to_ascii_lowercase()),
+        provider_type,
+        base_url: vendor_base_url.trim().to_string(),
+        api_key: vendor_api_key.trim().to_string(),
+        model: selected_model.trim().to_string(),
+        priority: 1,
+        timeout_seconds: 20,
+        max_concurrency: 1,
+    };
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(config.timeout_seconds))
+        .build()
+        .map_err(|err| format!("build llm test client failed: {err}"))?;
+    Ok(Arc::new(LlmProviderRuntime {
+        config,
+        client,
+        semaphore: Arc::new(Semaphore::new(1)),
+    }))
+}
+
 fn llm_runtime_differs(
     runtime_vendor: &str,
     runtime_model: &str,
@@ -5785,6 +6979,157 @@ async fn get_llm_config(
             error: None,
         }),
     )
+}
+
+async fn test_llm_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateLlmConfigRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
+    let selected_model = req.selected_model.trim().to_string();
+    if selected_vendor.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("selected_vendor is required".to_string()),
+            }),
+        );
+    }
+    if selected_model.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("selected_model is required".to_string()),
+            }),
+        );
+    }
+
+    let parsed = match read_skill_config_file(&state) {
+        Ok((_, parsed)) => parsed,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read llm config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let vendors = collect_llm_vendor_info(&parsed);
+    let Some(vendor_info) = vendors.iter().find(|item| {
+        item.get("name")
+            .and_then(|v| v.as_str())
+            .map(|name| name.eq_ignore_ascii_case(&selected_vendor))
+            .unwrap_or(false)
+    }) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("unsupported vendor: {selected_vendor}")),
+            }),
+        );
+    };
+
+    let allowed_models = vendor_info
+        .get("models")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if selected_vendor != "custom"
+        && !allowed_models.is_empty()
+        && !allowed_models.iter().any(|m| m == &selected_model)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!(
+                    "model is not in the configured pool for vendor {selected_vendor}: {selected_model}"
+                )),
+            }),
+        );
+    }
+
+    let vendor_base_url = req.vendor_base_url.as_deref().map(str::trim).unwrap_or("");
+    if vendor_base_url.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("vendor_base_url is required".to_string()),
+            }),
+        );
+    }
+    let vendor_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
+    let provider = match build_llm_test_runtime(
+        &selected_vendor,
+        &selected_model,
+        vendor_base_url,
+        vendor_api_key,
+        req.vendor_api_format.as_deref(),
+    ) {
+        Ok(provider) => provider,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(err),
+                }),
+            );
+        }
+    };
+
+    match crate::call_provider_with_retry(provider.clone(), LLM_CONNECTIVITY_TEST_PROMPT).await {
+        Ok(resp) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "success": true,
+                    "vendor": selected_vendor,
+                    "model": selected_model,
+                    "provider_type": provider.config.provider_type,
+                    "message": format!("连接测试通过：{} 可正常响应。", provider.config.name),
+                    "response_text": resp.text,
+                })),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!(
+                    "连接测试失败：vendor={} model={} {}",
+                    selected_vendor, selected_model, err
+                )),
+            }),
+        ),
+    }
 }
 
 async fn update_llm_config(
@@ -6628,8 +7973,108 @@ async fn local_interaction_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use axum::extract::State;
+    use axum::http::Request;
+    use axum::routing::post;
+    use axum::Router;
+    use crate::channel_send::FeishuSendConfig;
+    use crate::runtime::{CommandIntentRuntime, RateLimiter, ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy};
+    use rusqlite::Connection;
+    use serde_json::Value as JsonValue;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex, RwLock};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::net::TcpListener;
+    use tokio::sync::Semaphore;
+    use tower::ServiceExt;
+
+    fn test_app_state() -> AppState {
+        let root = temp_workspace_root();
+        let db = Connection::open_in_memory().expect("open sqlite");
+        db.execute_batch(crate::INIT_SQL).expect("init db");
+        crate::db_init::ensure_schedule_schema(&db).expect("schedule schema");
+        crate::db_init::ensure_memory_schema(&db).expect("memory schema");
+        crate::db_init::ensure_channel_schema(&db).expect("channel schema");
+        crate::ensure_key_auth_schema(&db).expect("create auth schema");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'admin', 1, '123', NULL)",
+            rusqlite::params!["rk-test-admin"],
+        )
+        .expect("insert admin key");
+        AppState {
+            started_at: std::time::Instant::now(),
+            queue_limit: 16,
+            db: Arc::new(Mutex::new(db)),
+            llm_providers: Vec::new(),
+            agents_by_id: Arc::new(HashMap::new()),
+            skill_timeout_seconds: 30,
+            skill_runner_path: root.join("target/debug/skill-runner"),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                registry: None,
+                skills_list: Arc::new(std::collections::HashSet::new()),
+            }))),
+            skill_semaphore: Arc::new(Semaphore::new(1)),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 60))),
+            maintenance: claw_core::config::MaintenanceConfig::default(),
+            memory: claw_core::config::MemoryConfig::default(),
+            workspace_root: root.clone(),
+            default_locator_search_dir: root.clone(),
+            locator_scan_max_depth: 4,
+            locator_scan_max_files: 200,
+            tools_policy: Arc::new(
+                ToolsPolicy::from_config(&claw_core::config::ToolsConfig::default())
+                    .expect("tools policy"),
+            ),
+            active_provider_type: None,
+            cmd_timeout_seconds: 10,
+            max_cmd_length: 4096,
+            allow_path_outside_workspace: false,
+            allow_sudo: false,
+            worker_task_timeout_seconds: 60,
+            worker_task_heartbeat_seconds: 5,
+            worker_running_no_progress_timeout_seconds: 60,
+            worker_running_recovery_check_interval_seconds: 10,
+            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            routing: claw_core::config::RoutingConfig::default(),
+            persona_prompt: String::new(),
+            command_intent: CommandIntentRuntime {
+                all_result_suffixes: Vec::new(),
+                default_locale: "zh-CN".to_string(),
+            },
+            schedule: ScheduleRuntime {
+                timezone: "Asia/Shanghai".to_string(),
+                intent_prompt_template: String::new(),
+                intent_prompt_file: String::new(),
+                intent_rules_template: String::new(),
+                locale: "zh-CN".to_string(),
+                i18n_dict: HashMap::new(),
+            },
+            telegram_bot_token: String::new(),
+            telegram_configured_bot_names: Arc::new(Vec::new()),
+            whatsapp_cloud_enabled: false,
+            whatsapp_api_base: String::new(),
+            whatsapp_access_token: String::new(),
+            whatsapp_phone_number_id: String::new(),
+            whatsapp_web_enabled: false,
+            whatsapp_web_bridge_base_url: String::new(),
+            future_adapters_enabled: Arc::new(Vec::new()),
+            wechat_send_config: None,
+            feishu_send_config: Some(FeishuSendConfig {
+                app_id: "cli_test_feishu_app".to_string(),
+                app_secret: "secret".to_string(),
+                api_base_url: "https://open.feishu.cn".to_string(),
+            }),
+            lark_send_config: None,
+            http_client: reqwest::Client::new(),
+            config_path_for_reload: "configs/config.toml".to_string(),
+            registry_path_for_reload: None,
+            skill_switches_for_reload: Arc::new(HashMap::new()),
+            initial_skills_list_for_reload: Vec::new(),
+        }
+    }
 
     fn temp_workspace_root() -> PathBuf {
         let unique = SystemTime::now()
@@ -6762,5 +8207,396 @@ models = ["MiniMax-M2.7"]
             minimax.get("api_format").and_then(|v| v.as_str()),
             Some("openai_compat")
         );
+    }
+
+    #[tokio::test]
+    async fn llm_test_endpoint_surfaces_upstream_auth_errors() {
+        let state = test_app_state();
+        let workspace_root = state.workspace_root.clone();
+        write_workspace_and_mounted_file(
+            &workspace_root,
+            "configs/config.toml",
+            r#"[llm]
+selected_vendor = "custom"
+selected_model = "test-model"
+
+[llm.custom]
+api_key = ""
+base_url = "https://example.invalid/v1"
+model = "test-model"
+models = []
+"#,
+        )
+        .expect("write llm config");
+
+        async fn mock_chat(headers: HeaderMap) -> (StatusCode, Json<JsonValue>) {
+            let auth = headers
+                .get(axum::http::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("");
+            if auth == "Bearer test-key" {
+                (
+                    StatusCode::OK,
+                    Json(json!({
+                        "choices": [
+                            {
+                                "message": { "content": "OK" },
+                                "finish_reason": "stop"
+                            }
+                        ]
+                    })),
+                )
+            } else {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "type": "error",
+                        "error": {
+                            "type": "authentication_error",
+                            "message": "invalid api key"
+                        }
+                    })),
+                )
+            }
+        }
+
+        let mock_app = Router::new().route("/v1/chat/completions", post(mock_chat));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock");
+        let addr = listener.local_addr().expect("mock addr");
+        tokio::spawn(async move {
+            axum::serve(listener, mock_app).await.expect("serve mock");
+        });
+
+        let app = build_ui_router().with_state(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/llm/test")
+                    .header("content-type", "application/json")
+                    .header("x-rustclaw-key", "rk-test-admin")
+                    .body(Body::from(format!(
+                        r#"{{
+                            "selected_vendor":"custom",
+                            "selected_model":"test-model",
+                            "vendor_base_url":"http://{addr}/v1",
+                            "vendor_api_key":"bad-key"
+                        }}"#
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read body");
+        let json: JsonValue = serde_json::from_slice(&body).expect("parse json");
+        assert_eq!(json["ok"], JsonValue::Bool(false));
+        assert!(
+            json["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("invalid api key")
+        );
+    }
+
+    #[tokio::test]
+    async fn feishu_bind_session_start_and_poll() {
+        let state = test_app_state();
+        let app = build_ui_router().with_state(state);
+
+        let start = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/channel-binds/feishu/start")
+                    .header("content-type", "application/json")
+                    .header("x-rustclaw-key", "rk-test-admin")
+                    .body(Body::from("{}"))
+                    .expect("start request"),
+            )
+            .await
+            .expect("start response");
+        assert_eq!(start.status(), StatusCode::OK);
+        let start_body = axum::body::to_bytes(start.into_body(), usize::MAX)
+            .await
+            .expect("read start body");
+        let start_json: JsonValue =
+            serde_json::from_slice(&start_body).expect("parse start json");
+        assert_eq!(start_json["ok"], JsonValue::Bool(true));
+        assert_eq!(start_json["data"]["channel"], JsonValue::String("feishu".to_string()));
+        assert_eq!(start_json["data"]["status"], JsonValue::String("pending".to_string()));
+        let session_id = start_json["data"]["session_id"]
+            .as_i64()
+            .expect("session id");
+        assert!(start_json["data"]["bind_token"].as_str().is_some());
+
+        let poll = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/admin/channel-binds/feishu/{session_id}"))
+                    .header("x-rustclaw-key", "rk-test-admin")
+                    .body(Body::empty())
+                    .expect("poll request"),
+            )
+            .await
+            .expect("poll response");
+        assert_eq!(poll.status(), StatusCode::OK);
+        let poll_body = axum::body::to_bytes(poll.into_body(), usize::MAX)
+            .await
+            .expect("read poll body");
+        let poll_json: JsonValue =
+            serde_json::from_slice(&poll_body).expect("parse poll json");
+        assert_eq!(poll_json["ok"], JsonValue::Bool(true));
+        assert_eq!(poll_json["data"]["session_id"], JsonValue::from(session_id));
+        assert_eq!(poll_json["data"]["status"], JsonValue::String("pending".to_string()));
+        assert_eq!(poll_json["data"]["channel"], JsonValue::String("feishu".to_string()));
+    }
+
+    #[tokio::test]
+    async fn feishu_config_save_updates_bind_entry_url() {
+        let mut state = test_app_state();
+        state.feishu_send_config = None;
+        let workspace_root = state.workspace_root.clone();
+        let app = build_ui_router().with_state(state);
+
+        let save = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/feishu/config")
+                    .header("content-type", "application/json")
+                    .header("x-rustclaw-key", "rk-test-admin")
+                    .body(Body::from(
+                        r#"{"app_id":"cli_saved_feishu_app","app_secret":"saved-secret"}"#,
+                    ))
+                    .expect("save request"),
+            )
+            .await
+            .expect("save response");
+        assert_eq!(save.status(), StatusCode::OK);
+
+        let saved_raw = std::fs::read_to_string(workspace_root.join("configs/channels/feishu.toml"))
+            .expect("read saved feishu config");
+        assert!(saved_raw.contains("enabled = true"));
+        assert!(saved_raw.contains("app_id = \"cli_saved_feishu_app\""));
+        assert!(saved_raw.contains("app_secret = \"saved-secret\""));
+
+        let start = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/channel-binds/feishu/start")
+                    .header("content-type", "application/json")
+                    .header("x-rustclaw-key", "rk-test-admin")
+                    .body(Body::from("{}"))
+                    .expect("start request"),
+            )
+            .await
+            .expect("start response");
+        assert_eq!(start.status(), StatusCode::OK);
+        let start_body = axum::body::to_bytes(start.into_body(), usize::MAX)
+            .await
+            .expect("read start body");
+        let start_json: JsonValue =
+            serde_json::from_slice(&start_body).expect("parse start json");
+        assert_eq!(
+            start_json["data"]["entry_url"],
+            JsonValue::String(
+                "https://applink.feishu.cn/client/bot/open?appId=cli_saved_feishu_app"
+                    .to_string(),
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn feishu_official_scan_flow_configures_and_binds_current_identity() {
+        let state = test_app_state();
+        let workspace_root = state.workspace_root.clone();
+        let db = state.db.clone();
+
+        write_workspace_and_mounted_file(
+            &workspace_root,
+            "configs/channels/feishu.toml",
+            r#"[feishu]
+enabled = false
+mode = "long_connection"
+listen = "0.0.0.0:8789"
+clawd_base_url = "http://127.0.0.1:8787"
+app_id = ""
+app_secret = ""
+verification_token = ""
+encrypt_key = ""
+request_timeout_seconds = 30
+task_delivery_timeout_seconds = 180
+text_chunk_chars = 4000
+"#,
+        )
+        .expect("write feishu config");
+
+        std::fs::write(
+            workspace_root.join("start-feishud.sh"),
+            "#!/usr/bin/env bash\nset -euo pipefail\nDIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\nexec \"$DIR/target/release/feishud\"\n",
+        )
+        .expect("write start script");
+        std::fs::create_dir_all(workspace_root.join("target/release")).expect("mkdir target");
+        std::fs::write(
+            workspace_root.join("target/release/feishud"),
+            "#!/usr/bin/env bash\nwhile true; do sleep 30; done\n",
+        )
+        .expect("write fake feishud");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                workspace_root.join("start-feishud.sh"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .expect("chmod start script");
+            std::fs::set_permissions(
+                workspace_root.join("target/release/feishud"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .expect("chmod fake binary");
+        }
+
+        async fn mock_registration(
+            State(poll_count): State<Arc<AtomicUsize>>,
+            body: String,
+        ) -> Json<JsonValue> {
+            let action = body
+                .split('&')
+                .find_map(|part| part.strip_prefix("action="))
+                .unwrap_or("");
+            match action {
+                "init" => Json(json!({
+                    "supported_auth_methods": ["client_secret"]
+                })),
+                "begin" => Json(json!({
+                    "device_code": "device-test-123",
+                    "verification_uri_complete": "https://accounts.feishu.cn/mock-scan",
+                    "interval": 1,
+                    "expire_in": 600
+                })),
+                "poll" => {
+                    poll_count.fetch_add(1, Ordering::SeqCst);
+                    Json(json!({
+                        "client_id": "cli_scan_generated_app",
+                        "client_secret": "scan_generated_secret",
+                        "user_info": {
+                            "open_id": "ou_scan_bound_user"
+                        }
+                    }))
+                }
+                _ => Json(json!({
+                    "error": "unsupported_action"
+                })),
+            }
+        }
+
+        let poll_count = Arc::new(AtomicUsize::new(0));
+        let mock_app = Router::new()
+            .route("/oauth/v1/app/registration", post(mock_registration))
+            .with_state(poll_count.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock");
+        let addr = listener.local_addr().expect("mock addr");
+        tokio::spawn(async move {
+            axum::serve(listener, mock_app).await.expect("serve mock");
+        });
+
+        unsafe {
+            std::env::set_var(
+                "RUSTCLAW_FEISHU_ACCOUNTS_BASE_URL",
+                format!("http://{addr}"),
+            );
+        }
+
+        let app = build_ui_router().with_state(state);
+
+        let start = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/channel-binds/feishu/start")
+                    .header("content-type", "application/json")
+                    .header("x-rustclaw-key", "rk-test-admin")
+                    .body(Body::from("{}"))
+                    .expect("start request"),
+            )
+            .await
+            .expect("start response");
+        assert_eq!(start.status(), StatusCode::OK);
+        let start_body = axum::body::to_bytes(start.into_body(), usize::MAX)
+            .await
+            .expect("read start body");
+        let start_json: JsonValue =
+            serde_json::from_slice(&start_body).expect("parse start json");
+        let session_id = start_json["data"]["session_id"].as_i64().expect("session id");
+        assert_eq!(
+            start_json["data"]["entry_url"],
+            JsonValue::String("https://accounts.feishu.cn/mock-scan".to_string())
+        );
+
+        let poll = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/admin/channel-binds/feishu/{session_id}"))
+                    .header("x-rustclaw-key", "rk-test-admin")
+                    .body(Body::empty())
+                    .expect("poll request"),
+            )
+            .await
+            .expect("poll response");
+        assert_eq!(poll.status(), StatusCode::OK);
+        let poll_body = axum::body::to_bytes(poll.into_body(), usize::MAX)
+            .await
+            .expect("read poll body");
+        let poll_json: JsonValue =
+            serde_json::from_slice(&poll_body).expect("parse poll json");
+        assert_eq!(poll_json["data"]["status"], JsonValue::String("bound".to_string()));
+        assert_eq!(
+            poll_json["data"]["external_user_id"],
+            JsonValue::String("ou_scan_bound_user".to_string())
+        );
+
+        let saved_raw = std::fs::read_to_string(workspace_root.join("configs/channels/feishu.toml"))
+            .expect("read saved config");
+        assert!(saved_raw.contains("enabled = true"));
+        assert!(saved_raw.contains("app_id = \"cli_scan_generated_app\""));
+        assert!(saved_raw.contains("app_secret = \"scan_generated_secret\""));
+
+        let binding: (String, String, String) = db
+            .lock()
+            .expect("db lock")
+            .query_row(
+                "SELECT channel, external_user_id, user_key
+                 FROM channel_bindings
+                 WHERE channel = 'feishu'
+                 ORDER BY id DESC
+                 LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read binding");
+        assert_eq!(
+            binding,
+            (
+                "feishu".to_string(),
+                "ou_scan_bound_user".to_string(),
+                "rk-test-admin".to_string(),
+            )
+        );
+        assert!(poll_count.load(Ordering::SeqCst) >= 1);
+
+        unsafe {
+            std::env::remove_var("RUSTCLAW_FEISHU_ACCOUNTS_BASE_URL");
+        }
     }
 }

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   BellRing,
+  Check,
   ChevronDown,
+  Copy,
   Database,
   FileText,
   LayoutDashboard,
@@ -18,10 +20,22 @@ import {
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import QRCode from "qrcode";
 import {
   countCompletedDashboardSteps,
   getDashboardOverviewItems,
 } from "./lib/dashboard-home";
+import { copyAuthKeyValue } from "./lib/auth-keys";
+import { formatDateOnlyHuman } from "./lib/date-format";
+import {
+  fetchFeishuBindSession,
+  getFeishuBindStatusCopy,
+  getFeishuSetupGuidance,
+  getFeishuStepStatus,
+  isFeishuBindTerminalStatus,
+  startFeishuBindSession,
+  type FeishuBindSessionResponse,
+} from "./lib/feishu-bind";
 import { hasUnsavedLlmDraftChanges } from "./lib/llm-config";
 
 interface ApiResponse<T> {
@@ -163,6 +177,15 @@ interface LlmConfigResponse {
   restart_required: boolean;
 }
 
+interface LlmTestResponse {
+  success: boolean;
+  vendor: string;
+  model: string;
+  provider_type: string;
+  message: string;
+  response_text?: string;
+}
+
 interface WechatConfigResponse {
   config_path: string;
   enabled: boolean;
@@ -175,6 +198,21 @@ interface WechatConfigResponse {
   text_chunk_chars: number;
   bot_token_configured: boolean;
   saved_session_present: boolean;
+  restart_required: boolean;
+}
+
+interface FeishuConfigResponse {
+  config_path: string;
+  enabled: boolean;
+  mode: string;
+  listen: string;
+  clawd_base_url: string;
+  api_base_url: string;
+  app_id: string;
+  app_secret: string;
+  verification_token_configured: boolean;
+  encrypt_key_configured: boolean;
+  bind_ready: boolean;
   restart_required: boolean;
 }
 
@@ -559,6 +597,9 @@ export default function App() {
   const [wechatConfigDraft, setWechatConfigDraft] = useState<WechatConfigResponse | null>(null);
   const [wechatConfigSaving, setWechatConfigSaving] = useState(false);
   const [wechatConfigSaveMessage, setWechatConfigSaveMessage] = useState<string | null>(null);
+  const [feishuConfigLoading, setFeishuConfigLoading] = useState(false);
+  const [feishuConfigError, setFeishuConfigError] = useState<string | null>(null);
+  const [feishuConfigData, setFeishuConfigData] = useState<FeishuConfigResponse | null>(null);
   const [telegramConfigLoading, setTelegramConfigLoading] = useState(false);
   const [telegramConfigError, setTelegramConfigError] = useState<string | null>(null);
   const [telegramConfigData, setTelegramConfigData] = useState<TelegramConfigResponse | null>(null);
@@ -588,6 +629,9 @@ export default function App() {
   const [llmDraftBaseUrl, setLlmDraftBaseUrl] = useState("");
   const [llmDraftApiKey, setLlmDraftApiKey] = useState("");
   const [llmDraftApiFormat, setLlmDraftApiFormat] = useState("openai_compat");
+  const [llmTestLoading, setLlmTestLoading] = useState(false);
+  const [llmTestMessage, setLlmTestMessage] = useState<string | null>(null);
+  const [llmTestError, setLlmTestError] = useState<string | null>(null);
   const [multimodalConfigData, setMultimodalConfigData] = useState<ModelConfigResponse | null>(null);
   const [multimodalConfigLoading, setMultimodalConfigLoading] = useState(false);
   const [multimodalConfigError, setMultimodalConfigError] = useState<string | null>(null);
@@ -649,6 +693,10 @@ export default function App() {
   const [wechatSessionKey, setWechatSessionKey] = useState<string | null>(null);
   const [wechatQrStarting, setWechatQrStarting] = useState(false);
   const [wechatQrPreviewRequested, setWechatQrPreviewRequested] = useState(false);
+  const [feishuBindLoading, setFeishuBindLoading] = useState(false);
+  const [feishuBindError, setFeishuBindError] = useState<string | null>(null);
+  const [feishuBindSession, setFeishuBindSession] = useState<FeishuBindSessionResponse | null>(null);
+  const [feishuBindQrDataUrl, setFeishuBindQrDataUrl] = useState<string | null>(null);
   const [channelBindingChannel, setChannelBindingChannel] = useState<ChannelName>("telegram");
   const [channelBindingExternalUserId, setChannelBindingExternalUserId] = useState("");
   const [channelBindingExternalChatId, setChannelBindingExternalChatId] = useState("");
@@ -664,6 +712,8 @@ export default function App() {
   const [authKeyCreateLoading, setAuthKeyCreateLoading] = useState(false);
   const [authKeyCreateError, setAuthKeyCreateError] = useState<string | null>(null);
   const [authKeyActionLoading, setAuthKeyActionLoading] = useState<number | null>(null);
+  const [authKeyCopyingTarget, setAuthKeyCopyingTarget] = useState<number | "new" | null>(null);
+  const [authKeyCopiedTarget, setAuthKeyCopiedTarget] = useState<number | "new" | null>(null);
   const [authKeyActionError, setAuthKeyActionError] = useState<string | null>(null);
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
   const [diagnosticsRefreshing, setDiagnosticsRefreshing] = useState(false);
@@ -780,6 +830,20 @@ export default function App() {
       return t(
         `${serviceLabel}服务当前没有启用，请先完成配置并保存后再试。`,
         `${serviceLabel} is not enabled yet. Finish the configuration and save it before trying again.`,
+      );
+    }
+
+    if (rawMessage.includes("app_id/app_secret")) {
+      return t(
+        `${serviceLabel}还缺少 App ID 或 App Secret。先把这两项填好并保存，再启动服务。`,
+        `${serviceLabel} still needs an App ID or App Secret. Fill them in, save, and then start the service.`,
+      );
+    }
+
+    if (rawMessage.includes("verification_token or encrypt_key")) {
+      return t(
+        `${serviceLabel}当前是 webhook 模式，还需要 Verification Token 或 Encrypt Key，补齐后才能启动。`,
+        `${serviceLabel} is in webhook mode and still needs a Verification Token or Encrypt Key before it can start.`,
       );
     }
 
@@ -1439,6 +1503,7 @@ export default function App() {
     setAuthKeyCreateLoading(true);
     setAuthKeyCreateError(null);
     setNewlyCreatedKey(null);
+    setAuthKeyCopiedTarget(null);
     try {
       const res = await apiFetch("/v1/admin/auth-keys", {
         method: "POST",
@@ -1455,6 +1520,74 @@ export default function App() {
       setAuthKeyCreateError(err instanceof Error ? err.message : "未知错误");
     } finally {
       setAuthKeyCreateLoading(false);
+    }
+  };
+
+  const fetchFullAuthKey = async (keyId: number) => {
+    const res = await apiFetch(`/v1/admin/auth-keys/${keyId}/full`);
+    const body = (await res.json()) as ApiResponse<{ user_key: string }>;
+    if (!res.ok || !body.ok || !body.data?.user_key) {
+      throw new Error(body.error || `完整 Key 获取失败 (${res.status})`);
+    }
+    return body.data.user_key;
+  };
+
+  const copyAuthKey = async (options: { target: number | "new"; keyId?: number; plaintextKey?: string | null }) => {
+    setAuthKeyActionError(null);
+    setAuthKeyCopyingTarget(options.target);
+    try {
+      await copyAuthKeyValue({
+        keyId: options.keyId,
+        plaintextKey: options.plaintextKey,
+        fetchFullAuthKey,
+        writeClipboard: async (value) => {
+          await navigator.clipboard.writeText(value);
+        },
+      });
+      setAuthKeyCopiedTarget(options.target);
+    } catch (err) {
+      setAuthKeyActionError(err instanceof Error ? err.message : "未知错误");
+    } finally {
+      setAuthKeyCopyingTarget(null);
+    }
+  };
+
+  const beginFeishuBind = async () => {
+    setFeishuBindLoading(true);
+    setFeishuBindError(null);
+    try {
+      const session = await startFeishuBindSession(apiFetch);
+      setFeishuBindSession(session);
+    } catch (err) {
+      setFeishuBindError(err instanceof Error ? err.message : "未知错误");
+    } finally {
+      setFeishuBindLoading(false);
+    }
+  };
+
+  const refreshFeishuBindSession = async (sessionId: number, silent = false) => {
+    if (!silent) {
+      setFeishuBindLoading(true);
+      setFeishuBindError(null);
+    }
+    try {
+      const session = await fetchFeishuBindSession(apiFetch, sessionId);
+      setFeishuBindSession(session);
+      if (session.status === "bound") {
+        await fetchFeishuConfig();
+        await fetchHealth();
+      }
+      return session;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      if (!silent) {
+        setFeishuBindError(message);
+      }
+      return null;
+    } finally {
+      if (!silent) {
+        setFeishuBindLoading(false);
+      }
     }
   };
 
@@ -1570,6 +1703,24 @@ export default function App() {
       setWechatConfigError(message);
     } finally {
       setWechatConfigLoading(false);
+    }
+  };
+
+  const fetchFeishuConfig = async () => {
+    setFeishuConfigLoading(true);
+    setFeishuConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/feishu/config`);
+      const body = (await res.json()) as ApiResponse<FeishuConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `飞书配置获取失败 (${res.status})`);
+      }
+      setFeishuConfigData(body.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setFeishuConfigError(message);
+    } finally {
+      setFeishuConfigLoading(false);
     }
   };
 
@@ -1975,6 +2126,51 @@ export default function App() {
       setLlmConfigError(message);
     } finally {
       setLlmConfigSaving(false);
+    }
+  };
+
+  const testLlmConfig = async () => {
+    if (!llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()) {
+      setLlmTestMessage(null);
+      setLlmTestError(
+        t(
+          "请先补齐厂商、模型和 Base URL，再测试连接。",
+          "Please fill in vendor, model, and base URL before testing the connection.",
+        ),
+      );
+      return;
+    }
+    setLlmTestLoading(true);
+    setLlmTestMessage(null);
+    setLlmTestError(null);
+    try {
+      const res = await apiFetch(`/v1/llm/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selected_vendor: llmDraftVendor,
+          selected_model: llmDraftModel,
+          vendor_base_url: llmDraftBaseUrl,
+          vendor_api_key: llmDraftApiKey.trim(),
+          vendor_api_format: llmDraftVendor === "minimax" ? llmDraftApiFormat : undefined,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<LlmTestResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `模型连接测试失败 (${res.status})`);
+      }
+      const message = hasUnsavedLlmChanges
+        ? `${body.data.message}${t(
+            " 这是页面里的临时草稿；确认没问题后，再点“保存模型设置”。",
+            " This used the current draft values; save the settings once you're happy with them.",
+          )}`
+        : body.data.message;
+      setLlmTestMessage(message);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setLlmTestError(message);
+    } finally {
+      setLlmTestLoading(false);
     }
   };
 
@@ -2507,6 +2703,11 @@ export default function App() {
     window.localStorage.setItem(STORAGE_KEYS.currentPage, currentPage);
   }, [currentPage]);
 
+  useEffect(() => {
+    setLlmTestMessage(null);
+    setLlmTestError(null);
+  }, [llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
+
   // 切换导航页时仅将主内容区滚动到顶部，不移动导航栏（不调用 scrollIntoView，避免小屏横向导航条滚动或整页抖动）
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
@@ -2518,6 +2719,7 @@ export default function App() {
     void fetchSkills();
     void fetchSkillsConfig();
     void fetchWechatConfig();
+    void fetchFeishuConfig();
     void fetchTelegramConfig();
     void fetchLlmConfig();
     void fetchLocalInteractionContext();
@@ -2543,6 +2745,7 @@ export default function App() {
     if (currentPage === "channels") {
       void fetchAuthKeys();
       void fetchWechatConfig();
+      void fetchFeishuConfig();
       void fetchTelegramConfig();
     }
   }, [currentPage, uiAuthReady, isAdminIdentity]);
@@ -2641,6 +2844,48 @@ export default function App() {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [wechatLoginDialogOpen]);
+
+  useEffect(() => {
+    const entryUrl = feishuBindSession?.entry_url?.trim() ?? "";
+    if (!entryUrl) {
+      setFeishuBindQrDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void QRCode.toDataURL(entryUrl, {
+      width: 288,
+      margin: 1,
+      color: {
+        dark: "#111827",
+        light: "#ffffff",
+      },
+    })
+      .then((url) => {
+        if (!cancelled) {
+          setFeishuBindQrDataUrl(url);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setFeishuBindError(err instanceof Error ? err.message : "未知错误");
+          setFeishuBindQrDataUrl(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [feishuBindSession?.entry_url]);
+
+  useEffect(() => {
+    if (!uiAuthReady) return;
+    if (!feishuBindSession) return;
+    if (isFeishuBindTerminalStatus(feishuBindSession.status)) return;
+    const timer = window.setInterval(() => {
+      void refreshFeishuBindSession(feishuBindSession.session_id, true);
+    }, 1800);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uiAuthReady, feishuBindSession?.session_id, feishuBindSession?.status]);
 
   const maskedSavedUiKey = useMemo(() => {
     if (authMode === "webd") return "";
@@ -2893,6 +3138,30 @@ export default function App() {
     if (health?.telegramd_healthy === true) return "done";
     return "attention";
   }, [health?.telegramd_healthy, telegramBotTokenConfigured]);
+  const feishuBindStatusCopy = useMemo(
+    () => getFeishuBindStatusCopy(feishuBindSession?.status ?? "pending"),
+    [feishuBindSession?.status],
+  );
+  const feishuSetupGuidance = useMemo(
+    () =>
+      getFeishuSetupGuidance({
+        bindReady: feishuConfigData?.bind_ready ?? false,
+        hasUnsavedConfigChanges: false,
+        serviceHealthy: health?.feishud_healthy === true,
+        hasActiveSession: Boolean(
+          feishuBindSession && !isFeishuBindTerminalStatus(feishuBindSession.status),
+        ),
+        bound: feishuBindSession?.status === "bound",
+      }),
+    [feishuBindSession, feishuConfigData?.bind_ready, health?.feishud_healthy],
+  );
+  const feishuStepStatus = useMemo<"done" | "attention" | "todo">(() => {
+    return getFeishuStepStatus({
+      bindReady: feishuConfigData?.bind_ready ?? false,
+      serviceHealthy: health?.feishud_healthy === true,
+      session: feishuBindSession,
+    });
+  }, [feishuBindSession, feishuConfigData?.bind_ready, health?.feishud_healthy]);
   const wechatStatusSummary = useMemo(() => {
     if (wechatStepStatus === "done") {
       return t("设置和登录都已完成，现在可以直接通过微信发送消息。", "Setup and sign-in are complete. You can now send messages through WeChat.");
@@ -3011,8 +3280,8 @@ export default function App() {
         desc: t("在这里发一条最简单的测试消息，确认模型和已接入渠道已经真正可用。", "Send a simple test message here to confirm the model and connected channel really work."),
       },
       services: {
-        title: t("频道接入", "Channel Setup"),
-        desc: t("微信和 Telegram 都在这里接入。按你要使用的渠道完成配置即可。", "Connect WeChat and Telegram here. Configure the channel you plan to use."),
+        title: t("渠道接入", "Channel Setup"),
+        desc: t("微信、Telegram 和飞书都在这里接入。按你要使用的渠道完成配置即可。", "Connect WeChat, Telegram, and Feishu here. Configure only the channel you plan to use."),
       },
       channels: {
         title: t("账号绑定", "Account Binding"),
@@ -3065,7 +3334,7 @@ export default function App() {
       },
       {
         id: "services" as const,
-        label: t("频道接入", "Channel Setup"),
+        label: t("渠道接入", "Channel Setup"),
         hint: t("连微信 TG", "connect channels"),
         icon: <Server className="h-4 w-4" />,
       },
@@ -3111,10 +3380,10 @@ export default function App() {
       {
         key: "wechat",
         title: t("连接机器人", "Connect the bot"),
-        description: t("如果你准备接入微信或 Telegram，就到频道接入页继续完成配置、启动服务和登录验证。", "If you are ready to connect WeChat or Telegram, continue in Channel Setup to finish configuration, start the service, and complete sign-in verification."),
+        description: t("如果你准备接入微信、Telegram 或飞书，就到渠道接入页继续完成配置、启动服务和登录验证。", "If you are ready to connect WeChat, Telegram, or Feishu, continue in Channel Setup to finish configuration, start the service, and complete sign-in verification."),
         status: wechatStepStatus,
         page: "services" as const,
-        cta: t("去频道接入", "Open Channel Setup"),
+        cta: t("去渠道接入", "Open Channel Setup"),
       },
     ],
     [lang, llmStepStatus, testMessageStepStatus, wechatStepStatus],
@@ -3728,18 +3997,18 @@ export default function App() {
                   <div className="max-w-2xl">
                     <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("渠道接入", "Channel setup")}</p>
                     <h3 className="mt-2 text-xl font-semibold tracking-tight">
-                      {t("微信和 Telegram 都可以在这里接入。", "You can connect both WeChat and Telegram here.")}
+                      {t("微信、Telegram 和飞书都可以在这里接入。", "WeChat, Telegram, and Feishu can all be connected here.")}
                     </h3>
                     <p className="mt-3 text-sm leading-7 text-white/70">
                       {t(
-                        "按你要使用的渠道完成配置即可。需要微信时，打开接入窗口完成设置和扫码；需要 Telegram 时，填好 Bot Token 后保存并启动服务。",
-                        "Configure the channel you plan to use. For WeChat, open the setup window to finish configuration and QR sign-in. For Telegram, enter the bot token, save it, and start the service.",
+                        "按你要使用的渠道完成配置即可。微信支持扫码登录，Telegram 支持 Bot Token 接入，飞书支持扫码进入机器人后自动绑定当前身份。",
+                        "Configure only the channel you plan to use. WeChat supports QR sign-in, Telegram uses a bot token, and Feishu can bind the current identity after you scan into the bot.",
                       )}
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                <div className="mt-5 grid gap-4 xl:grid-cols-3">
                   <div className="setup-channel-card channel-setup-card flex h-full flex-col">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -3835,6 +4104,97 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+
+                  <div className="setup-channel-card channel-setup-card flex h-full flex-col">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-lg font-semibold text-white">{t("飞书", "Feishu")}</h4>
+                        <p className="mt-2 text-sm leading-7 text-white/65">
+                          {t(
+                            "开始后会生成二维码，扫码即可完成接入。",
+                            "Start to generate a QR code, then scan to finish setup.",
+                          )}
+                        </p>
+                      </div>
+                      <span className={feishuStepStatus === "done" ? "setup-status setup-status-done" : feishuStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
+                        {feishuStepStatus === "done" ? t("已可用", "Ready") : feishuStepStatus === "attention" ? t("进行中", "In progress") : t("还没开始", "Not started")}
+                      </span>
+                    </div>
+
+                    <p className="mt-4 text-sm leading-7 text-white/65">
+                      {lang === "zh" ? feishuSetupGuidance.zhSummary : feishuSetupGuidance.enSummary}
+                    </p>
+
+                    {feishuConfigError ? (
+                      <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{feishuConfigError}</p>
+                    ) : null}
+                    <p className="mt-3 text-sm text-white/55">
+                      {lang === "zh" ? feishuSetupGuidance.zhHint : feishuSetupGuidance.enHint}
+                    </p>
+
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-black/18 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-white/92">{lang === "zh" ? feishuBindStatusCopy.zhLabel : feishuBindStatusCopy.enLabel}</p>
+                          <p className="mt-2 text-xs leading-6 text-white/58">
+                            {lang === "zh" ? feishuBindStatusCopy.zhDescription : feishuBindStatusCopy.enDescription}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex min-h-52 items-center justify-center rounded-[24px] border border-dashed border-white/12 bg-white/4">
+                        {feishuBindQrDataUrl ? (
+                          <div className="inline-block rounded-[24px] border border-white/12 bg-white p-4 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
+                            <img src={feishuBindQrDataUrl} alt="Feishu QR" className="h-52 w-52" />
+                          </div>
+                        ) : (
+                          <div className="max-w-xs text-center">
+                            <p className="text-sm font-medium text-white/80">{t("开始飞书接入后，这里会显示二维码。", "The Feishu QR code will appear here after you start Feishu setup.")}</p>
+                            <p className="mt-2 text-xs leading-6 text-white/48">
+                              {t("扫码后页面会自动刷新。", "The page will refresh automatically after you scan.")}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      {feishuBindSession && !feishuBindSession.entry_url ? (
+                        <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-xs leading-6 text-amber-100/85">
+                          {t(
+                            "这次飞书接入还没有拿到可用二维码。稍等 1 到 2 秒后重试；如果还是不行，再去日志页面看 feishud.log。",
+                            "This Feishu setup did not get a usable QR code yet. Wait 1-2 seconds and try again. If it still fails, check feishud.log on the logs page.",
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {feishuBindError ? (
+                      <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{feishuBindError}</p>
+                    ) : null}
+
+                    <div className="channel-setup-actions mt-auto flex flex-wrap gap-2 pt-5">
+                      <button
+                        type="button"
+                        onClick={() => void beginFeishuBind()}
+                        disabled={feishuBindLoading || !isAdminIdentity || !feishuSetupGuidance.canStartBind}
+                        className="theme-accent-btn px-3 py-2 text-sm"
+                      >
+                        {feishuBindLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        {feishuBindSession ? t("重新生成二维码", "Refresh QR") : t("开始飞书接入", "Start Feishu setup")}
+                      </button>
+                      {feishuSetupGuidance.canStartService || health?.feishud_healthy === true ? (
+                        <button
+                          type="button"
+                          onClick={() => void controlService("feishud", health?.feishud_healthy === true ? "restart" : "start")}
+                          disabled={Boolean(serviceActionLoading.feishud) || !feishuSetupGuidance.canStartService}
+                          className="theme-secondary-btn px-3 py-2 text-sm"
+                        >
+                          {serviceActionLoading.feishud ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
+                          {health?.feishud_healthy === true
+                            ? t("重启飞书服务", "Restart Feishu service")
+                            : t("启动飞书服务", "Start Feishu service")}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
               </section>
 
@@ -3848,7 +4208,7 @@ export default function App() {
                   <div>
                     <h3 className="text-base font-semibold">{t("账号绑定与 Key 管理", "Account binding and key management")}</h3>
                     <p className="mt-2 text-sm text-white/65">
-                      {t("微信和 Telegram 的快捷接入已经移到频道接入页。这里现在只保留账号绑定、访问 Key 生成与管理。", "Quick WeChat and Telegram setup moved to Channel Setup. This page now keeps account bindings plus access key generation and management.")}
+                      {t("微信、Telegram 和飞书的快捷接入已经移到渠道接入页。这里现在只保留账号绑定、访问 Key 生成与管理。", "Quick WeChat, Telegram, and Feishu setup moved to Channel Setup. This page now keeps account bindings plus access key generation and management.")}
                     </p>
                   </div>
                 </div>
@@ -3899,13 +4259,28 @@ export default function App() {
                   <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
                     <p className="text-sm font-medium text-emerald-200">{t("新 Key 已生成，请复制保存（只显示一次）", "New key generated. Copy and save it (shown once).")}</p>
                     <p className="mt-2 break-all font-mono text-sm text-white/90">{newlyCreatedKey}</p>
-                    <button
-                      type="button"
-                      onClick={() => setNewlyCreatedKey(null)}
-                      className="mt-2 text-xs text-white/70 underline"
-                    >
-                      {t("关闭", "Dismiss")}
-                    </button>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void copyAuthKey({ target: "new", plaintextKey: newlyCreatedKey })}
+                        disabled={authKeyCopyingTarget === "new"}
+                        className="theme-secondary-btn px-3 py-2 text-xs"
+                      >
+                        {authKeyCopiedTarget === "new" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                        {authKeyCopyingTarget === "new"
+                          ? t("复制中...", "Copying...")
+                          : authKeyCopiedTarget === "new"
+                            ? t("已复制", "Copied")
+                            : t("复制 Key", "Copy key")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewlyCreatedKey(null)}
+                        className="text-xs text-white/70 underline"
+                      >
+                        {t("关闭", "Dismiss")}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
                 <div className="mt-4 rounded-xl border border-white/10 bg-black/20 overflow-hidden">
@@ -3933,11 +4308,24 @@ export default function App() {
                             <td className="px-4 py-2 font-mono text-white/85">{row.user_key_masked}</td>
                             <td className="px-4 py-2 text-white/75">{row.role}</td>
                             <td className="px-4 py-2">{row.enabled ? t("是", "Yes") : t("否", "No")}</td>
-                            <td className="px-4 py-2 text-white/65">{formatDateTimeHuman(row.created_at)}</td>
+                            <td className="px-4 py-2 text-white/65">{formatDateOnlyHuman(row.created_at, lang === "zh" ? "zh-CN" : "en-US")}</td>
                             <td className="px-4 py-2 text-white/65">{formatDateTimeHuman(row.last_used_at)}</td>
                             <td className="px-4 py-2">
                               {isAdminIdentity ? (
                                 <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={authKeyCopyingTarget === row.key_id}
+                                    className="theme-secondary-btn px-2 py-1 text-xs"
+                                    onClick={() => void copyAuthKey({ target: row.key_id, keyId: row.key_id })}
+                                  >
+                                    {authKeyCopiedTarget === row.key_id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                                    {authKeyCopyingTarget === row.key_id
+                                      ? t("复制中...", "Copying...")
+                                      : authKeyCopiedTarget === row.key_id
+                                        ? t("已复制", "Copied")
+                                        : t("复制 Key", "Copy key")}
+                                  </button>
                                   <button
                                     type="button"
                                     disabled={authKeyActionLoading === row.key_id}
@@ -4009,6 +4397,15 @@ export default function App() {
                         {t("自定义模型", "Custom model")}
                       </button>
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void testLlmConfig()}
+                      disabled={llmTestLoading || llmConfigLoading || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
+                      className="theme-secondary-btn px-3 py-2 text-xs"
+                    >
+                      {llmTestLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      {t("测试连接", "Test Connection")}
+                    </button>
                     <button
                       onClick={() => void saveLlmConfig()}
                       disabled={llmConfigSaving || llmConfigLoading || !hasUnsavedLlmChanges || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
@@ -4141,6 +4538,16 @@ export default function App() {
                     {llmConfigSaveMessage ? (
                       <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
                         {llmConfigSaveMessage}
+                      </p>
+                    ) : null}
+                    {llmTestMessage ? (
+                      <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                        {llmTestMessage}
+                      </p>
+                    ) : null}
+                    {llmTestError ? (
+                      <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                        {llmTestError}
                       </p>
                     ) : null}
                     {hasUnsavedLlmChanges ? (

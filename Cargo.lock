@@ -571,6 +571,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml 0.8.23",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -2623,16 +2624,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags 2.11.0",
-]
-
-[[package]]
-name = "reference-resolver-skill"
-version = "0.1.3"
-dependencies = [
- "anyhow",
- "regex",
- "serde",
- "serde_json",
 ]
 
 [[package]]

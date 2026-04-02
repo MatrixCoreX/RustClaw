@@ -14,6 +14,7 @@ RUN sed -i "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g; s|http://deb.debi
     build-essential \
     clang \
     libclang-dev \
+    libprotobuf-dev \
     pkg-config \
     protobuf-compiler \
     python3 \
@@ -25,6 +26,7 @@ COPY . /build
 
 RUN cargo build --release \
     -p clawd \
+    -p feishud \
     -p skill-runner \
     -p webd \
     -p telegramd \
@@ -85,6 +87,7 @@ WORKDIR /app
 RUN mkdir -p /app/target/release /app/UI/dist /app/docker/config
 
 COPY --from=builder /build/target/release/clawd /app/target/release/
+COPY --from=builder /build/target/release/feishud /app/target/release/
 COPY --from=builder /build/target/release/skill-runner /app/target/release/
 COPY --from=builder /build/target/release/webd /app/target/release/
 COPY --from=builder /build/target/release/telegramd /app/target/release/
@@ -123,6 +126,7 @@ RUN chmod +x \
     /app/docker/docker-entrypoint.sh \
     /app/scripts/auth-key.sh \
     /app/target/release/clawd \
+    /app/target/release/feishud \
     /app/target/release/skill-runner \
     /app/target/release/webd \
     /app/target/release/telegramd \
