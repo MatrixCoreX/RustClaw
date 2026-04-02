@@ -3,13 +3,58 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString};
 use argon2::{Argon2, PasswordVerifier};
 use claw_core::config::{AppConfig, ChannelBindingConfig};
 use claw_core::types::{AuthIdentity, ExchangeCredentialStatus};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use tracing::info;
 
-use crate::{AppState, mask_secret, normalize_external_id_opt, now_ts};
+use crate::{mask_secret, normalize_external_id_opt, now_ts, AppState};
 
 fn generate_user_key() -> String {
     format!("rk-{}", uuid::Uuid::new_v4().simple())
+}
+
+const PENDING_CHANNEL_BIND_STATUS_PENDING: &str = "pending";
+const PENDING_CHANNEL_BIND_STATUS_DETECTED: &str = "detected";
+const PENDING_CHANNEL_BIND_STATUS_BOUND: &str = "bound";
+const PENDING_CHANNEL_BIND_STATUS_FAILED: &str = "failed";
+const PENDING_CHANNEL_BIND_STATUS_EXPIRED: &str = "expired";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingChannelBindSession {
+    pub(crate) id: i64,
+    pub(crate) channel: String,
+    pub(crate) user_key: String,
+    pub(crate) bind_token: String,
+    pub(crate) status: String,
+    pub(crate) external_user_id: Option<String>,
+    pub(crate) external_chat_id: Option<String>,
+    pub(crate) error_text: Option<String>,
+    pub(crate) install_device_code: Option<String>,
+    pub(crate) install_verification_url: Option<String>,
+    pub(crate) install_poll_interval_seconds: Option<i64>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) expires_at: String,
+}
+
+fn map_pending_channel_bind_session(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<PendingChannelBindSession> {
+    Ok(PendingChannelBindSession {
+        id: row.get(0)?,
+        channel: row.get(1)?,
+        user_key: row.get(2)?,
+        bind_token: row.get(3)?,
+        status: row.get(4)?,
+        external_user_id: row.get(5)?,
+        external_chat_id: row.get(6)?,
+        error_text: row.get(7)?,
+        install_device_code: row.get(8)?,
+        install_verification_url: row.get(9)?,
+        install_poll_interval_seconds: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+        expires_at: row.get(13)?,
+    })
 }
 
 pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Option<String>> {
@@ -30,6 +75,27 @@ pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Opti
 pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)?;
     db.execute_batch(crate::WEBD_LOGIN_SQL)?;
+    db.execute_batch(include_str!(
+        "../../../../migrations/006_pending_channel_bind_sessions.sql"
+    ))?;
+    crate::ensure_column_exists(
+        db,
+        "pending_channel_bind_sessions",
+        "install_device_code",
+        "ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_device_code TEXT",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "pending_channel_bind_sessions",
+        "install_verification_url",
+        "ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_verification_url TEXT",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "pending_channel_bind_sessions",
+        "install_poll_interval_seconds",
+        "ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_poll_interval_seconds INTEGER",
+    )?;
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS exchange_api_credentials (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -345,6 +411,31 @@ pub(crate) fn list_auth_keys(
     Ok(out)
 }
 
+fn get_auth_key_value_by_id_from_db(
+    db: &Connection,
+    key_id: i64,
+) -> anyhow::Result<Option<String>> {
+    let value = db
+        .query_row(
+            "SELECT user_key FROM auth_keys WHERE rowid = ?1",
+            params![key_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(value)
+}
+
+pub(crate) fn get_auth_key_value_by_id(
+    state: &AppState,
+    key_id: i64,
+) -> anyhow::Result<Option<String>> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    get_auth_key_value_by_id_from_db(&db, key_id)
+}
+
 pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<String> {
     let role = match role {
         "admin" => "admin",
@@ -363,10 +454,329 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
     Ok(user_key)
 }
 
+fn upsert_channel_binding_row(
+    db: &Connection,
+    channel: &str,
+    external_user_id: Option<&str>,
+    external_chat_id: Option<&str>,
+    user_key: &str,
+) -> anyhow::Result<()> {
+    let external_user_id = normalize_external_id_opt(external_user_id);
+    let external_chat_id =
+        normalize_external_id_opt(external_chat_id).or_else(|| external_user_id.clone());
+    if external_user_id.is_none() && external_chat_id.is_none() {
+        anyhow::bail!("external_user_id or external_chat_id is required");
+    }
+    let now = now_ts();
+    db.execute(
+        "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, bound_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+         ON CONFLICT(channel, external_user_id, external_chat_id)
+         DO UPDATE SET user_key=excluded.user_key, updated_at=excluded.updated_at",
+        params![channel, external_user_id, external_chat_id, user_key, now],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn create_pending_channel_bind_session(
+    db: &mut Connection,
+    channel: &str,
+    user_key: &str,
+    expires_at: &str,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let channel = channel.trim();
+    let user_key = normalize_user_key(user_key);
+    let expires_at = expires_at.trim();
+    if channel.is_empty() {
+        anyhow::bail!("channel is required");
+    }
+    if user_key.is_empty() {
+        anyhow::bail!("user_key is required");
+    }
+    if expires_at.is_empty() {
+        anyhow::bail!("expires_at is required");
+    }
+    let bind_token = format!("pb-{}", uuid::Uuid::new_v4().simple());
+    let now = now_ts();
+    db.execute(
+        "INSERT INTO pending_channel_bind_sessions (
+            channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+            install_device_code, install_verification_url, install_poll_interval_seconds,
+            created_at, updated_at, expires_at
+        ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, NULL, NULL, NULL, NULL, ?5, ?5, ?6)",
+        params![
+            channel,
+            user_key,
+            bind_token,
+            PENDING_CHANNEL_BIND_STATUS_PENDING,
+            now,
+            expires_at,
+        ],
+    )?;
+    let session_id = db.last_insert_rowid();
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("created pending bind session not found"))
+}
+
+pub(crate) fn attach_pending_channel_bind_session_install_flow(
+    db: &mut Connection,
+    session_id: i64,
+    device_code: &str,
+    verification_url: &str,
+    poll_interval_seconds: i64,
+    expires_at: &str,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let device_code = device_code.trim();
+    let verification_url = verification_url.trim();
+    let expires_at = expires_at.trim();
+    if device_code.is_empty() {
+        anyhow::bail!("device_code is required");
+    }
+    if verification_url.is_empty() {
+        anyhow::bail!("verification_url is required");
+    }
+    if expires_at.is_empty() {
+        anyhow::bail!("expires_at is required");
+    }
+    let now = now_ts();
+    let changed = db.execute(
+        "UPDATE pending_channel_bind_sessions
+         SET install_device_code = ?2,
+             install_verification_url = ?3,
+             install_poll_interval_seconds = ?4,
+             error_text = NULL,
+             updated_at = ?5,
+             expires_at = ?6
+         WHERE id = ?1
+           AND status IN (?7, ?8)",
+        params![
+            session_id,
+            device_code,
+            verification_url,
+            poll_interval_seconds.max(1),
+            now,
+            expires_at,
+            PENDING_CHANNEL_BIND_STATUS_PENDING,
+            PENDING_CHANNEL_BIND_STATUS_DETECTED,
+        ],
+    )?;
+    if changed == 0 {
+        anyhow::bail!("pending bind session not found or already terminal");
+    }
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("pending bind session not found after install flow update"))
+}
+
+pub(crate) fn get_pending_channel_bind_session_by_id(
+    db: &Connection,
+    session_id: i64,
+) -> anyhow::Result<Option<PendingChannelBindSession>> {
+    Ok(db
+        .query_row(
+            "SELECT id, channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+                    install_device_code, install_verification_url, install_poll_interval_seconds,
+                    created_at, updated_at, expires_at
+             FROM pending_channel_bind_sessions
+             WHERE id = ?1",
+            params![session_id],
+            map_pending_channel_bind_session,
+        )
+        .optional()?)
+}
+
+pub(crate) fn get_pending_channel_bind_session_by_token(
+    db: &Connection,
+    bind_token: &str,
+) -> anyhow::Result<Option<PendingChannelBindSession>> {
+    Ok(db
+        .query_row(
+            "SELECT id, channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+                    install_device_code, install_verification_url, install_poll_interval_seconds,
+                    created_at, updated_at, expires_at
+             FROM pending_channel_bind_sessions
+             WHERE bind_token = ?1",
+            params![bind_token],
+            map_pending_channel_bind_session,
+        )
+        .optional()?)
+}
+
+pub(crate) fn list_active_pending_channel_bind_sessions(
+    db: &Connection,
+    channel: &str,
+    now_ts: i64,
+) -> anyhow::Result<Vec<PendingChannelBindSession>> {
+    let mut stmt = db.prepare(
+        "SELECT id, channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+                install_device_code, install_verification_url, install_poll_interval_seconds,
+                created_at, updated_at, expires_at
+         FROM pending_channel_bind_sessions
+         WHERE channel = ?1
+           AND status IN (?2, ?3)
+           AND CAST(expires_at AS INTEGER) > ?4
+         ORDER BY id DESC",
+    )?;
+    let rows = stmt.query_map(
+        params![
+            channel,
+            PENDING_CHANNEL_BIND_STATUS_PENDING,
+            PENDING_CHANNEL_BIND_STATUS_DETECTED,
+            now_ts,
+        ],
+        map_pending_channel_bind_session,
+    )?;
+    let mut sessions = Vec::new();
+    for row in rows {
+        sessions.push(row?);
+    }
+    Ok(sessions)
+}
+
+fn mark_pending_channel_bind_session_status(
+    db: &mut Connection,
+    session_id: i64,
+    status: &str,
+    error_text: Option<&str>,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let now = now_ts();
+    let changed = db.execute(
+        "UPDATE pending_channel_bind_sessions
+         SET status = ?2,
+             error_text = ?3,
+             updated_at = ?4
+         WHERE id = ?1
+           AND status IN (?5, ?6)",
+        params![
+            session_id,
+            status,
+            error_text,
+            now,
+            PENDING_CHANNEL_BIND_STATUS_PENDING,
+            PENDING_CHANNEL_BIND_STATUS_DETECTED,
+        ],
+    )?;
+    if changed == 0 {
+        anyhow::bail!("pending bind session not found or already terminal");
+    }
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("pending bind session not found after update"))
+}
+
+pub(crate) fn mark_pending_channel_bind_session_detected(
+    db: &mut Connection,
+    session_id: i64,
+    external_user_id: &str,
+    external_chat_id: &str,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let external_user_id = normalize_external_id_opt(Some(external_user_id))
+        .ok_or_else(|| anyhow::anyhow!("external_user_id is required"))?;
+    let external_chat_id = normalize_external_id_opt(Some(external_chat_id))
+        .or_else(|| Some(external_user_id.clone()))
+        .ok_or_else(|| anyhow::anyhow!("external_chat_id is required"))?;
+    let now = now_ts();
+    let changed = db.execute(
+        "UPDATE pending_channel_bind_sessions
+         SET status = ?2,
+             external_user_id = ?3,
+             external_chat_id = ?4,
+             error_text = NULL,
+             updated_at = ?5
+         WHERE id = ?1
+           AND status IN (?6, ?7)",
+        params![
+            session_id,
+            PENDING_CHANNEL_BIND_STATUS_DETECTED,
+            external_user_id,
+            external_chat_id,
+            now,
+            PENDING_CHANNEL_BIND_STATUS_PENDING,
+            PENDING_CHANNEL_BIND_STATUS_DETECTED,
+        ],
+    )?;
+    if changed == 0 {
+        anyhow::bail!("pending bind session not found or already terminal");
+    }
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("pending bind session not found after detection"))
+}
+
+pub(crate) fn mark_pending_channel_bind_session_failed(
+    db: &mut Connection,
+    session_id: i64,
+    error_text: &str,
+) -> anyhow::Result<PendingChannelBindSession> {
+    mark_pending_channel_bind_session_status(
+        db,
+        session_id,
+        PENDING_CHANNEL_BIND_STATUS_FAILED,
+        Some(error_text),
+    )
+}
+
+pub(crate) fn mark_pending_channel_bind_session_expired(
+    db: &mut Connection,
+    session_id: i64,
+) -> anyhow::Result<PendingChannelBindSession> {
+    mark_pending_channel_bind_session_status(
+        db,
+        session_id,
+        PENDING_CHANNEL_BIND_STATUS_EXPIRED,
+        Some("expired"),
+    )
+}
+
+pub(crate) fn finalize_pending_channel_bind_session(
+    db: &mut Connection,
+    session_id: i64,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let tx = db.transaction()?;
+    let session = tx
+        .query_row(
+            "SELECT id, channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+                    install_device_code, install_verification_url, install_poll_interval_seconds,
+                    created_at, updated_at, expires_at
+             FROM pending_channel_bind_sessions
+             WHERE id = ?1",
+            params![session_id],
+            map_pending_channel_bind_session,
+        )
+        .optional()?;
+    let Some(session) = session else {
+        anyhow::bail!("pending bind session not found");
+    };
+    if matches!(
+        session.status.as_str(),
+        PENDING_CHANNEL_BIND_STATUS_FAILED | PENDING_CHANNEL_BIND_STATUS_EXPIRED
+    ) {
+        anyhow::bail!("pending bind session is already terminal");
+    }
+    if session.external_user_id.is_none() && session.external_chat_id.is_none() {
+        anyhow::bail!("pending bind session does not have a detected external identity");
+    }
+    upsert_channel_binding_row(
+        &tx,
+        &session.channel,
+        session.external_user_id.as_deref(),
+        session.external_chat_id.as_deref(),
+        &session.user_key,
+    )?;
+    tx.execute(
+        "UPDATE pending_channel_bind_sessions
+         SET status = ?2,
+             error_text = NULL,
+             updated_at = ?3
+         WHERE id = ?1",
+        params![session_id, PENDING_CHANNEL_BIND_STATUS_BOUND, now_ts()],
+    )?;
+    tx.commit()?;
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("pending bind session not found after finalize"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::rebuild_channel_tables_for_ui;
-    use rusqlite::Connection;
+    use super::{get_auth_key_value_by_id_from_db, rebuild_channel_tables_for_ui};
+    use rusqlite::{params, Connection};
 
     #[test]
     fn rebuild_channel_tables_upgrades_channel_constraints_for_wechat() {
@@ -455,6 +865,108 @@ mod tests {
         )
         .expect("insert wechat task");
     }
+
+    #[test]
+    fn get_auth_key_value_by_id_returns_full_key() {
+        let db = Connection::open_in_memory().expect("open sqlite");
+        db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+            .expect("create auth schema");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'admin', 1, '123', NULL)",
+            params!["rk-full-key-value"],
+        )
+        .expect("insert auth key");
+
+        let resolved = get_auth_key_value_by_id_from_db(&db, 1).expect("query key");
+        assert_eq!(resolved.as_deref(), Some("rk-full-key-value"));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn pending_feishu_bind_session_lifecycle() {
+    let mut db = Connection::open_in_memory().expect("open sqlite");
+    db.execute_batch(crate::INIT_SQL)
+        .expect("create base schema");
+    crate::ensure_memory_schema(&db).expect("create memory schema");
+    ensure_key_auth_schema(&db).expect("create auth schema");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+         VALUES (?1, 'user', 1, '123', NULL)",
+        params!["rk-pending-session-user"],
+    )
+    .expect("insert auth key");
+
+    let expires_at = (crate::now_ts().parse::<i64>().expect("current ts") + 600).to_string();
+    let created = create_pending_channel_bind_session(
+        &mut db,
+        "feishu",
+        "rk-pending-session-user",
+        &expires_at,
+    )
+    .expect("create pending bind session");
+    assert_eq!(created.channel, "feishu");
+    assert_eq!(created.user_key, "rk-pending-session-user");
+    assert_eq!(created.status, "pending");
+    assert!(!created.bind_token.is_empty());
+
+    let by_id = get_pending_channel_bind_session_by_id(&db, created.id)
+        .expect("load by id")
+        .expect("session by id");
+    assert_eq!(by_id.bind_token, created.bind_token);
+
+    let by_token = get_pending_channel_bind_session_by_token(&db, &created.bind_token)
+        .expect("load by token")
+        .expect("session by token");
+    assert_eq!(by_token.id, created.id);
+
+    let detected = mark_pending_channel_bind_session_detected(
+        &mut db,
+        created.id,
+        "feishu-user-123",
+        "feishu-chat-456",
+    )
+    .expect("mark detected");
+    assert_eq!(detected.status, "detected");
+    assert_eq!(
+        detected.external_user_id.as_deref(),
+        Some("feishu-user-123")
+    );
+    assert_eq!(
+        detected.external_chat_id.as_deref(),
+        Some("feishu-chat-456")
+    );
+
+    let bound = finalize_pending_channel_bind_session(&mut db, created.id)
+        .expect("finalize pending bind session");
+    assert_eq!(bound.status, "bound");
+
+    let binding: (String, String, String, String) = db
+        .query_row(
+            "SELECT channel, external_user_id, external_chat_id, user_key
+             FROM channel_bindings
+             WHERE channel = 'feishu'
+             ORDER BY id DESC
+             LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read channel binding");
+    assert_eq!(
+        binding,
+        (
+            "feishu".to_string(),
+            "feishu-user-123".to_string(),
+            "feishu-chat-456".to_string(),
+            "rk-pending-session-user".to_string(),
+        )
+    );
+
+    let terminal = get_pending_channel_bind_session_by_id(&db, created.id)
+        .expect("reload terminal session")
+        .expect("terminal session");
+    assert_eq!(terminal.status, "bound");
 }
 
 pub(crate) fn update_auth_key_by_id(
@@ -825,23 +1337,16 @@ pub(crate) fn bind_channel_identity(
     if external_user_id.is_none() && external_chat_id.is_none() {
         return Ok(None);
     }
-    let now = now_ts();
     let db = state
         .db
         .lock()
         .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
-    db.execute(
-        "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, bound_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-         ON CONFLICT(channel, external_user_id, external_chat_id)
-         DO UPDATE SET user_key=excluded.user_key, updated_at=excluded.updated_at",
-        params![
-            channel,
-            external_user_id,
-            external_chat_id,
-            &identity.user_key,
-            now
-        ],
+    upsert_channel_binding_row(
+        &db,
+        channel,
+        external_user_id.as_deref(),
+        external_chat_id.as_deref(),
+        &identity.user_key,
     )?;
     touch_auth_key_usage(&db, &identity.user_key)?;
     Ok(Some(build_auth_identity(
