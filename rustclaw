@@ -47,15 +47,15 @@ EOF
 usage() {
   cat <<'EOF'
 Usage / 用法:
-  rustclaw -start [release|debug] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--with-ui]
+  rustclaw -start [release] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--with-ui]
     # Start services / 启动服务（可选配置与通道）
-  rustclaw -start [vendor] [model] [release|debug] [channels]
+  rustclaw -start [vendor] [model] [release] [channels]
     # Start with vendor/model / 按厂商与模型启动
-  rustclaw -start --vendor <openai|google|anthropic|grok|qwen|custom> [--model <name>] [--profile <release|debug>] [--channels <...>] [--quick] [--skip-setup] [--with-ui] [--force-ui-rebuild]
+  rustclaw -start --vendor <openai|google|anthropic|grok|qwen|custom> [--model <name>] [--profile release] [--channels <...>] [--quick] [--skip-setup] [--with-ui] [--force-ui-rebuild]
     # Full start options / 完整启动参数
   rustclaw -stop
     # Stop all RustClaw processes / 停止所有 RustClaw 进程
-  rustclaw -restart [release|debug] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--quick] [--skip-setup] [--with-ui]
+  rustclaw -restart [release] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--quick] [--skip-setup] [--with-ui]
     # Stop then start / 先停后启
   rustclaw start -q
     # Shortcut: quick start without setup / 简化：免配置直接启动
@@ -63,7 +63,7 @@ Usage / 用法:
     # Shortcut: quick restart / 简化：免配置直接重启
   rustclaw -status
     # Show process status / 查看进程状态
-  rustclaw -build [all|release|debug]
+  rustclaw -build [release]
     # Build workspace / 构建工作区
   rustclaw -logs [all|clawd|telegramd|whatsappd|whatsapp_webd|feishud] [lines] [--follow]
     # Tail logs / 查看日志（可选行数与持续跟随）
@@ -90,7 +90,7 @@ Parameters / 参数说明:
   -start / -restart (or start / restart):
     vendor     : openai | google | anthropic | grok | qwen | custom  (LLM vendor / 模型厂商)
     model      : model override string  (模型名覆盖)
-    profile    : release | debug  (构建配置 / 默认由 start-all.sh 决定)
+    profile    : release  (构建配置 / 当前仅支持 release)
     channels   : telegram | whatsapp_web | both | whatsapp_cloud | all  (通道)
     -q         : short for --quick --skip-setup, default release all  / 简写，免配置
     --quick    : quick start  / 快速启动
@@ -99,7 +99,7 @@ Parameters / 参数说明:
     --force-ui-rebuild : force rebuild UI when --with-ui  / 启用 UI 时强制重建前端
 
   -build:
-    profile    : all | release | debug (default: release)  / 构建类型
+    profile    : release (default: release)  / 构建类型
 
   -logs:
     service    : all | clawd | telegramd | whatsappd | whatsapp_webd | feishud (default: all)  / 服务名
@@ -150,11 +150,11 @@ print_proc_status() {
 
 # 是否有 RustClaw 相关进程在运行（clawd/telegramd/whatsappd/whatsapp_webd/feishud）
 is_rustclaw_running() {
-  pgrep -f 'target/(debug|release)/clawd|cargo run -p clawd' >/dev/null 2>&1 && return 0
-  pgrep -f 'target/(debug|release)/telegramd|cargo run -p telegramd' >/dev/null 2>&1 && return 0
-  pgrep -f 'target/(debug|release)/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1 && return 0
-  pgrep -f 'target/(debug|release)/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge' >/dev/null 2>&1 && return 0
-  pgrep -f 'target/(debug|release)/feishud|cargo run -p feishud' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/release/clawd|cargo run -p clawd' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/release/telegramd|cargo run -p telegramd' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/release/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/release/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/release/feishud|cargo run -p feishud' >/dev/null 2>&1 && return 0
   return 1
 }
 
@@ -193,7 +193,7 @@ cmd_start() {
         [[ $i -lt ${#args[@]} ]] || { echo "Missing value for --channels"; exit 1; }
         channels="${args[$i]}"
         ;;
-      release|debug)
+      release)
         profile="$arg"
         ;;
       telegram|whatsapp_web|both|whatsapp_cloud|all)
@@ -234,7 +234,7 @@ cmd_start() {
   done
 
   require_file "$START_SCRIPT"
-  if [[ -n "$profile" && "$profile" != "release" && "$profile" != "debug" ]]; then
+  if [[ -n "$profile" && "$profile" != "release" ]]; then
     echo "Invalid profile: $profile"
     exit 1
   fi
@@ -248,7 +248,7 @@ cmd_start() {
   fi
 
   if [[ -z "$profile" ]]; then
-    profile="debug"
+    profile="release"
   fi
 
   if is_rustclaw_running; then
@@ -274,15 +274,20 @@ cmd_stop() {
 }
 
 cmd_status() {
-  print_proc_status "clawd" "target/(debug|release)/clawd|cargo run -p clawd"
-  print_proc_status "telegramd" "target/(debug|release)/telegramd|cargo run -p telegramd"
-  print_proc_status "whatsappd" "target/(debug|release)/whatsappd|cargo run -p whatsappd"
-  print_proc_status "whatsapp_webd" "target/(debug|release)/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge/index.js"
-  print_proc_status "feishud" "target/(debug|release)/feishud|cargo run -p feishud"
+  print_proc_status "clawd" "target/release/clawd|cargo run -p clawd"
+  print_proc_status "telegramd" "target/release/telegramd|cargo run -p telegramd"
+  print_proc_status "whatsappd" "target/release/whatsappd|cargo run -p whatsappd"
+  print_proc_status "whatsapp_webd" "target/release/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge/index.js"
+  print_proc_status "feishud" "target/release/feishud|cargo run -p feishud"
 }
 
 cmd_build() {
   local profile="${1:-release}"
+  if [[ "$profile" != "release" ]]; then
+    echo "Invalid build profile: $profile"
+    echo "Only release is supported."
+    exit 1
+  fi
   require_file "$BUILD_SCRIPT"
   "$BUILD_SCRIPT" "$profile"
 }

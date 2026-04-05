@@ -184,11 +184,8 @@ main() {
         log "Build completed but runner still missing: $RUNNER"
         exit 2
       fi
-    elif [[ "$PROFILE" == "release" ]]; then
-      log "Try: cargo build --release -p skill-runner -p crypto-skill"
     else
-      log "Try: cargo build -p skill-runner -p crypto-skill"
-      log "Or run: ./scripts/regression_crypto_skill.sh $PROFILE --auto-build"
+      log "Try: cargo build --release -p skill-runner -p crypto-skill"
     fi
     if [[ "$AUTO_BUILD" != "1" ]]; then
       exit 2
@@ -199,11 +196,7 @@ main() {
     log "Current runner does not recognize crypto skill."
     if [[ "$AUTO_BUILD" == "1" ]]; then
       log "[INFO] rebuilding runner + crypto skill..."
-      if [[ "$PROFILE" == "release" ]]; then
-        (cd "$ROOT_DIR" && cargo build --release -p skill-runner -p crypto-skill)
-      else
-        (cd "$ROOT_DIR" && cargo build -p skill-runner -p crypto-skill)
-      fi
+      (cd "$ROOT_DIR" && cargo build --release -p skill-runner -p crypto-skill)
       if ! runner_knows_crypto; then
         log "Runner still does not recognize crypto after build."
         exit 2

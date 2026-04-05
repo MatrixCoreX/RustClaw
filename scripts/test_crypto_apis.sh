@@ -28,7 +28,7 @@ Options:
   --address 0x...      ETH address for address-based API tests
   --token SYMBOL       Token symbol in [crypto.eth_token_contracts] (default: usdt)
   --timeout N          curl timeout seconds (default: 12)
-  --verbose, -v        Print debug details for failed checks
+  --verbose, -v        Print detailed output for failed checks
   --help, -h           Show this help
 
 Env:
