@@ -8,9 +8,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 cd "$SCRIPT_DIR"
 
+TRACKED_RELEASE_DIR="$SCRIPT_DIR/release-bin"
+BUILD_RELEASE_DIR="$SCRIPT_DIR/target/release"
+
 if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
+
+resolve_release_bin() {
+  local name="$1"
+  if [[ -x "$TRACKED_RELEASE_DIR/$name" ]]; then
+    printf '%s\n' "$TRACKED_RELEASE_DIR/$name"
+    return
+  fi
+  printf '%s\n' "$BUILD_RELEASE_DIR/$name"
+}
 
 # 优先使用已脱敏的发布配置；若无则用 config.toml，打包时步骤 5.3 会再脱敏
 if [[ -f "$SCRIPT_DIR/configs/config.release.sanitized.toml" ]]; then
@@ -60,8 +72,9 @@ if [[ "${#REQUIRED_BINS[@]}" -eq 0 ]]; then
 fi
 
 for bin in "${REQUIRED_BINS[@]}"; do
-  if [[ ! -x "$SCRIPT_DIR/target/release/$bin" ]]; then
-    echo "Missing release binary: target/release/$bin"
+  bin_path="$(resolve_release_bin "$bin")"
+  if [[ ! -x "$bin_path" ]]; then
+    echo "Missing release binary: $bin_path"
     exit 1
   fi
 done
@@ -118,7 +131,7 @@ fi
 
 mkdir -p "$STAGE_PROJECT_DIR/target/release"
 for bin in "${REQUIRED_BINS[@]}"; do
-  cp -R "$SCRIPT_DIR/target/release/$bin" "$STAGE_PROJECT_DIR/target/release/$bin"
+  cp -R "$(resolve_release_bin "$bin")" "$STAGE_PROJECT_DIR/target/release/$bin"
 done
 
 echo "[4.5/6] Add usage note (开盒即用)..."
