@@ -17,8 +17,10 @@ DEPLOY_UI_NGINX=""
 # --pi-app：配置 Pi App 桌面快捷方式 + 开机自启（小屏）
 CONFIGURE_PI_APP=0
 
-# 无构建模式要求至少存在此 bin（默认不构建，适合已交叉编译好 bin 的场景）
-REQUIRED_BIN="$SCRIPT_DIR/target/release/clawd"
+# 无构建模式优先使用 Git 跟踪的 release-bin；若本地刚构建，则回退到 target/release
+TRACKED_RELEASE_DIR="$SCRIPT_DIR/release-bin"
+BUILD_RELEASE_DIR="$SCRIPT_DIR/target/release"
+REQUIRED_BIN_NAME="clawd"
 # 交叉编译拉回路径（与 cross-build-upload.sh 一致）
 CROSS_TARGET="${RUSTCLAW_CROSS_TARGET:-aarch64-unknown-linux-gnu}"
 CROSS_RELEASE="$SCRIPT_DIR/target/$CROSS_TARGET/release"
@@ -88,7 +90,7 @@ Options:
   -h, --help       Show this help
 
 Default: install launcher and deploy UI to nginx (config nginx, copy UI, reload nginx). Default path is auto-detected per OS. Use --no-deploy-ui to skip UI/nginx.
-No build unless --build/--force-build; requires target/release/clawd to exist.
+No build unless --build/--force-build; requires release-bin/clawd or target/release/clawd to exist.
 Use --build or --force-build when building from source.
 
 Verify after install:
@@ -268,6 +270,14 @@ reload_nginx() {
   echo "Warning: nginx reload skipped. Please reload nginx manually."
 }
 
+resolve_release_dir() {
+  if [[ -x "$TRACKED_RELEASE_DIR/$REQUIRED_BIN_NAME" ]]; then
+    printf '%s\n' "$TRACKED_RELEASE_DIR"
+    return
+  fi
+  printf '%s\n' "$BUILD_RELEASE_DIR"
+}
+
 nginx_ui_config_matches() {
   local conf_path="$1"
   local ui_root="$2"
@@ -391,8 +401,8 @@ do_release_build() {
   fi
   echo "Building workspace (release)..."
   (cd "$SCRIPT_DIR" && cargo build --workspace --release)
-  if [[ ! -x "$SCRIPT_DIR/target/release/clawd" ]]; then
-    echo "Build finished but target/release/clawd missing."
+  if [[ ! -x "$BUILD_RELEASE_DIR/clawd" ]]; then
+    echo "Build finished but $BUILD_RELEASE_DIR/clawd missing."
     exit 1
   fi
   echo "Release build completed."
@@ -421,6 +431,9 @@ if [[ ! -f "$TARGET" ]]; then
   exit 1
 fi
 
+SELECTED_RELEASE_DIR="$(resolve_release_dir)"
+REQUIRED_BIN="$SELECTED_RELEASE_DIR/$REQUIRED_BIN_NAME"
+
 if [[ "$DO_BUILD" == "1" ]]; then
   if [[ "$FORCE_BUILD" == "1" ]]; then
     ensure_build "--force-build"
@@ -431,17 +444,20 @@ else
   if [[ ! -f "$REQUIRED_BIN" ]]; then
     if [[ -x "$CROSS_RELEASE/clawd" ]]; then
       echo "Using cross-compiled binaries from $CROSS_RELEASE"
-      mkdir -p "$SCRIPT_DIR/target/release"
+      mkdir -p "$BUILD_RELEASE_DIR"
       for f in "$CROSS_RELEASE"/*; do
         [[ ! -f "$f" || ! -x "$f" ]] && continue
         [[ "$f" == *.rlib || "$f" == *.d ]] && continue
-        ln -sf "$f" "$SCRIPT_DIR/target/release/$(basename "$f")" 2>/dev/null || cp -f "$f" "$SCRIPT_DIR/target/release/$(basename "$f")"
+        ln -sf "$f" "$BUILD_RELEASE_DIR/$(basename "$f")" 2>/dev/null || cp -f "$f" "$BUILD_RELEASE_DIR/$(basename "$f")"
       done
+      SELECTED_RELEASE_DIR="$(resolve_release_dir)"
+      REQUIRED_BIN="$SELECTED_RELEASE_DIR/$REQUIRED_BIN_NAME"
     fi
   fi
   if [[ ! -f "$REQUIRED_BIN" ]]; then
     echo "Error: binary not found: $REQUIRED_BIN"
-    echo "Copy your built clawd here, or run with --build to build from source."
+    echo "Copy your built clawd into release-bin/ or target/release/, or run with --build to build from source."
+    echo "To track release executables in git, run: bash scripts/sync-release-bin.sh"
     echo "Cross path checked: $CROSS_RELEASE/clawd (set RUSTCLAW_CROSS_TARGET if different)."
     exit 1
   fi
@@ -480,7 +496,8 @@ fi
 echo "Installed: $LINK_PATH -> $TARGET"
 
 # Install clawcli if present (terminal CLI to talk to clawd)
-CLAWCLI_BIN="$SCRIPT_DIR/target/release/clawcli"
+SELECTED_RELEASE_DIR="$(resolve_release_dir)"
+CLAWCLI_BIN="$SELECTED_RELEASE_DIR/clawcli"
 CLAWCLI_LINK="$INSTALL_DIR/clawcli"
 if [[ -x "$CLAWCLI_BIN" ]]; then
   if [[ "$USE_USER_DIR" == "1" ]] || [[ -w "$INSTALL_DIR" ]]; then

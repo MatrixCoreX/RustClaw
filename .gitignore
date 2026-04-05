@@ -16,7 +16,5 @@ data/*.db-wal
 
 
 node_modules
-target/*
-!target/release/
-!target/release/**
+target/
 
