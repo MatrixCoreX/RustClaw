@@ -277,22 +277,7 @@ async fn main() -> anyhow::Result<()> {
         config.llm.selected_vendor.as_deref(),
         &config.persona,
     );
-    let mut preferred_runner = workspace_root.join("target/release/skill-runner");
-    if let Ok(exe) = std::env::current_exe() {
-        let exe_lc = exe.to_string_lossy().to_ascii_lowercase();
-        if exe_lc.contains("/target/debug/") {
-            preferred_runner = workspace_root.join("target/debug/skill-runner");
-        }
-    }
-    let release_fallback = workspace_root.join("target/release/skill-runner");
-    let debug_fallback = workspace_root.join("target/debug/skill-runner");
-    let effective_skill_runner_path = if preferred_runner.exists() {
-        preferred_runner
-    } else if release_fallback.exists() {
-        release_fallback
-    } else {
-        debug_fallback
-    };
+    let effective_skill_runner_path = workspace_root.join("target/release/skill-runner");
     info!(
         "skill_runner_path resolved: {}",
         effective_skill_runner_path.display()
