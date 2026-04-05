@@ -136,26 +136,13 @@ fn execute_skill(req: SkillRequest) -> SkillResponse {
 fn skill_binary_path(skill_name: &str) -> Result<String, String> {
     let bin_name = runner_bin_name(skill_name)?;
 
-    let prefer_debug = prefer_debug_bins();
-    let candidates = if prefer_debug {
-        [
-            format!("target/debug/{bin_name}"),
-            format!("target/release/{bin_name}"),
-        ]
-    } else {
-        [
-            format!("target/release/{bin_name}"),
-            format!("target/debug/{bin_name}"),
-        ]
-    };
-    for p in candidates {
-        if Path::new(&p).exists() {
-            return Ok(p);
-        }
+    let release_path = format!("target/release/{bin_name}");
+    if Path::new(&release_path).exists() {
+        return Ok(release_path);
     }
 
     Err(format!(
-        "{skill_name} skill binary not found in target/debug or target/release, build it first"
+        "{skill_name} skill binary not found in target/release, build it first"
     ))
 }
 
@@ -176,28 +163,6 @@ fn runner_bin_name(skill_name: &str) -> Result<String, String> {
     } else {
         Ok(format!("{normalized}-skill"))
     }
-}
-
-fn prefer_debug_bins() -> bool {
-    if let Ok(profile) = std::env::var("RUSTCLAW_SKILL_BIN_PROFILE") {
-        let p = profile.trim().to_ascii_lowercase();
-        if p == "debug" {
-            return true;
-        }
-        if p == "release" {
-            return false;
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        let path = exe.to_string_lossy().to_ascii_lowercase();
-        if path.contains("/target/debug/") {
-            return true;
-        }
-        if path.contains("/target/release/") {
-            return false;
-        }
-    }
-    true
 }
 
 fn run_child_skill(child_bin: &str, input_line: &str, timeout: Duration) -> Result<String, String> {
