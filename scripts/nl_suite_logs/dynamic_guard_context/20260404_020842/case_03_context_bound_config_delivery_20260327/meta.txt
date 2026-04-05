@@ -1,0 +1,9 @@
+index=3
+case_name=context_bound_config_delivery_20260327
+chat_id=17752372584
+turn1_task_id=80a0f927-83cb-4441-bdc7-98a4773cedec
+turn1_prompt=先记一下，“那个配置文件”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+turn2_task_id=8c9023ae-ea18-4dea-a53f-6a595bc59fde
+turn2_prompt=把那个配置文件发给我
+turn3_task_id=37ca0b54-7fa6-4701-8ac9-b53ad84bdba9
+turn3_prompt=再用一句话说它主要是干嘛的

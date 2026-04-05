@@ -1,0 +1,6 @@
+ordinal=6
+source_line=10
+case_name=explicit_archive_unpack
+chat_id=17752372387
+task_id=f54c7549-b3d1-4005-ab39-4f88defbbde3
+prompt=把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 解压到 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/manual_dynamic_guard_unpack 然后告诉我结果

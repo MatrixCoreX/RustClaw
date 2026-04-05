@@ -1,0 +1,6 @@
+ordinal=25
+source_line=30
+case_name=missing_file_graceful
+chat_id=1985997015
+task_id=28840da5-c2e1-462a-9939-d67b0851d90b
+prompt=把 definitely_missing_named_file_rustclaw_001.txt 发给我

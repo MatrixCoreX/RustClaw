@@ -92,7 +92,13 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         }
         "port_list" => run_command("ss", &["-ltnp"], None)
             .or_else(|_| run_command("netstat", &["-ltnp"], None))
-            .map(|text| (text.clone(), json!({"action":"port_list","exit_code":0,"output":text}))),
+            .or_else(|_| run_command("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"], None))
+            .map(|text| {
+                (
+                    text.clone(),
+                    json!({"action":"port_list","exit_code":0,"output":text}),
+                )
+            }),
         "kill" => {
             let pid = obj
                 .get("pid")

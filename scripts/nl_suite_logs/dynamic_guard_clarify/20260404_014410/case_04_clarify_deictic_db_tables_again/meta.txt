@@ -1,0 +1,7 @@
+index=4
+case_name=clarify_deictic_db_tables_again
+chat_id=17752372485
+turn1_task_id=c022e483-efe1-44b5-aa20-b42b44574780
+turn1_prompt=查一下那个 sqlite 里有哪些表
+turn2_task_id=0f23216d-fd30-4bc8-a9ab-707f8182d728
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/shell_compat.sh"
 CALLS_DIR="$ROOT_DIR/scripts/skill_calls"
 PROFILE="${PROFILE:-release}"
 AUTO_BUILD=0
@@ -25,7 +27,7 @@ Usage:
   bash scripts/smoke_skill_calls.sh [options]
 
 Options:
-  --profile debug|release   Wrapper profile (default: release)
+  --profile release         Wrapper profile (default: release)
   --auto-build              Pass --auto-build to wrappers
   --timeout N               Timeout per wrapper in seconds (default: 60)
   --skills a,b,c            Only run selected skills
@@ -123,15 +125,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$PROFILE" != "debug" && "$PROFILE" != "release" ]]; then
-  echo "--profile must be debug or release" >&2
+if [[ "$PROFILE" != "release" ]]; then
+  echo "--profile must be release" >&2
   exit 2
 fi
 
 need_cmd jq
-need_cmd timeout
 
-mapfile -t ALL_SKILLS < <(discover_skills)
+array_from_command_lines ALL_SKILLS discover_skills
 
 if [[ "$LIST_ONLY" == "1" ]]; then
   printf '%s\n' "${ALL_SKILLS[@]}"
@@ -167,7 +168,7 @@ for skill in "${ALL_SKILLS[@]}"; do
   echo
   echo "== $skill =="
   set +e
-  timeout "$TIMEOUT_SECS" "${cmd[@]}" >"$stdout_log" 2>"$stderr_log"
+  run_with_timeout "$TIMEOUT_SECS" "${cmd[@]}" >"$stdout_log" 2>"$stderr_log"
   rc=$?
   set -e
 

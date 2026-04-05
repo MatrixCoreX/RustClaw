@@ -564,7 +564,6 @@ run_case() {
   else
     print_result_summary "$final_raw" "summary"
   fi
-
   echo "[TRACE]"
   print_clawd_trace "$task_id"
 

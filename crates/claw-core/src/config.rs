@@ -1024,6 +1024,8 @@ pub struct CommandIntentConfig {
     pub rules_dir: String,
     #[serde(default = "default_command_intent_llm_fallback_enabled")]
     pub llm_fallback_enabled: bool,
+    #[serde(default = "default_command_intent_verify_enforce_enabled")]
+    pub verify_enforce_enabled: bool,
 }
 
 impl Default for CommandIntentConfig {
@@ -1032,6 +1034,7 @@ impl Default for CommandIntentConfig {
             default_locale: default_command_intent_default_locale(),
             rules_dir: default_command_intent_rules_dir(),
             llm_fallback_enabled: default_command_intent_llm_fallback_enabled(),
+            verify_enforce_enabled: default_command_intent_verify_enforce_enabled(),
         }
     }
 }
@@ -1136,6 +1139,7 @@ fn default_skills_list() -> Vec<String> {
         "service_control".to_string(),
         "task_control".to_string(),
         "config_guard".to_string(),
+        "map_merchant".to_string(),
         "crypto".to_string(),
         "chat".to_string(),
         "stock".to_string(),
@@ -1640,6 +1644,10 @@ fn default_command_intent_rules_dir() -> String {
 
 fn default_command_intent_llm_fallback_enabled() -> bool {
     true
+}
+
+fn default_command_intent_verify_enforce_enabled() -> bool {
+    false
 }
 
 fn default_schedule_timezone() -> String {

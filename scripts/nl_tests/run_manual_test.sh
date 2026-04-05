@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/shell_compat.sh"
+# shellcheck source=/dev/null
 source "${ROOT_DIR}/scripts/lib.sh"
 
 DEFAULT_CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_manual.txt"
@@ -33,6 +35,8 @@ usage() {
   cat <<'EOF'
 Usage:
   bash scripts/nl_tests/run_manual_test.sh [options]
+  Preferred unified entry:
+    bash scripts/nl_tests/run_suite.sh manual [options]
 
 Options:
   --case-file PATH      Case file to run. Default: scripts/nl_tests/cases/nl_cases_manual.txt
@@ -206,10 +210,10 @@ poll_until_terminal() {
   local last_status=""
 
   while [[ "$waited" -le "$MAX_WAIT_SECONDS" ]]; do
-    local raw status err_file rc
+    local status err_file rc
     err_file="$(mktemp)"
     set +e
-    raw="$(query_task "$task_id" 2>"$err_file")"
+    query_task_to_file "$task_id" "$out_file" 2>"$err_file"
     rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then
@@ -220,7 +224,6 @@ poll_until_terminal() {
       return 1
     fi
     rm -f "$err_file"
-    printf '%s\n' "$raw" > "$out_file"
     status="$(extract_status "$out_file")"
     if [[ "$status" != "$last_status" ]]; then
       echo "  [status] ${last_status:-<none>} -> ${status:-<empty>}"
@@ -520,7 +523,7 @@ echo
 
 health_check
 
-mapfile -t CASE_ROWS < <(load_case_rows "$CASE_FILE")
+array_from_command_lines CASE_ROWS load_case_rows "$CASE_FILE"
 if [[ "${#CASE_ROWS[@]}" -eq 0 ]]; then
   echo "No runnable cases found in $CASE_FILE" >&2
   exit 2

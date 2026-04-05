@@ -21,7 +21,7 @@ Usage:
   bash scripts/skill_calls/call_<skill>.sh [options]
 
 Options:
-  --profile debug|release   Runner profile (default: release)
+  --profile release         Runner profile (default: release)
   --args '<json>'           Args JSON passed to skill (default: wrapper preset)
   --user-id N               Request user_id (default: 1)
   --chat-id N               Request chat_id (default: 1)
@@ -123,8 +123,8 @@ if [[ -z "$SKILL_NAME" ]]; then
   exit 2
 fi
 
-if [[ "$PROFILE" != "debug" && "$PROFILE" != "release" ]]; then
-  echo "--profile must be debug or release"
+if [[ "$PROFILE" != "release" ]]; then
+  echo "--profile must be release"
   exit 2
 fi
 
@@ -139,14 +139,6 @@ echo "$ARGS_JSON" | jq -e . >/dev/null 2>&1 || {
 }
 
 RUNNER="$ROOT_DIR/target/$PROFILE/skill-runner"
-ALT_PROFILE="debug"
-if [[ "$PROFILE" == "debug" ]]; then
-  ALT_PROFILE="release"
-fi
-ALT_RUNNER="$ROOT_DIR/target/$ALT_PROFILE/skill-runner"
-if [[ ! -x "$RUNNER" && -x "$ALT_RUNNER" ]]; then
-  RUNNER="$ALT_RUNNER"
-fi
 
 if [[ ! -x "$RUNNER" ]]; then
   if [[ "$AUTO_BUILD" != "1" ]]; then
@@ -154,26 +146,14 @@ if [[ ! -x "$RUNNER" ]]; then
     echo "Try: ./build-all.sh $PROFILE or rerun with --auto-build"
     exit 1
   fi
-  if [[ "$PROFILE" == "release" ]]; then
-    (cd "$ROOT_DIR" && cargo build -p skill-runner --release)
-  else
-    (cd "$ROOT_DIR" && cargo build -p skill-runner)
-  fi
-  if [[ ! -x "$RUNNER" && -x "$ALT_RUNNER" ]]; then
-    RUNNER="$ALT_RUNNER"
-  fi
+  (cd "$ROOT_DIR" && cargo build -p skill-runner --release)
 fi
 
 if [[ "$AUTO_BUILD" == "1" ]]; then
   if bin_name="$(skill_bin_name "$SKILL_NAME")"; then
     skill_bin="$ROOT_DIR/target/$PROFILE/$bin_name"
-    alt_skill_bin="$ROOT_DIR/target/$ALT_PROFILE/$bin_name"
-    if [[ ! -x "$skill_bin" && ! -x "$alt_skill_bin" ]]; then
-      if [[ "$PROFILE" == "release" ]]; then
-        (cd "$ROOT_DIR" && cargo build --bin "$bin_name" --release)
-      else
-        (cd "$ROOT_DIR" && cargo build --bin "$bin_name")
-      fi
+    if [[ ! -x "$skill_bin" ]]; then
+      (cd "$ROOT_DIR" && cargo build --bin "$bin_name" --release)
     fi
   fi
 fi

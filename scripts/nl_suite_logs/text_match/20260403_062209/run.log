@@ -1,0 +1,286 @@
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_text_match.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_062209
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_062209/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_062209/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 5
+[NAME]        run_cmd_pwd_with_result_tail
+[CHAT]        1985996991
+[PROMPT]      执行 pwd，然后告诉我结果
+[TASK]        50a58914-6eb3-4cdf-97bd-3593c00b0554
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] subtask#1 skill(run_cmd): success /tmp/rustclaw-workspace
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 6
+[NAME]        run_cmd_uname_with_result_tail_en
+[CHAT]        1985996992
+[PROMPT]      please run uname -a and tell me the result
+[TASK]        5a695015-f7e8-4e95-9da3-ab9427a2a202
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Darwin rustclaw-test-host.local 22.6.0 Darwin Kernel Version 22.6.0: Tue Jul 15 08:22:28 PDT 2025; root:xnu-8796.141.3.713.2~2/RELEASE_X86_64 x86_64
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 7
+[NAME]        fs_readme_head_summary_semantic
+[CHAT]        1985996993
+[PROMPT]      看看 README.md 开头讲了什么，读前 20 行后用三句话总结
+[TASK]        738f1ecc-93db-4d9e-a516-c6a6695d7788
+  [status] <none> -> running
+  [status] running -> timeout
+[RESULT]
+  [final] status=timeout
+  [error] auto timeout: no progress heartbeat for 1200s while status=running
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 8
+[NAME]        fs_hidden_files_bool_semantic
+[CHAT]        1985996994
+[PROMPT]      帮我判断一下当前目录有没有隐藏文件，只回答有或没有，并举两个例子
+[TASK]        54c3840b-8d0b-4a95-8eab-ad8af3f81322
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 无法确认当前工作目录，请提供完整的目录路径。
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 9
+[NAME]        fs_package_name_scalar_semantic
+[CHAT]        1985996995
+[PROMPT]      去 package.json 里找 name，只把值给我
+[TASK]        224b4fc3-99fd-42b0-9bd1-dfc0ec4cb0a3
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 文件未找到，请提供完整的路径。
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 10
+[NAME]        fs_service_semantic_explain
+[CHAT]        1985996996
+[PROMPT]      检查仓库里有没有 rustclaw.service；如果有，给路径并顺手解释它是干什么的
+[TASK]        a6910f06-e944-43cb-baef-5075085a2df3
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 未找到 rustclaw.service 文件；请提供该文件的完整路径。
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 11
+[NAME]        fs_compare_readmes_semantic
+[CHAT]        1985996997
+[PROMPT]      比较 README.md 和 README.zh-CN.md 哪个更大，再解释为什么可能不同
+[TASK]        eb23077e-e46f-46fd-ab2c-245e6d56e8f4
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 未找到 README.md 和 README.zh-CN.md，请提供这两个文件所在的完整路径。
+
+============================================================
+[CASE]        8
+[SOURCE_LINE] 12
+[NAME]        followup_extract_username_semantic
+[CHAT]        1985996998
+[PROMPT]      只输出当前用户名，不要解释
+[TASK]        b0bc2e22-4f1e-4326-8fce-ff389fb08449
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] subtask#1 skill(run_cmd): success testuser
+
+============================================================
+[CASE]        9
+[SOURCE_LINE] 13
+[NAME]        followup_extract_hostname_semantic
+[CHAT]        1985996999
+[PROMPT]      只输出当前机器 hostname，不要解释
+[TASK]        8eeea8a0-caf7-46fc-81fe-7210274055cb
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] rustclaw-test-host.local
+
+============================================================
+[CASE]        10
+[SOURCE_LINE] 14
+[NAME]        followup_count_scripts_items_semantic
+[CHAT]        1985997000
+[PROMPT]      统计 scripts 目录下有多少个直接子项，只输出数字
+[TASK]        5b9adc88-6472-4539-8f55-eec3c34da5aa
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] __pycache__/ auth-key.sh check-secrets.sh check_base_skill_response_contracts.sh check_browser_runtime.sh check_skill_prompts.py codex_autofix_from_log.sh codex_autofix_prompt_from_log.sh codex_fix.sh count_lines.sh cryp...(truncated)
+
+============================================================
+[CASE]        11
+[SOURCE_LINE] 15
+[NAME]        followup_logs_then_conclusion
+[CHAT]        1985997001
+[PROMPT]      列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物
+[TASK]        2e1f0105-b07f-4d95-a1fd-5c2501a5edd2
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 日志目录未找到，请提供完整路径。
+
+============================================================
+[CASE]        12
+[SOURCE_LINE] 16
+[NAME]        file_write_and_deliver_semantic_cn
+[CHAT]        1985997002
+[PROMPT]      写一个文本文件到 document/text_match_regression_note.txt，内容是 semantic routing regression note，然后把文件发给我
+[TASK]        8a987ae0-c040-49f8-9d04-e86246fc0e7f
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/document/text_match_regression_note.txt
+
+============================================================
+[CASE]        13
+[SOURCE_LINE] 17
+[NAME]        missing_file_graceful_cn_semantic
+[CHAT]        1985997003
+[PROMPT]      把 document/definitely_missing_text_match_case_001.txt 发给我
+[TASK]        ac072188-e436-4fc4-a2cc-2e38216c4077
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 在系统根目录和项目根目录都没有找到该文件
+
+============================================================
+[CASE]        14
+[SOURCE_LINE] 18
+[NAME]        missing_file_graceful_en_followup
+[CHAT]        1985997004
+[PROMPT]      send me document/definitely_missing_runtime_case_002.txt and do not paste the content
+[TASK]        4269bd1e-8d66-4644-bb79-8521d24b1dbd
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 在系统根目录和项目根目录都没有找到该文件
+
+============================================================
+[CASE]        15
+[SOURCE_LINE] 19
+[NAME]        plain_chat_no_execution_cn
+[CHAT]        1985997005
+[PROMPT]      别执行任何命令，直接讲一个很短的冷笑话
+[TASK]        1cc4de73-264a-4dc0-853d-c421cb756f17
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 有一天程序崩溃了，它说："我的世界在下雨。"——其实是内存泄漏了。
+
+============================================================
+[CASE]        16
+[SOURCE_LINE] 20
+[NAME]        mixed_request_cn_semantic
+[CHAT]        1985997006
+[PROMPT]      先看看当前目录有哪些顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么组织
+[TASK]        be53b541-cf14-458d-a72e-1e535a5a128a
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 当前工作区的顶层文件夹： - `.github` — GitHub 配置（Actions、PR 模板等） - `.husky` — Git Hooks 配置（自动格式化、代码检查） - `.mise` — 开发环境工具版本管理配置 - `.vscode` — VS Code 编辑器配置 - `bin` — 可执行脚本或编译产物 - `docs` — 项目文档 - `internal` — 内部使用的私有代码（不建议外部引用） - `pk...(truncated)
+
+============================================================
+[CASE]        17
+[SOURCE_LINE] 21
+[NAME]        git_branch_scalar_semantic
+[CHAT]        1985997007
+[PROMPT]      tell me the current git branch name and output only the branch
+[TASK]        97f8ef3e-94f4-4ae7-bc67-532931dbb31c
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] subtask#1 skill(git_basic): success exit=0 main
+
+============================================================
+[CASE]        18
+[SOURCE_LINE] 22
+[NAME]        health_check_brief_semantic
+[CHAT]        1985997008
+[PROMPT]      run a basic health check and summarize the most important findings briefly
+[TASK]        0b157546-5754-432e-aaa0-eae7ce7fd320
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 请提供健康检查的目标，例如服务器地址、URL 或服务名称。
+
+============================================================
+[CASE]        19
+[SOURCE_LINE] 23
+[NAME]        service_status_brief_semantic
+[CHAT]        1985997009
+[PROMPT]      check whether telegramd is currently running and explain the status briefly
+[TASK]        382652d0-643b-4dc4-8a27-9e2caeeef77d
+  [status] <none> -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] step 1 failed (skill(process_basic)): process command failed: exit=1\nps: illegal option -- -\nusage: ps [-AaCcEefhjlMmrSTvwXx] [-O fmt | -o fmt] [-G gid[,gid...]]\n          [-g grp[,grp...]] [-u [uid,uid...]]\n          [-p pid[,pid...]] [-t tty[,tty...]] [-U user[,user...]]\n       ps [-L]
+  [text] step 1 failed (skill(process_basic)): process command failed: exit=1 ps: illegal option -- - usage: ps [-AaCcEefhjlMmrSTvwXx] [-O fmt | -o fmt] [-G gid[,gid...]] [-g grp[,grp...]] [-u [uid,uid...]] [-p pid[,pid...]] [-t ...(truncated)
+
+============================================================
+[CASE]        20
+[SOURCE_LINE] 24
+[NAME]        transform_json_table_semantic
+[CHAT]        1985997010
+[PROMPT]      sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+[TASK]        648430e1-971e-47f0-af5b-2ac432027599
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 请提供需要排序的 JSON 数组数据，您提到的「提供的 JSON 数组」在当前消息中未找到。
+
+================ Final Summary ================
+TOTAL_CASES=20 SUCCEEDED=18 FAILED=1 CANCELED=0 TIMEOUT=1
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_062209
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_062209/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_062209/summary.jsonl

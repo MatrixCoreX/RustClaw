@@ -1,7 +1,0 @@
-index=9
-case_name=clarify_deictic_missing_file_after_target_again
-chat_id=1985996999
-turn1_task_id=57877f64-4a01-4ce0-b097-c4c1150b94d4
-turn1_prompt=把那个文件发我
-turn2_task_id=566d03f2-6b19-4cd8-b271-25d0b47882ac
-turn2_prompt=/home/guagua/test/docs/not_exists_case_001.md

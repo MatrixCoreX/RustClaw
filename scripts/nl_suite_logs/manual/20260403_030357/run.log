@@ -1,0 +1,35 @@
+Natural-language manual regression
+  case_file:     /var/folders/n4/29dhws1x4q346w9slyzcndc00000gn/T/tmp.3XRdXx8C
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_030357
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_030357/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_030357/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        act_pwd_only
+[CHAT]        1985996991
+[PROMPT]      只输出当前工作目录的绝对路径，不要解释
+[TASK]        72ed068f-1e29-4501-8f62-bea0457e0462
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] /tmp/rustclaw-workspace
+
+================ Final Summary ================
+TOTAL_CASES=1 SUCCEEDED=1 FAILED=0 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_030357
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_030357/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_030357/summary.jsonl

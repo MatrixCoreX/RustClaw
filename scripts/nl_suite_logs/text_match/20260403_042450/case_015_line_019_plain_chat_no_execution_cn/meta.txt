@@ -1,0 +1,6 @@
+ordinal=15
+source_line=19
+case_name=plain_chat_no_execution_cn
+chat_id=1985997005
+task_id=e29cce67-fd79-49e9-baa1-b15d1349f926
+prompt=别执行任何命令，直接讲一个很短的冷笑话

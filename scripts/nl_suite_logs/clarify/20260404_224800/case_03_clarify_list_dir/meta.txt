@@ -1,0 +1,7 @@
+index=3
+case_name=clarify_list_dir
+chat_id=1985998103
+turn1_task_id=e3e445e8-1ee8-4694-8228-845ca5f83eac
+turn1_prompt=看看那个目录下面都有什么
+turn2_task_id=1ce96f0e-a2fb-46cc-8e20-30c38ec54c91
+turn2_prompt=document

@@ -21,8 +21,9 @@ usage() {
 Usage:
   scripts/codex_autofix_prompt_from_log.sh [options]
 
-Same as codex_autofix_from_log.sh but restricts fixes to prompt files only
-(prompts/*.md). Use when the log suggests LLM/output issues and you want
+Same as codex_autofix_from_log.sh but restricts fixes to prompt sources under
+the prompts/ tree (for example layered prompts and generated skill prompt
+bodies). Use when the log suggests LLM/output issues and you want
 to tune prompts without touching code.
 
 Options:
@@ -145,7 +146,7 @@ SCOPE_TEXT=""
 if [[ -n "$VENDOR" ]] || [[ -n "$PROMPT_NAME" ]]; then
   SCOPE_TEXT="Scope (if applicable):"
   [[ -n "$VENDOR" ]]      && SCOPE_TEXT="$SCOPE_TEXT vendor=$VENDOR"
-  [[ -n "$PROMPT_NAME" ]] && SCOPE_TEXT="$SCOPE_TEXT prompt stem=$PROMPT_NAME (e.g. prompts/${PROMPT_NAME}.md or prompts/vendors/default/skills/*.md)"
+  [[ -n "$PROMPT_NAME" ]] && SCOPE_TEXT="$SCOPE_TEXT prompt stem=$PROMPT_NAME (e.g. prompts/${PROMPT_NAME}.md, prompts/skills/${PROMPT_NAME}.md, or prompts/layers/generated/skills/${PROMPT_NAME}.md)"
 fi
 
 cat > "$PROMPT_FILE" <<EOF
@@ -155,7 +156,7 @@ Workspace: ${ROOT_DIR}
 Primary signal: log excerpt for the last ${TASKS} task(s) from ${LOG_FILE}
 
 STRICT CONSTRAINT — PROMPTS ONLY:
-- You may ONLY create or modify files under the prompts/ directory (e.g. prompts/*.md, prompts/vendors/default/skills/*.md).
+- You may ONLY create or modify files under the prompts/ directory (e.g. prompts/*.md, prompts/skills/*.md as registry logical stubs, prompts/layers/generated/skills/*.md, prompts/layers/**/*.md).
 - Do NOT modify any Rust, TypeScript, TOML, or other code. Do NOT change crates/, UI/, configs/ (except if you are explicitly told to touch a specific config that only holds prompt text).
 - If the log clearly indicates a code bug (e.g. compile error, panic, wrong logic in .rs/.ts), do not attempt a code fix here; instead briefly state that the user should run codex_autofix_from_log.sh or codex_fix.sh for code fixes.
 

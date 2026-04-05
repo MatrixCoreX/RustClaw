@@ -1,9 +1,0 @@
-index=3
-case_name=context_ultra_mixed_docs_alias
-chat_id=1985996993
-turn1_task_id=5da232f0-c460-496e-afee-27778a0c426f
-turn1_prompt=先记住，that folder 是 /home/guagua/test/docs
-turn2_task_id=21b9366b-ce4a-4e04-9952-a4f8a8aa448f
-turn2_prompt=that folder names only
-turn3_task_id=b860b6be-d671-4e2e-8fde-e01565bfe10d
-turn3_prompt=再回我总数，number only

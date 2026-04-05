@@ -1,0 +1,6 @@
+ordinal=11
+source_line=15
+case_name=english_explicit_readme_summary
+chat_id=17752372392
+task_id=dcff70cb-0c12-45cc-a143-ed5dd6b27421
+prompt=Read the first part of /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md and give me a one-line summary.

@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"39c26c3a-8b26-4fbd-946e-18dcd5fe539c","status":"succeeded","result_json":{"text":"有一条 ERROR 记录（下游超时），但已自动恢复；另有一次 WARN（缓存未命中），整体无阻断性异常。"},"error_text":null},"error":null}

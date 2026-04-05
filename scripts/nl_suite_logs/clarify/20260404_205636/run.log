@@ -1,0 +1,18 @@
+NL multi-turn suite: clarify
+  run_dir:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_205636
+  run_log:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_205636/run.log
+  case_file:  /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_clarify.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985996990
+
+============================================================
+[CASE]   1
+[NAME]   clarify_send_file_by_name
+[CHAT]   1985996991
+[TURN1]  把文件发给我
+[TASK1]  72a2badb-035f-48ea-b98a-8e51044ead9b
+  [status] <none> -> queued
+  [status] queued -> running
+poll timeout for task_id=72a2badb-035f-48ea-b98a-8e51044ead9b

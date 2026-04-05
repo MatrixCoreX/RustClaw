@@ -1,0 +1,6 @@
+ordinal=10
+source_line=14
+case_name=explicit_db_schema_version_cn
+chat_id=17752372391
+task_id=7948e320-d347-4964-a0af-6b44772675d9
+prompt=查一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema version，只输出值

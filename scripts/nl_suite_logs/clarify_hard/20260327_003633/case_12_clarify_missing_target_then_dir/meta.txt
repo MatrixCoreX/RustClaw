@@ -1,7 +1,0 @@
-index=12
-case_name=clarify_missing_target_then_dir
-chat_id=1985997002
-turn1_task_id=36cce2c8-5799-4235-bc6a-5931d90e5f5d
-turn1_prompt=看看那个目录下面都有什么
-turn2_task_id=13ac9b49-d0aa-44b9-9ce2-d9d30dc7e787
-turn2_prompt=/home/guagua/test/docs

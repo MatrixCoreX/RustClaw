@@ -70,7 +70,10 @@ async fn main() -> anyhow::Result<()> {
 
     let health = Arc::new(Mutex::new(BridgeHealth::default()));
     let stop = Arc::new(AtomicBool::new(false));
-    let i18n_path = resolve_i18n_path(&config.whatsapp_web.language, &config.whatsapp_web.i18n_path);
+    let i18n_path = resolve_i18n_path(
+        &config.whatsapp_web.language,
+        &config.whatsapp_web.i18n_path,
+    );
 
     let supervisor_health = health.clone();
     let supervisor_stop = stop.clone();

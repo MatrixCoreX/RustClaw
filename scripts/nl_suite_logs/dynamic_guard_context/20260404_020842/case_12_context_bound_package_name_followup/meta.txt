@@ -1,0 +1,9 @@
+index=12
+case_name=context_bound_package_name_followup
+chat_id=17752372593
+turn1_task_id=2cf4f659-d3d5-4062-8b23-84233865c86c
+turn1_prompt=先记一下，“那个 package 文件”指 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/package.json
+turn2_task_id=9547e8e7-001f-4f8f-b9c5-152788065e92
+turn2_prompt=去读一下那个 package 文件里的 name
+turn3_task_id=03873167-ed37-4823-ba1f-05acdca70b6b
+turn3_prompt=只输出那个值

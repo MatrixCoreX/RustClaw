@@ -1,0 +1,6 @@
+ordinal=15
+source_line=20
+case_name=chat_act_show_readme_then_summary
+chat_id=1985997005
+task_id=2e79a175-5d39-4cdd-9d6d-7177df4d5698
+prompt=读取 README 开头内容，再用非技术用户能听懂的话做一句总结

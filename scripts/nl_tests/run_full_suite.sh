@@ -30,6 +30,8 @@ usage() {
   cat <<'EOF'
 Usage:
   bash scripts/nl_tests/run_full_suite.sh [options]
+  Preferred unified entry:
+    bash scripts/nl_tests/run_suite.sh full [options]
 
 Default:
   Run the comprehensive natural-language instruction suite using run_manual_test.sh.

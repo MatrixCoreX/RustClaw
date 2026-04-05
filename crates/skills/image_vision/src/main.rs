@@ -1,10 +1,10 @@
 use std::collections::HashSet;
-use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use claw_core::prompt_layers;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -442,20 +442,22 @@ fn parse_language_choice_from_llm(raw: &str) -> Option<String> {
     language_from_json_value(&v)
 }
 
-fn load_language_infer_prompt_template(workspace_root: &Path) -> String {
-    let primary = workspace_root.join("prompts/language_infer_prompt.md");
-    if let Ok(s) = fs::read_to_string(&primary) {
-        if !s.trim().is_empty() {
-            return s;
-        }
-    }
-    let fallback = workspace_root.join("prompts/vendors/default/language_infer_prompt.md");
-    if let Ok(s) = fs::read_to_string(&fallback) {
-        if !s.trim().is_empty() {
-            return s;
-        }
-    }
-    DEFAULT_LANGUAGE_INFER_PROMPT_TEMPLATE.to_string()
+fn preferred_prompt_vendor(cfg: &RootConfig) -> &str {
+    cfg.llm
+        .selected_vendor
+        .as_deref()
+        .or(cfg.image_vision.default_vendor.as_deref())
+        .unwrap_or("default")
+}
+
+fn load_language_infer_prompt_template(workspace_root: &Path, prompt_vendor: &str) -> String {
+    prompt_layers::load_prompt_template_for_vendor(
+        workspace_root,
+        prompt_vendor,
+        "prompts/language_infer_prompt.md",
+        DEFAULT_LANGUAGE_INFER_PROMPT_TEMPLATE,
+    )
+    .0
 }
 
 /// When explicit language args are absent, derive target language from generic runner `context`,
@@ -509,7 +511,8 @@ fn infer_language_from_memory_snippets_llm(
     memory_snippets: &str,
     infer_timeout_secs: u64,
 ) -> Option<String> {
-    let template = load_language_infer_prompt_template(workspace_root);
+    let template =
+        load_language_infer_prompt_template(workspace_root, preferred_prompt_vendor(cfg));
     let prompt = template.replace("__MEMORY_SNIPPETS__", memory_snippets);
     let t = infer_timeout_secs.clamp(5, 45).min(25);
     for vk in vendor_order(
@@ -581,16 +584,14 @@ fn build_prompt(
         .replace("__LANGUAGE_HINT__", &language_hint)
 }
 
-fn load_image_output_rewrite_prompt_template(workspace_root: &Path) -> String {
-    let primary = workspace_root.join("prompts/image_output_rewrite_prompt.md");
-    if let Ok(s) = fs::read_to_string(&primary) {
-        return s;
-    }
-    let fallback = workspace_root.join("prompts/vendors/default/image_output_rewrite_prompt.md");
-    if let Ok(s) = fs::read_to_string(&fallback) {
-        return s;
-    }
-    include_str!("../../../../prompts/vendors/default/image_output_rewrite_prompt.md").to_string()
+fn load_image_output_rewrite_prompt_template(workspace_root: &Path, prompt_vendor: &str) -> String {
+    prompt_layers::load_prompt_template_for_vendor(
+        workspace_root,
+        prompt_vendor,
+        "prompts/image_output_rewrite_prompt.md",
+        include_str!("../../../../prompts/layers/overlays/image_output_rewrite_prompt.md"),
+    )
+    .0
 }
 
 fn openai_compat_chat_rewrite(
@@ -652,7 +653,8 @@ fn maybe_rewrite_image_vision_text_for_target_language(
     if vision_output.trim().is_empty() {
         return vision_output;
     }
-    let template = load_image_output_rewrite_prompt_template(workspace_root);
+    let template =
+        load_image_output_rewrite_prompt_template(workspace_root, preferred_prompt_vendor(cfg));
     let prompt = template
         .replace("__TARGET_LANGUAGE__", lang)
         .replace("__ORIGINAL_OUTPUT__", &vision_output);
@@ -736,19 +738,6 @@ fn action_instruction(
     }
 }
 
-fn normalize_prompt_vendor_name(raw: &str) -> String {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "anthropic" | "claude" => "claude".to_string(),
-        "google" | "gemini" => "google".to_string(),
-        "openai" => "openai".to_string(),
-        "grok" | "xai" => "grok".to_string(),
-        "deepseek" => "deepseek".to_string(),
-        "qwen" => "qwen".to_string(),
-        "minimax" => "minimax".to_string(),
-        _ => "default".to_string(),
-    }
-}
-
 fn prompt_vendor_name_for_vendor(vendor: VendorKind) -> &'static str {
     match vendor {
         VendorKind::OpenAI => "openai",
@@ -761,39 +750,19 @@ fn prompt_vendor_name_for_vendor(vendor: VendorKind) -> &'static str {
     }
 }
 
-fn resolve_prompt_rel_path_for_vendor(
-    workspace_root: &Path,
-    vendor: &str,
-    rel_path: &str,
-) -> String {
-    let trimmed = rel_path.trim();
-    if trimmed.is_empty() || !trimmed.starts_with("prompts/") {
-        return trimmed.to_string();
-    }
-    let suffix = trimmed.trim_start_matches("prompts/");
-    let vendor_name = normalize_prompt_vendor_name(vendor);
-    let vendor_candidate = format!("prompts/vendors/{vendor_name}/{suffix}");
-    if workspace_root.join(&vendor_candidate).is_file() {
-        return vendor_candidate;
-    }
-    let default_candidate = format!("prompts/vendors/default/{suffix}");
-    if vendor_name != "default" && workspace_root.join(&default_candidate).is_file() {
-        return default_candidate;
-    }
-    trimmed.to_string()
-}
-
 fn load_prompt_fragment(
     workspace_root: &Path,
     vendor: &str,
     relative_path: &str,
     default_template: &str,
 ) -> String {
-    let resolved_path = resolve_prompt_rel_path_for_vendor(workspace_root, vendor, relative_path);
-    match std::fs::read_to_string(workspace_root.join(resolved_path)) {
-        Ok(s) if !s.trim().is_empty() => s,
-        _ => default_template.to_string(),
-    }
+    prompt_layers::load_prompt_template_for_vendor(
+        workspace_root,
+        vendor,
+        relative_path,
+        default_template,
+    )
+    .0
 }
 
 fn load_image_vision_prompt_template(workspace_root: &Path, vendor: &str) -> String {
@@ -806,25 +775,25 @@ fn load_image_vision_prompt_template(workspace_root: &Path, vendor: &str) -> Str
 }
 
 const DEFAULT_IMAGE_VISION_PROMPT_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/image_vision_prompt.md");
+    include_str!("../../../../prompts/layers/overlays/image_vision_prompt.md");
 const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_WITH_TARGET_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/image_vision_language_hint_with_target.md");
+    include_str!("../../../../prompts/layers/overlays/image_vision_language_hint_with_target.md");
 const DEFAULT_IMAGE_VISION_LANGUAGE_HINT_DEFAULT_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/image_vision_language_hint_default.md");
+    include_str!("../../../../prompts/layers/overlays/image_vision_language_hint_default.md");
 const DEFAULT_IMAGE_VISION_ACTION_DESCRIBE_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/image_vision_action_describe.md");
+    include_str!("../../../../prompts/layers/overlays/image_vision_action_describe.md");
 const DEFAULT_IMAGE_VISION_ACTION_COMPARE_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/image_vision_action_compare.md");
+    include_str!("../../../../prompts/layers/overlays/image_vision_action_compare.md");
 const DEFAULT_IMAGE_VISION_ACTION_SCREENSHOT_SUMMARY_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/image_vision_action_screenshot_summary.md");
+    include_str!("../../../../prompts/layers/overlays/image_vision_action_screenshot_summary.md");
 const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_WITH_SCHEMA_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/image_vision_action_extract_with_schema.md");
+    include_str!("../../../../prompts/layers/overlays/image_vision_action_extract_with_schema.md");
 const DEFAULT_IMAGE_VISION_ACTION_EXTRACT_DEFAULT_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/image_vision_action_extract_default.md");
+    include_str!("../../../../prompts/layers/overlays/image_vision_action_extract_default.md");
 const DEFAULT_IMAGE_VISION_ACTION_FALLBACK_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/image_vision_action_fallback.md");
+    include_str!("../../../../prompts/layers/overlays/image_vision_action_fallback.md");
 const DEFAULT_LANGUAGE_INFER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/language_infer_prompt.md");
+    include_str!("../../../../prompts/layers/overlays/language_infer_prompt.md");
 
 fn call_vendor_vision(
     vendor: VendorKind,

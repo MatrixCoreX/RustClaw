@@ -1,0 +1,6 @@
+ordinal=10
+source_line=14
+case_name=followup_count_scripts_items_semantic
+chat_id=1985997000
+task_id=decd4682-502b-4717-a307-1b9fa206ffc0
+prompt=统计 scripts 目录下有多少个直接子项，只输出数字

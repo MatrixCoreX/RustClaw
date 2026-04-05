@@ -1,7 +1,0 @@
-index=2
-case_name=clarify_deictic_config_send_again
-chat_id=1985996992
-turn1_task_id=e4f376e3-bdae-412b-9fd6-a03c29782561
-turn1_prompt=把那个配置文件发给我
-turn2_task_id=a0cac4d3-315b-4f28-9a0b-b2a5d07fd650
-turn2_prompt=/home/guagua/test/configs/app_config.toml

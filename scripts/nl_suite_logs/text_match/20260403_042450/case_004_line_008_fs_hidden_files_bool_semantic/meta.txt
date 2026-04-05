@@ -1,0 +1,6 @@
+ordinal=4
+source_line=8
+case_name=fs_hidden_files_bool_semantic
+chat_id=1985996994
+task_id=0861f88f-0462-437a-935a-1ac665a3873c
+prompt=帮我判断一下当前目录有没有隐藏文件，只回答有或没有，并举两个例子

@@ -1,6 +1,0 @@
-ordinal=5
-source_line=8
-case_name=explicit_db_tables
-chat_id=1985996995
-task_id=2d62bbe8-3dfb-473b-ad73-1a44fab04bb3
-prompt=查一下 /home/guagua/test/data/test_contract.sqlite 里有哪些表

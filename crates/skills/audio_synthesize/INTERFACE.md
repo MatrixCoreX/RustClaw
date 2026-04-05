@@ -5,7 +5,9 @@
 
 ## Capability Summary
 - `audio_synthesize` generates speech audio from text input.
+- It saves the generated audio file to disk and returns a file marker in `text`.
 - It supports voice/format/output path tuning plus optional vendor/model routing.
+- Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `voice`, `response_format`, `output_path`, and `outputs`.
 
 ## Actions
 - No explicit action is required.
@@ -21,6 +23,16 @@
 | synthesize | `vendor` | no | string | impl default | Backend vendor selector. |
 | synthesize | `model` | no | string | impl default | Backend model selector. |
 
+## Success `extra` (`status=ok`)
+- `provider`: resolved backend provider name
+- `model`: resolved model name
+- `model_kind`: adapter/runtime mode chosen by implementation
+- `voice`: resolved voice preset actually used
+- `response_format`: normalized output audio format
+- `output_path`: saved audio file path
+- `outputs`: machine-readable output summary, currently `[{\"type\":\"audio_file\",\"path\":\"...\"}]`
+- `latency_ms`: reserved latency field
+
 ## Error Contract
 - Missing/empty text input.
 - Invalid option values or unsupported format/voice/model.
@@ -34,5 +46,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"audio synthesized: tmp/hello.mp3","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"VOICE_FILE:tmp/hello.mp3","extra":{"provider":"openai","model":"gpt-4o-mini-tts","model_kind":"compat","voice":"alloy","response_format":"mp3","output_path":"tmp/hello.mp3","outputs":[{"type":"audio_file","path":"tmp/hello.mp3"}],"latency_ms":0},"error_text":null}
 ```

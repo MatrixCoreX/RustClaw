@@ -1,7 +1,0 @@
-index=6
-case_name=clarify_which_archive_unpack
-chat_id=1985996996
-turn1_task_id=fcdb9072-69e8-4fcd-9cd3-99b67fa46064
-turn1_prompt=把那个压缩包解压到 tmp/clarify_unpack_case 然后告诉我结果
-turn2_task_id=5b607f1f-88f3-44c9-9599-3d766b616fea
-turn2_prompt=tmp/nl_archive_case.zip

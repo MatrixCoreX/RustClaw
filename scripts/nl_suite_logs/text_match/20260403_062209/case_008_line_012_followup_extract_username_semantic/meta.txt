@@ -1,0 +1,6 @@
+ordinal=8
+source_line=12
+case_name=followup_extract_username_semantic
+chat_id=1985996998
+task_id=b0bc2e22-4f1e-4326-8fce-ff389fb08449
+prompt=只输出当前用户名，不要解释

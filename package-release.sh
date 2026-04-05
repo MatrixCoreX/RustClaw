@@ -4,6 +4,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 cd "$SCRIPT_DIR"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
@@ -24,7 +26,7 @@ echo "[1/6] Pack only (no build); discover release binaries..."
 WORKSPACE_METADATA="$(cargo metadata --no-deps --format-version 1)"
 export RUSTCLAW_WORKSPACE_METADATA="$WORKSPACE_METADATA"
 
-mapfile -t REQUIRED_BINS < <(
+REQUIRED_BINS_RAW="$(
   python3 - <<'PY'
 import json
 import os
@@ -49,7 +51,8 @@ for pkg in data.get("packages", []):
 for name in sorted(bins):
     print(name)
 PY
-)
+)"
+array_from_string_lines REQUIRED_BINS "$REQUIRED_BINS_RAW"
 
 if [[ "${#REQUIRED_BINS[@]}" -eq 0 ]]; then
   echo "No workspace binaries discovered."
@@ -80,7 +83,7 @@ copy_if_exists() {
   local rel="$1"
   if [[ -e "$SCRIPT_DIR/$rel" ]]; then
     mkdir -p "$STAGE_PROJECT_DIR/$(dirname "$rel")"
-    cp -a "$SCRIPT_DIR/$rel" "$STAGE_PROJECT_DIR/$rel"
+    cp -R "$SCRIPT_DIR/$rel" "$STAGE_PROJECT_DIR/$rel"
   else
     echo "Warning: skip missing path: $rel"
   fi
@@ -108,14 +111,14 @@ copy_if_exists "stop-rustclaw.sh"
 
 if [[ -d "$SCRIPT_DIR/UI/dist" ]]; then
   mkdir -p "$STAGE_PROJECT_DIR/UI"
-  cp -a "$SCRIPT_DIR/UI/dist" "$STAGE_PROJECT_DIR/UI/dist"
+  cp -R "$SCRIPT_DIR/UI/dist" "$STAGE_PROJECT_DIR/UI/dist"
 else
   echo "Warning: UI/dist not found, package will not include built UI assets."
 fi
 
 mkdir -p "$STAGE_PROJECT_DIR/target/release"
 for bin in "${REQUIRED_BINS[@]}"; do
-  cp -a "$SCRIPT_DIR/target/release/$bin" "$STAGE_PROJECT_DIR/target/release/$bin"
+  cp -R "$SCRIPT_DIR/target/release/$bin" "$STAGE_PROJECT_DIR/target/release/$bin"
 done
 
 echo "[4.5/6] Add usage note (开盒即用)..."
@@ -149,7 +152,7 @@ RustClaw runtime package — ready to run
 USAGE_EN
 
 echo "[5/6] Apply sanitized config as configs/config.toml..."
-cp -a "$SANITIZED_CONFIG" "$STAGE_PROJECT_DIR/configs/config.toml"
+cp -R "$SANITIZED_CONFIG" "$STAGE_PROJECT_DIR/configs/config.toml"
 rm -f "$STAGE_PROJECT_DIR/configs/config.release.sanitized.toml"
 
 echo "[5.2/6] Verify required config directories in package..."

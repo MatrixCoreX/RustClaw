@@ -1,5 +1,5 @@
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::AppState;
 
@@ -12,29 +12,33 @@ pub(crate) fn render_prompt_template(template: &str, replacements: &[(&str, &str
 }
 
 pub(crate) fn log_prompt_render(
+    state: &AppState,
     task_id: &str,
     prompt_name: &str,
-    prompt_file: &str,
+    prompt_source: &str,
     round: Option<usize>,
 ) {
+    if !state.routing.debug_log_prompt {
+        return;
+    }
     match round {
         Some(round) => {
             tracing::info!(
-                "{} prompt_invocation task_id={} prompt_name={} prompt_file={} prompt_dynamic=true note=dynamic_built_prompt round={}",
+                "{} prompt_invocation task_id={} prompt_name={} prompt_source={} prompt_dynamic=true note=dynamic_built_prompt round={}",
                 crate::highlight_tag("prompt"),
                 task_id,
                 prompt_name,
-                prompt_file,
+                prompt_source,
                 round
             );
         }
         None => {
             tracing::info!(
-                "{} prompt_invocation task_id={} prompt_name={} prompt_file={} prompt_dynamic=true note=dynamic_built_prompt",
+                "{} prompt_invocation task_id={} prompt_name={} prompt_source={} prompt_dynamic=true note=dynamic_built_prompt",
                 crate::highlight_tag("prompt"),
                 task_id,
                 prompt_name,
-                prompt_file
+                prompt_source
             );
         }
     }
@@ -264,8 +268,8 @@ fn repair_unescaped_inner_quotes(raw: &str) -> String {
                 while j < chars.len() && chars[j].is_whitespace() {
                     j += 1;
                 }
-                let looks_like_string_end = j >= chars.len()
-                    || matches!(chars[j], ',' | '}' | ']' | ':');
+                let looks_like_string_end =
+                    j >= chars.len() || matches!(chars[j], ',' | '}' | ']' | ':');
                 if looks_like_string_end {
                     out.push(ch);
                     in_string = false;
@@ -411,7 +415,10 @@ mod tests {
         let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
             .expect("valid json should parse");
         assert_eq!(
-            parsed.get("mode").and_then(|v| v.as_str()).unwrap_or_default(),
+            parsed
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
             "chat"
         );
     }

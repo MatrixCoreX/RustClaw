@@ -11,9 +11,27 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = REPO_ROOT / "crates" / "skills"
 EXTERNAL_SKILLS_DIR = REPO_ROOT / "external_skills"
-PROMPTS_DIR = REPO_ROOT / "prompts" / "vendors" / "default" / "skills"
+# Canonical generated skill prompt body. Vendor-specific behavior should stay in
+# prompts/layers/vendor_patches/<vendor>/skills/<name>.md instead of forking this file tree.
+PROMPTS_DIR = REPO_ROOT / "prompts" / "layers" / "generated" / "skills"
 REGISTRY_PATH = REPO_ROOT / "configs" / "skills_registry.toml"
 PROMPT_MANAGED_MARKER = "<!-- AUTO-GENERATED: sync_skill_docs.py -->"
+MULTILINGUAL_REINFORCEMENT_BLOCK = """## Multilingual Reinforcement
+<!-- Reserved for language-specific reinforcement.
+Use subheadings such as:
+### zh-CN
+- ...
+### en
+- ...
+Keep only language-specific nuances here; keep general rules in the main prompt body.
+-->
+### zh-CN
+- Chinese colloquial requests such as `帮我看下`、`瞄一眼`、`顺手查一下`、`帮我确认下` should still be interpreted by capability semantics rather than downgraded to pure chat.
+- Chinese delivery wording such as `发我`、`甩给我`、`直接给我`、`别贴正文` usually indicates file/result delivery intent instead of inline pasted content.
+- Chinese brevity/format wording such as `只回数字`、`只给结果`、`只回路径`、`一句话说完` should constrain the planner's final expected output shape when that skill can support it.
+- Chinese style wording such as `用人话说`、`通俗点`、`给新手讲` means keep the eventual explanation low-jargon and user-friendly.
+- Chinese deictic wording such as `那个`、`它`、`上面那个` should rely on immediate concrete context only; do not guess unsupported targets or invent missing args just to force a skill call.
+"""
 RESERVED_PROMPT_STEMS = {"README"}
 
 
@@ -154,6 +172,8 @@ def prompt_template(skill: str, interface_md: str) -> str:
 - Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
 - On uncertainty, prefer safe/readonly behavior first.
+
+{MULTILINGUAL_REINFORCEMENT_BLOCK}
 """
 
 
@@ -275,12 +295,12 @@ def main() -> int:
     parser.add_argument(
         "--adopt",
         default="",
-        help="Adopt one skill prompt into managed mode (overwrite prompts/vendors/default/skills/<skill>.md).",
+        help="Adopt one skill prompt into managed mode (overwrite prompts/layers/generated/skills/<skill>.md).",
     )
     parser.add_argument(
         "--adopt-all",
         action="store_true",
-        help="Adopt all skill prompts into managed mode (overwrite all prompts/vendors/default/skills/<skill>.md).",
+        help="Adopt all skill prompts into managed mode (overwrite all prompts/layers/generated/skills/<skill>.md).",
     )
     args = parser.parse_args()
 

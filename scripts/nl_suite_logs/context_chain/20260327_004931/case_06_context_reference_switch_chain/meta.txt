@@ -1,9 +1,0 @@
-index=6
-case_name=context_reference_switch_chain
-chat_id=1985996996
-turn1_task_id=fe00bf81-f032-419f-a7e9-4fb52c5f7833
-turn1_prompt=先记一下“甲”指 /home/guagua/test/README.md
-turn2_task_id=9fc8b3f7-d2ee-49fd-8157-bd570f2b97db
-turn2_prompt=再记一下“乙”指 /home/guagua/test/docs/service_notes.md
-turn3_task_id=3f85a63a-9a46-46fe-9e07-288241f105c5
-turn3_prompt=读一下乙的开头，然后顺手说甲是干什么的

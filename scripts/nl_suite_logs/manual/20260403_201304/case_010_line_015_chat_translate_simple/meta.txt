@@ -1,0 +1,6 @@
+ordinal=10
+source_line=15
+case_name=chat_translate_simple
+chat_id=1985997000
+task_id=c13eef7a-1983-464c-b103-d78261eb36fc
+prompt=把这句话翻成英文：现在服务已经恢复了

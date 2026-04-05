@@ -1,0 +1,17 @@
+{"suite": "clarify", "case_name": "clarify_deictic_readme_again", "pass": false, "reasons": ["turn1 should clarify first but does not look like a clarification"]}
+{"suite": "clarify", "case_name": "clarify_deictic_config_send_again", "pass": false, "reasons": ["turn1 should clarify first but does not look like a clarification"]}
+{"suite": "clarify", "case_name": "clarify_deictic_log_tail_again", "pass": false, "reasons": ["turn2 should execute after locator but re-asks generic question"]}
+{"suite": "clarify", "case_name": "clarify_deictic_db_tables_again", "pass": true, "reasons": []}
+{"suite": "clarify", "case_name": "clarify_deictic_archive_unpack_again", "pass": true, "reasons": []}
+{"suite": "clarify", "case_name": "clarify_deictic_dir_count_again", "pass": true, "reasons": []}
+{"suite": "clarify", "case_name": "clarify_deictic_mixed_lang_readme_again", "pass": false, "reasons": ["turn1 should clarify first but does not look like a clarification"]}
+{"suite": "clarify", "case_name": "clarify_deictic_file_delivery_cn_en_again", "pass": false, "reasons": ["turn1 should clarify first but does not look like a clarification"]}
+{"suite": "clarify", "case_name": "clarify_deictic_missing_file_after_target_again", "pass": false, "reasons": ["turn1 should clarify first but does not look like a clarification"]}
+{"suite": "clarify", "case_name": "clarify_deictic_db_schema_version_again", "pass": true, "reasons": []}
+{"suite": "clarify", "case_name": "clarify_deictic_colloquial_en_send", "pass": true, "reasons": []}
+{"suite": "clarify", "case_name": "clarify_deictic_colloquial_mixed_log", "pass": false, "reasons": ["turn1 should clarify first but does not look like a clarification"]}
+{"suite": "clarify", "case_name": "clarify_deictic_release_note_summary", "pass": true, "reasons": []}
+{"suite": "clarify", "case_name": "clarify_deictic_package_name_value", "pass": false, "reasons": ["turn2 locator path exists but output says not found/unreadable"]}
+{"suite": "clarify", "case_name": "clarify_deictic_model_io_tail", "pass": false, "reasons": ["turn2 should execute after locator but re-asks generic question", "turn2 locator path exists but output says not found/unreadable"]}
+{"suite": "clarify", "case_name": "clarify_deictic_docs_archive_list", "pass": false, "reasons": ["turn1 status=failed", "turn1 should clarify first but does not look like a clarification"]}
+{"suite": "clarify", "case_name": "clarify_deictic_colloquial_cn_notes_send", "pass": false, "reasons": ["turn1 should clarify first but does not look like a clarification"]}

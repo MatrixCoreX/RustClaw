@@ -1,0 +1,6 @@
+ordinal=15
+source_line=20
+case_name=act_check_document_dir
+chat_id=1985997005
+task_id=9d1a4d24-e1b3-4211-966a-bb0bbf889a63
+prompt=列出 document 目录下有哪些文件，只输出文件名列表

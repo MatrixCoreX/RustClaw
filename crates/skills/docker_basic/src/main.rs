@@ -64,11 +64,14 @@ fn execute(args: Value) -> Result<(String, Value), String> {
     let action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("ps");
 
     match action {
-        "ps" => run_docker("ps", &[
+        "ps" => run_docker(
             "ps",
-            "--format",
-            "table {{.Names}}\t{{.Status}}\t{{.Ports}}",
-        ]),
+            &[
+                "ps",
+                "--format",
+                "table {{.Names}}\t{{.Status}}\t{{.Ports}}",
+            ],
+        ),
         "images" => run_docker("images", &["images"]),
         "logs" => {
             let container = required(obj, "container")?;
@@ -77,10 +80,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(100)
                 .min(1000);
-            run_docker(
-                "logs",
-                &["logs", "--tail", &tail.to_string(), container],
-            )
+            run_docker("logs", &["logs", "--tail", &tail.to_string(), container])
         }
         "restart" => run_docker("restart", &["restart", required(obj, "container")?]),
         "start" => run_docker("start", &["start", required(obj, "container")?]),

@@ -1,0 +1,9 @@
+index=4
+case_name=context_ambiguous_after_two_files_20260327
+chat_id=17752372585
+turn1_task_id=89ac0dbe-fd45-438a-8c75-ae89ca23d685
+turn1_prompt=先读取 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md 开头 3 行
+turn2_task_id=02f82415-0486-4056-aa9e-203451dea16c
+turn2_prompt=再读取 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md 开头 3 行
+turn3_task_id=5c3f9e75-f656-4482-8fc8-d8b9a440f27f
+turn3_prompt=把那个文件发给我

@@ -1,0 +1,6 @@
+ordinal=8
+source_line=13
+case_name=write_and_deliver_hello
+chat_id=1985996998
+task_id=896e1f98-111d-4dd4-a215-c0c9f26a13a8
+prompt=写一个 hello world shell 脚本，保存成 document/hello_from_manual_test.sh，然后把文件发给我

@@ -1,0 +1,7 @@
+index=1
+case_name=clarify_send_file_by_name
+chat_id=1986001001
+turn1_task_id=9f200e1c-dd48-4161-b564-f2dd6a0e32ce
+turn1_prompt=把文件发给我
+turn2_task_id=ff0b8db5-dddf-4854-b49e-1d3b30e812fc
+turn2_prompt=README.md

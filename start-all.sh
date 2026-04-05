@@ -50,7 +50,7 @@ if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
 fi
 
 # Optional args:
-#   ./start-all.sh <vendor(openai|google|anthropic|grok|deepseek|qwen|minimax|custom)> [model] [release|debug] [channels]
+#   ./start-all.sh <vendor(openai|google|anthropic|grok|deepseek|qwen|minimax|custom)> [model] [release] [channels]
 # channels:
 #   telegram | whatsapp_web | both | whatsapp_cloud | all
 SELECTED_VENDOR_ARG="${1:-}"
@@ -68,9 +68,9 @@ case "$(echo "$QUICK_START_ARG" | tr '[:upper:]' '[:lower:]')" in
 	;;
 esac
 case "$PROFILE" in
-release | debug) ;;
+release) ;;
 *)
-	echo "Usage: ./start-all.sh <vendor> [model] [release|debug] [channels]" # zh: 用法：./start-all.sh <vendor> [model] [release|debug] [channels]
+	echo "Usage: ./start-all.sh <vendor> [model] [release] [channels]" # zh: 用法：./start-all.sh <vendor> [model] [release] [channels]
 	exit 1
 	;;
 esac
@@ -821,7 +821,7 @@ fi
 echo "Step 3/5: Setup and dependency check" # zh: 第 3/5 步：执行初始化与依赖检查
 run_embedded_setup
 
-# Self-contained startup with selectable profile (default: release).
+# Self-contained startup with release profile.
 CLAWD_BIN="$SCRIPT_DIR/target/$PROFILE/clawd"
 WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/webd"
 TELEGRAMD_BIN="$SCRIPT_DIR/target/$PROFILE/telegramd"
@@ -833,7 +833,7 @@ echo "Step 4/5: Build check" # zh: 第 4/5 步：检查编译产物
 if [[ ! -x "$CLAWD_BIN" || ! -x "$TELEGRAMD_BIN" ]]; then
 	echo "Prebuilt binaries missing for profile=$PROFILE." # zh: 缺少预编译二进制
 	echo "Required: $CLAWD_BIN, $TELEGRAMD_BIN"
-	echo "Copy your built binaries to target/$PROFILE/ or run: cargo build --workspace ${PROFILE:+--release}"
+	echo "Copy your built binaries to target/$PROFILE/ or run: cargo build --workspace --release"
 	exit 1
 fi
 echo "Detected prebuilt binaries under target/$PROFILE; starting directly in background." # zh: 已检测到预编译二进制，直接后台启动。
@@ -845,20 +845,8 @@ build_ui_if_needed
 # Ensure skill-runner binary exists for run_skill tasks.
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
 if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
-	ALT_PROFILE="debug"
-	if [[ "$PROFILE" == "debug" ]]; then
-		ALT_PROFILE="release"
-	fi
-	ALT_RUNNER="$SCRIPT_DIR/target/$ALT_PROFILE/skill-runner"
-	if [[ -x "$ALT_RUNNER" ]]; then
-		echo "skill-runner missing in $PROFILE, fallback to $ALT_PROFILE: $ALT_RUNNER" # zh: 当前 profile 未找到 skill-runner，回退到另一 profile。
-		SKILL_RUNNER_ABS="$ALT_RUNNER"
-	fi
-fi
-
-if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
 	echo "skill-runner missing: $SKILL_RUNNER_ABS" # zh: 未找到 skill-runner
-	echo "Copy your built skill-runner to target/$PROFILE/ or run: cargo build -p skill-runner ${PROFILE:+--release}"
+	echo "Copy your built skill-runner to target/$PROFILE/ or run: cargo build -p skill-runner --release"
 	exit 1
 fi
 

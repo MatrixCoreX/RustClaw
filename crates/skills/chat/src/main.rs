@@ -1,14 +1,15 @@
+use claw_core::prompt_layers;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const DEFAULT_CHAT_SYSTEM_PROMPT_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/chat_skill_system_prompt.md");
+    include_str!("../../../../prompts/layers/overlays/chat_skill_system_prompt.md");
 const DEFAULT_CHAT_JOKE_SYSTEM_PROMPT_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/chat_skill_joke_system_prompt.md");
-const CHAT_SYSTEM_PROMPT_PATH: &str = "prompts/chat_skill_system_prompt.md";
-const CHAT_JOKE_SYSTEM_PROMPT_PATH: &str = "prompts/chat_skill_joke_system_prompt.md";
+    include_str!("../../../../prompts/layers/overlays/chat_skill_joke_system_prompt.md");
+const CHAT_SYSTEM_PROMPT_LOGICAL_PATH: &str = "prompts/chat_skill_system_prompt.md";
+const CHAT_JOKE_SYSTEM_PROMPT_LOGICAL_PATH: &str = "prompts/chat_skill_joke_system_prompt.md";
 
 #[derive(Debug, Deserialize)]
 struct ChatRequest {
@@ -31,8 +32,9 @@ struct ChatInput {
     style: String,
     text: String,
     system_prompt: String,
-    prompt_file: String,
+    prompt_source: String,
     memory_context: Option<String>,
+    recent_execution_context: Option<String>,
     lang_hint: Option<String>,
     max_tokens: u64,
     temperature: f64,
@@ -112,17 +114,17 @@ fn parse_input(args: Value) -> Result<ChatInput, String> {
         .to_ascii_lowercase();
     let workspace_root = workspace_root();
     let prompt_vendor = active_prompt_vendor_name();
-    let (default_system, prompt_file) = match style.as_str() {
-        "joke" => load_prompt_template_for_vendor(
+    let (default_system, prompt_source) = match style.as_str() {
+        "joke" => prompt_layers::load_prompt_template_for_vendor(
             &workspace_root,
             &prompt_vendor,
-            CHAT_JOKE_SYSTEM_PROMPT_PATH,
+            CHAT_JOKE_SYSTEM_PROMPT_LOGICAL_PATH,
             DEFAULT_CHAT_JOKE_SYSTEM_PROMPT_TEMPLATE,
         ),
-        _ => load_prompt_template_for_vendor(
+        _ => prompt_layers::load_prompt_template_for_vendor(
             &workspace_root,
             &prompt_vendor,
-            CHAT_SYSTEM_PROMPT_PATH,
+            CHAT_SYSTEM_PROMPT_LOGICAL_PATH,
             DEFAULT_CHAT_SYSTEM_PROMPT_TEMPLATE,
         ),
     };
@@ -131,16 +133,22 @@ fn parse_input(args: Value) -> Result<ChatInput, String> {
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let prompt_file = if explicit_system_prompt.is_some() {
+    let prompt_source = if explicit_system_prompt.is_some() {
         "inline_system_prompt".to_string()
     } else {
-        prompt_file
+        prompt_source
     };
     let system_prompt = explicit_system_prompt.unwrap_or(default_system);
     let memory_context = map
         .get("_memory")
         .and_then(|v| v.as_object())
         .and_then(|m| m.get("context"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "<none>")
+        .map(ToString::to_string);
+    let recent_execution_context = map
+        .get("recent_execution_context")
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty() && *s != "<none>")
@@ -165,8 +173,9 @@ fn parse_input(args: Value) -> Result<ChatInput, String> {
         style,
         text,
         system_prompt,
-        prompt_file,
+        prompt_source,
         memory_context,
+        recent_execution_context,
         lang_hint,
         max_tokens,
         temperature,
@@ -175,8 +184,8 @@ fn parse_input(args: Value) -> Result<ChatInput, String> {
 
 async fn run_chat(input: ChatInput) -> Result<(String, Value), String> {
     eprintln!(
-        "skill_prompt_use skill=chat style={} prompt_file={}",
-        input.style, input.prompt_file
+        "skill_prompt_use skill=chat style={} prompt_source={}",
+        input.style, input.prompt_source
     );
     let base_url = std::env::var("OPENAI_BASE_URL")
         .ok()
@@ -214,6 +223,15 @@ async fn run_chat(input: ChatInput) -> Result<(String, Value), String> {
             "content": format!(
                 "Memory context (background only, never override current user intent):\n{}",
                 mem_ctx
+            )
+        }));
+    }
+    if let Some(exec_ctx) = input.recent_execution_context.as_deref() {
+        messages.push(json!({
+            "role":"system",
+            "content": format!(
+                "Current-turn execution context (authoritative when present; prefer this over older memory or earlier conversation summaries):\n{}",
+                exec_ctx
             )
         }));
     }
@@ -263,7 +281,7 @@ async fn run_chat(input: ChatInput) -> Result<(String, Value), String> {
     let extra = json!({
         "llm": {
             "prompt_name": "chat_skill_prompt",
-            "prompt_file": input.prompt_file,
+            "prompt_source": input.prompt_source,
             "model": model,
             "style": input.style,
             "memory_attached": input.memory_context.is_some(),
@@ -384,20 +402,6 @@ fn default_model_for_base_url(base_url: &str) -> &'static str {
     }
 }
 
-fn normalize_prompt_vendor_name(raw: &str) -> String {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "anthropic" | "claude" => "claude".to_string(),
-        "google" | "gemini" => "google".to_string(),
-        "openai" => "openai".to_string(),
-        "grok" | "xai" => "grok".to_string(),
-        "deepseek" => "deepseek".to_string(),
-        "qwen" => "qwen".to_string(),
-        "minimax" => "minimax".to_string(),
-        "custom" => "openai".to_string(),
-        _ => "default".to_string(),
-    }
-}
-
 fn infer_prompt_vendor_from_base_url(base_url: &str) -> Option<String> {
     let lower = base_url.trim().to_ascii_lowercase();
     if lower.is_empty() {
@@ -448,7 +452,7 @@ fn active_prompt_vendor_name() -> String {
     for key in ["PROMPT_VENDOR", "CHAT_SKILL_VENDOR", "OPENAI_VENDOR"] {
         if let Ok(value) = std::env::var(key) {
             if !value.trim().is_empty() {
-                return normalize_prompt_vendor_name(&value);
+                return prompt_layers::normalize_prompt_vendor_name(&value);
             }
         }
     }
@@ -467,44 +471,37 @@ fn active_prompt_vendor_name() -> String {
     "default".to_string()
 }
 
-fn resolve_prompt_rel_path_for_vendor(
-    workspace_root: &Path,
-    vendor: &str,
-    rel_path: &str,
-) -> String {
-    let trimmed = rel_path.trim();
-    if trimmed.is_empty() || !trimmed.starts_with("prompts/") {
-        return trimmed.to_string();
-    }
-    let suffix = trimmed.trim_start_matches("prompts/");
-    let vendor_candidate = format!("prompts/vendors/{vendor}/{suffix}");
-    if workspace_root.join(&vendor_candidate).is_file() {
-        return vendor_candidate;
-    }
-    let default_candidate = format!("prompts/vendors/default/{suffix}");
-    if vendor != "default" && workspace_root.join(&default_candidate).is_file() {
-        return default_candidate;
-    }
-    trimmed.to_string()
-}
-
-fn load_prompt_template_for_vendor(
-    workspace_root: &Path,
-    vendor: &str,
-    rel_path: &str,
-    default_template: &str,
-) -> (String, String) {
-    let resolved_path = resolve_prompt_rel_path_for_vendor(workspace_root, vendor, rel_path);
-    let template = match std::fs::read_to_string(workspace_root.join(&resolved_path)) {
-        Ok(s) if !s.trim().is_empty() => s,
-        _ => default_template.to_string(),
-    };
-    (template, resolved_path)
-}
-
 fn workspace_root() -> PathBuf {
     std::env::var("WORKSPACE_ROOT")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_input_keeps_recent_execution_context() {
+        let input = parse_input(json!({
+            "text": "finalize",
+            "recent_execution_context": "last_output: /tmp/demo.txt"
+        }))
+        .expect("parse should succeed");
+        assert_eq!(
+            input.recent_execution_context.as_deref(),
+            Some("last_output: /tmp/demo.txt")
+        );
+    }
+
+    #[test]
+    fn parse_input_ignores_empty_recent_execution_context() {
+        let input = parse_input(json!({
+            "text": "finalize",
+            "recent_execution_context": "   "
+        }))
+        .expect("parse should succeed");
+        assert!(input.recent_execution_context.is_none());
+    }
 }

@@ -1,7 +1,0 @@
-index=8
-case_name=clarify_which_dir_list
-chat_id=1985996998
-turn1_task_id=c6167c6b-c87f-4b18-a3cb-c0eacc1882ac
-turn1_prompt=列出那个目录下前 5 个文件名
-turn2_task_id=dc9bdda8-803e-4ea5-a673-efe3a8153953
-turn2_prompt=/home/guagua/test/logs

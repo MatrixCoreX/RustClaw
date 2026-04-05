@@ -1,0 +1,37 @@
+Natural-language manual regression
+  case_file:     scripts/nl_tests/cases/test.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_013814
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_013814/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_013814/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       240001
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        line_001
+[CHAT]        240002
+[PROMPT]      读取 README 的前 20 行并做 3 句话总结
+[TASK]        6b2f147a-9752-4f38-892b-b7345460b9c4
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+  [text] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 2
+[NAME]        line_002
+[CHAT]        240003
+[PROMPT]      检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+[TASK]        9b5b5205-17f2-4fc7-b6a3-857f34851071
+  [status] <none> -> running

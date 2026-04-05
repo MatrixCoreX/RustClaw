@@ -1,0 +1,6 @@
+ordinal=33
+source_line=38
+case_name=act_http_local_health_cn
+chat_id=1985997023
+task_id=f66fe788-e3b0-4bc5-877a-a950f8d36f20
+prompt=请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果

@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"b382804c-04a9-4a5f-97fe-2c3fcd78d343","status":"succeeded","result_json":{"messages":["这个目录是用于自然语言回归测试工件和包装脚本的测试工作区，runner 的输入和日志可以存放在此，但更改此目录不会改变代理的内部工作目录。"],"text":"这个目录是用于自然语言回归测试工件和包装脚本的测试工作区，runner 的输入和日志可以存放在此，但更改此目录不会改变代理的内部工作目录。"},"error_text":null},"error":null}

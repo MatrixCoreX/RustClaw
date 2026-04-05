@@ -1,0 +1,52 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_manual_targeted_4.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_112331
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_112331/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_112331/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1986004000
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        chat_explain_repo_briefly
+[CHAT]        1986004001
+[PROMPT]      用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+[TASK]        f9bcaa69-d3a5-443c-b458-6b604e5881b0
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这是一个用 Rust 编程语言开发的多平台聊天聚合工具。它可以把微信、WhatsApp、Telegram、飞书、Lark 等多个聊天软件的消息汇聚到一起，让你可以在一个地方统一管理所有聊天对话和机器人。项目自带界面和配置管理，支持在服务器上运行，属于「聊天中台」类的开源软件。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 2
+[NAME]        chat_act_list_then_explain_docs
+[CHAT]        1986004002
+[PROMPT]      列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+[TASK]        d96f1ad0-acf5-46e0-af6d-867989181615
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] docs 目录包含以下文档： 1. **base_skill_response_contract.md** - 定义基础技能响应的合同/规范标准 2. **clawd-main-split-checklist.md** - clawd 主分支分离操作的检查清单 3. **clawd-main-split-plan.md** - clawd 主分支分离的实施计划 4. **clawd-main-split-progress.md** - ...(truncated)
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 3
+[NAME]        act_log_analyze_brief
+[CHAT]        1986004003
+[PROMPT]      快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
+[TASK]        08641e0d-b5c2-4695-9806-ad968cdc2381
+  [status] <none> -> queued
+  [status] queued -> running
+poll timeout for task_id=08641e0d-b5c2-4695-9806-ad968cdc2381

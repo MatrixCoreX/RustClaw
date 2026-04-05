@@ -1,0 +1,64 @@
+NL multi-turn suite: clarify
+  run_dir:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221546
+  run_log:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221546/run.log
+  case_file:  /tmp/nl_clarify_targeted_345.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985997400
+
+============================================================
+[CASE]   1
+[NAME]   clarify_scalar_extract
+[CHAT]   1985997401
+[TURN1]  读一下那个文件里的名字字段，只输出值
+[TASK1]  c36aa3f0-2678-42b8-a3a8-c3b1d9ca67ad
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请给我那个文件的完整路径。
+[TURN2]  package.json
+[TASK2]  b84e6041-74a0-4340-b50f-88280442b2b8
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  name 字段不存在
+
+============================================================
+[CASE]   2
+[NAME]   clarify_count_dir
+[CHAT]   1985997402
+[TURN1]  数一下那个目录里有多少个直接子项，只输出数字
+[TASK1]  74f77ad9-a2db-41b6-8245-8281bfd974cf
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我目录的完整路径。
+[TURN2]  scripts
+[TASK2]  81d830ca-291e-421a-a747-21b3f771c82d
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  47
+
+============================================================
+[CASE]   3
+[NAME]   clarify_list_dir
+[CHAT]   1985997403
+[TURN1]  看看那个目录下面都有什么
+[TASK1]  e4713c1b-038b-4eac-a356-1d1175bf5232
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请问您指的是哪个目录？请提供完整路径。
+[TURN2]  document
+[TASK2]  0cf072bb-5be8-4b36-80ed-d986f34dc8c2
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  document 目录包含以下文件：\n\n脚本文件：\n- hello_from_manual_test.sh\n- hello_world.sh\n\n配置文件：\n- manual_fixture_note.txt\n- manual_meta.json\n- manual_meta_variant.json\n- manual_note.txt\n- manual_note_variant.txt\n\n子目录：\n- regression_llm_first/\n\n测试/回归文件：\n- runtime_delivery_followup_en.txt\n- runtime_delivery_followup_en_2.txt\n- text_match_regression_en.txt\n- text_match_regression_en_2.txt\n- text_match_regression_note.txt\n\n报告文档：\n- 垃圾代码端分析报告.md\n- 投资分析报告.txt
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221546
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221546/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221546/summary.jsonl

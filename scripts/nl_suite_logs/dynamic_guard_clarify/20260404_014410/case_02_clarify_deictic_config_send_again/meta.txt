@@ -1,0 +1,7 @@
+index=2
+case_name=clarify_deictic_config_send_again
+chat_id=17752372483
+turn1_task_id=d05c5b9e-959b-4372-a5d4-6639d4f36adb
+turn1_prompt=把那个配置文件直接发我
+turn2_task_id=a039e50f-4455-4950-9221-4b5ef5e79eac
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml

@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"45dcd2d4-3ee6-4796-ae89-b6cdc2f76c59","status":"succeeded","result_json":{"messages":["这个目录是用于存放 NL 回归测试产物和脚本的工作区，记录了运行程序的输入和日志可以放在这里，而运行时仍使用其自身的 workspace 根目录。"],"text":"这个目录是用于存放 NL 回归测试产物和脚本的工作区，记录了运行程序的输入和日志可以放在这里，而运行时仍使用其自身的 workspace 根目录。"},"error_text":null},"error":null}

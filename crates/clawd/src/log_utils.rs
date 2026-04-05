@@ -1,4 +1,4 @@
-use std::fs::{OpenOptions, create_dir_all};
+use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write as IoWrite;
 
 use serde_json::json;

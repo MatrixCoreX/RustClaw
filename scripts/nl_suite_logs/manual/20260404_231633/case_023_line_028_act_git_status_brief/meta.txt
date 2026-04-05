@@ -1,0 +1,6 @@
+ordinal=23
+source_line=28
+case_name=act_git_status_brief
+chat_id=1985999023
+task_id=08c1d665-936c-486a-a81c-27f99d740d8d
+prompt=看看这个仓库现在有没有未提交改动，用一句话告诉我

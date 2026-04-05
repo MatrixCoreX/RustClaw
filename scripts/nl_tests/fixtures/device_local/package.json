@@ -1,0 +1,6 @@
+{
+  "name": "rustclaw-nl-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local fixture package for RustClaw NL regression tests"
+}

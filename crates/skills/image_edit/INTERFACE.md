@@ -7,6 +7,7 @@
 - `image_edit` modifies existing images using natural language instructions.
 - It supports generic edit/outpaint/restyle/add-remove operations.
 - **Input recovery is implemented inside this skill** (not in `clawd`): if `image` is omitted, the skill uses host-provided generic context (`context.recent_image_paths`, newest first) and optional `args._memory.context` to pick a source image or ask for clarification.
+- Successful responses include machine-readable `extra` metadata such as `provider`, `model`, normalized `action`, and `outputs`.
 
 ## Actions
 - `edit`
@@ -26,8 +27,23 @@
 | all | `image` | conditional | string/object | - | Input image path/url/base64. **Required** unless the skill can recover a path from `context.recent_image_paths` (single candidate, or LLM disambiguation when multiple). |
 | all | `images` | no | array | - | If present with paths, treated as “has image” for recovery checks (same as host vision payloads). |
 | all | `mask` | no | string/object | - | Optional mask for local edits. |
+| all | `size` | no | string | `1024x1024` | Output size hint for providers that support it. |
+| all | `quality` | no | string | impl default | Quality/performance tradeoff hint. |
+| all | `n` | no | integer | `1` | Number of edited outputs requested; implementation clamps this value. |
 | all | `output_path` | no | string(path) | auto | Output location for edited asset. |
+| all | `response_language` or `language` | no | string | impl/config default | Language for the human-readable success text. |
+| all | `vendor` | no | string | impl default | Backend vendor selector. |
+| all | `model` | no | string | impl default | Backend model selector. |
+| all | `timeout_seconds` | no | integer | impl/config default | Per-request timeout, clamped by implementation. |
 | all | `_memory` | no | object | - | Optional injected memory blob; **`_memory.context`** is passed into the image-reference resolver prompt when multiple `recent_image_paths` exist. |
+
+## Success `extra` (`status=ok`)
+- `provider`: resolved backend provider name
+- `model`: resolved model name
+- `model_kind`: adapter/runtime mode chosen by implementation
+- `latency_ms`: reserved latency field
+- `action`: final normalized action actually executed
+- `outputs`: machine-readable output summary, currently `[{\"type\":\"image_file\",\"path\":\"...\"}]`
 
 ## Recovery & clarification (skill-side)
 1. If `image` (or `images` with paths) is already set → use it; normalize as today.
@@ -51,7 +67,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"image edited: ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"Edited successfully and saved: image/out-1.png\nFILE:image/out-1.png\nEPHEMERAL:IMAGE_SAVED","extra":{"provider":"openai","model":"gpt-image-1","model_kind":"native","latency_ms":0,"action":"restyle","outputs":[{"type":"image_file","path":"image/out-1.png"}]},"error_text":null}
 ```
 
 ### Example 2 — Recover from context (host provides `recent_image_paths`)

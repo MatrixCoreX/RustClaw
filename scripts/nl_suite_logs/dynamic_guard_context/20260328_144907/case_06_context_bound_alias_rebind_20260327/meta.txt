@@ -1,9 +1,0 @@
-index=6
-case_name=context_bound_alias_rebind_20260327
-chat_id=17746743787
-turn1_task_id=76166c7a-150b-4de7-af96-f95c277ca76b
-turn1_prompt=先记一下，“那个文档”是 /home/guagua/test/README.md
-turn2_task_id=dd955f70-7c76-4943-9f31-ca0789ac391c
-turn2_prompt=再记一下，“那个文档”改成 /home/guagua/test/docs/service_notes.md
-turn3_task_id=bc250eb7-868e-497e-bc7e-6b8c73e1602f
-turn3_prompt=读一下那个文档开头并一句话总结

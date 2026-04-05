@@ -1,0 +1,9 @@
+index=2
+case_name=context_bound_log_followup_20260327
+chat_id=17752372583
+turn1_task_id=2d2e73d2-befb-4992-873b-5de8a6c9ea95
+turn1_prompt=先记一下，“那个日志”指 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log
+turn2_task_id=b0a8a808-1fea-4400-8ed2-63849ec7edd1
+turn2_prompt=看一下那个日志最近 20 行
+turn3_task_id=183c405d-ed1f-411f-ba35-a669a47f176d
+turn3_prompt=再从里面挑一个最值得注意的点

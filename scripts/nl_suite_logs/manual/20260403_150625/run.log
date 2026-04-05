@@ -1,0 +1,23 @@
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_manual.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_150625
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_150625/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_150625/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 6
+[NAME]        chat_weather_joke
+[CHAT]        1985996991
+[PROMPT]      今天天气先别查，给我讲一个简短冷笑话
+[TASK]        0f2c7c63-a975-40cc-a0bf-816f18956658
+  [status] <none> -> queued
+  [status] queued -> running

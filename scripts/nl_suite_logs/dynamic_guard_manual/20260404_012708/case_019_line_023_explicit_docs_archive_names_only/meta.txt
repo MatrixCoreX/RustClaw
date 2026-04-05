@@ -1,0 +1,6 @@
+ordinal=19
+source_line=23
+case_name=explicit_docs_archive_names_only
+chat_id=17752372400
+task_id=326e47fc-7717-4241-bc62-7b41b3a7e7dc
+prompt=列出 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/archive 下面直接文件名，只要名字

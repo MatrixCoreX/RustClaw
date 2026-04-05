@@ -29,7 +29,7 @@ Usage:
   ./scripts/test_image_all.sh [options]
 
 Options:
-  --profile debug|release   Build profile (default: release)
+  --profile release         Build profile (default: release)
   --auto-build              Auto build missing binaries
   --vendor NAME             Vendor for skill calls (default: qwen)
   --gen-model NAME          image_generate model (default: qwen-image-plus)
@@ -110,8 +110,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$PROFILE" != "debug" && "$PROFILE" != "release" ]]; then
-  echo "--profile must be debug or release"
+if [[ "$PROFILE" != "release" ]]; then
+  echo "--profile must be release"
   exit 2
 fi
 

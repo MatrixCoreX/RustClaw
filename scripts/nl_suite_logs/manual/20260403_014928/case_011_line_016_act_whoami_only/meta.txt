@@ -1,0 +1,6 @@
+ordinal=11
+source_line=16
+case_name=act_whoami_only
+chat_id=1985997001
+task_id=c02bd8cd-c473-4eff-9c58-e62ee5c4c65a
+prompt=只输出当前用户名，不要解释

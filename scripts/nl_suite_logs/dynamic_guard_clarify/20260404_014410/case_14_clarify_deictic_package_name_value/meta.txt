@@ -1,0 +1,7 @@
+index=14
+case_name=clarify_deictic_package_name_value
+chat_id=17752372495
+turn1_task_id=088982b7-f165-47bf-b1c5-a69e0bb12699
+turn1_prompt=看看那个 package 里的 name 是什么，只输出值
+turn2_task_id=04f9e3fd-4bbb-4937-bc1d-bdf55a1825ea
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/package.json

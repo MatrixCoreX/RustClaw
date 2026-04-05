@@ -1,0 +1,35 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_manual_targeted_case5.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_224652
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_224652/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_224652/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985998000
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        line_001
+[CHAT]        1985998001
+[PROMPT]      扫一眼 README 前 20 行，再提炼成 3 句话
+[TASK]        82b1f400-472c-4e1e-8494-93a1c5b885fd
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] RustClaw 是一个基于 Rust 的本地代理运行时，支持通过 Telegram、WhatsApp、飞书/钉钉和浏览器 UI 进行日常操作。 它整合了任务路由、工具执行、记忆管理、调度、多模态技能和基于 user_key 的身份验证。 用户可以利用它进行多渠道聊天、运行内置技能、管理用户权限、使用本地 UI 进行监控，并保持对话记忆和多步骤任务的恢复能力。
+
+================ Final Summary ================
+TOTAL_CASES=1 SUCCEEDED=1 FAILED=0 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_224652
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_224652/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_224652/summary.jsonl

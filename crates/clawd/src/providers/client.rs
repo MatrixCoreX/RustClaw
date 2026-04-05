@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tracing::warn;
 
 use super::{anthropic_usage_snapshot, gemini_usage_snapshot, openai_usage_snapshot};
-use crate::{LLM_RETRY_TIMES, LlmProviderRuntime};
+use crate::{LlmProviderRuntime, LLM_RETRY_TIMES};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AnthropicAuthMode {
@@ -557,7 +557,7 @@ mod tests {
     use reqwest::Client;
     use tokio::sync::Semaphore;
 
-    use super::{AnthropicAuthMode, anthropic_auth_mode, anthropic_messages_url};
+    use super::{anthropic_auth_mode, anthropic_messages_url, AnthropicAuthMode};
     use crate::LlmProviderRuntime;
 
     fn provider(name: &str, base_url: &str) -> LlmProviderRuntime {

@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+claw-core = { path = "../../claw-core" }
 serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true

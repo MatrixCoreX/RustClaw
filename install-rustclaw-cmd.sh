@@ -2,6 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 TARGET="$SCRIPT_DIR/rustclaw"
 DEFAULT_INSTALL_DIR="/usr/local/bin"
 USER_INSTALL_DIR="${HOME}/.local/bin"
@@ -9,8 +11,9 @@ FORCE_BUILD=0
 DO_BUILD=0
 USE_USER_DIR=0
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
+OS_NAME="$(uname -s)"
 # 默认部署 UI 到 nginx：配置 nginx、复制 UI、重启 nginx；--no-deploy-ui 可跳过
-DEPLOY_UI_NGINX="/var/www/html/rustclaw"
+DEPLOY_UI_NGINX=""
 # --pi-app：配置 Pi App 桌面快捷方式 + 开机自启（小屏）
 CONFIGURE_PI_APP=0
 
@@ -19,6 +22,55 @@ REQUIRED_BIN="$SCRIPT_DIR/target/release/clawd"
 # 交叉编译拉回路径（与 cross-build-upload.sh 一致）
 CROSS_TARGET="${RUSTCLAW_CROSS_TARGET:-aarch64-unknown-linux-gnu}"
 CROSS_RELEASE="$SCRIPT_DIR/target/$CROSS_TARGET/release"
+
+default_nginx_root() {
+  if [[ "$OS_NAME" == "Darwin" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      local brew_prefix
+      brew_prefix="$(brew --prefix 2>/dev/null || true)"
+      if [[ -n "$brew_prefix" ]]; then
+        printf '%s\n' "$brew_prefix/var/www/rustclaw"
+        return
+      fi
+    fi
+    if [[ -d "/opt/homebrew/var/www" ]]; then
+      printf '%s\n' "/opt/homebrew/var/www/rustclaw"
+      return
+    fi
+    if [[ -d "/usr/local/var/www" ]]; then
+      printf '%s\n' "/usr/local/var/www/rustclaw"
+      return
+    fi
+  fi
+  printf '%s\n' "/var/www/html/rustclaw"
+}
+
+DEPLOY_UI_NGINX="$(default_nginx_root)"
+
+nginx_conf_path() {
+  if [[ "$OS_NAME" == "Darwin" ]]; then
+    local brew_prefix=""
+    if command -v brew >/dev/null 2>&1; then
+      brew_prefix="$(brew --prefix 2>/dev/null || true)"
+    fi
+    if [[ -n "$brew_prefix" ]]; then
+      printf '%s\n' "$brew_prefix/etc/nginx/servers/rustclaw-ui.conf"
+      return
+    fi
+    if [[ -d "/opt/homebrew/etc/nginx" ]]; then
+      printf '%s\n' "/opt/homebrew/etc/nginx/servers/rustclaw-ui.conf"
+      return
+    fi
+    if [[ -d "/usr/local/etc/nginx" ]]; then
+      printf '%s\n' "/usr/local/etc/nginx/servers/rustclaw-ui.conf"
+      return
+    fi
+  fi
+  printf '%s\n' "/etc/nginx/conf.d/rustclaw-ui.conf"
+}
+
+NGINX_CONF="$(nginx_conf_path)"
+NGINX_CONF_DIR="$(dirname "$NGINX_CONF")"
 
 usage() {
   cat <<'EOF'
@@ -30,12 +82,12 @@ Options:
   --force-build    Force rebuild before install (implies --build)
   --user           Install to ~/.local/bin (no sudo)
   --dir <path>     Install to custom directory
-  --deploy-ui-nginx [path]   Deploy UI to path (default: /var/www/html/rustclaw), configure nginx, reload nginx
+  --deploy-ui-nginx [path]   Deploy UI to path (default: auto-detect per OS), configure nginx, reload nginx
   --no-deploy-ui   Skip nginx config and UI deploy (launcher only)
   --pi-app         Configure Pi App: desktop shortcut + autostart on login (RustClaw 小屏)
   -h, --help       Show this help
 
-Default: install launcher and deploy UI to nginx (config nginx, copy UI, reload nginx). Use --no-deploy-ui to skip UI/nginx.
+Default: install launcher and deploy UI to nginx (config nginx, copy UI, reload nginx). Default path is auto-detected per OS. Use --no-deploy-ui to skip UI/nginx.
 No build unless --build/--force-build; requires target/release/clawd to exist.
 Use --build or --force-build when building from source.
 
@@ -85,7 +137,7 @@ while [[ $# -gt 0 ]]; do
         shift
         continue
       else
-        DEPLOY_UI_NGINX="/var/www/html/rustclaw"
+        DEPLOY_UI_NGINX="$(default_nginx_root)"
       fi
       ;;
     -h|--help)
@@ -133,6 +185,8 @@ ensure_npm() {
     . "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
     nvm install --lts
     nvm use --lts
+  elif command -v brew >/dev/null 2>&1; then
+    brew install node
   elif command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update -qq && sudo apt-get install -y nodejs npm
   elif command -v dnf >/dev/null 2>&1; then
@@ -157,7 +211,9 @@ ensure_nginx() {
   fi
 
   echo "nginx not found. Attempting to install nginx..."
-  if command -v apt-get >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    brew install nginx
+  elif command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update -qq && sudo apt-get install -y nginx
   elif command -v dnf >/dev/null 2>&1; then
     sudo dnf install -y nginx
@@ -176,8 +232,40 @@ ensure_nginx() {
   if command -v systemctl >/dev/null 2>&1; then
     sudo systemctl enable nginx >/dev/null 2>&1 || true
     sudo systemctl start nginx >/dev/null 2>&1 || true
+  elif [[ "$OS_NAME" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
+    brew services start nginx >/dev/null 2>&1 || true
   fi
   echo "nginx is installed."
+}
+
+reload_nginx() {
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl reload nginx
+    echo "Nginx config OK and reloaded via systemctl."
+    return
+  fi
+
+  if [[ "$OS_NAME" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
+    if nginx -t >/dev/null 2>&1; then
+      brew services restart nginx >/dev/null 2>&1
+      echo "Nginx config OK and restarted via brew services."
+      return
+    fi
+    echo "Nginx test failed. Check $NGINX_CONF and run: nginx -t"
+    exit 1
+  fi
+
+  if command -v nginx >/dev/null 2>&1; then
+    if sudo nginx -t; then
+      sudo nginx -s reload
+      echo "Nginx config OK and reloaded via nginx -s reload."
+      return
+    fi
+    echo "Nginx test failed. Check $NGINX_CONF and run: sudo nginx -t"
+    exit 1
+  fi
+
+  echo "Warning: nginx reload skipped. Please reload nginx manually."
 }
 
 nginx_ui_config_matches() {
@@ -475,20 +563,19 @@ if [[ -n "$DEPLOY_UI_NGINX" ]]; then
   fi
   if [[ -w "$DEPLOY_UI_NGINX" ]]; then
     mkdir -p "$DEPLOY_UI_NGINX"
-    cp -r "$SCRIPT_DIR/UI/dist/"* "$DEPLOY_UI_NGINX/"
+    cp -R "$SCRIPT_DIR/UI/dist/." "$DEPLOY_UI_NGINX/"
     echo "Copied UI to $DEPLOY_UI_NGINX (no sudo)."
   else
     sudo mkdir -p "$DEPLOY_UI_NGINX"
-    sudo cp -r "$SCRIPT_DIR/UI/dist/"* "$DEPLOY_UI_NGINX/"
+    sudo cp -R "$SCRIPT_DIR/UI/dist/." "$DEPLOY_UI_NGINX/"
     echo "Copied UI to $DEPLOY_UI_NGINX (sudo)."
   fi
   ensure_nginx
-  NGINX_CONF="/etc/nginx/conf.d/rustclaw-ui.conf"
   NGINX_CONFIG_CHANGED=0
   if nginx_ui_config_matches "$NGINX_CONF" "$DEPLOY_UI_NGINX"; then
     echo "Nginx config already up-to-date, skip configure: $NGINX_CONF"
-  elif [[ -w /etc/nginx/conf.d ]]; then
-    mkdir -p /etc/nginx/conf.d
+  elif [[ -w "$NGINX_CONF_DIR" ]]; then
+    mkdir -p "$NGINX_CONF_DIR"
     cat > "$NGINX_CONF" << NGX
 # RustClaw UI 仅静态托管，root 指向部署目录；API 地址在 UI 中填写。
 # default_server 使本虚拟主机处理 80 端口所有未匹配请求；不用 server_name _ 避免与其它配置冲突。
@@ -505,7 +592,7 @@ NGX
     echo "Wrote nginx config: $NGINX_CONF"
     NGINX_CONFIG_CHANGED=1
   else
-    sudo mkdir -p /etc/nginx/conf.d
+    sudo mkdir -p "$NGINX_CONF_DIR"
     sudo tee "$NGINX_CONF" >/dev/null << NGX
 # RustClaw UI 仅静态托管，root 指向部署目录；API 地址在 UI 中填写。
 # default_server 使本虚拟主机处理 80 端口所有未匹配请求；不用 server_name _ 避免与其它配置冲突。
@@ -523,7 +610,7 @@ NGX
     NGINX_CONFIG_CHANGED=1
   fi
   # 禁用 nginx 自带默认页，否则 80 端口会优先显示 default 页面
-  if [[ -f /etc/nginx/sites-enabled/default ]] || [[ -L /etc/nginx/sites-enabled/default ]]; then
+  if [[ "$OS_NAME" != "Darwin" ]] && { [[ -f /etc/nginx/sites-enabled/default ]] || [[ -L /etc/nginx/sites-enabled/default ]]; }; then
     if [[ -w /etc/nginx/sites-enabled ]]; then
       rm -f /etc/nginx/sites-enabled/default
       echo "Disabled nginx default site: removed /etc/nginx/sites-enabled/default"
@@ -534,19 +621,8 @@ NGX
     NGINX_CONFIG_CHANGED=1
   fi
   if [[ "$NGINX_CONFIG_CHANGED" == "1" ]]; then
-    if sudo nginx -t; then
-      if command -v systemctl >/dev/null 2>&1; then
-        sudo systemctl reload nginx
-        echo "Nginx config OK and reloaded via systemctl."
-      else
-        sudo nginx -s reload
-        echo "Nginx config OK and reloaded via nginx -s reload."
-      fi
-      echo "若外网用 IP 无法访问，请检查：1) 防火墙放行 80 端口（如 sudo ufw allow 80）；2) 云安全组/入站规则放行 80。"
-    else
-      echo "Nginx test failed. Check $NGINX_CONF and run: sudo nginx -t"
-      exit 1
-    fi
+    reload_nginx
+    echo "若外网用 IP 无法访问，请检查：1) 防火墙放行 80 端口（如 sudo ufw allow 80）；2) 云安全组/入站规则放行 80。"
   else
     echo "Skip nginx reload (no config changes)."
   fi

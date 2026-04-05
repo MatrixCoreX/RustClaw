@@ -178,9 +178,8 @@ poll_task_with_progress() {
   local progress_seen=0
 
   while [[ "$waited" -le "$MAX_WAIT_SECONDS" ]]; do
-    local raw parsed status progress_count
-    raw="$(query_task "$task_id")"
-    printf '%s\n' "$raw" > "$raw_file"
+    local parsed status progress_count
+    query_task_to_file "$task_id" "$raw_file"
     parsed="$(extract_poll_fields "$raw_file")"
     status="$(printf '%s\n' "$parsed" | awk -F'\t' 'NR==1{print $1}')"
     progress_count="$(printf '%s\n' "$parsed" | awk -F'\t' 'NR==1{print $2}')"
@@ -654,7 +653,6 @@ run_one_case() {
   else
     print_result_summary "$raw_file" "summary"
   fi
-
   echo "[TRACE]"
   print_clawd_trace "$task_id"
 

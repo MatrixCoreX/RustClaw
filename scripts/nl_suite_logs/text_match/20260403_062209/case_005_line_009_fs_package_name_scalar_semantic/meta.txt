@@ -1,0 +1,6 @@
+ordinal=5
+source_line=9
+case_name=fs_package_name_scalar_semantic
+chat_id=1985996995
+task_id=224b4fc3-99fd-42b0-9bd1-dfc0ec4cb0a3
+prompt=去 package.json 里找 name，只把值给我

@@ -1,0 +1,9 @@
+index=8
+case_name=context_bound_db_then_focus_20260327
+chat_id=17752372589
+turn1_task_id=0de166c6-b3f0-4725-b3c7-5d51a4e85bbd
+turn1_prompt=先记一下，“那个数据库”指 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
+turn2_task_id=7cf05f8b-7fac-4c51-9ebf-30d9376f09c6
+turn2_prompt=看下那个数据库有哪些表
+turn3_task_id=b0c506cb-631a-4a91-9160-2c38aafd5bf1
+turn3_prompt=再告诉我最像业务数据的是哪一张

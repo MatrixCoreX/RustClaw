@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use claw_core::config::AppConfig;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use tracing::debug;
 
 pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<Connection> {

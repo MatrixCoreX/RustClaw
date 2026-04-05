@@ -1,7 +1,0 @@
-index=2
-case_name=clarify_which_config_file
-chat_id=1985996992
-turn1_task_id=f754a5ec-2301-4db7-a25b-e430aabd0915
-turn1_prompt=把那个配置文件发给我
-turn2_task_id=f721dec5-6e4f-4ea1-a8a6-24eb2380ed87
-turn2_prompt=/home/guagua/test/configs/app_config.toml

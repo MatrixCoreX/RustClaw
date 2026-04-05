@@ -1,0 +1,396 @@
+NL full regression suite
+  run_dir:          /tmp/rustclaw-workspace/scripts/nl_suite_logs/full/20260403_070440
+  case_file:        /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_full.txt
+  trace_case_file:  /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_trace.txt
+  base_url:         http://127.0.0.1:8787
+  user_id:          1985996990
+  chat_id:          1985996990
+  user_key:         rk-a0832faf44d14ba1b174226120291aa7
+  wait:             180s
+  poll:             1s
+  net_retries:      5
+  net_sleep:        15s
+  model_sleep:      3600s
+  model_retries:    24
+  resume_dir:       <new run>
+  resume_line:      <none>
+  with_trace:       0
+  with_resume:      0
+
+== Section 1/3: comprehensive NL cases ==
+[deprecated] --network-retries is ignored; retry/sleep logic has been disabled
+[deprecated] --network-sleep is ignored; retry/sleep logic has been disabled
+[deprecated] --model-sleep is ignored; retry/sleep logic has been disabled
+[deprecated] --model-retries is ignored; retry/sleep logic has been disabled
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_full.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/full/20260403_070440/simple_nl_outputs/20260403_070440
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/full/20260403_070440/simple_nl_outputs/20260403_070440/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/full/20260403_070440/simple_nl_outputs/20260403_070440/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 6
+[NAME]        chat_weather_joke
+[CHAT]        1985996991
+[PROMPT]      今天天气先别查，给我讲一个简短冷笑话
+[TASK]        90ed132a-6106-454f-87c2-740cc801218e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 为什么程序员分不清万圣节和圣诞节？ 因为 Oct 31 = Dec 25。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 7
+[NAME]        chat_poem_short
+[CHAT]        1985996992
+[PROMPT]      写一首两句的打工人短诗
+[TASK]        b1f55941-03a5-4f70-941c-f7534b82256f
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 晨起挤地铁，深夜加班归。
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 8
+[NAME]        plain_chat_no_execution_en
+[CHAT]        1985996993
+[PROMPT]      do not run anything, just tell me a very short joke
+[TASK]        7c56fed1-6147-4b94-a12f-9f89ba8d3d82
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Why do programmers prefer dark mode? Because light attracts bugs.
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 9
+[NAME]        act_pwd_only
+[CHAT]        1985996994
+[PROMPT]      只输出当前工作目录的绝对路径，不要解释
+[TASK]        b12dbfd5-97ae-4009-8f4f-4617e777f26c
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] subtask#1 skill(run_cmd): success /tmp/rustclaw-workspace
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 10
+[NAME]        act_hidden_files
+[CHAT]        1985996995
+[PROMPT]      检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+[TASK]        85e75fbe-1235-48fd-a83e-37178b67904a
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 当前工作目录无法确定，请提供您要检查的目录的完整路径。
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 11
+[NAME]        act_list_logs
+[CHAT]        1985996996
+[PROMPT]      列出 logs 目录下的前 10 个文件名，不要读内容
+[TASK]        0f514934-3c6c-424f-9234-61a297f27a08
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] /tmp/rustclaw-workspace/logs/act_plan.log /tmp/rustclaw-workspace/logs/clawd.log /tmp/rustclaw-workspace/logs/feishud.log /tmp/rustclaw-workspace/logs/install_ops.log /tmp/rustclaw-workspace/logs/logs_directory_listing.t...(truncated)
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 12
+[NAME]        act_find_service_file
+[CHAT]        1985996997
+[PROMPT]      检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+[TASK]        00c38fc6-b7e7-45cf-a7a1-1c283fd8e048
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] subtask#1 skill(system_basic): success
+
+============================================================
+[CASE]        8
+[SOURCE_LINE] 13
+[NAME]        act_check_document_dir
+[CHAT]        1985996998
+[PROMPT]      列出 document 目录下有哪些文件，只输出文件名列表
+[TASK]        f43b51e6-0f82-4527-9a51-35ce242254e2
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] /tmp/rustclaw-workspace/document/hello_from_manual_test.sh /tmp/rustclaw-workspace/document/hello_world.sh /tmp/rustclaw-workspace/document/manual_fixture_note.txt /tmp/rustclaw-workspace/document/manual_meta.json /Users...(truncated)
+
+============================================================
+[CASE]        9
+[SOURCE_LINE] 14
+[NAME]        act_show_package_json_name
+[CHAT]        1985996999
+[PROMPT]      读取 package.json 里的 name 字段，只输出值
+[TASK]        a1c03a54-5d6f-4516-80f1-e393828d2313
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] package.json 文件未找到；请提供完整路径。
+
+============================================================
+[CASE]        10
+[SOURCE_LINE] 15
+[NAME]        act_show_cargo_package_name
+[CHAT]        1985997000
+[PROMPT]      读取 Cargo.toml 的 package.name，只输出值
+[TASK]        08480a23-1c52-42d1-899a-3cd4505df8a4
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Cargo.toml 文件未找到，请提供完整路径。
+
+============================================================
+[CASE]        11
+[SOURCE_LINE] 16
+[NAME]        act_whoami_only
+[CHAT]        1985997001
+[PROMPT]      只输出当前用户名，不要解释
+[TASK]        743a9573-9edf-4d7d-802c-d6fcb9a8aadc
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] subtask#1 skill(run_cmd): success testuser
+
+============================================================
+[CASE]        12
+[SOURCE_LINE] 17
+[NAME]        act_hostname_only_en
+[CHAT]        1985997002
+[PROMPT]      output only the current machine hostname, no explanation
+[TASK]        cb9fd135-318c-4fbf-b26f-567388b63561
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] rustclaw-test-host.local
+
+============================================================
+[CASE]        13
+[SOURCE_LINE] 18
+[NAME]        act_read_readme_head
+[CHAT]        1985997003
+[PROMPT]      读取 README 的前 20 行并做 3 句话总结
+[TASK]        0029906c-6359-4244-a5e7-445a80ea4928
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] README 文件未找到，请提供完整路径。
+
+============================================================
+[CASE]        14
+[SOURCE_LINE] 19
+[NAME]        act_read_agents_head
+[CHAT]        1985997004
+[PROMPT]      读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
+[TASK]        0ecdbc1e-7ad2-4870-b24f-dfff274caaeb
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 文件未找到，请提供 AGENTS.md 的完整路径。
+
+============================================================
+[CASE]        15
+[SOURCE_LINE] 20
+[NAME]        chat_act_show_readme_then_summary
+[CHAT]        1985997005
+[PROMPT]      读取 README 开头内容，再用非技术用户能听懂的话做一句总结
+[TASK]        2e79a175-5d39-4cdd-9d6d-7177df4d5698
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] README 文件未找到，请提供完整路径。
+
+============================================================
+[CASE]        16
+[SOURCE_LINE] 21
+[NAME]        chat_act_list_then_explain_docs
+[CHAT]        1985997006
+[PROMPT]      列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+[TASK]        f45baa99-69b8-49f1-9369-66b72baad576
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 是否在 /tmp/rustclaw-workspace/docs 目录下执行列出文件并简要说明？
+
+============================================================
+[CASE]        17
+[SOURCE_LINE] 22
+[NAME]        chat_explain_repo_briefly
+[CHAT]        1985997007
+[PROMPT]      用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+[TASK]        1efe8d05-2549-45eb-885f-32b930d48ab2
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 请提供您想了解的仓库的完整路径或所在目录。
+
+============================================================
+[CASE]        18
+[SOURCE_LINE] 23
+[NAME]        chat_act_compare_sizes
+[CHAT]        1985997008
+[PROMPT]      比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+[TASK]        294355e3-a012-4931-9a9f-68f41c7efdce
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Cargo.toml 和 Cargo.lock 未找到，请提供它们的完整路径。
+
+============================================================
+[CASE]        19
+[SOURCE_LINE] 24
+[NAME]        chat_act_disk_usage_brief
+[CHAT]        1985997009
+[PROMPT]      查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
+[TASK]        7804f8bc-95ae-4341-ade6-e1e0166d2d7e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 请提供您想查看的磁盘或挂载点路径（例如 /、/home）。
+
+============================================================
+[CASE]        20
+[SOURCE_LINE] 25
+[NAME]        followup_logs_then_conclusion
+[CHAT]        1985997010
+[PROMPT]      列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物
+[TASK]        10eb6178-633e-4791-b151-dff8571da2ca
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 是否要在 `/tmp/rustclaw-workspace/logs` 目录执行此操作？
+
+============================================================
+[CASE]        21
+[SOURCE_LINE] 26
+[NAME]        chat_act_hidden_files_brief
+[CHAT]        1985997011
+[PROMPT]      检查当前目录隐藏文件是否存在，再用一句话解释隐藏文件通常是干什么的
+[TASK]        877eb004-c39d-4c1e-9603-dd9e473698d3
+  [status] <none> -> running
+  [status] running -> timeout
+[RESULT]
+  [final] status=timeout
+  [error] auto timeout: no progress heartbeat for 1200s while status=running
+
+============================================================
+[CASE]        22
+[SOURCE_LINE] 27
+[NAME]        write_and_deliver_hello
+[CHAT]        1985997012
+[PROMPT]      写一个 hello world shell 脚本，保存成 document/hello_from_manual_test.sh，然后把文件发给我
+[TASK]        34f2b010-a15c-4e02-8b24-68daaca77ad5
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> timeout
+[RESULT]
+  [final] status=timeout
+  [error] auto timeout: no progress heartbeat for 1200s while status=running
+
+============================================================
+[CASE]        23
+[SOURCE_LINE] 28
+[NAME]        write_and_deliver_note
+[CHAT]        1985997013
+[PROMPT]      写一个文本文件到 document/manual_note.txt，内容是 RustClaw manual test note，然后把文件发给我
+[TASK]        2a7d3ef1-d52c-471b-ab17-804c9d9282ca
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/document/manual_note.txt
+
+============================================================
+[CASE]        24
+[SOURCE_LINE] 29
+[NAME]        write_and_deliver_json_variant_en
+[CHAT]        1985997014
+[PROMPT]      create a json file at document/manual_meta_variant.json with app=RustClaw and suite=full, then send me the file
+[TASK]        c196e99f-5476-4688-8d07-4ddd34b0ff99
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/document/manual_meta_variant.json
+
+============================================================
+[CASE]        25
+[SOURCE_LINE] 30
+[NAME]        missing_file_graceful
+[CHAT]        1985997015
+[PROMPT]      把 definitely_missing_named_file_rustclaw_001.txt 发给我
+[TASK]        28840da5-c2e1-462a-9939-d67b0851d90b
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 找到多个同名文件，请提供准确路径
+
+============================================================
+[CASE]        26
+[SOURCE_LINE] 31
+[NAME]        missing_file_graceful_en_followup
+[CHAT]        1985997016
+[PROMPT]      send me document/definitely_missing_runtime_case_002.txt and do not paste the content
+[TASK]        9ae23328-22c6-4e18-af99-df762e22a181
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 在系统根目录和项目根目录都没有找到该文件
+
+============================================================
+[CASE]        27
+[SOURCE_LINE] 32
+[NAME]        run_cmd_pwd_with_result_tail
+[CHAT]        1985997017
+[PROMPT]      执行 pwd，然后告诉我结果
+[TASK]        0af55268-acb7-4768-aabb-ac36beaafc92
+  [status] <none> -> queued
+  [status] queued -> running

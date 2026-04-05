@@ -1,0 +1,1 @@
+{"source_line": 1, "case_name": "act_pwd_only", "prompt": "只输出当前工作目录的绝对路径，不要解释", "task_id": "72ed068f-1e29-4501-8f62-bea0457e0462", "status": "succeeded", "text": "/tmp/rustclaw-workspace", "messages": ["/tmp/rustclaw-workspace"], "error_text": null}

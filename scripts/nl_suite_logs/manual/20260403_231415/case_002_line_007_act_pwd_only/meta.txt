@@ -1,0 +1,6 @@
+ordinal=2
+source_line=7
+case_name=act_pwd_only
+chat_id=1985996992
+task_id=d170f9a0-3457-45fa-8cbe-e9a6ddb38b49
+prompt=只输出当前工作目录的绝对路径，不要解释

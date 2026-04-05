@@ -1,0 +1,9 @@
+index=7
+case_name=context_bound_missing_file_followup_20260327
+chat_id=17752372588
+turn1_task_id=113c4550-3ca5-440a-98da-f72a4fe93abe
+turn1_prompt=先记一下，“那个文件”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/not_exists_case_002.md
+turn2_task_id=7fd34801-5a0b-4361-adaa-929bb1fd0c6f
+turn2_prompt=把那个文件发给我
+turn3_task_id=8c35680d-47ec-407b-81fb-0d7eab73d1c3
+turn3_prompt=如果不存在就简短说明原因

@@ -1,6 +1,0 @@
-ordinal=10
-source_line=13
-case_name=english_explicit_send
-chat_id=17746206501
-task_id=1fefe992-a0e2-4ef9-9d30-891688fbfec7
-prompt=Send me /home/guagua/test/README.md

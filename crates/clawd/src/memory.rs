@@ -4,14 +4,101 @@ pub(crate) mod indexing;
 pub(crate) mod retrieval;
 pub(crate) mod service;
 
+pub(crate) use service::dynamic_chat_memory_budget_chars;
+
 use anyhow::anyhow;
 use claw_core::config::MemoryConfig;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 
-use super::{AppState, extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix};
+use super::{extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix, AppState};
 
 pub(crate) const LLM_SHORT_TERM_MEMORY_PREFIX: &str = "[LLM_REPLY] ";
+pub(crate) const MEMORY_ROLE_USER: &str = "user";
+pub(crate) const MEMORY_ROLE_ASSISTANT: &str = "assistant";
+pub(crate) const MEMORY_ROLE_SYSTEM: &str = "system";
+
+pub(crate) const MEMORY_SAFETY_FLAG_NORMAL: &str = "normal";
+pub(crate) const MEMORY_SAFETY_FLAG_INJECTION_LIKE: &str = "injection_like";
+
+pub(crate) const MEMORY_TYPE_GENERIC: &str = "generic";
+pub(crate) const MEMORY_TYPE_SAFETY_SIGNAL: &str = "safety_signal";
+pub(crate) const MEMORY_TYPE_UNFINISHED_GOAL: &str = "unfinished_goal";
+pub(crate) const MEMORY_TYPE_ASSISTANT_OUTCOME: &str = "assistant_outcome";
+pub(crate) const MEMORY_TYPE_ASSISTANT_REPLY: &str = "assistant_reply";
+pub(crate) const MEMORY_TYPE_USER_INSTRUCTION: &str = "user_instruction";
+
+// `source_kind` answers "where did this retrieval row come from?"
+// It tracks the producer/origin table or pipeline.
+pub(crate) const RETRIEVAL_SOURCE_MEMORY: &str = "memory";
+pub(crate) const RETRIEVAL_SOURCE_PREFERENCE: &str = "preference";
+pub(crate) const RETRIEVAL_SOURCE_KB_DOC: &str = "kb_doc";
+pub(crate) const RETRIEVAL_SOURCE_KNOWLEDGE_FACT: &str = "knowledge_fact";
+
+// `memory_kind` answers "how should this row be recalled/presented?"
+// Multiple sources may map into the same recall bucket.
+pub(crate) const RETRIEVAL_KIND_TRIGGER_ANCHOR: &str = "trigger_anchor";
+pub(crate) const RETRIEVAL_KIND_SEMANTIC_FACT: &str = "semantic_fact";
+pub(crate) const RETRIEVAL_KIND_KNOWLEDGE_DOC: &str = "knowledge_doc";
+pub(crate) const RETRIEVAL_KIND_EPISODIC_EVENT: &str = "episodic_event";
+pub(crate) const RETRIEVAL_KIND_ASSISTANT_RESULT: &str = "assistant_result";
+pub(crate) const RETRIEVAL_KIND_UNFINISHED_GOAL: &str = "unfinished_goal";
+
+pub(crate) const RETRIEVAL_SUCCESS_STATE_SUCCEEDED: &str = "succeeded";
+pub(crate) const RETRIEVAL_SUCCESS_STATE_FAILED: &str = "failed";
+pub(crate) const RETRIEVAL_SUCCESS_STATE_NEUTRAL: &str = "neutral";
+
+pub(crate) const MEMORY_SCOPE_CHAT: &str = "chat";
+pub(crate) const MEMORY_SCOPE_USER: &str = "user";
+
+// `source_ref` is a stable, source-local identity key for update/dedup flows.
+// It should be machine-oriented and not treated as user-facing display text.
+// `tool_or_skill_name` is a best-effort producer label for debugging/analytics.
+pub(crate) const RETRIEVAL_PRODUCER_KB: &str = "kb";
+pub(crate) const RETRIEVAL_PRODUCER_MEMORY_PIPELINE: &str = RETRIEVAL_SOURCE_MEMORY;
+
+pub(crate) fn retrieval_source_is_knowledge(source_kind: &str) -> bool {
+    matches!(
+        source_kind,
+        RETRIEVAL_SOURCE_KB_DOC | RETRIEVAL_SOURCE_KNOWLEDGE_FACT
+    )
+}
+
+pub(crate) fn retrieval_kind_is_fact_bucket(memory_kind: &str) -> bool {
+    memory_kind == RETRIEVAL_KIND_SEMANTIC_FACT
+}
+
+pub(crate) fn retrieval_kind_is_knowledge_doc_bucket(memory_kind: &str) -> bool {
+    memory_kind == RETRIEVAL_KIND_KNOWLEDGE_DOC
+}
+
+pub(crate) fn retrieval_source_ref_for_memory(memory_id: i64) -> String {
+    memory_id.to_string()
+}
+
+pub(crate) fn retrieval_source_ref_for_preference(pref_key: &str) -> String {
+    pref_key.trim().to_string()
+}
+
+pub(crate) fn retrieval_source_ref_for_kb_chunk(
+    user_key: &str,
+    namespace: &str,
+    chunk_id: &str,
+) -> String {
+    format!(
+        "kb:{}:{}:{}",
+        user_key.trim(),
+        namespace.trim(),
+        chunk_id.trim()
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemoryWriteKind {
+    Default,
+    AssistantOutcome,
+    UnfinishedGoal,
+}
 
 fn normalized_user_key_opt(user_key: Option<&str>) -> Option<&str> {
     user_key.map(str::trim).filter(|v| !v.is_empty())
@@ -127,6 +214,7 @@ pub(crate) fn insert_memory(
     role: &str,
     content: &str,
     max_chars: usize,
+    write_kind: MemoryWriteKind,
 ) -> anyhow::Result<()> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
     if content.trim().is_empty() {
@@ -142,7 +230,7 @@ pub(crate) fn insert_memory(
         }
     }
     let trimmed = utf8_safe_prefix(&normalized, keep).to_string();
-    let extracted_prefs = if role == "user" && state.memory.enable_preference_extraction {
+    let extracted_prefs = if role == MEMORY_ROLE_USER && state.memory.enable_preference_extraction {
         extract_user_preferences(content, &state.memory, crate::main_flow_rules(state))
     } else {
         Vec::new()
@@ -160,9 +248,14 @@ pub(crate) fn insert_memory(
 
     let safety_flag = classify_memory_safety_flag(&trimmed, &state.memory);
     let is_instructional = detect_instructional_text(&trimmed, &state.memory);
-    let memory_type = infer_memory_type(role, is_instructional, &safety_flag);
-    let salience =
-        estimate_memory_salience(&trimmed, is_instructional, &safety_flag, &state.memory);
+    let memory_type = infer_memory_type(role, is_instructional, &safety_flag, write_kind);
+    let salience = estimate_memory_salience(
+        &trimmed,
+        is_instructional,
+        &safety_flag,
+        &state.memory,
+        write_kind,
+    );
 
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
@@ -280,7 +373,7 @@ pub(crate) fn recall_recent_memories(
     let rows = query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, limit)?;
     let mut out = Vec::new();
     for (role, content, safety_flag) in rows {
-        if state.memory.safety_filter_enabled && safety_flag == "injection_like" {
+        if state.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
             out.push((role, "[safety_signal content omitted]".to_string()));
             continue;
         }
@@ -291,7 +384,9 @@ pub(crate) fn recall_recent_memories(
             let rows =
                 query_recent_memories_for_chat(&db, user_id, legacy_chat_id, &user_key, limit)?;
             for (role, content, safety_flag) in rows {
-                if state.memory.safety_filter_enabled && safety_flag == "injection_like" {
+                if state.memory.safety_filter_enabled
+                    && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE
+                {
                     out.push((role, "[safety_signal content omitted]".to_string()));
                     continue;
                 }
@@ -313,7 +408,7 @@ pub(crate) fn filter_memories_for_prompt_recall(
     memories
         .into_iter()
         .filter(|(role, content)| {
-            if role != "assistant" {
+            if role != MEMORY_ROLE_ASSISTANT {
                 return true;
             }
             content.starts_with(LLM_SHORT_TERM_MEMORY_PREFIX)
@@ -340,23 +435,16 @@ pub(crate) fn select_relevant_memories_for_prompt(
     }
     if out.is_empty() {
         let mut user_pick: Option<(String, String)> = None;
-        let mut assistant_pick: Option<(String, String)> = None;
         for (role, content) in source.iter().rev() {
-            if user_pick.is_none() && role == "user" {
+            if user_pick.is_none() && role == MEMORY_ROLE_USER {
                 user_pick = Some((role.clone(), content.clone()));
                 continue;
             }
-            if assistant_pick.is_none() && role == "assistant" {
-                assistant_pick = Some((role.clone(), content.clone()));
-            }
-            if user_pick.is_some() && assistant_pick.is_some() {
+            if user_pick.is_some() {
                 break;
             }
         }
         if let Some(v) = user_pick {
-            out.push(v);
-        }
-        if let Some(v) = assistant_pick {
             out.push(v);
         }
     }
@@ -473,7 +561,7 @@ fn extract_last_turn_assistant_text_from_task(
     result_json: Option<&str>,
     error_text: Option<&str>,
 ) -> Option<String> {
-    if status.eq_ignore_ascii_case("failed") {
+    if status.eq_ignore_ascii_case(RETRIEVAL_SUCCESS_STATE_FAILED) {
         if let Some(err) = error_text.map(str::trim).filter(|v| !v.is_empty()) {
             return Some(err.to_string());
         }
@@ -597,17 +685,19 @@ fn format_last_turn_full_context(
 ) -> String {
     let user_safety = classify_memory_safety_flag(user_content, &state.memory);
     let assistant_safety = classify_memory_safety_flag(assistant_content, &state.memory);
-    let user_text = if state.memory.safety_filter_enabled && user_safety == "injection_like" {
-        "[safety_signal content omitted]".to_string()
-    } else {
-        utf8_safe_prefix(user_content.trim(), max_segment_chars).to_string()
-    };
-    let assistant_text =
-        if state.memory.safety_filter_enabled && assistant_safety == "injection_like" {
+    let user_text =
+        if state.memory.safety_filter_enabled && user_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
             "[safety_signal content omitted]".to_string()
         } else {
-            utf8_safe_prefix(assistant_content.trim(), max_segment_chars).to_string()
+            utf8_safe_prefix(user_content.trim(), max_segment_chars).to_string()
         };
+    let assistant_text = if state.memory.safety_filter_enabled
+        && assistant_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
+    {
+        "[safety_signal content omitted]".to_string()
+    } else {
+        utf8_safe_prefix(assistant_content.trim(), max_segment_chars).to_string()
+    };
     let formatted = format!(
         "[LAST_TURN_FULL]\nUser: {}\nAssistant: {}\n[/LAST_TURN_FULL]",
         user_text, assistant_text
@@ -668,17 +758,20 @@ pub(crate) fn build_recent_turns_full_context(
         let relative = -((idx as i64) + 1);
         let user_safety = classify_memory_safety_flag(user_text, &state.memory);
         let assistant_safety = classify_memory_safety_flag(assistant_text, &state.memory);
-        let user_view = if state.memory.safety_filter_enabled && user_safety == "injection_like" {
+        let user_view = if state.memory.safety_filter_enabled
+            && user_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
+        {
             "[safety_signal content omitted]".to_string()
         } else {
             utf8_safe_prefix(user_text.trim(), max_segment_chars).to_string()
         };
-        let assistant_view =
-            if state.memory.safety_filter_enabled && assistant_safety == "injection_like" {
-                "[safety_signal content omitted]".to_string()
-            } else {
-                utf8_safe_prefix(assistant_text.trim(), max_segment_chars).to_string()
-            };
+        let assistant_view = if state.memory.safety_filter_enabled
+            && assistant_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
+        {
+            "[safety_signal content omitted]".to_string()
+        } else {
+            utf8_safe_prefix(assistant_text.trim(), max_segment_chars).to_string()
+        };
         let turn_block = format!(
             "[TURN {}]\nUser: {}\nAssistant: {}\n[/TURN]\n",
             relative, user_view, assistant_view
@@ -746,12 +839,12 @@ pub(crate) fn build_last_turn_full_context(
     let mut found_user: Option<(String, String)> = None;
     for (role, content, safety_flag) in &recent {
         // First, find the most recent assistant reply
-        if found_assistant.is_none() && role == "assistant" {
+        if found_assistant.is_none() && role == MEMORY_ROLE_ASSISTANT {
             found_assistant = Some((content.clone(), safety_flag.clone()));
             continue;
         }
         // After finding assistant, look for the user message that precedes it (comes later in DESC list = older)
-        if found_assistant.is_some() && found_user.is_none() && role == "user" {
+        if found_assistant.is_some() && found_user.is_none() && role == MEMORY_ROLE_USER {
             found_user = Some((content.clone(), safety_flag.clone()));
             break;
         }
@@ -815,10 +908,10 @@ pub(crate) fn build_recent_assistant_replies_context(
 
     let mut lines: Vec<String> = Vec::new();
     for (role, content, safety_flag) in rows {
-        if role != "assistant" {
+        if role != MEMORY_ROLE_ASSISTANT {
             continue;
         }
-        if state.memory.safety_filter_enabled && safety_flag == "injection_like" {
+        if state.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
             continue;
         }
         let reply_index = lines.len() + 1;
@@ -974,7 +1067,7 @@ fn should_skip_memory_write(
         return true;
     }
     let tiny = text.to_ascii_lowercase();
-    if role == "assistant"
+    if role == MEMORY_ROLE_ASSISTANT
         && cfg
             .rules
             .assistant_ack_skip
@@ -1016,22 +1109,33 @@ fn detect_instructional_text(text: &str, cfg: &MemoryConfig) -> bool {
 fn classify_memory_safety_flag(text: &str, cfg: &MemoryConfig) -> String {
     let norm = text.to_ascii_lowercase();
     if contains_any_marker(&norm, &cfg.rules.injection_markers) {
-        return "injection_like".to_string();
+        return MEMORY_SAFETY_FLAG_INJECTION_LIKE.to_string();
     }
-    "normal".to_string()
+    MEMORY_SAFETY_FLAG_NORMAL.to_string()
 }
 
-fn infer_memory_type(role: &str, is_instructional: bool, safety_flag: &str) -> &'static str {
-    if safety_flag == "injection_like" {
-        return "safety_signal";
+fn infer_memory_type(
+    role: &str,
+    is_instructional: bool,
+    safety_flag: &str,
+    write_kind: MemoryWriteKind,
+) -> &'static str {
+    if safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        return MEMORY_TYPE_SAFETY_SIGNAL;
     }
-    if role == "assistant" {
-        return "assistant_reply";
+    if matches!(write_kind, MemoryWriteKind::UnfinishedGoal) {
+        return MEMORY_TYPE_UNFINISHED_GOAL;
+    }
+    if matches!(write_kind, MemoryWriteKind::AssistantOutcome) {
+        return MEMORY_TYPE_ASSISTANT_OUTCOME;
+    }
+    if role == MEMORY_ROLE_ASSISTANT {
+        return MEMORY_TYPE_ASSISTANT_REPLY;
     }
     if is_instructional {
-        return "user_instruction";
+        return MEMORY_TYPE_USER_INSTRUCTION;
     }
-    "generic"
+    MEMORY_TYPE_GENERIC
 }
 
 fn estimate_memory_salience(
@@ -1039,15 +1143,21 @@ fn estimate_memory_salience(
     is_instructional: bool,
     safety_flag: &str,
     cfg: &MemoryConfig,
+    write_kind: MemoryWriteKind,
 ) -> f32 {
     let mut score: f32 = if is_instructional { 0.72 } else { 0.48 };
+    match write_kind {
+        MemoryWriteKind::AssistantOutcome => score += 0.12,
+        MemoryWriteKind::UnfinishedGoal => score += 0.2,
+        MemoryWriteKind::Default => {}
+    }
     if contains_any_marker(
         &text.to_ascii_lowercase(),
         &cfg.rules.salience_boost_markers,
     ) {
         score += 0.16;
     }
-    if safety_flag == "injection_like" {
+    if safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
         score = 0.12;
     }
     score.clamp(0.0, 1.0)
@@ -1185,7 +1295,7 @@ fn extract_recall_keywords(prompt: &str) -> Vec<String> {
 }
 
 fn score_memory_relevance(role: &str, content: &str, keywords: &[String]) -> f32 {
-    let mut score = if role == "user" { 0.1 } else { 0.05 };
+    let mut score = if role == MEMORY_ROLE_USER { 0.1 } else { 0.05 };
     let text = content.to_ascii_lowercase();
     let mut hits = 0usize;
     for kw in keywords {
@@ -1201,4 +1311,40 @@ fn score_memory_relevance(role: &str, content: &str, keywords: &[String]) -> f32
         score += 0.04;
     }
     score.clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        retrieval_source_ref_for_kb_chunk, retrieval_source_ref_for_memory,
+        retrieval_source_ref_for_preference, RETRIEVAL_PRODUCER_KB,
+        RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY,
+    };
+
+    #[test]
+    fn retrieval_source_ref_for_memory_is_stable_id_string() {
+        assert_eq!(retrieval_source_ref_for_memory(42), "42");
+    }
+
+    #[test]
+    fn retrieval_source_ref_for_preference_uses_trimmed_pref_key() {
+        assert_eq!(
+            retrieval_source_ref_for_preference(" response_language "),
+            "response_language"
+        );
+    }
+
+    #[test]
+    fn retrieval_source_ref_for_kb_chunk_is_chunk_scoped() {
+        assert_eq!(
+            retrieval_source_ref_for_kb_chunk("user:test", "docs", "chunk-001"),
+            "kb:user:test:docs:chunk-001"
+        );
+    }
+
+    #[test]
+    fn retrieval_producer_constants_match_pipeline_intent() {
+        assert_eq!(RETRIEVAL_PRODUCER_KB, "kb");
+        assert_eq!(RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY);
+    }
 }

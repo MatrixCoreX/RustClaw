@@ -1,11 +1,11 @@
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    ActiveTaskItem, AppState, ClaimedTask, TaskQueryResponse, main_flow_rules, now_ts,
-    parse_task_status_with_rules, truncate_for_log,
+    main_flow_rules, now_ts, parse_task_status_with_rules, truncate_for_log, ActiveTaskItem,
+    AppState, ClaimedTask, TaskQueryResponse,
 };
 
 pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<ClaimedTask>> {

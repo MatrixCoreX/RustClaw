@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"d4cd6945-61bb-49e7-9eb5-428213210c65","status":"succeeded","result_json":{"messages":["该 README 介绍了一个名为 MiniMax-CLI 的本地命令行工具，用于通过命令行与 MiniMax 大模型交互，支持实时语音对话、角色扮演、多轮对话、函数调用及自定义系统提示词等功能。"],"text":"该 README 介绍了一个名为 MiniMax-CLI 的本地命令行工具，用于通过命令行与 MiniMax 大模型交互，支持实时语音对话、角色扮演、多轮对话、函数调用及自定义系统提示词等功能。"},"error_text":null},"error":null}

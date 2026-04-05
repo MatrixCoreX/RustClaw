@@ -1,0 +1,7 @@
+index=1
+case_name=clarify_deictic_readme_again
+chat_id=17752372482
+turn1_task_id=1566b573-c7dd-427e-bf30-e9e9e63c305b
+turn1_prompt=读一下那个 README 开头，然后一句话总结
+turn2_task_id=c3b7d240-1f25-4d05-9513-4685d495980e
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md

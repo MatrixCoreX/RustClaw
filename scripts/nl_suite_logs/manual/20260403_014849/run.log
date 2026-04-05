@@ -1,0 +1,14 @@
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_manual.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_014849
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_014849/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_014849/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+curl: (7) Failed to connect to 127.0.0.1 port 8787 after 0 ms: Couldn't connect to server

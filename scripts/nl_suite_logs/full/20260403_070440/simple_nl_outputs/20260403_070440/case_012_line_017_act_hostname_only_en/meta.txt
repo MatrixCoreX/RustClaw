@@ -1,0 +1,6 @@
+ordinal=12
+source_line=17
+case_name=act_hostname_only_en
+chat_id=1985997002
+task_id=cb9fd135-318c-4fbf-b26f-567388b63561
+prompt=output only the current machine hostname, no explanation

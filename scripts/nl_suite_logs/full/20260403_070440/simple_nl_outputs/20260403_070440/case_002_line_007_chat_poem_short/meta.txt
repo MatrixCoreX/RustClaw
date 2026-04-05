@@ -1,0 +1,6 @@
+ordinal=2
+source_line=7
+case_name=chat_poem_short
+chat_id=1985996992
+task_id=b1f55941-03a5-4f70-941c-f7534b82256f
+prompt=写一首两句的打工人短诗

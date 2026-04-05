@@ -1,0 +1,6 @@
+ordinal=19
+source_line=23
+case_name=service_status_brief_semantic
+chat_id=1985997009
+task_id=382652d0-643b-4dc4-8a27-9e2caeeef77d
+prompt=check whether telegramd is currently running and explain the status briefly

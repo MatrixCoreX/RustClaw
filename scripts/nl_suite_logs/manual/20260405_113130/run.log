@@ -1,0 +1,23 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_manual_case3_only.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_113130
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_113130/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_113130/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1986004300
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        act_log_analyze_brief
+[CHAT]        1986004301
+[PROMPT]      快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
+[TASK]        87acd316-382a-40dc-8dbd-79611ea325fa
+  [status] <none> -> running
+poll timeout for task_id=87acd316-382a-40dc-8dbd-79611ea325fa

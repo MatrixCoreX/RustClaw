@@ -1,0 +1,239 @@
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_manual.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_014928
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_014928/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_014928/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 6
+[NAME]        chat_weather_joke
+[CHAT]        1985996991
+[PROMPT]      今天天气先别查，给我讲一个简短冷笑话
+[TASK]        64146ef9-8ba0-4aa1-aa62-cc2c9750799e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 为什么程序员分不清万圣节和圣诞节？ 因为 **Oct 31 = Dec 25**。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 7
+[NAME]        act_pwd_only
+[CHAT]        1985996992
+[PROMPT]      只输出当前工作目录的绝对路径，不要解释
+[TASK]        ec171098-b26d-46eb-b433-cb2673030e97
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] /tmp/rustclaw-workspace
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 8
+[NAME]        act_list_top_dirs
+[CHAT]        1985996993
+[PROMPT]      把当前仓库顶层目录和文件列出来，简单分组就行
+[TASK]        efc30869-633f-48ab-962c-4000d6296f88
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] **目录：** - .cargo - .github - crates - docs **文件：** - .cargo-lock.json - .gitignore - .tool-versions - CHANGELOG.md - Cargo.toml - LICENSE - README.md - rust-toolchain.toml
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 9
+[NAME]        act_hidden_files
+[CHAT]        1985996994
+[PROMPT]      看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+[TASK]        da5ac5a3-804f-4dbe-92d2-fa45c3fa3174
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 您想检查 /tmp/rustclaw-workspace/./UI 还是 /tmp/rustclaw-workspace/./data/kb 目录中的隐藏文件？
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 10
+[NAME]        act_read_readme_head
+[CHAT]        1985996995
+[PROMPT]      扫一眼 README 前 20 行，再提炼成 3 句话
+[TASK]        0e59a655-c824-4c1e-8a62-157bbaa85041
+  [status] <none> -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+  [text] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 11
+[NAME]        chat_act_compare_sizes
+[CHAT]        1985996996
+[PROMPT]      比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+[TASK]        418d462e-bfd1-465d-a76e-387e50f9fd1d
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] -rw-r--r-- 1 testuser staff 118877 4 2 19:32 Cargo.lock -rw-r--r-- 1 testuser staff 2490 4 2 19:31 Cargo.toml
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 12
+[NAME]        missing_file_graceful
+[CHAT]        1985996997
+[PROMPT]      把 definitely_missing_named_file_rustclaw_001.txt 发给我
+[TASK]        46adbd1c-153a-4d0d-9923-87f1d2bdf414
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+  [text] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+
+============================================================
+[CASE]        8
+[SOURCE_LINE] 13
+[NAME]        write_and_deliver_hello
+[CHAT]        1985996998
+[PROMPT]      写一个 hello world shell 脚本，保存成 document/hello_from_manual_test.sh，然后把文件发给我
+[TASK]        416c948e-0ab7-42ef-b438-7a5b1ff2be1d
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/document/hello_from_manual_test.sh
+
+============================================================
+[CASE]        9
+[SOURCE_LINE] 14
+[NAME]        chat_explain_repo_briefly
+[CHAT]        1985996999
+[PROMPT]      用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+[TASK]        55273f1e-3168-4154-aa21-c876f6622bd4
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 您想让我检查哪个文件或目录来了解这个仓库的内容？（例如 README.md 或 docs/ 目录）
+
+============================================================
+[CASE]        10
+[SOURCE_LINE] 15
+[NAME]        chat_translate_simple
+[CHAT]        1985997000
+[PROMPT]      把这句话翻成英文：现在服务已经恢复了
+[TASK]        66165d38-142e-45e4-af24-0e4a7c0a2fa9
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The service has been restored.
+
+============================================================
+[CASE]        11
+[SOURCE_LINE] 16
+[NAME]        act_whoami_only
+[CHAT]        1985997001
+[PROMPT]      只输出当前用户名，不要解释
+[TASK]        c02bd8cd-c473-4eff-9c58-e62ee5c4c65a
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 当前用户名是 guest
+
+============================================================
+[CASE]        12
+[SOURCE_LINE] 17
+[NAME]        act_hostname_only
+[CHAT]        1985997002
+[PROMPT]      只输出当前机器 hostname
+[TASK]        26c5a1bb-fcda-4489-8a97-48ea12bef27d
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] rustclaw-test-host.local
+
+============================================================
+[CASE]        13
+[SOURCE_LINE] 18
+[NAME]        act_list_logs
+[CHAT]        1985997003
+[PROMPT]      列出 logs 目录下的前 10 个文件名，不要读内容
+[TASK]        5948f582-465d-4cd5-8cb9-0aea5c38e024
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+  [text] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+
+============================================================
+[CASE]        14
+[SOURCE_LINE] 19
+[NAME]        act_find_service_file
+[CHAT]        1985997004
+[PROMPT]      检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+[TASK]        b8f81ade-9158-43fd-9c8c-7726048c45fc
+  [status] <none> -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+  [text] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+
+============================================================
+[CASE]        15
+[SOURCE_LINE] 20
+[NAME]        act_check_document_dir
+[CHAT]        1985997005
+[PROMPT]      列出 document 目录下有哪些文件，只输出文件名列表
+[TASK]        42d88bcd-a69d-4dde-93e5-97c678025068
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] file1.txt file2.txt file3.txt
+
+============================================================
+[CASE]        16
+[SOURCE_LINE] 21
+[NAME]        act_read_agents_head
+[CHAT]        1985997006
+[PROMPT]      读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
+[TASK]        7b0b53a1-aafa-4e1d-b264-cbc83127b2ce
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 根据 AGENTS.md 前 30 行，提炼的 3 条最重要规则： 1. **面向非技术用户设计** — 主要用户是“不懂技术的普通小白”，UI 应降低理解门槛，让用户建立“我看得懂、我敢点、我不会弄坏”的信心。 2. **先解释，再操作** — 重要动作、状态、渠道概念都要先让用户看懂，再让用户点击。 3. **默认安全且可恢复** — 危险操作要弱化，关键操作要有明确反馈，失败时要告诉用户下一步。
+
+============================================================
+[CASE]        17
+[SOURCE_LINE] 22
+[NAME]        act_show_package_json_name
+[CHAT]        1985997007
+[PROMPT]      读取 package.json 里的 name 字段，只输出值
+[TASK]        5bbe6f48-d1e7-49ed-a723-a643d8c374ed
+  [status] <none> -> running

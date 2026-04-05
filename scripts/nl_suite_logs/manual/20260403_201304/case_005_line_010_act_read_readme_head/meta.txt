@@ -1,0 +1,6 @@
+ordinal=5
+source_line=10
+case_name=act_read_readme_head
+chat_id=1985996995
+task_id=ceef610a-226e-4f43-bd4e-376a7e66adc3
+prompt=扫一眼 README 前 20 行，再提炼成 3 句话

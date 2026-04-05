@@ -1,0 +1,241 @@
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_text_match.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_042450
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_042450/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_042450/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 5
+[NAME]        run_cmd_pwd_with_result_tail
+[CHAT]        1985996991
+[PROMPT]      执行 pwd，然后告诉我结果
+[TASK]        15684993-abab-469f-aae8-7704cfd17cce
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] /tmp/rustclaw-workspace
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 6
+[NAME]        run_cmd_uname_with_result_tail_en
+[CHAT]        1985996992
+[PROMPT]      please run uname -a and tell me the result
+[TASK]        309d65cf-7df4-43f4-802d-a9ac0a5970b6
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Darwin rustclaw-test-host.local 22.6.0 Darwin Kernel Version 22.6.0: Tue Jul 15 08:22:28 PDT 2025; root:xnu-8796.141.3.713.2~2/RELEASE_X86_64 x86_64
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 7
+[NAME]        fs_readme_head_summary_semantic
+[CHAT]        1985996993
+[PROMPT]      看看 README.md 开头讲了什么，读前 20 行后用三句话总结
+[TASK]        cbfa0f99-a19b-44df-96a2-185c131f147b
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] README.md 未找到，请提供完整路径。
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 8
+[NAME]        fs_hidden_files_bool_semantic
+[CHAT]        1985996994
+[PROMPT]      帮我判断一下当前目录有没有隐藏文件，只回答有或没有，并举两个例子
+[TASK]        0861f88f-0462-437a-935a-1ac665a3873c
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 有，例如 .bashrc 和 .profile
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 9
+[NAME]        fs_package_name_scalar_semantic
+[CHAT]        1985996995
+[PROMPT]      去 package.json 里找 name，只把值给我
+[TASK]        3b9fc0db-1e54-4afa-a574-c676007b36e6
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] my-project
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 10
+[NAME]        fs_service_semantic_explain
+[CHAT]        1985996996
+[PROMPT]      检查仓库里有没有 rustclaw.service；如果有，给路径并顺手解释它是干什么的
+[TASK]        bff3204e-34d3-4b56-bf4b-0f383472d6b3
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 未找到 rustclaw.service 文件
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 11
+[NAME]        fs_compare_readmes_semantic
+[CHAT]        1985996997
+[PROMPT]      比较 README.md 和 README.zh-CN.md 哪个更大，再解释为什么可能不同
+[TASK]        81996039-2657-4a99-9712-f25235a224b0
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] README.zh-CN.md 更大（12288 字节 vs 4096 字节），中英文版本的行数也反映这一点（317 行 vs 109 行）。\n\n可能不同的原因：1) 中文每个汉字占 2-4 字节，而英文字母只占 1 字节，导致相同内容的中文文件体积更大；2) 中英文版本的文档内容可能本身就不完全相同，比如中文版可能包含更多示例、翻译说明或本地化补充内容。
+
+============================================================
+[CASE]        8
+[SOURCE_LINE] 12
+[NAME]        followup_extract_username_semantic
+[CHAT]        1985996998
+[PROMPT]      只输出当前用户名，不要解释
+[TASK]        3df6c57c-2ea4-48d5-8fd3-1874f167c31b
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] root
+
+============================================================
+[CASE]        9
+[SOURCE_LINE] 13
+[NAME]        followup_extract_hostname_semantic
+[CHAT]        1985996999
+[PROMPT]      只输出当前机器 hostname，不要解释
+[TASK]        84c2929e-fc44-4702-abb2-c9563bf0a3aa
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] iZbp1a1a2b1a2b3c4d5e6f7fa
+
+============================================================
+[CASE]        10
+[SOURCE_LINE] 14
+[NAME]        followup_count_scripts_items_semantic
+[CHAT]        1985997000
+[PROMPT]      统计 scripts 目录下有多少个直接子项，只输出数字
+[TASK]        decd4682-502b-4717-a307-1b9fa206ffc0
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] __pycache__/ auth-key.sh check-secrets.sh check_base_skill_response_contracts.sh check_browser_runtime.sh check_skill_prompts.py codex_autofix_from_log.sh codex_autofix_prompt_from_log.sh codex_fix.sh count_lines.sh cryp...(truncated)
+
+============================================================
+[CASE]        11
+[SOURCE_LINE] 15
+[NAME]        followup_logs_then_conclusion
+[CHAT]        1985997001
+[PROMPT]      列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物
+[TASK]        54774180-6ab9-4a9d-a368-f2336ab45bef
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 请确认是否要在 /tmp/rustclaw-workspace/logs 目录执行此操作？
+
+============================================================
+[CASE]        12
+[SOURCE_LINE] 16
+[NAME]        file_write_and_deliver_semantic_cn
+[CHAT]        1985997002
+[PROMPT]      写一个文本文件到 document/text_match_regression_note.txt，内容是 semantic routing regression note，然后把文件发给我
+[TASK]        c8f4c3ba-1014-40d8-bdb5-7c25a4be83eb
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/document/text_match_regression_note.txt
+
+============================================================
+[CASE]        13
+[SOURCE_LINE] 17
+[NAME]        missing_file_graceful_cn_semantic
+[CHAT]        1985997003
+[PROMPT]      把 document/definitely_missing_text_match_case_001.txt 发给我
+[TASK]        4b14936c-cbaa-41b3-a5cc-ba9b327633cd
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 在系统根目录和项目根目录都没有找到该文件
+
+============================================================
+[CASE]        14
+[SOURCE_LINE] 18
+[NAME]        missing_file_graceful_en_followup
+[CHAT]        1985997004
+[PROMPT]      send me document/definitely_missing_runtime_case_002.txt and do not paste the content
+[TASK]        04dbeaf7-53f2-4d56-b47f-b7712682d92e
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 在系统根目录和项目根目录都没有找到该文件
+
+============================================================
+[CASE]        15
+[SOURCE_LINE] 19
+[NAME]        plain_chat_no_execution_cn
+[CHAT]        1985997005
+[PROMPT]      别执行任何命令，直接讲一个很短的冷笑话
+[TASK]        e29cce67-fd79-49e9-baa1-b15d1349f926
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 为什么程序员分不清万圣节和圣诞节？ 因为 Oct 31 = Dec 25。
+
+============================================================
+[CASE]        16
+[SOURCE_LINE] 20
+[NAME]        mixed_request_cn_semantic
+[CHAT]        1985997006
+[PROMPT]      先看看当前目录有哪些顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么组织
+[TASK]        9e955a15-b2d5-4f55-bbf3-28deec5b19ac
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 当前仓库的顶层文件夹： - `.github` — GitHub 配置（Actions、PR 模板等） - `.husky` — Git Hooks 配置（自动格式化、代码检查） - `.mise` — 开发环境工具版本管理配置 - `.vscode` — VS Code 编辑器配置 - `bin` — 可执行脚本或编译产物 - `docs` — 项目文档 - `internal` — 内部使用的私有代码（不建议外部引用） - `pkg...(truncated)
+
+============================================================
+[CASE]        17
+[SOURCE_LINE] 21
+[NAME]        git_branch_scalar_semantic
+[CHAT]        1985997007
+[PROMPT]      tell me the current git branch name and output only the branch
+[TASK]        af09c27a-d71a-40dd-a455-5a243d73b777
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] main

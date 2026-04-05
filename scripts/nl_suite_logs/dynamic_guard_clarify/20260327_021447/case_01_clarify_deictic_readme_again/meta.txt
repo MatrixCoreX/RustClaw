@@ -1,7 +1,0 @@
-index=1
-case_name=clarify_deictic_readme_again
-chat_id=1985996991
-turn1_task_id=6ddf69a1-0a8a-4ef3-a6bf-a2fa9f80212b
-turn1_prompt=读一下那个 README 开头并用一句话总结
-turn2_task_id=c1c5007f-472f-45d2-af16-7ad8c80c8123
-turn2_prompt=/home/guagua/test/README.md

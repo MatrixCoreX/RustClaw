@@ -1,14 +1,21 @@
 use std::path::{Path, PathBuf};
 
+use super::directory_lookup::{resolve_directory_locator_input, resolve_directory_target};
+use super::locator::{
+    classify_file_delivery_locator_input, extract_explicit_file_path_candidates,
+    normalize_locator_text,
+};
 use super::{
-    localize_delivery_message, response_has_same_file_token, trim_path_token,
-    BatchDirectoryDeliveryResolution, CurrentLevelDeliveryEntries,
-    CurrentLevelDeliveryEntriesResult, DeliveryMessageKind, DirectoryFileLookupResult,
-    DirectoryLookupResolution, FileDeliveryTargetResolution, FilenameScanResult,
-    IntentOutputContract,
+    localize_delivery_message, resolve_existing_dir_under_root, resolve_existing_file_under_root,
+    response_has_same_file_token, trim_path_token, BatchDirectoryDeliveryResolution,
+    CurrentLevelDeliveryEntries, CurrentLevelDeliveryEntriesResult, DeliveryMessageKind,
+    DirectoryFileLookupResult, DirectoryLookupResolution, FileDeliveryLocatorInput,
+    FileDeliveryTargetResolution, FilenameScanResult, IntentOutputContract,
 };
 use crate::AppState;
+use crate::OutputDeliveryIntent;
 
+// File-target resolution and batch delivery helpers used by the facade.
 pub(super) fn resolve_batch_directory_delivery(
     state: &AppState,
     user_request: &str,
@@ -16,12 +23,13 @@ pub(super) fn resolve_batch_directory_delivery(
 ) -> Option<BatchDirectoryDeliveryResolution> {
     if !matches!(
         output_contract.delivery_intent,
-        crate::intent_router::OutputDeliveryIntent::DirectoryBatchFiles
+        OutputDeliveryIntent::DirectoryBatchFiles
     ) {
         return None;
     }
-    let locator = super::resolve_directory_locator_input(output_contract, user_request)?;
-    let resolved = super::resolve_directory_target(
+    let locator =
+        resolve_directory_locator_input(output_contract, user_request, &state.workspace_root)?;
+    let resolved = resolve_directory_target(
         locator,
         Path::new("/"),
         &state.default_locator_search_dir,
@@ -46,11 +54,11 @@ pub(super) fn resolve_batch_directory_delivery(
                         &subdir_hint,
                     ))
                 }
-                CurrentLevelDeliveryEntriesResult::UserMessage(kind) => Some(
-                    BatchDirectoryDeliveryResolution::UserMessage(localize_delivery_message(
-                        state, kind,
-                    )),
-                ),
+                CurrentLevelDeliveryEntriesResult::UserMessage(kind) => {
+                    Some(BatchDirectoryDeliveryResolution::UserMessage(
+                        localize_delivery_message(state, kind),
+                    ))
+                }
             }
         }
         DirectoryLookupResolution::MultipleCandidates(candidates) => {
@@ -59,8 +67,14 @@ pub(super) fn resolve_batch_directory_delivery(
                 state,
                 DeliveryMessageKind::DirectoryMultipleCandidates,
             ));
-            lines.extend(candidates.into_iter().map(|path| path.display().to_string()));
-            Some(BatchDirectoryDeliveryResolution::UserMessage(lines.join("\n")))
+            lines.extend(
+                candidates
+                    .into_iter()
+                    .map(|path| path.display().to_string()),
+            );
+            Some(BatchDirectoryDeliveryResolution::UserMessage(
+                lines.join("\n"),
+            ))
         }
         DirectoryLookupResolution::UserMessage(kind) => Some(
             BatchDirectoryDeliveryResolution::UserMessage(localize_delivery_message(state, kind)),
@@ -73,7 +87,10 @@ pub(super) fn list_current_level_files_for_delivery(
     max_entries: usize,
 ) -> CurrentLevelDeliveryEntriesResult {
     let mut entries = match std::fs::read_dir(directory) {
-        Ok(v) => v.filter_map(Result::ok).map(|entry| entry.path()).collect::<Vec<_>>(),
+        Ok(v) => v
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>(),
         Err(_) => {
             return CurrentLevelDeliveryEntriesResult::UserMessage(
                 DeliveryMessageKind::DirectoryNoSendableFilesInCurrentLevel,
@@ -82,7 +99,9 @@ pub(super) fn list_current_level_files_for_delivery(
     };
     entries.sort();
     if entries.len() > max_entries.max(1) {
-        return CurrentLevelDeliveryEntriesResult::UserMessage(DeliveryMessageKind::DirectoryEntriesTooMany);
+        return CurrentLevelDeliveryEntriesResult::UserMessage(
+            DeliveryMessageKind::DirectoryEntriesTooMany,
+        );
     }
     let mut files = Vec::new();
     let mut has_child_dirs = false;
@@ -111,7 +130,10 @@ pub(super) fn list_current_level_files_for_delivery(
     })
 }
 
-pub(super) fn format_batch_delivery_tokens(files: &[PathBuf], trailing_hint: Option<&str>) -> String {
+pub(super) fn format_batch_delivery_tokens(
+    files: &[PathBuf],
+    trailing_hint: Option<&str>,
+) -> String {
     let mut lines = files
         .iter()
         .map(|path| format!("FILE:{}", path.display()))
@@ -165,7 +187,12 @@ pub(super) fn enforce_file_delivery_locator_contract(
                 let token_lines = tokens_text
                     .lines()
                     .map(str::trim)
-                    .filter(|line| line.starts_with("FILE:"))
+                    .filter(|line| {
+                        matches!(
+                            crate::finalizer::parse_delivery_token(line),
+                            Some((crate::finalizer::DeliveryTokenKind::File, _))
+                        )
+                    })
                     .map(|line| line.to_string())
                     .collect::<Vec<_>>();
                 if token_lines.is_empty() {
@@ -208,7 +235,8 @@ pub(super) fn enforce_file_delivery_locator_contract(
         }
         FileDeliveryTargetResolution::UserMessage(msg) => {
             *normalized_text = localize_delivery_message(state, msg);
-            normalized_messages.retain(|msg| !msg.trim_start().starts_with("FILE:"));
+            normalized_messages
+                .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
         }
     }
 }
@@ -221,12 +249,17 @@ pub(super) fn resolve_file_delivery_target_with_hint(
     scan_max_files: usize,
     locator_hint: Option<&str>,
 ) -> Option<FileDeliveryTargetResolution> {
-    let locator = super::classify_file_delivery_locator_input(user_request, locator_hint)?;
+    if let Some(resolved) =
+        resolve_explicit_file_path_candidate(locator_hint, user_request, system_root, project_root)
+    {
+        return Some(resolved);
+    }
+    let locator = classify_file_delivery_locator_input(user_request, locator_hint)?;
     match locator {
-        super::FileDeliveryLocatorInput::ExplicitFilePath { file_path } => {
-            Some(resolve_explicit_file_path(system_root, project_root, &file_path))
-        }
-        super::FileDeliveryLocatorInput::DirectoryAndFilename {
+        FileDeliveryLocatorInput::ExplicitFilePath { file_path } => Some(
+            resolve_explicit_file_path(system_root, project_root, &file_path),
+        ),
+        FileDeliveryLocatorInput::DirectoryAndFilename {
             directory_path,
             file_name,
         } => Some(resolve_directory_and_file(
@@ -235,10 +268,52 @@ pub(super) fn resolve_file_delivery_target_with_hint(
             &directory_path,
             &file_name,
         )),
-        super::FileDeliveryLocatorInput::FilenameOnly { file_name } => Some(
-            scan_filename_under_project_root(project_root, &file_name, scan_max_depth, scan_max_files),
-        ),
+        FileDeliveryLocatorInput::FilenameOnly { file_name } => Some(scan_filename_under_roots(
+            project_root,
+            system_root,
+            &file_name,
+            scan_max_depth,
+            scan_max_files,
+        )),
     }
+}
+
+fn resolve_explicit_file_path_candidate(
+    locator_hint: Option<&str>,
+    user_request: &str,
+    system_root: &Path,
+    project_root: &Path,
+) -> Option<FileDeliveryTargetResolution> {
+    for source in locator_hint
+        .into_iter()
+        .chain(std::iter::once(user_request))
+    {
+        for token in extract_explicit_file_path_candidates(source) {
+            let resolved = resolve_existing_file_under_root(system_root, &token)
+                .or_else(|| resolve_existing_file_under_root(project_root, &token));
+            if let Some(path) = resolved {
+                return Some(FileDeliveryTargetResolution::Resolved(path));
+            }
+            if token_has_definite_file_shape(&token) {
+                return Some(resolve_explicit_file_path(
+                    system_root,
+                    project_root,
+                    &token,
+                ));
+            }
+        }
+    }
+    None
+}
+
+fn token_has_definite_file_shape(token: &str) -> bool {
+    let cleaned = trim_path_token(token);
+    if cleaned.is_empty() || cleaned.ends_with('/') || cleaned.ends_with('\\') {
+        return false;
+    }
+    let normalized = cleaned.replace('\\', "/");
+    let last = normalized.rsplit('/').next().unwrap_or_default();
+    last.contains('.')
 }
 
 pub(super) fn resolve_explicit_file_path(
@@ -246,10 +321,10 @@ pub(super) fn resolve_explicit_file_path(
     project_root: &Path,
     raw_path: &str,
 ) -> FileDeliveryTargetResolution {
-    if let Some(path) = super::resolve_existing_file_under_root(system_root, raw_path) {
+    if let Some(path) = resolve_existing_file_under_root(system_root, raw_path) {
         return FileDeliveryTargetResolution::Resolved(path);
     }
-    if let Some(path) = super::resolve_existing_file_under_root(project_root, raw_path) {
+    if let Some(path) = resolve_existing_file_under_root(project_root, raw_path) {
         return FileDeliveryTargetResolution::Resolved(path);
     }
     FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule1BothRootsMiss)
@@ -261,8 +336,8 @@ pub(super) fn resolve_directory_and_file(
     directory_path: &str,
     file_name: &str,
 ) -> FileDeliveryTargetResolution {
-    let directory = super::resolve_existing_dir_under_root(system_root, directory_path)
-        .or_else(|| super::resolve_existing_dir_under_root(project_root, directory_path));
+    let directory = resolve_existing_dir_under_root(system_root, directory_path)
+        .or_else(|| resolve_existing_dir_under_root(project_root, directory_path));
     let Some(directory) = directory else {
         return FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule2DirNotFound);
     };
@@ -277,27 +352,47 @@ pub(super) fn resolve_directory_and_file(
     }
 }
 
-pub(super) fn scan_filename_under_project_root(
+pub(super) fn scan_filename_under_roots(
     project_root: &Path,
+    system_root: &Path,
     file_name: &str,
     scan_max_depth: usize,
     scan_max_files: usize,
 ) -> FileDeliveryTargetResolution {
-    match scan_filename_matches_with_limit(
+    let project_outcome = scan_filename_matches_with_limit_internal(
         project_root,
         file_name,
         scan_max_depth,
         scan_max_files,
-    ) {
+    );
+    match project_outcome.result {
         FilenameScanResult::Found(path) => FileDeliveryTargetResolution::Resolved(path),
-        FilenameScanResult::NotFound => {
-            FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule3FileNotFound)
+        FilenameScanResult::Multiple => {
+            FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::FilenameNotUnique)
         }
         FilenameScanResult::TooManyEntries => {
             FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule3ScanTooMany)
         }
-        FilenameScanResult::Multiple => {
-            FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::FilenameNotUnique)
+        FilenameScanResult::NotFound => {
+            match scan_filename_matches_with_limit_internal(
+                system_root,
+                file_name,
+                scan_max_depth,
+                scan_max_files,
+            )
+            .result
+            {
+                FilenameScanResult::Found(path) => FileDeliveryTargetResolution::Resolved(path),
+                FilenameScanResult::NotFound => FileDeliveryTargetResolution::UserMessage(
+                    DeliveryMessageKind::Rule3FileNotFound,
+                ),
+                FilenameScanResult::TooManyEntries => {
+                    FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule3ScanTooMany)
+                }
+                FilenameScanResult::Multiple => FileDeliveryTargetResolution::UserMessage(
+                    DeliveryMessageKind::FilenameNotUnique,
+                ),
+            }
         }
     }
 }
@@ -310,7 +405,7 @@ pub(super) fn find_file_in_directory_non_recursive(
     if target.is_empty() {
         return DirectoryFileLookupResult::NotFound;
     }
-    let target_norm = super::normalize_locator_text(&target);
+    let target_norm = normalize_locator_text(&target);
     let direct = directory.join(&target);
     if let Ok(canonical) = direct.canonicalize() {
         if canonical.is_file() {
@@ -330,10 +425,9 @@ pub(super) fn find_file_in_directory_non_recursive(
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_default();
-        let file_name_norm = super::normalize_locator_text(&file_name);
+        let file_name_norm = normalize_locator_text(&file_name);
         let is_exact = file_name_norm == target_norm;
-        let is_fuzzy = !is_exact
-            && (file_name_norm.contains(&target_norm) || target_norm.contains(&file_name_norm));
+        let is_fuzzy = !is_exact && file_name_norm.contains(&target_norm);
         if !is_exact && !is_fuzzy {
             continue;
         }
@@ -350,39 +444,61 @@ pub(super) fn find_file_in_directory_non_recursive(
             }
         }
     }
-    let mut matches = if exact_matches.is_empty() {
-        fuzzy_matches
-    } else {
-        exact_matches
-    };
-    matches.sort();
-    matches.dedup();
-    match matches.len() {
-        0 => DirectoryFileLookupResult::NotFound,
-        1 => matches
+    exact_matches.sort();
+    exact_matches.dedup();
+    if exact_matches.len() == 1 {
+        return exact_matches
             .into_iter()
             .next()
             .and_then(|path| path.canonicalize().ok())
             .map(DirectoryFileLookupResult::Found)
-            .unwrap_or(DirectoryFileLookupResult::NotFound),
-        _ => DirectoryFileLookupResult::Multiple,
+            .unwrap_or(DirectoryFileLookupResult::NotFound);
+    }
+    if exact_matches.len() > 1 {
+        return DirectoryFileLookupResult::Multiple;
+    }
+    fuzzy_matches.sort();
+    fuzzy_matches.dedup();
+    if fuzzy_matches.is_empty() {
+        DirectoryFileLookupResult::NotFound
+    } else {
+        DirectoryFileLookupResult::Multiple
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn scan_filename_matches_with_limit(
     project_root: &Path,
     file_name: &str,
     max_depth: usize,
     max_files: usize,
 ) -> FilenameScanResult {
+    scan_filename_matches_with_limit_internal(project_root, file_name, max_depth, max_files).result
+}
+
+#[derive(Debug)]
+struct FilenameScanOutcome {
+    result: FilenameScanResult,
+}
+
+fn scan_filename_matches_with_limit_internal(
+    project_root: &Path,
+    file_name: &str,
+    max_depth: usize,
+    max_files: usize,
+) -> FilenameScanOutcome {
     if !project_root.is_dir() {
-        return FilenameScanResult::NotFound;
+        return FilenameScanOutcome {
+            result: FilenameScanResult::NotFound,
+        };
     }
     let target = trim_path_token(file_name);
     if target.is_empty() {
-        return FilenameScanResult::NotFound;
+        return FilenameScanOutcome {
+            result: FilenameScanResult::NotFound,
+        };
     }
-    let target_norm = super::normalize_locator_text(&target);
+    let target_norm = normalize_locator_text(&target);
 
     let mut exact_matches = Vec::new();
     let mut fuzzy_matches = Vec::new();
@@ -391,14 +507,19 @@ pub(super) fn scan_filename_matches_with_limit(
 
     while let Some((dir, depth)) = stack.pop() {
         let mut entries = match std::fs::read_dir(&dir) {
-            Ok(v) => v.filter_map(Result::ok).map(|entry| entry.path()).collect::<Vec<_>>(),
+            Ok(v) => v
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>(),
             Err(_) => continue,
         };
         entries.sort();
         for path in entries {
             seen_entries += 1;
             if seen_entries > max_files.max(1) {
-                return FilenameScanResult::TooManyEntries;
+                return FilenameScanOutcome {
+                    result: FilenameScanResult::TooManyEntries,
+                };
             }
             let meta = match std::fs::symlink_metadata(&path) {
                 Ok(v) => v,
@@ -418,32 +539,38 @@ pub(super) fn scan_filename_matches_with_limit(
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_default();
-            let current_name_norm = super::normalize_locator_text(&current_name);
+            let current_name_norm = normalize_locator_text(&current_name);
             if current_name_norm == target_norm {
                 exact_matches.push(path);
-            } else if current_name_norm.contains(&target_norm)
-                || target_norm.contains(&current_name_norm)
-            {
+            } else if current_name_norm.contains(&target_norm) {
                 fuzzy_matches.push(path);
             }
         }
     }
 
-    let mut matches = if exact_matches.is_empty() {
-        fuzzy_matches
-    } else {
-        exact_matches
-    };
-    matches.sort();
-    matches.dedup();
-    match matches.len() {
-        0 => FilenameScanResult::NotFound,
-        1 => matches
-            .into_iter()
-            .next()
-            .and_then(|path| path.canonicalize().ok())
-            .map(FilenameScanResult::Found)
-            .unwrap_or(FilenameScanResult::NotFound),
-        _ => FilenameScanResult::Multiple,
+    exact_matches.sort();
+    exact_matches.dedup();
+    if exact_matches.len() == 1 {
+        return FilenameScanOutcome {
+            result: exact_matches
+                .into_iter()
+                .next()
+                .and_then(|path| path.canonicalize().ok())
+                .map(FilenameScanResult::Found)
+                .unwrap_or(FilenameScanResult::NotFound),
+        };
     }
+    if exact_matches.len() > 1 {
+        return FilenameScanOutcome {
+            result: FilenameScanResult::Multiple,
+        };
+    }
+    fuzzy_matches.sort();
+    fuzzy_matches.dedup();
+    let result = if fuzzy_matches.is_empty() {
+        FilenameScanResult::NotFound
+    } else {
+        FilenameScanResult::Multiple
+    };
+    FilenameScanOutcome { result }
 }

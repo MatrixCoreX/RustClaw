@@ -303,10 +303,7 @@ fn execute(args: &Value, cat: &TextCatalog, lang: &str) -> Result<(String, Value
             tr_with(
                 cat,
                 "weather.msg.coord_place",
-                &[
-                    ("lat", &format!("{lat:.2}")),
-                    ("lon", &format!("{lon:.2}")),
-                ],
+                &[("lat", &format!("{lat:.2}")), ("lon", &format!("{lon:.2}"))],
             ),
         ),
         _ => return Err(tr(cat, "weather.err.need_location")),
@@ -353,9 +350,7 @@ fn parse_forecast_days_arg(
     let Some(k) = key else {
         return Ok(None);
     };
-    let v = obj
-        .get(k)
-        .ok_or_else(|| format!("missing {k}"))?;
+    let v = obj.get(k).ok_or_else(|| format!("missing {k}"))?;
     let n = json_to_u32(v).ok_or_else(|| tr(cat, "weather.err.days_not_number"))?;
     if n == 0 {
         return Err(tr(cat, "weather.err.days_zero"));
@@ -502,10 +497,7 @@ fn fetch_daily_forecast(
     parts.push(tr_with(
         cat,
         "weather.msg.forecast_intro",
-        &[
-            ("place", place_name),
-            ("days", &format!("{days}")),
-        ],
+        &[("place", place_name), ("days", &format!("{days}"))],
     ));
     for i in 0..n {
         let date = &daily.time[i];

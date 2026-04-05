@@ -1,0 +1,2 @@
+{"source_line": 6, "case_name": "chat_weather_joke", "prompt": "今天天气先别查，给我讲一个简短冷笑话", "task_id": "fd984d8c-c67a-4770-aeba-e61cd60c5e87", "status": "succeeded", "text": "为什么程序员分不清万圣节和圣诞节？\n\n因为 `Oct 31 = Dec 25`。", "messages": ["为什么程序员分不清万圣节和圣诞节？\n\n因为 `Oct 31 = Dec 25`。"], "error_text": null}
+{"source_line": 7, "case_name": "act_pwd_only", "prompt": "只输出当前工作目录的绝对路径，不要解释", "task_id": "dc3e7d64-2495-41ca-a631-c0ee5aad4468", "status": "succeeded", "text": "无法确定当前工作目录的绝对路径，请提供当前工作目录的完整路径。", "messages": ["无法确定当前工作目录的绝对路径，请提供当前工作目录的完整路径。"], "error_text": null}

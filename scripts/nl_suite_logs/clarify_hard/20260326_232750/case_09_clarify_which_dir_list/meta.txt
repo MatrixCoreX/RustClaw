@@ -1,7 +1,0 @@
-index=9
-case_name=clarify_which_dir_list
-chat_id=1985996999
-turn1_task_id=ea1d76ec-b091-484d-a13c-eb5fb3751b01
-turn1_prompt=列出那个目录下前 5 个文件名
-turn2_task_id=09213f71-6b6d-42c8-a1d3-14091306b5ac
-turn2_prompt=logs
