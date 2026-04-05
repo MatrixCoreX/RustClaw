@@ -851,7 +851,7 @@ if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
 fi
 
 start_clawd() {
-	if pgrep -f 'target/(debug|release)/clawd|cargo run -p clawd' >/dev/null 2>&1; then
+	if pgrep -f 'target/release/clawd|cargo run -p clawd' >/dev/null 2>&1; then
 		echo "clawd is already running, skipping startup." # zh: clawd 已在运行，跳过启动。
 		return 0
 	fi
@@ -882,7 +882,7 @@ PY
 		echo "Binary not found or not executable: $WEBD_BIN" # zh: 二进制不存在或不可执行：$WEBD_BIN
 		return 1
 	fi
-	if pgrep -f 'target/(debug|release)/webd|cargo run -p webd' >/dev/null 2>&1; then
+	if pgrep -f 'target/release/webd|cargo run -p webd' >/dev/null 2>&1; then
 		echo "webd is already running, skipping startup." # zh: webd 已在运行，跳过启动。
 		return 0
 	fi
@@ -909,7 +909,7 @@ PY
 		echo "telegram_bot.enabled=false, skipping telegramd startup." # zh: telegram_bot.enabled=false，跳过 telegramd 启动。
 		return 0
 	fi
-	if pgrep -f 'target/(debug|release)/telegramd|cargo run -p telegramd' >/dev/null 2>&1; then
+	if pgrep -f 'target/release/telegramd|cargo run -p telegramd' >/dev/null 2>&1; then
 		echo "telegramd is already running, skipping startup." # zh: telegramd 已在运行，跳过启动。
 		return 0
 	fi
@@ -940,7 +940,7 @@ PY
 		echo "Binary not found or not executable: $WHATSAPP_WEBD_BIN" # zh: 二进制不存在或不可执行：$WHATSAPP_WEBD_BIN
 		return 1
 	fi
-	if pgrep -f 'target/(debug|release)/whatsapp_webd|cargo run -p whatsapp_webd' >/dev/null 2>&1; then
+	if pgrep -f 'target/release/whatsapp_webd|cargo run -p whatsapp_webd' >/dev/null 2>&1; then
 		echo "whatsapp_webd is already running, skipping startup." # zh: whatsapp_webd 已在运行，跳过启动。
 		return 0
 	fi
@@ -971,7 +971,7 @@ PY
 		echo "Binary not found or not executable: $WHATSAPPD_BIN" # zh: 二进制不存在或不可执行：$WHATSAPPD_BIN
 		return 1
 	fi
-	if pgrep -f 'target/(debug|release)/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1; then
+	if pgrep -f 'target/release/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1; then
 		echo "whatsappd is already running, skipping startup." # zh: whatsappd 已在运行，跳过启动。
 		return 0
 	fi
@@ -1004,7 +1004,7 @@ PY
 		echo "Binary not found or not executable: $FEISHUD_BIN" # zh: 二进制不存在或不可执行：$FEISHUD_BIN
 		return 0
 	fi
-	if pgrep -f 'target/(debug|release)/feishud|cargo run -p feishud' >/dev/null 2>&1; then
+	if pgrep -f 'target/release/feishud|cargo run -p feishud' >/dev/null 2>&1; then
 		echo "feishud is already running, skipping startup." # zh: feishud 已在运行，跳过启动。
 		return 0
 	fi

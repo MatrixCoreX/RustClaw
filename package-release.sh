@@ -221,36 +221,7 @@ for fp in targets:
     fp.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
 
-echo "[5.5/6] Force packaged scripts to release defaults..."
-export STAGE_PROJECT_DIR
-python3 - <<'PY'
-from pathlib import Path
-
-root = Path("tmp-not-used")
-del root
-stage = Path(__import__("os").environ["STAGE_PROJECT_DIR"])
-
-script_names = [
-    "start-all.sh",
-    "start-all-bin.sh",
-    "start-clawd.sh",
-    "start-clawd-ui.sh",
-    "start-telegramd.sh",
-    "start-whatsappd.sh",
-    "start-whatsapp-webd.sh",
-    "start-wechatd.sh",
-]
-
-for name in script_names:
-    p = stage / name
-    if not p.exists():
-        continue
-    s = p.read_text(encoding="utf-8")
-    s = s.replace("RUSTCLAW_START_PROFILE:-debug", "RUSTCLAW_START_PROFILE:-release")
-    s = s.replace('PROFILE="${1:-debug}"', 'PROFILE="${1:-release}"')
-    s = s.replace('PROFILE="${3:-${RUSTCLAW_START_PROFILE:-debug}}"', 'PROFILE="${3:-${RUSTCLAW_START_PROFILE:-release}}"')
-    p.write_text(s, encoding="utf-8")
-PY
+echo "[5.5/6] Packaged scripts already use release defaults."
 
 echo "[6/6] Create package in RustClaw_bundle and current dir..."
 BUNDLE_DIR="$HOME/RustClaw_bundle"

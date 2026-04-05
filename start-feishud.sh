@@ -59,7 +59,7 @@ else
   exit "$code"
 fi
 
-if pgrep -f 'target/(debug|release)/feishud|cargo run -p feishud' >/dev/null 2>&1; then
+if pgrep -f 'target/release/feishud|cargo run -p feishud' >/dev/null 2>&1; then
   echo "Detected feishud already running on this host. Stop old instance first." # zh: 检测到本机已有 feishud 在运行，请先停止旧实例。
   exit 1
 fi

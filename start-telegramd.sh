@@ -32,9 +32,9 @@ if [[ ! -x "$BIN_PATH" ]]; then
 fi
 
 # Preflight 1: avoid local duplicate polling workers.
-if pgrep -f 'target/(debug|release)/telegramd|cargo run -p telegramd' >/dev/null 2>&1; then
+if pgrep -f 'target/release/telegramd|cargo run -p telegramd' >/dev/null 2>&1; then
   echo "Detected telegramd already running on this host. Stop old instance first to avoid polling conflicts." # zh: 检测到本机已有 telegramd 在运行。请先停止旧实例，避免轮询冲突。
-  echo "You can run: pkill -f 'target/(debug|release)/telegramd|cargo run -p telegramd'" # zh: 可执行: pkill -f 'target/(debug|release)/telegramd|cargo run -p telegramd'
+  echo "You can run: pkill -f 'target/release/telegramd|cargo run -p telegramd'" # zh: 可执行: pkill -f 'target/release/telegramd|cargo run -p telegramd'
   exit 1
 fi
 

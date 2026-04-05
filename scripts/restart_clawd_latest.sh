@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd /home/guagua/git_upload
 
-pkill -f 'target/(debug|release)/clawd|cargo run -p clawd' || true
+pkill -f 'target/release/clawd|cargo run -p clawd' || true
 
 setsid /home/guagua/git_upload/target/release/clawd >/tmp/clawd.out 2>&1 </dev/null &
 
