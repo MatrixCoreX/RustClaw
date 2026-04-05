@@ -31,7 +31,7 @@ if [[ ! -x "$BIN_PATH" ]]; then
   exit 1
 fi
 
-if pgrep -f 'target/(debug|release)/whatsapp_webd|cargo run -p whatsapp_webd' >/dev/null 2>&1; then
+if pgrep -f 'target/release/whatsapp_webd|cargo run -p whatsapp_webd' >/dev/null 2>&1; then
   echo "Detected whatsapp_webd already running on this host. Stop old instance first." # zh: 检测到本机已有 whatsapp_webd 在运行，请先停止旧实例。
   exit 1
 fi

@@ -59,7 +59,7 @@ else
   exit "$code"
 fi
 
-if pgrep -f 'target/(debug|release)/larkd|cargo run -p larkd' >/dev/null 2>&1; then
+if pgrep -f 'target/release/larkd|cargo run -p larkd' >/dev/null 2>&1; then
   echo "Detected larkd already running on this host. Stop old instance first."
   exit 1
 fi

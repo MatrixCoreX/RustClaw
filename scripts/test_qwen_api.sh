@@ -32,7 +32,7 @@ Options:
   --model NAME         Override Qwen model name
   --api-key KEY        Override API key (avoid in shell history; prefer env)
   --timeout N          curl timeout seconds (default: 20)
-  --verbose, -v        Show response snippets for debugging
+  --verbose, -v        Show response snippets for troubleshooting
   --help, -h           Show this help
 
 Env:

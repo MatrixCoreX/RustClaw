@@ -57,7 +57,7 @@ else
   exit "$code"
 fi
 
-if pgrep -f 'target/(debug|release)/wechatd|cargo run -p wechatd' >/dev/null 2>&1; then
+if pgrep -f 'target/release/wechatd|cargo run -p wechatd' >/dev/null 2>&1; then
   echo "Detected wechatd already running on this host. Stop old instance first."
   exit 1
 fi

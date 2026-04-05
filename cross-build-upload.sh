@@ -351,7 +351,7 @@ PY
 usage() {
 	local exit_code="${1:-1}"
 	echo "用法: $0 [all|skill <技能名>|crate <包名>|dir]"
-	echo "  默认仅远程编译，并把 release 中的 bin 直接覆盖回本地 target/release（不拉 debug/非 bin 产物）。"
+	echo "  默认仅远程编译，并把 release 中的 bin 直接覆盖回本地 target/release（不拉非 release/非 bin 产物）。"
 	echo "  all            - 编译整个 workspace"
 	echo "  skill <name>   - 仅编译指定技能，如: skill health_check"
 	echo "  crate <name>   - 仅编译指定包，如: crate clawd"
