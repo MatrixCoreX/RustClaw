@@ -1,0 +1,6 @@
+ordinal=12
+source_line=17
+case_name=act_hostname_only
+chat_id=1985997002
+task_id=c2f1f3e8-acdf-4c64-a6c8-5e36ce558f37
+prompt=只输出当前机器 hostname

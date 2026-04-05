@@ -1,0 +1,6 @@
+ordinal=3
+source_line=8
+case_name=act_list_top_dirs
+chat_id=1985996993
+task_id=5fd17124-802f-47a0-bdc4-6d12ebda6db7
+prompt=把当前仓库顶层目录和文件列出来，简单分组就行

@@ -1,6 +1,0 @@
-ordinal=24
-source_line=29
-case_name=colloquial_cn_db_tables
-chat_id=17746321075
-task_id=81bddb8e-993c-4808-b920-fdda7e89cc57
-prompt=帮我看下 /home/guagua/test/data/test_contract.sqlite 里都有哪些表哈

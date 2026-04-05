@@ -64,8 +64,8 @@ python3 skill_develop/create_skill.py stock --aliases "a_stock,stock_quote" --ti
 2. 实现单行 JSON stdin/stdout 协议
 3. 补全 `INTERFACE.md`
 4. 运行 `python3 scripts/sync_skill_docs.py`
-5. 在 `prompts/agent_tool_spec.md` 增加参数契约
-6. 如有 vendor 特化，再补 `prompts/vendors/<vendor>/skills/<skill_name>.md`
+5. 在 `prompts/layers/overlays/agent_tool_spec.md` 增加参数契约
+6. 如有 vendor 特化，再补 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`
 7. 运行 `cargo check -p clawd -p skill-runner -p <new-skill-package>`
 
 ## `create_skill.py` 支持项
@@ -90,10 +90,18 @@ python3 skill_develop/create_skill.py --help
 ## 当前仓库约定
 - 普通技能默认做成 `runner`
 - 二进制命名约定：`foo_bar -> foo-bar-skill`
-- skill prompt 运行时优先读取：
-  1. `prompts/vendors/<vendor>/skills/<skill>.md`
-  2. `prompts/vendors/default/skills/<skill>.md`
+- skill prompt 运行时组装方式：
+  1. canonical body: `prompts/layers/generated/skills/<skill>.md`
+  2. planner/tool 约束叠加：`prompts/layers/overlays/agent_tool_spec.md`
+  3. optional vendor patch: `prompts/layers/vendor_patches/<vendor>/skills/<skill>.md`
 - 新增普通 runner 技能时，不应修改主程序代码
+- `configs/skills_registry.toml` 中的 `prompt_file = "prompts/skills/<skill>.md"` 是逻辑路径；运行时实际主内容由 `scripts/sync_skill_docs.py` 维护的 `prompts/layers/generated/skills/<skill>.md` 提供
+- 技能输入协议虽然最少只要能正确处理 `request_id` 和 `args` 就能工作，但新技能脚手架与文档应按当前主协议显式包含：
+  - `request_id`
+  - `args`
+  - `context`
+  - `user_id`
+  - `chat_id`
 
 ## 维护建议
 - 若后续技能开发规则调整，优先更新本目录文档，再让 agent 使用新版提示词。

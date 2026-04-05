@@ -1,0 +1,6 @@
+ordinal=32
+source_line=37
+case_name=act_db_schema_version_cn
+chat_id=1985997022
+task_id=dcca2594-7278-4071-8c1f-94b73773445d
+prompt=查一下 data/db-basic-contract.sqlite 的 schema version 是多少，简短告诉我

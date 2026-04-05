@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use claw_core::prompt_layers;
 use hmac::{Hmac, Mac};
 use reqwest::blocking::{multipart, Client};
 use serde::{Deserialize, Serialize};
@@ -337,18 +337,14 @@ fn memory_snippet_for_resolver(obj: &serde_json::Map<String, Value>) -> String {
         .to_string()
 }
 
-fn load_image_reference_resolver_prompt(workspace_root: &Path) -> String {
-    let primary = workspace_root.join("prompts/image_reference_resolver_prompt.md");
-    if let Ok(s) = fs::read_to_string(&primary) {
-        return s;
-    }
-    let fallback =
-        workspace_root.join("prompts/vendors/default/image_reference_resolver_prompt.md");
-    if let Ok(s) = fs::read_to_string(&fallback) {
-        return s;
-    }
-    include_str!("../../../../prompts/vendors/default/image_reference_resolver_prompt.md")
-        .to_string()
+fn load_image_reference_resolver_prompt(workspace_root: &Path, vendor: &str) -> String {
+    prompt_layers::load_prompt_template_for_vendor(
+        workspace_root,
+        vendor,
+        "prompts/image_reference_resolver_prompt.md",
+        include_str!("../../../../prompts/layers/overlays/image_reference_resolver_prompt.md"),
+    )
+    .0
 }
 
 fn render_image_reference_prompt(
@@ -445,7 +441,13 @@ fn resolve_image_path_from_context(
         return Ok(candidates[0].clone());
     }
     let memory = memory_snippet_for_resolver(obj);
-    let template = load_image_reference_resolver_prompt(workspace_root);
+    let prompt_vendor = cfg
+        .llm
+        .selected_vendor
+        .as_deref()
+        .or(cfg.image_edit.default_vendor.as_deref())
+        .unwrap_or("default");
+    let template = load_image_reference_resolver_prompt(workspace_root, prompt_vendor);
     let prompt = render_image_reference_prompt(&template, &memory, instruction, &candidates);
     let timeout = 30u64;
     let mut last_err: Option<String> = None;

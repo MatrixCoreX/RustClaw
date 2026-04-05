@@ -1,4 +1,3 @@
-target/
 logs/
 .pids/
 tmp/
@@ -14,3 +13,10 @@ data/*.db-wal
 # Common local files
 .DS_Store
 .vscode/
+
+
+node_modules
+target/*
+!target/release/
+!target/release/**
+

@@ -1,928 +1,41 @@
 use std::time::Duration;
-use std::{path::Path, path::PathBuf};
 
+use crate::{repo, AppState};
 use anyhow::anyhow;
-use serde_json::{json, Value};
-use tokio::sync::oneshot;
+use serde_json::Value;
 use tracing::{debug, error, info, info_span, warn, Instrument};
-use uuid::Uuid;
 
-use crate::{now_ts, now_ts_u64, repo, schedule_service, AppState, ScheduledJobDue};
+mod ask_finalize;
+mod ask_pipeline;
+mod ask_prepare;
+mod channels;
+mod locator;
+mod run_skill_finalize;
+mod runtime_support;
 
-fn trim_locator_token(token: &str) -> String {
-    token
-        .trim()
-        .trim_matches(|c: char| {
-            matches!(
-                c,
-                '"' | '\''
-                    | '`'
-                    | ','
-                    | '.'
-                    | '，'
-                    | '。'
-                    | ':'
-                    | '：'
-                    | ';'
-                    | '；'
-                    | ')'
-                    | '('
-                    | ']'
-                    | '['
-                    | '）'
-                    | '（'
-                    | '】'
-                    | '【'
-                    | '>'
-                    | '<'
-                    | '》'
-                    | '《'
-            )
-        })
-        .to_string()
-}
-
-fn has_explicit_path_or_url_locator(text: &str) -> bool {
-    text.split_whitespace()
-        .map(trim_locator_token)
-        .any(|token| {
-            if token.is_empty() {
-                return false;
-            }
-            token.starts_with('/')
-                || token.starts_with("./")
-                || token.starts_with("../")
-                || token.starts_with("~/")
-                || token.starts_with("http://")
-                || token.starts_with("https://")
-                || token.contains(":\\")
-        })
-}
-
-fn looks_like_filename_locator(token: &str) -> bool {
-    if token.is_empty()
-        || token.contains('/')
-        || token.contains('\\')
-        || token.starts_with("http://")
-        || token.starts_with("https://")
-    {
-        return false;
-    }
-    let Some((base, ext)) = token.rsplit_once('.') else {
-        return false;
-    };
-    if base.is_empty() || ext.is_empty() {
-        return false;
-    }
-    ext.chars().all(|ch| ch.is_ascii_alphanumeric()) && ext.len() <= 12
-}
-
-fn has_concrete_locator_hint(text: &str) -> bool {
-    if has_explicit_path_or_url_locator(text) {
-        return true;
-    }
-    text.split_whitespace()
-        .map(trim_locator_token)
-        .any(|token| looks_like_filename_locator(&token))
-}
-
-fn collect_files_for_locator_scan(root: &Path, max_depth: usize, max_files: usize) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let mut stack = vec![(root.to_path_buf(), 0usize)];
-    while let Some((dir, depth)) = stack.pop() {
-        let mut entries = match std::fs::read_dir(&dir) {
-            Ok(iter) => iter
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .collect::<Vec<_>>(),
-            Err(_) => continue,
-        };
-        entries.sort();
-        for path in entries {
-            let meta = match std::fs::symlink_metadata(&path) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let file_type = meta.file_type();
-            if file_type.is_dir() {
-                out.push(path.clone());
-                if out.len() >= max_files {
-                    return out;
-                }
-                if depth < max_depth {
-                    stack.push((path, depth + 1));
-                }
-                continue;
-            }
-            if file_type.is_file() || (file_type.is_symlink() && path.is_file()) {
-                out.push(path);
-                if out.len() >= max_files {
-                    return out;
-                }
-                continue;
-            }
-        }
-    }
-    out
-}
-
-fn push_locator_keyword(token: &str, acc: &mut Vec<String>) {
-    let lowered = token.trim().to_ascii_lowercase();
-    if lowered.chars().count() < 2 {
-        return;
-    }
-    if lowered.chars().all(|ch| ch.is_ascii_digit()) {
-        return;
-    }
-    if !acc.iter().any(|v| v == &lowered) {
-        acc.push(lowered.clone());
-    }
-    if acc.len() >= 12 {
-        return;
-    }
-    for part in lowered.split(|ch: char| matches!(ch, '.' | '_' | '-')) {
-        let trimmed = part.trim();
-        if trimmed.is_empty() || trimmed == lowered || trimmed.chars().count() < 2 {
-            continue;
-        }
-        if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
-            continue;
-        }
-        if !acc.iter().any(|v| v == trimmed) {
-            acc.push(trimmed.to_string());
-            if acc.len() >= 12 {
-                break;
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LocatorKeywordClass {
-    AsciiLike,
-    Cjk,
-}
-
-fn classify_locator_keyword_char(ch: char) -> Option<LocatorKeywordClass> {
-    let is_cjk = ('\u{4E00}'..='\u{9FFF}').contains(&ch);
-    if is_cjk {
-        return Some(LocatorKeywordClass::Cjk);
-    }
-    if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
-        return Some(LocatorKeywordClass::AsciiLike);
-    }
-    None
-}
-
-fn extract_locator_keywords(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut cur_class: Option<LocatorKeywordClass> = None;
-    for ch in text.chars() {
-        if let Some(next_class) = classify_locator_keyword_char(ch) {
-            if cur_class.is_some() && cur_class != Some(next_class) && !cur.is_empty() {
-                push_locator_keyword(&cur, &mut out);
-                cur.clear();
-                if out.len() >= 12 {
-                    break;
-                }
-            }
-            cur_class = Some(next_class);
-            cur.push(ch.to_ascii_lowercase());
-        } else if !cur.is_empty() {
-            push_locator_keyword(&cur, &mut out);
-            cur.clear();
-            cur_class = None;
-        } else {
-            cur_class = None;
-        }
-        if out.len() >= 12 {
-            break;
-        }
-    }
-    if !cur.is_empty() && out.len() < 12 {
-        push_locator_keyword(&cur, &mut out);
-    }
-    out
-}
-
-fn normalize_locator_match_text(token: &str) -> String {
-    trim_locator_token(token)
-        .chars()
-        .map(|ch| match ch {
-            '／' | '＼' => '/',
-            '－' => '-',
-            '＿' => '_',
-            '．' => '.',
-            '（' => '(',
-            '）' => ')',
-            '【' => '[',
-            '】' => ']',
-            '｛' => '{',
-            '｝' => '}',
-            '　' => ' ',
-            _ => ch,
-        })
-        .collect::<String>()
-        .to_lowercase()
-}
-
-fn try_resolve_direct_child_locator(search_root: &Path, keywords: &[String]) -> Option<String> {
-    if !search_root.is_dir() || keywords.is_empty() {
-        return None;
-    }
-    let normalized_keywords = keywords
-        .iter()
-        .map(|kw| normalize_locator_match_text(kw))
-        .filter(|kw| !kw.is_empty())
-        .collect::<Vec<_>>();
-    if normalized_keywords.is_empty() {
-        return None;
-    }
-
-    let mut matches = Vec::new();
-    let iter = std::fs::read_dir(search_root).ok()?;
-    for entry in iter.flatten() {
-        let path = entry.path();
-        let name = path
-            .file_name()
-            .map(|v| v.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let normalized_name = normalize_locator_match_text(&name);
-        if normalized_name.is_empty() {
-            continue;
-        }
-        if normalized_keywords
-            .iter()
-            .any(|kw| kw == &normalized_name)
-        {
-            let canonical = path.canonicalize().unwrap_or(path);
-            matches.push(canonical.display().to_string());
-        }
-    }
-    matches.sort();
-    matches.dedup();
-    if matches.len() == 1 {
-        matches.into_iter().next()
-    } else {
-        None
-    }
-}
-
-fn score_locator_candidate(keywords: &[String], rel_lower: &str, file_name_lower: &str) -> i32 {
-    let mut score = 0i32;
-
-    for kw in keywords {
-        if rel_lower.contains(kw) {
-            score += 4;
-        }
-        if file_name_lower.contains(kw) {
-            score += 5;
-        }
-        let dist = levenshtein_distance_with_limit(kw, file_name_lower, 2);
-        if dist <= 2 {
-            score += (4 - dist as i32).max(1);
-        }
-    }
-
-    score
-}
-
-#[derive(Debug)]
-enum LocatorAutoResolution {
-    Direct(String),
-    Fuzzy(Vec<String>),
-}
-
-fn extract_filename_like_tokens(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for raw in text.split_whitespace() {
-        let token = trim_locator_token(raw);
-        if looks_like_filename_locator(&token) && !out.iter().any(|v| v == &token) {
-            out.push(token);
-        }
-        if out.len() >= 8 {
-            break;
-        }
-    }
-    out
-}
-
-fn levenshtein_distance_with_limit(a: &str, b: &str, limit: usize) -> usize {
-    if a == b {
-        return 0;
-    }
-    if a.is_empty() || b.is_empty() {
-        return a.chars().count().max(b.chars().count());
-    }
-    let a_chars = a.chars().collect::<Vec<_>>();
-    let b_chars = b.chars().collect::<Vec<_>>();
-    if a_chars.len().abs_diff(b_chars.len()) > limit {
-        return limit + 1;
-    }
-    let mut prev = (0..=b_chars.len()).collect::<Vec<_>>();
-    let mut curr = vec![0usize; b_chars.len() + 1];
-    for (i, ca) in a_chars.iter().enumerate() {
-        curr[0] = i + 1;
-        let mut row_min = curr[0];
-        for (j, cb) in b_chars.iter().enumerate() {
-            let cost = if ca == cb { 0 } else { 1 };
-            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
-            row_min = row_min.min(curr[j + 1]);
-        }
-        if row_min > limit {
-            return limit + 1;
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-    prev[b_chars.len()]
-}
-
-fn collect_fuzzy_locator_suggestions(
-    search_root: &Path,
-    files: &[PathBuf],
-    token: &str,
-) -> Vec<String> {
-    let token_lower = token.to_ascii_lowercase();
-    let mut scored = Vec::<(i32, String)>::new();
-    for path in files {
-        let rel = path.strip_prefix(search_root).unwrap_or(path);
-        let rel_text = rel.to_string_lossy().to_string();
-        let abs_text = path.display().to_string();
-        let rel_lower = rel_text.to_ascii_lowercase();
-        let file_name_lower = path
-            .file_name()
-            .map(|v| v.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        let mut score = 0i32;
-        if file_name_lower.contains(&token_lower) || token_lower.contains(&file_name_lower) {
-            score += 6;
-        }
-        let dist = levenshtein_distance_with_limit(&token_lower, &file_name_lower, 2);
-        if dist <= 2 {
-            score += (5 - dist as i32).max(1);
-        }
-        if rel_lower.contains(&token_lower) {
-            score += 2;
-        }
-        if score > 0 {
-            scored.push((score, abs_text));
-        }
-    }
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-    let mut out = Vec::new();
-    for (_, item) in scored {
-        if !out.iter().any(|v| v == &item) {
-            out.push(item);
-        }
-        if out.len() >= 3 {
-            break;
-        }
-    }
-    out
-}
-
-fn try_resolve_implicit_locator_path(
-    state: &AppState,
-    raw_text: &str,
-    resolved_text: &str,
-    context_hint: Option<&str>,
-) -> Option<LocatorAutoResolution> {
-    let search_root = &state.default_locator_search_dir;
-    if !search_root.is_dir() {
-        return None;
-    }
-    let mut query_text = format!("{raw_text}\n{resolved_text}");
-    if let Some(ctx) = context_hint {
-        if !ctx.trim().is_empty() && ctx.trim() != "<none>" {
-            query_text.push('\n');
-            query_text.push_str(ctx);
-        }
-    }
-    let keywords = extract_locator_keywords(&query_text);
-    if let Some(path) = try_resolve_direct_child_locator(search_root, &keywords) {
-        return Some(LocatorAutoResolution::Direct(path));
-    }
-    let files = collect_files_for_locator_scan(
-        search_root,
-        state.locator_scan_max_depth,
-        state.locator_scan_max_files,
-    );
-    if files.is_empty() {
-        return None;
-    }
-    let filename_tokens = extract_filename_like_tokens(&query_text);
-    for token in &filename_tokens {
-        let mut ci_matches = files
-            .iter()
-            .filter(|path| {
-                path.file_name()
-                    .map(|v| v.to_string_lossy().eq_ignore_ascii_case(token))
-                    .unwrap_or(false)
-            })
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>();
-        ci_matches.sort();
-        ci_matches.dedup();
-        if ci_matches.len() == 1 {
-            return Some(LocatorAutoResolution::Direct(
-                ci_matches.into_iter().next().unwrap_or_default(),
-            ));
-        }
-        if ci_matches.len() > 1 {
-            return Some(LocatorAutoResolution::Fuzzy(
-                ci_matches.into_iter().take(3).collect(),
-            ));
-        }
-        let fuzzy = collect_fuzzy_locator_suggestions(search_root, &files, token);
-        if !fuzzy.is_empty() {
-            return Some(LocatorAutoResolution::Fuzzy(fuzzy));
-        }
-    }
-
-    let mut scored_keywords: Vec<(i32, String)> = Vec::new();
-    for path in &files {
-        let rel = path.strip_prefix(search_root).unwrap_or(&path);
-        let rel_lower = rel.to_string_lossy().to_ascii_lowercase();
-        let file_name_lower = path
-            .file_name()
-            .map(|v| v.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        let score = score_locator_candidate(&keywords, &rel_lower, &file_name_lower);
-        if score <= 0 {
-            continue;
-        }
-        scored_keywords.push((score, path.display().to_string()));
-    }
-    if scored_keywords.is_empty() {
-        return None;
-    }
-    scored_keywords.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-    let top_score = scored_keywords[0].0;
-    let top_paths = scored_keywords
-        .iter()
-        .filter(|(score, _)| *score == top_score)
-        .map(|(_, path)| path.clone())
-        .collect::<Vec<_>>();
-    if top_score >= 6 && top_paths.len() == 1 {
-        return Some(LocatorAutoResolution::Direct(top_paths[0].clone()));
-    }
-    let mut fuzzy = Vec::new();
-    for (_, path) in scored_keywords {
-        if !fuzzy.iter().any(|v| v == &path) {
-            fuzzy.push(path);
-        }
-        if fuzzy.len() >= 3 {
-            break;
-        }
-    }
-    if fuzzy.is_empty() {
-        None
-    } else {
-        Some(LocatorAutoResolution::Fuzzy(fuzzy))
-    }
-}
-
-fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Result<Vec<String>> {
-    let timeout_secs = state.worker_running_no_progress_timeout_seconds.max(60);
-    let now = now_ts_u64() as i64;
-    let stale_before = now.saturating_sub(timeout_secs as i64);
-    let stale_note = format!(
-        "auto timeout: no progress heartbeat for {}s while status=running",
-        timeout_secs
-    );
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
-
-    let mut task_ids = Vec::new();
-    {
-        let mut stmt = db.prepare(
-            "SELECT task_id
-             FROM tasks
-             WHERE status = 'running'
-               AND CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?1
-             ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) ASC",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![stale_before.to_string()], |row| {
-            row.get::<_, String>(0)
-        })?;
-        for row in rows {
-            task_ids.push(row?);
-        }
-    }
-
-    if task_ids.is_empty() {
-        return Ok(task_ids);
-    }
-
-    let changed = db.execute(
-        "UPDATE tasks
-         SET status = 'timeout',
-             error_text = CASE
-                 WHEN error_text IS NULL OR TRIM(error_text) = '' THEN ?2
-                 ELSE error_text
-             END,
-             updated_at = ?3
-         WHERE status = 'running'
-           AND CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?1",
-        rusqlite::params![stale_before.to_string(), stale_note, now_ts()],
-    )?;
-    if changed != task_ids.len() {
-        warn!(
-            "runtime stale-running recovery count mismatch: selected={} updated={}",
-            task_ids.len(),
-            changed
-        );
-    }
-    Ok(task_ids)
-}
-
-pub(crate) fn maybe_recover_stale_running_tasks_runtime(state: &AppState) -> anyhow::Result<()> {
-    let now = now_ts_u64();
-    let interval = state.worker_running_recovery_check_interval_seconds.max(10);
-    {
-        let mut guard = state
-            .last_running_recovery_check_ts
-            .lock()
-            .map_err(|_| anyhow!("running recovery lock poisoned"))?;
-        if now.saturating_sub(*guard) < interval {
-            return Ok(());
-        }
-        *guard = now;
-    }
-    let recovered = recover_stale_running_tasks_by_no_progress(state)?;
-    if !recovered.is_empty() {
-        warn!(
-            "runtime stale-running recovery applied: converted {} running tasks to timeout (no_progress_timeout={}s)",
-            recovered.len(),
-            state.worker_running_no_progress_timeout_seconds
-        );
-    }
-    Ok(())
-}
-
-pub(crate) fn start_task_heartbeat(state: AppState, task_id: String) -> oneshot::Sender<()> {
-    let interval_secs = state.worker_task_heartbeat_seconds.max(5);
-    let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
-                    if let Err(err) = repo::touch_running_task(&state, &task_id) {
-                        warn!(
-                            "task heartbeat update failed: task_id={} interval_secs={} err={}",
-                            task_id, interval_secs, err
-                        );
-                    }
-                }
-                _ = &mut stop_rx => {
-                    break;
-                }
-            }
-        }
-    });
-    stop_tx
-}
-
-fn spawn_long_term_summary_refresh(state: AppState, task: crate::ClaimedTask) {
-    tokio::spawn(async move {
-        if let Err(err) =
-            crate::memory::service::maybe_refresh_long_term_summary(&state, &task).await
-        {
-            warn!("refresh long-term memory summary failed: {err}");
-        }
-    });
-}
-
-pub(crate) fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: usize) {
-    let worker_count = concurrency.max(1);
-    info!(
-        "spawn_worker: starting {} worker loop(s), poll_interval_ms={}",
-        worker_count,
-        poll_interval_ms.max(10)
-    );
-    for worker_idx in 0..worker_count {
-        let state_cloned = state.clone();
-        tokio::spawn(async move {
-            loop {
-                if let Err(err) = worker_once(&state_cloned).await {
-                    error!("Worker tick failed (worker_idx={}): {}", worker_idx, err);
-                }
-                tokio::time::sleep(Duration::from_millis(poll_interval_ms.max(10))).await;
-            }
-        });
-    }
-}
-
-pub(crate) fn spawn_cleanup_worker(state: AppState) {
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(
-                state.maintenance.cleanup_interval_seconds.max(30),
-            ))
-            .await;
-
-            if let Err(err) = cleanup_once(&state) {
-                error!("Cleanup task failed: {}", err);
-            }
-        }
-    });
-}
-
-pub(crate) fn spawn_schedule_worker(state: AppState) {
-    tokio::spawn(async move {
-        loop {
-            if let Err(err) = schedule_once(&state) {
-                error!("Schedule worker tick failed: {}", err);
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    });
-}
-
-fn schedule_once(state: &AppState) -> anyhow::Result<()> {
-    let now = now_ts_u64() as i64;
-    let mut due_jobs: Vec<ScheduledJobDue> = Vec::new();
-
-    {
-        let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
-        let mut stmt = db.prepare(
-            "SELECT job_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, task_kind, task_payload_json, next_run_at,
-                    schedule_type, time_of_day, weekday, every_minutes, timezone
-             FROM scheduled_jobs
-             WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?1
-             ORDER BY next_run_at ASC
-             LIMIT 16",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![now], |row| {
-            Ok(ScheduledJobDue {
-                job_id: row.get(0)?,
-                user_id: row.get(1)?,
-                chat_id: row.get(2)?,
-                user_key: row.get(3)?,
-                channel: row.get(4)?,
-                external_user_id: row.get(5)?,
-                external_chat_id: row.get(6)?,
-                task_kind: row.get(7)?,
-                task_payload_json: row.get(8)?,
-                next_run_at: row.get(9)?,
-                schedule_type: row.get(10)?,
-                time_of_day: row.get(11)?,
-                weekday: row.get(12)?,
-                every_minutes: row.get(13)?,
-                timezone: row.get(14)?,
-            })
-        })?;
-        for row in rows {
-            due_jobs.push(row?);
-        }
-    }
-
-    if due_jobs.is_empty() {
-        return Ok(());
-    }
-
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
-
-    for job in due_jobs {
-        let next_run = schedule_service::compute_next_run_for_schedule(
-            &job.schedule_type,
-            job.time_of_day.as_deref(),
-            job.weekday,
-            job.every_minutes,
-            &job.timezone,
-            now,
-        );
-
-        let mut payload =
-            serde_json::from_str::<Value>(&job.task_payload_json).unwrap_or_else(|_| json!({}));
-        if let Value::Object(map) = &mut payload {
-            for (k, v) in schedule_service::schedule_invocation_metadata(&job.job_id) {
-                map.insert(k, v);
-            }
-            map.insert("channel".to_string(), Value::String(job.channel.clone()));
-            if let Some(v) = job.external_user_id.as_ref() {
-                map.insert("external_user_id".to_string(), Value::String(v.clone()));
-            }
-            if let Some(v) = job.external_chat_id.as_ref() {
-                map.insert("external_chat_id".to_string(), Value::String(v.clone()));
-            }
-        }
-
-        let task_id = Uuid::new_v4().to_string();
-        let now_text = now_ts();
-        db.execute(
-            "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, 'queued', NULL, NULL, ?10, ?10)",
-            rusqlite::params![
-                task_id,
-                job.user_id,
-                job.chat_id,
-                job.user_key,
-                job.channel,
-                job.external_user_id,
-                job.external_chat_id,
-                job.task_kind,
-                payload.to_string(),
-                now_text
-            ],
-        )?;
-
-        match next_run {
-            Some(ts) => {
-                db.execute(
-                    "UPDATE scheduled_jobs
-                     SET last_run_at = ?2, next_run_at = ?3, updated_at = ?2
-                     WHERE job_id = ?1 AND next_run_at = ?4",
-                    rusqlite::params![job.job_id, now.to_string(), ts, job.next_run_at],
-                )?;
-            }
-            None => {
-                db.execute(
-                    "UPDATE scheduled_jobs
-                     SET enabled = 0, last_run_at = ?2, next_run_at = NULL, updated_at = ?2
-                     WHERE job_id = ?1 AND next_run_at = ?3",
-                    rusqlite::params![job.job_id, now.to_string(), job.next_run_at],
-                )?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-pub(crate) fn runtime_channel_from_payload(
-    state: &AppState,
-    payload: &Value,
-) -> crate::RuntimeChannel {
-    let ch = payload
-        .get("channel")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    if is_whatsapp_channel_value(crate::main_flow_rules(state), &ch) {
-        return crate::RuntimeChannel::Whatsapp;
-    }
-    if ch == "wechat" {
-        return crate::RuntimeChannel::Wechat;
-    }
-    if ch == "feishu" {
-        return crate::RuntimeChannel::Feishu;
-    }
-    if ch == "lark" {
-        return crate::RuntimeChannel::Lark;
-    }
-    crate::RuntimeChannel::Telegram
-}
-
-pub(crate) fn is_whatsapp_channel_value(rules: &crate::MainFlowRules, raw: &str) -> bool {
-    let channel = raw.trim().to_ascii_lowercase();
-    rules
-        .runtime_whatsapp_channel_aliases
-        .iter()
-        .any(|v| v == &channel)
-}
+pub(super) use ask_finalize::{
+    finalize_ask_direct_success, finalize_ask_result, run_classifier_direct_reply,
+    try_finalize_schedule_direct_success,
+};
+use ask_prepare::{maybe_finalize_schedule_direct_text_success, prepare_run_skill_input};
+use ask_prepare::{prepare_ask_execution_context, prepare_ask_input, prepare_ask_routing};
+pub(crate) use channels::{
+    runtime_channel_from_payload, send_task_channel_message, task_external_chat_id,
+    task_payload_value, task_runtime_channel,
+};
+pub(super) use locator::{
+    has_concrete_locator_hint, try_resolve_implicit_locator_path, LocatorAutoResolution,
+};
+pub(super) use run_skill_finalize::finalize_run_skill_result;
+use runtime_support::spawn_long_term_summary_refresh;
+pub(crate) use runtime_support::{
+    maybe_recover_stale_running_tasks_runtime, recover_stale_running_tasks_on_startup,
+    spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, start_task_heartbeat,
+};
 
 pub(crate) fn is_resume_continue_source(rules: &crate::MainFlowRules, raw: &str) -> bool {
     let source = raw.trim().to_ascii_lowercase();
     rules.resume_continue_sources.iter().any(|v| v == &source)
-}
-
-pub(crate) fn task_payload_value(task: &crate::ClaimedTask) -> Option<Value> {
-    serde_json::from_str::<Value>(&task.payload_json).ok()
-}
-
-pub(crate) fn task_runtime_channel(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-) -> crate::RuntimeChannel {
-    let ch = task.channel.trim().to_ascii_lowercase();
-    if is_whatsapp_channel_value(crate::main_flow_rules(state), &ch) {
-        return crate::RuntimeChannel::Whatsapp;
-    }
-    if ch == "wechat" {
-        return crate::RuntimeChannel::Wechat;
-    }
-    if ch == "feishu" {
-        return crate::RuntimeChannel::Feishu;
-    }
-    if ch == "lark" {
-        return crate::RuntimeChannel::Lark;
-    }
-    let Some(payload) = task_payload_value(task) else {
-        return crate::RuntimeChannel::Telegram;
-    };
-    runtime_channel_from_payload(state, &payload)
-}
-
-pub(crate) fn task_external_chat_id(task: &crate::ClaimedTask) -> Option<String> {
-    if let Some(v) = task
-        .external_chat_id
-        .as_ref()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-    {
-        return Some(v);
-    }
-    let payload = task_payload_value(task)?;
-    payload
-        .get("external_chat_id")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
-pub(crate) fn resolve_whatsapp_delivery_route(
-    state: &AppState,
-    payload: &Value,
-) -> crate::WhatsappDeliveryRoute {
-    let rules = crate::main_flow_rules(state);
-    let adapter = payload
-        .get("adapter")
-        .and_then(|v| v.as_str())
-        .map(|v| v.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    if rules.whatsapp_web_adapters.iter().any(|a| a == &adapter) {
-        return crate::WhatsappDeliveryRoute::WebBridge;
-    }
-    if rules.whatsapp_cloud_adapters.iter().any(|a| a == &adapter) {
-        return crate::WhatsappDeliveryRoute::Cloud;
-    }
-    if state.whatsapp_web_enabled && !state.whatsapp_cloud_enabled {
-        return crate::WhatsappDeliveryRoute::WebBridge;
-    }
-    crate::WhatsappDeliveryRoute::Cloud
-}
-
-pub(crate) async fn maybe_bind_recent_failed_resume_context(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    payload: &mut Value,
-    user_text: &str,
-) -> Option<()> {
-    if payload.get("resume_context").is_some() {
-        return None;
-    }
-    let source = payload
-        .get("source")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-    if is_resume_continue_source(crate::main_flow_rules(state), source) {
-        return None;
-    }
-    let candidate = crate::find_recent_failed_resume_context(state, task.user_id, task.chat_id)?;
-    if candidate.has_newer_successful_ask_after_failed_task {
-        return None;
-    }
-    let binding_context_json = json!({
-        "source": "recent_failed_resume_context_candidate",
-        "failed_resume_context_ts": candidate.failed_ts,
-        "has_newer_successful_ask_after_failed_task": candidate.has_newer_successful_ask_after_failed_task,
-    });
-    let followup_intent = crate::intent_router::classify_resume_followup_intent(
-        state,
-        task,
-        user_text,
-        &candidate.resume_context,
-        &binding_context_json,
-    )
-    .await;
-    if !followup_intent.bind_resume_context
-        || followup_intent.decision == crate::intent_router::ResumeFollowupDecision::Abandon
-    {
-        return None;
-    }
-    let obj = payload.as_object_mut()?;
-    let resume_source = crate::main_flow_rules(state)
-        .resume_continue_sources
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "resume_continue_execute".to_string());
-    obj.insert("source".to_string(), Value::String(resume_source));
-    obj.insert(
-        "resume_user_text".to_string(),
-        Value::String(user_text.to_string()),
-    );
-    obj.insert(
-        "failed_resume_context_ts".to_string(),
-        Value::from(candidate.failed_ts),
-    );
-    obj.insert(
-        "has_newer_successful_ask_after_failed_task".to_string(),
-        Value::Bool(candidate.has_newer_successful_ask_after_failed_task),
-    );
-    obj.insert(
-        "resume_followup_decision".to_string(),
-        Value::String(
-            match followup_intent.decision {
-                crate::intent_router::ResumeFollowupDecision::Resume => "resume",
-                crate::intent_router::ResumeFollowupDecision::Abandon => "abandon",
-                crate::intent_router::ResumeFollowupDecision::Defer => "defer",
-            }
-            .to_string(),
-        ),
-    );
-    obj.insert("resume_context".to_string(), candidate.resume_context);
-    Some(())
 }
 
 pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
@@ -962,30 +75,7 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         let worker_timeout_secs = state.worker_task_timeout_seconds.max(1);
         let heartbeat_stop = start_task_heartbeat(state.clone(), task.task_id.clone());
         let task_result = tokio::time::timeout(Duration::from_secs(worker_timeout_secs), async {
-            match task.kind.as_str() {
-                "ask" => {
-                    process_ask_task(state, &task, &mut payload).await?;
-                }
-                "run_skill" => {
-                    process_run_skill_task(state, &task, &payload).await?;
-                }
-                other => {
-                    let err = format!("Unsupported task kind: {other}");
-                    error!(
-                        "worker_once: unsupported task kind for task_id={}: {}",
-                        task.task_id, other
-                    );
-                    repo::update_task_failure(state, &task.task_id, &err)?;
-                    info!("{}", crate::LOG_CALL_WRAP);
-                    info!(
-                        "task_call_end task_id={} kind={} status=failed error={}",
-                        task.task_id,
-                        other,
-                        crate::truncate_for_log(&err)
-                    );
-                    info!("{}", crate::LOG_CALL_WRAP);
-                }
-            }
+            process_claimed_task_by_kind(state, &task, &mut payload).await?;
             Ok::<(), anyhow::Error>(())
         })
         .await;
@@ -994,30 +84,80 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         match task_result {
             Ok(inner) => inner?,
             Err(_) => {
-                let timeout_err = format!(
-                    "worker timeout after {}s while processing kind={}",
-                    worker_timeout_secs, task_kind_for_timeout_log
-                );
-                error!(
-                    "worker_once timeout: task_id={} kind={} timeout_seconds={}",
-                    task.task_id, task_kind_for_timeout_log, worker_timeout_secs
-                );
-                crate::update_task_timeout(state, &task.task_id, &timeout_err)?;
-                maybe_notify_schedule_result(state, &task, &payload, false, &timeout_err).await;
-                info!("{}", crate::LOG_CALL_WRAP);
-                info!(
-                    "task_call_end task_id={} kind={} status=timeout error={}",
-                    task.task_id,
-                    task_kind_for_timeout_log,
-                    crate::truncate_for_log(&timeout_err)
-                );
-                info!("{}", crate::LOG_CALL_WRAP);
+                finalize_worker_timeout(
+                    state,
+                    &task,
+                    &payload,
+                    worker_timeout_secs,
+                    &task_kind_for_timeout_log,
+                )
+                .await?
             }
         }
         Ok(())
     }
     .instrument(call_span)
     .await
+}
+
+async fn process_claimed_task_by_kind(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    payload: &mut Value,
+) -> anyhow::Result<()> {
+    match task.kind.as_str() {
+        "ask" => {
+            process_ask_task(state, task, payload).await?;
+        }
+        "run_skill" => {
+            process_run_skill_task(state, task, payload).await?;
+        }
+        other => {
+            let err = format!("Unsupported task kind: {other}");
+            error!(
+                "worker_once: unsupported task kind for task_id={}: {}",
+                task.task_id, other
+            );
+            repo::update_task_failure(state, &task.task_id, &err)?;
+            info!("{}", crate::LOG_CALL_WRAP);
+            info!(
+                "task_call_end task_id={} kind={} status=failed error={}",
+                task.task_id,
+                other,
+                crate::truncate_for_log(&err)
+            );
+            info!("{}", crate::LOG_CALL_WRAP);
+        }
+    }
+    Ok(())
+}
+
+async fn finalize_worker_timeout(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    payload: &Value,
+    worker_timeout_secs: u64,
+    task_kind_for_timeout_log: &str,
+) -> anyhow::Result<()> {
+    let timeout_err = format!(
+        "worker timeout after {}s while processing kind={}",
+        worker_timeout_secs, task_kind_for_timeout_log
+    );
+    error!(
+        "worker_once timeout: task_id={} kind={} timeout_seconds={}",
+        task.task_id, task_kind_for_timeout_log, worker_timeout_secs
+    );
+    crate::update_task_timeout(state, &task.task_id, &timeout_err)?;
+    maybe_notify_schedule_result(state, task, payload, false, &timeout_err).await;
+    info!("{}", crate::LOG_CALL_WRAP);
+    info!(
+        "task_call_end task_id={} kind={} status=timeout error={}",
+        task.task_id,
+        task_kind_for_timeout_log,
+        crate::truncate_for_log(&timeout_err)
+    );
+    info!("{}", crate::LOG_CALL_WRAP);
+    Ok(())
 }
 
 pub(crate) async fn maybe_notify_schedule_result(
@@ -1086,687 +226,56 @@ pub(crate) async fn process_ask_task(
     task: &crate::ClaimedTask,
     payload: &mut Value,
 ) -> anyhow::Result<()> {
-    let original_prompt = payload
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let _ = maybe_bind_recent_failed_resume_context(state, task, payload, &original_prompt).await;
-    let prompt = payload
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-    let source = payload.get("source").and_then(|v| v.as_str()).unwrap_or("");
-    let is_schedule_triggered = payload
-        .get("schedule_triggered")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let schedule_task_mode = payload
-        .get("schedule_task_mode")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    let schedule_force_agent = payload
-        .get("schedule_force_agent")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let schedule_direct_text_mode = is_schedule_triggered
-        && !schedule_force_agent
-        && (schedule_task_mode.is_empty() || schedule_task_mode == "direct_text");
-    if schedule_direct_text_mode {
-        let direct_text = prompt.trim();
-        if !direct_text.is_empty() {
-            let answer_text = crate::intercept_response_text_for_delivery(direct_text);
-            let result = json!({ "text": answer_text.clone() });
-            repo::update_task_success(state, &task.task_id, &result.to_string())?;
-            maybe_notify_schedule_result(state, task, payload, true, &answer_text).await;
-            let _ = crate::memory::service::insert_memory(
-                state,
-                task.user_id,
-                task.chat_id,
-                task.user_key.as_deref(),
-                &task.channel,
-                task.external_chat_id.as_deref(),
-                "user",
-                prompt,
-                state.memory.item_max_chars.max(256),
-            );
-            let _ = crate::memory::service::insert_memory(
-                state,
-                task.user_id,
-                task.chat_id,
-                task.user_key.as_deref(),
-                &task.channel,
-                task.external_chat_id.as_deref(),
-                "assistant",
-                &answer_text,
-                state.memory.item_max_chars.max(256),
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-            info!(
-                "task_call_end task_id={} kind=ask status=success path=schedule_direct_text result={}",
-                task.task_id,
-                crate::truncate_for_log(&answer_text)
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-            return Ok(());
-        }
+    let prepared_input = prepare_ask_input(state, task, payload).await;
+    let prompt = prepared_input.prompt;
+    let source = prepared_input.source;
+    if maybe_finalize_schedule_direct_text_success(state, task, payload, &prompt).await? {
+        return Ok(());
     }
 
-    let main_rules = crate::main_flow_rules(state);
-    let is_resume_continue = is_resume_continue_source(main_rules, source);
-    let (now_iso, timezone_str, schedule_rules) =
-        schedule_service::schedule_context_for_normalizer(state);
-    let resume_context_opt = if is_resume_continue {
-        payload.get("resume_context").cloned()
-    } else {
-        None
-    };
-    let failed_resume_context_ts = payload
-        .get("failed_resume_context_ts")
-        .cloned()
-        .unwrap_or(Value::Null);
-    let has_newer_successful_ask_after_failed_task = payload
-        .get("has_newer_successful_ask_after_failed_task")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let binding_context_json = json!({
-        "source": source.trim(),
-        "is_resume_continue_source": is_resume_continue,
-        "failed_resume_context_ts": failed_resume_context_ts,
-        "has_newer_successful_ask_after_failed_task": has_newer_successful_ask_after_failed_task,
+    let prepared_flow =
+        ask_pipeline::prepare_ask_flow(state, task, payload, &prompt, &source).await?;
+    let agent_run_context = Some(crate::agent_engine::AgentRunContext {
+        route_result: Some(prepared_flow.route_result.clone()),
+        context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
+        auto_locator_path: prepared_flow.auto_locator_path.clone(),
     });
-    let normalizer_out = crate::intent_router::run_intent_normalizer(
+
+    let Some(result) = ask_pipeline::execute_ask_dispatch(
         state,
         task,
-        prompt,
-        resume_context_opt.as_ref(),
-        Some(&binding_context_json),
-        &now_iso,
-        &timezone_str,
-        &schedule_rules,
+        payload,
+        &prompt,
+        &prepared_flow.recent_execution_context,
+        &prepared_flow.resolved_prompt_for_execution,
+        &prepared_flow.prompt_with_memory_for_execution,
+        &prepared_flow.chat_prompt_context,
+        &prepared_flow.route_result,
+        prepared_flow.agent_mode,
+        &prepared_flow.clarify_reason,
+        &prepared_flow.fuzzy_locator_suggestions,
+        prepared_flow.classifier_direct_mode,
+        prepared_flow.direct_resume_discussion,
+        prepared_flow.direct_resume_execution,
+        prepared_flow.should_route_schedule_direct,
+        agent_run_context,
     )
-    .await;
-    let resume_should_apply_context = is_resume_continue
-        && normalizer_out.resume_behavior == crate::intent_router::ResumeBehavior::ResumeExecute;
-    let resume_should_discuss_context = is_resume_continue
-        && normalizer_out.resume_behavior == crate::intent_router::ResumeBehavior::ResumeDiscuss;
-    info!(
-        "worker_once: ask raw_message task_id={} user_id={} chat_id={} text={}",
-        task.task_id,
-        task.user_id,
-        task.chat_id,
-        crate::truncate_for_log(prompt)
-    );
-    let runtime_prompt = if resume_should_apply_context {
-        crate::build_resume_continue_execute_prompt(state, payload, prompt)
-    } else if resume_should_discuss_context {
-        crate::build_resume_followup_discussion_prompt(state, payload, prompt)
-    } else {
-        normalizer_out.resolved_user_intent.clone()
+    .await?
+    else {
+        return Ok(());
     };
-    info!(
-        "worker_once: ask received_message task_id={} user_id={} chat_id={} text={}",
-        task.task_id,
-        task.user_id,
-        task.chat_id,
-        crate::truncate_for_log(&runtime_prompt)
-    );
-    let agent_mode = payload
-        .get("agent_mode")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let direct_resume_execution = is_resume_continue && resume_should_apply_context;
-    let direct_resume_discussion = is_resume_continue && resume_should_discuss_context;
-    let context_resolution = crate::intent_router::ContextResolution {
-        resolved_user_intent: runtime_prompt.clone(),
-        needs_clarify: normalizer_out.needs_clarify,
-        confidence: Some(normalizer_out.confidence),
-        reason: normalizer_out.reason.clone(),
-    };
-    let resolved_prompt = context_resolution.resolved_user_intent.clone();
-    info!(
-        "{} worker_once: ask resolved_message task_id={} needs_clarify={} confidence={} reason={} resolved_text={}",
-        crate::highlight_tag("routing"),
-        task.task_id,
-        context_resolution.needs_clarify,
-        context_resolution.confidence.unwrap_or(-1.0),
-        crate::truncate_for_log(&context_resolution.reason),
-        crate::truncate_for_log(&resolved_prompt)
-    );
-    let chat_memory_budget_chars =
-        crate::dynamic_chat_memory_budget_chars(state, task, &resolved_prompt);
-    let memory_ctx = crate::memory::service::prepare_prompt_with_memory(
+
+    finalize_ask_result(
         state,
         task,
-        &resolved_prompt,
-        chat_memory_budget_chars,
-    );
-    let long_term_summary = memory_ctx.long_term_summary;
-    let preferences = memory_ctx.preferences;
-    let recalled = memory_ctx.recalled;
-    let similar_triggers = memory_ctx.similar_triggers;
-    let relevant_facts = memory_ctx.relevant_facts;
-    let recent_related_events = memory_ctx.recent_related_events;
-    let prompt_with_memory = memory_ctx.prompt_with_memory;
-    let mut chat_prompt_context = memory_ctx.chat_prompt_context;
-    let mut resolved_prompt_for_execution = resolved_prompt.clone();
-    let mut prompt_with_memory_for_execution = prompt_with_memory.clone();
-    let last_turn_full_context = crate::memory::build_last_turn_full_context(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        1200,
-        2400,
-    );
-    if last_turn_full_context != "<none>" {
-        prompt_with_memory_for_execution.push_str("\n\n");
-        prompt_with_memory_for_execution.push_str(&last_turn_full_context);
-        chat_prompt_context.push_str("\n\n");
-        chat_prompt_context.push_str(&last_turn_full_context);
-    }
-    let recent_execution_anchor_context =
-        crate::routing_context::build_recent_execution_anchor_context(state, task);
-    let recent_execution_context =
-        crate::routing_context::build_recent_execution_context(state, task, 8);
-    if recent_execution_anchor_context != "<none>" {
-        prompt_with_memory_for_execution.push_str(
-            "\n\n### RECENT_EXECUTION_CONTEXT\n\
-Use this block only as supporting evidence for genuinely short follow-up requests. Reuse a previous target only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this block override a needed clarification, and do not treat an artifact type word alone (for example README / config / log) as a concrete target.\n",
-        );
-        prompt_with_memory_for_execution.push_str(&recent_execution_anchor_context);
-    }
-    if let Some(image_context) =
-        crate::analyze_attached_images_for_ask(state, task, payload, &resolved_prompt).await?
-    {
-        let trimmed_image_context = image_context.trim();
-        if !trimmed_image_context.is_empty() {
-            let image_context_block = format!(
-                "\n\nAttached image analysis context:\n{}",
-                trimmed_image_context
-            );
-            resolved_prompt_for_execution.push_str(&image_context_block);
-            prompt_with_memory_for_execution.push_str(&image_context_block);
-        }
-    }
-    let long_term_log = long_term_summary
-        .as_deref()
-        .map(crate::truncate_for_log)
-        .unwrap_or_else(|| "<none>".to_string());
-    let recalled_log = if recalled.is_empty() {
-        "<none>".to_string()
-    } else {
-        let merged = recalled
-            .iter()
-            .map(|(role, content)| format!("{role}:{content}"))
-            .collect::<Vec<_>>()
-            .join(" | ");
-        crate::truncate_for_log(&merged)
-    };
-    let preferences_log = if preferences.is_empty() {
-        "<none>".to_string()
-    } else {
-        let merged = preferences
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(" | ");
-        crate::truncate_for_log(&merged)
-    };
-    let trigger_log = if similar_triggers.is_empty() {
-        "<none>".to_string()
-    } else {
-        crate::truncate_for_log(
-            &similar_triggers
-                .iter()
-                .map(|v| v.text.clone())
-                .collect::<Vec<_>>()
-                .join(" | "),
-        )
-    };
-    let fact_log = if relevant_facts.is_empty() {
-        "<none>".to_string()
-    } else {
-        crate::truncate_for_log(
-            &relevant_facts
-                .iter()
-                .map(|v| v.text.clone())
-                .collect::<Vec<_>>()
-                .join(" | "),
-        )
-    };
-    let related_log = if recent_related_events.is_empty() {
-        "<none>".to_string()
-    } else {
-        crate::truncate_for_log(
-            &recent_related_events
-                .iter()
-                .map(|v| v.text.clone())
-                .collect::<Vec<_>>()
-                .join(" | "),
-        )
-    };
-    info!(
-        "worker_once: ask memory task_id={} memory.long_term_summary={} memory.preferences={} memory.similar_triggers={} memory.relevant_facts={} memory.related_events={} memory.recalled_recent_count={} memory.recalled_recent={}",
-        task.task_id,
-        long_term_log,
-        preferences_log,
-        trigger_log,
-        fact_log,
-        related_log,
-        recalled.len(),
-        recalled_log,
-    );
-
-    let classifier_direct_mode = crate::main_flow_rules(state)
-        .classifier_direct_sources
-        .iter()
-        .any(|s| s == &source.to_ascii_lowercase());
-    let mut fuzzy_locator_suggestions: Vec<String> = Vec::new();
-    let path_scoped_content_request = normalizer_out.output_contract.requires_content_evidence
-        && matches!(
-            normalizer_out.output_contract.locator_kind,
-            crate::intent_router::OutputLocatorKind::Path
-        );
-    let mut auto_locator_resolved_direct = false;
-    let mut missing_locator_for_path_scoped_content = path_scoped_content_request
-        && !has_concrete_locator_hint(prompt)
-        && !has_concrete_locator_hint(&resolved_prompt);
-    let locator_guard_active = path_scoped_content_request;
-    if locator_guard_active {
-        match try_resolve_implicit_locator_path(
-            state,
-            prompt,
-            &resolved_prompt,
-            Some(&recent_execution_context),
-        ) {
-            Some(LocatorAutoResolution::Direct(path)) => {
-                let hint = format!(
-                    "\n\n[AUTO_LOCATOR]\nResolved concrete path from default locator directory: {path}\nUse this path as the target unless user explicitly overrides it.\n"
-                );
-                resolved_prompt_for_execution.push_str(&hint);
-                prompt_with_memory_for_execution.push_str(&hint);
-                auto_locator_resolved_direct = true;
-                if missing_locator_for_path_scoped_content {
-                    missing_locator_for_path_scoped_content = false;
-                }
-                info!(
-                    "{} worker_once: ask auto_locator_resolved task_id={} path={} raw_text={} resolved_text={}",
-                    crate::highlight_tag("routing"),
-                    task.task_id,
-                    path,
-                    crate::truncate_for_log(prompt),
-                    crate::truncate_for_log(&resolved_prompt)
-                );
-            }
-            Some(LocatorAutoResolution::Fuzzy(candidates)) => {
-                fuzzy_locator_suggestions = candidates;
-                info!(
-                    "{} worker_once: ask auto_locator_fuzzy_candidates task_id={} candidates={}",
-                    crate::highlight_tag("routing"),
-                    task.task_id,
-                    crate::truncate_for_log(&fuzzy_locator_suggestions.join(" | "))
-                );
-            }
-            None => {}
-        }
-    }
-    if missing_locator_for_path_scoped_content {
-        info!(
-            "{} worker_once: ask force_clarify_by_locator_guard task_id={} reason=missing_concrete_locator_for_path_scoped_content raw_text={} resolved_text={}",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            crate::truncate_for_log(prompt),
-            crate::truncate_for_log(&resolved_prompt)
-        );
-    }
-    let routed_mode_after_locator = if auto_locator_resolved_direct
-        && path_scoped_content_request
-        && matches!(
-            normalizer_out.routed_mode,
-            crate::RoutedMode::AskClarify | crate::RoutedMode::Chat
-        ) {
-        if matches!(
-            normalizer_out.output_contract.response_shape,
-            crate::intent_router::OutputResponseShape::Scalar
-                | crate::intent_router::OutputResponseShape::FileToken
-        ) {
-            crate::RoutedMode::Act
-        } else {
-            crate::RoutedMode::ChatAct
-        }
-    } else {
-        normalizer_out.routed_mode
-    };
-    if routed_mode_after_locator != normalizer_out.routed_mode {
-        info!(
-            "{} worker_once: ask routed_mode_override_by_auto_locator task_id={} mode={:?}->{:?}",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            normalizer_out.routed_mode,
-            routed_mode_after_locator
-        );
-    }
-    let force_clarify = (context_resolution.needs_clarify && !auto_locator_resolved_direct)
-        || missing_locator_for_path_scoped_content
-        || !fuzzy_locator_suggestions.is_empty();
-    let clarify_reason = if missing_locator_for_path_scoped_content {
-        if context_resolution.reason.trim().is_empty() {
-            "missing_concrete_locator_for_path_scoped_content".to_string()
-        } else {
-            format!(
-                "{}; missing_concrete_locator_for_path_scoped_content",
-                context_resolution.reason
-            )
-        }
-    } else if !fuzzy_locator_suggestions.is_empty() {
-        let joined = fuzzy_locator_suggestions.join(" | ");
-        if context_resolution.reason.trim().is_empty() {
-            format!("fuzzy_locator_candidates={joined}")
-        } else {
-            format!(
-                "{}; fuzzy_locator_candidates={joined}",
-                context_resolution.reason
-            )
-        }
-    } else {
-        context_resolution.reason.clone()
-    };
-    let has_schedule_intent =
-        normalizer_out.schedule_kind != crate::intent_router::ScheduleKind::None;
-    let should_route_schedule_direct =
-        has_schedule_intent && !direct_resume_execution && !direct_resume_discussion;
-
-    let result = if force_clarify {
-        let clarify_context = if fuzzy_locator_suggestions.is_empty() {
-            recent_execution_context.clone()
-        } else if recent_execution_context.trim().is_empty()
-            || recent_execution_context.trim() == "<none>"
-        {
-            format!(
-                "### LOCATOR_FUZZY_CANDIDATES\n{}\n",
-                fuzzy_locator_suggestions
-                    .iter()
-                    .map(|v| format!("- {v}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )
-        } else {
-            format!(
-                "{}\n\n### LOCATOR_FUZZY_CANDIDATES\n{}\n",
-                recent_execution_context,
-                fuzzy_locator_suggestions
-                    .iter()
-                    .map(|v| format!("- {v}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )
-        };
-        let clarify = crate::intent_router::generate_clarify_question(
-            state,
-            task,
-            prompt,
-            &clarify_reason,
-            Some(&clarify_context),
-        )
-        .await;
-        Ok(crate::AskReply::non_llm(clarify))
-    } else if direct_resume_discussion {
-        let resume_prompt_file = crate::resolve_prompt_rel_path_for_vendor(
-            &state.workspace_root,
-            &crate::active_prompt_vendor_name(state),
-            crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH,
-        );
-        crate::log_prompt_render(
-            &task.task_id,
-            "resume_followup_discussion_prompt",
-            &resume_prompt_file,
-            None,
-        );
-        crate::llm_gateway::run_with_fallback_with_prompt_file(
-            state,
-            task,
-            &resolved_prompt_for_execution,
-            &resume_prompt_file,
-        )
-        .await
-        .map(|s| crate::AskReply::llm(s.trim().to_string()))
-    } else if direct_resume_execution {
-        crate::agent_engine::run_agent_with_tools(
-            state,
-            task,
-            &prompt_with_memory_for_execution,
-            &resolved_prompt_for_execution,
-        )
-        .await
-    } else if should_route_schedule_direct {
-        if let Ok(Some(schedule_reply)) = crate::intent_router::try_handle_schedule_request(
-            state,
-            task,
-            &resolved_prompt_for_execution,
-        )
-        .await
-        {
-            let schedule_reply = crate::intercept_response_text_for_delivery(&schedule_reply);
-            let result = json!({ "text": schedule_reply.clone() });
-            repo::update_task_success(state, &task.task_id, &result.to_string())?;
-            let _ = crate::memory::service::insert_memory(
-                state,
-                task.user_id,
-                task.chat_id,
-                task.user_key.as_deref(),
-                &task.channel,
-                task.external_chat_id.as_deref(),
-                "user",
-                prompt,
-                state.memory.item_max_chars.max(256),
-            );
-            let _ = crate::memory::service::insert_memory(
-                state,
-                task.user_id,
-                task.chat_id,
-                task.user_key.as_deref(),
-                &task.channel,
-                task.external_chat_id.as_deref(),
-                "assistant",
-                &schedule_reply,
-                state.memory.item_max_chars.max(256),
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-            info!(
-                "task_call_end task_id={} kind=ask status=success path=schedule_direct result={}",
-                task.task_id,
-                crate::truncate_for_log(&schedule_reply)
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-            return Ok(());
-        }
-        if classifier_direct_mode && !resume_should_discuss_context {
-            crate::log_prompt_render(
-                &task.task_id,
-                "classifier_direct",
-                "prompts/classifier_direct.md",
-                None,
-            );
-            crate::llm_gateway::run_with_fallback_with_prompt_file(
-                state,
-                task,
-                &resolved_prompt_for_execution,
-                "prompts/classifier_direct.md",
-            )
-            .await
-            .map(|s| crate::AskReply::llm(s.trim().to_string()))
-            .map_err(|e| e.to_string())
-        } else {
-            crate::execute_ask_routed(
-                state,
-                task,
-                &chat_prompt_context,
-                &prompt_with_memory_for_execution,
-                &resolved_prompt_for_execution,
-                agent_mode,
-                resume_should_discuss_context,
-                Some(routed_mode_after_locator),
-            )
-            .await
-        }
-    } else if classifier_direct_mode {
-        crate::log_prompt_render(
-            &task.task_id,
-            "classifier_direct",
-            "prompts/classifier_direct.md",
-            None,
-        );
-        crate::llm_gateway::run_with_fallback_with_prompt_file(
-            state,
-            task,
-            &resolved_prompt_for_execution,
-            "prompts/classifier_direct.md",
-        )
-        .await
-        .map(|s| crate::AskReply::llm(s.trim().to_string()))
-        .map_err(|e| e.to_string())
-    } else {
-        crate::execute_ask_routed(
-            state,
-            task,
-            &chat_prompt_context,
-            &prompt_with_memory_for_execution,
-            &resolved_prompt_for_execution,
-            agent_mode,
-            false,
-            Some(routed_mode_after_locator),
-        )
-        .await
-    };
-
-    match result {
-        Ok(answer) => {
-            if !repo::is_task_still_running(state, &task.task_id)? {
-                info!(
-                    "task_call_end task_id={} kind=ask status=canceled path=normal",
-                    task.task_id
-                );
-                return Ok(());
-            }
-            let (answer_text, answer_messages) = if force_clarify {
-                (
-                    crate::intercept_response_text_for_delivery(&answer.text),
-                    answer.messages,
-                )
-            } else {
-                crate::intercept_response_payload_for_delivery(
-                    state,
-                    &resolved_prompt_for_execution,
-                    normalizer_out.wants_file_delivery,
-                    &normalizer_out.output_contract,
-                    answer.text,
-                    answer.messages,
-                )
-            };
-            let result = if answer_messages.is_empty() {
-                json!({ "text": answer_text.clone() })
-            } else {
-                json!({ "text": answer_text.clone(), "messages": answer_messages })
-            };
-            repo::update_task_success(state, &task.task_id, &result.to_string())?;
-            maybe_notify_schedule_result(state, task, payload, true, &answer_text).await;
-            let _ = crate::memory::service::insert_memory(
-                state,
-                task.user_id,
-                task.chat_id,
-                task.user_key.as_deref(),
-                &task.channel,
-                task.external_chat_id.as_deref(),
-                "user",
-                prompt,
-                state.memory.item_max_chars.max(256),
-            );
-            let assistant_memory_text =
-                if answer.is_llm_reply && state.memory.mark_llm_reply_in_short_term {
-                    format!(
-                        "{}{}",
-                        crate::memory::LLM_SHORT_TERM_MEMORY_PREFIX,
-                        answer_text
-                    )
-                } else {
-                    answer_text.clone()
-                };
-            let _ = crate::memory::service::insert_memory(
-                state,
-                task.user_id,
-                task.chat_id,
-                task.user_key.as_deref(),
-                &task.channel,
-                task.external_chat_id.as_deref(),
-                "assistant",
-                &assistant_memory_text,
-                state.memory.item_max_chars.max(256),
-            );
-            spawn_long_term_summary_refresh(state.clone(), task.clone());
-            info!("{}", crate::LOG_CALL_WRAP);
-            info!(
-                "task_call_end task_id={} kind=ask status=success path=normal result={}",
-                task.task_id,
-                crate::truncate_for_log(&answer_text)
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-        }
-        Err(err_text) => {
-            if err_text == crate::agent_engine::TASK_CANCELED_ERR
-                || !repo::is_task_still_running(state, &task.task_id)?
-            {
-                info!(
-                    "task_call_end task_id={} kind=ask status=canceled path=normal",
-                    task.task_id
-                );
-                return Ok(());
-            }
-            if let Some((user_error, resume_ctx)) = crate::parse_resume_context_error(&err_text) {
-                let resume_payload = resume_ctx
-                    .get("resume_context")
-                    .cloned()
-                    .unwrap_or(resume_ctx);
-                let result = json!({
-                    "text": user_error.clone(),
-                    "resume_context": resume_payload,
-                });
-                repo::update_task_failure_with_result(
-                    state,
-                    &task.task_id,
-                    &result.to_string(),
-                    &user_error,
-                )?;
-                maybe_notify_schedule_result(state, task, payload, false, &user_error).await;
-                info!("{}", crate::LOG_CALL_WRAP);
-                info!(
-                    "task_call_end task_id={} kind=ask status=failed path=normal error={} resume_context=true",
-                    task.task_id,
-                    crate::truncate_for_log(&user_error)
-                );
-                info!("{}", crate::LOG_CALL_WRAP);
-                return Ok(());
-            }
-            error!(
-                "worker_once: ask task_id={} failed: {}",
-                task.task_id, err_text
-            );
-            repo::update_task_failure(state, &task.task_id, &err_text)?;
-            maybe_notify_schedule_result(state, task, payload, false, &err_text).await;
-            info!("{}", crate::LOG_CALL_WRAP);
-            info!(
-                "task_call_end task_id={} kind=ask status=failed path=normal error={}",
-                task.task_id,
-                crate::truncate_for_log(&err_text)
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-        }
-    }
-
-    Ok(())
+        payload,
+        &prompt,
+        &prepared_flow.context_bundle_summary,
+        &prepared_flow.resolved_prompt_for_execution,
+        &prepared_flow.route_result,
+        result,
+    )
+    .await
 }
 
 pub(crate) async fn process_run_skill_task(
@@ -1774,240 +283,36 @@ pub(crate) async fn process_run_skill_task(
     task: &crate::ClaimedTask,
     payload: &Value,
 ) -> anyhow::Result<()> {
-    let skill_name = payload
-        .get("skill_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-    let args = payload.get("args").cloned().unwrap_or_else(|| json!(""));
+    let prepared_input = prepare_run_skill_input(payload);
 
     info!(
         "worker_once: processing run_skill task_id={} user_id={} chat_id={} skill_name={} args={}",
         task.task_id,
         task.user_id,
         task.chat_id,
-        skill_name,
-        crate::truncate_for_log(&args.to_string())
+        prepared_input.skill_name,
+        crate::truncate_for_log(&prepared_input.args.to_string())
     );
 
-    match crate::run_skill_with_runner_outcome(state, task, skill_name, args).await {
-        Ok(outcome) => {
-            if !repo::is_task_still_running(state, &task.task_id)? {
-                info!(
-                    "task_call_end task_id={} kind=run_skill status=canceled skill={}",
-                    task.task_id, skill_name
-                );
-                return Ok(());
-            }
-            let clean_text = crate::intercept_response_text_for_delivery(&outcome.text);
-            let result = json!({
-                "text": clean_text,
-                "delivery_meta": {
-                    "mode": "single_step_skill",
-                    "label": "step",
-                    "skill_name": skill_name
-                }
-            });
-            repo::update_task_success(state, &task.task_id, &result.to_string())?;
-            if outcome.notify.unwrap_or(true) {
-                maybe_notify_schedule_result(state, task, payload, true, &clean_text).await;
-            }
-            let _ = crate::memory::service::insert_memory(
-                state,
-                task.user_id,
-                task.chat_id,
-                task.user_key.as_deref(),
-                &task.channel,
-                task.external_chat_id.as_deref(),
-                "assistant",
-                &clean_text,
-                state.memory.item_max_chars.max(256),
-            );
-            let _ = repo::insert_audit_log(
-                state,
-                Some(task.user_id),
-                "run_skill",
-                Some(
-                    &json!({
-                        "task_id": task.task_id,
-                        "chat_id": task.chat_id,
-                        "skill_name": skill_name,
-                        "status": "ok"
-                    })
-                    .to_string(),
-                ),
-                None,
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-            info!(
-                "task_call_end task_id={} kind=run_skill status=success skill={} result={}",
-                task.task_id,
-                skill_name,
-                crate::truncate_for_log(&clean_text)
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-        }
-        Err(err_text) => {
-            if !repo::is_task_still_running(state, &task.task_id)? {
-                info!(
-                    "task_call_end task_id={} kind=run_skill status=canceled skill={}",
-                    task.task_id, skill_name
-                );
-                return Ok(());
-            }
-            error!(
-                "worker_once: run_skill task_id={} skill={} failed: {}",
-                task.task_id, skill_name, err_text
-            );
-            repo::update_task_failure(state, &task.task_id, &err_text)?;
-            maybe_notify_schedule_result(state, task, payload, false, &err_text).await;
-            let action = if err_text.contains("timeout") {
-                "timeout"
-            } else {
-                "run_skill"
-            };
-            let _ = repo::insert_audit_log(
-                state,
-                Some(task.user_id),
-                action,
-                Some(
-                    &json!({
-                        "task_id": task.task_id,
-                        "chat_id": task.chat_id,
-                        "skill_name": skill_name,
-                        "status": "failed"
-                    })
-                    .to_string(),
-                ),
-                Some(&err_text),
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-            info!(
-                "task_call_end task_id={} kind=run_skill status=failed skill={} error={}",
-                task.task_id,
-                skill_name,
-                crate::truncate_for_log(&err_text)
-            );
-            info!("{}", crate::LOG_CALL_WRAP);
-        }
-    }
-
-    Ok(())
-}
-
-async fn send_task_channel_message(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    payload: &Value,
-    text: &str,
-) -> Result<(), String> {
-    match runtime_channel_from_payload(state, payload) {
-        crate::RuntimeChannel::Telegram => {
-            let target_chat_id = task_external_chat_id(task)
-                .or_else(|| {
-                    payload
-                        .get("external_chat_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| v.trim().to_string())
-                        .filter(|v| !v.is_empty())
-                })
-                .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(task.chat_id);
-            crate::channel_send::send_telegram_message(state, target_chat_id, text).await
-        }
-        crate::RuntimeChannel::Whatsapp => {
-            let to = task_external_chat_id(task)
-                .or_else(|| {
-                    payload
-                        .get("external_chat_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| v.trim().to_string())
-                        .filter(|v| !v.is_empty())
-                })
-                .ok_or_else(|| "missing external_chat_id for whatsapp task".to_string())?;
-            match resolve_whatsapp_delivery_route(state, payload) {
-                crate::WhatsappDeliveryRoute::WebBridge => {
-                    crate::channel_send::send_whatsapp_web_bridge_text_message(state, &to, text)
-                        .await
-                }
-                crate::WhatsappDeliveryRoute::Cloud => {
-                    crate::channel_send::send_whatsapp_cloud_text_message(state, &to, text).await
-                }
-            }
-        }
-        crate::RuntimeChannel::Wechat => {
-            let to_user_id = task_external_chat_id(task)
-                .or_else(|| {
-                    payload
-                        .get("external_chat_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| v.trim().to_string())
-                        .filter(|v| !v.is_empty())
-                })
-                .ok_or_else(|| "missing external_chat_id for wechat task".to_string())?;
-            let context_token = payload
-                .get("context_token")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|v| !v.is_empty());
-            crate::channel_send::send_wechat_text_message(state, &to_user_id, context_token, text)
-                .await
-        }
-        crate::RuntimeChannel::Feishu => {
-            let receive_id = task_external_chat_id(task)
-                .or_else(|| {
-                    payload
-                        .get("external_chat_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| v.trim().to_string())
-                        .filter(|v| !v.is_empty())
-                })
-                .ok_or_else(|| "missing external_chat_id for feishu task".to_string())?;
-            crate::channel_send::send_feishu_text_message(state, &receive_id, text).await
-        }
-        crate::RuntimeChannel::Lark => {
-            let receive_id = task_external_chat_id(task)
-                .or_else(|| {
-                    payload
-                        .get("external_chat_id")
-                        .and_then(|v| v.as_str())
-                        .map(|v| v.trim().to_string())
-                        .filter(|v| !v.is_empty())
-                })
-                .ok_or_else(|| "missing external_chat_id for lark task".to_string())?;
-            crate::channel_send::send_lark_text_message(state, &receive_id, text).await
-        }
-    }
+    finalize_run_skill_result(
+        state,
+        task,
+        payload,
+        &prepared_input.skill_name,
+        crate::run_skill_with_runner_outcome(
+            state,
+            task,
+            &prepared_input.skill_name,
+            prepared_input.args,
+        )
+        .await,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    struct TempDirGuard {
-        path: PathBuf,
-    }
-
-    impl TempDirGuard {
-        fn new(prefix: &str) -> Self {
-            let mut path = std::env::temp_dir();
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time before unix epoch")
-                .as_nanos();
-            path.push(format!("clawd_worker_locator_{prefix}_{}_{}", std::process::id(), nanos));
-            fs::create_dir_all(&path).expect("create temp dir");
-            Self { path }
-        }
-    }
-
-    impl Drop for TempDirGuard {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
 
     #[test]
     fn wechat_payload_shape_keeps_context_token_available() {
@@ -2025,159 +330,4 @@ mod tests {
             Some("ctx-123")
         );
     }
-
-    #[test]
-    fn concrete_locator_hint_detects_explicit_path_and_filename() {
-        assert!(super::has_concrete_locator_hint(
-            "read /home/guagua/test/README.md and summarize"
-        ));
-        assert!(super::has_concrete_locator_hint("send Cargo.toml"));
-        assert!(super::has_concrete_locator_hint(
-            "open https://example.com/file.txt"
-        ));
-    }
-
-    #[test]
-    fn concrete_locator_hint_rejects_deictic_without_locator() {
-        assert!(!super::has_concrete_locator_hint(
-            "读一下那个 README 开头并用一句话总结"
-        ));
-        assert!(!super::has_concrete_locator_hint("that config please"));
-    }
-
-    #[test]
-    fn filename_like_tokens_extracts_expected_items() {
-        let tokens = super::extract_filename_like_tokens("please open Config.toml and README.md");
-        assert!(tokens.iter().any(|v| v == "Config.toml"));
-        assert!(tokens.iter().any(|v| v == "README.md"));
-    }
-
-    #[test]
-    fn levenshtein_with_limit_short_circuit() {
-        assert_eq!(
-            super::levenshtein_distance_with_limit("config", "config", 2),
-            0
-        );
-        assert_eq!(
-            super::levenshtein_distance_with_limit("config", "cnfig", 2),
-            1
-        );
-        assert!(super::levenshtein_distance_with_limit("config", "very-long-name", 2) > 2);
-    }
-
-    #[test]
-    fn fuzzy_suggestions_return_close_candidates() {
-        let root = PathBuf::from("/tmp");
-        let files = vec![
-            PathBuf::from("/tmp/config.toml"),
-            PathBuf::from("/tmp/configs/app_config.toml"),
-            PathBuf::from("/tmp/readme.md"),
-        ];
-        let out = super::collect_fuzzy_locator_suggestions(&root, &files, "cnfig.toml");
-        assert!(!out.is_empty());
-        assert!(out.iter().all(|v| v.starts_with("/tmp/")));
-        assert!(out
-            .iter()
-            .any(|v| v.to_ascii_lowercase().contains("config.toml")));
-    }
-
-    #[test]
-    fn locator_keywords_split_mixed_script_tokens() {
-        let out = super::extract_locator_keywords("请在 doc目录 里找 App_Config.toml");
-        assert!(out.iter().any(|v| v == "doc"));
-        assert!(out.iter().any(|v| v == "目录"));
-        assert!(out.iter().any(|v| v == "app_config.toml"));
-    }
-
-    #[test]
-    fn direct_child_locator_prefers_project_root_exact_name() {
-        let root = TempDirGuard::new("direct_child");
-        fs::create_dir_all(root.path.join("scripts")).expect("create scripts");
-        fs::create_dir_all(root.path.join("nested/scripts")).expect("create nested/scripts");
-        let keywords = vec!["查看一下".to_string(), "scripts".to_string(), "目录下面文件".to_string()];
-
-        let out = super::try_resolve_direct_child_locator(&root.path, &keywords);
-        let expected = root
-            .path
-            .join("scripts")
-            .canonicalize()
-            .expect("canonical scripts")
-            .display()
-            .to_string();
-        assert_eq!(out, Some(expected));
-    }
-}
-
-fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
-
-    let now = now_ts_u64() as i64;
-
-    let task_cutoff = now - (state.maintenance.tasks_retention_days as i64 * 86400);
-    db.execute(
-        "DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1",
-        rusqlite::params![task_cutoff],
-    )?;
-
-    db.execute(
-        "DELETE FROM tasks WHERE task_id IN (
-             SELECT task_id FROM tasks
-             ORDER BY CAST(created_at AS INTEGER) DESC
-             LIMIT -1 OFFSET ?1
-         )",
-        rusqlite::params![state.maintenance.tasks_max_rows as i64],
-    )?;
-
-    let audit_cutoff = now - (state.maintenance.audit_retention_days as i64 * 86400);
-    db.execute(
-        "DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1",
-        rusqlite::params![audit_cutoff],
-    )?;
-
-    db.execute(
-        "DELETE FROM audit_logs WHERE id IN (
-             SELECT id FROM audit_logs
-             ORDER BY id DESC
-             LIMIT -1 OFFSET ?1
-         )",
-        rusqlite::params![state.maintenance.audit_max_rows as i64],
-    )?;
-
-    let memory_cutoff = now - (state.memory.retention_days as i64 * 86400);
-    db.execute(
-        "DELETE FROM memories
-         WHERE COALESCE(created_at_ts, CAST(created_at AS INTEGER)) < ?1",
-        rusqlite::params![memory_cutoff],
-    )?;
-
-    db.execute(
-        "DELETE FROM memories WHERE id IN (
-             SELECT id FROM memories
-             ORDER BY id DESC
-             LIMIT -1 OFFSET ?1
-         )",
-        rusqlite::params![state.memory.max_rows as i64],
-    )?;
-    if state.memory.hybrid_recall_enabled {
-        let index_max_rows = state.memory.max_rows.saturating_mul(3).max(2000);
-        crate::memory::indexing::cleanup_retrieval_index(&db, memory_cutoff, index_max_rows)?;
-    }
-
-    let long_term_cutoff = now - (state.memory.long_term_retention_days as i64 * 86400);
-    db.execute(
-        "DELETE FROM long_term_memories
-         WHERE COALESCE(updated_at_ts, CAST(updated_at AS INTEGER)) < ?1",
-        rusqlite::params![long_term_cutoff],
-    )?;
-
-    db.execute(
-        "DELETE FROM long_term_memories WHERE id IN (
-             SELECT id FROM long_term_memories
-             ORDER BY id DESC
-             LIMIT -1 OFFSET ?1
-         )",
-        rusqlite::params![state.memory.long_term_max_rows as i64],
-    )?;
-
-    Ok(())
 }

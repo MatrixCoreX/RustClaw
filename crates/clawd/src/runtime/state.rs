@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use claw_core::config::{AgentConfig, AppConfig, MaintenanceConfig, MemoryConfig, RoutingConfig};
-use claw_core::skill_registry::{SkillKind, SkillsRegistry};
+use claw_core::skill_registry::{
+    OutputKind, SkillKind, SkillManifest, SkillRiskLevel, SkillsRegistry,
+};
 use reqwest::Client;
 use rusqlite::Connection;
 use serde::Serialize;
@@ -152,6 +154,7 @@ pub(crate) struct AppState {
     pub(crate) skill_views_snapshot: Arc<RwLock<Arc<SkillViewsSnapshot>>>,
     pub(crate) skill_semaphore: Arc<Semaphore>,
     pub(crate) rate_limiter: Arc<Mutex<RateLimiter>>,
+    pub(crate) llm_calls_per_task: Arc<Mutex<HashMap<String, u64>>>,
     pub(crate) maintenance: MaintenanceConfig,
     pub(crate) memory: MemoryConfig,
     pub(crate) workspace_root: PathBuf,
@@ -186,6 +189,8 @@ pub(crate) struct AppState {
     pub(crate) feishu_send_config: Option<crate::channel_send::FeishuSendConfig>,
     pub(crate) lark_send_config: Option<crate::channel_send::LarkSendConfig>,
     pub(crate) http_client: Client,
+    pub(crate) database_sqlite_path: PathBuf,
+    pub(crate) database_busy_timeout_ms: u64,
     pub(crate) config_path_for_reload: String,
     #[allow(dead_code)]
     pub(crate) registry_path_for_reload: Option<String>,
@@ -198,6 +203,25 @@ pub(crate) struct AppState {
 impl AppState {
     fn snapshot(&self) -> Arc<SkillViewsSnapshot> {
         self.skill_views_snapshot.read().unwrap().clone()
+    }
+
+    pub(crate) fn note_task_llm_call(&self, task_id: &str) {
+        let mut guard = self.llm_calls_per_task.lock().unwrap();
+        let counter = guard.entry(task_id.to_string()).or_insert(0);
+        *counter = counter.saturating_add(1);
+    }
+
+    pub(crate) fn task_llm_call_count(&self, task_id: &str) -> u64 {
+        self.llm_calls_per_task
+            .lock()
+            .unwrap()
+            .get(task_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn clear_task_llm_call_count(&self, task_id: &str) {
+        self.llm_calls_per_task.lock().unwrap().remove(task_id);
     }
 
     pub(crate) fn get_skills_registry(&self) -> Option<Arc<SkillsRegistry>> {
@@ -290,7 +314,7 @@ impl AppState {
         crate::is_builtin_skill_name(&canonical)
     }
 
-    pub(crate) fn skill_prompt_file(&self, canonical_name: &str) -> Option<String> {
+    pub(crate) fn skill_registry_prompt_rel_path(&self, canonical_name: &str) -> Option<String> {
         self.get_skills_registry()
             .as_ref()
             .and_then(|r| r.prompt_file(canonical_name).map(String::from))
@@ -314,6 +338,42 @@ impl AppState {
             .as_ref()
             .map(|r| r.runner_name(canonical_name))
             .unwrap_or_else(|| crate::canonical_skill_name(canonical_name).to_string())
+    }
+
+    pub(crate) fn skill_manifest(&self, canonical_name: &str) -> Option<SkillManifest> {
+        self.get_skills_registry()
+            .as_ref()
+            .and_then(|r| r.manifest(canonical_name))
+    }
+
+    pub(crate) fn skill_requires_confirmation_policy(&self, canonical_name: &str) -> bool {
+        let Some(manifest) = self.skill_manifest(canonical_name) else {
+            return false;
+        };
+        manifest.requires_confirmation == Some(true)
+            || matches!(manifest.risk_level, Some(SkillRiskLevel::High))
+            || (manifest.side_effect == Some(true) && manifest.auto_invocable == Some(false))
+    }
+
+    pub(crate) fn skill_is_retryable(&self, canonical_name: &str) -> bool {
+        self.skill_manifest(canonical_name)
+            .map(|manifest| manifest.retryable == Some(true))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn skill_is_read_only(&self, canonical_name: &str) -> bool {
+        self.skill_manifest(canonical_name)
+            .map(|manifest| manifest.side_effect == Some(false))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn skill_output_contract(
+        &self,
+        canonical_name: &str,
+    ) -> Option<(OutputKind, serde_json::Value)> {
+        let manifest = self.skill_manifest(canonical_name)?;
+        let output_schema = manifest.output_schema?;
+        Some((manifest.output_kind, output_schema))
     }
 }
 

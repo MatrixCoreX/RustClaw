@@ -225,7 +225,7 @@ profile = "executor"
 # 建议修改/Recommended change: 线上建议 false，排障时临时开启.
 # 风险/Risk: 开启会增加日志噪音，可能暴露更多 prompt 细节.
 [routing]
-debug_log_prompt = false
+debug_log_prompt = true
 # 模糊指代文件时的默认检索目录（相对路径以 clawd 启动目录为基准；"." 表示启动当前目录）。
 # 当请求缺少明确路径时，会先在该目录下递归搜索子目录；命中唯一候选可直接执行。
 default_locator_search_dir = "."
@@ -259,7 +259,7 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = { browser_web = true, doc_parse = true, kb = true, schedule = true, stock = true, task_control = true, transform = true, weather = true, web_search_extract = true }
+skill_switches = { map_merchant = true, browser_web = true, doc_parse = true, kb = true, schedule = true, stock = true, task_control = true, transform = true, weather = true, web_search_extract = true }
 skill_max_concurrency = 1
 skill_timeout_seconds = 86400
 # 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):
@@ -300,6 +300,7 @@ skills_list = [
     "service_control",
     "task_control",
     "config_guard",
+    "map_merchant",
     "crypto",
     "chat",
     "stock",

@@ -14,7 +14,8 @@ Runtime behavior notes:
 - Browser launch prefers system Chromium (`/usr/bin/chromium`, `/usr/bin/chromium-browser`) when available.
 - If system Chromium is unavailable, fallback is Playwright-managed Chromium.
 - Browser runs in forced headless mode and clears `DISPLAY/WAYLAND_DISPLAY/XAUTHORITY` in child runtime to avoid X11 popup requests.
-- `open_extract` writes capture artifacts by default under `skills_output/browser_web/...` with raw HTML, cleaned text, images, and JSONL indexes.
+- `open_extract` writes capture artifacts under `skills_output/browser_web/...` with raw HTML, cleaned text, images, and JSONL indexes.
+- At the current interface level, callers can control extraction behavior, but cannot customize capture root/source/run-id/chunking knobs through args.
 
 ## Actions
 
@@ -28,20 +29,13 @@ Open one or more URLs in a browser, apply readability checks, and return extract
 - `urls` (optional, string[]): multiple URLs
 - `max_pages` (optional, integer, default `3`, range `1..10`)
 - `wait_until` (optional, string, default `domcontentloaded`): `domcontentloaded|load|networkidle`
-- `save_screenshot` (optional, bool, default `false`)
+- `save_screenshot` (optional, bool, default `true`)
 - `screenshot_dir` (optional, string, default `skills_output/browser_web/screenshots`)
 - `content_mode` (optional, string, default `clean`): `clean|raw`
 - `max_text_chars` (optional, integer, default `12000`, range `100..200000`)
 - `min_content_chars` (optional, integer, default `200`, range `20..10000`): readability threshold for extracted text
 - `fail_fast` (optional, bool, default `false`): if true, stop on first page failure
 - `wait_map_path` (optional, string): optional wait strategy mapping file
-- `enable_capture` (optional, bool, default `true`): whether to persist capture artifacts
-- `capture_root` (optional, string, default `skills_output`): root directory for capture runs
-- `capture_source` (optional, string, default `browser_web`): source namespace folder name
-- `run_id` (optional, string): custom run id for output folder
-- `chunk_chars` (optional, integer, default `3000`): chunk size for `index/chunks.jsonl`
-- `capture_images` (optional, bool, default `true`): download page images to `assets/images` for archive
-- `max_capture_images` (optional, integer, default `12`): max image files downloaded per page
 
 At least one of `url` or `urls` is required.
 
@@ -131,9 +125,8 @@ Search first (`search_page`), then extract top result pages (`open_extract`).
 | open_extract | url / urls | yes (one) | string / string[] | - | URL targets to open |
 | open_extract | max_pages | no | integer | 3 | max pages from input list |
 | open_extract | wait_until | no | string | domcontentloaded | navigation wait strategy |
-| open_extract | save_screenshot | no | bool | false | capture screenshots only when explicitly needed |
-| open_extract | capture_images | no | bool | true | archive page images to assets/images |
-| open_extract | max_capture_images | no | integer | 12 | image download cap per page |
+| open_extract | save_screenshot | no | bool | true | capture screenshots by default |
+| open_extract | screenshot_dir | no | string | `skills_output/browser_web/screenshots` | screenshot output directory |
 | open_extract | content_mode | no | string | clean | clean or raw text mode |
 | open_extract | max_text_chars | no | integer | 12000 | max returned text chars |
 | open_extract | min_content_chars | no | integer | 200 | readability threshold for extracted text |
@@ -141,16 +134,23 @@ Search first (`search_page`), then extract top result pages (`open_extract`).
 | open_extract | wait_map_path | no | string | null | domain-based wait strategy map |
 | search_page | action | yes | string | - | `search_page` |
 | search_page | query | yes | string | - | search query |
+| search_page | engine | no | string | google | currently only `google` is supported |
 | search_page | top_k | no | integer | 5 | max results |
 | search_page | region | no | string | null | Google `gl` region |
 | search_page | lang | no | string | en | Google `hl` language |
 | search_extract | action | yes | string | - | `search_extract` |
 | search_extract | query | yes | string | - | search query |
+| search_extract | engine | no | string | google | currently only `google` is supported |
+| search_extract | top_k | no | integer | 5 | max search results before extraction |
 | search_extract | extract_top_n | no | integer | 3 | number of results to extract |
+| search_extract | wait_until | no | string | domcontentloaded | navigation wait strategy for extracted pages |
 | search_extract | summarize | no | bool | true | include short summary field |
 | search_extract | content_mode | no | string | clean | clean or raw mode |
 | search_extract | max_text_chars | no | integer | 12000 | max returned text chars |
 | search_extract | min_content_chars | no | integer | 200 | readability threshold for extracted text |
+| search_extract | fail_fast | no | bool | false | stop on first extraction failure |
+| search_extract | region | no | string | null | Google `gl` region |
+| search_extract | lang | no | string | en | Google `hl` language |
 
 ## Error Contract
 

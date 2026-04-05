@@ -1,0 +1,6 @@
+ordinal=29
+source_line=34
+case_name=act_transform_json_table
+chat_id=1985997019
+task_id=78d9c4cc-c01d-400c-9fef-7044fdac6c79
+prompt=把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]

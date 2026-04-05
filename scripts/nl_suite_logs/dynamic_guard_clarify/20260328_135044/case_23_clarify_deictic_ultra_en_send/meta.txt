@@ -1,7 +1,0 @@
-index=23
-case_name=clarify_deictic_ultra_en_send
-chat_id=17746743704
-turn1_task_id=adb152ee-dd40-45d5-80ef-908c0573ac0d
-turn1_prompt=send me that file pls, no paste
-turn2_task_id=3e4abc05-20cd-4a27-82a6-983332712fa6
-turn2_prompt=/home/guagua/test/docs/service_notes.md

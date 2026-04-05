@@ -1,0 +1,9 @@
+index=13
+case_name=context_bound_model_log_followup
+chat_id=17752372594
+turn1_task_id=bc063390-cd7d-4b33-aff7-6bb9757688e7
+turn1_prompt=先记一下，“那份模型日志”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/model_io.log
+turn2_task_id=0c51fb9c-1c94-4df0-bb2b-85e9adc58d58
+turn2_prompt=看下那份模型日志最后 4 行
+turn3_task_id=642b4a8c-4ba2-41fd-b6c2-8f238c36df53
+turn3_prompt=再一句话说有没有失败后恢复的迹象

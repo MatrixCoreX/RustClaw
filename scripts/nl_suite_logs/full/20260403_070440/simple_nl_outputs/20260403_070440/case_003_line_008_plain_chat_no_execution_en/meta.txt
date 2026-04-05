@@ -1,0 +1,6 @@
+ordinal=3
+source_line=8
+case_name=plain_chat_no_execution_en
+chat_id=1985996993
+task_id=7c56fed1-6147-4b94-a12f-9f89ba8d3d82
+prompt=do not run anything, just tell me a very short joke

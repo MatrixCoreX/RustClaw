@@ -1,0 +1,7 @@
+index=15
+case_name=clarify_deictic_model_io_tail
+chat_id=17752372496
+turn1_task_id=eda356c6-1a84-4676-a3ee-9bad93011df7
+turn1_prompt=看一下那个 model io log 最后 4 行，再一句话说有什么现象
+turn2_task_id=49cd7270-b923-40c6-951f-d24d48ff5361
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/model_io.log

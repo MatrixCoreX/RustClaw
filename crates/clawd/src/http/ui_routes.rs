@@ -4,7 +4,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom};
@@ -14,21 +14,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 
 use super::super::{
-    ApiResponse, AppState, HealthResponse, LocalInteractionContext, bind_channel_identity,
-    channel_gateway_process_stats, create_auth_key, current_rss_bytes, delete_auth_key_by_id,
-    exchange_credential_status_for_user_key, feishud_process_stats, larkd_process_stats,
-    list_auth_keys, mask_secret, oldest_running_task_age_seconds, reload_skill_views,
-    resolve_auth_identity_by_key, resolve_channel_binding_identity, task_count_by_status,
-    telegramd_process_stats, update_auth_key_by_id, upsert_exchange_credential_for_user_key,
-    upsert_webd_login_account, verify_webd_password_login, wa_webd_process_stats,
-    webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
+    bind_channel_identity, channel_gateway_process_stats, create_auth_key, current_rss_bytes,
+    delete_auth_key_by_id, exchange_credential_status_for_user_key, feishud_process_stats,
+    larkd_process_stats, list_auth_keys, mask_secret, oldest_running_task_age_seconds,
+    reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
+    task_count_by_status, telegramd_process_stats, update_auth_key_by_id,
+    upsert_exchange_credential_for_user_key, upsert_webd_login_account, verify_webd_password_login,
+    wa_webd_process_stats, webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
+    ApiResponse, AppState, HealthResponse, LocalInteractionContext,
 };
-use claw_core::skill_registry::SkillKind;
 use claw_core::types::{
     AuthIdentity, BindChannelKeyRequest, ExchangeCredentialStatus, GatewayInstanceRuntimeStatus,
     ResolveChannelBindingRequest, ResolveChannelBindingResponse, TelegramBotRuntimeStatus,
     UiKeyVerifyRequest, UpsertExchangeCredentialRequest,
 };
+use claw_core::{prompt_layers, skill_registry::SkillKind};
 
 const UI_HIDDEN_SKILLS: &[&str] = &["chat"];
 const TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS: i64 = 45;
@@ -3485,13 +3485,14 @@ async fn list_skills(
 }
 
 fn ui_skill_description(state: &AppState, skill_name: &str) -> Option<String> {
-    let prompt_rel = state.skill_prompt_file(skill_name)?;
-    let prompt_path = if Path::new(&prompt_rel).is_absolute() {
-        PathBuf::from(&prompt_rel)
-    } else {
-        state.workspace_root.join(&prompt_rel)
-    };
-    let raw = std::fs::read_to_string(prompt_path).ok()?;
+    let registry_prompt_rel_path = state.skill_registry_prompt_rel_path(skill_name)?;
+    let vendor = crate::bootstrap::prompts::active_prompt_vendor_name(state);
+    let (raw, _) = prompt_layers::load_prompt_template_for_vendor(
+        &state.workspace_root,
+        &vendor,
+        &registry_prompt_rel_path,
+        "",
+    );
     extract_skill_description_from_prompt(&raw)
 }
 
@@ -4586,7 +4587,8 @@ struct ImportedSkillPlan {
     description: String,
     external_kind: String,
     aliases: Vec<String>,
-    prompt_rel_path: String,
+    registry_prompt_rel_path: String,
+    prompt_body_rel_path: String,
     bundle_rel_dir: String,
     entry_file: String,
     runtime: Option<String>,
@@ -4829,14 +4831,16 @@ fn detect_import_plan(
     } else {
         "Imported external skill".to_string()
     };
-    let prompt_rel_path = format!("prompts/vendors/default/skills/{canonical_name}.md");
+    let registry_prompt_rel_path = format!("prompts/skills/{canonical_name}.md");
+    let prompt_body_rel_path = format!("prompts/layers/generated/skills/{canonical_name}.md");
     Ok(ImportedSkillPlan {
         canonical_name,
         display_name,
         description,
         external_kind,
         aliases,
-        prompt_rel_path,
+        registry_prompt_rel_path,
+        prompt_body_rel_path,
         bundle_rel_dir: bundle_rel_dir.to_string(),
         entry_file,
         runtime,
@@ -4868,7 +4872,7 @@ fn render_imported_skill_registry_block(plan: &ImportedSkillPlan) -> String {
     lines.push("kind = \"external\"".to_string());
     lines.push(format!("aliases = {}", render_string_array(&plan.aliases)));
     lines.push("timeout_seconds = 60".to_string());
-    lines.push(format!("prompt_file = {:?}", plan.prompt_rel_path));
+    lines.push(format!("prompt_file = {:?}", plan.registry_prompt_rel_path));
     lines.push("output_kind = \"text\"".to_string());
     lines.push(format!("external_kind = {:?}", plan.external_kind));
     lines.push(format!("external_bundle_dir = {:?}", plan.bundle_rel_dir));
@@ -5128,8 +5132,8 @@ fn finalize_imported_bundle(
         }
     };
 
-    let prompt_path = state.workspace_root.join(&plan.prompt_rel_path);
-    if let Some(parent) = prompt_path.parent() {
+    let prompt_body_path = state.workspace_root.join(&plan.prompt_body_rel_path);
+    if let Some(parent) = prompt_body_path.parent() {
         if let Err(err) = std::fs::create_dir_all(parent) {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -5141,7 +5145,10 @@ fn finalize_imported_bundle(
             );
         }
     }
-    if let Err(err) = std::fs::write(&prompt_path, render_imported_skill_prompt(&plan, skill_md)) {
+    if let Err(err) = std::fs::write(
+        &prompt_body_path,
+        render_imported_skill_prompt(&plan, skill_md),
+    ) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -5210,7 +5217,7 @@ fn finalize_imported_bundle(
                 "runtime": plan.runtime,
                 "require_bins": plan.require_bins,
                 "require_py_modules": plan.require_py_modules,
-                "prompt_file": plan.prompt_rel_path,
+                "prompt_file": plan.registry_prompt_rel_path,
                 "source": plan.source_url,
                 "reload": reload
             })),
@@ -6147,14 +6154,18 @@ async fn uninstall_external_skill(
     }
 
     let mut removed_prompt = false;
-    let prompt_rel = entry.prompt_file.trim();
-    if !prompt_rel.is_empty() {
-        let prompt_path = if Path::new(prompt_rel).is_absolute() {
-            PathBuf::from(prompt_rel)
+    let registry_prompt_rel_path = entry.prompt_file.trim();
+    if !registry_prompt_rel_path.is_empty() {
+        let prompt_body_path = if let Some(prompt_body_rel) =
+            prompt_layers::canonical_skill_prompt_body_rel_path(registry_prompt_rel_path)
+        {
+            state.workspace_root.join(prompt_body_rel)
+        } else if Path::new(registry_prompt_rel_path).is_absolute() {
+            PathBuf::from(registry_prompt_rel_path)
         } else {
-            state.workspace_root.join(prompt_rel)
+            state.workspace_root.join(registry_prompt_rel_path)
         };
-        match remove_managed_prompt_file(&prompt_path) {
+        match remove_managed_prompt_file(&prompt_body_path) {
             Ok(value) => removed_prompt = value,
             Err(err) => {
                 return (

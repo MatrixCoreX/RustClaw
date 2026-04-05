@@ -1,0 +1,6 @@
+ordinal=19
+source_line=24
+case_name=chat_act_disk_usage_brief
+chat_id=1985997009
+task_id=4ca78f61-31c1-4f9d-a90d-d1a88a1250e6
+prompt=查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项

@@ -4,7 +4,7 @@ set -euo pipefail
 # Test image_generate skill via skill-runner directly.
 #
 # Usage:
-#   ./scripts/test_image_module.sh [--profile debug|release] [--vendor qwen] [--model MODEL] [--prompt TEXT] [--size 1024x1024] [--output-path PATH] [--auto-build] [--raw]
+#   ./scripts/test_image_module.sh [--profile release] [--vendor qwen] [--model MODEL] [--prompt TEXT] [--size 1024x1024] [--output-path PATH] [--auto-build] [--raw]
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILE="release"
@@ -22,7 +22,7 @@ Usage:
   ./scripts/test_image_module.sh [options]
 
 Options:
-  --profile debug|release   Build profile (default: release)
+  --profile release         Build profile (default: release)
   --vendor NAME             Vendor name (default: qwen)
   --model MODEL             Model name (default: auto-read from configs/image.toml image_generation.default_model)
   --prompt TEXT             Prompt for generation
@@ -88,8 +88,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$PROFILE" != "debug" && "$PROFILE" != "release" ]]; then
-  echo "--profile must be debug or release"
+if [[ "$PROFILE" != "release" ]]; then
+  echo "--profile must be release"
   exit 2
 fi
 

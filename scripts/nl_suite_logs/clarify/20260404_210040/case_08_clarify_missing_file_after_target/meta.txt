@@ -1,0 +1,7 @@
+index=8
+case_name=clarify_missing_file_after_target
+chat_id=1985996998
+turn1_task_id=e077b23c-1f2d-4268-8767-3f0a9f59b92b
+turn1_prompt=把那个文件发给我
+turn2_task_id=e8995c58-f9e0-4716-a956-494895460923
+turn2_prompt=document/definitely_missing_clarify_case_001.txt

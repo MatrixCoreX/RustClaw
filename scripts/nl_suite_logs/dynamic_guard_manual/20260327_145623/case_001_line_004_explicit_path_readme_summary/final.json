@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"003433d0-ed0d-4fac-9dd6-6e4b9f3daa9e","status":"succeeded","result_json":{"messages":["该目录用于存放 NL 回归测试的产物和脚本，且更改此目录不会影响代理内部的工作区根目录。"],"text":"该目录用于存放 NL 回归测试的产物和脚本，且更改此目录不会影响代理内部的工作区根目录。"},"error_text":null},"error":null}

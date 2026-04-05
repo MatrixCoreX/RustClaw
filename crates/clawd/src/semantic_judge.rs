@@ -1,14 +1,15 @@
 use serde::Deserialize;
-use serde_json::Value;
 
-use crate::{AppState, ClaimedTask, llm_gateway};
+use crate::{llm_gateway, AppState, ClaimedTask};
 
 const META_RESPOND_CLASSIFIER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/meta_respond_classifier_prompt.md");
-const META_RESPOND_CLASSIFIER_PROMPT_PATH: &str = "prompts/meta_respond_classifier_prompt.md";
+    include_str!("../../../prompts/layers/overlays/meta_respond_classifier_prompt.md");
+const META_RESPOND_CLASSIFIER_PROMPT_LOGICAL_PATH: &str =
+    "prompts/meta_respond_classifier_prompt.md";
 const PUBLISHABLE_RAW_CLASSIFIER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/publishable_raw_classifier_prompt.md");
-const PUBLISHABLE_RAW_CLASSIFIER_PROMPT_PATH: &str = "prompts/publishable_raw_classifier_prompt.md";
+    include_str!("../../../prompts/layers/overlays/publishable_raw_classifier_prompt.md");
+const PUBLISHABLE_RAW_CLASSIFIER_PROMPT_LOGICAL_PATH: &str =
+    "prompts/publishable_raw_classifier_prompt.md";
 
 #[derive(Debug, Deserialize)]
 struct MetaRespondClassifierOut {
@@ -39,20 +40,21 @@ async fn classify_meta_respond_instruction_with_llm(
     if trimmed.is_empty() {
         return Some((false, "empty".to_string(), 1.0));
     }
-    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+    let (prompt_template, prompt_source) = crate::load_prompt_template_for_state(
         state,
-        META_RESPOND_CLASSIFIER_PROMPT_PATH,
+        META_RESPOND_CLASSIFIER_PROMPT_LOGICAL_PATH,
         META_RESPOND_CLASSIFIER_PROMPT_TEMPLATE,
     );
     let prompt = crate::render_prompt_template(&prompt_template, &[("__TEXT__", trimmed)]);
     crate::log_prompt_render(
+        state,
         &task.task_id,
         "meta_respond_classifier_prompt",
-        &prompt_file,
+        &prompt_source,
         None,
     );
     let llm_out =
-        llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file)
+        llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &prompt_source)
             .await
             .ok()?;
     let trimmed_out = llm_out.trim();
@@ -86,39 +88,12 @@ pub(crate) async fn is_meta_respond_instruction(
         .unwrap_or(false)
 }
 
-fn looks_like_planner_artifact(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if crate::prompt_utils::extract_agent_action_objects(trimmed)
-        .into_iter()
-        .next()
-        .is_some()
-    {
-        return true;
-    }
-    let Some(value) = crate::parse_llm_json_raw_or_any::<Value>(trimmed) else {
-        return false;
-    };
-    match value {
-        Value::Object(map) => {
-            map.contains_key("type")
-                || map.contains_key("tool")
-                || map.contains_key("skill")
-                || map.contains_key("action")
-                || map.get("steps").and_then(|v| v.as_array()).is_some()
-        }
-        _ => false,
-    }
-}
-
 fn is_publishable_raw_deterministic_guard(s: &str) -> bool {
     let t = s.trim();
     if t.is_empty() || t.len() <= 2 {
         return false;
     }
-    if looks_like_planner_artifact(t) {
+    if crate::finalizer::looks_like_planner_artifact(t) {
         return false;
     }
     if t.chars()
@@ -138,20 +113,21 @@ async fn classify_publishable_raw_with_llm(
     if trimmed.is_empty() {
         return Some((false, "empty".to_string(), 1.0));
     }
-    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
+    let (prompt_template, prompt_source) = crate::load_prompt_template_for_state(
         state,
-        PUBLISHABLE_RAW_CLASSIFIER_PROMPT_PATH,
+        PUBLISHABLE_RAW_CLASSIFIER_PROMPT_LOGICAL_PATH,
         PUBLISHABLE_RAW_CLASSIFIER_PROMPT_TEMPLATE,
     );
     let prompt = crate::render_prompt_template(&prompt_template, &[("__TEXT__", trimmed)]);
     crate::log_prompt_render(
+        state,
         &task.task_id,
         "publishable_raw_classifier_prompt",
-        &prompt_file,
+        &prompt_source,
         None,
     );
     let llm_out =
-        llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file)
+        llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &prompt_source)
             .await
             .ok()?;
     let trimmed_out = llm_out.trim();

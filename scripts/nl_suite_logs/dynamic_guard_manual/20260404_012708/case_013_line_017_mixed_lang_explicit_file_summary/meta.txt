@@ -1,0 +1,6 @@
+ordinal=13
+source_line=17
+case_name=mixed_lang_explicit_file_summary
+chat_id=17752372394
+task_id=8bb6f47d-a4fa-4fa4-b00a-4c5d0730e43c
+prompt=read /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md 前几行，然后用中文一句话总结

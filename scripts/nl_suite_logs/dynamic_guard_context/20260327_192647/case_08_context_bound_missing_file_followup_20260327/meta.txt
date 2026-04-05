@@ -1,9 +1,0 @@
-index=8
-case_name=context_bound_missing_file_followup_20260327
-chat_id=1985996998
-turn1_task_id=fc3c7c03-6d02-4e33-859c-2d134ddc8c76
-turn1_prompt=先记一下，“那个文件”就是 /home/guagua/test/docs/not_exists_case_002.md
-turn2_task_id=37ba79ca-83f8-491a-9f21-443cdb453375
-turn2_prompt=把那个文件发给我
-turn3_task_id=2ac3498c-884a-4502-8d4a-b38187f6b185
-turn3_prompt=如果不存在就简短说明原因

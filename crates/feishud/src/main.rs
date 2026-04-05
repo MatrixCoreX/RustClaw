@@ -178,7 +178,12 @@ fn feishu_t(config: &FeishuConfig, key: &str, fallback: &str) -> String {
     text_from_path(&config.feishu.i18n_path, key, fallback)
 }
 
-fn feishu_t_with(config: &FeishuConfig, key: &str, vars: &[(&str, &str)], fallback: &str) -> String {
+fn feishu_t_with(
+    config: &FeishuConfig,
+    key: &str,
+    vars: &[(&str, &str)],
+    fallback: &str,
+) -> String {
     text_with_vars_from_path(&config.feishu.i18n_path, key, vars, fallback)
 }
 
@@ -531,14 +536,7 @@ async fn handle_incoming_feishu_text(
                 FEISHU_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
                 FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
             );
-            let _ = send_feishu_text(
-                &config,
-                &client,
-                &token_cache,
-                &chat_id,
-                &msg,
-            )
-            .await;
+            let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
             return;
         }
     };
@@ -565,17 +563,11 @@ async fn handle_incoming_feishu_text(
             FEISHU_I18N_BIND_HELP_KEY,
             FEISHU_BIND_HELP_FALLBACK,
         );
-        let _ = send_feishu_text(
-            &config,
-            &client,
-            &token_cache,
-            &chat_id,
-            &msg,
-        )
-        .await;
+        let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
         return;
     }
-    let maybe_candidate = extract_bind_key_candidate(trimmed, should_expect_key_reply(&state, &chat_id));
+    let maybe_candidate =
+        extract_bind_key_candidate(trimmed, should_expect_key_reply(&state, &chat_id));
     if let Some(candidate) = maybe_candidate {
         info!(
             "feishud: bind attempt external_chat_id={} key_len={}",
@@ -617,14 +609,7 @@ async fn handle_incoming_feishu_text(
                     FEISHU_I18N_BIND_REQUEST_FAILED_KEY,
                     FEISHU_BIND_REQUEST_FAILED_FALLBACK,
                 );
-                let _ = send_feishu_text(
-                    &config,
-                    &client,
-                    &token_cache,
-                    &chat_id,
-                    &msg,
-                )
-                .await;
+                let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
             }
         }
         return;
@@ -641,14 +626,7 @@ async fn handle_incoming_feishu_text(
         FEISHU_I18N_BIND_REQUIRED_KEY,
         FEISHU_BIND_REQUIRED_FALLBACK,
     );
-    let _ = send_feishu_text(
-        &config,
-        &client,
-        &token_cache,
-        &chat_id,
-        &msg,
-    )
-    .await;
+    let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
 }
 
 /// 入站媒体：下载并落盘后，将提示文本交给 clawd ask（与文本链路一致）。
@@ -673,14 +651,7 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
                 FEISHU_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
                 FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
             );
-            let _ = send_feishu_text(
-                &config,
-                &client,
-                &token_cache,
-                &ctx.chat_id,
-                &msg,
-            )
-            .await;
+            let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
             return;
         }
     };
@@ -692,14 +663,7 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
             FEISHU_I18N_BIND_REQUIRED_KEY,
             FEISHU_BIND_REQUIRED_FALLBACK,
         );
-        let _ = send_feishu_text(
-            &config,
-            &client,
-            &token_cache,
-            &ctx.chat_id,
-            &msg,
-        )
-        .await;
+        let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
         return;
     };
 
@@ -730,14 +694,7 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
                 FEISHU_I18N_MEDIA_DOWNLOAD_FAILED_KEY,
                 FEISHU_MEDIA_DOWNLOAD_FAILED_FALLBACK,
             );
-            let _ = send_feishu_text(
-                &config,
-                &client,
-                &token_cache,
-                &ctx.chat_id,
-                &msg,
-            )
-            .await;
+            let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
             return;
         }
     };
@@ -758,14 +715,7 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
             FEISHU_I18N_MEDIA_FILE_TOO_LARGE_KEY,
             FEISHU_MEDIA_FILE_TOO_LARGE_FALLBACK,
         );
-        let _ = send_feishu_text(
-            &config,
-            &client,
-            &token_cache,
-            &ctx.chat_id,
-            &msg,
-        )
-        .await;
+        let _ = send_feishu_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
         return;
     }
 
@@ -1116,14 +1066,9 @@ fn handle_text_message_to_clawd(
                         &[("error", &detail)],
                         FEISHU_PROCESS_FAILED_WITH_ERROR_FALLBACK,
                     );
-                    let _ = send_feishu_text(
-                        &config,
-                        &client,
-                        &token_cache,
-                        &chat_id_delivery,
-                        &msg,
-                    )
-                    .await;
+                    let _ =
+                        send_feishu_text(&config, &client, &token_cache, &chat_id_delivery, &msg)
+                            .await;
                     info!(
                         "feishud: task delivery failure task_id={} status={:?}",
                         task_id, task.status
@@ -1636,7 +1581,10 @@ mod tests {
 
     #[test]
     fn waiting_key_state_rejects_non_binding_commands() {
-        assert_eq!(extract_bind_key_candidate("/run image_vision {}", true), None);
+        assert_eq!(
+            extract_bind_key_candidate("/run image_vision {}", true),
+            None
+        );
         assert_eq!(extract_bind_key_candidate("/crypto btc", true), None);
     }
 

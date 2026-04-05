@@ -11,10 +11,10 @@ fi
 
 PROFILE="${1:-${RUSTCLAW_START_PROFILE:-release}}"
 case "$PROFILE" in
-  release|debug)
+  release)
     ;;
   *)
-    echo "Usage: ./start-clawd-ui.sh [release|debug]"
+    echo "Usage: ./start-clawd-ui.sh [release]"
     exit 1
     ;;
 esac

@@ -1,0 +1,6 @@
+ordinal=3
+source_line=7
+case_name=fs_readme_head_summary_semantic
+chat_id=1985996993
+task_id=cbfa0f99-a19b-44df-96a2-185c131f147b
+prompt=看看 README.md 开头讲了什么，读前 20 行后用三句话总结

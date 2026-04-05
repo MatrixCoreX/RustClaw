@@ -1,0 +1,6 @@
+ordinal=9
+source_line=13
+case_name=followup_extract_hostname_semantic
+chat_id=1985996999
+task_id=84c2929e-fc44-4702-abb2-c9563bf0a3aa
+prompt=只输出当前机器 hostname，不要解释

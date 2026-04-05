@@ -1,6 +1,0 @@
-ordinal=34
-source_line=41
-case_name=colloquial_en_ultra_read
-chat_id=17746321085
-task_id=79df41d5-2ece-40eb-848d-81c21d9aa241
-prompt=take a quick look at /home/guagua/test/README.md top lines, one-liner only

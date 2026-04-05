@@ -1,0 +1,19 @@
+[map_merchant]
+default_provider = "amap"
+default_radius_meters = 3000
+default_top_k = 5
+max_fetch_candidates = 12
+default_sort_by = "balanced"
+distance_weight = 0.40
+rating_weight = 0.30
+price_weight = 0.15
+keyword_weight = 0.15
+default_keyword = "商户"
+
+[map_merchant.amap]
+enabled = true
+api_key = ""
+
+[map_merchant.google]
+enabled = false
+api_key = ""

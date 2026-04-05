@@ -1,0 +1,6 @@
+ordinal=22
+source_line=27
+case_name=act_git_branch_scalar
+chat_id=1985997012
+task_id=c5c9781a-8e11-4111-917b-cd9e8e036e30
+prompt=看看当前 git 分支叫什么，只给我分支名

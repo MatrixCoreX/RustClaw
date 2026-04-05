@@ -202,7 +202,11 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-fn resolve_path(workspace_root: &Path, input: &str, allow_absolute: bool) -> Result<PathBuf, String> {
+fn resolve_path(
+    workspace_root: &Path,
+    input: &str,
+    allow_absolute: bool,
+) -> Result<PathBuf, String> {
     let raw = Path::new(input);
     let mut normalized = PathBuf::new();
     for comp in raw.components() {

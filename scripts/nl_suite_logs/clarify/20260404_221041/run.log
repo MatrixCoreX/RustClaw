@@ -1,0 +1,61 @@
+NL multi-turn suite: clarify
+  run_dir:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221041
+  run_log:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221041/run.log
+  case_file:  /tmp/nl_clarify_targeted_345.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985997300
+
+============================================================
+[CASE]   1
+[NAME]   clarify_scalar_extract
+[CHAT]   1985997301
+[TURN1]  读一下那个文件里的名字字段，只输出值
+[TASK1]  8fa35fc5-6619-4018-845f-58869f628738
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。
+[TURN2]  package.json
+[TASK2]  305f68bb-b16d-4895-838e-ec6344213937
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。
+
+============================================================
+[CASE]   2
+[NAME]   clarify_count_dir
+[CHAT]   1985997302
+[TURN1]  数一下那个目录里有多少个直接子项，只输出数字
+[TASK1]  1d6d5716-320d-4f44-a556-4a9d5250fce8
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。
+[TURN2]  scripts
+[TASK2]  0363b4af-cf71-42d8-9f2e-0962cb509f9c
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。
+
+============================================================
+[CASE]   3
+[NAME]   clarify_list_dir
+[CHAT]   1985997303
+[TURN1]  看看那个目录下面都有什么
+[TASK1]  7ecd8e04-ab2b-4d83-b1f4-963d78ff26f2
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。
+[TURN2]  document
+[TASK2]  945ea90e-199b-4cd6-b8f1-887e1b73a1af
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221041
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221041/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_221041/summary.jsonl

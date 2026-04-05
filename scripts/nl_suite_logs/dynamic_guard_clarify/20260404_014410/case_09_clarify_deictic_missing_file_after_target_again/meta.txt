@@ -1,0 +1,7 @@
+index=9
+case_name=clarify_deictic_missing_file_after_target_again
+chat_id=17752372490
+turn1_task_id=a68d5166-8bd7-48f9-8b72-de6283dd5ef3
+turn1_prompt=把那个文件发我
+turn2_task_id=c062b785-1837-47b5-a024-7f9f5d604d43
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/not_exists_case_001.md

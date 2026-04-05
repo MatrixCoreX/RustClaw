@@ -1,0 +1,7 @@
+index=2
+case_name=clarify_count_dir
+chat_id=1985997402
+turn1_task_id=74f77ad9-a2db-41b6-8245-8281bfd974cf
+turn1_prompt=数一下那个目录里有多少个直接子项，只输出数字
+turn2_task_id=81d830ca-291e-421a-a747-21b3f771c82d
+turn2_prompt=scripts

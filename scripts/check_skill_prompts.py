@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Check that every registry skill has a default vendor skill prompt.
+"""Check that every registry skill prompt logical path has a canonical generated body.
 
-Canonical registry prompt_file remains prompts/skills/<name>.md as a logical path.
-Runtime loads skill prompts from vendor layers only:
-prompts/vendors/<active_vendor>/skills/<name>.md -> prompts/vendors/default/skills/<name>.md.
-This script validates the required fallback baseline under vendors/default.
+Canonical registry `prompt_file` remains prompts/skills/<name>.md as a logical path.
+Runtime loads skill prompt bodies from the canonical default body:
+prompts/layers/generated/skills/<name>.md
+and may append vendor-specific patches from:
+prompts/layers/vendor_patches/<vendor>/skills/<name>.md.
+This script validates the required canonical baseline under prompts/layers/generated/skills.
 Does not touch production code or clawd.
 """
 from __future__ import annotations
@@ -15,11 +17,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = REPO_ROOT / "configs" / "skills_registry.toml"
-VENDOR_DEFAULT_SKILLS = REPO_ROOT / "prompts" / "vendors" / "default" / "skills"
+GENERATED_SKILLS = REPO_ROOT / "prompts" / "layers" / "generated" / "skills"
 
 
 def parse_registry_prompt_files(path: Path) -> list[tuple[str, str]]:
-    """Return list of (skill_name, prompt_file) from [[skills]] blocks."""
+    """Return list of (skill_name, registry_prompt_logical_path) from [[skills]] blocks."""
     text = path.read_text(encoding="utf-8")
     out: list[tuple[str, str]] = []
     name_re = re.compile(r'^\s*name\s*=\s*"([^"]+)"', re.M)
@@ -41,23 +43,37 @@ def main() -> int:
         return 1
     skills = parse_registry_prompt_files(REGISTRY_PATH)
     missing: list[str] = []
+    unsupported: list[str] = []
     for name, prompt_file in skills:
-        if not prompt_file.strip().startswith("prompts/skills/"):
+        prompt_file = prompt_file.strip()
+        if prompt_file.startswith("prompts/skills/"):
+            base = Path(prompt_file).name
+        elif prompt_file.startswith("prompts/layers/generated/skills/"):
+            base = Path(prompt_file).name
+        else:
+            unsupported.append(f"{name} ({prompt_file})")
             continue
-        base = Path(prompt_file.strip()).name
-        in_vendor_default = (VENDOR_DEFAULT_SKILLS / base).is_file()
-        if not in_vendor_default:
+        in_generated = (GENERATED_SKILLS / base).is_file()
+        if not in_generated:
             missing.append(f"{name} (expect {base})")
+    if unsupported:
+        print(
+            "Unsupported skill registry prompt logical path (expected prompts/skills/<name>.md or prompts/layers/generated/skills/<name>.md):",
+            file=sys.stderr,
+        )
+        for item in unsupported:
+            print(f"  - {item}", file=sys.stderr)
+        return 1
     if missing:
         print(
-            "Missing default vendor skill prompt file (need in prompts/vendors/default/skills/):",
+            "Missing generated skill prompt body (need in prompts/layers/generated/skills/):",
             file=sys.stderr,
         )
         for m in missing:
             print(f"  - {m}", file=sys.stderr)
         return 1
     print(
-        f"OK: all {len(skills)} registry skills have a default vendor prompt fallback."
+        f"OK: all {len(skills)} registry skills have a generated layered prompt body."
     )
     return 0
 

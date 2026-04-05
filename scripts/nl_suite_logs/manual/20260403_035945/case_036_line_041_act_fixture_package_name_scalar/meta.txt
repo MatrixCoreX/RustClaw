@@ -1,0 +1,6 @@
+ordinal=36
+source_line=41
+case_name=act_fixture_package_name_scalar
+chat_id=1985997026
+task_id=42f250f8-463c-4511-9503-a16134e522f0
+prompt=去 scripts/nl_tests/fixtures/device_local/package.json 里找 name，只输出值

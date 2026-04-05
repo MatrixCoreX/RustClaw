@@ -1,0 +1,9 @@
+index=14
+case_name=context_rebind_from_notes_to_release
+chat_id=17752372595
+turn1_task_id=e8d994cd-4bce-4da3-ba78-bafa42dca990
+turn1_prompt=先记一下，“那个说明”是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md
+turn2_task_id=93002e81-6d40-466b-b283-9db95989ffa6
+turn2_prompt=再记一下，“那个说明”改成 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md
+turn3_task_id=512eb8a3-d4be-48b7-a492-6600c353d9be
+turn3_prompt=读一下那个说明，并告诉我它更像操作指南还是背景介绍

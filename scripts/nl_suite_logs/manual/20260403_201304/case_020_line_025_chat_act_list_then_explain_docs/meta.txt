@@ -1,0 +1,6 @@
+ordinal=20
+source_line=25
+case_name=chat_act_list_then_explain_docs
+chat_id=1985997010
+task_id=0c7afe0c-d8bd-48b0-a708-6e86c3f1774b
+prompt=列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的

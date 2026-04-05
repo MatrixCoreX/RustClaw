@@ -1,0 +1,6 @@
+ordinal=3
+source_line=7
+case_name=explicit_config_send
+chat_id=17752372384
+task_id=46750037-20ec-4efa-902f-0e6b7b3996a0
+prompt=把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml 发给我，别贴正文

@@ -1,0 +1,6 @@
+ordinal=28
+source_line=33
+case_name=act_task_list_brief
+chat_id=1985997018
+task_id=8cffdffd-24fd-4e21-a228-38265d47216f
+prompt=看看我这个会话里现在有没有未完成任务，简短告诉我结果

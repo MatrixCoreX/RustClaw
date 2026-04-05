@@ -1,0 +1,6 @@
+ordinal=20
+source_line=25
+case_name=followup_logs_then_conclusion
+chat_id=1985997010
+task_id=10eb6178-633e-4791-b151-dff8571da2ca
+prompt=列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物

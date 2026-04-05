@@ -1,6 +1,0 @@
-ordinal=19
-source_line=22
-case_name=english_explicit_db_tables
-chat_id=17746635750
-task_id=95cd0816-803b-4cdc-afcd-977b15d84ad8
-prompt=List tables from /home/guagua/test/data/test_contract.sqlite.

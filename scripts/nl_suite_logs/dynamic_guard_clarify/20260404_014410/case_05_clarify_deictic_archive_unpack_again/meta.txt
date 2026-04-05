@@ -1,0 +1,7 @@
+index=5
+case_name=clarify_deictic_archive_unpack_again
+chat_id=17752372486
+turn1_task_id=7941b151-a070-43d4-941a-6ec02e8c7270
+turn1_prompt=把那个压缩包解压到 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/dynamic_guard_unpack_case 然后告诉我结果
+turn2_task_id=4e7e1df5-3799-4795-a953-a709ad6ccfe3
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip

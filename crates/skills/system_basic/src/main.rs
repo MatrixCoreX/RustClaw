@@ -632,8 +632,22 @@ fn structured_keys(workspace_root: &Path, obj: &Map<String, Value>) -> Result<St
         Some(&root_value)
     } else {
         lookup_field_value(&root_value, field_path)
-    }
-    .ok_or_else(|| "field_path not found".to_string())?;
+    };
+
+    let Some(target) = target else {
+        return Ok(json!({
+            "action": "structured_keys",
+            "path": path,
+            "resolved_path": real.display().to_string(),
+            "format": format,
+            "field_path": field_path,
+            "exists": false,
+            "container_type": "missing",
+            "count": 0,
+            "keys": [],
+        })
+        .to_string());
+    };
 
     match target {
         Value::Object(map) => {
@@ -649,6 +663,7 @@ fn structured_keys(workspace_root: &Path, obj: &Map<String, Value>) -> Result<St
                 "resolved_path": real.display().to_string(),
                 "format": format,
                 "field_path": field_path,
+                "exists": true,
                 "container_type": "object",
                 "count": map.len(),
                 "omitted": omitted,
@@ -674,6 +689,7 @@ fn structured_keys(workspace_root: &Path, obj: &Map<String, Value>) -> Result<St
                 "resolved_path": real.display().to_string(),
                 "format": format,
                 "field_path": field_path,
+                "exists": true,
                 "container_type": "array",
                 "count": arr.len(),
                 "indices_preview": preview,
@@ -686,6 +702,7 @@ fn structured_keys(workspace_root: &Path, obj: &Map<String, Value>) -> Result<St
             "resolved_path": real.display().to_string(),
             "format": format,
             "field_path": field_path,
+            "exists": true,
             "container_type": json_value_type(other),
             "count": 0,
             "keys": [],

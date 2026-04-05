@@ -1,0 +1,9 @@
+index=10
+case_name=context_colloquial_mixed_docs_alias
+chat_id=17752372591
+turn1_task_id=6c3e14e3-e76c-4305-af77-ae961a102c17
+turn1_prompt=先记一下，that docs dir 就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs
+turn2_task_id=719c265e-a4e9-4c14-9fee-fdf2ea56f635
+turn2_prompt=look at that docs dir, names only
+turn3_task_id=a5a0f2f8-4db7-4c74-a4a1-4800f2ca3643
+turn3_prompt=然后告诉我一共有多少个直接子项，只输出数字

@@ -1,0 +1,7 @@
+index=7
+case_name=clarify_deictic_mixed_lang_readme_again
+chat_id=17752372488
+turn1_task_id=18804fab-53e6-4c41-be2b-f4806987e88d
+turn1_prompt=Can you read that README header and sum it up in one sentence?
+turn2_task_id=8a0ba85b-134c-48b2-820d-cc170647d7a4
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md

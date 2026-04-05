@@ -1,0 +1,9 @@
+index=11
+case_name=context_bound_release_note_followup
+chat_id=17752372592
+turn1_task_id=13cf4321-b498-4beb-baeb-acb034fc8ae3
+turn1_prompt=先记一下，“那份发布说明”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md
+turn2_task_id=3de6d004-7550-4855-bc87-a27f9cb4efa4
+turn2_prompt=读一下那份发布说明开头
+turn3_task_id=bd31102a-f7dc-4e91-999d-b5dd2216ca0d
+turn3_prompt=再一句话说最该先做什么

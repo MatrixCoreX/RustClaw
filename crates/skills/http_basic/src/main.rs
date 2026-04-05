@@ -174,6 +174,8 @@ fn execute(args: Value, req_user_key: Option<&str>) -> Result<(String, Value), S
             }),
         ))
     } else {
-        Err(format!("http request returned non-success status={status}\n{preview}"))
+        Err(format!(
+            "http request returned non-success status={status}\n{preview}"
+        ))
     }
 }

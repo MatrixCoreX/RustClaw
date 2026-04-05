@@ -1,6 +1,0 @@
-ordinal=2
-source_line=5
-case_name=explicit_path_readme_send
-chat_id=17746635733
-task_id=e9d6c5cd-f92c-4008-b0aa-e97e45b2f79a
-prompt=把 /home/guagua/test/README.md 发给我

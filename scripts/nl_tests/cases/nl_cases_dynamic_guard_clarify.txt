@@ -1,0 +1,21 @@
+# Dynamic-guard clarify regression cases for deictic targets that should ask first, then execute after a concrete locator is provided.
+# Format: case_name|turn1|turn2
+# Curated list: keep distinct deictic target types and language styles.
+
+clarify_deictic_readme_again|读一下那个 README 开头，然后一句话总结|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md
+clarify_deictic_config_send_again|把那个配置文件直接发我|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+clarify_deictic_log_tail_again|看下那个日志最近 20 行|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log
+clarify_deictic_db_tables_again|查一下那个 sqlite 里有哪些表|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
+clarify_deictic_archive_unpack_again|把那个压缩包解压到 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/dynamic_guard_unpack_case 然后告诉我结果|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip
+clarify_deictic_dir_count_again|数一下那个目录里有多少个直接子项，只输出数字|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs
+clarify_deictic_mixed_lang_readme_again|Can you read that README header and sum it up in one sentence?|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md
+clarify_deictic_file_delivery_cn_en_again|把那个 file 发给我，不要贴内容|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md
+clarify_deictic_missing_file_after_target_again|把那个文件发我|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/not_exists_case_001.md
+clarify_deictic_db_schema_version_again|看看那个 sqlite 的 schema version 是多少|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
+clarify_deictic_colloquial_en_send|Can you shoot me that config file real quick, no paste?|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+clarify_deictic_colloquial_mixed_log|that log 给我 tail 一下最后 6 行|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log
+clarify_deictic_release_note_summary|读一下那个发布说明，然后一句话告诉我重点|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md
+clarify_deictic_package_name_value|看看那个 package 里的 name 是什么，只输出值|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/package.json
+clarify_deictic_model_io_tail|看一下那个 model io log 最后 4 行，再一句话说有什么现象|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/model_io.log
+clarify_deictic_docs_archive_list|看看那个 archive 目录下有什么，只列名字|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/archive
+clarify_deictic_colloquial_cn_notes_send|把那份 notes 直接发我，别贴正文|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md

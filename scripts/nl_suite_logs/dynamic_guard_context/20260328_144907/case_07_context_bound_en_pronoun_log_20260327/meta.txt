@@ -1,9 +1,0 @@
-index=7
-case_name=context_bound_en_pronoun_log_20260327
-chat_id=17746743788
-turn1_task_id=18ef8323-3c73-481e-aed5-7e1c2268b553
-turn1_prompt=Remember this: "that log" means /home/guagua/test/logs/app.log
-turn2_task_id=c5bf56d0-5b4f-4608-8e4d-c8e01679b3d7
-turn2_prompt=tail that log 10 lines
-turn3_task_id=7fb435cf-4508-48cc-b984-b0108149dc9c
-turn3_prompt=in one sentence tell me if anything looks abnormal

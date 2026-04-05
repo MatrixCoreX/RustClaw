@@ -1,0 +1,6 @@
+ordinal=21
+source_line=26
+case_name=chat_act_hidden_files_brief
+chat_id=1985997011
+task_id=877eb004-c39d-4c1e-9603-dd9e473698d3
+prompt=检查当前目录隐藏文件是否存在，再用一句话解释隐藏文件通常是干什么的

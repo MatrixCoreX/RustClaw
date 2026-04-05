@@ -1,0 +1,6 @@
+ordinal=1
+source_line=5
+case_name=run_cmd_pwd_with_result_tail
+chat_id=1985996991
+task_id=15684993-abab-469f-aae8-7704cfd17cce
+prompt=执行 pwd，然后告诉我结果

@@ -1,0 +1,6 @@
+ordinal=1
+source_line=1
+case_name=line_001
+chat_id=240002
+task_id=6b2f147a-9752-4f38-892b-b7345460b9c4
+prompt=读取 README 的前 20 行并做 3 句话总结

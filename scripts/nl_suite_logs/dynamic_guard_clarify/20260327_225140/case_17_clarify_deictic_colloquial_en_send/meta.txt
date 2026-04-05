@@ -1,7 +1,0 @@
-index=17
-case_name=clarify_deictic_colloquial_en_send
-chat_id=17746206608
-turn1_task_id=51392cff-0b47-460d-9420-59762960a40e
-turn1_prompt=Can you shoot me that config file real quick, no paste?
-turn2_task_id=341198fc-35c1-4f36-8a42-a0735320e36e
-turn2_prompt=/home/guagua/test/configs/app_config.toml

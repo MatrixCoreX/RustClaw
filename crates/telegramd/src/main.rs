@@ -1,3 +1,5 @@
+mod telegram_buttons;
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
@@ -14,6 +16,7 @@ use claw_core::hard_rules::types::VoiceModeIntentAliases;
 use claw_core::hard_rules::voice_mode::{
     load_voice_mode_intent_aliases, parse_voice_mode_intent_decision,
 };
+use claw_core::prompt_layers;
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ExchangeCredentialStatus,
     GatewayInstanceRuntimeStatus, HealthResponse, ResolveChannelBindingRequest,
@@ -27,6 +30,10 @@ use teloxide::types::{CallbackQuery, ChatAction, InputFile, MediaKind, MessageKi
 use tokio::sync::oneshot;
 use toml::Value as TomlValue;
 use tracing::{debug, info, warn};
+
+use crate::telegram_buttons::{
+    build_url_button_markup, extract_url_buttons_from_text, UrlButtonSpec,
+};
 
 #[derive(Clone)]
 struct BotState {
@@ -87,11 +94,11 @@ enum VoiceReplyMode {
 }
 
 const DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/voice_chat_prompt.md");
+    include_str!("../../../prompts/layers/overlays/voice_chat_prompt.md");
 const DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/voice_mode_intent_prompt.md");
-const VOICE_CHAT_PROMPT_PATH: &str = "prompts/voice_chat_prompt.md";
-const VOICE_MODE_INTENT_PROMPT_PATH: &str = "prompts/voice_mode_intent_prompt.md";
+    include_str!("../../../prompts/layers/overlays/voice_mode_intent_prompt.md");
+const VOICE_CHAT_PROMPT_LOGICAL_PATH: &str = "prompts/voice_chat_prompt.md";
+const VOICE_MODE_INTENT_PROMPT_LOGICAL_PATH: &str = "prompts/voice_mode_intent_prompt.md";
 const RESUME_CONTEXT_TTL_SECONDS: u64 = 30 * 60;
 const VOICE_MODE_INTENT_ALIASES_PATH: &str =
     "configs/command_intent/voice_mode_intent_aliases.toml";
@@ -176,7 +183,11 @@ fn extract_bind_key_candidate(text: &str, expect_key_reply: bool) -> Option<Stri
         })
 }
 
-async fn send_bind_key_required_prompt(bot: &Bot, msg: &Message, state: &BotState) -> anyhow::Result<()> {
+async fn send_bind_key_required_prompt(
+    bot: &Bot,
+    msg: &Message,
+    state: &BotState,
+) -> anyhow::Result<()> {
     set_expect_key_reply(state, msg.chat.id.0, true);
     bot.send_message(
         msg.chat.id,
@@ -354,11 +365,11 @@ async fn detect_voice_mode_intent_with_llm(
         return None;
     }
     info!(
-        "{} transport_prompt_use flow=voice_mode_intent_detect prompt_name=voice_mode_intent_prompt chat_id={} user_id={} prompt_file={}",
+        "{} transport_prompt_use flow=voice_mode_intent_detect prompt_name=voice_mode_intent_prompt chat_id={} user_id={} prompt_source={}",
         transport_highlight_tag("transport_prompt"),
         chat_id,
         user_id,
-        VOICE_MODE_INTENT_PROMPT_PATH
+        VOICE_MODE_INTENT_PROMPT_LOGICAL_PATH
     );
     let prompt = render_voice_mode_intent_prompt(&state.voice_mode_intent_prompt_template, text);
     let task_id = match submit_task_only(
@@ -575,13 +586,13 @@ async fn main() -> anyhow::Result<()> {
     let voice_chat_prompt_template = load_prompt_template(
         &workspace_root,
         &prompt_vendor,
-        VOICE_CHAT_PROMPT_PATH,
+        VOICE_CHAT_PROMPT_LOGICAL_PATH,
         DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE,
     );
     let voice_mode_intent_prompt_template = load_prompt_template(
         &workspace_root,
         &prompt_vendor,
-        VOICE_MODE_INTENT_PROMPT_PATH,
+        VOICE_MODE_INTENT_PROMPT_LOGICAL_PATH,
         DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE,
     );
     let mut telegram_runtime_bots = config.telegram_runtime_bots();
@@ -2077,11 +2088,11 @@ async fn handle_audio_message(
         .map(|set| !set.contains(&msg.chat.id.0))
         .unwrap_or(true);
     info!(
-        "{} transport_prompt_use flow=voice_chat prompt_name=voice_chat_prompt chat_id={} user_id={} prompt_file={}",
+        "{} transport_prompt_use flow=voice_chat prompt_name=voice_chat_prompt chat_id={} user_id={} prompt_source={}",
         transport_highlight_tag("transport_prompt"),
         msg.chat.id.0,
         user_id,
-        VOICE_CHAT_PROMPT_PATH
+        VOICE_CHAT_PROMPT_LOGICAL_PATH
     );
     let ask_task_id = submit_task_only(
         state,
@@ -2449,23 +2460,9 @@ fn normalize_video_ext(ext: &str) -> String {
     }
 }
 
-fn normalize_prompt_vendor_name(raw: &str) -> String {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "anthropic" | "claude" => "claude".to_string(),
-        "google" | "gemini" => "google".to_string(),
-        "openai" => "openai".to_string(),
-        "grok" | "xai" => "grok".to_string(),
-        "deepseek" => "deepseek".to_string(),
-        "qwen" => "qwen".to_string(),
-        "minimax" => "minimax".to_string(),
-        "custom" => "openai".to_string(),
-        _ => "default".to_string(),
-    }
-}
-
 fn prompt_vendor_name_from_selected_vendor(selected_vendor: Option<&str>) -> String {
     selected_vendor
-        .map(normalize_prompt_vendor_name)
+        .map(prompt_layers::normalize_prompt_vendor_name)
         .unwrap_or_else(|| "default".to_string())
 }
 
@@ -2476,38 +2473,19 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-fn resolve_prompt_rel_path_for_vendor(
-    workspace_root: &Path,
-    vendor: &str,
-    rel_path: &str,
-) -> String {
-    let trimmed = rel_path.trim();
-    if trimmed.is_empty() || !trimmed.starts_with("prompts/") {
-        return trimmed.to_string();
-    }
-    let suffix = trimmed.trim_start_matches("prompts/");
-    let vendor_candidate = format!("prompts/vendors/{vendor}/{suffix}");
-    if workspace_root.join(&vendor_candidate).is_file() {
-        return vendor_candidate;
-    }
-    let default_candidate = format!("prompts/vendors/default/{suffix}");
-    if vendor != "default" && workspace_root.join(&default_candidate).is_file() {
-        return default_candidate;
-    }
-    trimmed.to_string()
-}
-
 fn load_prompt_template(
     workspace_root: &Path,
     prompt_vendor: &str,
     rel_path: &str,
     default_template: &str,
 ) -> String {
-    let resolved_path = resolve_prompt_rel_path_for_vendor(workspace_root, prompt_vendor, rel_path);
-    match fs::read_to_string(workspace_root.join(resolved_path)) {
-        Ok(s) if !s.trim().is_empty() => s,
-        _ => default_template.to_string(),
-    }
+    prompt_layers::load_prompt_template_for_vendor(
+        workspace_root,
+        prompt_vendor,
+        rel_path,
+        default_template,
+    )
+    .0
 }
 
 fn render_voice_chat_prompt(template: &str, transcript: &str) -> String {
@@ -2590,6 +2568,9 @@ async fn send_text_or_image(
     const VOICE_PREFIX: &str = "VOICE_FILE:";
     const EPHEMERAL_PREFIX: &str = "EPHEMERAL:";
     const EPHEMERAL_IMAGE_SAVED_TOKEN: &str = "EPHEMERAL:IMAGE_SAVED";
+    let parsed_buttons = extract_url_buttons_from_text(answer);
+    let answer = parsed_buttons.text_without_buttons.as_str();
+    let url_buttons = &parsed_buttons.buttons;
 
     let mut image_paths = dedupe_preserve_order(extract_prefixed_paths(answer, PREFIX));
     let explicit_file_tokens = dedupe_preserve_order(extract_prefixed_tokens(answer, FILE_PREFIX));
@@ -2640,9 +2621,20 @@ async fn send_text_or_image(
                 .to_string();
         }
         if !text_without_tokens.is_empty() {
-            let sent = send_telegram_text(bot, chat_id, &text_without_tokens)
+            let sent = if url_buttons.is_empty() {
+                send_telegram_text(bot, chat_id, &text_without_tokens)
+                    .await
+                    .context("send file preface text failed")?
+            } else {
+                send_telegram_text_with_url_buttons(
+                    bot,
+                    chat_id,
+                    &text_without_tokens,
+                    &url_buttons,
+                )
                 .await
-                .context("send file preface text failed")?;
+                .context("send file preface text with buttons failed")?
+            };
             debug!(
                 "phase=deliver_media_preface chat_id={} answer_fp={} telegram_msg_id={} text_preview={}",
                 chat_id.0,
@@ -2668,9 +2660,15 @@ async fn send_text_or_image(
             if let Some(inline_text) =
                 inline_single_small_text_file(&file_paths, &image_paths, &voice_paths)
             {
-                let sent = send_telegram_text(bot, chat_id, &inline_text)
-                    .await
-                    .context("send inline text file body failed")?;
+                let sent = if url_buttons.is_empty() {
+                    send_telegram_text(bot, chat_id, &inline_text)
+                        .await
+                        .context("send inline text file body failed")?
+                } else {
+                    send_telegram_text_with_url_buttons(bot, chat_id, &inline_text, &url_buttons)
+                        .await
+                        .context("send inline text file body with buttons failed")?
+                };
                 debug!(
                     "phase=deliver_inline_text_file chat_id={} answer_fp={} telegram_msg_id={} text_preview={}",
                     chat_id.0,
@@ -2717,9 +2715,15 @@ async fn send_text_or_image(
         return Ok(());
     }
 
-    let sent = send_telegram_text(bot, chat_id, answer)
-        .await
-        .context("send text message failed")?;
+    let sent = if url_buttons.is_empty() {
+        send_telegram_text(bot, chat_id, answer)
+            .await
+            .context("send text message failed")?
+    } else {
+        send_telegram_text_with_url_buttons(bot, chat_id, answer, &url_buttons)
+            .await
+            .context("send text message with buttons failed")?
+    };
     debug!(
         "phase=deliver_text chat_id={} answer_fp={} telegram_msg_id={} answer_preview={}",
         chat_id.0,
@@ -2829,6 +2833,54 @@ async fn send_telegram_text(bot: &Bot, chat_id: ChatId, text: &str) -> anyhow::R
             n
         );
         let req = bot.send_message(chat_id, body);
+        let req = if let Some(mode) = parse_mode {
+            req.parse_mode(mode)
+        } else {
+            req
+        };
+        let msg = req.await?;
+        last = Some(msg);
+    }
+    Ok(last.expect("chunks non-empty"))
+}
+
+async fn send_telegram_text_with_url_buttons(
+    bot: &Bot,
+    chat_id: ChatId,
+    text: &str,
+    buttons: &[UrlButtonSpec],
+) -> anyhow::Result<Message> {
+    let chunks = chunk_text_for_channel(
+        text,
+        TELEGRAM_TEXT_CHUNK_CHARS.saturating_sub(SEGMENT_PREFIX_MAX_CHARS),
+    );
+    if chunks.is_empty() {
+        return Err(anyhow::anyhow!("empty text"));
+    }
+    let Some(keyboard) = build_url_button_markup(buttons) else {
+        return send_telegram_text(bot, chat_id, text).await;
+    };
+    if chunks.len() == 1 {
+        let (body, parse_mode) = telegram_text_payload(&chunks[0]);
+        let req = bot.send_message(chat_id, body).reply_markup(keyboard);
+        let req = if let Some(mode) = parse_mode {
+            req.parse_mode(mode)
+        } else {
+            req
+        };
+        return Ok(req.await?);
+    }
+    let n = chunks.len();
+    let mut last = None;
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        let segment_text = format!("（{}/{}）\n{}", i + 1, n, chunk);
+        let (body, parse_mode) = telegram_text_payload(&segment_text);
+        let req = bot.send_message(chat_id, body);
+        let req = if i + 1 == n {
+            req.reply_markup(keyboard.clone())
+        } else {
+            req
+        };
         let req = if let Some(mode) = parse_mode {
             req.parse_mode(mode)
         } else {
@@ -4484,14 +4536,12 @@ async fn submit_task_only(
         "submit_task_only: url={} user_id={} chat_id={} kind={:?}",
         submit_url, user_id, chat_id, submit_req.kind
     );
-    let submit_resp = maybe_with_user_key_header(
-        state.client.post(&submit_url),
-        user_key_header.as_deref(),
-    )
-        .json(&submit_req)
-        .send()
-        .await
-        .context("submit task request failed")?;
+    let submit_resp =
+        maybe_with_user_key_header(state.client.post(&submit_url), user_key_header.as_deref())
+            .json(&submit_req)
+            .send()
+            .await
+            .context("submit task request failed")?;
 
     if !submit_resp.status().is_success() {
         let status = submit_resp.status();
@@ -4586,10 +4636,10 @@ async fn cancel_tasks_for_chat(
         state.client.post(&url),
         bound_user_key_for_chat(state, chat_id).as_deref(),
     )
-        .json(&payload)
-        .send()
-        .await
-        .context("request cancel tasks failed")?;
+    .json(&payload)
+    .send()
+    .await
+    .context("request cancel tasks failed")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -4619,9 +4669,9 @@ async fn fetch_status_text(state: &BotState, chat_id: i64) -> anyhow::Result<Str
         state.client.get(&url),
         bound_user_key_for_chat(state, chat_id).as_deref(),
     )
-        .send()
-        .await
-        .context("request health failed")?;
+    .send()
+    .await
+    .context("request health failed")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -4682,9 +4732,9 @@ async fn fetch_queue_length(state: &BotState, chat_id: i64) -> anyhow::Result<us
         state.client.get(&url),
         bound_user_key_for_chat(state, chat_id).as_deref(),
     )
-        .send()
-        .await
-        .context("request health failed")?;
+    .send()
+    .await
+    .context("request health failed")?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -4832,10 +4882,7 @@ fn persist_chat_voice_mode_to_config(
 }
 
 fn handle_openclaw_config_command(state: &BotState, text: &str) -> anyhow::Result<String> {
-    let cmd = text
-        .strip_prefix("/rustclaw")
-        .unwrap_or_default()
-        .trim();
+    let cmd = text.strip_prefix("/rustclaw").unwrap_or_default().trim();
     if cmd.is_empty() {
         return Ok(openclaw_usage_text(state));
     }

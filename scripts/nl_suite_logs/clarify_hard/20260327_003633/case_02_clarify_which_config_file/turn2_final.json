@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"8c18dae4-4c24-4582-90e4-3ddf15b58da8","status":"succeeded","result_json":{"messages":["{skill: read_file, path: \"/home/guagua/test/configs/app_config.toml\"}"],"text":"{skill: read_file, path: \"/home/guagua/test/configs/app_config.toml\"}"},"error_text":null},"error":null}

@@ -1,5 +1,0 @@
-# Focus rerun for previously wrong-logic cases (from context suite case_13/case_17/case_21)
-# Format: case_name|turn1|turn2|turn3
-context_colloquial_cn_send_config_alias|先记一下，“那份配置”就是 /home/guagua/test/configs/app_config.toml|那份配置直接发我，别贴正文|再一句话说主要用途
-context_ultra_cn_readme_alias|记住哈，“那玩意README”就是 /home/guagua/test/README.md|那玩意开头给我看两眼|最后一句话讲重点
-context_ultra_mixed_docs_alias|先记住，that folder 是 /home/guagua/test/docs|that folder names only|再回我总数，number only

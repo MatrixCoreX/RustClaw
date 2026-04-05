@@ -142,25 +142,53 @@ fn execute(
             .map_err(|e| format!("build http client failed: {e}"))?;
         match input.action.as_str() {
             "list" => {
-                let tasks =
-                    fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id, user_key.as_deref()).await?;
+                let tasks = fetch_active_tasks(
+                    &client,
+                    &base_url,
+                    user_id,
+                    chat_id,
+                    &request_id,
+                    user_key.as_deref(),
+                )
+                .await?;
                 Ok(render_task_list(&tasks))
             }
             "cancel_all" => {
-                let tasks =
-                    fetch_active_tasks(&client, &base_url, user_id, chat_id, &request_id, user_key.as_deref()).await?;
+                let tasks = fetch_active_tasks(
+                    &client,
+                    &base_url,
+                    user_id,
+                    chat_id,
+                    &request_id,
+                    user_key.as_deref(),
+                )
+                .await?;
                 if tasks.is_empty() {
                     return Ok("当前没有可结束的未完成任务。".to_string());
                 }
-                let canceled =
-                    cancel_all_tasks(&client, &base_url, user_id, chat_id, &request_id, user_key.as_deref()).await?;
+                let canceled = cancel_all_tasks(
+                    &client,
+                    &base_url,
+                    user_id,
+                    chat_id,
+                    &request_id,
+                    user_key.as_deref(),
+                )
+                .await?;
                 Ok(render_cancel_all(tasks, canceled))
             }
             "cancel_one" => {
                 let index = input.index.unwrap_or(0);
-                let task =
-                    cancel_one_task(&client, &base_url, user_id, chat_id, &request_id, index, user_key.as_deref())
-                        .await?;
+                let task = cancel_one_task(
+                    &client,
+                    &base_url,
+                    user_id,
+                    chat_id,
+                    &request_id,
+                    index,
+                    user_key.as_deref(),
+                )
+                .await?;
                 Ok(render_cancel_one(&task))
             }
             _ => Err("unsupported action".to_string()),
@@ -198,11 +226,15 @@ async fn fetch_active_tasks(
     exclude_task_id: &str,
     user_key: Option<&str>,
 ) -> Result<Vec<ActiveTaskItem>, String> {
-    let mut req = client.post(format!("{}/v1/tasks/active", base_url.trim_end_matches('/')));
+    let mut req = client.post(format!(
+        "{}/v1/tasks/active",
+        base_url.trim_end_matches('/')
+    ));
     if let Some(key) = user_key {
         req = req.header("x-rustclaw-key", key);
     }
-    let resp = req.json(&json!({
+    let resp = req
+        .json(&json!({
             "user_id": user_id,
             "chat_id": chat_id,
             "exclude_task_id": exclude_task_id,
@@ -224,11 +256,15 @@ async fn cancel_all_tasks(
     exclude_task_id: &str,
     user_key: Option<&str>,
 ) -> Result<usize, String> {
-    let mut req = client.post(format!("{}/v1/tasks/cancel", base_url.trim_end_matches('/')));
+    let mut req = client.post(format!(
+        "{}/v1/tasks/cancel",
+        base_url.trim_end_matches('/')
+    ));
     if let Some(key) = user_key {
         req = req.header("x-rustclaw-key", key);
     }
-    let resp = req.json(&json!({
+    let resp = req
+        .json(&json!({
             "user_id": user_id,
             "chat_id": chat_id,
             "exclude_task_id": exclude_task_id,
@@ -256,7 +292,8 @@ async fn cancel_one_task(
     if let Some(key) = user_key {
         req = req.header("x-rustclaw-key", key);
     }
-    let resp = req.json(&json!({
+    let resp = req
+        .json(&json!({
             "user_id": user_id,
             "chat_id": chat_id,
             "index": index,

@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::Deserialize;
+use serde_json::Value as JsonValue;
+use toml::Value as TomlValue;
 
 /// 技能类型：builtin（clawd 内执行）/ runner（skill-runner 子进程）/ 预留 external
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
@@ -28,6 +30,44 @@ pub enum OutputKind {
     Mixed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillRiskLevel {
+    #[default]
+    Unknown,
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PrimaryFallbackRole {
+    #[default]
+    None,
+    Primary,
+    Fallback,
+}
+
+#[derive(Debug, Clone)]
+pub struct SkillManifest {
+    pub name: String,
+    pub kind: SkillKind,
+    pub output_kind: OutputKind,
+    pub description: Option<String>,
+    pub prompt_file: Option<String>,
+    pub input_schema: Option<JsonValue>,
+    pub output_schema: Option<JsonValue>,
+    pub risk_level: Option<SkillRiskLevel>,
+    pub auto_invocable: Option<bool>,
+    pub requires_confirmation: Option<bool>,
+    pub side_effect: Option<bool>,
+    pub timeout_seconds: Option<u64>,
+    pub retryable: Option<bool>,
+    pub group: Option<String>,
+    pub primary_fallback_role: Option<PrimaryFallbackRole>,
+}
+
 /// 注册表中的单条技能定义
 #[derive(Debug, Clone, Deserialize)]
 pub struct SkillRegistryEntry {
@@ -46,6 +86,26 @@ pub struct SkillRegistryEntry {
     pub prompt_file: String,
     #[serde(default)]
     pub output_kind: OutputKind,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub input_schema: Option<TomlValue>,
+    #[serde(default)]
+    pub output_schema: Option<TomlValue>,
+    #[serde(default)]
+    pub risk_level: Option<SkillRiskLevel>,
+    #[serde(default)]
+    pub auto_invocable: Option<bool>,
+    #[serde(default)]
+    pub requires_confirmation: Option<bool>,
+    #[serde(default)]
+    pub side_effect: Option<bool>,
+    #[serde(default)]
+    pub retryable: Option<bool>,
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub primary_fallback_role: Option<PrimaryFallbackRole>,
 
     // ---------- Phase 5: 执行配置 ----------
     /// Runner 技能：在 runner 侧的执行名；未设则用 name。
@@ -87,6 +147,17 @@ pub struct SkillRegistryEntry {
 
 fn default_true() -> bool {
     true
+}
+
+fn trim_optional_string(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+}
+
+fn toml_value_to_json(value: &TomlValue) -> Option<JsonValue> {
+    serde_json::to_value(value).ok()
 }
 
 /// 整张技能注册表（通常从 TOML [[skills]] 加载）
@@ -272,6 +343,31 @@ impl SkillsRegistry {
             auth_ref: e.external_auth_ref.as_deref(),
         })
     }
+
+    pub fn manifest(&self, canonical_name: &str) -> Option<SkillManifest> {
+        let entry = self.get(canonical_name)?;
+        let timeout_seconds = entry
+            .external_timeout_seconds
+            .filter(|&t| t > 0)
+            .or_else(|| (entry.timeout_seconds > 0).then_some(entry.timeout_seconds));
+        Some(SkillManifest {
+            name: entry.name.clone(),
+            kind: entry.kind,
+            output_kind: entry.output_kind,
+            description: trim_optional_string(entry.description.as_deref()),
+            prompt_file: trim_optional_string(Some(entry.prompt_file.as_str())),
+            input_schema: entry.input_schema.as_ref().and_then(toml_value_to_json),
+            output_schema: entry.output_schema.as_ref().and_then(toml_value_to_json),
+            risk_level: entry.risk_level,
+            auto_invocable: entry.auto_invocable,
+            requires_confirmation: entry.requires_confirmation,
+            side_effect: entry.side_effect,
+            timeout_seconds,
+            retryable: entry.retryable,
+            group: trim_optional_string(entry.group.as_deref()),
+            primary_fallback_role: entry.primary_fallback_role,
+        })
+    }
 }
 
 /// Phase 5: External 技能执行配置（只读引用）
@@ -298,8 +394,11 @@ fn to_canonical_key(s: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Registry stores prompt_file as a logical path (e.g. prompts/skills/run_cmd.md).
-    /// Runtime in clawd resolves to prompts/vendors/<vendor>/skills/ or prompts/vendors/default/skills/ only.
+    /// Registry stores `prompt_file` as a logical path
+    /// (e.g. prompts/skills/run_cmd.md).
+    /// Runtime in clawd assembles skill prompts from
+    /// prompts/layers/generated/skills/<name>.md plus optional
+    /// prompts/layers/vendor_patches/<vendor>/skills/<name>.md.
     #[test]
     fn test_registry_resolve_and_timeout() {
         let toml = r#"
@@ -333,6 +432,64 @@ output_kind = "image"
         assert_eq!(reg.timeout_seconds("image_vision"), 90);
         assert!(reg.enabled_names().contains(&"run_cmd".to_string()));
         assert!(reg.enabled_names().contains(&"image_vision".to_string()));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_registry_manifest_view() {
+        let toml = r#"
+[[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+prompt_file = "prompts/skills/run_cmd.md"
+description = "Run a shell command"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = true
+group = "shell"
+primary_fallback_role = "primary"
+input_schema = { type = "object", required = ["command"] }
+output_schema = { type = "object", properties = { text = { type = "string" } } }
+"#;
+        let path = std::env::temp_dir().join("test_skills_manifest_registry.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path).unwrap();
+        let manifest = reg.manifest("run_cmd").unwrap();
+        assert_eq!(manifest.name, "run_cmd");
+        assert_eq!(manifest.description.as_deref(), Some("Run a shell command"));
+        assert_eq!(
+            manifest.prompt_file.as_deref(),
+            Some("prompts/skills/run_cmd.md")
+        );
+        assert_eq!(manifest.risk_level, Some(SkillRiskLevel::High));
+        assert_eq!(manifest.auto_invocable, Some(false));
+        assert_eq!(manifest.requires_confirmation, Some(true));
+        assert_eq!(manifest.side_effect, Some(true));
+        assert_eq!(manifest.retryable, Some(true));
+        assert_eq!(manifest.group.as_deref(), Some("shell"));
+        assert_eq!(
+            manifest.primary_fallback_role,
+            Some(PrimaryFallbackRole::Primary)
+        );
+        assert_eq!(
+            manifest
+                .input_schema
+                .as_ref()
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("object")
+        );
+        assert_eq!(
+            manifest
+                .output_schema
+                .as_ref()
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("object")
+        );
         let _ = std::fs::remove_file(path);
     }
 }

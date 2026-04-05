@@ -23,8 +23,9 @@
 5. 在 `configs/skills_registry.toml` 中新增一个 `[[skills]]`。
 6. 如需别名，只在 registry 的 `aliases` 中配置，不要优先改主程序 fallback。
 7. 如需自定义 runner 二进制名，只在 registry 中配置 `runner_name`。
-8. 在 `prompts/agent_tool_spec.md` 中补充该技能的参数契约。
-9. 运行 `python3 scripts/sync_skill_docs.py`，生成或更新 `prompts/vendors/default/skills/<skill_name>.md`。
+8. 在 `prompts/layers/overlays/agent_tool_spec.md` 中补充该技能的参数契约。
+9. 运行 `python3 scripts/sync_skill_docs.py`，生成或更新 `prompts/layers/generated/skills/<skill_name>.md`。
+10. 如需模型特化，只新增 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`，不要再维护旧的 vendor skill 全量副本。
 
 ## `skills_registry.toml` 最低要求
 - `name`
@@ -35,6 +36,7 @@
 - `prompt_file = "prompts/skills/<skill_name>.md"`
 - `output_kind`
 - 仅当二进制名不符合默认约定时，再额外配置 `runner_name`
+- 注意：这里的 `prompt_file` 是逻辑路径；运行时主体内容由 `scripts/sync_skill_docs.py` 生成到 `prompts/layers/generated/skills/<skill_name>.md`
 
 ## 技能进程协议
 - 必须遵循“单行 JSON stdin -> 单行 JSON stdout”。
@@ -59,6 +61,12 @@
 - `Parameter Contract`
 - `Error Contract`
 - 2 到 3 个请求/响应 JSON 示例
+
+## prompt 相关约定
+- 生成型 canonical skill prompt 位于 `prompts/layers/generated/skills/<skill_name>.md`
+- 规划器/工具总约束位于 `prompts/layers/overlays/agent_tool_spec.md`
+- 如需模型特化，只补 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`
+- 不要再假设存在旧路径 `prompts/agent_tool_spec.md`
 
 ## 主程序修改禁令
 除非满足以下任一条件，否则禁止修改主程序：

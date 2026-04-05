@@ -1,0 +1,6 @@
+ordinal=13
+source_line=18
+case_name=act_list_logs
+chat_id=1985997003
+task_id=8d8004c8-793f-45b0-8af2-3787ce6776f6
+prompt=列出 logs 目录下的前 10 个文件名，不要读内容

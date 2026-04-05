@@ -2,6 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 cd "$SCRIPT_DIR"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
@@ -26,10 +28,10 @@ fi
 
 PROFILE="${1:-${RUSTCLAW_START_PROFILE:-release}}"
 case "$PROFILE" in
-  release|debug)
+  release)
     ;;
   *)
-    echo "Usage: ./start-clawd.sh [release|debug]" # zh: 用法：./start-clawd.sh [release|debug]
+    echo "Usage: ./start-clawd.sh [release]" # zh: 用法：./start-clawd.sh [release]
     exit 1
     ;;
 esac
@@ -38,27 +40,15 @@ esac
 CLAWD_BIN="$SCRIPT_DIR/target/$PROFILE/clawd"
 if [[ ! -x "$CLAWD_BIN" ]]; then
   echo "clawd binary missing: $CLAWD_BIN"
-  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p clawd ${PROFILE:+--release}"
+  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p clawd --release"
   exit 1
 fi
 
 # Ensure skill-runner binary exists before starting clawd.
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
 if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
-  ALT_PROFILE="debug"
-  if [[ "$PROFILE" == "debug" ]]; then
-    ALT_PROFILE="release"
-  fi
-  ALT_RUNNER="$SCRIPT_DIR/target/$ALT_PROFILE/skill-runner"
-  if [[ -x "$ALT_RUNNER" ]]; then
-    echo "skill-runner missing in $PROFILE, fallback: $ALT_RUNNER" # zh: 当前 profile 未找到 skill-runner，回退到另一 profile。
-    SKILL_RUNNER_ABS="$ALT_RUNNER"
-  fi
-fi
-
-if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
   echo "skill-runner missing: $SKILL_RUNNER_ABS" # zh: 未找到 skill-runner
-  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p skill-runner ${PROFILE:+--release}"
+  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p skill-runner --release"
   exit 1
 fi
 
@@ -126,7 +116,7 @@ PY
     exit 1
   fi
 
-  mapfile -t PROVIDERS <<<"$PROVIDER_ROWS"
+  array_from_string_lines PROVIDERS "$PROVIDER_ROWS"
   for row in "${PROVIDERS[@]}"; do
     IFS='|' read -r idx vendor model marker <<<"$row"
     echo "  ${idx}) ${vendor} | ${model}${marker}"

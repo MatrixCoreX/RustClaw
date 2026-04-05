@@ -1,0 +1,36 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_manual_targeted_case5.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_222803
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_222803/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_222803/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985997600
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        line_001
+[CHAT]        1985997601
+[PROMPT]      扫一眼 README 前 20 行，再提炼成 3 句话
+[TASK]        5fd1f936-f9e9-4c31-8cbd-3a4786413fa2
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] step 2 failed (skill(chat)): chat skill llm failed status=400 Bad Request: {"type":"error","error":{"type":"bad_request_error","message":"invalid params, invalid chat setting (2013)","http_code":"400"},"request_id":"0620533ddddb5077a1c342572f138ad3"}
+  [text] step 2 failed (skill(chat)): chat skill llm failed status=400 Bad Request: {"type":"error","error":{"type":"bad_request_error","message":"invalid params, invalid chat setting (2013)","http_code":"400"},"request_id":"0620...(truncated)
+
+================ Final Summary ================
+TOTAL_CASES=1 SUCCEEDED=0 FAILED=1 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_222803
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_222803/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_222803/summary.jsonl

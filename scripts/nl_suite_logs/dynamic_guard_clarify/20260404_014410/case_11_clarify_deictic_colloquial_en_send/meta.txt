@@ -1,0 +1,7 @@
+index=11
+case_name=clarify_deictic_colloquial_en_send
+chat_id=17752372492
+turn1_task_id=640aa4a0-9ffc-4d6c-9951-a918477651e1
+turn1_prompt=Can you shoot me that config file real quick, no paste?
+turn2_task_id=1de5fa03-caa8-4524-8811-51ddbc4ef37a
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml

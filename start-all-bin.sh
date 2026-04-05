@@ -30,13 +30,13 @@ if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
 fi
 
 # Usage:
-#   ./start-all-bin.sh [release|debug]
+#   ./start-all-bin.sh [release]
 PROFILE="${1:-release}"
 case "$PROFILE" in
-  release|debug)
+  release)
     ;;
   *)
-    echo "Usage: ./start-all-bin.sh [release|debug]  # default: release" # zh: 用法：./start-all-bin.sh [release|debug]，默认 release
+    echo "Usage: ./start-all-bin.sh [release]  # default: release" # zh: 用法：./start-all-bin.sh [release]，默认 release
     exit 1
     ;;
 esac
@@ -63,18 +63,6 @@ fi
 
 # Ensure skill-runner binary exists for run_skill tasks.
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/$PROFILE/skill-runner"
-if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
-  ALT_PROFILE="debug"
-  if [[ "$PROFILE" == "debug" ]]; then
-    ALT_PROFILE="release"
-  fi
-  ALT_RUNNER="$SCRIPT_DIR/target/$ALT_PROFILE/skill-runner"
-  if [[ -x "$ALT_RUNNER" ]]; then
-    echo "skill-runner missing in $PROFILE, fallback: $ALT_RUNNER" # zh: 当前 profile 未找到 skill-runner，回退到另一 profile。
-    SKILL_RUNNER_ABS="$ALT_RUNNER"
-  fi
-fi
-
 if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
   echo "skill-runner missing: $SKILL_RUNNER_ABS" # zh: 未找到 skill-runner
   echo "Copy built binary to target/$PROFILE/ or run: ./build-all.sh $PROFILE"

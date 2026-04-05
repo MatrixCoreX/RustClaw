@@ -2270,13 +2270,9 @@ async fn handle_incoming_message(state: State, msg: WeixinMessage) {
     };
 
     if extract_text_message(&msg).is_none() {
-        let Some(identity) = ensure_bound_before_task(
-            &state,
-            &from_user_id,
-            msg.context_token.as_deref(),
-            None,
-        )
-        .await
+        let Some(identity) =
+            ensure_bound_before_task(&state, &from_user_id, msg.context_token.as_deref(), None)
+                .await
         else {
             return;
         };
@@ -2923,7 +2919,10 @@ mod tests {
 
     #[test]
     fn waiting_key_state_rejects_non_binding_commands() {
-        assert_eq!(extract_bind_key_candidate("/run image_vision {}", true), None);
+        assert_eq!(
+            extract_bind_key_candidate("/run image_vision {}", true),
+            None
+        );
         assert_eq!(extract_bind_key_candidate("/crypto btc", true), None);
     }
 

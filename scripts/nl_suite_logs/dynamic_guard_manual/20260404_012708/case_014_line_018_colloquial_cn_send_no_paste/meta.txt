@@ -1,0 +1,6 @@
+ordinal=14
+source_line=18
+case_name=colloquial_cn_send_no_paste
+chat_id=17752372395
+task_id=a8d58863-53c9-46ec-9841-08b9e459b4c6
+prompt=别贴正文，直接把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md 丢给我

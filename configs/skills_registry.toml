@@ -10,6 +10,13 @@ aliases = ["shell", "exec"]
 timeout_seconds = 60
 prompt_file = "prompts/skills/run_cmd.md"
 output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = true
+input_schema = { type = "object", required = ["command"], properties = { command = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "read_file"
@@ -19,6 +26,12 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/read_file.md"
 output_kind = "text"
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "write_file"
@@ -28,6 +41,13 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/write_file.md"
 output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
+input_schema = { type = "object", required = ["path", "content"], properties = { path = { type = "string" }, content = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "list_dir"
@@ -64,6 +84,13 @@ aliases = ["schedule_compile", "timer_compile"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/schedule.md"
 output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "x"
@@ -82,6 +109,11 @@ aliases = ["system", "system_query"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/system_basic.md"
 output_kind = "text"
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "http_basic"
@@ -226,6 +258,11 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/health_check.md"
 output_kind = "text"
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "log_analyze"
@@ -297,6 +334,15 @@ kind = "runner"
 aliases = ["天气", "weather_query", "查天气"]
 timeout_seconds = 15
 prompt_file = "prompts/skills/weather.md"
+output_kind = "text"
+
+[[skills]]
+name = "map_merchant"
+enabled = true
+kind = "runner"
+aliases = ["地图商户", "商户推荐", "附近商户", "高德地图", "高德商户", "高德商户推荐", "高德附近商户", "谷歌地图商户", "google地图商户"]
+timeout_seconds = 20
+prompt_file = "prompts/skills/map_merchant.md"
 output_kind = "text"
 
 # Phase 5 示例（可选）：

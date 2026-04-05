@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"bc2011d3-51a6-476c-bf84-bf933673d938","status":"succeeded","result_json":{"text":"这是一个测试工作空间的说明文件。\n\n核心要点：\n- 目录用途：存放自然语言回归测试的产物和脚本\n- runner的输入和日志可放在这里\n- 修改此目录不会改变clawd运行时的工作目录——它仍使用自身配置的workspace root"},"error_text":null},"error":null}

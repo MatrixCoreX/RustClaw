@@ -1,0 +1,30 @@
+NL multi-turn suite: clarify
+  run_dir:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260405_121309
+  run_log:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260405_121309/run.log
+  case_file:  /tmp/nl_clarify_case_scalar.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1986009000
+
+============================================================
+[CASE]   1
+[NAME]   clarify_read_scalar_from_which_file
+[CHAT]   1986009001
+[TURN1]  读一下那个文件里的名字字段，只输出值
+[TASK1]  0a1f3d1e-c6a9-44db-b60a-b2f0a9248d8f
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  「那个文件」未找到，请提供完整路径。
+[TURN2]  package.json
+[TASK2]  4920e1ff-4baf-48d3-85bd-0e51bb5826f9
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  name 字段不存在
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260405_121309
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260405_121309/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260405_121309/summary.jsonl

@@ -1,0 +1,6 @@
+ordinal=13
+source_line=18
+case_name=act_read_readme_head
+chat_id=1985997003
+task_id=0029906c-6359-4244-a5e7-445a80ea4928
+prompt=读取 README 的前 20 行并做 3 句话总结

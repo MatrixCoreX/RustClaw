@@ -33,8 +33,7 @@ const WA_I18N_BIND_SUCCESS_KEY: &str = "whatsapp_cloud.msg.bind_success";
 const WA_I18N_BIND_INVALID_KEY: &str = "whatsapp_cloud.msg.bind_invalid";
 const WA_I18N_BIND_HELP_KEY: &str = "whatsapp_cloud.msg.bind_help";
 const WA_I18N_RUN_USAGE_KEY: &str = "whatsapp_cloud.msg.run_usage";
-const WA_I18N_PROCESS_FAILED_WITH_ERROR_KEY: &str =
-    "whatsapp_cloud.msg.process_failed_with_error";
+const WA_I18N_PROCESS_FAILED_WITH_ERROR_KEY: &str = "whatsapp_cloud.msg.process_failed_with_error";
 const WA_I18N_TASK_DONE_FALLBACK_TEXT_KEY: &str = "whatsapp_cloud.msg.task_done_fallback_text";
 const WA_I18N_TASK_FAILED_FALLBACK_ERROR_KEY: &str =
     "whatsapp_cloud.msg.task_failed_fallback_error";

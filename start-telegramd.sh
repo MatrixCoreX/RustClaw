@@ -15,10 +15,10 @@ fi
 
 PROFILE="${1:-${RUSTCLAW_START_PROFILE:-release}}"
 case "$PROFILE" in
-  release|debug)
+  release)
     ;;
   *)
-    echo "Usage: ./start-telegramd.sh [release|debug]" # zh: 用法：./start-telegramd.sh [release|debug]
+    echo "Usage: ./start-telegramd.sh [release]" # zh: 用法：./start-telegramd.sh [release]
     exit 1
     ;;
 esac
@@ -27,7 +27,7 @@ BIN_NAME="telegramd"
 BIN_PATH="$SCRIPT_DIR/target/$PROFILE/$BIN_NAME"
 if [[ ! -x "$BIN_PATH" ]]; then
   echo "Binary missing: $BIN_PATH" # zh: 未找到二进制：$BIN_PATH
-  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p $BIN_NAME ${PROFILE:+--release}"
+  echo "Copy built binary to target/$PROFILE/ or run: cargo build -p $BIN_NAME --release"
   exit 1
 fi
 

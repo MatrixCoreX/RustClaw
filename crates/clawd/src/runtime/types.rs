@@ -22,6 +22,10 @@ pub(crate) struct AskReply {
     pub(crate) text: String,
     pub(crate) messages: Vec<String>,
     pub(crate) is_llm_reply: bool,
+    pub(crate) task_journal: Option<crate::task_journal::TaskJournal>,
+    pub(crate) should_fail_task: bool,
+    pub(crate) error_text: Option<String>,
+    pub(crate) resume_context: Option<Value>,
 }
 
 impl AskReply {
@@ -30,6 +34,10 @@ impl AskReply {
             text,
             messages: Vec::new(),
             is_llm_reply: true,
+            task_journal: None,
+            should_fail_task: false,
+            error_text: None,
+            resume_context: None,
         }
     }
 
@@ -38,11 +46,34 @@ impl AskReply {
             text,
             messages: Vec::new(),
             is_llm_reply: false,
+            task_journal: None,
+            should_fail_task: false,
+            error_text: None,
+            resume_context: None,
         }
     }
 
     pub(crate) fn with_messages(mut self, messages: Vec<String>) -> Self {
         self.messages = messages;
+        self
+    }
+
+    pub(crate) fn with_task_journal(
+        mut self,
+        task_journal: crate::task_journal::TaskJournal,
+    ) -> Self {
+        self.task_journal = Some(task_journal);
+        self
+    }
+
+    pub(crate) fn with_failure(mut self, error_text: impl Into<String>) -> Self {
+        self.should_fail_task = true;
+        self.error_text = Some(error_text.into());
+        self
+    }
+
+    pub(crate) fn with_resume_context(mut self, resume_context: Value) -> Self {
+        self.resume_context = Some(resume_context);
         self
     }
 }
@@ -75,6 +106,17 @@ pub(crate) enum RoutedMode {
     AskClarify,
 }
 
+impl RoutedMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "Chat",
+            Self::Act => "Act",
+            Self::ChatAct => "ChatAct",
+            Self::AskClarify => "AskClarify",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct CommandIntentRules {}
 
@@ -82,13 +124,14 @@ pub(crate) struct CommandIntentRules {}
 pub(crate) struct CommandIntentRuntime {
     pub(crate) all_result_suffixes: Vec<String>,
     pub(crate) default_locale: String,
+    pub(crate) verify_enforce_enabled: bool,
 }
 
 #[derive(Clone)]
 pub(crate) struct ScheduleRuntime {
     pub(crate) timezone: String,
     pub(crate) intent_prompt_template: String,
-    pub(crate) intent_prompt_file: String,
+    pub(crate) intent_prompt_source: String,
     pub(crate) intent_rules_template: String,
     pub(crate) locale: String,
     pub(crate) i18n_dict: HashMap<String, String>,

@@ -1,9 +1,0 @@
-index=14
-case_name=context_colloquial_en_readme_alias
-chat_id=17746743795
-turn1_task_id=6469ab15-f1da-42a0-8a54-08288276ca81
-turn1_prompt=Quick note: when I say "that README", I mean /home/guagua/test/README.md
-turn2_task_id=fe3a29e7-3954-4f48-84bc-5d0a3948c491
-turn2_prompt=Could you read that README header for me?
-turn3_task_id=d601fde6-e522-4a49-91cf-1a6a0efc9567
-turn3_prompt=Then give me a one-line summary.

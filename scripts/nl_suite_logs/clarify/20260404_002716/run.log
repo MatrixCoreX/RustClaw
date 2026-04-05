@@ -1,0 +1,48 @@
+NL multi-turn suite: clarify
+  run_dir:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_002716
+  run_log:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_002716/run.log
+  case_file:  /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_clarify.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985996990
+
+============================================================
+[CASE]   1
+[NAME]   clarify_send_file_by_name
+[CHAT]   1985996991
+[TURN1]  把文件发给我
+[TASK1]  7f14aec4-396b-4776-9433-444b806f478f
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我您想发送哪个文件的完整路径？
+[TURN2]  README.md
+[TASK2]  32c2f8f8-56d4-49d2-bd92-959efb7495f8
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/tmp/rustclaw-workspace/README.md
+
+============================================================
+[CASE]   2
+[NAME]   clarify_send_file_by_path
+[CHAT]   1985996992
+[TURN1]  把那个配置文件发给我
+[TASK1]  762dbb68-eb59-488d-97c2-556d8e41c969
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  我没找到那个配置文件，请提供完整路径。
+[TURN2]  configs/config.toml
+[TASK2]  6debcceb-7ccb-4922-a71e-2c46b8a822bf
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/tmp/rustclaw-workspace/configs/config.toml
+
+============================================================
+[CASE]   3
+[NAME]   clarify_read_scalar_from_which_file
+[CHAT]   1985996993
+[TURN1]  读一下那个文件里的名字字段，只输出值
+[TASK1]  e8693994-fac5-4e9d-bb79-212c5c829c85
+  [status] <none> -> running

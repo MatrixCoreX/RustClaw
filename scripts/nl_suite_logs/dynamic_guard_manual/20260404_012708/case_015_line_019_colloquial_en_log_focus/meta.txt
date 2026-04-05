@@ -1,0 +1,6 @@
+ordinal=15
+source_line=19
+case_name=colloquial_en_log_focus
+chat_id=17752372396
+task_id=145d0a1b-bc3c-4f04-b6fc-d5d8bdffc069
+prompt=Could you quickly tail /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log for 9 lines and give me a one-liner takeaway?

@@ -1,0 +1,6 @@
+ordinal=14
+source_line=19
+case_name=act_read_agents_head
+chat_id=1985997004
+task_id=0ecdbc1e-7ad2-4870-b24f-dfff274caaeb
+prompt=读取 AGENTS.md 前 30 行，提炼 3 条最重要规则

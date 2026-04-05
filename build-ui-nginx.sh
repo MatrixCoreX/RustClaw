@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 编译 UI（npm run build 默认输出目录）并复制到 nginx 目录。
 # 参数：--build 仅编译；--deploy / --copy 仅复制；默认先编译再复制。
-# 可选：--path /path/to/nginx/root 指定 nginx 站点根（默认 /var/www/html/rustclaw）。
+# 可选：--path /path/to/nginx/root 指定 nginx 站点根。
 
 set -e
 
@@ -11,11 +11,58 @@ UI_DIR="$SCRIPT_DIR/UI"
 # npm run build 在 UI 下的默认输出目录（Vite 默认 dist）
 DIST_DIR="$UI_DIR/dist"
 BUILD_STAMP_FILE="$DIST_DIR/.rustclaw-ui-build-fingerprint"
-NGINX_ROOT_DEFAULT="/var/www/html/rustclaw"
+OS_NAME="$(uname -s)"
+
+default_nginx_root() {
+  if [[ "$OS_NAME" == "Darwin" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      local brew_prefix
+      brew_prefix="$(brew --prefix 2>/dev/null || true)"
+      if [[ -n "$brew_prefix" ]]; then
+        printf '%s\n' "$brew_prefix/var/www/rustclaw"
+        return
+      fi
+    fi
+
+    if [[ -d "/opt/homebrew/var/www" ]]; then
+      printf '%s\n' "/opt/homebrew/var/www/rustclaw"
+      return
+    fi
+    if [[ -d "/usr/local/var/www" ]]; then
+      printf '%s\n' "/usr/local/var/www/rustclaw"
+      return
+    fi
+  fi
+
+  printf '%s\n' "/var/www/html/rustclaw"
+}
+
+NGINX_ROOT_DEFAULT="$(default_nginx_root)"
 
 DO_BUILD=""
 DO_DEPLOY=""
 NGINX_ROOT="$NGINX_ROOT_DEFAULT"
+
+ui_deps_healthy() {
+  local vite_pkg_bin="$UI_DIR/node_modules/vite/bin/vite.js"
+  local vite_cli="$UI_DIR/node_modules/vite/dist/node/cli.js"
+
+  [[ -f "$vite_pkg_bin" ]] || return 1
+  [[ -f "$vite_cli" ]] || return 1
+}
+
+ensure_ui_deps() {
+  if [[ ! -d "$UI_DIR/node_modules" ]]; then
+    echo "Installing UI dependencies..."
+    (cd "$UI_DIR" && npm install --prefer-offline --no-audit --no-fund)
+    return
+  fi
+
+  if ! ui_deps_healthy; then
+    echo "UI dependencies look inconsistent; reinstalling..."
+    (cd "$UI_DIR" && npm install --prefer-offline --no-audit --no-fund)
+  fi
+}
 
 usage() {
   echo "Usage: $0 [--build] [--deploy|--copy] [--path DIR]"
@@ -81,6 +128,31 @@ compute_ui_build_fingerprint() {
   hash_file "$manifest"
 }
 
+reload_nginx() {
+  echo "Reloading nginx..."
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl reload nginx
+    echo "Nginx reloaded via systemctl."
+    return
+  fi
+
+  if command -v nginx >/dev/null 2>&1; then
+    sudo nginx -s reload
+    echo "Nginx reloaded via nginx -s reload."
+    return
+  fi
+
+  if [[ "$OS_NAME" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
+    if brew services restart nginx >/dev/null 2>&1; then
+      echo "Nginx restarted via brew services."
+      return
+    fi
+  fi
+
+  echo "Warning: nginx reload skipped. Please reload nginx manually."
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --build)
@@ -122,10 +194,7 @@ if [[ -n "$DO_BUILD" ]]; then
     echo "Error: npm not found. Install Node.js/npm first."
     exit 1
   fi
-  if [[ ! -d "$UI_DIR/node_modules" ]]; then
-    echo "Installing UI dependencies..."
-    (cd "$UI_DIR" && npm install)
-  fi
+  ensure_ui_deps
   CURRENT_FINGERPRINT="$(compute_ui_build_fingerprint)"
   if [[ -f "$DIST_DIR/index.html" ]] && [[ -f "$BUILD_STAMP_FILE" ]]; then
     LAST_FINGERPRINT="$(tr -d '\r\n' < "$BUILD_STAMP_FILE")"
@@ -154,14 +223,13 @@ if [[ -n "$DO_DEPLOY" ]]; then
   fi
   if [[ -w "$NGINX_ROOT" ]]; then
     mkdir -p "$NGINX_ROOT"
-    cp -r "$DIST_DIR/"* "$NGINX_ROOT/"
+    cp -R "$DIST_DIR/." "$NGINX_ROOT/"
     echo "Copied UI to $NGINX_ROOT (no sudo)."
   else
     sudo mkdir -p "$NGINX_ROOT"
-    sudo cp -r "$DIST_DIR/"* "$NGINX_ROOT/"
+    sudo cp -R "$DIST_DIR/." "$NGINX_ROOT/"
     echo "Copied UI to $NGINX_ROOT (sudo)."
   fi
-  echo "Reloading nginx..."
-  sudo systemctl reload nginx
+  reload_nginx
   echo "Deploy done."
 fi

@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"8263bd0d-a2f6-42ed-8c15-27f880705d17","status":"succeeded","result_json":{"messages":["成功解压 test_bundle.zip 到 manual_dynamic_guard_unpack，提取了以下文件：\n- file_one.txt\n- file_two.txt"],"text":"成功解压 test_bundle.zip 到 manual_dynamic_guard_unpack，提取了以下文件：\n- file_one.txt\n- file_two.txt"},"error_text":null},"error":null}

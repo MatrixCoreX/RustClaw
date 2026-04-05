@@ -1,7 +1,0 @@
-index=1
-case_name=clarify_which_readme
-chat_id=1985996991
-turn1_task_id=37ebca6c-f20b-4f15-9ecd-96b78b4b28a5
-turn1_prompt=读一下那个 README 开头并用一句话总结
-turn2_task_id=9cbd0d06-9923-4c2a-99cf-de26a76d7d1d
-turn2_prompt=/home/guagua/test/README.md

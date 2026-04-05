@@ -1,0 +1,6 @@
+ordinal=20
+source_line=24
+case_name=colloquial_cn_config_purpose
+chat_id=17752372401
+task_id=a2511099-dd0a-4970-ab8b-12fcdef0e35e
+prompt=瞅一眼 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml，然后用一句人话说它是干嘛的

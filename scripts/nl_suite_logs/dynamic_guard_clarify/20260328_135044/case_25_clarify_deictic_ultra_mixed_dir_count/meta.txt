@@ -1,7 +1,0 @@
-index=25
-case_name=clarify_deictic_ultra_mixed_dir_count
-chat_id=17746743706
-turn1_task_id=06e86bcf-81fa-4499-9183-5dab60a85712
-turn1_prompt=that docs 目录有几个直接子项，只回数字
-turn2_task_id=57928f33-447a-4bee-a3a8-48942a0de986
-turn2_prompt=/home/guagua/test/docs

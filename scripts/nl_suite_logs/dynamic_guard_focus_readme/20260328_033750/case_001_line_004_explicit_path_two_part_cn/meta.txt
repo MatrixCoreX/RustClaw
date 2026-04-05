@@ -1,6 +1,0 @@
-ordinal=1
-source_line=4
-case_name=explicit_path_two_part_cn
-chat_id=17746452002
-task_id=ffd9d346-587c-48fc-ab5e-1d7440428d75
-prompt=先读 /home/guagua/test/README.md 开头，再用一句话总结

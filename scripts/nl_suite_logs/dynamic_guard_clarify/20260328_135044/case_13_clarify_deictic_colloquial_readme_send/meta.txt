@@ -1,7 +1,0 @@
-index=13
-case_name=clarify_deictic_colloquial_readme_send
-chat_id=17746743694
-turn1_task_id=bb52ecf5-81d5-4441-8ef4-902fb7bb4506
-turn1_prompt=那个 README 直接发我呗，别贴正文
-turn2_task_id=c8c4e867-3b65-4f71-94e9-b79be144d235
-turn2_prompt=/home/guagua/test/README.md

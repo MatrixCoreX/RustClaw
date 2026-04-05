@@ -1,0 +1,6 @@
+ordinal=16
+source_line=20
+case_name=mixed_request_cn_semantic
+chat_id=1985997006
+task_id=be53b541-cf14-458d-a72e-1e535a5a128a
+prompt=先看看当前目录有哪些顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么组织

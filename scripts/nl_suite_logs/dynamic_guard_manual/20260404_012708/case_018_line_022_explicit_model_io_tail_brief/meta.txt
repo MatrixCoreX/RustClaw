@@ -1,0 +1,6 @@
+ordinal=18
+source_line=22
+case_name=explicit_model_io_tail_brief
+chat_id=17752372399
+task_id=a56fe138-b749-438f-bb59-e342104a1314
+prompt=看一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/model_io.log 最后 5 行，再一句话说有什么现象

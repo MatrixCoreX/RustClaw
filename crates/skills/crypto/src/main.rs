@@ -804,7 +804,13 @@ fn execute(
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
-        .unwrap_or("quote");
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(if obj.contains_key("symbols") {
+            "price"
+        } else {
+            "quote"
+        });
     let action = normalize_crypto_dispatch_action(action, obj);
     if cfg
         .crypto
@@ -5011,6 +5017,20 @@ mod tests {
         assert_eq!(
             normalize_crypto_dispatch_action("price", &multi),
             "multi_quote"
+        );
+    }
+
+    #[test]
+    fn missing_action_defaults_to_multi_quote_when_symbols_present() {
+        let cfg = RootConfig::default();
+        let args = json!({
+            "symbols": ["BTC", "ETH", "DOGE"],
+            "timeout_seconds": 3
+        });
+        let out = execute(&cfg, args, None);
+        assert!(
+            !matches!(&out, Err(err) if err == "symbol is required"),
+            "missing action with symbols should not fall back to single-symbol quote"
         );
     }
 

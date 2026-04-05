@@ -59,8 +59,8 @@ This file is for all agents working in this repository. The goal is to standardi
    `call_skill` goes through `execution_adapters::run_skill()` -> `run_skill_with_runner()`.
 5. `run_skill_with_runner()` 启动 `skill-runner` 子进程，STDIN/STDOUT 传一行 JSON。  
    `run_skill_with_runner()` launches `skill-runner`, passing one-line JSON over STDIN/STDOUT.
-6. `skill-runner` 根据 `skill_name` 按约定推导具体技能二进制（默认 `foo_bar` -> `target/debug|release/foo-bar-skill`；若 registry 配了 `runner_name` 则优先用它）。  
-   `skill-runner` derives the concrete skill binary from `skill_name` by convention (default `foo_bar` -> `target/debug|release/foo-bar-skill`; if registry sets `runner_name`, that takes precedence).
+6. `skill-runner` 根据 `skill_name` 按约定推导具体技能二进制（默认 `foo_bar` -> `target/release/foo-bar-skill`；若 registry 配了 `runner_name` 则优先用它）。  
+   `skill-runner` derives the concrete skill binary from `skill_name` by convention (default `foo_bar` -> `target/release/foo-bar-skill`; if registry sets `runner_name`, that takes precedence).
 7. 技能进程读取请求 JSON，输出响应 JSON，回传 `clawd` 汇总为任务结果。  
    The skill process reads request JSON, writes response JSON, and returns it to `clawd` for task result aggregation.
 
@@ -90,6 +90,8 @@ Skill binaries must use “single-line JSON stdin -> single-line JSON stdout”.
   On failure, return `status=error` and a readable `error_text`.
 - 不得阻塞不退出（遵循 `SKILL_TIMEOUT_SECONDS` 预期）。  
   Do not hang indefinitely; respect `SKILL_TIMEOUT_SECONDS` expectations.
+- 基础 skill 的 `text/extra/error_text` 响应约定、推荐字段名与当前门禁范围，见 [docs/base_skill_response_contract.md](/home/guagua/git_upload/docs/base_skill_response_contract.md)。  
+  For base-skill response conventions, preferred `extra` field names, and the current gated set, see [docs/base_skill_response_contract.md](/home/guagua/git_upload/docs/base_skill_response_contract.md).
 
 ## 3) New Skill Integration Checklist / 新技能接入清单（全部完成才算可用）
 
@@ -106,8 +108,8 @@ When adding a new skill `foo_bar`, all of the following are required:
    Register aliases (optional but recommended): prefer `aliases` in `configs/skills_registry.toml`; `canonical_skill_name()` in `crates/clawd/src/main.rs` is compatibility fallback only when no registry is used.
 5. 加入 agent 技能认知 / Add agent skill awareness:
  - `crates/skills/foo_bar/INTERFACE.md`
- - 运行 `python3 scripts/sync_skill_docs.py`，生成/更新 `prompts/vendors/default/skills/foo_bar.md`
- - 在 `configs/skills_registry.toml` 中为该技能配置 `prompt_file = "prompts/skills/foo_bar.md"`
+ - 运行 `python3 scripts/sync_skill_docs.py`，生成/更新 `prompts/layers/generated/skills/foo_bar.md`
+- 在 `configs/skills_registry.toml` 中为该技能配置 `prompt_file = "prompts/skills/foo_bar.md"`（逻辑路径；运行时主体读取 `prompts/layers/generated/skills/foo_bar.md`，如有模型差异再叠加 `prompts/layers/vendor_patches/<vendor>/skills/foo_bar.md`）
  - `prompts/agent_tool_spec.md` 增加该技能参数契约
 6. 配置基线 / Config baseline:
    - `crates/claw-core/src/config.rs` 的默认 `skills_list`（按需要）  
@@ -126,6 +128,8 @@ When adding a new skill `foo_bar`, all of the following are required:
        Required/optional params, types, defaults per action
      - 错误码或错误文本约定 / Error contract
      - 2~3 个请求/响应 JSON 示例 / 2-3 request/response JSON examples
+   - 若是基础 skill 或计划做机器可读响应，额外参考 [docs/base_skill_response_contract.md](/home/guagua/git_upload/docs/base_skill_response_contract.md)。  
+     If this is a base skill or is expected to expose machine-readable success payloads, also follow [docs/base_skill_response_contract.md](/home/guagua/git_upload/docs/base_skill_response_contract.md).
 9. 使用自动同步脚本维护技能文档：`python3 scripts/sync_skill_docs.py`。  
    Use the auto-sync script to maintain skill docs: `python3 scripts/sync_skill_docs.py`.
    - 技能发现目录 / Skill discovery roots:
@@ -133,16 +137,17 @@ When adding a new skill `foo_bar`, all of the following are required:
      - `external_skills/*`（外部提交技能 / externally submitted skills）
    - 新 skill 目录（`crates/skills/<skill>`）出现时，自动创建：
      - `crates/skills/<skill>/INTERFACE.md`
-     - `prompts/skills/<skill>.md`
+    - `prompts/layers/generated/skills/<skill>.md`
    - 新外部 skill 目录（`external_skills/<skill>`）出现时，自动创建：
-     - `prompts/skills/<skill>.md`（前提：开发者已提供 `external_skills/<skill>/INTERFACE.md`）
+    - `prompts/layers/generated/skills/<skill>.md`（前提：开发者已提供 `external_skills/<skill>/INTERFACE.md`）
    - 对外部技能强制门禁 / Hard gate for external skills:
      - 若缺少 `external_skills/<skill>/INTERFACE.md`，同步脚本会报错并返回非 0（可直接用于 CI 阻断）。
      - If `external_skills/<skill>/INTERFACE.md` is missing, sync exits non-zero and can be used as a CI blocker.
-   - skill 目录删除时，自动删除 `prompts/skills/<skill>.md`。
+  - skill 目录删除时，自动删除 `prompts/layers/generated/skills/<skill>.md`。
    - skill 仅关闭（`skill_switches=false`）时，不删除任何 md（保持提示词兼容与回滚能力）。
-   - `prompts/skills/<skill>.md` 采用受控自动生成模式：包含 `<!-- AUTO-GENERATED: sync_skill_docs.py -->` 标记的文件会在同步时自动更新；无标记文件视为手工维护，不会被覆盖。  
-     `prompts/skills/<skill>.md` uses controlled auto-generation: files containing `<!-- AUTO-GENERATED: sync_skill_docs.py -->` are updated on sync; files without the marker are treated as manually maintained and are not overwritten.
+  - `prompts/layers/generated/skills/<skill>.md` 采用受控自动生成模式：包含 `<!-- AUTO-GENERATED: sync_skill_docs.py -->` 标记的文件会在同步时自动更新；无标记文件视为手工维护，不会被覆盖。  
+    `prompts/layers/generated/skills/<skill>.md` uses controlled auto-generation: files containing `<!-- AUTO-GENERATED: sync_skill_docs.py -->` are updated on sync; files without the marker are treated as manually maintained and are not overwritten.
+  - 模型差异若确有必要，只允许放在 `prompts/layers/vendor_patches/<vendor>/skills/<skill>.md`，不要再新增旧的 vendor skill 全量副本。
    - 托管迁移命令 / Adopt commands:
      - `python3 scripts/sync_skill_docs.py --adopt <skill>`：将单个 skill 的 prompt md 迁移为自动托管（覆盖该文件）。  
        Migrate one skill prompt into managed mode (overwrites that prompt file).
@@ -183,6 +188,8 @@ A skill is considered available only when “mapping complete + compile pass + r
 
 ## 6) Execution Principles (for agents) / 实施原则（给 agent）
 
+- **`prompts/` 下所有真正的 prompt markdown 文件**在文件末尾保留统一的 **Multilingual Reinforcement** 区块（固定标题与注释模板），用于 zh-CN / en 等语言特有补充；通用规则仍写在正文。说明类 README（如 `prompts/layers/README.md`）不追加该区块，仅文档化规范。  
+  **All real prompt markdown files under `prompts/`** keep a unified **Multilingual Reinforcement** block at EOF (fixed heading + comment template) for language-specific nuance (e.g. zh-CN / en); general rules stay in the main body. Explainer READMEs (e.g. `prompts/layers/README.md`) do not get the block—document the convention only.
 - 优先增量改动，不重构无关模块。  
   Prefer incremental changes; avoid unrelated refactors.
 - 先补协议与映射，再补提示词与 UI，最后跑编译。  

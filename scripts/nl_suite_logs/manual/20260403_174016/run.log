@@ -1,0 +1,50 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_cases_10_11.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_174016
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_174016/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_174016/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        act_read_readme_head
+[CHAT]        1985996991
+[PROMPT]      扫一眼 README 前 20 行，再提炼成 3 句话
+[TASK]        55422d3a-c336-419e-9146-5ab3ea715715
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text]
+未找到 README 文件；请提供完整的绝对路径（例如 /path/to/README.md）。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 2
+[NAME]        chat_act_compare_sizes
+[CHAT]        1985996992
+[PROMPT]      比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+[TASK]        6e7c340f-980b-48b3-b1dd-8334b09d328d
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text]
+未找到 Cargo.toml 或 Cargo.lock，请提供完整路径。
+
+================ Final Summary ================
+TOTAL_CASES=2 SUCCEEDED=2 FAILED=0 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_174016
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_174016/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_174016/summary.jsonl

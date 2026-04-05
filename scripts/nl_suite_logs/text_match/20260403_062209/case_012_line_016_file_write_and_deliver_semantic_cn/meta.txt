@@ -1,0 +1,6 @@
+ordinal=12
+source_line=16
+case_name=file_write_and_deliver_semantic_cn
+chat_id=1985997002
+task_id=8a987ae0-c040-49f8-9d04-e86246fc0e7f
+prompt=写一个文本文件到 document/text_match_regression_note.txt，内容是 semantic routing regression note，然后把文件发给我

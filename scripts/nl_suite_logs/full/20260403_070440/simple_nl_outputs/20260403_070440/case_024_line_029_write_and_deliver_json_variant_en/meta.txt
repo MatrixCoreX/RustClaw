@@ -1,0 +1,6 @@
+ordinal=24
+source_line=29
+case_name=write_and_deliver_json_variant_en
+chat_id=1985997014
+task_id=c196e99f-5476-4688-8d07-4ddd34b0ff99
+prompt=create a json file at document/manual_meta_variant.json with app=RustClaw and suite=full, then send me the file

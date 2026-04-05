@@ -1,0 +1,6 @@
+ordinal=1
+source_line=6
+case_name=chat_weather_joke
+chat_id=1985996991
+task_id=1ae4adfd-6765-477f-9437-235762b3d4ee
+prompt=今天天气先别查，给我讲一个简短冷笑话

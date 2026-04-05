@@ -4,17 +4,31 @@
 
 Chinese version: `README.zh-CN.md`
 
-RustClaw is a local Rust-based agent runtime for everyday operations through Telegram, WhatsApp, Feishu/Lark, and a browser UI. It combines task routing, tool execution, memory, scheduling, multimodal skills, and `user_key` based identity into one deployable stack.
+RustClaw is a local Rust agent runtime centered on `clawd`. It combines multi-channel chat access, task execution, tool and skill routing, memory, scheduling, browser UI, and `user_key` based identity into one deployable stack.
 
-## What It Is For
+## Overview
 
-RustClaw is designed to let you:
+RustClaw is built for daily use and administration from messaging apps or a browser instead of a terminal-first workflow.
 
-- chat with an agent from multiple channels
-- run built-in skills such as file, HTTP, crypto, image, and service tasks
-- manage users and permissions with `user_key`
-- use a local UI for monitoring and daily administration
-- keep conversation memory and resumable multi-step tasks
+Current repository highlights:
+
+- multi-channel entry points: Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, browser UI, and optional `webd`
+- task runtime and HTTP API in `clawd`
+- skill subprocess model through `skill-runner`
+- built-in and runner-based skills for system, files, web, images, audio, crypto, KB, and automation tasks
+- local browser UI in `UI/`
+- Raspberry Pi / small-screen desktop app in `pi_app/`
+
+## Main Components
+
+- `crates/clawd`: core runtime, HTTP API, routing, memory, scheduling, auth, task queue
+- `crates/skill-runner`: launches skill binaries using the registry and runner convention
+- `crates/clawcli`: terminal CLI for talking to `clawd`
+- `crates/webd`: optional reverse proxy and login session bridge for public/browser access
+- `crates/telegramd`, `crates/wechatd`, `crates/feishud`, `crates/larkd`, `crates/whatsappd`, `crates/whatsapp_webd`: channel daemons
+- `crates/skills/*`: skill implementations and `INTERFACE.md` specs
+- `UI/`: Vite + React local console
+- `pi_app/`: small-screen desktop monitor and launcher scripts
 
 ## Quick Start
 
@@ -25,17 +39,25 @@ rustup default stable
 python3 --version
 ```
 
-Python `3.11+` is recommended.
+`python3` is required. `npm` is needed when you want to build or deploy the UI.
 
-### 2. Install the `rustclaw` command
+### 2. Install the launcher
+
+Recommended path:
 
 ```bash
-# Standard install
-bash install-rustclaw-cmd.sh
+# Local install without nginx/UI deployment
+bash install-rustclaw-cmd.sh --user --no-deploy-ui
 
-# Install without sudo
-bash install-rustclaw-cmd.sh --user
+# Or build from source first, then install
+bash install-rustclaw-cmd.sh --build --user --no-deploy-ui
 ```
+
+Notes:
+
+- `install-rustclaw-cmd.sh` installs the `rustclaw` launcher
+- if `clawcli` was built, it is installed too
+- by default the installer also deploys `UI/dist` to nginx unless you pass `--no-deploy-ui`
 
 Verify:
 
@@ -45,59 +67,99 @@ rustclaw -h
 rustclaw -status
 ```
 
-### 3. Configure your model and channels
+### 3. Configure runtime and channels
 
-Main config: `configs/config.toml`
+Main runtime config:
 
-Channel configs:
+- `configs/config.toml`
+- `configs/skills_registry.toml`
 
-- `configs/channels/telegram.toml`
-- `configs/channels/whatsapp.toml`
-- `configs/channels/feishu.toml`
-
-Common split configs:
+Split configs commonly edited:
 
 - `configs/image.toml`
 - `configs/audio.toml`
 - `configs/crypto.toml`
+- `configs/memory.toml`
 
-### 4. Start RustClaw
+Current channel config files:
+
+- `configs/channels/telegram.toml`
+- `configs/channels/wechat.toml`
+- `configs/channels/feishu.toml`
+- `configs/channels/lark.toml`
+- `configs/channels/whatsapp.toml`
+- `configs/channels/whatsapp-web.toml`
+- `configs/channels/whatsapp-cloud.toml`
+- `configs/channels/webd.toml`
+
+### 4. Build from source
 
 ```bash
-# Full start with UI
-rustclaw -start --vendor openai --model gpt-4.1 --profile release --channels all --with-ui --quick
+# Full release build, including skill doc sync and optional UI build
+./build-all.sh
 
-# Another vendor example
-rustclaw -start --vendor qwen --model qwen-max-latest --profile release --channels all --quick
+# Skip UI build
+./build-all.sh no-ui
 
-# Simple mode
-rustclaw -start release all
+# Or use Cargo directly
+cargo build --workspace --release
 ```
 
-### 5. Daily operations
+`build-all.sh` also runs `scripts/sync_skill_docs.py` before building.
+
+### 5. Start RustClaw
+
+Examples with the launcher:
 
 ```bash
-rustclaw -status
-rustclaw -logs clawd 200 --follow
-rustclaw -health
-rustclaw -stop
+# Quick start with release profile and all supported launcher-managed channels
+rustclaw start -q
+
+# Start with explicit vendor/model
+rustclaw -start --vendor openai --model gpt-5 --profile release --channels all --quick --skip-setup
+
+# Start with UI enabled
+rustclaw -start release all --with-ui
 ```
 
-Legacy scripts are still available:
+Equivalent script-based flow is still available:
 
 ```bash
 ./start-all.sh
 ./stop-rustclaw.sh
 ```
 
-## Keys, Identity, and Permissions
+Single-service scripts are also available when you want finer control:
 
-RustClaw uses `user_key` as the primary identity across UI and messaging channels.
+```bash
+./start-clawd.sh
+./start-telegramd.sh
+./start-wechatd.sh
+./start-feishud.sh
+./start-larkd.sh
+./start-whatsappd.sh
+./start-whatsapp-webd.sh
+./start-clawd-ui.sh
+```
+
+### 6. Daily operations
+
+```bash
+rustclaw -status
+rustclaw -logs clawd 200 --follow
+rustclaw -health
+rustclaw -stop
+rustclaw -key list
+```
+
+## Identity And Access
+
+RustClaw uses `user_key` as the main identity across the UI and messaging channels.
 
 - permissions are resolved by `user_key`
-- channel conversations are resolved by `channel + external_chat_id`
-- the UI uses the same auth model as Telegram and WhatsApp
-- `clawd` can bootstrap the first admin key when the auth table is empty
+- conversations are resolved by `channel + external_chat_id`
+- the browser UI sends `X-RustClaw-Key`
+- when the auth table is empty, `clawd` can bootstrap the first admin key
 
 Key management:
 
@@ -105,21 +167,15 @@ Key management:
 rustclaw -key list
 rustclaw -key generate user
 rustclaw -key generate admin
-scripts/auth-key.sh list
+rustclaw -key add rk-xxxx admin
+rustclaw -key disable rk-xxxx
 ```
 
-## Local UI and API
+## UI, API, And `webd`
 
-The listen address is configured in `configs/config.toml`, usually `127.0.0.1:8787` or `0.0.0.0:8787`.
+The main API is served by `clawd`. In the current default config, `configs/config.toml` uses `0.0.0.0:8787`.
 
-UI:
-
-- URL: `http://127.0.0.1:8787/`
-- static files: `UI/dist`
-- override UI directory with `RUSTCLAW_UI_DIST`
-- the browser stores a valid `user_key` locally and sends it with `X-RustClaw-Key`
-
-Important API endpoints:
+Useful endpoints:
 
 - `GET /v1/health`
 - `POST /v1/tasks`
@@ -129,11 +185,10 @@ Important API endpoints:
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`
 
-Examples:
+Quick example:
 
 ```bash
-curl http://127.0.0.1:8787/v1/health \
-  -H "X-RustClaw-Key: rk-xxxx"
+curl http://127.0.0.1:8787/v1/health
 
 curl -X POST http://127.0.0.1:8787/v1/tasks \
   -H "Content-Type: application/json" \
@@ -141,81 +196,48 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
   -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello","agent_mode":true}}'
 ```
 
-## Common Telegram Commands
+UI notes:
 
-- `/start`
-- `/help`
-- `/agent on|off`
-- `/status`
-- `/cancel`
-- `/skills`
-- `/run <skill> <args>`
-- `/sendfile <path>`
-- `/voicemode show|voice|text|both|reset`
-- `/openclaw config show|vendors|set <vendor> <model>`
-- `/cryptoapi show`
-- `/cryptoapi set binance <api_key> <api_secret>`
-- `/cryptoapi set okx <api_key> <api_secret> <passphrase>`
+- source lives in `UI/`
+- built assets live in `UI/dist`
+- `install-rustclaw-cmd.sh` can deploy the static UI to nginx
+- `webd` can sit in front of `clawd` as a reverse proxy and login/session bridge
 
-## Crypto Credentials
+## Skills
 
-Exchange credentials are stored per `user_key`, not as one shared global secret for all users.
+RustClaw currently ships a broad skill set. Representative groups:
 
-- supported live exchanges: `binance`, `okx`
-- risk controls are defined in `configs/crypto.toml`
-- credentials are stored in `exchange_api_credentials`
-- each `user_key` has its own exchange credential record
+- system and ops: `system_basic`, `process_basic`, `service_control`, `health_check`, `log_analyze`, `task_control`
+- files and developer tools: `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
+- network and content: `http_basic`, `rss_fetch`, `browser_web`, `doc_parse`, `transform`, `web_search_extract`
+- multimodal: `image_generate`, `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize`
+- domain skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`, `chat`, `x`
 
-You can manage crypto credentials through:
+Skill discovery and runtime behavior are driven by:
 
-- `GET/POST /v1/auth/crypto-credentials`
-- Telegram `/cryptoapi ...` commands
-- `scripts/import-crypto-credentials.sh` for legacy migration
+- `configs/skills_registry.toml`
+- `[skills]` in `configs/config.toml`
+- `crates/skills/*/INTERFACE.md`
+- `prompts/layers/generated/skills/*.md`
 
-## Built-in Skills
+Skill integration entry points:
 
-Common built-in skills include:
+- unified guide: `docs/skill_integration_guide.md`
+- standard `runner` skills: `skill_develop/README.md`
+- external skill example: `external_skills/example/README.md`
 
-- `archive_basic`
-- `audio_synthesize`
-- `audio_transcribe`
-- `chat`
-- `config_guard`
-- `crypto`
-- `db_basic`
-- `docker_basic`
-- `fs_search`
-- `git_basic`
-- `health_check`
-- `http_basic`
-- `image_edit`
-- `image_generate`
-- `image_vision`
-- `log_analyze`
-- `package_manager`
-- `process_basic`
-- `rss_fetch`
-- `service_control`
-- `system_basic`
-- `x`
+## Directory Guide
 
-## Important Files and Directories
-
-- `configs/config.toml`: main runtime config
-- `configs/channels/*.toml`: channel-specific config
-- `configs/image.toml`: image skill config
-- `configs/audio.toml`: audio skill config
-- `configs/crypto.toml`: crypto risk and exchange config
-- `configs/i18n/*.toml`: text resources
-- `prompts/`: prompt templates
-- `migrations/`: database migrations
-- `UI/`: browser UI
-- `pi_app/`: desktop mini app and small-screen monitor
+- `configs/`: runtime, channel, model, memory, and skill configuration
+- `crates/`: Rust services, daemons, CLI, and skills
+- `prompts/`: prompt layers and generated skill prompt files
+- `scripts/`: setup, regression, maintenance, and skill-call helpers
+- `UI/`: browser UI project
+- `pi_app/`: desktop small-screen app
+- `docker/`: docker-oriented configs and entrypoint files
 - `systemd/`: service templates
-- `crates/clawd`: API, routing, queue, memory, scheduling
-- `crates/skills/*`: skill implementations
 
-## Small-Screen Desktop App
+## Pi App
 
 The small-screen desktop app lives in `pi_app/`.
 
@@ -226,14 +248,14 @@ cd pi_app && ./enable-autostart.sh
 cd pi_app && ./open-small-screen.sh
 ```
 
-It reads `GET /v1/health`, so `clawd` must already be running.
+It reads health status from `clawd`, so start the backend first.
 
-## Notes
+## Developer Notes
 
-- review and sanitize configs before production deployment
-- if `/usr/local/bin` is not writable, use `bash install-rustclaw-cmd.sh --user`
-- if `~/.local/bin` is not in `PATH`, add `export PATH="$HOME/.local/bin:$PATH"`
-- for service deployment, use `systemd/` as the starting point
+- `build-all.sh` is the most accurate repository-level build entry for source builds
+- `install-rustclaw-cmd.sh` is the most convenient operator-facing install entry
+- many helper and regression scripts live in `scripts/`
+- if you only want static UI hosting, use `build-ui-nginx.sh` or the install script's nginx deployment path
 
 ## License
 

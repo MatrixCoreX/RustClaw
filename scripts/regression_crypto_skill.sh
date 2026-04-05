@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Crypto skill regression (direct via skill-runner)
 # Usage:
-#   ./scripts/regression_crypto_skill.sh [debug|release] [--auto-build] [--help]
+#   ./scripts/regression_crypto_skill.sh [release] [--auto-build] [--help]
 
 PROFILE="release"
 AUTO_BUILD=0
@@ -38,10 +38,10 @@ fail() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/regression_crypto_skill.sh [debug|release] [--auto-build] [--help]
+  ./scripts/regression_crypto_skill.sh [release] [--auto-build] [--help]
 
 Options:
-  debug|release  Choose build profile (default: release)
+  release        Choose build profile (default: release)
   --auto-build   Build missing binaries automatically
   --help, -h     Show this help
 EOF
@@ -151,7 +151,7 @@ run_case_err_contains() {
 main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      debug|release)
+      release)
         PROFILE="$1"
         ;;
       --auto-build)
@@ -179,11 +179,7 @@ main() {
     log "Runner not found: $RUNNER"
     if [[ "$AUTO_BUILD" == "1" ]]; then
       log "[INFO] auto-build enabled, building missing binaries..."
-      if [[ "$PROFILE" == "release" ]]; then
-        (cd "$ROOT_DIR" && cargo build --release -p skill-runner -p crypto-skill)
-      else
-        (cd "$ROOT_DIR" && cargo build -p skill-runner -p crypto-skill)
-      fi
+      (cd "$ROOT_DIR" && cargo build --release -p skill-runner -p crypto-skill)
       if [[ ! -x "$RUNNER" ]]; then
         log "Build completed but runner still missing: $RUNNER"
         exit 2

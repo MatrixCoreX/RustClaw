@@ -1,2 +1,0 @@
-# case1 only rerun
-context_colloquial_cn_send_config_alias|先记一下，“那份配置”就是 /home/guagua/test/configs/app_config.toml|那份配置直接发我，别贴正文|再一句话说主要用途

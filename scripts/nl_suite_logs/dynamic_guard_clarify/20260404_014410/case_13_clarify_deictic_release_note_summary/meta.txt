@@ -1,0 +1,7 @@
+index=13
+case_name=clarify_deictic_release_note_summary
+chat_id=17752372494
+turn1_task_id=afba73de-16a0-4a33-9ff9-94504cb78e27
+turn1_prompt=读一下那个发布说明，然后一句话告诉我重点
+turn2_task_id=395e8988-bf16-4920-9164-c26ab152b35c
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md

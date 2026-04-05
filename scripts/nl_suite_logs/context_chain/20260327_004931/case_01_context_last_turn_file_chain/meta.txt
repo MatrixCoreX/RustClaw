@@ -1,9 +1,0 @@
-index=1
-case_name=context_last_turn_file_chain
-chat_id=1985996991
-turn1_task_id=725b36d4-9a6a-4e41-8762-9579defa0dce
-turn1_prompt=先记一下，后面我说“那个文件”就是 /home/guagua/test/README.md
-turn2_task_id=db91ba5d-ac08-4156-a058-d0e8ffeeb6ee
-turn2_prompt=把那个文件开头读 10 行
-turn3_task_id=f7b77a8e-bee1-43e9-bd8f-95c50ef12c08
-turn3_prompt=把它再用一句人话总结

@@ -1,6 +1,0 @@
-ordinal=21
-source_line=26
-case_name=colloquial_cn_readme_oneliner
-chat_id=17746743602
-task_id=72f3ff5e-c1c1-4de7-b9f4-0134ca993504
-prompt=帮我瞅一眼 /home/guagua/test/README.md 前几行，然后一句话说重点

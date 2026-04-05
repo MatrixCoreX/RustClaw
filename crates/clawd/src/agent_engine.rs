@@ -1,27 +1,51 @@
 use serde::Deserialize;
-use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path};
-use toml::Value as TomlValue;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::Path;
 use tracing::{debug, info, warn};
 
-use crate::{
-    AgentAction, AppState, AskReply, ClaimedTask, execution_adapters, llm_gateway, repo,
-    run_skill_with_runner_outcome,
+mod arg_resolver;
+mod dispatch_support;
+mod execution_loop;
+mod loop_control;
+mod loop_finalize;
+mod observed_output;
+mod planning;
+mod prepare_round;
+mod skill_execution;
+mod support;
+
+use self::arg_resolver::{
+    attach_recent_execution_context_to_chat_args, resolve_arg_string, resolve_arg_value,
+    rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
+    rewrite_tool_path_with_written_aliases,
+};
+use self::dispatch_support::{classify_skill_failure_recovery, dispatch_round_action};
+use self::execution_loop::execute_actions_once;
+use self::loop_control::run_agent_with_loop;
+use self::loop_finalize::finalize_loop_reply;
+use self::prepare_round::{prepare_round_actions, push_round_trace};
+use self::skill_execution::execute_prepared_skill_action;
+use self::support::{
+    action_fingerprint, append_delivery_message, append_progress_hint,
+    build_safe_skill_args_summary, encode_progress_i18n, load_agent_loop_guard_policy,
+    AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 
+use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
+
 const AGENT_TOOL_SPEC_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/agent_tool_spec.md");
+    include_str!("../../../prompts/layers/overlays/agent_tool_spec.md");
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
 const SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/single_plan_execution_prompt.md");
-const SINGLE_PLAN_EXECUTION_PROMPT_PATH: &str = "prompts/single_plan_execution_prompt.md";
+    include_str!("../../../prompts/layers/overlays/single_plan_execution_prompt.md");
+const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/loop_incremental_plan_prompt.md");
-const LOOP_INCREMENTAL_PLAN_PROMPT_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
+    include_str!("../../../prompts/layers/overlays/loop_incremental_plan_prompt.md");
+const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
 const PLAN_REPAIR_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/plan_repair_prompt.md");
-const PLAN_REPAIR_PROMPT_PATH: &str = "prompts/plan_repair_prompt.md";
+    include_str!("../../../prompts/layers/overlays/plan_repair_prompt.md");
+const PLAN_REPAIR_PROMPT_LOGICAL_PATH: &str = "prompts/plan_repair_prompt.md";
 pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
 
 fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), String> {
@@ -34,7 +58,7 @@ fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), Strin
 
 /// Phase 2+: Planner 可见技能按 task/agent 动态收敛：
 /// （execution-enabled）∩（agent allowed_skills）。
-/// 每个可见技能需在 registry 中提供 prompt_file 才会注入 playbook。
+/// 每个可见技能需在 registry 中提供 skill prompt 的逻辑路径配置，才会注入 playbook。
 fn build_skill_playbooks_text(state: &AppState, task: &ClaimedTask) -> String {
     let enabled = state.planner_visible_skills_for_task(task);
     let enabled_count = enabled.len();
@@ -50,20 +74,21 @@ fn build_skill_playbooks_text(state: &AppState, task: &ClaimedTask) -> String {
     let mut skipped_no_prompt: Vec<String> = Vec::new();
 
     for skill in &enabled {
-        let Some(registry_path) = state.skill_prompt_file(skill) else {
+        let Some(registry_prompt_rel_path) = state.skill_registry_prompt_rel_path(skill) else {
             warn!(
-                "planner skill playbook: skill={} prompt_file missing in registry, skipping",
+                "planner skill playbook: skill={} registry prompt_file missing, skipping",
                 skill
             );
             skipped_no_prompt.push(skill.clone());
             continue;
         };
 
-        let prompt_body = crate::load_prompt_template_for_state(state, &registry_path, "").0;
+        let prompt_body =
+            crate::load_prompt_template_for_state(state, &registry_prompt_rel_path, "").0;
 
         debug!(
-            "planner skill playbook: skill={} prompt_file={} source=registry",
-            skill, registry_path
+            "planner skill playbook: skill={} prompt_logical_path={} source=registry",
+            skill, registry_prompt_rel_path
         );
 
         let trimmed = prompt_body.trim();
@@ -122,227 +147,19 @@ fn build_skill_quick_index_text(state: &AppState, task: &ClaimedTask) -> String 
     }
     let mut lines = Vec::new();
     for skill in &enabled {
-        let summary = if let Some(registry_path) = state.skill_prompt_file(skill) {
-            let prompt_body = crate::load_prompt_template_for_state(state, &registry_path, "").0;
-            first_non_heading_line(&prompt_body).unwrap_or_else(|| {
-                "use this skill when user intent matches its capability".to_string()
-            })
-        } else {
-            "skill enabled but registry prompt_file missing".to_string()
-        };
+        let summary =
+            if let Some(registry_prompt_rel_path) = state.skill_registry_prompt_rel_path(skill) {
+                let prompt_body =
+                    crate::load_prompt_template_for_state(state, &registry_prompt_rel_path, "").0;
+                first_non_heading_line(&prompt_body).unwrap_or_else(|| {
+                    "use this skill when user intent matches its capability".to_string()
+                })
+            } else {
+                "skill enabled but registry prompt_file logical path missing".to_string()
+            };
         lines.push(format!("- {skill}: {summary}"));
     }
     lines.join("\n")
-}
-
-#[derive(Debug, Clone)]
-struct AgentLoopGuardPolicy {
-    max_steps: usize,
-    max_rounds: usize,
-    repeat_action_limit: usize,
-    no_progress_limit: usize,
-    multi_round_enabled: bool,
-}
-
-fn parse_usize_from_toml(root: &TomlValue, path: &[&str], fallback: usize) -> usize {
-    let mut cursor = root;
-    for key in path {
-        let Some(next) = cursor.get(*key) else {
-            return fallback;
-        };
-        cursor = next;
-    }
-    cursor
-        .as_integer()
-        .and_then(|v| usize::try_from(v).ok())
-        .filter(|v| *v >= 1)
-        .unwrap_or(fallback)
-}
-
-fn parse_bool_from_toml(root: &TomlValue, path: &[&str], fallback: bool) -> bool {
-    let mut cursor = root;
-    for key in path {
-        let Some(next) = cursor.get(*key) else {
-            return fallback;
-        };
-        cursor = next;
-    }
-    cursor.as_bool().unwrap_or(fallback)
-}
-
-fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPolicy {
-    let path = state.workspace_root.join("configs/agent_guard.toml");
-    let parsed = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| toml::from_str::<TomlValue>(&raw).ok())
-        .unwrap_or(TomlValue::Table(Default::default()));
-    AgentLoopGuardPolicy {
-        max_steps: parse_usize_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "max_steps"],
-            crate::AGENT_MAX_STEPS,
-        ),
-        max_rounds: parse_usize_from_toml(&parsed, &["agent", "loop_guard", "max_rounds"], 2),
-        repeat_action_limit: parse_usize_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "repeat_action_limit"],
-            4,
-        ),
-        no_progress_limit: parse_usize_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "no_progress_limit"],
-            1,
-        ),
-        multi_round_enabled: parse_bool_from_toml(
-            &parsed,
-            &["agent", "loop_guard", "multi_round_enabled"],
-            true,
-        ),
-    }
-}
-
-/// Publish progress hints only. Used for "in progress" UI. Must not contain full raw tool/skill output.
-fn publish_progress(state: &AppState, task: &ClaimedTask, progress_messages: &[String]) {
-    if progress_messages.is_empty() {
-        return;
-    }
-    let payload = json!({
-        "progress_messages": progress_messages,
-    });
-    if let Err(err) = repo::update_task_progress_result(state, &task.task_id, &payload.to_string())
-    {
-        warn!(
-            "run_agent_with_tools: task_id={} publish progress failed: {}",
-            task.task_id, err
-        );
-    } else {
-        debug!(
-            "progress published task_id={} count={} last={}",
-            task.task_id,
-            progress_messages.len(),
-            crate::truncate_for_log(progress_messages.last().map(|s| s.as_str()).unwrap_or(""))
-        );
-    }
-}
-
-/// Max length for args summary in progress hint. Longer summaries are truncated with "...".
-const PROGRESS_ARGS_SUMMARY_MAX_LEN: usize = 160;
-
-/// Keys allowed in progress hint args summary (fixed order). Any other key is omitted.
-const PROGRESS_ARGS_WHITELIST: &[&str] = &[
-    "action",
-    "exchange",
-    "symbol",
-    "side",
-    "order_type",
-    "quote_qty_usd",
-    "qty",
-    "price",
-    "stop_price",
-    "time_in_force",
-    "limit",
-    "order_id",
-    "client_order_id",
-];
-
-/// Keys that must never appear in progress hint (case-insensitive substring match).
-const PROGRESS_ARGS_SENSITIVE: &[&str] = &[
-    "api_key",
-    "api_secret",
-    "passphrase",
-    "user_key",
-    "authorization",
-    "token",
-    "credential",
-    "secret",
-    "password",
-];
-
-fn is_sensitive_key(key: &str) -> bool {
-    let k = key.to_lowercase();
-    PROGRESS_ARGS_SENSITIVE
-        .iter()
-        .any(|s| k.contains(&s.to_lowercase()))
-}
-
-fn value_to_short_string(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.as_str().trim().to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => String::new(),
-        _ => v.to_string(),
-    }
-}
-
-/// Build a safe, whitelisted args summary for progress hint. No sensitive keys; truncated to max_len.
-pub(crate) fn build_safe_skill_args_summary(args: &Value, max_len: usize) -> String {
-    let obj = match args.as_object() {
-        Some(o) => o,
-        None => return String::new(),
-    };
-    let mut parts: Vec<String> = Vec::new();
-    for &key in PROGRESS_ARGS_WHITELIST {
-        if is_sensitive_key(key) {
-            continue;
-        }
-        let Some(v) = obj.get(key) else { continue };
-        let s = value_to_short_string(v);
-        if s.is_empty() {
-            continue;
-        }
-        // Truncate single value if very long (e.g. pasted text)
-        let val_display = if s.len() > 40 {
-            format!("{}...", &s[..37])
-        } else {
-            s
-        };
-        parts.push(format!("{key}={val_display}"));
-    }
-    let summary = parts.join(", ");
-    if summary.len() <= max_len {
-        summary
-    } else {
-        format!(
-            "{}...",
-            summary
-                .chars()
-                .take(max_len.saturating_sub(3))
-                .collect::<String>()
-        )
-    }
-}
-
-/// Encode a progress hint for telegramd to render with its i18n. Format: "I18N:key:json_vars".
-pub(crate) fn encode_progress_i18n(key: &str, vars: &[(&str, &str)]) -> String {
-    let obj: HashMap<String, String> = vars
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-    let vars_json = serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
-    format!("I18N:{}:{}", key, vars_json)
-}
-
-/// Append a short progress hint and publish. For "processing..." display only. Do not pass full raw output.
-fn append_progress_hint(
-    state: &AppState,
-    task: &ClaimedTask,
-    progress_messages: &mut Vec<String>,
-    hint: String,
-) {
-    progress_messages.push(hint);
-    publish_progress(state, task, progress_messages);
-}
-
-/// Append to final delivery only. This is the only path that feeds user-visible result. No progress publish.
-fn append_delivery_message(task_id: &str, delivery_messages: &mut Vec<String>, message: String) {
-    delivery_messages.push(message.clone());
-    info!(
-        "delivery appended task_id={} len={} content={}",
-        task_id,
-        delivery_messages.len(),
-        crate::truncate_for_log(&message)
-    );
 }
 
 #[derive(Debug, Deserialize)]
@@ -351,33 +168,17 @@ struct SinglePlanEnvelope {
     steps: Vec<Value>,
 }
 
-#[derive(Debug, Deserialize)]
-struct FinalizerSchemaOut {
-    #[serde(default)]
-    answer: String,
-    #[serde(default)]
-    completion_ok: bool,
-    #[serde(default)]
-    grounded_ok: bool,
-    #[serde(default)]
-    format_ok: bool,
-    #[serde(default)]
-    needs_clarify: bool,
-    #[serde(default)]
-    confidence: f64,
-    #[serde(default)]
-    used_evidence_ids: Vec<String>,
-    #[serde(default)]
-    evidence_quotes: Vec<String>,
-}
-
 fn build_single_plan_prompt(
     prompt_template: &str,
     user_request: &str,
     goal: &str,
     tool_spec: &str,
     skill_playbooks: &str,
+    recent_assistant_replies: &str,
     config_response_language: &str,
+    runtime_os: &str,
+    runtime_shell: &str,
+    workspace_root: &str,
 ) -> String {
     crate::render_prompt_template(
         prompt_template,
@@ -386,107 +187,13 @@ fn build_single_plan_prompt(
             ("__GOAL__", goal),
             ("__TOOL_SPEC__", tool_spec),
             ("__SKILL_PLAYBOOKS__", skill_playbooks),
+            ("__RECENT_ASSISTANT_REPLIES__", recent_assistant_replies),
             ("__CONFIG_RESPONSE_LANGUAGE__", config_response_language),
+            ("__RUNTIME_OS__", runtime_os),
+            ("__RUNTIME_SHELL__", runtime_shell),
+            ("__WORKSPACE_ROOT__", workspace_root),
         ],
     )
-}
-
-fn build_incremental_plan_prompt(
-    prompt_template: &str,
-    user_request: &str,
-    goal: &str,
-    tool_spec: &str,
-    skill_playbooks: &str,
-    config_response_language: &str,
-    round: usize,
-    history_compact: &str,
-    last_round_output: &str,
-) -> String {
-    crate::render_prompt_template(
-        prompt_template,
-        &[
-            ("__USER_REQUEST__", user_request),
-            ("__GOAL__", goal),
-            ("__TOOL_SPEC__", tool_spec),
-            ("__SKILL_PLAYBOOKS__", skill_playbooks),
-            ("__CONFIG_RESPONSE_LANGUAGE__", config_response_language),
-            ("__ROUND__", &round.to_string()),
-            ("__HISTORY_COMPACT__", history_compact),
-            ("__LAST_ROUND_OUTPUT__", last_round_output),
-        ],
-    )
-}
-
-fn parse_plan_action_step(step: &Value, state: &AppState) -> Option<AgentAction> {
-    let raw_step = serde_json::to_string(step).ok()?;
-    let normalized = crate::parse_agent_action_json_with_repair(&raw_step, state).ok()?;
-    serde_json::from_value::<AgentAction>(normalized).ok()
-}
-
-async fn parse_single_plan_actions(
-    raw: &str,
-    state: &AppState,
-    task: &ClaimedTask,
-) -> Option<Vec<AgentAction>> {
-    let mut step_values = Vec::new();
-    if let Some(value) = crate::parse_llm_json_raw_or_any::<Value>(raw) {
-        match value {
-            Value::Object(map) => {
-                if let Some(steps) = map.get("steps").and_then(|v| v.as_array()) {
-                    step_values.extend(steps.iter().cloned());
-                } else {
-                    step_values.push(Value::Object(map));
-                }
-            }
-            Value::Array(arr) => step_values.extend(arr),
-            other => step_values.push(other),
-        }
-    }
-    if step_values.is_empty() {
-        for candidate in crate::prompt_utils::extract_agent_action_objects(raw) {
-            if let Ok(value) = serde_json::from_str::<Value>(&candidate) {
-                step_values.push(value);
-            }
-        }
-    }
-    if step_values.is_empty() {
-        let value = crate::parse_llm_json_raw_or_any::<Value>(raw)?;
-        let env = serde_json::from_value::<SinglePlanEnvelope>(value).ok()?;
-        step_values.extend(env.steps);
-    }
-    if step_values.is_empty() {
-        return None;
-    }
-
-    let mut actions = Vec::new();
-    for step in step_values {
-        let Some(action) = parse_plan_action_step(&step, state) else {
-            continue;
-        };
-        match action {
-            AgentAction::Think { .. } => {}
-            AgentAction::Respond { content } => {
-                if !actions.is_empty()
-                    && crate::semantic_judge::is_meta_respond_instruction(state, task, &content)
-                        .await
-                {
-                    debug!(
-                        "plan_meta_respond_suppressed task_id={} content={}",
-                        task.task_id,
-                        crate::truncate_for_log(&content)
-                    );
-                    continue;
-                }
-                actions.push(AgentAction::Respond { content });
-            }
-            _ => actions.push(action),
-        }
-    }
-    if actions.is_empty() {
-        None
-    } else {
-        Some(actions)
-    }
 }
 
 /// Progress: short hints only (e.g. "Step 1/3", "Skill X completed"). For "in progress" UI. Not final content.
@@ -518,6 +225,8 @@ struct LoopState {
     last_user_visible_respond: Option<String>,
     /// Last publishable chat-skill output. Prefer this over LLM finalization when no explicit respond was emitted.
     last_publishable_chat_output: Option<String>,
+    executed_step_results: Vec<crate::executor::StepExecutionResult>,
+    round_traces: Vec<crate::task_journal::TaskJournalRoundTrace>,
 }
 
 impl LoopState {
@@ -526,6 +235,31 @@ impl LoopState {
             max_rounds,
             ..Self::default()
         }
+    }
+}
+
+fn seed_loop_state_from_agent_context(
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) {
+    let Some(ctx) = agent_run_context else {
+        return;
+    };
+    if let Some(path) = ctx
+        .auto_locator_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        loop_state
+            .output_vars
+            .insert("auto_locator_path".to_string(), path.to_string());
+    }
+    if let Some(route) = ctx.route_result.as_ref() {
+        loop_state.output_vars.insert(
+            "route_locator_kind".to_string(),
+            route.output_contract.locator_kind.as_str().to_string(),
+        );
     }
 }
 
@@ -538,166 +272,29 @@ struct RoundOutcome {
     no_progress: bool,
 }
 
-fn action_fingerprint(state: &AppState, action: &AgentAction) -> String {
-    match action {
-        // LEGACY: CallTool normalized to skill view so capability/fingerprint is unified.
-        AgentAction::CallTool { tool, args } => {
-            let normalized_skill = state
-                .resolve_canonical_skill_name(tool.trim())
-                .to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(&normalized_skill, args);
-            format!(
-                "skill:{}:{}",
-                normalized_skill,
-                canonical_json_string(&normalized_args)
-            )
-        }
-        AgentAction::CallSkill { skill, args } => {
-            let normalized_skill = state
-                .resolve_canonical_skill_name(skill)
-                .to_ascii_lowercase();
-            let normalized_args = normalize_args_for_fingerprint(&normalized_skill, args);
-            format!(
-                "skill:{}:{}",
-                normalized_skill,
-                canonical_json_string(&normalized_args)
-            )
-        }
-        AgentAction::Respond { content } => {
-            format!("respond:{}", content.trim().to_ascii_lowercase())
-        }
-        AgentAction::Think { .. } => "think".to_string(),
-    }
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AgentRunContext {
+    pub(crate) route_result: Option<crate::RouteResult>,
+    pub(crate) context_bundle_summary: Option<String>,
+    pub(crate) auto_locator_path: Option<String>,
 }
 
-fn normalize_run_cmd_command_for_fingerprint(command: &str) -> String {
-    let tokens = command
-        .split_whitespace()
-        .map(normalize_command_token_for_fingerprint)
-        .collect::<Vec<_>>();
-    tokens.join(" ")
+struct RespondActionOutcome {
+    ended_with_user_visible_output: bool,
+    stop_signal: Option<String>,
+    should_stop: bool,
 }
 
-fn normalize_command_token_for_fingerprint(token: &str) -> String {
-    if token.is_empty() {
-        return String::new();
-    }
-    if token.starts_with('-') || token.contains('$') || token.contains('*') {
-        return token.to_string();
-    }
-    if token.starts_with("./") || token.contains("/./") || token.contains("//") {
-        return normalize_path_string_for_fingerprint(token);
-    }
-    token.to_string()
+struct SkillActionOutcome {
+    ended_with_user_visible_output: bool,
+    stop_signal: Option<String>,
+    continue_in_round: bool,
 }
 
-fn normalize_path_string_for_fingerprint(raw: &str) -> String {
-    let mut s = raw.trim().to_string();
-    let mut quote_prefix = String::new();
-    let mut quote_suffix = String::new();
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        quote_prefix = s[..1].to_string();
-        quote_suffix = s[s.len() - 1..].to_string();
-        s = s[1..s.len().saturating_sub(1)].to_string();
-    }
-
-    while s.starts_with("./") {
-        s = s[2..].to_string();
-    }
-    while s.contains("//") {
-        s = s.replace("//", "/");
-    }
-    s = s.replace("/./", "/");
-
-    let path = Path::new(&s);
-    let mut parts = Vec::new();
-    let mut absolute = false;
-    for comp in path.components() {
-        match comp {
-            Component::RootDir => absolute = true,
-            Component::CurDir => {}
-            Component::Normal(p) => parts.push(p.to_string_lossy().to_string()),
-            Component::ParentDir => parts.push("..".to_string()),
-            Component::Prefix(_) => {}
-        }
-    }
-    let mut out = if absolute {
-        format!("/{}", parts.join("/"))
-    } else {
-        parts.join("/")
-    };
-    if out.is_empty() {
-        out = ".".to_string();
-    }
-    format!("{quote_prefix}{out}{quote_suffix}")
-}
-
-fn normalize_args_for_fingerprint(action_name: &str, args: &Value) -> Value {
-    let mut out = args.clone();
-    if action_name == "run_cmd" {
-        if let Some(obj) = out.as_object_mut() {
-            if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
-                obj.insert(
-                    "command".to_string(),
-                    Value::String(normalize_run_cmd_command_for_fingerprint(cmd)),
-                );
-            }
-            if let Some(cwd) = obj.get("cwd").and_then(|v| v.as_str()) {
-                obj.insert(
-                    "cwd".to_string(),
-                    Value::String(normalize_path_string_for_fingerprint(cwd)),
-                );
-            }
-        }
-    }
-    out
-}
-
-fn canonicalize_json_value(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            let mut keys = map.keys().cloned().collect::<Vec<_>>();
-            keys.sort_unstable();
-            let mut out = serde_json::Map::new();
-            for key in keys {
-                if let Some(v) = map.get(&key) {
-                    out.insert(key, canonicalize_json_value(v));
-                }
-            }
-            Value::Object(out)
-        }
-        Value::Array(arr) => Value::Array(arr.iter().map(canonicalize_json_value).collect()),
-        Value::Number(num) => canonicalize_json_number(num),
-        _ => value.clone(),
-    }
-}
-
-fn canonicalize_json_number(num: &serde_json::Number) -> Value {
-    if num.is_i64() || num.is_u64() {
-        return Value::Number(num.clone());
-    }
-    let Some(float_value) = num.as_f64() else {
-        return Value::Number(num.clone());
-    };
-    if !float_value.is_finite() {
-        return Value::Number(num.clone());
-    }
-    // Normalize whole-number floats (e.g. 100.0) to integers so action
-    // fingerprints treat semantically identical args as duplicates.
-    let rounded = float_value.round();
-    if (float_value - rounded).abs() <= 1e-12 {
-        if rounded >= 0.0 && rounded <= u64::MAX as f64 {
-            return Value::Number(serde_json::Number::from(rounded as u64));
-        }
-        if rounded >= i64::MIN as f64 && rounded <= i64::MAX as f64 {
-            return Value::Number(serde_json::Number::from(rounded as i64));
-        }
-    }
-    Value::Number(num.clone())
-}
-
-fn canonical_json_string(value: &Value) -> String {
-    serde_json::to_string(&canonicalize_json_value(value)).unwrap_or_else(|_| value.to_string())
+enum ActionLoopDecision {
+    NextAction,
+    ContinueRound,
+    StopRound(String),
 }
 
 fn build_loop_history_compact(loop_state: &LoopState) -> String {
@@ -725,18 +322,19 @@ fn register_step_output(
         key_prefix, global_step, round_step
     );
     let value = trimmed.to_string();
-    let output_kind = classify_observed_output_kind(trimmed);
-    let content_status = classify_observed_content_status(trimmed);
+    let output_kind = crate::finalizer::classify_observed_output_kind(trimmed);
+    let content_status = crate::finalizer::classify_observed_content_status(trimmed);
     loop_state.last_output = Some(value.clone());
     loop_state
         .output_vars
         .insert("last_output".to_string(), value.clone());
-    loop_state
-        .output_vars
-        .insert("last_output_kind".to_string(), output_kind.to_string());
+    loop_state.output_vars.insert(
+        "last_output_kind".to_string(),
+        output_kind.as_str().to_string(),
+    );
     loop_state.output_vars.insert(
         "last_content_status".to_string(),
-        content_status.to_string(),
+        content_status.as_str().to_string(),
     );
     loop_state
         .output_vars
@@ -746,29 +344,30 @@ fn register_step_output(
         .insert(format!("s{round_step}.output"), value.clone());
     loop_state.output_vars.insert(
         format!("s{global_step}.output_kind"),
-        output_kind.to_string(),
+        output_kind.as_str().to_string(),
     );
     loop_state.output_vars.insert(
         format!("s{round_step}.output_kind"),
-        output_kind.to_string(),
+        output_kind.as_str().to_string(),
     );
     loop_state.output_vars.insert(
         format!("s{global_step}.content_status"),
-        content_status.to_string(),
+        content_status.as_str().to_string(),
     );
     loop_state.output_vars.insert(
         format!("s{round_step}.content_status"),
-        content_status.to_string(),
+        content_status.as_str().to_string(),
     );
     loop_state
         .output_vars
         .insert(format!("{key_prefix}.last_output"), value);
-    loop_state
-        .output_vars
-        .insert(format!("{key_prefix}.output_kind"), output_kind.to_string());
+    loop_state.output_vars.insert(
+        format!("{key_prefix}.output_kind"),
+        output_kind.as_str().to_string(),
+    );
     loop_state.output_vars.insert(
         format!("{key_prefix}.content_status"),
-        content_status.to_string(),
+        content_status.as_str().to_string(),
     );
 }
 
@@ -826,7 +425,9 @@ fn register_file_path_output(
         .insert(format!("{key_prefix}.path"), value);
     loop_state.output_vars.insert(
         "last_file_kind".to_string(),
-        infer_file_target_kind(trimmed).to_string(),
+        crate::finalizer::infer_file_target_kind(trimmed)
+            .as_str()
+            .to_string(),
     );
 }
 
@@ -840,17 +441,26 @@ fn register_failed_step_output(
 ) {
     loop_state.has_recoverable_failure_context = true;
     let trimmed = err.trim();
+    let failed_status = crate::finalizer::ObservedContentStatus::Failed
+        .as_str()
+        .to_string();
     if !trimmed.is_empty() {
         loop_state.last_output = Some(trimmed.to_string());
         loop_state
             .output_vars
             .insert("last_output".to_string(), trimmed.to_string());
-        loop_state
-            .output_vars
-            .insert("last_output_kind".to_string(), "error".to_string());
-        loop_state
-            .output_vars
-            .insert("last_content_status".to_string(), "failed".to_string());
+        loop_state.output_vars.insert(
+            "last_output_kind".to_string(),
+            crate::finalizer::ObservedOutputKind::Error
+                .as_str()
+                .to_string(),
+        );
+        loop_state.output_vars.insert(
+            "last_content_status".to_string(),
+            crate::finalizer::ObservedContentStatus::Failed
+                .as_str()
+                .to_string(),
+        );
         loop_state
             .output_vars
             .insert("last_error".to_string(), trimmed.to_string());
@@ -859,11 +469,11 @@ fn register_failed_step_output(
             .insert("failed_step.error".to_string(), trimmed.to_string());
         loop_state.output_vars.insert(
             format!("s{global_step}.content_status"),
-            "failed".to_string(),
+            failed_status.clone(),
         );
         loop_state.output_vars.insert(
             format!("s{round_step}.content_status"),
-            "failed".to_string(),
+            failed_status.clone(),
         );
         loop_state
             .output_vars
@@ -876,7 +486,7 @@ fn register_failed_step_output(
             .insert(format!("{key_prefix}.error"), trimmed.to_string());
         loop_state
             .output_vars
-            .insert(format!("{key_prefix}.content_status"), "failed".to_string());
+            .insert(format!("{key_prefix}.content_status"), failed_status);
     }
     loop_state.output_vars.insert(
         "failed_step.action".to_string(),
@@ -887,1895 +497,7 @@ fn register_failed_step_output(
         .insert("failed_step.index".to_string(), round_step.to_string());
 }
 
-fn rewrite_response_with_written_aliases(text: &str, loop_state: &LoopState) -> String {
-    let mut out = text.to_string();
-    for (alias, effective) in &loop_state.written_file_aliases {
-        let file_alias = format!("FILE:{alias}");
-        let file_effective = format!("FILE:{effective}");
-        let image_alias = format!("IMAGE_FILE:{alias}");
-        let image_effective = format!("IMAGE_FILE:{effective}");
-        out = out.replace(&file_alias, &file_effective);
-        out = out.replace(&image_alias, &image_effective);
-        let trimmed = out.trim();
-        if trimmed == alias {
-            return effective.clone();
-        }
-        if trimmed == format!("`{alias}`") {
-            return effective.clone();
-        }
-    }
-    if let Some(saved_path) = loop_state.last_written_file_path.as_deref() {
-        let trimmed = out.trim();
-        let lower = trimmed.to_ascii_lowercase();
-        if lower.starts_with("saved path:") && !trimmed.contains(saved_path) {
-            return format!("Saved path: {saved_path}");
-        }
-        if (trimmed.starts_with("保存路径") || trimmed.starts_with("文件路径"))
-            && !trimmed.contains(saved_path)
-        {
-            return format!("保存路径：{saved_path}");
-        }
-        if lower.contains("saved path to ")
-            && lower.contains(": written ")
-            && !trimmed.contains(saved_path)
-        {
-            return format!("Saved path: {saved_path}");
-        }
-    }
-    out
-}
-
-fn has_remaining_action_after(
-    actions: &[AgentAction],
-    current_idx: usize,
-    max_steps: usize,
-) -> bool {
-    actions
-        .iter()
-        .take(max_steps.max(1))
-        .skip(current_idx + 1)
-        .any(|action| !matches!(action, AgentAction::Think { .. }))
-}
-
-fn remaining_actions_are_discussion_only(
-    state: &AppState,
-    actions: &[AgentAction],
-    current_idx: usize,
-    max_steps: usize,
-) -> bool {
-    let remaining = actions
-        .iter()
-        .take(max_steps.max(1))
-        .skip(current_idx + 1)
-        .filter(|action| !matches!(action, AgentAction::Think { .. }))
-        .collect::<Vec<_>>();
-    !remaining.is_empty()
-        && remaining.iter().all(|action| match action {
-            AgentAction::Respond { .. } => true,
-            AgentAction::CallSkill { skill, .. } => state
-                .resolve_canonical_skill_name(skill)
-                .eq_ignore_ascii_case("chat"),
-            AgentAction::Think { .. } => true,
-            _ => false,
-        })
-}
-
-fn classify_skill_failure_recovery(
-    state: &AppState,
-    actions: &[AgentAction],
-    current_idx: usize,
-    max_steps: usize,
-    normalized_skill: &str,
-    call_args: Option<&Value>,
-    err: &str,
-) -> Option<&'static str> {
-    if crate::skills::is_recoverable_skill_error(normalized_skill, err) {
-        if has_remaining_action_after(actions, current_idx, max_steps) {
-            return Some("recoverable_failure_continue_in_round");
-        }
-        return Some("recoverable_failure_finalize");
-    }
-    if has_remaining_action_after(actions, current_idx, max_steps)
-        && call_args
-            .map(|args| is_read_only_skill_invocation(normalized_skill, args))
-            .unwrap_or(false)
-    {
-        return Some("recoverable_failure_continue_in_round");
-    }
-    if remaining_actions_are_discussion_only(state, actions, current_idx, max_steps) {
-        return Some("recoverable_failure_continue_in_round");
-    }
-    None
-}
-
-fn is_read_only_skill_invocation(normalized_skill: &str, args: &Value) -> bool {
-    match normalized_skill {
-        "read_file" | "list_dir" | "fs_search" | "system_basic" | "log_analyze" | "doc_parse"
-        | "git_basic" | "http_basic" | "stock" | "weather" | "web_search_extract"
-        | "health_check" | "task_control" | "chat" => true,
-        "db_basic" => args
-            .get("action")
-            .and_then(|v| v.as_str())
-            .map(|a| {
-                a.eq_ignore_ascii_case("sqlite_query") || a.eq_ignore_ascii_case("schema_version")
-            })
-            .unwrap_or(true),
-        _ => false,
-    }
-}
-
-fn rewrite_run_cmd_with_written_aliases(command: &str, loop_state: &LoopState) -> String {
-    if loop_state.written_file_aliases.is_empty() {
-        return command.to_string();
-    }
-    let mut changed = false;
-    let rewritten = command
-        .split_whitespace()
-        .map(|token| {
-            let mut candidate = token.to_string();
-            for (alias, effective) in &loop_state.written_file_aliases {
-                let quoted = candidate.trim_matches(|c| c == '"' || c == '\'');
-                let normalized = quoted.strip_prefix("./").unwrap_or(quoted);
-                if normalized == alias {
-                    changed = true;
-                    if quoted.starts_with("./") {
-                        candidate = candidate.replacen(&format!("./{normalized}"), effective, 1);
-                    } else {
-                        candidate = candidate.replacen(normalized, effective, 1);
-                    }
-                    break;
-                }
-            }
-            candidate
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    if changed {
-        rewritten
-    } else {
-        command.to_string()
-    }
-}
-
-fn rewrite_tool_path_with_written_aliases(tool: &str, args: &mut Value, loop_state: &LoopState) {
-    if !matches!(tool, "read_file" | "remove_file") || loop_state.written_file_aliases.is_empty() {
-        return;
-    }
-    let Some(obj) = args.as_object_mut() else {
-        return;
-    };
-    let Some(path) = obj.get("path").and_then(|v| v.as_str()) else {
-        return;
-    };
-    let quoted = path.trim_matches(|c| c == '"' || c == '\'');
-    let normalized = quoted.strip_prefix("./").unwrap_or(quoted);
-    let Some(effective) = loop_state.written_file_aliases.get(normalized) else {
-        return;
-    };
-    obj.insert("path".to_string(), Value::String(effective.clone()));
-}
-
-fn attach_recent_execution_context_to_chat_args(args: &mut Value, loop_state: &LoopState) {
-    let Some(obj) = args.as_object_mut() else {
-        return;
-    };
-    let mut context_lines = loop_state
-        .subtask_results
-        .iter()
-        .rev()
-        .take(3)
-        .cloned()
-        .collect::<Vec<_>>();
-    context_lines.reverse();
-    if let Some(last_output) = loop_state
-        .last_output
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        context_lines.push(format!(
-            "latest_raw_output:\n{}",
-            crate::truncate_for_agent_trace(last_output)
-        ));
-    }
-    if let Some(path) = loop_state
-        .last_written_file_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        context_lines.push(format!("last_written_file_path: {path}"));
-    }
-    if let Some(last_error) = loop_state
-        .output_vars
-        .get("last_error")
-        .map(String::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        context_lines.push(format!("latest_error: {last_error}"));
-    }
-    if context_lines.is_empty() {
-        return;
-    }
-    let execution_context = format!(
-        "Recent execution context for this same user request (use it when relevant; do not claim the user failed to provide it if it already appears below).\nStay grounded in the supplied user-visible execution context. If the subtask says to base the answer on a directory listing / file content / command output, do not invent unseen files, directories, paths, lines, or results. Do not expose internal bookkeeping labels or meta-status words in the final answer:\n{}",
-        context_lines.join("\n")
-    );
-    let merged_system_prompt = obj
-        .get("system_prompt")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|existing| format!("{existing}\n\n{execution_context}"))
-        .unwrap_or(execution_context);
-    obj.insert(
-        "system_prompt".to_string(),
-        Value::String(merged_system_prompt),
-    );
-}
-
-fn replace_double_brace_placeholders(input: &str, vars: &HashMap<String, String>) -> String {
-    let mut out = String::new();
-    let mut cursor = input;
-    loop {
-        let Some(start) = cursor.find("{{") else {
-            out.push_str(cursor);
-            break;
-        };
-        out.push_str(&cursor[..start]);
-        let remain = &cursor[start + 2..];
-        let Some(end) = remain.find("}}") else {
-            out.push_str(&cursor[start..]);
-            break;
-        };
-        let key = remain[..end].trim();
-        if let Some(v) = vars.get(key) {
-            out.push_str(v);
-        } else {
-            out.push_str("{{");
-            out.push_str(key);
-            out.push_str("}}");
-        }
-        cursor = &remain[end + 2..];
-    }
-    out
-}
-
-fn single_brace_key(input: &str) -> Option<&str> {
-    if !input.starts_with('{') || !input.ends_with('}') || input.starts_with("{{") {
-        return None;
-    }
-    let key = &input[1..input.len().saturating_sub(1)];
-    let trimmed = key.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-    {
-        Some(trimmed)
-    } else {
-        None
-    }
-}
-
-fn angle_bracket_key(input: &str) -> Option<&str> {
-    if !input.starts_with('<') || !input.ends_with('>') || input.len() < 3 {
-        return None;
-    }
-    let key = input[1..input.len() - 1].trim();
-    if key.is_empty() {
-        return None;
-    }
-    Some(key)
-}
-
-fn resolve_arg_string(input: &str, loop_state: &LoopState) -> String {
-    let replaced = replace_double_brace_placeholders(input, &loop_state.output_vars);
-    if let Some(key) = single_brace_key(replaced.trim()) {
-        if let Some(v) = loop_state.output_vars.get(key) {
-            return v.clone();
-        }
-        if let Some(v) = &loop_state.last_output {
-            return v.clone();
-        }
-    }
-    if let Some(key) = angle_bracket_key(replaced.trim()) {
-        if let Some(v) = loop_state.output_vars.get(key) {
-            return v.clone();
-        }
-        let normalized_key = key.to_ascii_lowercase();
-        if let Some(v) = loop_state.output_vars.get(&normalized_key) {
-            return v.clone();
-        }
-        if normalized_key.contains("output") {
-            if let Some(v) = &loop_state.last_output {
-                return v.clone();
-            }
-        }
-    }
-    replaced
-}
-
-fn resolve_arg_value(value: &Value, loop_state: &LoopState) -> Value {
-    match value {
-        Value::String(s) => Value::String(resolve_arg_string(s, loop_state)),
-        Value::Array(arr) => Value::Array(
-            arr.iter()
-                .map(|v| resolve_arg_value(v, loop_state))
-                .collect::<Vec<_>>(),
-        ),
-        Value::Object(map) => {
-            let mut out = serde_json::Map::new();
-            for (k, v) in map {
-                out.insert(k.clone(), resolve_arg_value(v, loop_state));
-            }
-            Value::Object(out)
-        }
-        _ => value.clone(),
-    }
-}
-
-async fn plan_round_actions(
-    state: &AppState,
-    task: &ClaimedTask,
-    goal: &str,
-    user_text: &str,
-    policy: &AgentLoopGuardPolicy,
-    loop_state: &LoopState,
-) -> Result<Vec<AgentAction>, String> {
-    let skill_playbooks = build_skill_playbooks_text(state, task);
-    let skill_quick_index = build_skill_quick_index_text(state, task);
-    let (tool_spec_template, _) = crate::load_prompt_template_for_state(
-        state,
-        AGENT_TOOL_SPEC_PATH,
-        AGENT_TOOL_SPEC_TEMPLATE,
-    );
-    let (prompt_name, prompt_file, prompt_text) = if loop_state.round_no <= 1 {
-        let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
-            state,
-            SINGLE_PLAN_EXECUTION_PROMPT_PATH,
-            SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE,
-        );
-        (
-            "single_plan_execution_prompt",
-            prompt_file,
-            format!(
-                "{}\n\n## Skill Quick Index (first-round routing hint)\nGoal: reduce misclassification and move into a second round when needed.\n- Do NOT end round-1 with a generic chat-style final answer when a skill might be relevant.\n- In round-1, prioritize intent classification + missing-slot check (what skill, what key args are missing).\n- If intent seems skill-related but confidence/args are incomplete, use `respond` to ask one concise clarifying question, then continue next round.\n- Only use immediate `call_skill` in round-1 when intent and required args are already clear.\n{}\n",
-                build_single_plan_prompt(
-                    &prompt_template,
-                    user_text,
-                    goal,
-                    &tool_spec_template,
-                    &skill_playbooks,
-                    &state.command_intent.default_locale,
-                ),
-                skill_quick_index
-            ),
-        )
-    } else {
-        let history_compact = build_loop_history_compact(loop_state);
-        let last_output = loop_state
-            .delivery_messages
-            .last()
-            .cloned()
-            .unwrap_or_else(|| "(none)".to_string());
-        let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
-            state,
-            LOOP_INCREMENTAL_PLAN_PROMPT_PATH,
-            LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE,
-        );
-        (
-            "loop_incremental_plan_prompt",
-            prompt_file,
-            build_incremental_plan_prompt(
-                &prompt_template,
-                user_text,
-                goal,
-                &tool_spec_template,
-                &skill_playbooks,
-                &state.command_intent.default_locale,
-                loop_state.round_no,
-                &history_compact,
-                &last_output,
-            ),
-        )
-    };
-    crate::log_prompt_render(
-        &task.task_id,
-        prompt_name,
-        &prompt_file,
-        Some(loop_state.round_no),
-    );
-    info!(
-        "{} loop_round_plan task_id={} round={} max_rounds={} max_steps={} multi_round_enabled={}",
-        crate::highlight_tag("loop"),
-        task.task_id,
-        loop_state.round_no,
-        policy.max_rounds,
-        policy.max_steps,
-        policy.multi_round_enabled
-    );
-    info!(
-        "plan_llm_request task_id={} round={} user_request={}",
-        task.task_id,
-        loop_state.round_no,
-        crate::truncate_for_log(user_text)
-    );
-    let plan_raw =
-        llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt_text, &prompt_file)
-            .await?;
-    info!(
-        "plan_llm_response task_id={} round={} raw={}",
-        task.task_id,
-        loop_state.round_no,
-        crate::truncate_for_log(&plan_raw)
-    );
-    let plan_actions = match parse_single_plan_actions(&plan_raw, state, task).await {
-        Some(actions) => actions,
-        None => {
-            warn!(
-                "plan_parse_failed task_id={} round={} attempting_repair",
-                task.task_id, loop_state.round_no
-            );
-            let repaired = repair_plan_actions(
-                state,
-                task,
-                goal,
-                user_text,
-                &tool_spec_template,
-                &skill_playbooks,
-                &plan_raw,
-                loop_state.round_no,
-            )
-            .await?;
-            parse_single_plan_actions(&repaired, state, task)
-                .await
-                .ok_or_else(|| "single plan parser failed: no executable steps".to_string())?
-        }
-    };
-    let labels: Vec<String> = plan_actions.iter().map(plan_step_label).collect();
-    info!(
-        "act_split_trace task_id={} round={} split_steps={}",
-        task.task_id,
-        loop_state.round_no,
-        serde_json::to_string(&labels).unwrap_or_else(|_| "[]".to_string())
-    );
-    Ok(plan_actions)
-}
-
-async fn repair_plan_actions(
-    state: &AppState,
-    task: &ClaimedTask,
-    goal: &str,
-    user_text: &str,
-    tool_spec: &str,
-    skill_playbooks: &str,
-    raw_plan: &str,
-    round_no: usize,
-) -> Result<String, String> {
-    let (prompt_template, prompt_file) = crate::load_prompt_template_for_state(
-        state,
-        PLAN_REPAIR_PROMPT_PATH,
-        PLAN_REPAIR_PROMPT_TEMPLATE,
-    );
-    let prompt = crate::render_prompt_template(
-        &prompt_template,
-        &[
-            ("__GOAL__", goal),
-            ("__USER_REQUEST__", user_text),
-            ("__TOOL_SPEC__", tool_spec),
-            ("__SKILL_PLAYBOOKS__", skill_playbooks),
-            (
-                "__CONFIG_RESPONSE_LANGUAGE__",
-                &state.command_intent.default_locale,
-            ),
-            ("__RAW_PLAN__", raw_plan),
-        ],
-    );
-    crate::log_prompt_render(
-        &task.task_id,
-        "plan_repair_prompt",
-        &prompt_file,
-        Some(round_no),
-    );
-    let repaired =
-        llm_gateway::run_with_fallback_with_prompt_file(state, task, &prompt, &prompt_file).await?;
-    info!(
-        "plan_llm_repair_response task_id={} round={} raw={}",
-        task.task_id,
-        round_no,
-        crate::truncate_for_log(&repaired)
-    );
-    Ok(repaired)
-}
-
-/// Decide if this respond should enter delivery. Avoid duplicate: do not publish when respond
-/// merely repeats the last delivery or the last raw step output.
-fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if !loop_state.has_tool_or_skill_output {
-        return true;
-    }
-    if loop_state
-        .delivery_messages
-        .last()
-        .is_some_and(|last| last.trim() == trimmed)
-    {
-        return false;
-    }
-    if loop_state
-        .last_output
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|last| last == trimmed)
-    {
-        return false;
-    }
-    true
-}
-
-async fn execute_actions_once(
-    state: &AppState,
-    task: &ClaimedTask,
-    goal: &str,
-    user_text: &str,
-    actions: &[AgentAction],
-    loop_state: &mut LoopState,
-    policy: &AgentLoopGuardPolicy,
-) -> Result<RoundOutcome, String> {
-    ensure_task_running(state, task)?;
-    let mut executed_actions = 0usize;
-    let mut stop_signal: Option<String> = None;
-    let actionable_count = actions.iter().take(policy.max_steps.max(1)).count();
-    let before_delivery_count = loop_state.delivery_messages.len();
-    let before_progress_count = loop_state.progress_messages.len();
-    let before_subtask_count = loop_state.subtask_results.len();
-    let mut ended_with_user_visible_output = false;
-    let round_steps: Vec<String> = actions.iter().map(plan_step_label).collect();
-    for (idx, action) in actions.iter().take(policy.max_steps.max(1)).enumerate() {
-        ensure_task_running(state, task)?;
-        let step_in_round = idx + 1;
-        let global_step = loop_state.total_steps_executed + 1;
-        let fingerprint = action_fingerprint(state, action);
-        let repeat_count = loop_state
-            .repeat_action_counts
-            .entry(fingerprint.clone())
-            .or_insert(0);
-        *repeat_count += 1;
-        if let Some(success_count) = loop_state.successful_action_fingerprints.get(&fingerprint) {
-            stop_signal = Some("repeat_completed_action".to_string());
-            info!(
-                "executor_result_error task_id={} round={} step={} type=guard error={}",
-                task.task_id,
-                loop_state.round_no,
-                step_in_round,
-                format!(
-                    "skip repeated successful action: count={} action={}",
-                    success_count,
-                    crate::truncate_for_log(&fingerprint)
-                )
-            );
-            break;
-        }
-        if *repeat_count > policy.repeat_action_limit {
-            stop_signal = Some("repeat_action_limit".to_string());
-            info!(
-                "executor_result_error task_id={} round={} step={} type=guard error={}",
-                task.task_id,
-                loop_state.round_no,
-                step_in_round,
-                format!(
-                    "repeat action guard triggered: count={} limit={} action={}",
-                    *repeat_count,
-                    policy.repeat_action_limit,
-                    crate::truncate_for_log(&fingerprint)
-                )
-            );
-            break;
-        }
-
-        info!(
-            "executor_step_start task_id={} round={} step={} global_step={} action={}",
-            task.task_id,
-            loop_state.round_no,
-            step_in_round,
-            global_step,
-            plan_step_label(action)
-        );
-        loop_state.last_actions_fingerprint = Some(fingerprint.clone());
-        // Main path: CallSkill (planner outputs only call_skill). CallTool is legacy fallback for parsed old input only.
-        match action {
-            // LEGACY COMPATIBILITY: CallTool only from old plans/history; normalizer now outputs call_skill only. Same dispatch as CallSkill (run_skill).
-            AgentAction::CallTool { tool, args } => {
-                let mut resolved_args = resolve_arg_value(args, loop_state);
-                let normalized_skill = state.resolve_canonical_skill_name(tool);
-                if normalized_skill == "chat" {
-                    attach_recent_execution_context_to_chat_args(&mut resolved_args, loop_state);
-                }
-                let write_file_effective_path = if normalized_skill == "write_file" {
-                    resolved_args
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .map(|path| {
-                            let effective =
-                                crate::ensure_default_file_path(&state.workspace_root, path);
-                            let user_visible = if Path::new(&effective).is_absolute() {
-                                effective.clone()
-                            } else {
-                                state.workspace_root.join(&effective).display().to_string()
-                            };
-                            (path.to_string(), effective, user_visible)
-                        })
-                } else {
-                    None
-                };
-                if normalized_skill == "run_cmd" {
-                    if let Some(obj) = resolved_args.as_object_mut() {
-                        if let Some(command) = obj.get("command").and_then(|v| v.as_str()) {
-                            let rewritten =
-                                rewrite_run_cmd_with_written_aliases(command, loop_state);
-                            if rewritten != command {
-                                obj.insert("command".to_string(), Value::String(rewritten));
-                            }
-                        }
-                    }
-                }
-                rewrite_tool_path_with_written_aliases(
-                    &normalized_skill,
-                    &mut resolved_args,
-                    loop_state,
-                );
-                loop_state.tool_calls_total += 1;
-                let args_summary =
-                    build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
-                info!(
-                    "{} executor_step_execute task_id={} round={} step={} type=call_skill(legacy_tool) skill={} args={}",
-                    crate::highlight_tag("skill"),
-                    task.task_id,
-                    loop_state.round_no,
-                    step_in_round,
-                    normalized_skill,
-                    crate::truncate_for_log(&resolved_args.to_string())
-                );
-                match run_skill_with_runner_outcome(
-                    state,
-                    task,
-                    &normalized_skill,
-                    resolved_args.clone(),
-                )
-                .await
-                {
-                    Ok(outcome) => {
-                        ensure_task_running(state, task)?;
-                        let out = outcome.text.clone();
-                        if normalized_skill == "chat"
-                            && crate::semantic_judge::is_publishable_raw(state, task, &out).await
-                        {
-                            loop_state.last_publishable_chat_output = Some(out.clone());
-                        }
-                        if let Some((original_path, _effective_path, user_visible_path)) =
-                            &write_file_effective_path
-                        {
-                            remember_written_file_alias(
-                                loop_state,
-                                original_path,
-                                user_visible_path,
-                            );
-                            register_file_path_output(
-                                loop_state,
-                                global_step,
-                                step_in_round,
-                                &format!("skill.{normalized_skill}"),
-                                user_visible_path,
-                            );
-                        } else if tool == "read_file" {
-                            if let Some(path) = resolved_args.get("path").and_then(|v| v.as_str()) {
-                                register_file_path_output(
-                                    loop_state,
-                                    global_step,
-                                    step_in_round,
-                                    &format!("skill.{normalized_skill}"),
-                                    path,
-                                );
-                            }
-                        }
-                        crate::append_subtask_result(
-                            &mut loop_state.subtask_results,
-                            global_step,
-                            &format!("skill({normalized_skill})"),
-                            true,
-                            &out,
-                        );
-                        if !out.trim().is_empty() {
-                            loop_state.has_tool_or_skill_output = true;
-                            ended_with_user_visible_output = true;
-                            let hint = if args_summary.is_empty() {
-                                encode_progress_i18n(
-                                    "telegram.progress.skill_completed",
-                                    &[("skill", normalized_skill.as_str())],
-                                )
-                            } else {
-                                encode_progress_i18n(
-                                    "telegram.progress.skill_completed_with_args",
-                                    &[
-                                        ("skill", normalized_skill.as_str()),
-                                        ("args_summary", args_summary.as_str()),
-                                    ],
-                                )
-                            };
-                            append_progress_hint(
-                                state,
-                                task,
-                                &mut loop_state.progress_messages,
-                                hint,
-                            );
-                        }
-                        register_step_output(
-                            loop_state,
-                            global_step,
-                            step_in_round,
-                            &format!("skill.{normalized_skill}"),
-                            &out,
-                        );
-                        *loop_state
-                            .successful_action_fingerprints
-                            .entry(fingerprint.clone())
-                            .or_insert(0) += 1;
-                        info!(
-                            "executor_result_ok task_id={} round={} step={} type=call_skill(legacy_tool) output={} trace_only=raw_not_delivery",
-                            task.task_id,
-                            loop_state.round_no,
-                            step_in_round,
-                            crate::truncate_for_log(&out)
-                        );
-                        loop_state.history_compact.push(format!(
-                            "round={} step={} skill={} ok",
-                            loop_state.round_no, step_in_round, normalized_skill
-                        ));
-                    }
-                    Err(err) => {
-                        if !repo::is_task_still_running(state, &task.task_id).unwrap_or(true) {
-                            return Err(TASK_CANCELED_ERR.to_string());
-                        }
-                        let user_visible_err =
-                            crate::skills::normalize_skill_error_for_user(&normalized_skill, &err);
-                        crate::append_subtask_result(
-                            &mut loop_state.subtask_results,
-                            global_step,
-                            &format!("skill({normalized_skill})"),
-                            false,
-                            &user_visible_err,
-                        );
-                        info!(
-                            "executor_result_error task_id={} round={} step={} type=call_skill(legacy_tool) error={}",
-                            task.task_id,
-                            loop_state.round_no,
-                            step_in_round,
-                            crate::truncate_for_log(&user_visible_err)
-                        );
-                        if let Some(stop_reason) = classify_skill_failure_recovery(
-                            state,
-                            actions,
-                            idx,
-                            policy.max_steps,
-                            &normalized_skill,
-                            Some(&resolved_args),
-                            &err,
-                        ) {
-                            register_failed_step_output(
-                                loop_state,
-                                global_step,
-                                step_in_round,
-                                &format!("skill.{normalized_skill}"),
-                                &format!("skill({normalized_skill})"),
-                                &user_visible_err,
-                            );
-                            loop_state.history_compact.push(format!(
-                                "round={} step={} skill={} failed error={}",
-                                loop_state.round_no,
-                                step_in_round,
-                                normalized_skill,
-                                crate::truncate_for_agent_trace(&user_visible_err)
-                            ));
-                            executed_actions += 1;
-                            loop_state.total_steps_executed += 1;
-                            if stop_reason == "recoverable_failure_continue_in_round" {
-                                continue;
-                            }
-                            stop_signal = Some(stop_reason.to_string());
-                            break;
-                        }
-                        let resume_err = build_resume_context_error(
-                            actions,
-                            &round_steps,
-                            user_text,
-                            goal,
-                            &loop_state.subtask_results,
-                            &loop_state.delivery_messages,
-                            step_in_round,
-                            &format!("skill({normalized_skill})"),
-                            &user_visible_err,
-                        );
-                        return Err(resume_err);
-                    }
-                }
-            }
-            AgentAction::CallSkill { skill, args } => {
-                let mut resolved_args = resolve_arg_value(args, loop_state);
-                loop_state.tool_calls_total += 1;
-                let normalized_skill = state.resolve_canonical_skill_name(skill);
-                let recovery_args = resolved_args.clone();
-                let read_file_requested_path = if normalized_skill == "read_file" {
-                    resolved_args
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .map(|path| path.to_string())
-                } else {
-                    None
-                };
-                let write_file_effective_path = if normalized_skill == "write_file" {
-                    resolved_args
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .map(|path| {
-                            let effective =
-                                crate::ensure_default_file_path(&state.workspace_root, path);
-                            let user_visible = if Path::new(&effective).is_absolute() {
-                                effective.clone()
-                            } else {
-                                state.workspace_root.join(&effective).display().to_string()
-                            };
-                            (path.to_string(), effective, user_visible)
-                        })
-                } else {
-                    None
-                };
-                if normalized_skill == "chat" {
-                    attach_recent_execution_context_to_chat_args(&mut resolved_args, loop_state);
-                }
-                let args_summary =
-                    build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
-                info!(
-                    "{} executor_step_execute task_id={} round={} step={} type=call_skill skill={} args={}",
-                    crate::highlight_tag("skill"),
-                    task.task_id,
-                    loop_state.round_no,
-                    step_in_round,
-                    normalized_skill,
-                    crate::truncate_for_log(&resolved_args.to_string())
-                );
-                match run_skill_with_runner_outcome(state, task, &normalized_skill, resolved_args)
-                    .await
-                {
-                    Ok(outcome) => {
-                        ensure_task_running(state, task)?;
-                        let out = outcome.text.clone();
-                        if let Some((original_path, _effective_path, user_visible_path)) =
-                            &write_file_effective_path
-                        {
-                            remember_written_file_alias(
-                                loop_state,
-                                original_path,
-                                user_visible_path,
-                            );
-                            register_file_path_output(
-                                loop_state,
-                                global_step,
-                                step_in_round,
-                                &format!("skill.{normalized_skill}"),
-                                user_visible_path,
-                            );
-                        } else if normalized_skill == "read_file" {
-                            if let Some(path) = read_file_requested_path.as_deref() {
-                                register_file_path_output(
-                                    loop_state,
-                                    global_step,
-                                    step_in_round,
-                                    &format!("skill.{normalized_skill}"),
-                                    path,
-                                );
-                            }
-                        }
-                        crate::append_subtask_result(
-                            &mut loop_state.subtask_results,
-                            global_step,
-                            &format!("skill({normalized_skill})"),
-                            true,
-                            &out,
-                        );
-                        if !out.trim().is_empty() {
-                            loop_state.has_tool_or_skill_output = true;
-                            ended_with_user_visible_output = true;
-                            let hint = if args_summary.is_empty() {
-                                encode_progress_i18n(
-                                    "telegram.progress.skill_completed",
-                                    &[("skill", normalized_skill.as_str())],
-                                )
-                            } else {
-                                encode_progress_i18n(
-                                    "telegram.progress.skill_completed_with_args",
-                                    &[
-                                        ("skill", normalized_skill.as_str()),
-                                        ("args_summary", args_summary.as_str()),
-                                    ],
-                                )
-                            };
-                            append_progress_hint(
-                                state,
-                                task,
-                                &mut loop_state.progress_messages,
-                                hint,
-                            );
-                        }
-                        register_step_output(
-                            loop_state,
-                            global_step,
-                            step_in_round,
-                            &format!("skill.{normalized_skill}"),
-                            &out,
-                        );
-                        *loop_state
-                            .successful_action_fingerprints
-                            .entry(fingerprint.clone())
-                            .or_insert(0) += 1;
-                        info!(
-                            "executor_result_ok task_id={} round={} step={} type=call_skill output={} trace_only=raw_not_delivery",
-                            task.task_id,
-                            loop_state.round_no,
-                            step_in_round,
-                            crate::truncate_for_log(&out)
-                        );
-                        loop_state.history_compact.push(format!(
-                            "round={} step={} skill={} ok",
-                            loop_state.round_no, step_in_round, normalized_skill
-                        ));
-                    }
-                    Err(err) => {
-                        if !repo::is_task_still_running(state, &task.task_id).unwrap_or(true) {
-                            return Err(TASK_CANCELED_ERR.to_string());
-                        }
-                        let user_visible_err =
-                            crate::skills::normalize_skill_error_for_user(&normalized_skill, &err);
-                        crate::append_subtask_result(
-                            &mut loop_state.subtask_results,
-                            global_step,
-                            &format!("skill({normalized_skill})"),
-                            false,
-                            &user_visible_err,
-                        );
-                        info!(
-                            "executor_result_error task_id={} round={} step={} type=call_skill error={}",
-                            task.task_id,
-                            loop_state.round_no,
-                            step_in_round,
-                            crate::truncate_for_log(&user_visible_err)
-                        );
-                        if let Some(stop_reason) = classify_skill_failure_recovery(
-                            state,
-                            actions,
-                            idx,
-                            policy.max_steps,
-                            &normalized_skill,
-                            Some(&recovery_args),
-                            &err,
-                        ) {
-                            register_failed_step_output(
-                                loop_state,
-                                global_step,
-                                step_in_round,
-                                &format!("skill.{normalized_skill}"),
-                                &format!("skill({normalized_skill})"),
-                                &user_visible_err,
-                            );
-                            loop_state.history_compact.push(format!(
-                                "round={} step={} skill={} failed error={}",
-                                loop_state.round_no,
-                                step_in_round,
-                                normalized_skill,
-                                crate::truncate_for_agent_trace(&user_visible_err)
-                            ));
-                            executed_actions += 1;
-                            loop_state.total_steps_executed += 1;
-                            if stop_reason == "recoverable_failure_continue_in_round" {
-                                continue;
-                            }
-                            stop_signal = Some(stop_reason.to_string());
-                            break;
-                        }
-                        let resume_err = build_resume_context_error(
-                            actions,
-                            &round_steps,
-                            user_text,
-                            goal,
-                            &loop_state.subtask_results,
-                            &loop_state.delivery_messages,
-                            step_in_round,
-                            &format!("skill({normalized_skill})"),
-                            &user_visible_err,
-                        );
-                        return Err(resume_err);
-                    }
-                }
-            }
-            AgentAction::Respond { content } => {
-                let text = rewrite_response_with_written_aliases(
-                    &resolve_arg_string(content, loop_state).trim().to_string(),
-                    loop_state,
-                )
-                .trim()
-                .to_string();
-
-                let has_remaining_actions =
-                    has_remaining_action_after(actions, idx, policy.max_steps);
-                // For terminal responds after successful read_file, defer user-visible delivery
-                // to observed-read synthesis so final text stays grounded in file evidence.
-                let terminal_read_grounding_override = !has_remaining_actions
-                    && extract_latest_successful_read_file_output(loop_state).is_some()
-                    && !text.trim_start().starts_with("FILE:")
-                    && !text.trim_start().starts_with("IMAGE_FILE:");
-                let publish_respond =
-                    should_publish_respond_message(loop_state, &text) && !terminal_read_grounding_override;
-                if !text.is_empty()
-                    && (publish_respond
-                        || (!has_remaining_actions && !terminal_read_grounding_override))
-                {
-                    loop_state.last_user_visible_respond = Some(text.clone());
-                }
-                if publish_respond {
-                    crate::append_subtask_result(
-                        &mut loop_state.subtask_results,
-                        global_step,
-                        "respond",
-                        true,
-                        &text,
-                    );
-                    if !has_remaining_actions {
-                        ended_with_user_visible_output = !text.is_empty();
-                    }
-                    append_delivery_message(
-                        &task.task_id,
-                        &mut loop_state.delivery_messages,
-                        text.clone(),
-                    );
-                    info!(
-                        "delivery appended from respond task_id={} len={} has_remaining={}",
-                        task.task_id,
-                        loop_state.delivery_messages.len(),
-                        has_remaining_actions
-                    );
-                    let hint = encode_progress_i18n("telegram.progress.reply_generated", &[]);
-                    append_progress_hint(state, task, &mut loop_state.progress_messages, hint);
-                }
-                if !publish_respond && !text.is_empty() {
-                    debug!(
-                        "executor_step_skip task_id={} round={} step={} type=respond reason=respond_not_publishable trace_only",
-                        task.task_id, loop_state.round_no, step_in_round
-                    );
-                }
-                if terminal_read_grounding_override {
-                    info!(
-                        "terminal_respond_deferred_to_observed_read task_id={} round={} step={}",
-                        task.task_id, loop_state.round_no, step_in_round
-                    );
-                }
-                register_step_output(loop_state, global_step, step_in_round, "respond", &text);
-                *loop_state
-                    .successful_action_fingerprints
-                    .entry(fingerprint.clone())
-                    .or_insert(0) += 1;
-                info!(
-                    "executor_result_ok task_id={} round={} step={} type=respond output={}",
-                    task.task_id,
-                    loop_state.round_no,
-                    step_in_round,
-                    crate::truncate_for_log(&text)
-                );
-                loop_state.history_compact.push(format!(
-                    "round={} step={} respond{}",
-                    loop_state.round_no,
-                    step_in_round,
-                    if has_remaining_actions {
-                        "_intermediate"
-                    } else {
-                        ""
-                    }
-                ));
-                executed_actions += 1;
-                loop_state.total_steps_executed += 1;
-                if !has_remaining_actions {
-                    if terminal_read_grounding_override {
-                        stop_signal = Some("terminal_read_grounded_synthesis".to_string());
-                    } else {
-                        stop_signal = Some("respond".to_string());
-                    }
-                    break;
-                }
-                continue;
-            }
-            AgentAction::Think { .. } => {}
-        }
-        executed_actions += 1;
-        loop_state.total_steps_executed += 1;
-    }
-    if stop_signal.is_none()
-        && executed_actions == actionable_count
-        && ended_with_user_visible_output
-    {
-        stop_signal = Some("plan_exhausted_user_visible".to_string());
-    }
-    let delivery_grew = loop_state.delivery_messages.len() > before_delivery_count;
-    let progress_grew = loop_state.progress_messages.len() > before_progress_count;
-    let step_output_grew = loop_state.subtask_results.len() > before_subtask_count;
-    let no_progress = !delivery_grew && !progress_grew && !step_output_grew;
-    let next_goal_hint = loop_state.delivery_messages.last().cloned();
-    Ok(RoundOutcome {
-        executed_actions,
-        had_error: false,
-        stop_signal,
-        next_goal_hint,
-        no_progress,
-    })
-}
-
-/// Synthesize a final user-facing answer when execution produced raw outputs but no explicit
-/// publishable respond was emitted by the plan itself.
-fn should_synthesize_final_response(loop_state: &LoopState) -> bool {
-    (loop_state.has_tool_or_skill_output || loop_state.has_recoverable_failure_context)
-        && loop_state.last_user_visible_respond.is_none()
-}
-
-fn classify_observed_output_kind(text: &str) -> &'static str {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        "empty"
-    } else if looks_like_planner_artifact(trimmed) {
-        "planner_artifact"
-    } else if trimmed.starts_with("FILE:") || trimmed.starts_with("IMAGE_FILE:") {
-        "delivery_token"
-    } else if trimmed.starts_with('{') || trimmed.starts_with('[') {
-        "structured"
-    } else {
-        "content"
-    }
-}
-
-fn classify_observed_content_status(text: &str) -> &'static str {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        "no_content"
-    } else if looks_like_planner_artifact(trimmed)
-        || trimmed.starts_with("FILE:")
-        || trimmed.starts_with("IMAGE_FILE:")
-    {
-        "mentioned_only"
-    } else {
-        "content_available"
-    }
-}
-
-fn looks_like_planner_artifact(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if trimmed.starts_with("[TOOL_CALL]")
-        || trimmed.contains("[/TOOL_CALL]")
-        || (trimmed.contains("{tool =>") && trimmed.contains("args =>"))
-    {
-        return true;
-    }
-    if crate::prompt_utils::extract_agent_action_objects(trimmed)
-        .into_iter()
-        .next()
-        .is_some()
-    {
-        return true;
-    }
-    let Some(value) = crate::parse_llm_json_raw_or_any::<Value>(trimmed) else {
-        return false;
-    };
-    match value {
-        Value::Object(map) => {
-            map.contains_key("type")
-                || map.contains_key("tool")
-                || map.contains_key("skill")
-                || map.contains_key("action")
-                || map.get("steps").and_then(|v| v.as_array()).is_some()
-        }
-        _ => false,
-    }
-}
-
-fn infer_file_target_kind(path: &str) -> &'static str {
-    let lower = path.to_ascii_lowercase();
-    if lower.ends_with(".log") {
-        "log_file"
-    } else if lower.ends_with(".json") {
-        "json_file"
-    } else if lower.ends_with(".sqlite") || lower.ends_with(".db") {
-        "db_file"
-    } else if lower.ends_with(".zip") || lower.ends_with(".tgz") || lower.ends_with(".tar.gz") {
-        "archive_file"
-    } else if Path::new(path)
-        .file_name()
-        .and_then(|v| v.to_str())
-        .map(|name| !name.contains('.'))
-        .unwrap_or(false)
-    {
-        "directory"
-    } else {
-        "file"
-    }
-}
-
-/// Build final delivery list and final_text with priority: last_user_visible_respond > delivery_messages (deduped).
-/// Used for testing and by run_agent_with_loop. Does not apply fallback_from_raw.
-pub(crate) fn build_final_delivery_with_priority(
-    delivery_messages: &[String],
-    last_user_visible_respond: Option<&String>,
-) -> (Vec<String>, String, bool) {
-    let mut delivery_deduped: Vec<String> = Vec::new();
-    for m in delivery_messages {
-        let t = m.trim();
-        if t.is_empty() {
-            continue;
-        }
-        if let Some(pos) = delivery_deduped.iter().position(|x| x.trim() == t) {
-            delivery_deduped.remove(pos);
-        }
-        delivery_deduped.push(m.clone());
-    }
-    let used_last_respond = if let Some(last_respond) = last_user_visible_respond {
-        let trimmed = last_respond.trim();
-        if !trimmed.is_empty() {
-            delivery_deduped.retain(|x| x.trim() != trimmed);
-            delivery_deduped.push(last_respond.clone());
-            true
-        } else {
-            false
-        }
-    } else {
-        false
-    };
-    let final_text = delivery_deduped.last().cloned().unwrap_or_default();
-    (delivery_deduped, final_text, used_last_respond)
-}
-
-/// Build a single final delivery string from raw subtask results (no LLM). Only include publishable raw;
-/// process/internal lines are filtered out so they are not exposed as final delivery.
-async fn fallback_finalize_from_raw(
-    state: &AppState,
-    task: &ClaimedTask,
-    subtask_results: &[String],
-) -> String {
-    if subtask_results.is_empty() {
-        return String::new();
-    }
-    const MAX_FALLBACK_ITEMS: usize = 5;
-    let take = subtask_results.len().min(MAX_FALLBACK_ITEMS);
-    let slice = &subtask_results[subtask_results.len().saturating_sub(take)..];
-    let mut filtered: Vec<String> = Vec::new();
-    for s in slice {
-        let t = normalize_user_visible_text(s);
-        if t.is_empty() {
-            continue;
-        }
-        if crate::semantic_judge::is_publishable_raw(state, task, t).await {
-            filtered.push(t.to_string());
-        }
-    }
-    filtered.join("\n\n")
-}
-
-/// Normalize raw loop text to user-visible plain body.
-/// If a legacy `subtask#...` header exists, keep only its body.
-fn normalize_user_visible_text(raw: &str) -> &str {
-    let trimmed = raw.trim();
-    if !trimmed.starts_with("subtask#") {
-        return trimmed;
-    }
-    if let Some((_, body)) = trimmed.split_once('\n') {
-        let body = body.trim();
-        if !body.is_empty() {
-            return body;
-        }
-    }
-    ""
-}
-
-fn parse_finalizer_schema_out(raw: &str) -> Option<FinalizerSchemaOut> {
-    crate::parse_llm_json_extract_or_any::<FinalizerSchemaOut>(raw)
-        .or_else(|| crate::parse_llm_json_raw_or_any::<FinalizerSchemaOut>(raw))
-}
-
-fn finalizer_contract_ok(schema: &FinalizerSchemaOut) -> bool {
-    schema.completion_ok
-        && schema.grounded_ok
-        && schema.format_ok
-        && !schema.answer.trim().is_empty()
-        && !looks_like_internal_trace_artifact(schema.answer.trim())
-}
-
-fn finalizer_schema_answer(raw: &str) -> Option<(String, FinalizerSchemaOut)> {
-    let schema = parse_finalizer_schema_out(raw)?;
-    let answer = schema.answer.trim().to_string();
-    if answer.is_empty() {
-        return None;
-    }
-    Some((answer, schema))
-}
-
-fn looks_like_internal_trace_artifact(text: &str) -> bool {
-    let trimmed = text.trim();
-    trimmed.starts_with("subtask#")
-        || trimmed.starts_with("round=")
-        || trimmed.starts_with("step=")
-}
-
-fn looks_like_structured_blob(text: &str) -> bool {
-    let trimmed = text.trim();
-    trimmed.starts_with('{') || trimmed.starts_with('[')
-}
-
-fn trim_request_path_token(token: &str) -> String {
-    token
-        .trim()
-        .trim_matches(|c: char| {
-            matches!(
-                c,
-                '"' | '\'' | '`' | '，' | ',' | ':' | '：' | ';' | '。' | ')' | '(' | '）' | '（'
-            )
-        })
-        .to_string()
-}
-
-fn extract_explicit_paths_from_request(input: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    for token in input.split_whitespace() {
-        let trimmed = trim_request_path_token(token);
-        if !(trimmed.starts_with('/') || trimmed.starts_with("./") || trimmed.starts_with("../")) {
-            continue;
-        }
-        if seen.insert(trimmed.clone()) {
-            out.push(trimmed);
-        }
-    }
-    out
-}
-
-fn extract_single_explicit_path_from_request(input: &str) -> Option<String> {
-    let paths = extract_explicit_paths_from_request(input);
-    if paths.len() == 1 {
-        paths.into_iter().next()
-    } else {
-        None
-    }
-}
-
-fn normalize_path_for_scope_compare(workspace_root: &Path, raw: &str) -> Option<String> {
-    let trimmed = trim_request_path_token(raw);
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut normalized = crate::ensure_default_file_path(workspace_root, &trimmed).replace('\\', "/");
-    while normalized.len() > 1 && normalized.ends_with('/') {
-        normalized.pop();
-    }
-    Some(normalized)
-}
-
-fn paths_equivalent_for_scope(workspace_root: &Path, expected: &str, actual: &str) -> bool {
-    let Some(left) = normalize_path_for_scope_compare(workspace_root, expected) else {
-        return false;
-    };
-    let Some(right) = normalize_path_for_scope_compare(workspace_root, actual) else {
-        return false;
-    };
-    left == right
-}
-
-fn observed_quotes_grounded(schema: &FinalizerSchemaOut, observed: &str) -> bool {
-    let mut any = false;
-    for quote in schema
-        .evidence_quotes
-        .iter()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-    {
-        any = true;
-        if !observed.contains(quote) {
-            return false;
-        }
-    }
-    any
-}
-
-fn observed_read_path_matches_request(
-    workspace_root: &Path,
-    user_text: &str,
-    observed_read_path: Option<&str>,
-) -> bool {
-    let Some(expected_path) = extract_single_explicit_path_from_request(user_text) else {
-        return true;
-    };
-    let Some(actual_path) = observed_read_path else {
-        return true;
-    };
-    paths_equivalent_for_scope(workspace_root, &expected_path, actual_path)
-}
-
-async fn synthesize_final_response(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &LoopState,
-) -> Result<Option<String>, String> {
-    if !should_synthesize_final_response(loop_state) {
-        return Ok(None);
-    }
-    let observed_read_output = extract_latest_successful_read_file_output(loop_state);
-    if observed_read_output.is_some() {
-        if let Some(recovered) =
-            synthesize_from_observed_read_output(state, task, user_text, loop_state).await?
-        {
-            let trimmed = recovered.trim().to_string();
-            if trimmed.is_empty()
-                || looks_like_planner_artifact(&trimmed)
-                || looks_like_internal_trace_artifact(&trimmed)
-            {
-                return Ok(None);
-            }
-            return Ok(Some(trimmed));
-        }
-    }
-    let mut args = json!({
-        "text": format!(
-            "Original user request:\n{}\n\nWrite the final user-facing answer now. Use the recent execution context above. Complete any still-pending lightweight conclusion requested by the user, but do not invent unseen files, paths, lines, or command results. Treat the current turn's observed tool results as authoritative; do not let older memory or earlier execution snippets override a successful tool result from this turn. If the observed raw result already exactly satisfies the user request, return it unchanged. If the user asked for a boolean / scalar / path / filename / FILE token only, keep that exact compact format and do not wrap it in extra prose. If the user asked for only a number but the observed result is a plain newline-separated listing from this turn, answer with the count only. If the user asked for a field value and the observed extraction result is `undefined`, `null`, or empty, answer that the field was not found; do not turn that into a file-not-found claim. If execution already produced one concrete saved file path and the user asked to receive the file itself, return exactly FILE:<that-path>. If the observed execution context shows a requested file/path was not found, answer concisely that it was not found instead of asking the user to re-provide contents that were already attempted. Do not claim that you lack file access or cannot access files when the execution context already shows that file-access steps were attempted; in that case stay grounded in the observed file-not-found result. Keep the reply concise and direct.\n\nReturn JSON only with this schema:\n{{\"answer\":\"<final user-facing text>\",\"completion_ok\":true|false,\"grounded_ok\":true|false,\"format_ok\":true|false,\"needs_clarify\":true|false,\"confidence\":0.0-1.0,\"used_evidence_ids\":[\"E1\",\"E2\"]}}",
-            user_text
-        )
-    });
-    attach_recent_execution_context_to_chat_args(&mut args, loop_state);
-    let out = execution_adapters::run_skill(state, task, "chat", args).await?;
-    if let Some((answer, schema)) = finalizer_schema_answer(&out) {
-        let contract_ok = finalizer_contract_ok(&schema);
-        info!(
-            "finalizer_schema_eval task_id={} stage=general contract_ok={} completion_ok={} grounded_ok={} format_ok={} needs_clarify={} confidence={} used_evidence_ids_count={}",
-            task.task_id,
-            contract_ok,
-            schema.completion_ok,
-            schema.grounded_ok,
-            schema.format_ok,
-            schema.needs_clarify,
-            schema.confidence,
-            schema.used_evidence_ids.len()
-        );
-        if contract_ok && !looks_like_planner_artifact(&answer) {
-            return Ok(Some(answer));
-        }
-        return Ok(None);
-    }
-    let trimmed = out.trim().to_string();
-    if trimmed.is_empty() {
-        Ok(None)
-    } else if looks_like_planner_artifact(&trimmed)
-        || looks_like_internal_trace_artifact(&trimmed)
-        || looks_like_structured_blob(&trimmed)
-    {
-        if looks_like_structured_blob(&trimmed) {
-            warn!(
-                "finalizer_schema_eval task_id={} stage=general parse_failed=true structured_blob_rejected=true",
-                task.task_id
-            );
-        }
-        Ok(None)
-    } else {
-        Ok(Some(trimmed))
-    }
-}
-
-fn extract_latest_successful_read_file_output(loop_state: &LoopState) -> Option<String> {
-    for item in loop_state.subtask_results.iter().rev() {
-        let lower = item.to_ascii_lowercase();
-        if !lower.contains("skill(read_file): success") {
-            continue;
-        }
-        let body = normalize_user_visible_text(item).trim();
-        if body.is_empty() {
-            continue;
-        }
-        if let Some((head, tail)) = body.split_once('\n') {
-            if head
-                .trim()
-                .to_ascii_lowercase()
-                .contains("skill(read_file): success")
-            {
-                let tail_trimmed = tail.trim();
-                if !tail_trimmed.is_empty() {
-                    return Some(tail_trimmed.to_string());
-                }
-            }
-        }
-        return Some(body.to_string());
-    }
-    None
-}
-
-fn extract_latest_successful_read_file_path(loop_state: &LoopState) -> Option<String> {
-    loop_state
-        .output_vars
-        .get("skill.read_file.path")
-        .or_else(|| loop_state.output_vars.get("last_file_path"))
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
-fn deterministic_summary_from_observed(observed: &str) -> Option<String> {
-    if let Some(line) = first_non_heading_line(observed) {
-        return Some(line);
-    }
-    observed
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(|line| {
-            let mut out = line.to_string();
-            if out.chars().count() > 120 {
-                out = out.chars().take(120).collect::<String>() + "...";
-            }
-            out
-        })
-}
-
-async fn synthesize_from_observed_read_output(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &LoopState,
-) -> Result<Option<String>, String> {
-    let Some(mut observed) = extract_latest_successful_read_file_output(loop_state) else {
-        return Ok(None);
-    };
-    let mut observed_read_path = extract_latest_successful_read_file_path(loop_state);
-
-    // If the user specified one explicit path but execution read another path, perform one
-    // corrective read on that explicit path before final synthesis.
-    if let (Some(expected_path), Some(actual_path)) = (
-        extract_single_explicit_path_from_request(user_text),
-        observed_read_path.as_deref(),
-    ) {
-        if !paths_equivalent_for_scope(&state.workspace_root, &expected_path, actual_path) {
-            info!(
-                "observed_read_path_mismatch task_id={} expected_path={} actual_path={}",
-                task.task_id, expected_path, actual_path
-            );
-            match run_skill_with_runner_outcome(
-                state,
-                task,
-                "read_file",
-                json!({ "path": expected_path.clone() }),
-            )
-            .await
-            {
-                Ok(outcome) => {
-                    let corrected = outcome.text.trim();
-                    if !corrected.is_empty() {
-                        observed = corrected.to_string();
-                        observed_read_path = Some(expected_path.clone());
-                        info!(
-                            "observed_read_path_corrected task_id={} corrected_path={} corrected_len={}",
-                            task.task_id,
-                            expected_path,
-                            corrected.len()
-                        );
-                    }
-                }
-                Err(err) => {
-                    warn!(
-                        "observed_read_path_correction_failed task_id={} expected_path={} err={}",
-                        task.task_id,
-                        expected_path,
-                        crate::truncate_for_log(&err)
-                    );
-                }
-            }
-        }
-    }
-
-    let observed_path_for_prompt = observed_read_path
-        .as_deref()
-        .unwrap_or("<unknown>");
-    let mut args = json!({
-        "text": format!(
-            "Original user request:\n{}\n\nObserved read_file path from this turn:\n{}\n\nObserved file content from a successful read_file step (authoritative):\n{}\n\nReturn the final user-facing answer directly based on the observed content. Do not claim missing/unreadable file because the read_file step already succeeded. Keep the reply concise and preserve requested format constraints from the user request. Include 1-3 exact short quotes copied verbatim from the observed content as grounding evidence.\n\nReturn JSON only with this schema:\n{{\"answer\":\"<final user-facing text>\",\"completion_ok\":true|false,\"grounded_ok\":true|false,\"format_ok\":true|false,\"needs_clarify\":true|false,\"confidence\":0.0-1.0,\"used_evidence_ids\":[\"E1\"],\"evidence_quotes\":[\"<exact quote from observed content>\"]}}",
-            user_text,
-            observed_path_for_prompt,
-            crate::truncate_for_agent_trace(&observed)
-        )
-    });
-    attach_recent_execution_context_to_chat_args(&mut args, loop_state);
-    let retry = execution_adapters::run_skill(state, task, "chat", args).await?;
-    if let Some((answer, schema)) = finalizer_schema_answer(&retry) {
-        let evidence_ok = observed_quotes_grounded(&schema, &observed);
-        let path_ok = observed_read_path_matches_request(
-            &state.workspace_root,
-            user_text,
-            observed_read_path.as_deref(),
-        );
-        let contract_ok = finalizer_contract_ok(&schema) && evidence_ok && path_ok;
-        info!(
-            "finalizer_schema_eval task_id={} stage=observed_read contract_ok={} completion_ok={} grounded_ok={} format_ok={} needs_clarify={} confidence={} used_evidence_ids_count={} evidence_quotes_count={} evidence_ok={} path_ok={} observed_path={}",
-            task.task_id,
-            contract_ok,
-            schema.completion_ok,
-            schema.grounded_ok,
-            schema.format_ok,
-            schema.needs_clarify,
-            schema.confidence,
-            schema.used_evidence_ids.len(),
-            schema.evidence_quotes.len(),
-            evidence_ok,
-            path_ok,
-            observed_path_for_prompt
-        );
-        if contract_ok && !looks_like_planner_artifact(&answer) {
-            return Ok(Some(answer));
-        }
-        return Ok(deterministic_summary_from_observed(&observed));
-    }
-    warn!(
-        "finalizer_schema_eval task_id={} stage=observed_read parse_failed=true; fallback=deterministic_summary",
-        task.task_id
-    );
-    Ok(deterministic_summary_from_observed(&observed))
-}
-
-fn evaluate_round_outcome(
-    task: &ClaimedTask,
-    loop_state: &mut LoopState,
-    policy: &AgentLoopGuardPolicy,
-    outcome: &RoundOutcome,
-) -> bool {
-    if outcome.had_error {
-        info!(
-            "loop_round_stop task_id={} round={} reason=had_error",
-            task.task_id, loop_state.round_no
-        );
-        return true;
-    }
-    if let Some(reason) = &outcome.stop_signal {
-        if reason == "recoverable_failure_continue_round" {
-            info!(
-                "loop_round_continue task_id={} round={} reason={}",
-                task.task_id, loop_state.round_no, reason
-            );
-            return false;
-        }
-        info!(
-            "loop_round_stop task_id={} round={} reason={} next_goal_hint={}",
-            task.task_id,
-            loop_state.round_no,
-            reason,
-            crate::truncate_for_log(outcome.next_goal_hint.as_deref().unwrap_or(""))
-        );
-        return true;
-    }
-    if outcome.executed_actions == 0 {
-        info!(
-            "loop_round_stop task_id={} round={} reason=no_actions",
-            task.task_id, loop_state.round_no
-        );
-        return true;
-    }
-    if outcome.no_progress {
-        loop_state.consecutive_no_progress += 1;
-    } else {
-        loop_state.consecutive_no_progress = 0;
-    }
-    if loop_state.consecutive_no_progress > policy.no_progress_limit {
-        info!(
-            "loop_round_stop task_id={} round={} reason=no_progress limit={} count={}",
-            task.task_id,
-            loop_state.round_no,
-            policy.no_progress_limit,
-            loop_state.consecutive_no_progress
-        );
-        return true;
-    }
-    if !policy.multi_round_enabled {
-        info!(
-            "loop_round_stop task_id={} round={} reason=multi_round_disabled",
-            task.task_id, loop_state.round_no
-        );
-        return true;
-    }
-    if loop_state.round_no >= loop_state.max_rounds {
-        info!(
-            "loop_round_stop task_id={} round={} reason=max_rounds reached={}",
-            task.task_id, loop_state.round_no, loop_state.max_rounds
-        );
-        return true;
-    }
-    false
-}
-
-async fn run_agent_with_loop(
-    state: &AppState,
-    task: &ClaimedTask,
-    goal: &str,
-    user_text: &str,
-) -> Result<AskReply, String> {
-    let policy = load_agent_loop_guard_policy(state);
-    let mut loop_state = LoopState::new(policy.max_rounds.max(1));
-    for round in 1..=loop_state.max_rounds {
-        ensure_task_running(state, task)?;
-        loop_state.round_no = round;
-        info!(
-            "loop_round_start task_id={} round={} max_rounds={} total_steps={} tool_calls_total={}",
-            task.task_id,
-            round,
-            loop_state.max_rounds,
-            loop_state.total_steps_executed,
-            loop_state.tool_calls_total
-        );
-        let actions =
-            plan_round_actions(state, task, goal, user_text, &policy, &loop_state).await?;
-        let outcome = execute_actions_once(
-            state,
-            task,
-            goal,
-            user_text,
-            &actions,
-            &mut loop_state,
-            &policy,
-        )
-        .await?;
-        info!(
-            "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
-            task.task_id,
-            round,
-            outcome.executed_actions,
-            outcome.no_progress,
-            outcome.stop_signal.as_deref().unwrap_or(""),
-            crate::truncate_for_log(outcome.next_goal_hint.as_deref().unwrap_or(""))
-        );
-        if evaluate_round_outcome(task, &mut loop_state, &policy, &outcome) {
-            break;
-        }
-    }
-
-    // When delivery is empty, fill from last_user_visible_respond so fallback path still has a candidate.
-    if loop_state.delivery_messages.is_empty() {
-        if let Some(ref last_respond) = loop_state.last_user_visible_respond {
-            if !last_respond.trim().is_empty() {
-                append_delivery_message(
-                    &task.task_id,
-                    &mut loop_state.delivery_messages,
-                    last_respond.clone(),
-                );
-                info!(
-                    "final_result_use_last_respond task_id={} (delivery was empty)",
-                    task.task_id
-                );
-            }
-        }
-    }
-
-    if loop_state.delivery_messages.is_empty() {
-        if let Some(ref last_chat_output) = loop_state.last_publishable_chat_output {
-            if !last_chat_output.trim().is_empty() {
-                append_delivery_message(
-                    &task.task_id,
-                    &mut loop_state.delivery_messages,
-                    last_chat_output.clone(),
-                );
-                info!(
-                    "final_result_use_chat_output task_id={} (delivery was empty)",
-                    task.task_id
-                );
-            }
-        }
-    }
-
-    // Finalizer: when execution produced raw outputs but the plan never emitted an explicit
-    // publishable respond, synthesize the final user-facing answer from observed results.
-    if loop_state.delivery_messages.is_empty() && should_synthesize_final_response(&loop_state) {
-        match synthesize_final_response(state, task, user_text, &loop_state).await {
-            Ok(Some(synthesized)) => {
-                append_delivery_message(
-                    &task.task_id,
-                    &mut loop_state.delivery_messages,
-                    synthesized.clone(),
-                );
-                info!("delivery fallback_from_synthesize task_id={}", task.task_id);
-                crate::append_subtask_result(
-                    &mut loop_state.subtask_results,
-                    loop_state.total_steps_executed + 1,
-                    "respond(finalize)",
-                    true,
-                    &synthesized,
-                );
-                loop_state
-                    .history_compact
-                    .push("finalize respond".to_string());
-            }
-            Ok(None) => {}
-            Err(err) => {
-                warn!(
-                    "finalize_synthesize_failed task_id={} err={}",
-                    task.task_id,
-                    crate::truncate_for_log(&err)
-                );
-            }
-        }
-    }
-
-    // Raw fallback: only when synthesis did not yield anything usable.
-    if loop_state.delivery_messages.is_empty() && !loop_state.subtask_results.is_empty() {
-        let fallback =
-            fallback_finalize_from_raw(state, task, loop_state.subtask_results.as_slice()).await;
-        if !fallback.trim().is_empty() {
-            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, fallback);
-            info!(
-                "final_result_fallback_from_raw task_id={} subtask_count={}",
-                task.task_id,
-                loop_state.subtask_results.len()
-            );
-        }
-    }
-
-    let (delivery_deduped, _, used_last_respond) = build_final_delivery_with_priority(
-        &loop_state.delivery_messages,
-        loop_state.last_user_visible_respond.as_ref(),
-    );
-
-    let final_text = delivery_deduped
-        .last()
-        .cloned()
-        .or_else(|| loop_state.subtask_results.last().cloned())
-        .unwrap_or_default();
-
-    if used_last_respond {
-        info!(
-            "final_result_source=last_respond task_id={} len={}",
-            task.task_id,
-            delivery_deduped.len()
-        );
-    } else if !delivery_deduped.is_empty() {
-        info!(
-            "final_result_source=delivery_messages task_id={} len={}",
-            task.task_id,
-            delivery_deduped.len()
-        );
-    } else if !loop_state.subtask_results.is_empty() {
-        info!(
-            "final_result_source=fallback_from_raw task_id={}",
-            task.task_id
-        );
-    }
-
-    crate::append_act_plan_log(
-        state,
-        task,
-        "loop_done",
-        loop_state.total_steps_executed,
-        loop_state.subtask_results.len(),
-        loop_state.tool_calls_total,
-        &format!(
-            "rounds={} messages={} no_progress_count={}",
-            loop_state.round_no,
-            loop_state.delivery_messages.len(),
-            loop_state.consecutive_no_progress
-        ),
-    );
-    Ok(AskReply::non_llm(final_text).with_messages(delivery_deduped))
-}
+type WriteFileEffectivePath = (String, String, String);
 
 fn plan_step_label(action: &AgentAction) -> String {
     match action {
@@ -2872,11 +594,73 @@ fn build_resume_context_error(
     format!("{}{}", crate::RESUME_CONTEXT_ERROR_PREFIX, payload)
 }
 
+fn confirmation_remaining_step_labels(steps: &[crate::PlanStep]) -> Vec<String> {
+    steps
+        .iter()
+        .map(|step| match step.action_type.as_str() {
+            "respond" => "respond".to_string(),
+            "think" => "think".to_string(),
+            "call_tool" => format!("tool({})", step.skill),
+            _ => format!("skill({})", step.skill),
+        })
+        .collect()
+}
+
+fn build_confirmation_required_resume_context(
+    steps: &[crate::PlanStep],
+    user_request: &str,
+    goal: &str,
+    subtask_results: &[String],
+    delivery_messages: &[String],
+    detail: &str,
+    locale: &str,
+) -> (String, serde_json::Value) {
+    let completed_messages_for_ctx: Vec<String> = if delivery_messages.is_empty() {
+        subtask_results.to_vec()
+    } else {
+        delivery_messages.to_vec()
+    };
+    let remaining_steps = confirmation_remaining_step_labels(steps);
+    let remaining_actions = steps
+        .iter()
+        .filter_map(crate::PlanStep::to_agent_action)
+        .collect::<Vec<_>>();
+    let resume_context = json!({
+        "resume_context_id": format!("ctx-{}", uuid::Uuid::new_v4()),
+        "user_request": user_request,
+        "goal": goal,
+        "plan_steps": remaining_steps,
+        "completed_steps": subtask_results,
+        "completed_messages": completed_messages_for_ctx,
+        "failed_step": {
+            "index": 0,
+            "action": "confirmation_required",
+            "error": crate::truncate_for_agent_trace(detail),
+        },
+        "remaining_steps": remaining_steps,
+        "remaining_actions": remaining_actions,
+        "hint": "User must explicitly confirm before executing the remaining actions."
+    });
+    let user_error = if locale.to_ascii_lowercase().starts_with("zh") {
+        format!(
+            "这一步需要你先明确确认，我还不会直接执行。你可以回复“继续”来执行剩余步骤。\n原因：{}",
+            detail
+        )
+    } else {
+        format!(
+            "This step needs your explicit confirmation before I execute it. Reply \"continue\" to run the remaining steps.\nReason: {}",
+            detail
+        )
+    };
+    (user_error, resume_context)
+}
+
 pub(crate) async fn run_agent_with_tools(
     state: &AppState,
     task: &ClaimedTask,
     goal: &str,
     user_request: &str,
+    agent_run_context: Option<AgentRunContext>,
 ) -> Result<AskReply, String> {
     info!(
         "run_agent_with_tools: task_id={} user_id={} chat_id={} goal={}",
@@ -2887,7 +671,7 @@ pub(crate) async fn run_agent_with_tools(
     );
     let user_text = user_request.trim();
     if !user_text.is_empty() {
-        return run_agent_with_loop(state, task, goal, user_text).await;
+        return run_agent_with_loop(state, task, goal, user_text, agent_run_context.as_ref()).await;
     }
     return Ok(AskReply::non_llm(String::new()));
 }
@@ -2953,7 +737,7 @@ mod tests {
         let delivery = vec!["early answer".to_string()];
         let last_respond = "final answer".to_string();
         let (deduped, final_text, used) =
-            build_final_delivery_with_priority(&delivery, Some(&last_respond));
+            crate::finalizer::build_final_delivery_with_priority(&delivery, Some(&last_respond));
         assert!(used);
         assert_eq!(deduped.len(), 2);
         assert_eq!(deduped[0], "early answer");
@@ -2966,7 +750,7 @@ mod tests {
         let delivery = vec!["same text".to_string()];
         let last_respond = "same text".to_string();
         let (deduped, final_text, used) =
-            build_final_delivery_with_priority(&delivery, Some(&last_respond));
+            crate::finalizer::build_final_delivery_with_priority(&delivery, Some(&last_respond));
         assert!(used);
         assert_eq!(deduped.len(), 1);
         assert_eq!(deduped[0], "same text");
@@ -2976,7 +760,8 @@ mod tests {
     #[test]
     fn test_final_delivery_no_last_respond_uses_delivery() {
         let delivery = vec!["only delivery".to_string()];
-        let (deduped, final_text, used) = build_final_delivery_with_priority(&delivery, None);
+        let (deduped, final_text, used) =
+            crate::finalizer::build_final_delivery_with_priority(&delivery, None);
         assert!(!used);
         assert_eq!(deduped.len(), 1);
         assert_eq!(final_text, "only delivery");
@@ -2985,29 +770,69 @@ mod tests {
     #[test]
     fn test_final_delivery_both_empty() {
         let delivery: Vec<String> = vec![];
-        let (deduped, final_text, used) = build_final_delivery_with_priority(&delivery, None);
+        let (deduped, final_text, used) =
+            crate::finalizer::build_final_delivery_with_priority(&delivery, None);
         assert!(!used);
         assert!(deduped.is_empty());
         assert!(final_text.is_empty());
     }
 
     #[test]
-    fn test_deterministic_summary_from_observed_prefers_non_heading_line() {
-        let observed = "# Test Workspace\nThis directory is reserved for NL regression test artifacts.";
+    fn test_final_delivery_strips_subtask_prefix_from_user_visible_messages() {
+        let delivery = vec!["subtask#1 skill(run_cmd): success\ntestuser".to_string()];
+        let (deduped, final_text, used) =
+            crate::finalizer::build_final_delivery_with_priority(&delivery, None);
+        assert!(!used);
+        assert_eq!(deduped, vec!["testuser".to_string()]);
+        assert_eq!(final_text, "testuser");
+    }
+
+    #[test]
+    fn test_normalize_user_visible_text_strips_inline_subtask_prefix() {
         assert_eq!(
-            deterministic_summary_from_observed(observed).as_deref(),
-            Some("This directory is reserved for NL regression test artifacts.")
+            crate::finalizer::normalize_user_visible_text(
+                "subtask#1 skill(run_cmd): success testuser"
+            ),
+            "testuser"
+        );
+    }
+
+    #[test]
+    fn test_final_delivery_preserves_failed_message_body() {
+        let delivery = vec!["subtask#1 skill(run_cmd): failed\npermission denied".to_string()];
+        let (deduped, final_text, used) =
+            crate::finalizer::build_final_delivery_with_priority(&delivery, None);
+        assert!(!used);
+        assert_eq!(deduped, vec!["permission denied".to_string()]);
+        assert_eq!(final_text, "permission denied");
+    }
+
+    #[test]
+    fn test_normalize_user_visible_text_strips_inline_failed_prefix() {
+        assert_eq!(
+            crate::finalizer::normalize_user_visible_text(
+                "subtask#1 skill(run_cmd): failed permission denied"
+            ),
+            "permission denied"
         );
     }
 
     #[test]
     fn test_extract_latest_successful_read_file_output_prefers_content_body() {
         let mut loop_state = LoopState::default();
-        loop_state.subtask_results.push(
-            "subtask#2 skill(read_file): success\n# Test Workspace\nThis directory is reserved."
-                .to_string(),
-        );
-        let observed = extract_latest_successful_read_file_output(&loop_state);
+        loop_state
+            .executed_step_results
+            .push(crate::executor::StepExecutionResult {
+                step_id: "subtask#2".to_string(),
+                skill: "read_file".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output: Some("# Test Workspace\nThis directory is reserved.".to_string()),
+                error: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+        let observed =
+            super::observed_output::extract_latest_successful_read_file_output(&loop_state);
         assert_eq!(
             observed.as_deref(),
             Some("# Test Workspace\nThis directory is reserved.")
@@ -3015,52 +840,220 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_latest_successful_list_dir_output_prefers_content_body() {
+        let mut loop_state = LoopState::default();
+        loop_state
+            .executed_step_results
+            .push(crate::executor::StepExecutionResult {
+                step_id: "subtask#1".to_string(),
+                skill: "list_dir".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output: Some("file1.txt\nsubdir/\nfile2.md".to_string()),
+                error: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+        let observed =
+            super::observed_output::extract_latest_successful_list_dir_output(&loop_state);
+        assert_eq!(observed.as_deref(), Some("file1.txt\nsubdir/\nfile2.md"));
+    }
+
+    #[test]
+    fn test_extract_latest_generic_successful_output_prefers_non_read_non_list_skill() {
+        let mut loop_state = LoopState::default();
+        loop_state
+            .executed_step_results
+            .push(crate::executor::StepExecutionResult {
+                step_id: "subtask#1".to_string(),
+                skill: "read_file".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output: Some("hello".to_string()),
+                error: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+        loop_state
+            .executed_step_results
+            .push(crate::executor::StepExecutionResult {
+                step_id: "subtask#2".to_string(),
+                skill: "run_cmd".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output: Some("testuser".to_string()),
+                error: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+        let observed =
+            super::observed_output::extract_latest_generic_successful_output(&loop_state)
+                .expect("generic observed output");
+        assert!(observed.action_label.contains("skill(run_cmd): success"));
+        assert_eq!(observed.body, "testuser");
+    }
+
+    #[test]
+    fn test_extract_latest_generic_successful_output_skips_non_content() {
+        let mut loop_state = LoopState::default();
+        loop_state
+            .executed_step_results
+            .push(crate::executor::StepExecutionResult {
+                step_id: "subtask#1".to_string(),
+                skill: "chat".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output: Some("FILE:/tmp/demo.txt".to_string()),
+                error: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+        assert!(
+            super::observed_output::extract_latest_generic_successful_output(&loop_state).is_none()
+        );
+    }
+
+    #[test]
+    fn test_normalized_observed_listing_trims_blank_lines() {
+        let observed = "\n file1.txt \n\n subdir/ \n";
+        let out = super::observed_output::normalized_observed_listing(observed);
+        assert_eq!(out.as_deref(), Some("file1.txt\nsubdir/"));
+    }
+
+    #[test]
     fn test_finalizer_schema_answer_parse_ok() {
         let raw = r#"{"answer":"hello","completion_ok":true,"grounded_ok":true,"format_ok":true,"needs_clarify":false,"confidence":0.9,"used_evidence_ids":["E1"]}"#;
-        let (answer, schema) = finalizer_schema_answer(raw).expect("schema parse");
+        let (answer, schema) =
+            crate::finalizer::finalizer_schema_answer(raw).expect("schema parse");
         assert_eq!(answer, "hello");
-        assert!(finalizer_contract_ok(&schema));
+        assert!(crate::finalizer::finalizer_contract_ok(&schema));
     }
 
     #[test]
     fn test_finalizer_schema_answer_parse_fail_non_json() {
-        assert!(finalizer_schema_answer("plain text").is_none());
+        assert!(crate::finalizer::finalizer_schema_answer("plain text").is_none());
     }
 
     #[test]
     fn test_finalizer_contract_not_ok_when_grounding_false() {
         let raw = r#"{"answer":"hello","completion_ok":true,"grounded_ok":false,"format_ok":true}"#;
-        let (_answer, schema) = finalizer_schema_answer(raw).expect("schema parse");
-        assert!(!finalizer_contract_ok(&schema));
+        let (_answer, schema) =
+            crate::finalizer::finalizer_schema_answer(raw).expect("schema parse");
+        assert!(!crate::finalizer::finalizer_contract_ok(&schema));
+        assert!(matches!(
+            crate::finalizer::finalizer_contract_disposition(&schema),
+            crate::finalizer::FinalizerDisposition::MustFail
+        ));
+    }
+
+    #[test]
+    fn test_finalizer_contract_disposition_allows_fallback_on_format_only_failure() {
+        let raw = r#"{"answer":"hello","completion_ok":true,"grounded_ok":true,"format_ok":false}"#;
+        let (_answer, schema) =
+            crate::finalizer::finalizer_schema_answer(raw).expect("schema parse");
+        assert!(matches!(
+            crate::finalizer::finalizer_contract_disposition(&schema),
+            crate::finalizer::FinalizerDisposition::AllowFallback
+        ));
+    }
+
+    #[test]
+    fn test_finalizer_contract_disposition_must_fail_on_needs_clarify() {
+        let raw = r#"{"answer":"need info","completion_ok":false,"grounded_ok":true,"format_ok":true,"needs_clarify":true}"#;
+        let (_answer, schema) =
+            crate::finalizer::finalizer_schema_answer(raw).expect("schema parse");
+        assert!(matches!(
+            crate::finalizer::finalizer_contract_disposition(&schema),
+            crate::finalizer::FinalizerDisposition::MustFail
+        ));
     }
 
     #[test]
     fn test_internal_trace_artifact_detected() {
-        assert!(looks_like_internal_trace_artifact(
+        assert!(crate::finalizer::looks_like_internal_trace_artifact(
             "subtask#1 skill(run_cmd): success"
         ));
     }
 
     #[test]
     fn test_structured_blob_detected() {
-        assert!(looks_like_structured_blob("{\"answer\":\"x\"}"));
-        assert!(looks_like_structured_blob("[1,2,3]"));
-        assert!(!looks_like_structured_blob("plain text"));
+        assert!(crate::finalizer::looks_like_structured_blob(
+            "{\"answer\":\"x\"}"
+        ));
+        assert!(crate::finalizer::looks_like_structured_blob("[1,2,3]"));
+        assert!(!crate::finalizer::looks_like_structured_blob("plain text"));
+    }
+
+    #[test]
+    fn test_infer_file_target_kind_classifies_extension_backed_files() {
+        assert_eq!(
+            crate::finalizer::infer_file_target_kind("/tmp/app.log"),
+            crate::finalizer::FileTargetKind::LogFile
+        );
+        assert_eq!(
+            crate::finalizer::infer_file_target_kind("/tmp/data.json"),
+            crate::finalizer::FileTargetKind::JsonFile
+        );
+        assert_eq!(
+            crate::finalizer::infer_file_target_kind("/tmp/archive.tar.gz"),
+            crate::finalizer::FileTargetKind::ArchiveFile
+        );
+    }
+
+    #[test]
+    fn test_infer_file_target_kind_distinguishes_directory_from_plain_file() {
+        assert_eq!(
+            crate::finalizer::infer_file_target_kind("/tmp/output"),
+            crate::finalizer::FileTargetKind::Directory
+        );
+        assert_eq!(
+            crate::finalizer::infer_file_target_kind("/tmp/output.txt"),
+            crate::finalizer::FileTargetKind::File
+        );
+    }
+
+    #[test]
+    fn test_parse_delivery_token_normalizes_supported_prefixes() {
+        let (kind, payload) =
+            crate::finalizer::parse_delivery_token(" IMAGE_FILE:/tmp/demo.png ").expect("token");
+        assert_eq!(kind, crate::finalizer::DeliveryTokenKind::ImageFile);
+        assert_eq!(payload.trim(), "/tmp/demo.png");
+        assert_eq!(kind.canonical_prefix(), "FILE:");
+
+        let (kind, payload) =
+            crate::finalizer::parse_delivery_token("MEDIA_URL:https://example.com/a.mp4")
+                .expect("token");
+        assert_eq!(kind, crate::finalizer::DeliveryTokenKind::MediaUrl);
+        assert_eq!(payload.trim(), "https://example.com/a.mp4");
+    }
+
+    #[test]
+    fn test_classify_planner_artifact_detects_tool_call_and_action_json() {
+        assert!(matches!(
+            crate::finalizer::classify_planner_artifact("[TOOL_CALL]run_cmd[/TOOL_CALL]"),
+            Some(crate::finalizer::PlannerArtifactKind::ToolCallTag)
+        ));
+        assert!(matches!(
+            crate::finalizer::classify_planner_artifact(
+                r#"{"type":"call_tool","tool":"read_file"}"#
+            ),
+            Some(
+                crate::finalizer::PlannerArtifactKind::ActionObject
+                    | crate::finalizer::PlannerArtifactKind::PlannerObject
+            )
+        ));
     }
 
     #[test]
     fn test_extract_single_explicit_path_from_request_ok() {
         let text = "先读 /home/guagua/test/README.md 开头，再用一句话总结";
         assert_eq!(
-            extract_single_explicit_path_from_request(text).as_deref(),
+            crate::finalizer::extract_single_explicit_path_from_request(text).as_deref(),
             Some("/home/guagua/test/README.md")
         );
     }
 
     #[test]
     fn test_observed_quotes_grounded_requires_exact_match() {
-        let observed = "# Test Workspace\nThis directory is reserved for NL regression test artifacts.";
-        let schema = FinalizerSchemaOut {
+        let observed =
+            "# Test Workspace\nThis directory is reserved for NL regression test artifacts.";
+        let schema = crate::finalizer::FinalizerSchemaOut {
             answer: "summary".to_string(),
             completion_ok: true,
             grounded_ok: true,
@@ -3070,25 +1063,27 @@ mod tests {
             used_evidence_ids: vec!["E1".to_string()],
             evidence_quotes: vec!["NL regression test artifacts".to_string()],
         };
-        assert!(observed_quotes_grounded(&schema, observed));
+        assert!(crate::finalizer::observed_quotes_grounded(
+            &schema, observed
+        ));
 
-        let bad = FinalizerSchemaOut {
+        let bad = crate::finalizer::FinalizerSchemaOut {
             evidence_quotes: vec!["high-performance distributed scheduler".to_string()],
             ..schema
         };
-        assert!(!observed_quotes_grounded(&bad, observed));
+        assert!(!crate::finalizer::observed_quotes_grounded(&bad, observed));
     }
 
     #[test]
     fn test_observed_read_path_matches_request() {
         let ws = Path::new("/tmp/workspace");
         let user_text = "Read /home/guagua/test/README.md and summarize.";
-        assert!(observed_read_path_matches_request(
+        assert!(crate::finalizer::observed_read_path_matches_request(
             ws,
             user_text,
             Some("/home/guagua/test/README.md")
         ));
-        assert!(!observed_read_path_matches_request(
+        assert!(!crate::finalizer::observed_read_path_matches_request(
             ws,
             user_text,
             Some("/home/guagua/git_upload/README.md")

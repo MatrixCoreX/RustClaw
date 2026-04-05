@@ -1,9 +1,0 @@
-NL suite: clarify
-  run_dir:   /home/guagua/git_upload/scripts/nl_suite_logs/clarify_hard/20260327_003347
-  run_log:   /home/guagua/git_upload/scripts/nl_suite_logs/clarify_hard/20260327_003347/run.log
-  case_file: /home/guagua/git_upload/scripts/nl_cases_clarify_hard_20260326.txt
-  base_url:  http://127.0.0.1:8787
-  user_id:   1985996990
-  chat_id:   1985996990
-
-curl: (7) Failed to connect to 127.0.0.1 port 8787 after 0 ms: Could not connect to server

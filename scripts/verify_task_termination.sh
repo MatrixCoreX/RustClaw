@@ -159,7 +159,7 @@ PY
 
 get_health_json() {
   local -a auth_args=()
-  mapfile -t auth_args < <(curl_auth_args)
+  array_from_command_lines auth_args curl_auth_args
   curl -sS "${auth_args[@]}" "${BASE_URL}/v1/health"
 }
 
@@ -225,7 +225,7 @@ cancel_tasks_now() {
   local body
   local -a auth_args=()
   body="$(build_cancel_body "$cancel_user_id" "$cancel_chat_id")"
-  mapfile -t auth_args < <(curl_auth_args)
+  array_from_command_lines auth_args curl_auth_args
   curl -sS -X POST "${BASE_URL}/v1/tasks/cancel" \
     -H "Content-Type: application/json" \
     "${auth_args[@]}" \

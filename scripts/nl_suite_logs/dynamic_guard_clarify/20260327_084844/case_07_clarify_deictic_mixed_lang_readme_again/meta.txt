@@ -1,7 +1,0 @@
-index=7
-case_name=clarify_deictic_mixed_lang_readme_again
-chat_id=1985996997
-turn1_task_id=8911ef0a-7f91-4475-983b-f8d094fddc36
-turn1_prompt=Can you read that README header and summarize it in one sentence?
-turn2_task_id=72fb7c2b-172d-417a-ae14-c2c6034aa0b4
-turn2_prompt=/home/guagua/test/README.md

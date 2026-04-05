@@ -5,23 +5,81 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CASE_DIR="${SCRIPT_DIR}/cases"
 
+ALL_SUITES=(
+  manual
+  text_match
+  full
+  trace
+  resume
+  clarify
+  clarify_hard
+  context_chain
+  dynamic_guard
+  clarify_context_prompt
+)
+
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/nl_tests/run_suite.sh <mode> [shared options]
+  bash scripts/nl_tests/run_suite.sh <suite-or-category>... [shared options]
+  bash scripts/nl_tests/run_suite.sh --category <name> [--category <name> ...] [shared options]
+  bash scripts/nl_tests/run_suite.sh --list
 
-Modes:
-  manual                  run manual NL cases
-  text_match              run text-match NL cases
-  full                    run full NL suite
-  trace                   run trace ask regression (wrapped with run.log)
-  resume                  run resume/continue regression (wrapped with run.log)
-  clarify                 run 2-turn clarify suite
-  context_chain           run 3-turn context-chain suite
-  all                     run: manual, text_match, full, trace, resume, clarify, context_chain
-  clarify_context_prompt  run clarify_hard + context_chain and print a ready prompt
+Suites:
+  manual
+  text_match
+  full
+  trace
+  resume
+  clarify
+  clarify_hard
+  context_chain
+  dynamic_guard
+  clarify_context_prompt
 
-Shared options are passed through to the selected mode scripts.
+Categories:
+  smoke         -> manual, clarify
+  single_turn   -> manual, text_match, full
+  multi_turn    -> clarify, clarify_hard, context_chain
+  regression    -> trace, resume
+  guard         -> dynamic_guard
+  core          -> manual, text_match, trace, resume, clarify, context_chain
+  all           -> manual, text_match, full, trace, resume, clarify, clarify_hard, context_chain, dynamic_guard
+
+Examples:
+  bash scripts/nl_tests/run_suite.sh manual
+  bash scripts/nl_tests/run_suite.sh manual trace clarify
+  bash scripts/nl_tests/run_suite.sh --category multi_turn
+  bash scripts/nl_tests/run_suite.sh --category regression --category guard --base-url http://127.0.0.1:8787
+
+Notes:
+  - Shared options are passed through to the underlying suite runner.
+  - If the first unknown flag starts with '-', it and the remaining args are treated as pass-through args.
+EOF
+}
+
+print_available() {
+  cat <<'EOF'
+Available suites:
+  - manual
+  - text_match
+  - full
+  - trace
+  - resume
+  - clarify
+  - clarify_hard
+  - context_chain
+  - dynamic_guard
+  - clarify_context_prompt
+
+Available categories:
+  - smoke
+  - single_turn
+  - multi_turn
+  - regression
+  - guard
+  - core
+  - all
 EOF
 }
 
@@ -47,6 +105,11 @@ run_wrapped_suite() {
     echo "  - ${run_dir}"
     echo "  - ${run_log}"
   )
+}
+
+latest_run_dir() {
+  local log_root="$1"
+  ls -1dt "${log_root}"/* 2>/dev/null | head -n 1 || true
 }
 
 run_mode_manual() {
@@ -95,21 +158,24 @@ run_mode_clarify() {
     "$@"
 }
 
+run_mode_clarify_hard() {
+  bash "${SCRIPT_DIR}/run_multi_turn_suite.sh" \
+    --suite clarify \
+    --case-file "${CASE_DIR}/nl_cases_clarify_hard.txt" \
+    --log-root "${ROOT_DIR}/scripts/nl_suite_logs/clarify_hard" \
+    "$@"
+}
+
 run_mode_context_chain() {
   bash "${SCRIPT_DIR}/run_multi_turn_suite.sh" \
     --suite context_chain \
-    --case-file "${CASE_DIR}/nl_cases_context_chain_20260326.txt" \
+    --case-file "${CASE_DIR}/nl_cases_context_chain.txt" \
     --log-root "${ROOT_DIR}/scripts/nl_suite_logs/context_chain" \
     "$@"
 }
 
-run_mode_all() {
-  local mode
-  for mode in manual text_match full trace resume clarify context_chain; do
-    echo "============================================================"
-    echo "[MODE] ${mode}"
-    bash "$0" "$mode" "$@"
-  done
+run_mode_dynamic_guard() {
+  bash "${SCRIPT_DIR}/run_dynamic_guard_all.sh" "$@"
 }
 
 run_mode_clarify_context_prompt() {
@@ -117,20 +183,11 @@ run_mode_clarify_context_prompt() {
   local context_log_root="${ROOT_DIR}/scripts/nl_suite_logs/context_chain"
   local latest_clarify latest_context
 
-  bash "${SCRIPT_DIR}/run_multi_turn_suite.sh" \
-    --suite clarify \
-    --case-file "${CASE_DIR}/nl_cases_clarify_hard_20260326.txt" \
-    --log-root "${clarify_log_root}" \
-    "$@"
+  run_mode_clarify_hard "$@"
+  run_mode_context_chain "$@"
 
-  bash "${SCRIPT_DIR}/run_multi_turn_suite.sh" \
-    --suite context_chain \
-    --case-file "${CASE_DIR}/nl_cases_context_chain_20260326.txt" \
-    --log-root "${context_log_root}" \
-    "$@"
-
-  latest_clarify="$(ls -1dt "${clarify_log_root}"/* 2>/dev/null | head -n 1 || true)"
-  latest_context="$(ls -1dt "${context_log_root}"/* 2>/dev/null | head -n 1 || true)"
+  latest_clarify="$(latest_run_dir "${clarify_log_root}")"
+  latest_context="$(latest_run_dir "${context_log_root}")"
 
   echo
   echo "==== Paste this to Codex ===="
@@ -147,44 +204,158 @@ run_mode_clarify_context_prompt() {
   fi
 }
 
-MODE="${1:-}"
-if [[ -z "$MODE" || "$MODE" == "-h" || "$MODE" == "--help" ]]; then
+run_one_suite() {
+  local suite="$1"
+  shift
+  case "$suite" in
+    manual)
+      run_mode_manual "$@"
+      ;;
+    text_match)
+      run_mode_text_match "$@"
+      ;;
+    full)
+      run_mode_full "$@"
+      ;;
+    trace)
+      run_mode_trace "$@"
+      ;;
+    resume)
+      run_mode_resume "$@"
+      ;;
+    clarify)
+      run_mode_clarify "$@"
+      ;;
+    clarify_hard)
+      run_mode_clarify_hard "$@"
+      ;;
+    context_chain)
+      run_mode_context_chain "$@"
+      ;;
+    dynamic_guard)
+      run_mode_dynamic_guard "$@"
+      ;;
+    clarify_context_prompt)
+      run_mode_clarify_context_prompt "$@"
+      ;;
+    *)
+      echo "Unknown suite: $suite" >&2
+      exit 2
+      ;;
+  esac
+}
+
+declare -A SEEN_SUITES=()
+ORDERED_SUITES=()
+
+add_suite() {
+  local suite="$1"
+  [[ -n "$suite" ]] || return 0
+  if [[ -z "${SEEN_SUITES[$suite]:-}" ]]; then
+    SEEN_SUITES["$suite"]=1
+    ORDERED_SUITES+=("$suite")
+  fi
+}
+
+expand_selector() {
+  local selector="$1"
+  case "$selector" in
+    manual|text_match|full|trace|resume|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+      add_suite "$selector"
+      ;;
+    smoke)
+      add_suite manual
+      add_suite clarify
+      ;;
+    single_turn)
+      add_suite manual
+      add_suite text_match
+      add_suite full
+      ;;
+    multi_turn)
+      add_suite clarify
+      add_suite clarify_hard
+      add_suite context_chain
+      ;;
+    regression)
+      add_suite trace
+      add_suite resume
+      ;;
+    guard)
+      add_suite dynamic_guard
+      ;;
+    core)
+      add_suite manual
+      add_suite text_match
+      add_suite trace
+      add_suite resume
+      add_suite clarify
+      add_suite context_chain
+      ;;
+    all)
+      local suite
+      for suite in manual text_match full trace resume clarify clarify_hard context_chain dynamic_guard; do
+        add_suite "$suite"
+      done
+      ;;
+    *)
+      echo "Unknown suite/category: $selector" >&2
+      print_available >&2
+      exit 2
+      ;;
+  esac
+}
+
+SELECTORS=()
+PASS_THROUGH_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --list)
+      print_available
+      exit 0
+      ;;
+    --category|--suite)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "Missing value for $1" >&2
+        exit 2
+      fi
+      SELECTORS+=("$2")
+      shift 2
+      ;;
+    --)
+      shift
+      PASS_THROUGH_ARGS+=("$@")
+      break
+      ;;
+    -*)
+      PASS_THROUGH_ARGS+=("$@")
+      break
+      ;;
+    *)
+      SELECTORS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ "${#SELECTORS[@]}" -eq 0 ]]; then
   usage
+  echo
+  print_available
   exit 0
 fi
-shift
 
-case "$MODE" in
-  manual)
-    run_mode_manual "$@"
-    ;;
-  text_match)
-    run_mode_text_match "$@"
-    ;;
-  full)
-    run_mode_full "$@"
-    ;;
-  trace)
-    run_mode_trace "$@"
-    ;;
-  resume)
-    run_mode_resume "$@"
-    ;;
-  clarify)
-    run_mode_clarify "$@"
-    ;;
-  context_chain)
-    run_mode_context_chain "$@"
-    ;;
-  all)
-    run_mode_all "$@"
-    ;;
-  clarify_context_prompt)
-    run_mode_clarify_context_prompt "$@"
-    ;;
-  *)
-    echo "Unknown mode: $MODE" >&2
-    usage >&2
-    exit 2
-    ;;
-esac
+for selector in "${SELECTORS[@]}"; do
+  expand_selector "$selector"
+done
+
+for suite in "${ORDERED_SUITES[@]}"; do
+  echo "============================================================"
+  echo "[SUITE] ${suite}"
+  run_one_suite "$suite" "${PASS_THROUGH_ARGS[@]}"
+done

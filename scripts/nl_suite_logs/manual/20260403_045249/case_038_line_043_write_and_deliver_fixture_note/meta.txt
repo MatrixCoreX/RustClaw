@@ -1,0 +1,6 @@
+ordinal=38
+source_line=43
+case_name=write_and_deliver_fixture_note
+chat_id=1985997028
+task_id=d1b0adbf-adf3-4958-93fd-a33e91620cce
+prompt=生成一个文本文件 document/manual_fixture_note.txt，内容是 local fixture ready，然后把文件发给我

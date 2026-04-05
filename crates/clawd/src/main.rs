@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use axum::extract::{Path as AxumPath, State};
@@ -7,16 +7,13 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::{get, get_service, post};
 use axum::{Json, Router};
 use claw_core::config::AppConfig;
-use claw_core::hard_rules::main_flow::load_main_flow_rules;
 use claw_core::hard_rules::types::MainFlowRules;
 use claw_core::types::{
     ApiResponse, HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse,
-    TaskStatus,
 };
 use reqwest::Client;
-use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::Semaphore;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
@@ -25,6 +22,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod agent_engine;
+mod app_helpers;
 mod ask_flow;
 mod bootstrap;
 mod capability_map;
@@ -32,12 +30,16 @@ mod channel_send;
 mod db_init;
 mod delivery_utils;
 mod execution_adapters;
+mod executor;
+mod finalizer;
 mod http;
 mod intent_router;
 mod llm_gateway;
 mod log_utils;
 mod memory;
 mod output_paths;
+mod pipeline_types;
+mod post_route_policy;
 mod prompt_utils;
 mod providers;
 mod repo;
@@ -47,8 +49,16 @@ mod schedule_service;
 mod semantic_judge;
 mod skills;
 mod system_health;
+mod task_context_builder;
+mod task_journal;
+mod verifier;
 mod worker;
 
+pub(crate) use app_helpers::{
+    ensure_column_exists, i18n_t_with_default, is_affirmation_click_text, main_flow_rules,
+    mask_secret, normalize_affirmation_text, normalize_exchange_name, normalize_external_id_opt,
+    now_ts, now_ts_u64, parse_resume_context_error, parse_task_status_with_rules,
+};
 pub(crate) use ask_flow::{
     analyze_attached_images_for_ask, build_resume_continue_execute_prompt,
     build_resume_followup_discussion_prompt, execute_ask_routed,
@@ -70,7 +80,13 @@ pub(crate) use log_utils::{
     append_act_plan_log, append_subtask_result, highlight_tag, truncate_for_agent_trace,
     truncate_for_log,
 };
+pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
+pub(crate) use pipeline_types::{
+    plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, PlanKind, PlanResult, PlanStep, ResumeBehavior, RiskCeiling, RouteResult,
+    ScheduleKind,
+};
 pub(crate) use prompt_utils::{
     extract_first_json_object_any, log_prompt_render, parse_agent_action_json_with_repair,
     parse_llm_json_extract_or_any, parse_llm_json_extract_then_raw, parse_llm_json_raw_or_any,
@@ -81,7 +97,6 @@ use providers::{
     maybe_sanitize_llm_text_output, truncate_text, utf8_safe_prefix,
 };
 pub(crate) use repo::{
-    SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
     bind_channel_identity, build_conversation_chat_id, build_submit_task_payload,
     cancel_one_task_for_user_chat, cancel_tasks_for_user_chat, check_submit_task_access,
     check_submit_task_limits, check_task_view_access, create_auth_key, delete_auth_key_by_id,
@@ -91,15 +106,16 @@ pub(crate) use repo::{
     resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
     stable_i64_from_key, submit_task_audit_detail, task_count_by_status, task_kind_name,
     update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
-    upsert_webd_login_account, verify_webd_password_login,
+    upsert_webd_login_account, verify_webd_password_login, SubmitTaskAccessError,
+    SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 pub(crate) use runtime::{
-    AgentAction, AgentRuntimeConfig, AppState, AskReply, ClaimedTask, CommandIntentRules,
-    CommandIntentRuntime, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
-    RateLimiter, RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime,
-    ScheduledJobDue, SkillViewsSnapshot, ToolsPolicy, WhatsappDeliveryRoute, build_skill_views,
-    llm_model_kind, llm_vendor_name, reload_skill_views,
+    build_skill_views, llm_model_kind, llm_vendor_name, reload_skill_views, AgentAction,
+    AgentRuntimeConfig, AppState, AskReply, ClaimedTask, CommandIntentRules, CommandIntentRuntime,
+    LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper, RateLimiter, RoutedMode,
+    RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue, SkillViewsSnapshot,
+    ToolsPolicy, WhatsappDeliveryRoute,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
@@ -109,7 +125,10 @@ pub(crate) use system_health::{
     webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
 };
 pub(crate) use worker::task_payload_value;
-use worker::{spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, task_external_chat_id};
+use worker::{
+    recover_stale_running_tasks_on_startup, spawn_cleanup_worker, spawn_schedule_worker,
+    spawn_worker, task_external_chat_id,
+};
 
 pub(crate) const INIT_SQL: &str = include_str!("../../../migrations/001_init.sql");
 pub(crate) const MEMORY_UPGRADE_SQL: &str =
@@ -129,20 +148,20 @@ const LOG_CALL_WRAP: &str = "---- task-call ----";
 const DEFAULT_AGENT_ID: &str = "main";
 
 pub(crate) const CHAT_RESPONSE_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/chat_response_prompt.md");
-pub(crate) const CHAT_RESPONSE_PROMPT_PATH: &str = "prompts/chat_response_prompt.md";
+    include_str!("../../../prompts/layers/overlays/chat_response_prompt.md");
+pub(crate) const CHAT_RESPONSE_PROMPT_LOGICAL_PATH: &str = "prompts/chat_response_prompt.md";
 pub(crate) const RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/resume_continue_execute_prompt.md");
+    include_str!("../../../prompts/layers/overlays/resume_continue_execute_prompt.md");
 pub(crate) const RESUME_FOLLOWUP_DISCUSSION_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/resume_followup_discussion_prompt.md");
-pub(crate) const RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH: &str =
+    include_str!("../../../prompts/layers/overlays/resume_followup_discussion_prompt.md");
+pub(crate) const RESUME_FOLLOWUP_DISCUSSION_PROMPT_LOGICAL_PATH: &str =
     "prompts/resume_followup_discussion_prompt.md";
 const LONG_TERM_SUMMARY_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/vendors/default/long_term_summary_prompt.md");
+    include_str!("../../../prompts/layers/overlays/long_term_summary_prompt.md");
 const SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT: &str =
-    include_str!("../../../prompts/vendors/default/schedule_intent_prompt.md");
+    include_str!("../../../prompts/layers/overlays/schedule_intent_prompt.md");
 const SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT: &str =
-    include_str!("../../../prompts/vendors/default/schedule_intent_rules.md");
+    include_str!("../../../prompts/layers/overlays/schedule_intent_rules.md");
 
 /// 统一错误响应，避免重复手写 (StatusCode, Json(ApiResponse)).
 fn api_err<T: Serialize>(
@@ -182,6 +201,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = AppConfig::load("configs/config.toml")?;
+    let workspace_root = std::env::current_dir()?;
     let tools_policy = ToolsPolicy::from_config(&config.tools)
         .map_err(|err| anyhow::anyhow!("invalid tools config: {err}"))?;
     let db = init_db(&config)?;
@@ -195,7 +215,7 @@ async fn main() -> anyhow::Result<()> {
         && (config.memory.reindex_on_startup
             || memory::indexing::retrieval_index_is_empty(&db).unwrap_or(true))
     {
-        memory::indexing::rebuild_retrieval_index(&db, &config.memory)?;
+        memory::indexing::rebuild_retrieval_index(&db, &config.memory, &workspace_root)?;
     }
     let bootstrap_admin_key = ensure_bootstrap_admin_key(&db)?;
     seed_channel_bindings(&db, &config)?;
@@ -244,7 +264,6 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let workspace_root = std::env::current_dir()?;
     let memory_runtime = load_memory_runtime_config(&workspace_root, &config.memory);
     let command_intent = load_command_intent_runtime(&workspace_root, &config.command_intent);
     let schedule = load_schedule_runtime(
@@ -316,6 +335,14 @@ async fn main() -> anyhow::Result<()> {
     let active_provider_type = llm_providers
         .first()
         .map(|p| p.config.provider_type.clone());
+    let database_sqlite_path = {
+        let raw = std::path::PathBuf::from(&config.database.sqlite_path);
+        if raw.is_absolute() {
+            raw
+        } else {
+            workspace_root.join(raw)
+        }
+    };
     let normalized_agents = config.normalized_agents();
     let mut agents_by_id = HashMap::new();
     for agent in &normalized_agents {
@@ -415,7 +442,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     };
-    let locator_scan_max_depth = config.routing.locator_scan_max_depth.max(1);
+    let locator_scan_max_depth = config.routing.locator_scan_max_depth;
     let locator_scan_max_files = config.routing.locator_scan_max_files.max(1);
     info!(
         "routing default_locator_search_dir={} locator_scan_max_depth={} locator_scan_max_files={}",
@@ -441,6 +468,7 @@ async fn main() -> anyhow::Result<()> {
             config.limits.global_rpm,
             config.limits.user_rpm,
         ))),
+        llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
         maintenance: config.maintenance.clone(),
         memory: memory_runtime,
         workspace_root,
@@ -487,6 +515,8 @@ async fn main() -> anyhow::Result<()> {
         feishu_send_config,
         lark_send_config,
         http_client: Client::new(),
+        database_sqlite_path,
+        database_busy_timeout_ms: config.database.busy_timeout_ms,
         config_path_for_reload: "configs/config.toml".to_string(),
         registry_path_for_reload: config.skills.registry_path.clone(),
         skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
@@ -551,408 +581,6 @@ async fn main() -> anyhow::Result<()> {
     info!("clawd listening on {}", config.server.listen);
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-fn recover_stale_running_tasks_on_startup(
-    db: &Connection,
-    no_progress_timeout_seconds: u64,
-) -> anyhow::Result<Vec<String>> {
-    let now = now_ts_u64() as i64;
-    let timeout = no_progress_timeout_seconds.max(1) as i64;
-    let stale_before = now.saturating_sub(timeout);
-    let mut task_ids = Vec::new();
-    {
-        let mut stmt = db.prepare(
-            "SELECT task_id
-             FROM tasks
-             WHERE status = 'running'
-               AND CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?1
-             ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) ASC",
-        )?;
-        let rows = stmt.query_map(params![stale_before.to_string()], |row| {
-            row.get::<_, String>(0)
-        })?;
-        for row in rows {
-            task_ids.push(row?);
-        }
-    }
-    if task_ids.is_empty() {
-        return Ok(task_ids);
-    }
-
-    let stale_note = format!(
-        "auto timeout on startup: no progress heartbeat for {}s while status=running",
-        no_progress_timeout_seconds.max(1)
-    );
-
-    let changed = db.execute(
-        "UPDATE tasks
-         SET status = 'timeout',
-             error_text = CASE
-                 WHEN error_text IS NULL OR TRIM(error_text) = '' THEN ?2
-                 ELSE error_text
-             END,
-             updated_at = ?3
-         WHERE status = 'running'
-           AND CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) <= ?1",
-        params![stale_before.to_string(), stale_note, now_ts()],
-    )?;
-    if changed != task_ids.len() {
-        warn!(
-            "startup stale-running recovery count mismatch: selected={} updated={}",
-            task_ids.len(),
-            changed
-        );
-    }
-
-    Ok(task_ids)
-}
-
-fn parse_task_status_with_rules(rules: &MainFlowRules, raw: &str) -> TaskStatus {
-    let s = raw.trim().to_ascii_lowercase();
-    if s == rules.task_status_queued {
-        TaskStatus::Queued
-    } else if s == rules.task_status_running {
-        TaskStatus::Running
-    } else if s == rules.task_status_succeeded {
-        TaskStatus::Succeeded
-    } else if s == rules.task_status_failed {
-        TaskStatus::Failed
-    } else if s == rules.task_status_canceled {
-        TaskStatus::Canceled
-    } else if s == rules.task_status_timeout {
-        TaskStatus::Timeout
-    } else {
-        TaskStatus::Failed
-    }
-}
-
-fn dynamic_chat_memory_budget_chars(
-    state: &AppState,
-    task: &ClaimedTask,
-    request_text: &str,
-) -> usize {
-    let configured_budget = state.memory.chat_memory_budget_chars.max(384);
-    let prompt_budget_cap = state.memory.prompt_max_chars.max(384);
-    let providers = state.task_llm_providers(task);
-    if providers.is_empty() {
-        return configured_budget.min(prompt_budget_cap);
-    }
-    let min_context_tokens = providers
-        .iter()
-        .map(|p| estimate_context_window_tokens(p))
-        .min()
-        .unwrap_or(32_000)
-        .max(8_000);
-    // Reserve output and control prompt overhead to keep headroom for provider formatting.
-    let output_reserve_tokens = 4_096usize.min(min_context_tokens / 3).max(768);
-    let fixed_overhead_tokens = 1_200usize;
-    let request_tokens = estimate_text_tokens(request_text);
-    let available_tokens = min_context_tokens
-        .saturating_sub(output_reserve_tokens)
-        .saturating_sub(fixed_overhead_tokens)
-        .saturating_sub(request_tokens);
-    // Keep memory context as a bounded fraction of remaining context.
-    let dynamic_tokens = (available_tokens / 4).clamp(192, 8_000);
-    let dynamic_chars = dynamic_tokens.saturating_mul(2);
-    let dynamic_budget = dynamic_chars.clamp(384, prompt_budget_cap);
-    info!(
-        "{} dynamic_chat_memory_budget task_id={} configured={} computed={} cap={} min_ctx_tokens={} request_tokens={}",
-        highlight_tag("memory"),
-        task.task_id,
-        configured_budget,
-        dynamic_budget,
-        prompt_budget_cap,
-        min_context_tokens,
-        request_tokens
-    );
-    dynamic_budget
-}
-
-fn estimate_context_window_tokens(provider: &LlmProviderRuntime) -> usize {
-    let model = provider.config.model.trim().to_ascii_lowercase();
-    if let Some(explicit) = extract_model_k_or_m_capacity_tokens(&model) {
-        return explicit.max(8_000);
-    }
-    match provider.config.provider_type.as_str() {
-        "anthropic_claude" => 200_000,
-        "google_gemini" => 256_000,
-        "openai_compat" => {
-            if model.contains("gpt-4.1")
-                || model.contains("gpt-4o")
-                || model.contains("o3")
-                || model.contains("o4")
-            {
-                128_000
-            } else if model.contains("gpt-3.5") {
-                16_000
-            } else if model.contains("deepseek") {
-                64_000
-            } else if model.contains("qwen") {
-                32_000
-            } else {
-                64_000
-            }
-        }
-        _ => 64_000,
-    }
-}
-
-fn extract_model_k_or_m_capacity_tokens(model_lower: &str) -> Option<usize> {
-    let bytes = model_lower.as_bytes();
-    let mut idx = 0usize;
-    while idx < bytes.len() {
-        if !bytes[idx].is_ascii_digit() {
-            idx += 1;
-            continue;
-        }
-        let start = idx;
-        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
-            idx += 1;
-        }
-        if idx >= bytes.len() {
-            break;
-        }
-        let number = model_lower[start..idx].parse::<usize>().ok()?;
-        let unit = bytes[idx];
-        if unit == b'k' {
-            return Some(number.saturating_mul(1_000));
-        }
-        if unit == b'm' {
-            return Some(number.saturating_mul(1_000_000));
-        }
-        idx += 1;
-    }
-    None
-}
-
-fn estimate_text_tokens(text: &str) -> usize {
-    let chars = text.chars().count();
-    let mut cjk_count = 0usize;
-    for ch in text.chars() {
-        if ('\u{4e00}'..='\u{9fff}').contains(&ch) {
-            cjk_count += 1;
-        }
-    }
-    if cjk_count * 2 >= chars.max(1) {
-        chars.max(1)
-    } else {
-        chars.div_ceil(3).max(1)
-    }
-}
-
-fn parse_resume_context_error(error_text: &str) -> Option<(String, Value)> {
-    let trimmed = error_text.trim();
-    let payload = trimmed.strip_prefix(RESUME_CONTEXT_ERROR_PREFIX)?;
-    let value: Value = serde_json::from_str(payload).ok()?;
-    let user_error = value
-        .get("user_error")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Task execution failed")
-        .to_string();
-    Some((user_error, value))
-}
-
-pub(crate) fn i18n_t_with_default(state: &AppState, key: &str, default_text: &str) -> String {
-    state
-        .schedule
-        .i18n_dict
-        .get(key)
-        .cloned()
-        .unwrap_or_else(|| default_text.to_string())
-}
-
-/// Base (builtin) skills: run_cmd, read_file, write_file, list_dir, make_dir, remove_file; executed in-process. Policy uses skill:* token.
-async fn maybe_refresh_long_term_summary(
-    state: &AppState,
-    task: &ClaimedTask,
-) -> Result<(), String> {
-    if !state.memory.long_term_enabled {
-        return Ok(());
-    }
-    if task
-        .user_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .is_none()
-    {
-        return Ok(());
-    }
-    let rounds = memory::count_chat_memory_rounds(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-    )
-    .map_err(|err| format!("count memory rounds failed: {err}"))?;
-    if rounds == 0 || rounds % state.memory.long_term_every_rounds.max(1) != 0 {
-        return Ok(());
-    }
-    let source_id = memory::read_long_term_source_memory_id(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-    )
-    .map_err(|err| format!("read long-term source id failed: {err}"))?;
-    let fetch_limit = state.memory.long_term_source_rounds.max(1) * 2;
-    let entries = memory::recall_memories_since_id(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        source_id,
-        fetch_limit,
-    )
-    .map_err(|err| format!("read memories for summary failed: {err}"))?;
-    let min_entries = state.memory.long_term_every_rounds.max(1) * 2;
-    if entries.len() < min_entries {
-        return Ok(());
-    }
-    let new_chars = entries
-        .iter()
-        .map(|(_, _, content, _)| content.trim().chars().count())
-        .sum::<usize>();
-    if new_chars < state.memory.long_term_refresh_min_new_chars.max(1) {
-        return Ok(());
-    }
-    if memory::repeated_entries_ratio(&entries) > state.memory.long_term_refresh_max_repeat_ratio {
-        return Ok(());
-    }
-
-    let latest_id = entries.last().map(|e| e.0).unwrap_or(source_id);
-    if latest_id <= source_id {
-        return Ok(());
-    }
-
-    let previous_summary = memory::recall_long_term_summary(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-    )
-    .map_err(|err| format!("read previous long-term summary failed: {err}"))?
-    .unwrap_or_default();
-
-    let mut convo_lines = Vec::new();
-    for (_, role, content, safety_flag) in &entries {
-        if state.memory.safety_filter_enabled && safety_flag == "injection_like" {
-            convo_lines.push(format!("{role}: [safety_signal content omitted]"));
-            continue;
-        }
-        convo_lines.push(format!("{role}: {content}"));
-    }
-    if convo_lines.is_empty() {
-        return Ok(());
-    }
-    let (summary_template, summary_prompt_file) = load_prompt_template_for_state(
-        state,
-        "prompts/long_term_summary_prompt.md",
-        LONG_TERM_SUMMARY_PROMPT_TEMPLATE,
-    );
-    let summary_prompt = render_prompt_template(
-        &summary_template,
-        &[
-            ("__PREVIOUS_SUMMARY__", &previous_summary),
-            (
-                "__NEW_CONVERSATION_CHUNK__",
-                &convo_lines.join(
-                    "
-",
-                ),
-            ),
-        ],
-    );
-    log_prompt_render(
-        &task.task_id,
-        "long_term_summary_prompt",
-        &summary_prompt_file,
-        None,
-    );
-
-    let summary = llm_gateway::run_with_fallback_with_prompt_file(
-        state,
-        task,
-        &summary_prompt,
-        &summary_prompt_file,
-    )
-    .await?;
-    let trimmed = truncate_text(&summary, state.memory.long_term_summary_max_chars.max(512));
-    memory::upsert_long_term_summary(
-        state,
-        task.user_id,
-        task.chat_id,
-        task.user_key.as_deref(),
-        &trimmed,
-        latest_id,
-    )
-    .map_err(|err| format!("write long-term summary failed: {err}"))?;
-    Ok(())
-}
-
-fn preferred_response_language(preferences: &[(String, String)]) -> Option<String> {
-    for (k, v) in preferences.iter().rev() {
-        if k.trim() == "response_language" || k.trim() == "language" {
-            let lang = v.trim();
-            if !lang.is_empty() {
-                return Some(lang.to_string());
-            }
-        }
-    }
-    None
-}
-
-pub(crate) fn ensure_column_exists(
-    db: &Connection,
-    table_name: &str,
-    column_name: &str,
-    alter_sql: &str,
-) -> anyhow::Result<()> {
-    let pragma = format!("PRAGMA table_info({table_name})");
-    let mut stmt = db.prepare(&pragma)?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for r in rows {
-        if r?.eq_ignore_ascii_case(column_name) {
-            return Ok(());
-        }
-    }
-    db.execute(alter_sql, [])?;
-    Ok(())
-}
-
-pub(crate) fn now_ts_u64() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-pub(crate) fn now_ts() -> String {
-    now_ts_u64().to_string()
-}
-
-pub(crate) fn main_flow_rules(state: &AppState) -> &'static MainFlowRules {
-    static RULES: OnceLock<MainFlowRules> = OnceLock::new();
-    RULES.get_or_init(|| {
-        let path = state
-            .workspace_root
-            .join("configs/hard_rules/main_flow.toml");
-        let path_str = path.to_string_lossy().to_string();
-        load_main_flow_rules(&path_str)
-    })
-}
-
-fn normalize_affirmation_text(text: &str) -> String {
-    text.trim().to_ascii_lowercase()
-}
-
-fn is_affirmation_click_text(_state: &AppState, text: &str) -> bool {
-    let t = text.trim().to_ascii_lowercase();
-    matches!(t.as_str(), "y" | "yes")
 }
 
 async fn submit_task(
@@ -1145,41 +773,6 @@ async fn submit_task(
     );
 
     api_ok(SubmitTaskResponse { task_id })
-}
-
-pub(crate) fn mask_secret(raw: &str) -> String {
-    let value = raw.trim();
-    if value.is_empty() {
-        return "-".to_string();
-    }
-    let chars: Vec<char> = value.chars().collect();
-    if chars.len() <= 8 {
-        return "*".repeat(chars.len().max(4));
-    }
-    let head: String = chars.iter().take(4).collect();
-    let tail: String = chars
-        .iter()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    format!("{head}****{tail}")
-}
-
-fn normalize_exchange_name(raw: &str) -> anyhow::Result<String> {
-    let exchange = raw.trim().to_ascii_lowercase();
-    match exchange.as_str() {
-        "binance" | "okx" => Ok(exchange),
-        _ => Err(anyhow::anyhow!("unsupported exchange: {exchange}")),
-    }
-}
-
-pub(crate) fn normalize_external_id_opt(raw: Option<&str>) -> Option<String> {
-    raw.map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToString::to_string)
 }
 
 async fn get_task(

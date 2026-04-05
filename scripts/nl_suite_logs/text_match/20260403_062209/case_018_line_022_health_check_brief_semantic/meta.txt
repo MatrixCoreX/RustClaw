@@ -1,0 +1,6 @@
+ordinal=18
+source_line=22
+case_name=health_check_brief_semantic
+chat_id=1985997008
+task_id=0b157546-5754-432e-aaa0-eae7ce7fd320
+prompt=run a basic health check and summarize the most important findings briefly
