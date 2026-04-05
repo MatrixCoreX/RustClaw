@@ -104,6 +104,34 @@ fn direct_scalar_observed_answer(
     ))
 }
 
+async fn direct_publishable_observed_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let observed = super::observed_output::extract_latest_generic_successful_output(loop_state)?;
+    let answer = observed.body.trim().to_string();
+    if answer.is_empty()
+        || crate::finalizer::looks_like_planner_artifact(&answer)
+        || crate::finalizer::looks_like_internal_trace_artifact(&answer)
+    {
+        return None;
+    }
+    if !crate::semantic_judge::is_publishable_raw(state, task, &answer).await {
+        return None;
+    }
+    Some((
+        answer,
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion),
+            contract_ok: true,
+            used_evidence_ids_count: 1,
+            ..Default::default()
+        },
+    ))
+}
+
 fn pending_confirmation_resume_payload(
     state: &AppState,
     user_text: &str,
@@ -309,6 +337,17 @@ pub(super) async fn finalize_loop_reply(
                 "delivery fallback_from_observed_scalar task_id={}",
                 task.task_id
             );
+        }
+    }
+
+    if loop_state.delivery_messages.is_empty() {
+        if let Some((answer, summary)) =
+            direct_publishable_observed_answer(state, task, &loop_state).await
+        {
+            finalizer_summary = Some(summary);
+            loop_state.last_user_visible_respond = Some(answer.clone());
+            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+            info!("delivery fallback_from_observed_raw task_id={}", task.task_id);
         }
     }
 
