@@ -21,6 +21,14 @@ use serde_json::Value;
 struct Req {{
     request_id: String,
     args: Value,
+    #[serde(default)]
+    context: Option<Value>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    user_id: i64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    chat_id: i64,
 }}
 
 #[derive(Debug, Serialize)]
@@ -28,6 +36,8 @@ struct Resp {{
     request_id: String,
     status: String,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<Value>,
     error_text: Option<String>,
 }}
 
@@ -44,12 +54,14 @@ fn main() -> anyhow::Result<()> {{
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
+                    extra: None,
                     error_text: None,
                 }},
                 Err(err) => Resp {{
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: None,
                     error_text: Some(err),
                 }},
             }},
@@ -57,6 +69,7 @@ fn main() -> anyhow::Result<()> {{
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {{err}}")),
             }},
         }};
@@ -274,7 +287,7 @@ def main() -> int:
         print(f"[update] {path.relative_to(REPO_ROOT)}")
 
     print("[next] 运行 python3 scripts/sync_skill_docs.py")
-    print("[next] 补充 prompts/agent_tool_spec.md 的技能契约")
+    print("[next] 补充 prompts/layers/overlays/agent_tool_spec.md 的技能契约")
     print(f"[next] 运行 cargo check -p clawd -p skill-runner -p {skill_name.replace('_', '-')}-skill")
     return 0
 

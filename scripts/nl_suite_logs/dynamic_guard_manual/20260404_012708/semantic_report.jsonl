@@ -1,0 +1,20 @@
+{"suite": "manual", "case_name": "explicit_path_readme_summary", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_path_readme_send", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_config_send", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_log_tail", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_db_tables", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_archive_unpack", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_docs_list_names_only", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_docs_count_scalar", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_missing_file_graceful", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_db_schema_version_cn", "pass": false, "reasons": ["scalar-only requirement violated"]}
+{"suite": "manual", "case_name": "english_explicit_readme_summary", "pass": false, "reasons": ["status=failed"]}
+{"suite": "manual", "case_name": "english_explicit_log_tail", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "mixed_lang_explicit_file_summary", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "colloquial_cn_send_no_paste", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "colloquial_en_log_focus", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_release_checklist_summary", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_package_name_scalar", "pass": false, "reasons": ["scalar-only requirement violated"]}
+{"suite": "manual", "case_name": "explicit_model_io_tail_brief", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "explicit_docs_archive_names_only", "pass": true, "reasons": []}
+{"suite": "manual", "case_name": "colloquial_cn_config_purpose", "pass": true, "reasons": []}

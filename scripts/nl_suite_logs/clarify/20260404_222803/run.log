@@ -1,0 +1,62 @@
+NL multi-turn suite: clarify
+  run_dir:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_222803
+  run_log:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_222803/run.log
+  case_file:  /tmp/nl_clarify_targeted_345.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985997700
+
+============================================================
+[CASE]   1
+[NAME]   clarify_scalar_extract
+[CHAT]   1985997701
+[TURN1]  读一下那个文件里的名字字段，只输出值
+[TASK1]  be43a28f-1b7d-409f-8ea4-889643a703ed
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  我没找到这个文件，请提供完整路径。
+[TURN2]  package.json
+[TASK2]  f9628860-cc9a-489a-ac5f-c5fda53a84ca
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  name 字段不存在
+
+============================================================
+[CASE]   2
+[NAME]   clarify_count_dir
+[CHAT]   1985997702
+[TURN1]  数一下那个目录里有多少个直接子项，只输出数字
+[TASK1]  3a9e1fef-e729-4992-b647-d5187a17634d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请问您指的是哪个目录？
+[TURN2]  scripts
+[TASK2]  2c0aabff-3790-4abc-a925-c71e56e01116
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  47
+
+============================================================
+[CASE]   3
+[NAME]   clarify_list_dir
+[CHAT]   1985997703
+[TURN1]  看看那个目录下面都有什么
+[TASK1]  af7d8786-40a5-4f77-9575-03d8aa5510d7
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请问您指的是哪个目录？
+[TURN2]  document
+[TASK2]  5a1eef45-d633-47a3-a7c0-1a430c69c255
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  hello_from_manual_test.sh\nhello_world.sh\nmanual_fixture_note.txt\nmanual_meta.json\nmanual_meta_variant.json\nmanual_note.txt\nmanual_note_variant.txt\nregression_llm_first/\nruntime_delivery_followup_en.txt\nruntime_delivery_followup_en_2.txt\ntext_match_regression_en.txt\ntext_match_regression_en_2.txt\ntext_match_regression_note.txt\n垃圾代码端分析报告.md\n投资分析报告.txt
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_222803
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_222803/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_222803/summary.jsonl

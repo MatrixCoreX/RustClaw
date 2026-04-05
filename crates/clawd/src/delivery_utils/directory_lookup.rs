@@ -1,15 +1,17 @@
 use std::path::{Path, PathBuf};
 
+use super::locator::{
+    directory_lookup_input_from_hint, normalize_locator_text, parse_directory_lookup_input,
+};
 use super::{
-    dedup_and_sort_paths, directory_hint_from_token, directory_lookup_input_from_hint,
-    extract_directory_and_file_pair, extract_directory_name_hint,
-    extract_directory_path_candidate_from_request, list_current_level_files_for_delivery,
-    localize_delivery_message, looks_like_directory_path_hint, looks_like_directory_token,
-    normalize_locator_text, DeliveryMessageKind, DirectoryEntriesListResult, DirectoryLookupInput,
-    DirectoryLookupResolution, IntentOutputContract, OutputDeliveryIntent,
+    dedup_and_sort_paths, localize_delivery_message, resolve_existing_dir_under_root,
+    DeliveryMessageKind, DirectoryEntriesListResult, DirectoryLookupInput,
+    DirectoryLookupResolution, IntentOutputContract,
 };
 use crate::AppState;
+use crate::{OutputDeliveryIntent, OutputLocatorKind};
 
+// Directory-only lookup and listing flow used by delivery interception.
 pub(super) fn try_handle_directory_lookup_request(
     state: &AppState,
     user_request: &str,
@@ -23,7 +25,8 @@ pub(super) fn try_handle_directory_lookup_request(
     if !allow_directory_lookup || file_delivery_contract {
         return None;
     }
-    let request = resolve_directory_locator_input(output_contract, user_request)?;
+    let request =
+        resolve_directory_locator_input(output_contract, user_request, &state.workspace_root)?;
     let resolved = resolve_directory_target(
         request,
         Path::new("/"),
@@ -61,32 +64,40 @@ pub(super) fn try_handle_directory_lookup_request(
                 state,
                 DeliveryMessageKind::DirectoryMultipleCandidates,
             ));
-            lines.extend(candidates.into_iter().map(|path| path.display().to_string()));
+            lines.extend(
+                candidates
+                    .into_iter()
+                    .map(|path| path.display().to_string()),
+            );
             Some(lines.join("\n"))
         }
-        DirectoryLookupResolution::UserMessage(kind) => Some(localize_delivery_message(state, kind)),
+        DirectoryLookupResolution::UserMessage(kind) => {
+            Some(localize_delivery_message(state, kind))
+        }
     }
 }
 
 pub(super) fn resolve_directory_locator_input(
     output_contract: &IntentOutputContract,
     user_request: &str,
+    workspace_root: &Path,
 ) -> Option<DirectoryLookupInput> {
+    if matches!(
+        output_contract.locator_kind,
+        OutputLocatorKind::CurrentWorkspace
+    ) {
+        return Some(DirectoryLookupInput::ExplicitPath {
+            directory_path: workspace_root
+                .canonicalize()
+                .unwrap_or_else(|_| workspace_root.to_path_buf())
+                .display()
+                .to_string(),
+        });
+    }
     if let Some(from_hint) = directory_lookup_input_from_hint(&output_contract.locator_hint) {
         return Some(from_hint);
     }
     parse_directory_lookup_input(user_request.trim())
-}
-
-pub(super) fn parse_directory_lookup_input(text: &str) -> Option<DirectoryLookupInput> {
-    if let Some(path) = extract_directory_path_candidate_from_request(text) {
-        return Some(DirectoryLookupInput::ExplicitPath { directory_path: path });
-    }
-
-    if let Some(hint) = extract_directory_name_hint(text) {
-        return directory_lookup_input_from_hint(&hint);
-    }
-    None
 }
 
 pub(super) fn resolve_directory_target(
@@ -98,10 +109,11 @@ pub(super) fn resolve_directory_target(
 ) -> DirectoryLookupResolution {
     match input {
         DirectoryLookupInput::ExplicitPath { directory_path } => {
-            if let Some(directory) = super::resolve_existing_dir_under_root(system_root, &directory_path) {
+            if let Some(directory) = resolve_existing_dir_under_root(system_root, &directory_path) {
                 return DirectoryLookupResolution::Resolved(directory);
             }
-            if let Some(directory) = super::resolve_existing_dir_under_root(project_root, &directory_path) {
+            if let Some(directory) = resolve_existing_dir_under_root(project_root, &directory_path)
+            {
                 return DirectoryLookupResolution::Resolved(directory);
             }
             DirectoryLookupResolution::UserMessage(DeliveryMessageKind::DirectoryBothRootsMiss)
@@ -127,7 +139,9 @@ pub(super) fn resolve_directory_target(
                 return DirectoryLookupResolution::Resolved(exact[0].clone());
             }
             if exact.len() > 1 {
-                return DirectoryLookupResolution::MultipleCandidates(exact.into_iter().take(3).collect());
+                return DirectoryLookupResolution::MultipleCandidates(
+                    exact.into_iter().take(3).collect(),
+                );
             }
 
             let mut fuzzy = collect_directory_candidates(
@@ -177,7 +191,10 @@ pub(super) fn collect_directory_candidates(
 
     while let Some((dir, depth)) = stack.pop() {
         let mut entries = match std::fs::read_dir(&dir) {
-            Ok(v) => v.filter_map(Result::ok).map(|entry| entry.path()).collect::<Vec<_>>(),
+            Ok(v) => v
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>(),
             Err(_) => continue,
         };
         entries.sort();
@@ -225,12 +242,17 @@ pub(super) fn list_directory_entries_for_user(
     max_entries: usize,
 ) -> DirectoryEntriesListResult {
     let mut entries = match std::fs::read_dir(directory) {
-        Ok(v) => v.filter_map(Result::ok).map(|entry| entry.path()).collect::<Vec<_>>(),
+        Ok(v) => v
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>(),
         Err(_) => return DirectoryEntriesListResult::FilePaths(Vec::new()),
     };
     entries.sort();
     if entries.len() > max_entries.max(1) {
-        return DirectoryEntriesListResult::UserMessage(DeliveryMessageKind::DirectoryEntriesTooMany);
+        return DirectoryEntriesListResult::UserMessage(
+            DeliveryMessageKind::DirectoryEntriesTooMany,
+        );
     }
     let mut files = Vec::new();
     for path in entries {

@@ -1,0 +1,6 @@
+ordinal=26
+source_line=31
+case_name=act_log_analyze_brief
+chat_id=1985997016
+task_id=a526032c-b36e-413d-b83a-0868a1fb4dd7
+prompt=快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结

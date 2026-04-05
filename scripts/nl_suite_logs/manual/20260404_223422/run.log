@@ -1,0 +1,35 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_manual_targeted_case5.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_223422
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_223422/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_223422/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985997800
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        line_001
+[CHAT]        1985997801
+[PROMPT]      扫一眼 README 前 20 行，再提炼成 3 句话
+[TASK]        7f01d1e2-04c7-47b4-bf5d-2f0bf9c5adfd
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] README 文件摘要： 【基于前 20 行内容提炼的 3 句话摘要】 {"action":"read_range","end_line":20,"excerpt":"1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|\n5|Chinese version: `README.zh-CN.md`\n6|\n7|RustClaw is a local Ru...(truncated)
+
+================ Final Summary ================
+TOTAL_CASES=1 SUCCEEDED=1 FAILED=0 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_223422
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_223422/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_223422/summary.jsonl

@@ -1,0 +1,6 @@
+ordinal=8
+source_line=12
+case_name=explicit_docs_count_scalar
+chat_id=17752372389
+task_id=e333f675-a615-4cdc-96c9-d835878ac2c4
+prompt=数一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs 目录直接有多少个子项，只回数字

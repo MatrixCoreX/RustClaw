@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"ad236e3a-342b-4c7d-9727-128be5dfa908","status":"succeeded","result_json":{"messages":["该 README.md 文件介绍了一个基于 Ollama 的本地大模型部署方案，包含模型管理、API 服务配置及 Docker 集成等核心功能，帮助用户快速搭建本地 AI 推理环境。"],"text":"该 README.md 文件介绍了一个基于 Ollama 的本地大模型部署方案，包含模型管理、API 服务配置及 Docker 集成等核心功能，帮助用户快速搭建本地 AI 推理环境。"},"error_text":null},"error":null}

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use claw_core::prompt_layers;
 use hmac::{Hmac, Mac};
 use reqwest::blocking::{multipart, Client};
 use serde::{Deserialize, Serialize};
@@ -165,8 +166,8 @@ enum AudioInput {
 }
 
 const DEFAULT_AUDIO_TRANSCRIBE_PROMPT_TEMPLATE: &str =
-    include_str!("../../../../prompts/vendors/default/audio_transcribe_prompt.md");
-const AUDIO_TRANSCRIBE_PROMPT_PATH: &str = "prompts/audio_transcribe_prompt.md";
+    include_str!("../../../../prompts/layers/overlays/audio_transcribe_prompt.md");
+const AUDIO_TRANSCRIBE_PROMPT_LOGICAL_PATH: &str = "prompts/audio_transcribe_prompt.md";
 
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
@@ -245,7 +246,7 @@ fn execute(
     let transcribe_prompt_template = load_prompt_template_for_vendor(
         workspace_root,
         prompt_vendor_name_for_vendor(vendor),
-        AUDIO_TRANSCRIBE_PROMPT_PATH,
+        AUDIO_TRANSCRIBE_PROMPT_LOGICAL_PATH,
         DEFAULT_AUDIO_TRANSCRIBE_PROMPT_TEMPLATE,
     );
     let transcribe_prompt = render_transcribe_prompt(&transcribe_prompt_template, transcribe_hint);
@@ -1130,20 +1131,6 @@ fn vendor_models<'a>(
     }
 }
 
-fn normalize_prompt_vendor_name(raw: &str) -> String {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "anthropic" | "claude" => "claude".to_string(),
-        "google" | "gemini" => "google".to_string(),
-        "openai" => "openai".to_string(),
-        "grok" | "xai" => "grok".to_string(),
-        "deepseek" => "deepseek".to_string(),
-        "qwen" => "qwen".to_string(),
-        "minimax" => "minimax".to_string(),
-        "custom" => "openai".to_string(),
-        _ => "default".to_string(),
-    }
-}
-
 fn prompt_vendor_name_for_vendor(vendor: VendorKind) -> &'static str {
     match vendor {
         VendorKind::OpenAI => "openai",
@@ -1157,39 +1144,19 @@ fn prompt_vendor_name_for_vendor(vendor: VendorKind) -> &'static str {
     }
 }
 
-fn resolve_prompt_rel_path_for_vendor(
-    workspace_root: &Path,
-    vendor: &str,
-    rel_path: &str,
-) -> String {
-    let trimmed = rel_path.trim();
-    if trimmed.is_empty() || !trimmed.starts_with("prompts/") {
-        return trimmed.to_string();
-    }
-    let suffix = trimmed.trim_start_matches("prompts/");
-    let vendor_name = normalize_prompt_vendor_name(vendor);
-    let vendor_candidate = format!("prompts/vendors/{vendor_name}/{suffix}");
-    if workspace_root.join(&vendor_candidate).is_file() {
-        return vendor_candidate;
-    }
-    let default_candidate = format!("prompts/vendors/default/{suffix}");
-    if vendor_name != "default" && workspace_root.join(&default_candidate).is_file() {
-        return default_candidate;
-    }
-    trimmed.to_string()
-}
-
 fn load_prompt_template_for_vendor(
     workspace_root: &Path,
     vendor: &str,
     rel_path: &str,
     default_template: &str,
 ) -> String {
-    let resolved_path = resolve_prompt_rel_path_for_vendor(workspace_root, vendor, rel_path);
-    match std::fs::read_to_string(workspace_root.join(resolved_path)) {
-        Ok(s) if !s.trim().is_empty() => s,
-        _ => default_template.to_string(),
-    }
+    prompt_layers::load_prompt_template_for_vendor(
+        workspace_root,
+        vendor,
+        rel_path,
+        default_template,
+    )
+    .0
 }
 
 fn render_transcribe_prompt(template: &str, hint: &str) -> String {

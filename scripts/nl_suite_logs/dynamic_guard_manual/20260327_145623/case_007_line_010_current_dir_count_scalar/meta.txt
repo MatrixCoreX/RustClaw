@@ -1,6 +1,0 @@
-ordinal=7
-source_line=10
-case_name=current_dir_count_scalar
-chat_id=1985996997
-task_id=db29a1a2-4d5d-48e4-a05d-74d18313c101
-prompt=数一下当前目录有多少个直接子项，只输出数字

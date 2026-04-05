@@ -1,0 +1,6 @@
+ordinal=17
+source_line=21
+case_name=explicit_package_name_scalar
+chat_id=17752372398
+task_id=78c82557-6a21-4a4e-b20a-261b9eb9af44
+prompt=去 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/package.json 里把 name 的值拿出来，只输出值

@@ -1,0 +1,6 @@
+ordinal=20
+source_line=24
+case_name=transform_json_table_semantic
+chat_id=1985997010
+task_id=648430e1-971e-47f0-af5b-2ac432027599
+prompt=sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]

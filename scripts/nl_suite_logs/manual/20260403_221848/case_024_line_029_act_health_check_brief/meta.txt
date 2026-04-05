@@ -1,0 +1,6 @@
+ordinal=24
+source_line=29
+case_name=act_health_check_brief
+chat_id=1985997014
+task_id=9359e531-89da-4126-9bcf-38059dc7fbf9
+prompt=帮我做一次基础健康检查，只列最重要的结论

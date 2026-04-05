@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"3ec388d8-e568-4c55-a682-6f9c558c2418","status":"succeeded","result_json":{"messages":["文件已成功读取，但执行结果中未包含该文件的实际内容。\n\n文件路径：`/home/guagua/test/configs/app_config.toml`"],"text":"文件已成功读取，但执行结果中未包含该文件的实际内容。\n\n文件路径：`/home/guagua/test/configs/app_config.toml`"},"error_text":null},"error":null}

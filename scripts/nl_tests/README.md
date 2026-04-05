@@ -2,20 +2,36 @@
 
 All natural-language test scripts are centralized in this directory.
 
-## Entry points
+## Unified Tool
 
+Primary entry point:
+
+- `bash scripts/nl_tests/run_suite.sh --list`
 - `bash scripts/nl_tests/run_suite.sh manual`
-- `bash scripts/nl_tests/run_suite.sh text_match`
-- `bash scripts/nl_tests/run_suite.sh full`
-- `bash scripts/nl_tests/run_suite.sh trace`
-- `bash scripts/nl_tests/run_suite.sh resume`
-- `bash scripts/nl_tests/run_suite.sh clarify`
-- `bash scripts/nl_tests/run_suite.sh context_chain`
+- `bash scripts/nl_tests/run_suite.sh manual trace clarify`
+- `bash scripts/nl_tests/run_suite.sh --category multi_turn`
+- `bash scripts/nl_tests/run_suite.sh --category regression --category guard`
 - `bash scripts/nl_tests/run_suite.sh all`
 - `bash scripts/nl_tests/run_suite.sh clarify_context_prompt`
 
+Built-in categories:
+
+- `smoke`
+- `single_turn`
+- `multi_turn`
+- `regression`
+- `guard`
+- `core`
+- `all`
+
+Shared options are passed through to the underlying runners, for example:
+
+- `bash scripts/nl_tests/run_suite.sh manual --base-url http://127.0.0.1:8787`
+- `bash scripts/nl_tests/run_suite.sh --category multi_turn --chat-id 3000000`
+
 ## Core runners
 
+- `run_suite.sh` is now the preferred user-facing tool script.
 - `bash scripts/nl_tests/run_manual_test.sh`
 - `bash scripts/nl_tests/run_full_suite.sh`
 - `bash scripts/nl_tests/run_multi_turn_suite.sh`
@@ -29,7 +45,11 @@ All natural-language test scripts are centralized in this directory.
   - `nl_cases_trace.txt`
   - `nl_cases_text_match.txt`
   - `nl_cases_clarify.txt`
-  - `nl_cases_context_chain_20260326.txt`
+  - `nl_cases_clarify_hard.txt`
+  - `nl_cases_context_chain.txt`
+  - `nl_cases_dynamic_guard_manual.txt`
+  - `nl_cases_dynamic_guard_clarify.txt`
+  - `nl_cases_dynamic_guard_context.txt`
 - Additional test text files now also live here:
   - `regression_trace_ask_cases_real.txt`
   - `regression_trace_ask_cases_minimax_think.txt`

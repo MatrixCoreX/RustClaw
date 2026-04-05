@@ -305,11 +305,11 @@ fn synthesize_llm_providers(
     out
 }
 
-pub(crate) async fn run_with_fallback_with_prompt_file(
+pub(crate) async fn run_with_fallback_with_prompt_source(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
-    prompt_file: &str,
+    prompt_source: &str,
 ) -> Result<String, String> {
     let _prompt_debug_enabled = state.routing.debug_log_prompt;
     let task_providers = state.task_llm_providers(task);
@@ -325,7 +325,7 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
         let model_kind = crate::llm_model_kind(provider);
         let provider_name = format!("{}:{}", provider.config.name, provider.config.model);
         info!(
-            "{} [LLM_CALL] stage=request task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={}",
+            "{} [LLM_CALL] stage=request task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={}",
             crate::highlight_tag("llm"),
             task.task_id,
             task.user_id,
@@ -334,7 +334,7 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
             model,
             model_kind,
             provider_name,
-            prompt_file
+            prompt_source
         );
 
         match crate::call_provider_with_retry(provider.clone(), prompt).await {
@@ -343,7 +343,7 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
                     crate::maybe_sanitize_llm_text_output(vendor, &output.text);
                 if sanitized {
                     warn!(
-                        "{} [LLM_CALL] stage=cleanup task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} note=removed_think_block",
+                        "{} [LLM_CALL] stage=cleanup task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={} note=removed_think_block",
                         crate::highlight_tag("llm"),
                         task.task_id,
                         task.user_id,
@@ -352,11 +352,11 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
                         model,
                         model_kind,
                         provider_name,
-                        prompt_file
+                        prompt_source
                     );
                 }
                 info!(
-                    "{} [LLM_CALL] stage=response task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} response={}",
+                    "{} [LLM_CALL] stage=response task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={} response={}",
                     crate::highlight_tag("llm"),
                     task.task_id,
                     task.user_id,
@@ -365,7 +365,7 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
                     model,
                     model_kind,
                     provider_name,
-                    prompt_file,
+                    prompt_source,
                     crate::truncate_for_log(&cleaned_text)
                 );
                 crate::append_model_io_log(
@@ -373,7 +373,7 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
                     task,
                     provider,
                     "ok",
-                    prompt_file,
+                    prompt_source,
                     prompt,
                     &output.request_payload,
                     Some(&output.raw_response),
@@ -405,7 +405,7 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
             Err(err) => {
                 last_error = format!("provider={provider_name} failed: {err}");
                 warn!(
-                    "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_file={} error={}",
+                    "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={} error={}",
                     crate::highlight_tag("llm"),
                     task.task_id,
                     task.user_id,
@@ -414,7 +414,7 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
                     model,
                     model_kind,
                     provider_name,
-                    prompt_file,
+                    prompt_source,
                     crate::truncate_for_log(&last_error)
                 );
                 crate::append_model_io_log(
@@ -422,7 +422,7 @@ pub(crate) async fn run_with_fallback_with_prompt_file(
                     task,
                     provider,
                     "failed",
-                    prompt_file,
+                    prompt_source,
                     prompt,
                     &err.request_payload,
                     err.raw_response.as_deref(),

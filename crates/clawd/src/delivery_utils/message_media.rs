@@ -1,0 +1,262 @@
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use rusqlite::params;
+use serde_json::Value;
+
+use crate::AppState;
+
+pub(crate) fn normalize_delivery_message(state: &AppState, text: &str) -> Option<String> {
+    let normalized = super::intercept_response_text_for_delivery(text);
+    if normalized.is_empty() {
+        return None;
+    }
+    let trimmed = normalized.trim();
+    if crate::finalizer::looks_like_tool_call_artifact(trimmed) {
+        return None;
+    }
+    if let Some((_kind, path)) = crate::finalizer::parse_delivery_file_token(trimmed) {
+        let resolved = resolve_existing_delivery_path(state, path)?;
+        return Some(format!("FILE:{}", resolved.display()));
+    }
+    if let Some((kind, url)) = crate::finalizer::parse_delivery_token(trimmed) {
+        if kind.is_file_path() {
+            return None;
+        }
+        let url = trim_path_token(url);
+        if url.is_empty() {
+            return None;
+        }
+        return Some(format!("{}{}", kind.prefix(), url));
+    }
+    Some(normalized)
+}
+
+fn resolve_existing_delivery_path(state: &AppState, raw_path: &str) -> Option<PathBuf> {
+    let trimmed = trim_path_token(raw_path);
+    if trimmed.is_empty() {
+        return None;
+    }
+    let candidates = if Path::new(&trimmed).is_absolute() {
+        vec![PathBuf::from(&trimmed)]
+    } else {
+        vec![
+            state.default_locator_search_dir.join(&trimmed),
+            state.workspace_root.join(&trimmed),
+        ]
+    };
+    for candidate in candidates {
+        let Ok(canonical) = candidate.canonicalize() else {
+            continue;
+        };
+        if canonical.is_file() {
+            return Some(canonical);
+        }
+    }
+    None
+}
+
+pub(crate) fn collect_recent_image_candidates(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    limit: usize,
+) -> Vec<String> {
+    let Some(user_key) = user_key.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Vec::new();
+    };
+    let db = match state.db.lock() {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut mem_stmt = match db.prepare(
+        "SELECT content
+         FROM memories
+         WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3 AND role = 'assistant'
+         ORDER BY id DESC
+         LIMIT 120",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    if let Ok(rows) = mem_stmt.query_map(params![user_id, chat_id, user_key], |row| {
+        row.get::<_, String>(0)
+    }) {
+        for row in rows.flatten() {
+            let tokens = super::extract_delivery_file_tokens(&row);
+            for t in tokens {
+                if let Some(reference) = extract_image_reference_from_delivery_token(&t) {
+                    if seen.insert(reference.clone()) {
+                        out.push(reference);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut task_stmt = match db.prepare(
+        "SELECT payload_json, result_json
+         FROM tasks
+         WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3 AND kind = 'run_skill' AND status = 'succeeded'
+         ORDER BY rowid DESC
+         LIMIT ?4",
+    ) {
+        Ok(s) => s,
+        Err(_) => return out,
+    };
+    if let Ok(rows) = task_stmt
+        .query_map(params![user_id, chat_id, user_key, limit as i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+    {
+        for row in rows.flatten() {
+            let (payload_json, result_json) = row;
+            if let Ok(payload) = serde_json::from_str::<Value>(&payload_json) {
+                collect_image_paths_from_task_payload(&payload, &mut out, &mut seen);
+            }
+            if let Some(result) = result_json {
+                if let Ok(v) = serde_json::from_str::<Value>(&result) {
+                    if let Some(text) = v.get("text").and_then(|x| x.as_str()) {
+                        for t in super::extract_delivery_file_tokens(text) {
+                            if let Some(reference) = extract_image_reference_from_delivery_token(&t)
+                            {
+                                if seen.insert(reference.clone()) {
+                                    out.push(reference);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+pub(crate) fn extract_file_path_from_delivery_token(token: &str) -> Option<String> {
+    crate::finalizer::parse_delivery_file_token(token)
+        .map(|(_kind, path)| trim_path_token(path))
+        .filter(|s| !s.is_empty())
+}
+
+fn extract_image_reference_from_delivery_token(token: &str) -> Option<String> {
+    if let Some(path) = extract_file_path_from_delivery_token(token) {
+        if is_image_file_path(&path) {
+            return Some(path);
+        }
+    }
+    match crate::finalizer::parse_delivery_token(token) {
+        Some((crate::finalizer::DeliveryTokenKind::ImageUrl, url)) => {
+            let url = trim_path_token(url);
+            is_remote_image_url(&url).then_some(url)
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn trim_path_token(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches(|c: char| {
+            matches!(
+                c,
+                '"' | '\''
+                    | '`'
+                    | '“'
+                    | '”'
+                    | '‘'
+                    | '’'
+                    | '《'
+                    | '》'
+                    | '「'
+                    | '」'
+                    | '，'
+                    | ','
+                    | ':'
+                    | '：'
+                    | ';'
+                    | '；'
+                    | '。'
+                    | '、'
+                    | ')'
+                    | '('
+                    | '）'
+                    | '（'
+            )
+        })
+        .to_string()
+}
+
+fn is_image_file_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".bmp")
+}
+
+fn is_remote_image_url(url: &str) -> bool {
+    let lower = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .to_ascii_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://")) && is_image_file_path(&lower)
+}
+
+fn merge_image_candidate_paths_from_args(
+    args: &serde_json::Map<String, Value>,
+    out: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
+    if let Some(images) = args.get("images").and_then(|v| v.as_array()) {
+        for item in images {
+            let path = item
+                .as_object()
+                .and_then(|m| m.get("path"))
+                .and_then(|v| v.as_str())
+                .or_else(|| item.as_str());
+            if let Some(path) = path {
+                let p = path.trim().to_string();
+                if is_image_file_path(&p) && seen.insert(p.clone()) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    let path = args
+        .get("image")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get("path"))
+        .and_then(|v| v.as_str())
+        .or_else(|| args.get("image").and_then(|v| v.as_str()));
+    if let Some(path) = path {
+        let p = path.trim().to_string();
+        if is_image_file_path(&p) && seen.insert(p.clone()) {
+            out.push(p);
+        }
+    }
+    if let Some(path) = args.get("output_path").and_then(|v| v.as_str()) {
+        let p = path.trim().to_string();
+        if is_image_file_path(&p) && seen.insert(p.clone()) {
+            out.push(p);
+        }
+    }
+}
+
+fn collect_image_paths_from_task_payload(
+    payload: &Value,
+    out: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
+    let Some(args) = payload.get("args").and_then(|v| v.as_object()) else {
+        return;
+    };
+    merge_image_candidate_paths_from_args(args, out, seen);
+}

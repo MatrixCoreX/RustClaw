@@ -27,6 +27,9 @@ usage() {
   cat <<'EOF'
 Usage:
   bash scripts/nl_tests/run_multi_turn_suite.sh [options]
+  Preferred unified entry:
+    bash scripts/nl_tests/run_suite.sh clarify [options]
+    bash scripts/nl_tests/run_suite.sh context_chain [options]
 
 Options:
   --suite NAME          clarify | context_chain (default: clarify)
@@ -109,9 +112,8 @@ poll_until_terminal() {
   local last_status=""
 
   while [[ "$waited" -le "$MAX_WAIT_SECONDS" ]]; do
-    local raw status
-    raw="$(query_task "$task_id")"
-    printf '%s\n' "$raw" > "$out_file"
+    local status
+    query_task_to_file "$task_id" "$out_file"
     status="$(extract_status "$out_file")"
     if [[ "$status" != "$last_status" ]]; then
       echo "  [status] ${last_status:-<none>} -> ${status:-<empty>}"
@@ -203,7 +205,7 @@ select_suite_defaults() {
       ;;
     context_chain)
       TURN_COUNT=3
-      [[ -n "$CASE_FILE" ]] || CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_context_chain_20260326.txt"
+      [[ -n "$CASE_FILE" ]] || CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_context_chain.txt"
       [[ -n "$LOG_ROOT" ]] || LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/context_chain"
       ;;
     *)

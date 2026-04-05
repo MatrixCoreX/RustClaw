@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"1c99aea8-ad5c-4ffb-a064-f1086e8f06c7","status":"succeeded","result_json":{"messages":["该文件开头介绍了一个基于 Rust + React 的自托管服务管理平台，支持 Docker 容器化部署，提供进程管理、日志监控、定时任务和开放 API 等核心功能。"],"text":"该文件开头介绍了一个基于 Rust + React 的自托管服务管理平台，支持 Docker 容器化部署，提供进程管理、日志监控、定时任务和开放 API 等核心功能。"},"error_text":null},"error":null}

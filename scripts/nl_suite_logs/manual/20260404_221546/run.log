@@ -1,0 +1,35 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_manual_targeted_case5.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_221546
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_221546/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_221546/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985997500
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        line_001
+[CHAT]        1985997501
+[PROMPT]      扫一眼 README 前 20 行，再提炼成 3 句话
+[TASK]        1c93348e-7475-4d4e-bf22-b7ed8fc0073e
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 请阅读 README 前 20 行并提炼成 3 句话摘要
+
+================ Final Summary ================
+TOTAL_CASES=1 SUCCEEDED=1 FAILED=0 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_221546
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_221546/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260404_221546/summary.jsonl

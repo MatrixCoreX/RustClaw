@@ -1,0 +1,7 @@
+index=3
+case_name=clarify_deictic_log_tail_again
+chat_id=17752372484
+turn1_task_id=cf032c20-d9c5-43ca-b74a-160677a62b05
+turn1_prompt=看下那个日志最近 20 行
+turn2_task_id=5fbe3846-5f90-45bc-8de4-5d0b8bdf2455
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log

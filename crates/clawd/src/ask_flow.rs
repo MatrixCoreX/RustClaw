@@ -1,6 +1,53 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::{AppState, AskReply, ClaimedTask, RoutedMode};
+
+fn build_resume_continue_execute_prompt_from_parts(
+    state: &AppState,
+    user_text: &str,
+    resume_context: &Value,
+    resume_instruction: &str,
+    resume_steps: Option<&Value>,
+) -> String {
+    let resume_steps = resume_steps
+        .cloned()
+        .filter(|v| v.as_array().map(|arr| !arr.is_empty()).unwrap_or(false))
+        .unwrap_or_else(|| {
+            resume_context
+                .get("remaining_actions")
+                .cloned()
+                .filter(|v| v.as_array().map(|arr| !arr.is_empty()).unwrap_or(false))
+                .unwrap_or_else(|| {
+                    resume_context
+                        .get("remaining_steps")
+                        .cloned()
+                        .unwrap_or_else(|| json!([]))
+                })
+        });
+    let resume_context_json =
+        serde_json::to_string_pretty(resume_context).unwrap_or_else(|_| resume_context.to_string());
+    let resume_steps_json =
+        serde_json::to_string_pretty(&resume_steps).unwrap_or_else(|_| resume_steps.to_string());
+
+    let (prompt_template, _) = crate::bootstrap::load_prompt_template_for_state(
+        state,
+        "prompts/resume_continue_execute_prompt.md",
+        crate::RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE,
+    );
+    crate::render_prompt_template(
+        &prompt_template,
+        &[
+            ("__USER_TEXT__", user_text),
+            ("__RESUME_CONTEXT__", &resume_context_json),
+            ("__RESUME_STEPS__", &resume_steps_json),
+            ("__RESUME_INSTRUCTION__", resume_instruction),
+            (
+                "__CONFIG_RESPONSE_LANGUAGE__",
+                &state.command_intent.default_locale,
+            ),
+        ],
+    )
+}
 
 pub(crate) fn build_resume_continue_execute_prompt(
     state: &AppState,
@@ -19,39 +66,45 @@ pub(crate) fn build_resume_continue_execute_prompt(
         .get("resume_instruction")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let resume_steps = payload
-        .get("resume_steps")
-        .cloned()
-        .filter(|v| v.as_array().map(|arr| !arr.is_empty()).unwrap_or(false))
-        .unwrap_or_else(|| {
-            resume_context
-                .get("remaining_actions")
-                .cloned()
-                .filter(|v| v.as_array().map(|arr| !arr.is_empty()).unwrap_or(false))
-                .unwrap_or_else(|| {
-                    resume_context
-                        .get("remaining_steps")
-                        .cloned()
-                        .unwrap_or_else(|| json!([]))
-                })
-        });
-    let resume_context_json = serde_json::to_string_pretty(&resume_context)
-        .unwrap_or_else(|_| resume_context.to_string());
-    let resume_steps_json =
-        serde_json::to_string_pretty(&resume_steps).unwrap_or_else(|_| resume_steps.to_string());
+    let resume_steps = payload.get("resume_steps");
+    build_resume_continue_execute_prompt_from_parts(
+        state,
+        user_text,
+        &resume_context,
+        resume_instruction,
+        resume_steps,
+    )
+}
 
+pub(crate) fn build_resume_continue_execute_prompt_from_context(
+    state: &AppState,
+    user_text: &str,
+    resume_context: &Value,
+) -> String {
+    build_resume_continue_execute_prompt_from_parts(state, user_text, resume_context, "", None)
+}
+
+fn build_resume_followup_discussion_prompt_from_parts(
+    state: &AppState,
+    user_text: &str,
+    resume_context: &Value,
+) -> String {
+    let resume_context_json =
+        serde_json::to_string_pretty(resume_context).unwrap_or_else(|_| resume_context.to_string());
     let (prompt_template, _) = crate::bootstrap::load_prompt_template_for_state(
         state,
-        "prompts/resume_continue_execute_prompt.md",
-        crate::RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE,
+        crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_LOGICAL_PATH,
+        crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_TEMPLATE,
     );
     crate::render_prompt_template(
         &prompt_template,
         &[
-            ("__USER_TEXT__", user_text),
+            ("__USER_TEXT__", user_text.trim()),
             ("__RESUME_CONTEXT__", &resume_context_json),
-            ("__RESUME_STEPS__", &resume_steps_json),
-            ("__RESUME_INSTRUCTION__", resume_instruction),
+            (
+                "__CONFIG_RESPONSE_LANGUAGE__",
+                &state.command_intent.default_locale,
+            ),
         ],
     )
 }
@@ -70,24 +123,15 @@ pub(crate) fn build_resume_followup_discussion_prompt(
         .get("resume_context")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let resume_context_json = serde_json::to_string_pretty(&resume_context)
-        .unwrap_or_else(|_| resume_context.to_string());
-    let (prompt_template, _) = crate::bootstrap::load_prompt_template_for_state(
-        state,
-        crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_PATH,
-        crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_TEMPLATE,
-    );
-    crate::render_prompt_template(
-        &prompt_template,
-        &[
-            ("__USER_TEXT__", user_text),
-            ("__RESUME_CONTEXT__", &resume_context_json),
-            (
-                "__CONFIG_RESPONSE_LANGUAGE__",
-                &state.command_intent.default_locale,
-            ),
-        ],
-    )
+    build_resume_followup_discussion_prompt_from_parts(state, user_text, &resume_context)
+}
+
+pub(crate) fn build_resume_followup_discussion_prompt_from_context(
+    state: &AppState,
+    user_text: &str,
+    resume_context: &Value,
+) -> String {
+    build_resume_followup_discussion_prompt_from_parts(state, user_text, resume_context)
 }
 
 fn chat_act_goal_from_prompt(prompt_with_memory: &str) -> String {
@@ -106,6 +150,7 @@ pub(crate) async fn execute_ask_routed(
     agent_mode: bool,
     resume_force_chat: bool,
     normalizer_mode: Option<RoutedMode>,
+    agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Result<AskReply, String> {
     let (routed_mode, used_fallback_router, override_reason) = if resume_force_chat {
         (RoutedMode::Chat, false, Some("resume_force_chat"))
@@ -133,16 +178,17 @@ pub(crate) async fn execute_ask_routed(
     );
     match routed_mode {
         RoutedMode::Chat => {
-            let (chat_prompt_template, chat_prompt_file) =
+            let (chat_prompt_template, chat_prompt_source) =
                 crate::bootstrap::load_prompt_template_for_state(
                     state,
-                    crate::CHAT_RESPONSE_PROMPT_PATH,
+                    crate::CHAT_RESPONSE_PROMPT_LOGICAL_PATH,
                     crate::CHAT_RESPONSE_PROMPT_TEMPLATE,
                 );
             crate::log_prompt_render(
+                state,
                 &task.task_id,
                 "chat_response_prompt",
-                &chat_prompt_file,
+                &chat_prompt_source,
                 None,
             );
             let task_persona_prompt = state.task_persona_prompt(task);
@@ -158,11 +204,11 @@ pub(crate) async fn execute_ask_routed(
                     ("__REQUEST__", resolved_prompt),
                 ],
             );
-            crate::llm_gateway::run_with_fallback_with_prompt_file(
+            crate::llm_gateway::run_with_fallback_with_prompt_source(
                 state,
                 task,
                 &chat_prompt,
-                &chat_prompt_file,
+                &chat_prompt_source,
             )
             .await
             .map(crate::AskReply::llm)
@@ -174,6 +220,7 @@ pub(crate) async fn execute_ask_routed(
                 task,
                 prompt_with_memory,
                 resolved_prompt,
+                agent_run_context.clone(),
             )
             .await
         }
@@ -183,6 +230,7 @@ pub(crate) async fn execute_ask_routed(
                 task,
                 &chat_act_goal_from_prompt(prompt_with_memory),
                 resolved_prompt,
+                agent_run_context.clone(),
             )
             .await
         }

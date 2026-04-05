@@ -1,9 +1,0 @@
-index=15
-case_name=context_colloquial_en_log_alias
-chat_id=17746743796
-turn1_task_id=3a97fc5b-3800-4418-95f9-9233b90f3a49
-turn1_prompt=FYI, "that log" = /home/guagua/test/logs/app.log
-turn2_task_id=45318169-41ca-437c-8cc2-dea7532d47bf
-turn2_prompt=tail that log 7 lines real quick
-turn3_task_id=172db14e-2ef9-4c13-bd77-185a915dc46e
-turn3_prompt=and tell me in one sentence if anything looks off

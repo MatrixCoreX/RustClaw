@@ -155,7 +155,7 @@ extract_vendor() {
 extract_prompt() {
 	local source_text="$1"
 	local prompt
-	prompt="$(printf '%s\n' "$source_text" | rg -o 'prompt_file=[^ ]*([A-Za-z0-9_/-]+)\.md' -N | tail -n 1 | sed -E 's#.*prompt_file=.*/([^/]+)\.md#\1#' || true)"
+	prompt="$(printf '%s\n' "$source_text" | rg -o 'prompt_(source|file)=[^ ]*([A-Za-z0-9_/-]+)\.md' -N | tail -n 1 | sed -E 's#.*prompt_(source|file)=.*/([^/]+)\.md#\2#' || true)"
 	if [[ -z "$prompt" ]]; then
 		prompt="$(printf '%s\n' "$source_text" | rg -o 'prompt_name=[A-Za-z0-9_-]+' -N | tail -n 1 | sed 's/^prompt_name=//' || true)"
 	fi
@@ -168,7 +168,7 @@ if [[ -n "$LOG_TAIL" ]]; then
 	if printf '%s\n' "$LOG_TAIL" | rg -qi 'error\[E[0-9]{4}\]|could not compile|panicked|panic|traceback|exception|segmentation fault|borrow checker|mismatched types|no method named'; then
 		has_code_signal=1
 	fi
-	if printf '%s\n' "$LOG_TAIL" | rg -qi '\[LLM_CALL\]|\[PROMPT\]|prompt_invocation|prompt_file=|prompt_name=|parse_failed|invalid json|json parse|needs_clarify|resolved_user_intent'; then
+	if printf '%s\n' "$LOG_TAIL" | rg -qi '\[LLM_CALL\]|\[PROMPT\]|prompt_invocation|prompt_source=|prompt_file=|prompt_name=|parse_failed|invalid json|json parse|needs_clarify|resolved_user_intent'; then
 		has_prompt_signal=1
 	fi
 fi
@@ -223,16 +223,16 @@ fi
 
 PROMPT_CONTEXT=""
 if [[ "$MODE" != "code" ]]; then
-	BASE_PROMPT="${ROOT_DIR}/prompts/vendors/default/${PROMPT_NAME}.md"
-	VENDOR_PROMPT="${ROOT_DIR}/prompts/vendors/${VENDOR}/${PROMPT_NAME}.md"
-	[[ -f "$VENDOR_PROMPT" ]] || {
-		echo "Vendor prompt not found: $VENDOR_PROMPT" >&2
-		exit 1
-	}
-	BASE_TEXT=""
-	[[ -f "$BASE_PROMPT" ]] && BASE_TEXT="$(sed -n '1,220p' "$BASE_PROMPT")"
-	VENDOR_TEXT="$(sed -n '1,260p' "$VENDOR_PROMPT")"
-	CODE_HINTS="$(rg -n "$PROMPT_NAME|${PROMPT_NAME}.md|prompt_file=.*${PROMPT_NAME}|prompt_name=.*${PROMPT_NAME}" "$ROOT_DIR/crates" 2>/dev/null || true)"
+	LOGICAL_PROMPT="prompts/${PROMPT_NAME}.md"
+	PRIMARY_HINT="${ROOT_DIR}/prompts/layers/overlays/${PROMPT_NAME}.md"
+	if [[ -f "${ROOT_DIR}/prompts/layers/generated/skills/${PROMPT_NAME}.md" ]]; then
+		LOGICAL_PROMPT="prompts/skills/${PROMPT_NAME}.md"
+		PRIMARY_HINT="${ROOT_DIR}/prompts/layers/generated/skills/${PROMPT_NAME}.md"
+	fi
+	RENDERED_TEXT="$(python3 "$ROOT_DIR/scripts/render_prompt_layers.py" --vendor "$VENDOR" --prompt "$LOGICAL_PROMPT" 2>/dev/null || true)"
+	PRIMARY_TEXT=""
+	[[ -f "$PRIMARY_HINT" ]] && PRIMARY_TEXT="$(sed -n '1,260p' "$PRIMARY_HINT")"
+	CODE_HINTS="$(rg -n "$PROMPT_NAME|${PROMPT_NAME}.md|prompt_source=.*${PROMPT_NAME}|prompt_file=.*${PROMPT_NAME}|prompt_name=.*${PROMPT_NAME}" "$ROOT_DIR/crates" 2>/dev/null || true)"
 	MODEL_IO_EXCERPT=""
 	if [[ -f "$MODEL_IO_LOG" ]]; then
 		MODEL_IO_EXCERPT="$(tail -n "$LINES" "$MODEL_IO_LOG" | rg -i "${VENDOR}|${PROMPT_NAME}" -n || true)"
@@ -240,18 +240,18 @@ if [[ "$MODE" != "code" ]]; then
 	PROMPT_CONTEXT=$(
 		cat <<EOF
 Prompt target vendor: ${VENDOR}
-Prompt target file: ${VENDOR_PROMPT}
-Base prompt file: ${BASE_PROMPT}
+Prompt logical path: ${LOGICAL_PROMPT}
+Likely primary file to edit: ${PRIMARY_HINT}
 
-Current vendor prompt:
-aaaVENDOR_PROMPT_STARTaaa
-${VENDOR_TEXT}
-aaaVENDOR_PROMPT_ENDaaa
+Current rendered prompt:
+aaaRENDERED_PROMPT_STARTaaa
+${RENDERED_TEXT}
+aaaRENDERED_PROMPT_ENDaaa
 
-Base prompt reference:
-aaaBASE_PROMPT_STARTaaa
-${BASE_TEXT}
-aaaBASE_PROMPT_ENDaaa
+Primary file reference:
+aaaPRIMARY_PROMPT_STARTaaa
+${PRIMARY_TEXT}
+aaaPRIMARY_PROMPT_ENDaaa
 
 Relevant code references:
 aaaCODE_HINTS_STARTaaa

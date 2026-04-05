@@ -1,6 +1,0 @@
-ordinal=15
-source_line=18
-case_name=explicit_log_tail_focus_cn
-chat_id=17746298866
-task_id=d8c4734d-c2f1-46e2-8f0e-aa8bb965ca0a
-prompt=看下 /home/guagua/test/logs/app.log 最近 15 行，然后一句话指出最可疑点

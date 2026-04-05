@@ -1,6 +1,0 @@
-ordinal=35
-source_line=42
-case_name=colloquial_en_ultra_db
-chat_id=17746743616
-task_id=3d0d32e3-b719-4054-a717-ad6447746975
-prompt=yo, what tables are in /home/guagua/test/data/test_contract.sqlite ?

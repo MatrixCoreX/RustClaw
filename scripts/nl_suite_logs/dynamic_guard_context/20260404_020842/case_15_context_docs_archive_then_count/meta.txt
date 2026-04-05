@@ -1,0 +1,9 @@
+index=15
+case_name=context_docs_archive_then_count
+chat_id=17752372596
+turn1_task_id=de08b1fd-d3df-40ae-9cad-0c1818dc224c
+turn1_prompt=先记一下，“那个 archive 目录”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/archive
+turn2_task_id=0a50aadc-360f-482f-9dab-5635a5978f00
+turn2_prompt=列出那个 archive 目录下的名字
+turn3_task_id=b804ad9d-6ea1-4789-b064-38f5b542444b
+turn3_prompt=再告诉我一共有几个直接子项，只输出数字

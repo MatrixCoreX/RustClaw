@@ -1,0 +1,6 @@
+ordinal=14
+source_line=19
+case_name=act_find_service_file
+chat_id=1985997004
+task_id=637c137a-e92d-46c5-a7be-2f8e64b5a70e
+prompt=检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径

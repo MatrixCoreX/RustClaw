@@ -1,6 +1,0 @@
-ordinal=32
-source_line=39
-case_name=colloquial_cn_ultra_count_docs
-chat_id=17746321083
-task_id=b2037780-f0c7-4a76-82fb-a2d72e490aa0
-prompt=/home/guagua/test/docs 里头有几个直接子项？只回数字

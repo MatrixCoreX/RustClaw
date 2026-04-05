@@ -1,19 +1,26 @@
-use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use regex::Regex;
 
-use super::{
-    candidate_path_from_root, dedup_and_sort_paths, has_windows_drive_prefix, is_pure_punctuation,
-    trim_path_token, DeliveryMessageKind, DirectoryLookupInput, FileDeliveryLocatorInput,
-};
+use super::{trim_path_token, DirectoryLookupInput, FileDeliveryLocatorInput};
 
+// Pure locator parsing helpers shared by directory lookup and file delivery.
 pub(super) fn parse_directory_lookup_input(text: &str) -> Option<DirectoryLookupInput> {
-    if let Some(path) = extract_directory_path_candidate_from_request(text) {
-        return Some(DirectoryLookupInput::ExplicitPath { directory_path: path });
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || extract_directory_and_file_pair(trimmed).is_some()
+        || extract_filename_candidates(trimmed).len() == 1
+        || extract_definite_file_path_candidate(trimmed).is_some()
+    {
+        return None;
+    }
+    if let Some(path) = extract_directory_path_candidate_from_request(trimmed) {
+        return Some(DirectoryLookupInput::ExplicitPath {
+            directory_path: path,
+        });
     }
 
-    if let Some(hint) = extract_directory_name_hint(text) {
+    if let Some(hint) = extract_directory_name_hint(trimmed) {
         return directory_lookup_input_from_hint(&hint);
     }
     None
@@ -25,13 +32,19 @@ pub(super) fn directory_lookup_input_from_hint(raw_hint: &str) -> Option<Directo
         return None;
     }
     if let Some(path) = extract_directory_path_candidate_from_request(&hint) {
-        return Some(DirectoryLookupInput::ExplicitPath { directory_path: path });
+        return Some(DirectoryLookupInput::ExplicitPath {
+            directory_path: path,
+        });
     }
     if looks_like_directory_path_hint(&hint) {
-        return Some(DirectoryLookupInput::ExplicitPath { directory_path: hint });
+        return Some(DirectoryLookupInput::ExplicitPath {
+            directory_path: hint,
+        });
     }
-    if looks_like_directory_token(&hint) {
-        return Some(DirectoryLookupInput::NameHint { directory_hint: hint });
+    if is_compact_directory_hint_token(&hint) {
+        return Some(DirectoryLookupInput::NameHint {
+            directory_hint: hint,
+        });
     }
     None
 }
@@ -39,7 +52,9 @@ pub(super) fn directory_lookup_input_from_hint(raw_hint: &str) -> Option<Directo
 pub(super) fn extract_directory_path_candidate_from_request(text: &str) -> Option<String> {
     let explicit = extract_explicit_file_path_candidates(text);
     for token in explicit {
-        if looks_like_explicit_directory_path_expression(&token) {
+        if looks_like_explicit_directory_path_expression(&token)
+            && explicit_path_prefers_directory_lookup(&token)
+        {
             return Some(token);
         }
     }
@@ -65,33 +80,6 @@ pub(super) fn extract_directory_name_hint(text: &str) -> Option<String> {
         }
     }
 
-    let tokens = text
-        .split_whitespace()
-        .map(trim_path_token)
-        .filter(|token| !token.is_empty())
-        .collect::<Vec<_>>();
-    if tokens.len() == 1 {
-        return directory_hint_from_token(&tokens[0]);
-    }
-
-    let mut candidates = Vec::new();
-    for token in tokens {
-        if let Some(v) = directory_hint_from_token(&token) {
-            if !candidates.iter().any(|existing| existing == &v) {
-                candidates.push(v);
-            }
-        }
-    }
-    if candidates.len() == 1 {
-        return candidates.into_iter().next();
-    }
-    let path_like = candidates
-        .into_iter()
-        .filter(|v| looks_like_directory_path_hint(v))
-        .collect::<Vec<_>>();
-    if path_like.len() == 1 {
-        return path_like.into_iter().next();
-    }
     None
 }
 
@@ -100,7 +88,7 @@ pub(super) fn directory_hint_from_token(raw: &str) -> Option<String> {
     if token.is_empty() || looks_like_filename_token(&token) {
         return None;
     }
-    if looks_like_directory_path_hint(&token) || looks_like_directory_token(&token) {
+    if looks_like_directory_path_hint(&token) || is_compact_directory_hint_token(&token) {
         return Some(token);
     }
     None
@@ -114,9 +102,7 @@ pub(super) fn classify_file_delivery_locator_input(
         return Some(hint);
     }
 
-    let explicit_file_path = extract_explicit_file_path_candidates(user_request)
-        .into_iter()
-        .find(|token| looks_like_explicit_file_path_expression(token));
+    let explicit_file_path = extract_definite_file_path_candidate(user_request);
     if let Some(file_path) = explicit_file_path {
         return Some(FileDeliveryLocatorInput::ExplicitFilePath { file_path });
     }
@@ -144,10 +130,7 @@ pub(super) fn classify_file_delivery_locator_from_hint(
     if raw.is_empty() {
         return None;
     }
-    if let Some(path) = extract_explicit_file_path_candidates(&raw)
-        .into_iter()
-        .find(|token| looks_like_explicit_file_path_expression(token))
-    {
+    if let Some(path) = extract_definite_file_path_candidate(&raw) {
         return Some(FileDeliveryLocatorInput::ExplicitFilePath { file_path: path });
     }
     if let Some((directory_path, file_name)) = extract_directory_and_file_pair(&raw) {
@@ -165,10 +148,8 @@ pub(super) fn classify_file_delivery_locator_from_hint(
 pub(super) fn extract_explicit_file_path_candidates(text: &str) -> Vec<String> {
     static RE: OnceLock<Regex> = OnceLock::new();
     let regex = RE.get_or_init(|| {
-        Regex::new(
-            r#"(?P<path>[A-Za-z]:\\[^\s"'`]+|(?:/|\.{1,2}/)[^\s"'`]+|[^\s"'`]+/[^\s"'`]+)"#,
-        )
-        .expect("explicit path regex")
+        Regex::new(r#"(?P<path>[A-Za-z]:\\[^\s"'`]+|(?:/|\.{1,2}/)[^\s"'`]+|[^\s"'`]+/[^\s"'`]+)"#)
+            .expect("explicit path regex")
     });
     let mut out = Vec::new();
     for caps in regex.captures_iter(text) {
@@ -214,7 +195,7 @@ pub(super) fn extract_directory_and_file_pair(text: &str) -> Option<(String, Str
     let file = filename_tokens[0].clone();
     let file_norm = normalize_locator_text(&file);
 
-    if let Some(path) = extract_directory_path_candidate_from_request(text) {
+    if let Some(path) = extract_directory_path_candidate_for_file_pair(text) {
         return Some((path, file));
     }
 
@@ -228,16 +209,20 @@ pub(super) fn extract_directory_and_file_pair(text: &str) -> Option<(String, Str
         .iter()
         .position(|token| normalize_locator_text(token) == file_norm)?;
 
-    for idx in (0..file_idx).rev() {
-        let token = &tokens[idx];
-        if looks_like_directory_token(token) {
-            return Some((token.clone(), file));
+    let mut preceding_candidates = Vec::new();
+    for token in tokens.iter().take(file_idx) {
+        if is_compact_directory_hint_token(token) {
+            preceding_candidates.push(token.clone());
         }
     }
-    for token in tokens.iter().skip(file_idx + 1) {
-        if looks_like_directory_token(token) {
-            return Some((token.clone(), file));
-        }
+    if let Some(candidate) = preceding_candidates
+        .iter()
+        .find(|token| token.chars().count() > 2 || !token.is_ascii())
+    {
+        return Some((candidate.clone(), file));
+    }
+    if let Some(candidate) = preceding_candidates.first() {
+        return Some((candidate.clone(), file));
     }
 
     None
@@ -247,13 +232,6 @@ pub(super) fn looks_like_explicit_file_path_expression(path: &str) -> bool {
     let token = trim_path_token(path);
     if token.is_empty() || token.contains("://") || token.ends_with('/') || token.ends_with('\\') {
         return false;
-    }
-    if token.starts_with('/')
-        || token.starts_with("./")
-        || token.starts_with("../")
-        || has_windows_drive_prefix(&token)
-    {
-        return true;
     }
     let normalized = token.replace('\\', "/");
     if !normalized.contains('/') {
@@ -303,11 +281,6 @@ pub(super) fn looks_like_directory_path_hint(token: &str) -> bool {
     normalized.contains('/') && !looks_like_filename_token(last)
 }
 
-pub(super) fn dedup_and_sort_paths(paths: &mut Vec<PathBuf>) {
-    paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
-    paths.dedup();
-}
-
 pub(super) fn looks_like_filename_token(token: &str) -> bool {
     let cleaned = trim_path_token(token);
     if cleaned.is_empty()
@@ -329,7 +302,9 @@ pub(super) fn looks_like_filename_token(token: &str) -> bool {
         return false;
     }
     if base.chars().count() > 128
-        || base.chars().all(|ch| ch.is_whitespace() || is_pure_punctuation(ch))
+        || base
+            .chars()
+            .all(|ch| ch.is_whitespace() || is_pure_punctuation(ch))
     {
         return false;
     }
@@ -372,31 +347,30 @@ pub(super) fn looks_like_directory_token(token: &str) -> bool {
 pub(super) fn is_pure_punctuation(ch: char) -> bool {
     matches!(
         ch,
-        '.'
-            | ','
-            | '?'
+        '.' | ','
+            | '，'
             | ';'
-            | '?'
+            | '；'
             | ':'
-            | '?'
+            | '：'
             | '!'
-            | '?'
-            | '?'
-            | '?'
+            | '！'
+            | '？'
+            | '。'
             | '('
             | ')'
-            | '?'
-            | '?'
+            | '（'
+            | '）'
             | '['
             | ']'
-            | '?'
-            | '?'
+            | '【'
+            | '】'
             | '{'
             | '}'
-            | '?'
-            | '?'
-            | '?'
-            | '?'
+            | '「'
+            | '」'
+            | '《'
+            | '》'
             | '"'
             | '\''
             | '`'
@@ -407,17 +381,17 @@ pub(super) fn normalize_locator_text(text: &str) -> String {
     trim_path_token(text)
         .chars()
         .map(|ch| match ch {
-            '?' | '?' => '/',
-            '?' => '-',
-            '?' => '_',
-            '?' => '.',
-            '?' => '(',
-            '?' => ')',
-            '?' => '[',
-            '?' => ']',
-            '?' => '{',
-            '?' => '}',
-            '?' => ' ',
+            '／' | '、' => '/',
+            '－' => '-',
+            '＿' => '_',
+            '。' => '.',
+            '（' => '(',
+            '）' => ')',
+            '【' => '[',
+            '】' => ']',
+            '｛' => '{',
+            '｝' => '}',
+            '　' => ' ',
             _ => ch,
         })
         .collect::<String>()
@@ -431,32 +405,52 @@ pub(super) fn has_windows_drive_prefix(token: &str) -> bool {
         && (token.as_bytes()[2] == b'\\' || token.as_bytes()[2] == b'/')
 }
 
-pub(super) fn resolve_existing_file_under_root(root: &Path, raw_path: &str) -> Option<PathBuf> {
-    let candidate = candidate_path_from_root(root, raw_path)?;
-    let canonical = candidate.canonicalize().ok()?;
-    canonical.is_file().then_some(canonical)
+fn extract_directory_path_candidate_for_file_pair(text: &str) -> Option<String> {
+    extract_explicit_file_path_candidates(text)
+        .into_iter()
+        .find(|token| looks_like_explicit_directory_path_expression(token))
 }
 
-pub(super) fn resolve_existing_dir_under_root(root: &Path, raw_path: &str) -> Option<PathBuf> {
-    let candidate = candidate_path_from_root(root, raw_path)?;
-    let canonical = candidate.canonicalize().ok()?;
-    canonical.is_dir().then_some(canonical)
+fn extract_definite_file_path_candidate(text: &str) -> Option<String> {
+    extract_explicit_file_path_candidates(text)
+        .into_iter()
+        .find(|token| looks_like_explicit_file_path_expression(token))
 }
 
-pub(super) fn candidate_path_from_root(root: &Path, raw_path: &str) -> Option<PathBuf> {
-    let cleaned = trim_path_token(raw_path);
+fn explicit_path_prefers_directory_lookup(token: &str) -> bool {
+    let cleaned = trim_path_token(token);
     if cleaned.is_empty() {
-        return None;
+        return false;
     }
-    if has_windows_drive_prefix(&cleaned) {
-        return Some(PathBuf::from(cleaned));
+    if cleaned.ends_with('/') || cleaned.ends_with('\\') {
+        return true;
     }
-    let relative = cleaned
-        .trim_start_matches('/')
-        .trim_start_matches("./")
-        .to_string();
-    if relative.is_empty() {
-        return Some(root.to_path_buf());
+    if looks_like_explicit_file_path_expression(&cleaned) {
+        return false;
     }
-    Some(root.join(relative))
+    let normalized = cleaned.replace('\\', "/");
+    let last = normalized.rsplit('/').next().unwrap_or_default();
+    normalized.contains('/')
+        && !last.is_empty()
+        && !looks_like_filename_token(last)
+        && last.chars().count() <= 4
+}
+
+fn is_compact_directory_hint_token(token: &str) -> bool {
+    let cleaned = trim_path_token(token);
+    if !looks_like_directory_token(&cleaned) {
+        return false;
+    }
+    let chars = cleaned.chars().count();
+    if chars < 2 || chars > 32 {
+        return false;
+    }
+    if cleaned.is_ascii() {
+        chars >= 3
+            && cleaned
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+    } else {
+        true
+    }
 }

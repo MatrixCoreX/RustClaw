@@ -1,7 +1,0 @@
-index=22
-case_name=clarify_deictic_ultra_cn_db
-chat_id=17746743703
-turn1_task_id=3f5392fa-8954-464a-86af-699f3b397a66
-turn1_prompt=那个数据库有啥表，直接说
-turn2_task_id=daba7a1e-886d-4872-8f08-1911939c3681
-turn2_prompt=/home/guagua/test/data/test_contract.sqlite

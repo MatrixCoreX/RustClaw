@@ -1,7 +1,0 @@
-index=4
-case_name=clarify_which_db
-chat_id=1985996994
-turn1_task_id=4df86e55-a1f8-4a08-83ac-ddba34470b3b
-turn1_prompt=查一下那个 sqlite 里有哪些表
-turn2_task_id=253efca2-4709-44e1-92be-db59f34d3db2
-turn2_prompt=/home/guagua/test/data/test_contract.sqlite

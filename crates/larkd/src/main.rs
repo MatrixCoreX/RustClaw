@@ -523,14 +523,7 @@ async fn handle_incoming_lark_text(
                 LARK_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
                 LARK_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
             );
-            let _ = send_lark_text(
-                &config,
-                &client,
-                &token_cache,
-                &chat_id,
-                &msg,
-            )
-            .await;
+            let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
             return;
         }
     };
@@ -556,7 +549,8 @@ async fn handle_incoming_lark_text(
         let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
         return;
     }
-    let maybe_candidate = extract_bind_key_candidate(trimmed, should_expect_key_reply(&state, &chat_id));
+    let maybe_candidate =
+        extract_bind_key_candidate(trimmed, should_expect_key_reply(&state, &chat_id));
     if let Some(candidate) = maybe_candidate {
         info!(
             "larkd: bind attempt external_chat_id={} key_len={}",
@@ -567,13 +561,24 @@ async fn handle_incoming_lark_text(
             Ok(Some(_)) => {
                 set_expect_key_reply(&state, &chat_id, false);
                 info!("larkd: bind success external_chat_id={}", chat_id);
-                let msg = lark_t(&config, LARK_I18N_BIND_SUCCESS_KEY, LARK_BIND_SUCCESS_FALLBACK);
+                let msg = lark_t(
+                    &config,
+                    LARK_I18N_BIND_SUCCESS_KEY,
+                    LARK_BIND_SUCCESS_FALLBACK,
+                );
                 let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
             }
             Ok(None) => {
                 set_expect_key_reply(&state, &chat_id, true);
-                warn!("larkd: bind failure (invalid key) external_chat_id={}", chat_id);
-                let msg = lark_t(&config, LARK_I18N_BIND_INVALID_KEY, LARK_BIND_INVALID_FALLBACK);
+                warn!(
+                    "larkd: bind failure (invalid key) external_chat_id={}",
+                    chat_id
+                );
+                let msg = lark_t(
+                    &config,
+                    LARK_I18N_BIND_INVALID_KEY,
+                    LARK_BIND_INVALID_FALLBACK,
+                );
                 let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
             }
             Err(e) => {
@@ -587,14 +592,7 @@ async fn handle_incoming_lark_text(
                     LARK_I18N_BIND_REQUEST_FAILED_KEY,
                     LARK_BIND_REQUEST_FAILED_FALLBACK,
                 );
-                let _ = send_lark_text(
-                    &config,
-                    &client,
-                    &token_cache,
-                    &chat_id,
-                    &msg,
-                )
-                .await;
+                let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
             }
         }
         return;
@@ -611,14 +609,7 @@ async fn handle_incoming_lark_text(
         LARK_I18N_BIND_REQUIRED_KEY,
         LARK_BIND_REQUIRED_FALLBACK,
     );
-    let _ = send_lark_text(
-        &config,
-        &client,
-        &token_cache,
-        &chat_id,
-        &msg,
-    )
-    .await;
+    let _ = send_lark_text(&config, &client, &token_cache, &chat_id, &msg).await;
 }
 
 /// 入站媒体：下载并落盘后，将提示文本交给 clawd ask（与文本链路一致）。
@@ -643,14 +634,7 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
                 LARK_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
                 LARK_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
             );
-            let _ = send_lark_text(
-                &config,
-                &client,
-                &token_cache,
-                &ctx.chat_id,
-                &msg,
-            )
-            .await;
+            let _ = send_lark_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
             return;
         }
     };
@@ -662,14 +646,7 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
             LARK_I18N_BIND_REQUIRED_KEY,
             LARK_BIND_REQUIRED_FALLBACK,
         );
-        let _ = send_lark_text(
-            &config,
-            &client,
-            &token_cache,
-            &ctx.chat_id,
-            &msg,
-        )
-        .await;
+        let _ = send_lark_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
         return;
     };
 
@@ -700,14 +677,7 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
                 LARK_I18N_MEDIA_DOWNLOAD_FAILED_KEY,
                 LARK_MEDIA_DOWNLOAD_FAILED_FALLBACK,
             );
-            let _ = send_lark_text(
-                &config,
-                &client,
-                &token_cache,
-                &ctx.chat_id,
-                &msg,
-            )
-            .await;
+            let _ = send_lark_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
             return;
         }
     };
@@ -724,14 +694,7 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
             LARK_I18N_MEDIA_FILE_TOO_LARGE_KEY,
             LARK_MEDIA_FILE_TOO_LARGE_FALLBACK,
         );
-        let _ = send_lark_text(
-            &config,
-            &client,
-            &token_cache,
-            &ctx.chat_id,
-            &msg,
-        )
-        .await;
+        let _ = send_lark_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
         return;
     }
 
@@ -1065,14 +1028,8 @@ fn handle_text_message_to_clawd(
                         &[("error", &detail)],
                         LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK,
                     );
-                    let _ = send_lark_text(
-                        &config,
-                        &client,
-                        &token_cache,
-                        &chat_id_delivery,
-                        &msg,
-                    )
-                    .await;
+                    let _ = send_lark_text(&config, &client, &token_cache, &chat_id_delivery, &msg)
+                        .await;
                     info!(
                         "larkd: task delivery failure task_id={} status={:?}",
                         task_id, task.status
@@ -1584,7 +1541,10 @@ mod tests {
 
     #[test]
     fn waiting_key_state_rejects_non_binding_commands() {
-        assert_eq!(extract_bind_key_candidate("/run image_vision {}", true), None);
+        assert_eq!(
+            extract_bind_key_candidate("/run image_vision {}", true),
+            None
+        );
         assert_eq!(extract_bind_key_candidate("/crypto btc", true), None);
     }
 

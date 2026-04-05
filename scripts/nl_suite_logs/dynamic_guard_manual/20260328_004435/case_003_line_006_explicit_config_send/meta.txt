@@ -1,6 +1,0 @@
-ordinal=3
-source_line=6
-case_name=explicit_config_send
-chat_id=17746298854
-task_id=e036dc57-d851-4985-8694-5f872c79b8e5
-prompt=把 /home/guagua/test/configs/app_config.toml 发给我

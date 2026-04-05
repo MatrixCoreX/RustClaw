@@ -1,11 +1,11 @@
 use chrono::{Datelike, Duration as ChronoDuration, NaiveDateTime, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
 use rusqlite::params;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::{AppState, ClaimedTask, ScheduleIntentOutput, llm_gateway, memory};
+use crate::{llm_gateway, memory, AppState, ClaimedTask, ScheduleIntentOutput};
 use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 
 // ---------- Schedule skill catalog & validation (dynamic from registry) ----------
@@ -158,15 +158,14 @@ fn load_skill_contract_hint(
     registry: &SkillsRegistry,
     canonical_name: &str,
 ) -> Option<SkillContractHint> {
-    let prompt_rel = registry.prompt_file(canonical_name)?;
+    let registry_prompt_rel_path = registry.prompt_file(canonical_name)?;
     let vendor = crate::bootstrap::prompts::active_prompt_vendor_name(state);
-    let resolved_rel = crate::bootstrap::prompts::resolve_prompt_rel_path_for_vendor(
+    let (markdown, _) = crate::bootstrap::prompts::load_prompt_template_for_vendor(
         &state.workspace_root,
-        &vendor,
-        prompt_rel,
+        Some(&vendor),
+        registry_prompt_rel_path,
+        "",
     );
-    let full_path = state.workspace_root.join(resolved_rel);
-    let markdown = std::fs::read_to_string(full_path).ok()?;
     parse_skill_contract_hint(&markdown)
 }
 
@@ -284,17 +283,18 @@ pub(crate) async fn parse_schedule_intent(
         ],
     );
     crate::log_prompt_render(
+        state,
         &task.task_id,
         "schedule_intent_prompt",
-        &state.schedule.intent_prompt_file,
+        &state.schedule.intent_prompt_source,
         None,
     );
 
-    let llm_out = match llm_gateway::run_with_fallback_with_prompt_file(
+    let llm_out = match llm_gateway::run_with_fallback_with_prompt_source(
         state,
         task,
         &prompt,
-        &state.schedule.intent_prompt_file,
+        &state.schedule.intent_prompt_source,
     )
     .await
     {
@@ -1040,7 +1040,11 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/health_check.md"
 output_kind = "text"
 "#;
-        let path = std::env::temp_dir().join("schedule_skill_test_registry.toml");
+        let path = std::env::temp_dir().join(format!(
+            "schedule_skill_test_registry_{}_{}.toml",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
         std::fs::write(&path, toml).unwrap();
         let reg = SkillsRegistry::load_from_path(&path).unwrap();
         let _ = std::fs::remove_file(path);
@@ -1336,13 +1340,14 @@ output_kind = "text"
     #[test]
     fn schedule_service_only_uses_adapter_for_schedule_compile_skill() {
         const SRC: &str = include_str!("schedule_service.rs");
-        let n = SRC.matches("execution_adapters::run_skill").count();
+        let prod = SRC.split("#[cfg(test)]").next().unwrap_or(SRC);
+        let n = prod.matches("execution_adapters::run_skill").count();
         assert_eq!(
             n, 1,
             "schedule_service must only call execution_adapters::run_skill for schedule intent compile"
         );
         assert!(
-            SRC.contains("run_skill(state, task, \"schedule\", compile_args)"),
+            prod.contains("run_skill(state, task, \"schedule\", compile_args)"),
             "adapter target must remain the schedule skill only"
         );
     }
@@ -1356,9 +1361,7 @@ output_kind = "text"
             concat!("Cr", "ypto", "Price", "Alert", "Profile"),
             concat!("Existing", "Cr", "ypto", "Price", "Alert", "Job"),
             concat!("extract_", "cryp", "to", "_price", "_alert", "_profile"),
-            concat!(
-                "load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"
-            ),
+            concat!("load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"),
             concat!("schedule_", "content", "_matches"),
             concat!("normalize_", "direction"),
             concat!("normalize_", "threshold", "_pct"),
@@ -1416,9 +1419,7 @@ output_kind = "text"
             concat!("Existing", "Cr", "ypto", "Price", "Alert", "Job"),
             concat!("extract_", "cryp", "to", "_price", "_alert", "_profile"),
             concat!("schedule_", "content", "_matches"),
-            concat!(
-                "load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"
-            ),
+            concat!("load_", "existing", "_cryp", "to", "_price", "_alert", "_jobs"),
             concat!("normalize_", "direction"),
             concat!("normalize_", "threshold", "_pct"),
         ];
@@ -1433,11 +1434,18 @@ output_kind = "text"
     /// Root schedule intent few-shots must not embed built-in monitoring defaults (belong in target skills).
     #[test]
     fn schedule_intent_prompt_root_avoids_builtin_monitoring_defaults_in_examples() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join("prompts/schedule_intent_prompt.md");
-        let s = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let (s, resolved_path) = claw_core::prompt_layers::load_prompt_template_for_vendor(
+            &workspace_root,
+            "default",
+            "prompts/schedule_intent_prompt.md",
+            "",
+        );
+        assert!(
+            !s.trim().is_empty(),
+            "resolved prompt should not be empty: {}",
+            resolved_path
+        );
         assert!(
             !s.contains("\"window_minutes\":15"),
             "schedule_intent_prompt must not spell default window 15 in examples"

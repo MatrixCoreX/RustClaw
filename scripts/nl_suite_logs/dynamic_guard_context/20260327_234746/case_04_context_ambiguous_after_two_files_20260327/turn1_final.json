@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"e606d883-309a-4e54-bb7e-6b49d0f8b654","status":"succeeded","result_json":{"messages":["我来读取该文件的开头 3 行：\n\n```\nhead -n 3 /home/guagua/test/README.md\n```"],"text":"我来读取该文件的开头 3 行：\n\n```\nhead -n 3 /home/guagua/test/README.md\n```"},"error_text":null},"error":null}

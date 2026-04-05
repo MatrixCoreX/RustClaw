@@ -252,16 +252,8 @@ done <<< "$CONFIG_META"
 
 SKILL_RUNNER_ABS="$SCRIPT_DIR/target/release/skill-runner"
 BUILD_RELEASE=1
-if [[ ! -x "$SKILL_RUNNER_ABS" && -x "$SCRIPT_DIR/target/debug/skill-runner" ]]; then
-  SKILL_RUNNER_ABS="$SCRIPT_DIR/target/debug/skill-runner"
-  BUILD_RELEASE=0
-fi
-CARGO_PROFILE_FLAG=()
-TARGET_DIR="target/debug"
-if [[ "$BUILD_RELEASE" == "1" ]]; then
-  CARGO_PROFILE_FLAG=(--release)
-  TARGET_DIR="target/release"
-fi
+CARGO_PROFILE_FLAG=(--release)
+TARGET_DIR="target/release"
 
 if [[ ! -x "$SKILL_RUNNER_ABS" ]]; then
   echo "skill-runner missing, building..." # zh: 未找到 skill-runner，开始编译...

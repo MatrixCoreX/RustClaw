@@ -1,0 +1,9 @@
+index=1
+case_name=context_bound_readme_followup_20260327
+chat_id=17752372582
+turn1_task_id=c3434e6f-0808-4896-9c73-fa43bb02a49b
+turn1_prompt=先记一下，后面我说“那个 README”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md
+turn2_task_id=8ce6b389-4ef9-4f47-b79f-145e7720f1fa
+turn2_prompt=读一下那个 README 开头 5 行
+turn3_task_id=6483730b-0c56-43ee-a5fb-1512a8ed9f84
+turn3_prompt=再用一句话总结它

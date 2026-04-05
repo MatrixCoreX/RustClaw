@@ -1,0 +1,9 @@
+index=9
+case_name=context_two_targets_disambiguate_20260327
+chat_id=17752372590
+turn1_task_id=27ddadea-f9f0-4f25-88df-2d74c341efc6
+turn1_prompt=先记一下，“那个目录”是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs，“那个日志”是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log
+turn2_task_id=18bd3e0b-2f1b-47e7-bc71-96f5d2b3e359
+turn2_prompt=看下那个目录里有什么
+turn3_task_id=bfee3264-9a56-4599-a424-3a012b25992d
+turn3_prompt=再看那个日志最后 5 行

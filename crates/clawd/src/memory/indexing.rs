@@ -1,8 +1,23 @@
-use claw_core::config::MemoryConfig;
-use rusqlite::{Connection, params};
+use std::fs;
+use std::path::Path;
 
-use super::LLM_SHORT_TERM_MEMORY_PREFIX;
+use claw_core::config::MemoryConfig;
+use rusqlite::{params, Connection};
+use serde::Deserialize;
+use serde_json::json;
+
 use super::retrieval::{build_topic_tags, embed_text_locally, vector_to_json};
+use super::{
+    retrieval_source_ref_for_kb_chunk, retrieval_source_ref_for_memory,
+    retrieval_source_ref_for_preference, LLM_SHORT_TERM_MEMORY_PREFIX, MEMORY_ROLE_ASSISTANT,
+    MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, MEMORY_SCOPE_CHAT, MEMORY_SCOPE_USER,
+    MEMORY_TYPE_UNFINISHED_GOAL, RETRIEVAL_KIND_ASSISTANT_RESULT, RETRIEVAL_KIND_EPISODIC_EVENT,
+    RETRIEVAL_KIND_KNOWLEDGE_DOC, RETRIEVAL_KIND_SEMANTIC_FACT, RETRIEVAL_KIND_TRIGGER_ANCHOR,
+    RETRIEVAL_KIND_UNFINISHED_GOAL, RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE,
+    RETRIEVAL_SOURCE_KB_DOC, RETRIEVAL_SOURCE_KNOWLEDGE_FACT, RETRIEVAL_SOURCE_MEMORY,
+    RETRIEVAL_SOURCE_PREFERENCE, RETRIEVAL_SUCCESS_STATE_NEUTRAL,
+    RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
+};
 
 pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(
@@ -11,6 +26,7 @@ pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
             source_kind       TEXT NOT NULL,
             source_memory_id  INTEGER,
             source_pref_key   TEXT,
+            source_ref        TEXT,
             user_id           INTEGER NOT NULL,
             chat_id           INTEGER NOT NULL,
             user_key          TEXT,
@@ -20,20 +36,39 @@ pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
             trigger_text      TEXT,
             topic_tags        TEXT NOT NULL DEFAULT '',
             vector_json       TEXT NOT NULL DEFAULT '[]',
+            metadata_json     TEXT NOT NULL DEFAULT '{}',
             salience          REAL NOT NULL DEFAULT 0.5,
             success_state     TEXT NOT NULL DEFAULT 'neutral',
             tool_or_skill_name TEXT,
             created_at_ts     INTEGER NOT NULL DEFAULT 0,
             updated_at_ts     INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_memory_retrieval_scope_updated
-        ON memory_retrieval_index(user_key, chat_id, updated_at_ts DESC);
-        CREATE INDEX IF NOT EXISTS idx_memory_retrieval_scope_kind_updated
-        ON memory_retrieval_index(user_key, chat_id, memory_kind, updated_at_ts DESC);
-        CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_memory
-        ON memory_retrieval_index(source_memory_id);
-        CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_pref
-        ON memory_retrieval_index(source_pref_key);",
+        );",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "memory_retrieval_index",
+        "source_ref",
+        "ALTER TABLE memory_retrieval_index ADD COLUMN source_ref TEXT",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "memory_retrieval_index",
+        "metadata_json",
+        "ALTER TABLE memory_retrieval_index ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    db.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_memory_retrieval_scope_updated
+         ON memory_retrieval_index(user_key, chat_id, updated_at_ts DESC);
+         CREATE INDEX IF NOT EXISTS idx_memory_retrieval_scope_kind_updated
+         ON memory_retrieval_index(user_key, chat_id, memory_kind, updated_at_ts DESC);
+         CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_memory
+         ON memory_retrieval_index(source_memory_id);
+         CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_pref
+         ON memory_retrieval_index(source_pref_key);
+         CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_kind
+         ON memory_retrieval_index(source_kind, updated_at_ts DESC);
+         CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_ref
+         ON memory_retrieval_index(source_ref);",
     )?;
     let _ = db.execute_batch(
         "CREATE VIRTUAL TABLE IF NOT EXISTS memory_retrieval_index_fts
@@ -75,7 +110,11 @@ pub(crate) fn cleanup_retrieval_index(
     Ok(())
 }
 
-pub(crate) fn rebuild_retrieval_index(db: &Connection, _cfg: &MemoryConfig) -> anyhow::Result<()> {
+pub(crate) fn rebuild_retrieval_index(
+    db: &Connection,
+    _cfg: &MemoryConfig,
+    workspace_root: &Path,
+) -> anyhow::Result<()> {
     ensure_retrieval_schema(db)?;
     db.execute("DELETE FROM memory_retrieval_index", [])?;
     let _ = db.execute("DELETE FROM memory_retrieval_index_fts", []);
@@ -150,6 +189,7 @@ pub(crate) fn rebuild_retrieval_index(db: &Connection, _cfg: &MemoryConfig) -> a
         let pref = vec![(pref_key, pref_value, confidence, source)];
         index_preference_entries(db, user_id, chat_id, &user_key, &pref, ts)?;
     }
+    rebuild_kb_rows(db, workspace_root)?;
     Ok(())
 }
 
@@ -162,27 +202,36 @@ pub(crate) fn index_preference_entries(
     now_ts_i64: i64,
 ) -> anyhow::Result<()> {
     for (pref_key, pref_value, confidence, source) in entries {
+        let source_ref = retrieval_source_ref_for_preference(pref_key);
         db.execute(
             "DELETE FROM memory_retrieval_index
-             WHERE source_kind = 'preference' AND user_id = ?1 AND chat_id = ?2
-               AND COALESCE(user_key, '') = ?3 AND source_pref_key = ?4",
-            params![user_id, chat_id, user_key, pref_key],
+             WHERE source_kind = ?1 AND user_id = ?2 AND chat_id = ?3
+               AND COALESCE(user_key, '') = ?4 AND source_pref_key = ?5",
+            params![
+                RETRIEVAL_SOURCE_PREFERENCE,
+                user_id,
+                chat_id,
+                user_key,
+                pref_key
+            ],
         )?;
         let text = format!("Preference {pref_key}: {pref_value}");
         insert_index_row(
             db,
-            "preference",
+            RETRIEVAL_SOURCE_PREFERENCE,
             None,
             Some(pref_key),
+            Some(&source_ref),
             user_id,
             chat_id,
             user_key,
-            "semantic_fact",
+            RETRIEVAL_KIND_SEMANTIC_FACT,
             None,
             &text,
             Some(pref_key),
+            Some(&build_preference_metadata_json(pref_key)),
             *confidence,
-            "succeeded",
+            RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
             Some(source),
             now_ts_i64,
         )?;
@@ -206,8 +255,8 @@ pub(crate) fn index_memory_row(
 ) -> anyhow::Result<()> {
     db.execute(
         "DELETE FROM memory_retrieval_index
-         WHERE source_kind = 'memory' AND source_memory_id = ?1",
-        params![source_memory_id],
+         WHERE source_kind = ?1 AND source_memory_id = ?2",
+        params![RETRIEVAL_SOURCE_MEMORY, source_memory_id],
     )?;
 
     let cleaned = content.trim();
@@ -221,60 +270,93 @@ pub(crate) fn index_memory_row(
     if search_text.is_empty() {
         return Ok(());
     }
+    let source_ref = retrieval_source_ref_for_memory(source_memory_id);
 
-    insert_index_row(
-        db,
-        "memory",
-        Some(source_memory_id),
-        None,
-        user_id,
-        chat_id,
-        user_key,
-        "episodic_event",
-        Some(role),
-        search_text,
-        None,
-        salience,
-        "neutral",
-        None,
-        created_at_ts,
-    )?;
-
-    if role == "user" && (is_instructional || search_text.chars().count() <= 240) {
+    if memory_type == MEMORY_TYPE_UNFINISHED_GOAL {
         insert_index_row(
             db,
-            "memory",
+            RETRIEVAL_SOURCE_MEMORY,
             Some(source_memory_id),
             None,
+            Some(&source_ref),
             user_id,
             chat_id,
             user_key,
-            "trigger_anchor",
+            RETRIEVAL_KIND_UNFINISHED_GOAL,
             Some(role),
             search_text,
-            Some(search_text),
+            None,
+            Some(&build_chat_scope_metadata_json()),
+            (salience + 0.18).clamp(0.0, 1.0),
+            RETRIEVAL_SUCCESS_STATE_NEUTRAL,
+            None,
+            created_at_ts,
+        )?;
+        return Ok(());
+    }
+
+    if role == MEMORY_ROLE_ASSISTANT {
+        insert_index_row(
+            db,
+            RETRIEVAL_SOURCE_MEMORY,
+            Some(source_memory_id),
+            None,
+            Some(&source_ref),
+            user_id,
+            chat_id,
+            user_key,
+            RETRIEVAL_KIND_ASSISTANT_RESULT,
+            Some(role),
+            search_text,
+            None,
+            Some(&build_chat_scope_metadata_json()),
             (salience + 0.08).clamp(0.0, 1.0),
-            "neutral",
+            RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
+            None,
+            created_at_ts,
+        )?;
+        return Ok(());
+    }
+
+    if role != MEMORY_ROLE_ASSISTANT {
+        insert_index_row(
+            db,
+            RETRIEVAL_SOURCE_MEMORY,
+            Some(source_memory_id),
+            None,
+            Some(&source_ref),
+            user_id,
+            chat_id,
+            user_key,
+            RETRIEVAL_KIND_EPISODIC_EVENT,
+            Some(role),
+            search_text,
+            None,
+            Some(&build_chat_scope_metadata_json()),
+            salience,
+            RETRIEVAL_SUCCESS_STATE_NEUTRAL,
             None,
             created_at_ts,
         )?;
     }
 
-    if role == "user" && looks_like_durable_fact(search_text, memory_type) {
+    if role == MEMORY_ROLE_USER && (is_instructional || search_text.chars().count() <= 240) {
         insert_index_row(
             db,
-            "memory",
+            RETRIEVAL_SOURCE_MEMORY,
             Some(source_memory_id),
             None,
+            Some(&source_ref),
             user_id,
             chat_id,
             user_key,
-            "semantic_fact",
+            RETRIEVAL_KIND_TRIGGER_ANCHOR,
             Some(role),
             search_text,
-            None,
-            (salience + 0.12).clamp(0.0, 1.0),
-            "neutral",
+            Some(search_text),
+            Some(&build_chat_scope_metadata_json()),
+            (salience + 0.08).clamp(0.0, 1.0),
+            RETRIEVAL_SUCCESS_STATE_NEUTRAL,
             None,
             created_at_ts,
         )?;
@@ -289,6 +371,7 @@ fn insert_index_row(
     source_kind: &str,
     source_memory_id: Option<i64>,
     source_pref_key: Option<&str>,
+    source_ref: Option<&str>,
     user_id: i64,
     chat_id: i64,
     user_key: &str,
@@ -296,6 +379,7 @@ fn insert_index_row(
     role: Option<&str>,
     search_text: &str,
     trigger_text: Option<&str>,
+    metadata_json: Option<&str>,
     salience: f32,
     success_state: &str,
     tool_or_skill_name: Option<&str>,
@@ -305,15 +389,16 @@ fn insert_index_row(
     let vector_json = vector_to_json(&embed_text_locally(search_text));
     db.execute(
         "INSERT INTO memory_retrieval_index (
-            source_kind, source_memory_id, source_pref_key, user_id, chat_id, user_key,
-            memory_kind, role, search_text, trigger_text, topic_tags, vector_json,
+            source_kind, source_memory_id, source_pref_key, source_ref, user_id, chat_id, user_key,
+            memory_kind, role, search_text, trigger_text, topic_tags, vector_json, metadata_json,
             salience, success_state, tool_or_skill_name, created_at_ts, updated_at_ts
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)",
         params![
             source_kind,
             source_memory_id,
             source_pref_key,
+            source_ref,
             user_id,
             chat_id,
             user_key,
@@ -323,6 +408,7 @@ fn insert_index_row(
             trigger_text,
             topic_tags,
             vector_json,
+            metadata_json.unwrap_or("{}"),
             salience,
             success_state,
             tool_or_skill_name,
@@ -338,25 +424,199 @@ fn insert_index_row(
     Ok(())
 }
 
-fn looks_like_durable_fact(text: &str, memory_type: &str) -> bool {
-    if memory_type == "user_instruction" {
-        return true;
+fn build_chat_scope_metadata_json() -> String {
+    json!({
+        "scope_kind": MEMORY_SCOPE_CHAT,
+    })
+    .to_string()
+}
+
+fn build_preference_metadata_json(pref_key: &str) -> String {
+    json!({
+        "scope_kind": MEMORY_SCOPE_CHAT,
+        "namespace": "preferences",
+        "path": pref_key,
+        "preference_key": pref_key,
+    })
+    .to_string()
+}
+
+#[derive(Debug, Deserialize)]
+struct KbNamespaceSnapshot {
+    namespace: String,
+    #[serde(default)]
+    owner_user_key: String,
+    #[serde(default)]
+    chunks: Vec<KbChunkSnapshot>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KbChunkSnapshot {
+    chunk_id: String,
+    path: String,
+    file_type: String,
+    offset: usize,
+    text: String,
+    #[serde(default)]
+    mtime_epoch: i64,
+}
+
+fn rebuild_kb_rows(db: &Connection, workspace_root: &Path) -> anyhow::Result<()> {
+    db.execute(
+        "DELETE FROM memory_retrieval_index WHERE source_kind = ?1",
+        params![RETRIEVAL_SOURCE_KB_DOC],
+    )?;
+    let kb_dir = workspace_root.join("data").join("kb");
+    if !kb_dir.exists() {
+        return Ok(());
     }
-    let norm = text.to_ascii_lowercase();
-    [
-        "以后",
-        "默认",
-        "记住",
-        "always",
-        "default",
-        "prefer",
-        "i am",
-        "i'm",
-        "我是",
-        "我叫",
-        "我的项目",
-        "我的目标",
-    ]
-    .iter()
-    .any(|marker| norm.contains(marker))
+    for path in collect_kb_snapshot_files(&kb_dir)? {
+        let raw = fs::read_to_string(&path)?;
+        let snapshot = serde_json::from_str::<KbNamespaceSnapshot>(&raw)?;
+        let namespace = snapshot.namespace.trim();
+        let owner_user_key = snapshot.owner_user_key.trim();
+        if namespace.is_empty() || owner_user_key.is_empty() {
+            continue;
+        }
+        for chunk in snapshot.chunks {
+            let search_text = chunk.text.trim();
+            if search_text.is_empty() {
+                continue;
+            }
+            let source_ref =
+                retrieval_source_ref_for_kb_chunk(owner_user_key, namespace, &chunk.chunk_id);
+            let metadata = build_kb_metadata(
+                owner_user_key,
+                namespace,
+                &chunk.path,
+                &chunk.file_type,
+                chunk.mtime_epoch,
+                &chunk.chunk_id,
+                chunk.offset,
+            );
+            let row_ts = if chunk.mtime_epoch > 0 {
+                chunk.mtime_epoch
+            } else {
+                crate::now_ts_u64() as i64
+            };
+            insert_index_row(
+                db,
+                RETRIEVAL_SOURCE_KB_DOC,
+                None,
+                None,
+                Some(&source_ref),
+                0,
+                0,
+                owner_user_key,
+                RETRIEVAL_KIND_KNOWLEDGE_DOC,
+                None,
+                search_text,
+                None,
+                Some(&metadata),
+                0.78,
+                RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
+                Some(RETRIEVAL_PRODUCER_KB),
+                row_ts,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_kb_snapshot_files(root: &Path) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                out.push(path);
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+fn build_kb_metadata(
+    owner_user_key: &str,
+    namespace: &str,
+    path: &str,
+    file_type: &str,
+    mtime_epoch: i64,
+    chunk_id: &str,
+    offset: usize,
+) -> String {
+    json!({
+        "scope_kind": MEMORY_SCOPE_USER,
+        "owner_user_key": owner_user_key,
+        "namespace": namespace,
+        "path": path,
+        "file_type": file_type,
+        "mtime_epoch": mtime_epoch,
+        "chunk_id": chunk_id,
+        "offset": offset,
+    })
+    .to_string()
+}
+
+pub(crate) fn upsert_knowledge_fact(
+    db: &Connection,
+    user_id: i64,
+    user_key: &str,
+    namespace: &str,
+    retrieval_kind: &str,
+    source_ref: &str,
+    text: &str,
+    ts: i64,
+) -> anyhow::Result<()> {
+    let cleaned = text.trim();
+    if cleaned.is_empty() {
+        return Ok(());
+    }
+    db.execute(
+        "DELETE FROM memory_retrieval_index
+         WHERE source_kind = ?1 AND source_ref = ?2",
+        params![RETRIEVAL_SOURCE_KNOWLEDGE_FACT, source_ref],
+    )?;
+    let metadata = build_knowledge_fact_metadata_json(namespace);
+    insert_index_row(
+        db,
+        RETRIEVAL_SOURCE_KNOWLEDGE_FACT,
+        None,
+        None,
+        Some(source_ref),
+        user_id,
+        0,
+        user_key,
+        retrieval_kind,
+        Some(MEMORY_ROLE_SYSTEM),
+        cleaned,
+        None,
+        Some(&metadata),
+        0.86,
+        RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
+        Some(RETRIEVAL_PRODUCER_MEMORY_PIPELINE),
+        ts,
+    )?;
+    let _ = db.execute(
+        "DELETE FROM memory_retrieval_index_fts
+         WHERE rowid NOT IN (SELECT id FROM memory_retrieval_index)",
+        [],
+    );
+    Ok(())
+}
+
+fn build_knowledge_fact_metadata_json(namespace: &str) -> String {
+    json!({
+        "scope_kind": MEMORY_SCOPE_USER,
+        "namespace": namespace,
+        "path": "conversation",
+    })
+    .to_string()
 }

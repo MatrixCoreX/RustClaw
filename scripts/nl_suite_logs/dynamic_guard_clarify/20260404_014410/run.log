@@ -1,0 +1,284 @@
+NL multi-turn suite: clarify
+  run_dir:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_clarify/20260404_014410
+  run_log:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_clarify/20260404_014410/run.log
+  case_file:  /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_dynamic_guard_clarify.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    17752372481
+
+============================================================
+[CASE]   1
+[NAME]   clarify_deictic_readme_again
+[CHAT]   17752372482
+[TURN1]  读一下那个 README 开头，然后一句话总结
+[TASK1]  1566b573-c7dd-427e-bf30-e9e9e63c305b
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  RustClaw 是一个本地 Rust 运行时，通过 Telegram、WhatsApp、飞书等渠道提供多渠道聊天、任务路由、工具执行、内存管理和用户权限控制等功能。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md
+[TASK2]  c3b7d240-1f25-4d05-9513-4685d495980e
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  这个目录包含用于 RustClaw NL 回归测试的稳定本地文件。
+
+============================================================
+[CASE]   2
+[NAME]   clarify_deictic_config_send_again
+[CHAT]   17752372483
+[TURN1]  把那个配置文件直接发我
+[TASK1]  d05c5b9e-959b-4372-a5d4-6639d4f36adb
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  我没找到你说的那个配置文件，请给我完整路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+[TASK2]  a039e50f-4455-4950-9221-4b5ef5e79eac
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+
+============================================================
+[CASE]   3
+[NAME]   clarify_deictic_log_tail_again
+[CHAT]   17752372484
+[TURN1]  看下那个日志最近 20 行
+[TASK1]  cf032c20-d9c5-43ca-b74a-160677a62b05
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  我没找到那个日志，请提供完整路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log
+[TASK2]  5fbe3846-5f90-45bc-8de4-5d0b8bdf2455
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  我没找到这个文件，请提供完整路径。
+
+============================================================
+[CASE]   4
+[NAME]   clarify_deictic_db_tables_again
+[CHAT]   17752372485
+[TURN1]  查一下那个 sqlite 里有哪些表
+[TASK1]  c022e483-efe1-44b5-aa20-b42b44574780
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我那个SQLite数据库的完整路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
+[TASK2]  0f23216d-fd30-4bc8-a9ab-707f8182d728
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  该 SQLite 数据库（test_contract.sqlite）中包含以下 3 张表：users、orders、service_logs
+
+============================================================
+[CASE]   5
+[NAME]   clarify_deictic_archive_unpack_again
+[CHAT]   17752372486
+[TURN1]  把那个压缩包解压到 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/dynamic_guard_unpack_case 然后告诉我结果
+[TASK1]  7941b151-a070-43d4-941a-6ec02e8c7270
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  缺少必要参数：请问要解压哪个压缩包？请提供压缩包的完整路径（例如 `/path/to/archive.zip` 或 `/path/to/archive.tar.gz`）。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip
+[TASK2]  4e7e1df5-3799-4795-a953-a709ad6ccfe3
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  压缩包已成功解压。共提取了 2 个文件：\n1. notes.txt\n2. nested/config.ini\n\n文件已保存到目录 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/dynamic_guard_unpack_case 下。
+
+============================================================
+[CASE]   6
+[NAME]   clarify_deictic_dir_count_again
+[CHAT]   17752372487
+[TURN1]  数一下那个目录里有多少个直接子项，只输出数字
+[TASK1]  5ccd9b22-70d1-4263-b8ca-36c0f13ca1e7
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我目录的完整路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs
+[TASK2]  d4a0c9ed-9e20-4674-9d17-683f6ee15d35
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  3
+
+============================================================
+[CASE]   7
+[NAME]   clarify_deictic_mixed_lang_readme_again
+[CHAT]   17752372488
+[TURN1]  Can you read that README header and sum it up in one sentence?
+[TASK1]  18804fab-53e6-4c41-be2b-f4806987e88d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请给我完整路径
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md
+[TASK2]  8a0ba85b-134c-48b2-820d-cc170647d7a4
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  本目录为 device_local 设备的测试固件和配置文件，用于本地设备通信和功能验证测试。
+
+============================================================
+[CASE]   8
+[NAME]   clarify_deictic_file_delivery_cn_en_again
+[CHAT]   17752372489
+[TURN1]  把那个 file 发给我，不要贴内容
+[TASK1]  b6eca6fe-34aa-4b78-b9c5-585fc740a1bd
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  FILE:/.file
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md
+[TASK2]  b4b7d4ef-dc57-416c-8e28-cd29c3beff11
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md
+
+============================================================
+[CASE]   9
+[NAME]   clarify_deictic_missing_file_after_target_again
+[CHAT]   17752372490
+[TURN1]  把那个文件发我
+[TASK1]  a68d5166-8bd7-48f9-8b72-de6283dd5ef3
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请给我完整路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/not_exists_case_001.md
+[TASK2]  c062b785-1837-47b5-a024-7f9f5d604d43
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  在系统根目录和项目根目录都没有找到该文件
+
+============================================================
+[CASE]   10
+[NAME]   clarify_deictic_db_schema_version_again
+[CHAT]   17752372491
+[TURN1]  看看那个 sqlite 的 schema version 是多少
+[TASK1]  65c95f68-af61-4f67-bd12-e3793fb66883
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请提供 SQLite 数据库文件的完整路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
+[TASK2]  987c5cb6-cde9-4330-a057-0348d75adeb1
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  {"columns":["user_version"],"rows":[{"user_version":7}]}
+
+============================================================
+[CASE]   11
+[NAME]   clarify_deictic_colloquial_en_send
+[CHAT]   17752372492
+[TURN1]  Can you shoot me that config file real quick, no paste?
+[TASK1]  640aa4a0-9ffc-4d6c-9951-a918477651e1
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  Which config file are you referring to? Please provide the full path.
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+[TASK2]  1de5fa03-caa8-4524-8811-51ddbc4ef37a
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+
+============================================================
+[CASE]   12
+[NAME]   clarify_deictic_colloquial_mixed_log
+[CHAT]   17752372493
+[TURN1]  that log 给我 tail 一下最后 6 行
+[TASK1]  84971d13-2032-412c-958b-e2f366f1c68d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  没找到这个文件，请给我完整的日志文件路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log
+[TASK2]  54cf8e6d-6c56-46f7-8272-9a06e00760c5
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  2026-04-01 10:07:15 INFO  db query finished rows=3\n2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata\n2026-04-01 10:08:46 INFO  provider retry succeeded on second attempt\n2026-04-01 10:09:20 INFO  user-facing answer published\n2026-04-01 10:10:01 INFO  maintenance sweep finished\n2026-04-01 10:10:30 INFO  service idle
+
+============================================================
+[CASE]   13
+[NAME]   clarify_deictic_release_note_summary
+[CHAT]   17752372494
+[TURN1]  读一下那个发布说明，然后一句话告诉我重点
+[TASK1]  afba73de-16a0-4a33-9ff9-94504cb78e27
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT1]  请提供发布说明的完整文件路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md
+[TASK2]  395e8988-bf16-4920-9164-c26ab152b35c
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  发布检查清单的核心是确保配置正确加载、数据库迁移已应用，以及日志中没有异常错误，从而验证部署准备就绪。
+
+============================================================
+[CASE]   14
+[NAME]   clarify_deictic_package_name_value
+[CHAT]   17752372495
+[TURN1]  看看那个 package 里的 name 是什么，只输出值
+[TASK1]  088982b7-f165-47bf-b1c5-a69e0bb12699
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请提供完整的 package 文件路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/package.json
+[TASK2]  04f9e3fd-4bbb-4937-bc1d-bdf55a1825ea
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  无法读取该文件，请确认路径是否正确或文件是否存在。
+
+============================================================
+[CASE]   15
+[NAME]   clarify_deictic_model_io_tail
+[CHAT]   17752372496
+[TURN1]  看一下那个 model io log 最后 4 行，再一句话说有什么现象
+[TASK1]  eda356c6-1a84-4676-a3ee-9bad93011df7
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  我没找到这个文件，请提供完整路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/model_io.log
+[TASK2]  49cd7270-b923-40c6-951f-d24d48ff5361
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  文件未找到，请提供可访问的完整路径。
+
+============================================================
+[CASE]   16
+[NAME]   clarify_deictic_docs_archive_list
+[CHAT]   17752372497
+[TURN1]  看看那个 archive 目录下有什么，只列名字
+[TASK1]  a9980687-c217-4567-8bcb-edfb0e8d38c5
+  [status] <none> -> running
+  [status] running -> failed
+[TEXT1]  step 1 failed (skill(list_dir)): read_dir failed: No such file or directory (os error 2)
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/archive
+[TASK2]  eca4a6f4-3e55-4a3e-8c19-77c06b39dd96
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  README.txt
+
+============================================================
+[CASE]   17
+[NAME]   clarify_deictic_colloquial_cn_notes_send
+[CHAT]   17752372498
+[TURN1]  把那份 notes 直接发我，别贴正文
+[TASK1]  0a4bd71a-529b-4b3f-8f43-5cb0f85fb98d
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  我没找到这个文件，请给我完整路径。
+[TURN2]  /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md
+[TASK2]  ed44c4e2-af75-42ef-bf10-2a68a6fb35fc
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT2]  FILE:/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_clarify/20260404_014410
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_clarify/20260404_014410/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_clarify/20260404_014410/summary.jsonl

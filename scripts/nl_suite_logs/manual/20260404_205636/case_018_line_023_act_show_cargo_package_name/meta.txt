@@ -1,0 +1,6 @@
+ordinal=18
+source_line=23
+case_name=act_show_cargo_package_name
+chat_id=1985997008
+task_id=f7891ac0-38da-46f7-a890-c4fdec80f03c
+prompt=读取 Cargo.toml 的 package.name，只输出值

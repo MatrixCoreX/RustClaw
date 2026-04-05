@@ -1,0 +1,7 @@
+index=16
+case_name=clarify_deictic_docs_archive_list
+chat_id=17752372497
+turn1_task_id=a9980687-c217-4567-8bcb-edfb0e8d38c5
+turn1_prompt=看看那个 archive 目录下有什么，只列名字
+turn2_task_id=eca4a6f4-3e55-4a3e-8c19-77c06b39dd96
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/archive

@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"cf34a124-db23-4259-9a9a-f3ee4d1588f2","status":"succeeded","result_json":{"text":"文件不存在的可能原因：\n\n1. 路径或文件名拼写错误\n2. 文件从未创建过\n3. 文件已被删除\n4. 目录不存在（如 `docs/` 文件夹缺失）\n\n你可以用 `ls /home/guagua/test/docs/` 检查目录是否存在及内容。"},"error_text":null},"error":null}

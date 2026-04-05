@@ -1,0 +1,9 @@
+index=5
+case_name=context_bound_alias_rebind_20260327
+chat_id=17752372586
+turn1_task_id=9ea9cd18-12af-476c-9547-6d4fc59f4735
+turn1_prompt=先记一下，“那个文档”是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md
+turn2_task_id=6fad433d-5de9-4fa8-9d59-e05287d67f72
+turn2_prompt=再记一下，“那个文档”改成 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md
+turn3_task_id=c07673aa-ff27-467c-90a0-dedcaaa31c00
+turn3_prompt=读一下那个文档开头并一句话总结

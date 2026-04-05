@@ -1,0 +1,29 @@
+NL multi-turn suite: clarify
+  run_dir:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_230505
+  run_log:    /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_230505/run.log
+  case_file:  /tmp/nl_clarify_case3_only.txt
+  turn_count: 2
+  base_url:   http://127.0.0.1:8787
+  user_id:    1985996990
+  chat_id:    1985998200
+
+============================================================
+[CASE]   1
+[NAME]   clarify_list_dir
+[CHAT]   1985998201
+[TURN1]  看看那个目录下面都有什么
+[TASK1]  300bffae-abf5-4b1a-9c84-0900d6348077
+  [status] <none> -> running
+  [status] running -> succeeded
+[TEXT1]  请告诉我完整的目录路径。
+[TURN2]  document
+[TASK2]  345071f8-1578-4b9d-bef2-849ff8b91136
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[TEXT2]  /tmp/rustclaw-workspace/document/hello_from_manual_test.sh\n/tmp/rustclaw-workspace/document/hello_world.sh\n/tmp/rustclaw-workspace/document/manual_fixture_note.txt\n/tmp/rustclaw-workspace/document/manual_meta.json\n/tmp/rustclaw-workspace/document/manual_meta_variant.json\n/tmp/rustclaw-workspace/document/manual_note.txt\n/tmp/rustclaw-workspace/document/manual_note_variant.txt\n/tmp/rustclaw-workspace/document/runtime_delivery_followup_en.txt\n/tmp/rustclaw-workspace/document/runtime_delivery_followup_en_2.txt\n/tmp/rustclaw-workspace/document/text_match_regression_en.txt\n/tmp/rustclaw-workspace/document/text_match_regression_en_2.txt\n/tmp/rustclaw-workspace/document/text_match_regression_note.txt\n/tmp/rustclaw-workspace/document/垃圾代码端分析报告.md\n/tmp/rustclaw-workspace/document/投资分析报告.txt
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_230505
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_230505/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/clarify/20260404_230505/summary.jsonl

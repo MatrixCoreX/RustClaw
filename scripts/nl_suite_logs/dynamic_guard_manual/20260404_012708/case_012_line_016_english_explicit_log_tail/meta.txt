@@ -1,0 +1,6 @@
+ordinal=12
+source_line=16
+case_name=english_explicit_log_tail
+chat_id=17752372393
+task_id=1be67946-ba2e-4f33-9c92-9533f3e79765
+prompt=Show me the last 12 lines of /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log.

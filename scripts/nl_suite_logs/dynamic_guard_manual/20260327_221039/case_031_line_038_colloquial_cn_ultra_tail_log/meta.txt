@@ -1,6 +1,0 @@
-ordinal=31
-source_line=38
-case_name=colloquial_cn_ultra_tail_log
-chat_id=17746206522
-task_id=75b36b2a-6682-47ad-a8cb-8caeed7cf904
-prompt=/home/guagua/test/logs/app.log 最后 5 行给我看下

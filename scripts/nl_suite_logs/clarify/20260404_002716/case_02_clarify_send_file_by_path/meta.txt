@@ -1,0 +1,7 @@
+index=2
+case_name=clarify_send_file_by_path
+chat_id=1985996992
+turn1_task_id=762dbb68-eb59-488d-97c2-556d8e41c969
+turn1_prompt=把那个配置文件发给我
+turn2_task_id=6debcceb-7ccb-4922-a71e-2c46b8a822bf
+turn2_prompt=configs/config.toml

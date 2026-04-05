@@ -1,7 +1,0 @@
-index=3
-case_name=clarify_deictic_log_tail_again
-chat_id=1985996993
-turn1_task_id=c828dc5d-8636-4bc7-89ba-666c70610905
-turn1_prompt=看下那个日志最近 20 行
-turn2_task_id=09cb666d-9a24-4888-9aa9-e783a63ba9f0
-turn2_prompt=/home/guagua/test/logs/app.log

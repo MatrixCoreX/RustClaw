@@ -299,6 +299,15 @@ timeout_seconds = 15
 prompt_file = "prompts/skills/weather.md"
 output_kind = "text"
 
+[[skills]]
+name = "map_merchant"
+enabled = true
+kind = "runner"
+aliases = ["地图商户", "商户推荐", "附近商户", "高德地图", "高德商户", "高德商户推荐", "高德附近商户", "谷歌地图商户", "google地图商户"]
+timeout_seconds = 20
+prompt_file = "prompts/skills/map_merchant.md"
+output_kind = "text"
+
 # Phase 5 示例（可选）：
 # - runner 技能可配置 runner_name，未配则用 name 作为执行名。
 # - external 技能需配置 external_kind（如 "http_json"）、external_endpoint；可选 external_timeout_seconds、external_auth_ref。
@@ -311,15 +320,6 @@ output_kind = "text"
 # external_timeout_seconds = 60
 # prompt_file = "prompts/skills/my_external.md"
 # output_kind = "text"
-
-[[skills]]
-name = "reference_resolver"
-enabled = true
-kind = "runner"
-aliases = ["resolve_reference", "reference", "context_reference"]
-timeout_seconds = 15
-prompt_file = "prompts/skills/reference_resolver.md"
-output_kind = "text"
 
 [[skills]]
 name = "doc_parse"

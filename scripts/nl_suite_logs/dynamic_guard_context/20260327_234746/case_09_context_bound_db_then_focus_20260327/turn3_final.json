@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"8e496c61-4265-47ec-a925-1f529ae00a68","status":"succeeded","result_json":{"text":"`accounts` 更可能是核心业务数据表。\n\n理由：\n- `accounts` 通常存储账户主体信息（用户、余额、状态等），是业务逻辑的核心实体\n- `audit_log` 是操作日志表，用于记录变更历史，属于辅助/支持性质，不承载业务主数据"},"error_text":null},"error":null}

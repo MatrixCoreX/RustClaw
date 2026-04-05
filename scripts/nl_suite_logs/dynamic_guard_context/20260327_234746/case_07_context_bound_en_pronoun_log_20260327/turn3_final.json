@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"e1948620-9c34-4e06-9086-bedad7e2ed23","status":"succeeded","result_json":{"text":"The error at 23:07:10 shows a downstream timeout, though it auto-recovered; otherwise logs are routine for a test environment."},"error_text":null},"error":null}

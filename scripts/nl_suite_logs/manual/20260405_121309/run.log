@@ -1,0 +1,63 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_manual_targeted_4.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_121309
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_121309/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_121309/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1986008000
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        chat_explain_repo_briefly
+[CHAT]        1986008001
+[PROMPT]      用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+[TASK]        770bdee2-6e4e-4038-8214-e78eed08717f
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这个仓库叫 RustClaw，是一个用 Rust 语言开发的多平台聊天机器人后端框架，能够同时对接微信、Telegram、飞书、WhatsApp 等多种即时通讯工具，让你可以在一个系统里统一管理多个平台的聊天机器人和自动化业务。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 2
+[NAME]        chat_act_list_then_explain_docs
+[CHAT]        1986008002
+[PROMPT]      列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+[TASK]        466d2fe0-e880-4c7c-affd-fa6d581edba7
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] docs目录包含13个文档：base_skill_response_contract.md（基础技能响应契约定义）、clawd-main-split-checklist.md（主分支拆分检查清单）、clawd-main-split-plan.md（主分支拆分实施计划）、clawd-main-split-progress.md（主分支拆分进度跟踪）、dynamic_prompt_regression_cases_20260327.txt（...(truncated)
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 3
+[NAME]        act_log_analyze_brief
+[CHAT]        1986008003
+[PROMPT]      快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
+[TASK]        59d6c597-9164-479d-9528-477a6687131b
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 日志文件 `telegramd.log`（共48行）中检测到大量错误，共40条错误记录。 **错误特征：** - **类型**：全部为 `Network(reqwest::Error)` 网络请求错误 - **来源**：Telegram API 更新监听器（update listener） - **时间分布**：错误分散在多个时间点（17:12、17:32、17:49、18:06），呈间歇性出现 **结论：** telegramd 服务...(truncated)
+
+================ Final Summary ================
+TOTAL_CASES=3 SUCCEEDED=3 FAILED=0 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_121309
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_121309/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_121309/summary.jsonl

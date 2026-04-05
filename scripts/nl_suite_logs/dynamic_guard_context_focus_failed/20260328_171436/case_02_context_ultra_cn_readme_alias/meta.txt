@@ -1,9 +1,0 @@
-index=2
-case_name=context_ultra_cn_readme_alias
-chat_id=1985996992
-turn1_task_id=2475f59b-3e02-41d9-979c-dbeacd03486e
-turn1_prompt=记住哈，“那玩意README”就是 /home/guagua/test/README.md
-turn2_task_id=9c628ea7-51ba-4d60-bd0b-f9608359f056
-turn2_prompt=那玩意开头给我看两眼
-turn3_task_id=deea22ca-57b4-4f5c-a618-9be6c4ec0182
-turn3_prompt=最后一句话讲重点

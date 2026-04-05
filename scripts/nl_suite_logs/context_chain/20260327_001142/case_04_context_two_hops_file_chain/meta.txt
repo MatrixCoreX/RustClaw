@@ -1,9 +1,0 @@
-index=4
-case_name=context_two_hops_file_chain
-chat_id=1985996994
-turn1_task_id=558c620b-1d14-4c4a-8638-a2e38a40951f
-turn1_prompt=先读取 /home/guagua/test/README.md 开头 10 行
-turn2_task_id=726717bb-1fe9-4ab3-8cf5-9669c51258c0
-turn2_prompt=再读取 /home/guagua/test/docs/service_notes.md 开头 10 行
-turn3_task_id=60e83fb8-4765-462e-b342-9438fd4febb2
-turn3_prompt=把上上个文件和上个文件用一句话对比

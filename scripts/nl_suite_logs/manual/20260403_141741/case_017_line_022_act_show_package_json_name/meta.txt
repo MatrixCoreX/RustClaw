@@ -1,0 +1,6 @@
+ordinal=17
+source_line=22
+case_name=act_show_package_json_name
+chat_id=1985997007
+task_id=c374a6f6-8d71-4570-ae49-25528948661a
+prompt=读取 package.json 里的 name 字段，只输出值

@@ -7,6 +7,8 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+const MATCH_LINE_MAX_CHARS: usize = 240;
+
 #[derive(Debug, Deserialize)]
 struct Req {
     request_id: String,
@@ -107,7 +109,11 @@ fn execute(args: Value) -> Result<String, String> {
             }
         }
         if hit {
-            matches.push(format!("{}: {}", idx + 1, line));
+            matches.push(format!(
+                "{}: {}",
+                idx + 1,
+                sanitize_match_line(line, MATCH_LINE_MAX_CHARS)
+            ));
         }
     }
     if matches.len() > max_matches {
@@ -132,7 +138,10 @@ fn resolve_log_path(path: &PathBuf) -> Result<PathBuf, String> {
         return Err(format!("log path not found: {}", path.display()));
     }
     if !path.is_dir() {
-        return Err(format!("log path is neither file nor directory: {}", path.display()));
+        return Err(format!(
+            "log path is neither file nor directory: {}",
+            path.display()
+        ));
     }
 
     let mut candidates: Vec<(u8, SystemTime, PathBuf)> = Vec::new();
@@ -147,7 +156,11 @@ fn resolve_log_path(path: &PathBuf) -> Result<PathBuf, String> {
             .metadata()
             .map_err(|err| format!("read log file metadata failed: {err}"))?;
         let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-        candidates.push((candidate_priority(&candidate_path), modified, candidate_path));
+        candidates.push((
+            candidate_priority(&candidate_path),
+            modified,
+            candidate_path,
+        ));
     }
     if candidates.is_empty() {
         return Err(format!(
@@ -170,8 +183,25 @@ fn candidate_priority(path: &std::path::Path) -> u8 {
         .and_then(|v| v.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if ext == "log" {
-        3
+    if matches!(
+        file_name.as_str(),
+        "clawd.log"
+            | "telegramd.log"
+            | "wechatd.log"
+            | "whatsappd.log"
+            | "whatsapp-webd.log"
+            | "feishud.log"
+            | "larkd.log"
+            | "webd.log"
+    ) {
+        5
+    } else if file_name.contains("model_io")
+        || file_name.contains("task_journal")
+        || file_name.contains("provider_request")
+    {
+        1
+    } else if ext == "log" {
+        4
     } else if ["txt", "out", "err"].contains(&ext.as_str()) || file_name.contains("log") {
         2
     } else {
@@ -179,9 +209,39 @@ fn candidate_priority(path: &std::path::Path) -> u8 {
     }
 }
 
+fn sanitize_match_line(line: &str, max_chars: usize) -> String {
+    let trimmed = line.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let mut out = trimmed.chars().take(max_chars).collect::<String>();
+    out.push_str(" ...(truncated)");
+    out
+}
+
 fn workspace_root() -> PathBuf {
     std::env::var("WORKSPACE_ROOT")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{candidate_priority, sanitize_match_line};
+    use std::path::Path;
+
+    #[test]
+    fn candidate_priority_prefers_operational_logs_over_model_io() {
+        assert!(candidate_priority(Path::new("clawd.log")) > candidate_priority(Path::new("model_io.log")));
+        assert!(candidate_priority(Path::new("telegramd.log")) > candidate_priority(Path::new("model_io.log")));
+    }
+
+    #[test]
+    fn sanitize_match_line_truncates_oversized_lines() {
+        let long = "a".repeat(400);
+        let out = sanitize_match_line(&long, 32);
+        assert!(out.len() < long.len());
+        assert!(out.ends_with("...(truncated)"));
+    }
 }

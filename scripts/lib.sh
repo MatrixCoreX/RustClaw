@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/shell_compat.sh"
+
 BASE_URL="${BASE_URL:-http://127.0.0.1:8787}"
 USER_ID="${USER_ID:-1985996990}"
 CHAT_ID="${CHAT_ID:-1985996990}"
@@ -23,7 +27,7 @@ curl_auth_args() {
 
 health_check() {
   local -a auth_args=()
-  mapfile -t auth_args < <(curl_auth_args)
+  array_from_command_lines auth_args curl_auth_args
   curl -sS "${auth_args[@]}" "${BASE_URL}/v1/health" >/dev/null
 }
 
@@ -60,7 +64,7 @@ submit_task() {
   local body
   local -a auth_args=()
   body="$(build_submit_body "$prompt")"
-  mapfile -t auth_args < <(curl_auth_args)
+  array_from_command_lines auth_args curl_auth_args
   curl -sS -X POST "${BASE_URL}/v1/tasks" \
     -H "Content-Type: application/json" \
     "${auth_args[@]}" \
@@ -110,7 +114,7 @@ submit_task_with_options() {
   local body
   local -a auth_args=()
   body="$(build_submit_body_with_options "$prompt" "$agent_mode" "$source")"
-  mapfile -t auth_args < <(curl_auth_args)
+  array_from_command_lines auth_args curl_auth_args
   curl -sS -X POST "${BASE_URL}/v1/tasks" \
     -H "Content-Type: application/json" \
     "${auth_args[@]}" \
@@ -166,7 +170,7 @@ submit_run_skill_task() {
   local body
   local -a auth_args=()
   body="$(build_submit_run_skill_body "$skill_name" "$args_json")"
-  mapfile -t auth_args < <(curl_auth_args)
+  array_from_command_lines auth_args curl_auth_args
   curl -sS -X POST "${BASE_URL}/v1/tasks" \
     -H "Content-Type: application/json" \
     "${auth_args[@]}" \
@@ -197,8 +201,16 @@ PY
 query_task() {
   local task_id="$1"
   local -a auth_args=()
-  mapfile -t auth_args < <(curl_auth_args)
+  array_from_command_lines auth_args curl_auth_args
   curl -sS "${auth_args[@]}" "${BASE_URL}/v1/tasks/${task_id}"
+}
+
+query_task_to_file() {
+  local task_id="$1"
+  local out_file="$2"
+  local -a auth_args=()
+  array_from_command_lines auth_args curl_auth_args
+  curl -sS "${auth_args[@]}" "${BASE_URL}/v1/tasks/${task_id}" > "$out_file"
 }
 
 extract_task_triplet() {
@@ -244,4 +256,161 @@ wait_task_until_terminal_with_limit() {
 
   echo "poll timeout for task_id=${task_id}" >&2
   return 1
+}
+
+print_skill_call_details_from_final_json_file() {
+  local final_json_file="$1"
+  local task_id="${2:-}"
+  local clawd_log_file="${3:-logs/clawd.log}"
+  python3 - "$final_json_file" "$task_id" "$clawd_log_file" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+task_id = (sys.argv[2] or "").strip()
+clawd_log_file = (sys.argv[3] or "").strip()
+
+obj = {}
+parse_error = None
+try:
+    if path.exists():
+        obj = json.loads(path.read_text(encoding="utf-8"))
+except Exception as err:
+    parse_error = str(err)
+
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+resume = result.get("resume_context") or {}
+
+blobs = []
+
+def push_blob(value):
+    if value is None:
+        return
+    if isinstance(value, str):
+        if value.strip():
+            blobs.append(value)
+        return
+    if isinstance(value, list):
+        for item in value:
+            push_blob(item)
+        return
+    if isinstance(value, dict):
+        fields = []
+        for key in ("index", "type", "skill", "tool", "action", "error"):
+            if key in value and value[key] not in (None, ""):
+                fields.append(f"{key}={value[key]}")
+        if fields:
+            blobs.append(" ".join(fields))
+        return
+
+def compact(text, limit=360):
+    merged = " ".join(str(text).split())
+    if len(merged) > limit:
+        return merged[:limit] + "...(truncated)"
+    return merged
+
+def collect_lines(text):
+    out = []
+    for match in re.finditer(r"\[TOOL_CALL\](.*?)\[/TOOL_CALL\]", text, flags=re.S | re.I):
+        block = compact(match.group(1))
+        out.append(f"[TOOL_CALL] {block} [/TOOL_CALL]")
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        low = line.lower()
+        if (
+            "skill(" in line
+            or "skill:" in low
+            or "tool =>" in low
+            or "tool=" in low
+            or ("i18n:" in low and "skill" in low)
+        ):
+            out.append(line)
+    return out
+
+def parse_clawd_log_calls(task_id_text, explicit_log_file):
+    out = []
+    if not task_id_text:
+        return out
+    candidates = []
+    if explicit_log_file:
+        candidates.append(Path(explicit_log_file))
+    candidates.append(Path("logs/clawd.log"))
+    seen_files = set()
+    for log_path in candidates:
+        key = str(log_path.resolve()) if log_path.exists() else str(log_path)
+        if key in seen_files:
+            continue
+        seen_files.add(key)
+        if not log_path.exists():
+            continue
+        try:
+            with log_path.open("r", encoding="utf-8", errors="ignore") as fh:
+                for raw in fh:
+                    line = raw.strip()
+                    if not line or task_id_text not in line:
+                        continue
+                    if "executor_step_execute" in line and "type=call_" in line:
+                        m = re.search(
+                            r"type=(call_skill|call_tool)\s+(?:skill|tool)=([^\s]+)\s+args=(\{.*?\})\s+call_id=",
+                            line,
+                        )
+                        if m:
+                            out.append(
+                                compact(f"[LOG_EXEC] type={m.group(1)} name={m.group(2)} args={m.group(3)}")
+                            )
+                            continue
+                    if "plan_llm_response" in line and "raw=" in line and "\"call_" in line:
+                        raw_json = line.split("raw=", 1)[1].split(" call_id=", 1)[0]
+                        out.append(compact(f"[LOG_PLAN] {raw_json}"))
+                        continue
+                    if "[LLM_CALL]" in line and "stage=response" in line and "response=" in line and "\"call_" in line:
+                        raw_json = line.split("response=", 1)[1].split(" call_id=", 1)[0]
+                        out.append(compact(f"[LOG_LLM] {raw_json}"))
+        except Exception:
+            continue
+    return out
+
+push_blob(result.get("progress_messages"))
+push_blob(result.get("messages"))
+push_blob(result.get("text"))
+push_blob(result.get("tool_calls"))
+push_blob(result.get("skill_calls"))
+push_blob(resume.get("completed_messages"))
+push_blob(resume.get("completed_steps"))
+push_blob(resume.get("failed_step"))
+push_blob(resume.get("plan_steps"))
+push_blob(resume.get("remaining_steps"))
+push_blob(resume.get("remaining_actions"))
+
+calls = []
+seen = set()
+for blob in blobs:
+    for line in collect_lines(str(blob)):
+        normalized = compact(line)
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        calls.append(normalized)
+
+if not calls:
+    for item in parse_clawd_log_calls(task_id, clawd_log_file):
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        calls.append(item)
+
+print(f"  [SKILL_CALLS] count={len(calls)}")
+for idx, item in enumerate(calls, start=1):
+    print(f"  [SKILL_CALL {idx}] {item}")
+if parse_error and not calls:
+    print(f"  [SKILL_CALLS_NOTE] parse_error={compact(parse_error, 200)}")
+PY
 }

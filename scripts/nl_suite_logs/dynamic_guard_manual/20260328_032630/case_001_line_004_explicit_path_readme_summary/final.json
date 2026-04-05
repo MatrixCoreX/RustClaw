@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"de82f44d-92f2-44c0-9db5-319979eefa67","status":"succeeded","result_json":{"messages":["这个 README.md 文件说明 `/home/guagua/test` 目录是用于 NL 回归测试的工件和脚本存放区，测试运行时仍使用自己配置的 workspace 根目录。"],"text":"这个 README."},"error_text":null},"error":null}

@@ -1,0 +1,79 @@
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_text_match.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_212434
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_212434/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/text_match/20260403_212434/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 5
+[NAME]        run_cmd_pwd_with_result_tail
+[CHAT]        1985996991
+[PROMPT]      执行 pwd，然后告诉我结果
+[TASK]        472f673e-e4cf-48d4-b405-dc60e5decd9f
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] /tmp/rustclaw-workspace
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 6
+[NAME]        run_cmd_uname_with_result_tail_en
+[CHAT]        1985996992
+[PROMPT]      please run uname -a and tell me the result
+[TASK]        6a96c4cf-ddd9-4c75-8887-688db39a3d34
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Darwin rustclaw-test-host.local 22.6.0 Darwin Kernel Version 22.6.0: Tue Jul 15 08:22:28 PDT 2025; root:xnu-8796.141.3.713.2~2/RELEASE_X86_64 x86_64
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 7
+[NAME]        fs_readme_head_summary_semantic
+[CHAT]        1985996993
+[PROMPT]      看看 README.md 开头讲了什么，读前 20 行后用三句话总结
+[TASK]        5a74032c-2adf-456b-b4aa-9c17ee9cf4fb
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] README.md 前 20 行内容如下： {"action":"read_range","end_line":20,"excerpt":"1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|\n5|Chinese version: `README.zh-CN.md`\n6|\n7|RustClaw is a local Rust-based agent...(truncated)
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 8
+[NAME]        fs_hidden_files_bool_semantic
+[CHAT]        1985996994
+[PROMPT]      帮我判断一下当前目录有没有隐藏文件，只回答有或没有，并举两个例子
+[TASK]        df7497f7-0b11-43e2-b83c-84181b4cdf60
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 有，例如：.cargo/、.git/
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 9
+[NAME]        fs_package_name_scalar_semantic
+[CHAT]        1985996995
+[PROMPT]      去 package.json 里找 name，只把值给我
+[TASK]        45535594-49d0-4b6b-ba73-c628b3af9741
+  [status] <none> -> queued
+  [status] queued -> running

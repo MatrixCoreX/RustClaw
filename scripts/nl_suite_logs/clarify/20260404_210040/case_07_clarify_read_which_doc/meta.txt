@@ -1,0 +1,7 @@
+index=7
+case_name=clarify_read_which_doc
+chat_id=1985996997
+turn1_task_id=e9c51134-fa17-4b15-bd88-df65b0a77621
+turn1_prompt=读一下那个说明文档开头，然后用一句话总结
+turn2_task_id=98544a62-3628-44b4-ab6b-acd466bbf853
+turn2_prompt=README.md

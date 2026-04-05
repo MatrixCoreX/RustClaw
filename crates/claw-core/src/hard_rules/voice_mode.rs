@@ -125,8 +125,14 @@ mod tests {
     #[test]
     fn plain_text_without_json_is_rejected() {
         let aliases = VoiceModeIntentAliases::defaults();
-        assert_eq!(parse_voice_mode_intent_label("请切到语音回复", &aliases), None);
-        assert_eq!(parse_voice_mode_intent_label("just text please", &aliases), None);
+        assert_eq!(
+            parse_voice_mode_intent_label("请切到语音回复", &aliases),
+            None
+        );
+        assert_eq!(
+            parse_voice_mode_intent_label("just text please", &aliases),
+            None
+        );
     }
 
     #[test]

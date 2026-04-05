@@ -1,0 +1,62 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_manual_targeted_4.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114901
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114901/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114901/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1986006000
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        chat_explain_repo_briefly
+[CHAT]        1986006001
+[PROMPT]      用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+[TASK]        62130380-aa2e-4746-8d89-f21e9f2ce4b9
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] single plan parser failed: no executable steps
+  [text] single plan parser failed: no executable steps
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 2
+[NAME]        chat_act_list_then_explain_docs
+[CHAT]        1986006002
+[PROMPT]      列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+[TASK]        9e3552f2-4c68-4219-912f-235ea02e39c7
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] docs 目录包含以下13个文件： 1. **base_skill_response_contract.md** - 定义基础技能响应的契约规范和标准格式 2. **clawd-main-split-checklist.md** - clawd 主程序拆分的检查清单 3. **clawd-main-split-plan.md** - clawd 主程序拆分的详细计划 4. **clawd-main-split-progress.md**...(truncated)
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 3
+[NAME]        act_log_analyze_brief
+[CHAT]        1986006003
+[PROMPT]      快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
+[TASK]        48c0b4c0-93f9-4e93-a3db-903d790f7d2b
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 日志文件 `/tmp/rustclaw-workspace/logs/telegramd.log` 共 48 行，其中 40 行为错误。所有错误均为「更新监听器」向 Telegram API（https://api.telegram...）发起的网络请求失败（reqwest::Error，kind: Request），错误出现的时间点集中在 2026‑04‑04 的 17:12、17:32、17:49、18:06 等多个时段，呈批量重试...(truncated)
+
+================ Final Summary ================
+TOTAL_CASES=3 SUCCEEDED=2 FAILED=1 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114901
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114901/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114901/summary.jsonl

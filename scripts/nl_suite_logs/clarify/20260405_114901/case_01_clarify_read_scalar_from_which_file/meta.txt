@@ -1,0 +1,7 @@
+index=1
+case_name=clarify_read_scalar_from_which_file
+chat_id=1986007001
+turn1_task_id=f4959a30-9c8e-4d42-97ca-a3fd557fd149
+turn1_prompt=读一下那个文件里的名字字段，只输出值
+turn2_task_id=002286ac-5d25-4968-9fa6-b3975da84528
+turn2_prompt=package.json

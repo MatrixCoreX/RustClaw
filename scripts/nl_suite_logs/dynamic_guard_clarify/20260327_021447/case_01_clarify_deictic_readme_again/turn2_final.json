@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"c1c5007f-472f-45d2-af16-7ad8c80c8123","status":"succeeded","result_json":{"messages":["[TOOL_CALL]\n{tool => \"read_file\", args => {\n  --path \"/home/guagua/test/README.md\"\n}}\n[/TOOL_CALL]"],"text":"[TOOL_CALL]\n{tool => \"read_file\", args => {\n  --path \"/home/guagua/test/README.md\"\n}}\n[/TOOL_CALL]"},"error_text":null},"error":null}

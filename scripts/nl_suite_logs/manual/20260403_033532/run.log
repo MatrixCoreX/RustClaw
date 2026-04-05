@@ -1,0 +1,339 @@
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_manual.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_033532
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_033532/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_033532/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 6
+[NAME]        chat_weather_joke
+[CHAT]        1985996991
+[PROMPT]      今天天气先别查，给我讲一个简短冷笑话
+[TASK]        5ed01fa1-b080-4fa5-9ba0-155e2755bede
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 为什么海水是凉的？ 因为鱼在里面吹空调。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 7
+[NAME]        act_pwd_only
+[CHAT]        1985996992
+[PROMPT]      只输出当前工作目录的绝对路径，不要解释
+[TASK]        1125191b-082d-4fb2-8051-a6b94705c9bc
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] /tmp/rustclaw-workspace
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 8
+[NAME]        act_list_top_dirs
+[CHAT]        1985996993
+[PROMPT]      把当前仓库顶层目录和文件列出来，简单分组就行
+[TASK]        d5f5ba73-3c96-4ed5-bbe7-ec3e008f5ed2
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] **目录 (Directories):** - .cargo/ - .github/ - crates/ - docs/ **文件 (Files):** - .cargo-lock.json - .gitignore - .tool-versions - AGENTS.md - CHANGELOG.md - Cargo.toml - LICENSE - README.md - rust-toolchain.toml
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 9
+[NAME]        act_hidden_files
+[CHAT]        1985996994
+[PROMPT]      看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+[TASK]        dd2e1092-e990-47d1-a38c-8f8c39f84ec3
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 没有 注：当前目录没有隐藏文件（.开头的文件或目录）
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 10
+[NAME]        act_read_readme_head
+[CHAT]        1985996995
+[PROMPT]      扫一眼 README 前 20 行，再提炼成 3 句话
+[TASK]        552bbe96-6783-41ae-a980-3ccb6d06efbb
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] README 文件未找到，请提供完整路径。
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 11
+[NAME]        chat_act_compare_sizes
+[CHAT]        1985996996
+[PROMPT]      比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+[TASK]        bc3e8ee7-d8e7-4bb3-9f07-8c18cb2a4f66
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Cargo.lock 更大（约 116 KB），而 Cargo.toml 很小（约 2.4 KB）。 通俗解释：Cargo.lock 像是项目的"全家福合影"——它记录了每个依赖包（包括间接依赖）的精确版本和来源，信息量很大；Cargo.toml 则只是你"想邀请哪些人"的清单，只写直接依赖的大致版本范围，自然轻量得多。
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 12
+[NAME]        missing_file_graceful
+[CHAT]        1985996997
+[PROMPT]      把 definitely_missing_named_file_rustclaw_001.txt 发给我
+[TASK]        e97a374b-2d96-4108-91cb-ba8b25a934b7
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 找到多个同名文件，请提供准确路径
+
+============================================================
+[CASE]        8
+[SOURCE_LINE] 13
+[NAME]        write_and_deliver_hello
+[CHAT]        1985996998
+[PROMPT]      写一个 hello world shell 脚本，保存成 document/hello_from_manual_test.sh，然后把文件发给我
+[TASK]        f7e963f9-12bd-4c20-9559-977323dee972
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/document/hello_from_manual_test.sh
+
+============================================================
+[CASE]        9
+[SOURCE_LINE] 14
+[NAME]        chat_explain_repo_briefly
+[CHAT]        1985996999
+[PROMPT]      用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+[TASK]        eb3363d5-1e78-42f3-a2f6-0e202e691dd9
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] RustClaw 是一个本地运行的 AI 助手平台。简单说，就是让你可以通过聊天软件（Telegram、WhatsApp、飞书）或网页与 AI 对话，它能帮你处理文件、查资料、生成图片等。适合个人或团队搭建自己的 AI 工作站。
+
+============================================================
+[CASE]        10
+[SOURCE_LINE] 15
+[NAME]        chat_translate_simple
+[CHAT]        1985997000
+[PROMPT]      把这句话翻成英文：现在服务已经恢复了
+[TASK]        a11f9fd0-a33b-4d9b-8577-210a5236a739
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] The service has been restored.
+
+============================================================
+[CASE]        11
+[SOURCE_LINE] 16
+[NAME]        act_whoami_only
+[CHAT]        1985997001
+[PROMPT]      只输出当前用户名，不要解释
+[TASK]        ce061693-2bb2-4f53-a648-549e20103c7d
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] guest
+
+============================================================
+[CASE]        12
+[SOURCE_LINE] 17
+[NAME]        act_hostname_only
+[CHAT]        1985997002
+[PROMPT]      只输出当前机器 hostname
+[TASK]        91db8594-bdc3-4b97-8f53-bef57a389dbb
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] rustclaw-test-host.local
+
+============================================================
+[CASE]        13
+[SOURCE_LINE] 18
+[NAME]        act_list_logs
+[CHAT]        1985997003
+[PROMPT]      列出 logs 目录下的前 10 个文件名，不要读内容
+[TASK]        f46ee33c-54a9-45da-aeb8-9a395827e26d
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] logs 目录为空或不存在（ls logs/ 返回空结果）
+
+============================================================
+[CASE]        14
+[SOURCE_LINE] 19
+[NAME]        act_find_service_file
+[CHAT]        1985997004
+[PROMPT]      检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+[TASK]        14c33924-d47d-4940-99e4-c67a991d415a
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 没有
+
+============================================================
+[CASE]        15
+[SOURCE_LINE] 20
+[NAME]        act_check_document_dir
+[CHAT]        1985997005
+[PROMPT]      列出 document 目录下有哪些文件，只输出文件名列表
+[TASK]        de305edd-b62b-4b2e-bc8d-ef12a990b31f
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] dir1 dir1 file1.txt file2.txt file3.txt
+
+============================================================
+[CASE]        16
+[SOURCE_LINE] 21
+[NAME]        act_read_agents_head
+[CHAT]        1985997006
+[PROMPT]      读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
+[TASK]        819d5159-2879-4093-be09-608f9837c117
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] AGENTS.md 文件未找到，请提供完整的文件路径。
+
+============================================================
+[CASE]        17
+[SOURCE_LINE] 22
+[NAME]        act_show_package_json_name
+[CHAT]        1985997007
+[PROMPT]      读取 package.json 里的 name 字段，只输出值
+[TASK]        2deffe8d-9419-4460-a13d-f04d7d00eb72
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] my-awesome-project
+
+============================================================
+[CASE]        18
+[SOURCE_LINE] 23
+[NAME]        act_show_cargo_package_name
+[CHAT]        1985997008
+[PROMPT]      读取 Cargo.toml 的 package.name，只输出值
+[TASK]        8ef77b95-0b04-4306-abfa-66de272c9776
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] chat-skill
+
+============================================================
+[CASE]        19
+[SOURCE_LINE] 24
+[NAME]        chat_act_disk_usage_brief
+[CHAT]        1985997009
+[PROMPT]      查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
+[TASK]        5d47cadd-4540-428f-8c3f-815eb84aa0e1
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] Filesystem Size Used Avail Capacity iused ifree %iused Mounted on
+
+============================================================
+[CASE]        20
+[SOURCE_LINE] 25
+[NAME]        chat_act_list_then_explain_docs
+[CHAT]        1985997010
+[PROMPT]      列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+[TASK]        21ad3d2c-957c-4989-8341-3865d19cdc1f
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 您是要我在 /tmp/rustclaw-workspace/docs 目录上执行此操作吗？
+
+============================================================
+[CASE]        21
+[SOURCE_LINE] 26
+[NAME]        write_and_deliver_json
+[CHAT]        1985997011
+[PROMPT]      生成一个 JSON 文件 document/manual_meta.json，内容包含 app=RustClaw 和 test=nl，然后把文件发给我
+[TASK]        f7cb5a3c-5868-43f9-8461-9ddb6508b621
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/document/manual_meta.json
+
+============================================================
+[CASE]        22
+[SOURCE_LINE] 27
+[NAME]        act_git_branch_scalar
+[CHAT]        1985997012
+[PROMPT]      看看当前 git 分支叫什么，只给我分支名
+[TASK]        589dcca9-f6dc-412c-9b36-2b3faca246a7
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] master
+
+============================================================
+[CASE]        23
+[SOURCE_LINE] 28
+[NAME]        act_git_status_brief
+[CHAT]        1985997013
+[PROMPT]      看看这个仓库现在有没有未提交改动，用一句话告诉我
+[TASK]        c123d136-ba13-4214-8ccb-b10008319aa2
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 当前仓库没有未提交的改动，工作区是干净的。
+
+============================================================
+[CASE]        24
+[SOURCE_LINE] 29
+[NAME]        act_health_check_brief
+[CHAT]        1985997014
+[PROMPT]      帮我做一次基础健康检查，只列最重要的结论
+[TASK]        dd0d3722-6d96-4a02-9252-3fdcece89f5e
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 请提供健康检查的具体目标，例如系统、服务或URL。
+
+============================================================
+[CASE]        25
+[SOURCE_LINE] 30
+[NAME]        act_ports_brief
+[CHAT]        1985997015
+[PROMPT]      看一下现在机器上有哪些监听端口，再简短说最值得注意的几个
+[TASK]        e2666b39-4890-4491-9e35-5f21edd8f8bf
+  [status] <none> -> queued
+  [status] queued -> running

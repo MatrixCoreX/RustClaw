@@ -1,9 +1,0 @@
-index=5
-case_name=context_explicit_path_after_clarify_20260327
-chat_id=1985996995
-turn1_task_id=0f6b7773-02e3-422b-84f9-77c8605b400d
-turn1_prompt=先记一下，如果我后面没说清楚你就先反问
-turn2_task_id=10f9efec-ab05-4a29-8b41-2700ebaf0cee
-turn2_prompt=/home/guagua/test/README.md
-turn3_task_id=701d40a9-c8c0-48b7-9e56-eca9fc87c7d9
-turn3_prompt=读一下这个路径开头并用一句话总结

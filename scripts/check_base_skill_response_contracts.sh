@@ -19,7 +19,7 @@ Usage:
   bash scripts/check_base_skill_response_contracts.sh [options]
 
 Options:
-  --profile debug|release   Wrapper profile (default: release)
+  --profile release         Wrapper profile (default: release)
   --log-dir PATH            Directory for logs
   --report PATH             Markdown report path (default: <log-dir>/report.md)
   --help, -h                Show help
@@ -52,8 +52,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$PROFILE" != "debug" && "$PROFILE" != "release" ]]; then
-  echo "--profile must be debug or release" >&2
+if [[ "$PROFILE" != "release" ]]; then
+  echo "--profile must be release" >&2
   exit 2
 fi
 

@@ -1,0 +1,6 @@
+ordinal=6
+source_line=11
+case_name=chat_act_compare_sizes
+chat_id=1985996996
+task_id=01e5a14e-bac0-4571-81d0-b6ff58c41e86
+prompt=比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因

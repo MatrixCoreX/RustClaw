@@ -1,7 +1,0 @@
-index=6
-case_name=clarify_which_json_name
-chat_id=1985996996
-turn1_task_id=45102d8d-d587-4ca3-8c99-43b75854b5dc
-turn1_prompt=读一下那个 JSON 里的 name 字段，只输出值
-turn2_task_id=eae3fa50-09ed-4c94-b4ed-0c2a3d0e4b22
-turn2_prompt=/home/guagua/test/package.json

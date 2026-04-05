@@ -1,0 +1,6 @@
+ordinal=25
+source_line=30
+case_name=act_ports_brief
+chat_id=1985997015
+task_id=f532d0c8-d317-443c-b47e-6481bb16c711
+prompt=看一下现在机器上有哪些监听端口，再简短说最值得注意的几个

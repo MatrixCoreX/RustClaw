@@ -3,10 +3,10 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString};
 use argon2::{Argon2, PasswordVerifier};
 use claw_core::config::{AppConfig, ChannelBindingConfig};
 use claw_core::types::{AuthIdentity, ExchangeCredentialStatus};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use tracing::info;
 
-use crate::{AppState, mask_secret, normalize_external_id_opt, now_ts};
+use crate::{mask_secret, normalize_external_id_opt, now_ts, AppState};
 
 fn generate_user_key() -> String {
     format!("rk-{}", uuid::Uuid::new_v4().simple())

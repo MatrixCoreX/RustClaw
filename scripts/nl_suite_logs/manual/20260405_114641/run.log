@@ -1,0 +1,35 @@
+Natural-language manual regression
+  case_file:     /tmp/nl_manual_case3_only.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114641
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114641/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114641/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1986005000
+  user_key:      <set>
+  wait:          180s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 1
+[NAME]        act_log_analyze_brief
+[CHAT]        1986005001
+[PROMPT]      快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
+[TASK]        a0d99bd0-a4de-47d2-9c42-c14c6c27ca4d
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 最近最值得注意的错误是 **telegramd.log** 中持续出现的 Telegram API 网络请求错误。 **关键发现：** - 共检测到 **40 个 ERROR** 记录（占 48 行日志的 83%） - 全部错误均为 `Network(reqwest::Error)` 类型，发生在更新监听器（update listener）向 Telegram API 发起 HTTPS 请求时 - 错误时间跨度：2026-04-04 1...(truncated)
+
+================ Final Summary ================
+TOTAL_CASES=1 SUCCEEDED=1 FAILED=0 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114641
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114641/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260405_114641/summary.jsonl

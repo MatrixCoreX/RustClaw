@@ -1,0 +1,7 @@
+index=6
+case_name=clarify_find_which_script
+chat_id=1985996996
+turn1_task_id=96f77629-0c5a-476c-8b7d-1d1f1031e7b7
+turn1_prompt=看看那个重启脚本在不在
+turn2_task_id=02c8c925-c010-4c08-a975-ed825dd34c32
+turn2_prompt=restart_clawd_latest.sh

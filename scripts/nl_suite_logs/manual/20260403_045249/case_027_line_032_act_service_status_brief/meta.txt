@@ -1,0 +1,6 @@
+ordinal=27
+source_line=32
+case_name=act_service_status_brief
+chat_id=1985997017
+task_id=101d8a33-eae7-4df9-a5b5-da8de4685679
+prompt=帮我检查 telegramd 现在是不是在运行，顺手简短解释状态

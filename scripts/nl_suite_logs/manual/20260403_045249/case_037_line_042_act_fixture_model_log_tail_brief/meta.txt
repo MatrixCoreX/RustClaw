@@ -1,0 +1,6 @@
+ordinal=37
+source_line=42
+case_name=act_fixture_model_log_tail_brief
+chat_id=1985997027
+task_id=3c4fb9fb-b518-4ab8-99c8-fd93e8231d7d
+prompt=看一下 scripts/nl_tests/fixtures/device_local/logs/model_io.log 最后 4 行，再一句话说有没有失败后恢复

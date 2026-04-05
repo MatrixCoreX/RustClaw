@@ -13,3 +13,9 @@ clarify_check_which_service|看看那个服务现在是不是在运行|telegramd
 clarify_tail_which_log|帮我看一下那个日志最近 20 行|logs/clawd.log
 clarify_read_which_git_thing|看看那个分支现在叫什么|current branch
 clarify_transform_which_json|把那个 JSON 数组按 score 排一下并转成表格|[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+clarify_send_release_note|把那个发布说明发给我|scripts/nl_tests/fixtures/device_local/docs/release_checklist.md
+clarify_tail_model_io_log|看看那个模型日志最后 5 行|scripts/nl_tests/fixtures/device_local/logs/model_io.log
+clarify_package_name_fixture|去那个 package 文件里找 name，只输出值|scripts/nl_tests/fixtures/device_local/package.json
+clarify_docs_archive_list|看看那个 archive 目录里有什么|scripts/nl_tests/fixtures/device_local/docs/archive
+clarify_sqlite_schema_version_fixture|看一下那个 sqlite 的 schema version 是多少|scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
+clarify_send_fixture_config_colloquial|把那份本地配置直接甩给我，别贴正文|scripts/nl_tests/fixtures/device_local/configs/app_config.toml

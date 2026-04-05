@@ -1,0 +1,6 @@
+ordinal=34
+source_line=39
+case_name=act_workspace_glance_cn
+chat_id=1985997024
+task_id=9e27b36e-951e-4ac6-b0a6-38ec766194ee
+prompt=快速看一下当前工作区，简短告诉我这里大概是什么项目

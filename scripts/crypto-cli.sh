@@ -3,7 +3,7 @@
 # crypto-cli.sh — crypto-skill 单独调用工具
 # =============================================================================
 # 协议：单行 JSON stdin → 单行 JSON stdout
-# 二进制：target/debug/crypto-skill  或  target/release/crypto-skill
+# 二进制：target/release/crypto-skill
 # 配置：WORKSPACE_ROOT 下的 configs/crypto.toml (或 configs/config.toml)
 # =============================================================================
 
@@ -12,16 +12,12 @@ set -euo pipefail
 # ---------- 路径解析 ----------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-BIN_DEBUG="$WORKSPACE/target/debug/crypto-skill"
 BIN_RELEASE="$WORKSPACE/target/release/crypto-skill"
 
-# 优先 debug（最新编译），release 作为 fallback
-if [[ -x "$BIN_DEBUG" ]]; then
-    BIN="$BIN_DEBUG"
-elif [[ -x "$BIN_RELEASE" ]]; then
+if [[ -x "$BIN_RELEASE" ]]; then
     BIN="$BIN_RELEASE"
 else
-    echo "错误：未找到 crypto-skill 二进制，请先 cargo build -p crypto-skill" >&2
+    echo "错误：未找到 crypto-skill 二进制，请先 cargo build -p crypto-skill --release" >&2
     exit 1
 fi
 

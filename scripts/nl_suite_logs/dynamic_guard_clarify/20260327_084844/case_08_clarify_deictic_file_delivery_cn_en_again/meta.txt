@@ -1,7 +1,0 @@
-index=8
-case_name=clarify_deictic_file_delivery_cn_en_again
-chat_id=1985996998
-turn1_task_id=15e149af-93d9-4e4d-95c3-e03b596f7e70
-turn1_prompt=把那个 file 发给我，不要贴内容
-turn2_task_id=75f06e8e-1dd7-4486-a552-e7e13da86424
-turn2_prompt=/home/guagua/test/docs/service_notes.md

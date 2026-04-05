@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"a980ef44-ce7b-43d1-bee9-c3d42d91bc9a","status":"succeeded","result_json":{"text":"**重点：**\n\n- **结果**：无法获取文件内容\n- **原因**：`/home/guagua/test/README.md` 文件不存在于当前执行环境\n- **意图**：用户想查看\"那玩意README\"（即该文件）的开头部分"},"error_text":null},"error":null}

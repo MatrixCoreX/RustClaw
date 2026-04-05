@@ -1,9 +1,0 @@
-index=2
-case_name=context_bound_log_followup_20260327
-chat_id=1985996992
-turn1_task_id=83aa3fde-b012-43f6-a282-19b6dc24e518
-turn1_prompt=先记一下，“那个日志”指 /home/guagua/test/logs/app.log
-turn2_task_id=b6214617-ad32-4d3c-ab11-3f3813f4ac53
-turn2_prompt=看一下那个日志最近 20 行
-turn3_task_id=cde01d92-6fcf-4d24-ac9f-db0cfb995a69
-turn3_prompt=再从里面挑一个最值得注意的点

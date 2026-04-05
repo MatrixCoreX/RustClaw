@@ -1,0 +1,6 @@
+ordinal=5
+source_line=9
+case_name=explicit_db_tables
+chat_id=17752372386
+task_id=bf3e4c08-ff30-4ba0-b96a-f511373c1d92
+prompt=看看 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里面有哪些表

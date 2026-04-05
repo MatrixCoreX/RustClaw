@@ -1,0 +1,6 @@
+ordinal=9
+source_line=14
+case_name=chat_explain_repo_briefly
+chat_id=1985999009
+task_id=7fa6f35d-e539-4d56-83b8-ca5f1eba1f31
+prompt=用非技术用户能听懂的话，简短解释这个仓库主要是干什么的

@@ -1,0 +1,6 @@
+ordinal=35
+source_line=40
+case_name=act_release_note_brief
+chat_id=1985997025
+task_id=4aaad013-ef37-4c51-8f4b-e2c4744a17ee
+prompt=读一下 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md，然后用一句话说它更像提醒什么

@@ -1,0 +1,7 @@
+index=17
+case_name=clarify_deictic_colloquial_cn_notes_send
+chat_id=17752372498
+turn1_task_id=0a4bd71a-529b-4b3f-8f43-5cb0f85fb98d
+turn1_prompt=把那份 notes 直接发我，别贴正文
+turn2_task_id=ed44c4e2-af75-42ef-bf10-2a68a6fb35fc
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md

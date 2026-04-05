@@ -6,9 +6,9 @@ use toml::Value as TomlValue;
 use tracing::{info, warn};
 
 use crate::{
-    CommandIntentRules, CommandIntentRuntime, MemoryConfigFileWrapper,
-    SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT, SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT,
-    ScheduleRuntime, load_prompt_template_for_vendor,
+    load_prompt_template_for_vendor, CommandIntentRules, CommandIntentRuntime,
+    MemoryConfigFileWrapper, ScheduleRuntime, SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT,
+    SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT,
 };
 
 pub(crate) fn load_command_intent_runtime(
@@ -45,6 +45,7 @@ pub(crate) fn load_command_intent_runtime(
     CommandIntentRuntime {
         all_result_suffixes: Vec::new(),
         default_locale,
+        verify_enforce_enabled: cfg.verify_enforce_enabled,
     }
 }
 
@@ -59,19 +60,19 @@ pub(crate) fn load_schedule_runtime(
         cfg.timezone.trim().to_string()
     };
 
-    let prompt_rel = if cfg.intent_prompt_path.trim().is_empty() {
+    let intent_prompt_logical_path = if cfg.intent_prompt_path.trim().is_empty() {
         "prompts/schedule_intent_prompt.md"
     } else {
         cfg.intent_prompt_path.trim()
     };
-    let (intent_prompt_template, intent_prompt_file) = load_prompt_template_for_vendor(
+    let (intent_prompt_template, intent_prompt_source) = load_prompt_template_for_vendor(
         workspace_root,
         selected_vendor,
-        prompt_rel,
+        intent_prompt_logical_path,
         SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT,
     );
 
-    let rules_rel = if cfg.intent_rules_path.trim().is_empty() {
+    let intent_rules_logical_path = if cfg.intent_rules_path.trim().is_empty() {
         "prompts/schedule_intent_rules.md"
     } else {
         cfg.intent_rules_path.trim()
@@ -79,7 +80,7 @@ pub(crate) fn load_schedule_runtime(
     let (intent_rules_template, _intent_rules_file) = load_prompt_template_for_vendor(
         workspace_root,
         selected_vendor,
-        rules_rel,
+        intent_rules_logical_path,
         SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT,
     );
 
@@ -230,7 +231,7 @@ pub(crate) fn load_schedule_runtime(
     ScheduleRuntime {
         timezone,
         intent_prompt_template,
-        intent_prompt_file,
+        intent_prompt_source,
         intent_rules_template,
         locale,
         i18n_dict,

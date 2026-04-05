@@ -1,6 +1,0 @@
-ordinal=3
-source_line=8
-case_name=colloquial_cn_ultra_peek_readme
-chat_id=17746750004
-task_id=bea485bc-2979-47a5-b91e-521f9849b9cd
-prompt=瞅下 /home/guagua/test/README.md 开头，给我一句人话总结

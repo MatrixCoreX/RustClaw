@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"7a25b35e-c696-44ec-964f-48343c6bb5c7","status":"succeeded","result_json":{"messages":["无法查看文件 `/home/guagua/test/configs/app_config.toml` 的内容。当前执行上下文仅包含测试环境元数据，未提供该文件的内容或读取结果。"],"text":"无法查看文件 `/home/guagua/test/configs/app_config.toml` 的内容。当前执行上下文仅包含测试环境元数据，未提供该文件的内容或读取结果。"},"error_text":null},"error":null}

@@ -1,6 +1,0 @@
-ordinal=18
-source_line=21
-case_name=english_explicit_log_tail
-chat_id=17746659439
-task_id=49a78d86-6eca-465e-a36b-379eb3ebc2ce
-prompt=Show the last 12 lines of /home/guagua/test/logs/app.log.

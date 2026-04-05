@@ -1,0 +1,291 @@
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_dynamic_guard_manual.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_manual/20260404_012708
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_manual/20260404_012708/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_manual/20260404_012708/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       17752372381
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 5
+[NAME]        explicit_path_readme_summary
+[CHAT]        17752372382
+[PROMPT]      帮我看一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md 开头，然后一句话说重点
+[TASK]        651c9626-c58e-4694-b1d7-61c10111c2c2
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 本目录包含用于本地设备（device_local）场景的测试夹具文件，提供了模拟本地存储或本地文件系统行为的测试数据集合。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 6
+[NAME]        explicit_path_readme_send
+[CHAT]        17752372383
+[PROMPT]      把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md 这个文件直接发我
+[TASK]        74b59473-9e7a-4182-bd10-ae497cd38a0f
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 7
+[NAME]        explicit_config_send
+[CHAT]        17752372384
+[PROMPT]      把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml 发给我，别贴正文
+[TASK]        46750037-20ec-4efa-902f-0e6b7b3996a0
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 8
+[NAME]        explicit_log_tail
+[CHAT]        17752372385
+[PROMPT]      帮我看下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log 最后 10 行
+[TASK]        2545af28-fe30-410e-a232-f75e9668eb57
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 我没有找到这个文件，请确认完整路径是否正确。
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 9
+[NAME]        explicit_db_tables
+[CHAT]        17752372386
+[PROMPT]      看看 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里面有哪些表
+[TASK]        bf3e4c08-ff30-4ba0-b96a-f511373c1d92
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该 SQLite 数据库文件包含以下 3 张表： 1. users 2. orders 3. service_logs
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 10
+[NAME]        explicit_archive_unpack
+[CHAT]        17752372387
+[PROMPT]      把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 解压到 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/manual_dynamic_guard_unpack 然后告诉我结果
+[TASK]        f54c7549-b3d1-4005-ab39-4f88defbbde3
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 解压成功。已从 test_bundle.zip 解压出 2 个文件到 manual_dynamic_guard_unpack 目录： - notes.txt - nested/config.ini
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 11
+[NAME]        explicit_docs_list_names_only
+[CHAT]        17752372388
+[PROMPT]      列一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs 这一层直接子项，只要名字
+[TASK]        58f3c2e0-f954-4bb9-9f91-9e953d462c59
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] archive/ release_checklist.md service_notes.md
+
+============================================================
+[CASE]        8
+[SOURCE_LINE] 12
+[NAME]        explicit_docs_count_scalar
+[CHAT]        17752372389
+[PROMPT]      数一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs 目录直接有多少个子项，只回数字
+[TASK]        e333f675-a615-4cdc-96c9-d835878ac2c4
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 3
+
+============================================================
+[CASE]        9
+[SOURCE_LINE] 13
+[NAME]        explicit_missing_file_graceful
+[CHAT]        17752372390
+[PROMPT]      把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/not_exists_case_003.md 发给我，不要瞎编
+[TASK]        c5d919e3-d583-4b90-9479-25ff1bbb8f1d
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 在系统根目录和项目根目录都没有找到该文件
+
+============================================================
+[CASE]        10
+[SOURCE_LINE] 14
+[NAME]        explicit_db_schema_version_cn
+[CHAT]        17752372391
+[PROMPT]      查一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema version，只输出值
+[TASK]        7948e320-d347-4964-a0af-6b44772675d9
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] {"columns":["user_version"],"rows":[{"user_version":7}]}
+
+============================================================
+[CASE]        11
+[SOURCE_LINE] 15
+[NAME]        english_explicit_readme_summary
+[CHAT]        17752372392
+[PROMPT]      Read the first part of /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md and give me a one-line summary.
+[TASK]        dcff70cb-0c12-45cc-a143-ed5dd6b27421
+  [status] <none> -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] step 2 failed (skill(chat)): chat skill llm failed status=400 Bad Request: {"type":"error","error":{"type":"bad_request_error","message":"invalid params, invalid chat setting (2013)","http_code":"400"},"request_id":"061f2d88a948ef933df11cbb9b99eea7"}
+  [text] step 2 failed (skill(chat)): chat skill llm failed status=400 Bad Request: {"type":"error","error":{"type":"bad_request_error","message":"invalid params, invalid chat setting (2013)","http_code":"400"},"request_id":"061f...(truncated)
+
+============================================================
+[CASE]        12
+[SOURCE_LINE] 16
+[NAME]        english_explicit_log_tail
+[CHAT]        17752372393
+[PROMPT]      Show me the last 12 lines of /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log.
+[TASK]        1be67946-ba2e-4f33-9c92-9533f3e79765
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 2026-04-01 10:03:40 INFO request id=req-002 route=/v1/tasks status=queued 2026-04-01 10:03:41 INFO request id=req-002 summary generated 2026-04-01 10:05:01 INFO health check ok 2026-04-01 10:05:33 WARN cache miss ratio a...(truncated)
+
+============================================================
+[CASE]        13
+[SOURCE_LINE] 17
+[NAME]        mixed_lang_explicit_file_summary
+[CHAT]        17752372394
+[PROMPT]      read /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md 前几行，然后用中文一句话总结
+[TASK]        8bb6f47d-a4fa-4fa4-b00a-4c5d0730e43c
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该目录包含用于 RustClaw NL 回归测试的本地文件，包括配置文件、文档、日志、测试数据库和压缩包等样本文件。
+
+============================================================
+[CASE]        14
+[SOURCE_LINE] 18
+[NAME]        colloquial_cn_send_no_paste
+[CHAT]        17752372395
+[PROMPT]      别贴正文，直接把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md 丢给我
+[TASK]        a8d58863-53c9-46ec-9841-08b9e459b4c6
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] FILE:/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md
+
+============================================================
+[CASE]        15
+[SOURCE_LINE] 19
+[NAME]        colloquial_en_log_focus
+[CHAT]        17752372396
+[PROMPT]      Could you quickly tail /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log for 9 lines and give me a one-liner takeaway?
+[TASK]        145d0a1b-bc3c-4f04-b6fc-d5d8bdffc069
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 📋 Last 9 lines of app.log:
+
+============================================================
+[CASE]        16
+[SOURCE_LINE] 20
+[NAME]        explicit_release_checklist_summary
+[CHAT]        17752372397
+[PROMPT]      读一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md，然后一句话说它主要提醒什么
+[TASK]        c9cacbc5-0a22-4def-bad2-42c40af695a8
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 该清单提醒在发布前需验证配置加载、确认数据库迁移已应用，并检查日志是否有异常错误。
+
+============================================================
+[CASE]        17
+[SOURCE_LINE] 21
+[NAME]        explicit_package_name_scalar
+[CHAT]        17752372398
+[PROMPT]      去 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/package.json 里把 name 的值拿出来，只输出值
+[TASK]        78c82557-6a21-4a4e-b20a-261b9eb9af44
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 无法从该文件中提取到可靠的 `name` 字段值，请确认文件内容或提供完整路径。
+
+============================================================
+[CASE]        18
+[SOURCE_LINE] 22
+[NAME]        explicit_model_io_tail_brief
+[CHAT]        17752372399
+[PROMPT]      看一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/model_io.log 最后 5 行，再一句话说有什么现象
+[TASK]        a56fe138-b749-438f-bb59-e342104a1314
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 最后5行显示模型在处理输入后产生了正常的响应输出，包括推理耗时约16毫秒，未出现异常错误。
+
+============================================================
+[CASE]        19
+[SOURCE_LINE] 23
+[NAME]        explicit_docs_archive_names_only
+[CHAT]        17752372400
+[PROMPT]      列出 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/archive 下面直接文件名，只要名字
+[TASK]        326e47fc-7717-4241-bc62-7b41b3a7e7dc
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] README.txt
+
+============================================================
+[CASE]        20
+[SOURCE_LINE] 24
+[NAME]        colloquial_cn_config_purpose
+[CHAT]        17752372401
+[PROMPT]      瞅一眼 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml，然后用一句人话说它是干嘛的
+[TASK]        a2511099-dd0a-4970-ab8b-12fcdef0e35e
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 这是 RustClaw NL 测试环境的应用配置文件，定义了测试应用的名称、端口（8787）、功能开关（上传、动态守卫）和路径设置（文档、日志、数据库）。
+
+================ Final Summary ================
+TOTAL_CASES=20 SUCCEEDED=19 FAILED=1 CANCELED=0 TIMEOUT=0
+
+Artifacts:
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_manual/20260404_012708
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_manual/20260404_012708/run.log
+  - /tmp/rustclaw-workspace/scripts/nl_suite_logs/dynamic_guard_manual/20260404_012708/summary.jsonl

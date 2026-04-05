@@ -1,0 +1,6 @@
+ordinal=21
+source_line=26
+case_name=write_and_deliver_json
+chat_id=1985997011
+task_id=6c60fcb8-4b01-437b-9193-4fb1c27191c2
+prompt=生成一个 JSON 文件 document/manual_meta.json，内容包含 app=RustClaw 和 test=nl，然后把文件发给我

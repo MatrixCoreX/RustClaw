@@ -1,0 +1,6 @@
+ordinal=30
+source_line=35
+case_name=act_package_manager_detect_cn
+chat_id=1985997020
+task_id=c0261dd9-981c-4c5b-9df2-ca2bbdeb8ef7
+prompt=帮我看看这台机器识别到的包管理器是什么，简短告诉我

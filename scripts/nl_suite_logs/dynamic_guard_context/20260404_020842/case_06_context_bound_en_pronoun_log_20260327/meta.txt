@@ -1,0 +1,9 @@
+index=6
+case_name=context_bound_en_pronoun_log_20260327
+chat_id=17752372587
+turn1_task_id=3748d4b2-8e5a-48e4-8015-acd430cca272
+turn1_prompt=Remember this: "that log" means /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log
+turn2_task_id=e2ef6833-6397-4196-939c-937d63cb4fb1
+turn2_prompt=tail that log 10 lines
+turn3_task_id=90b39fe6-c804-44d5-ad0d-a24ad991fd25
+turn3_prompt=in one sentence tell me if anything looks abnormal

@@ -1,16 +1,16 @@
-use std::fs::{OpenOptions, create_dir_all};
+use std::fs::{create_dir_all, OpenOptions};
 use std::io::{IsTerminal, Write as IoWrite};
 use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{Local, TimeZone};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tracing::warn;
 
 use super::client::LlmUsageSnapshot;
 use crate::{
-    AppState, ClaimedTask, LlmProviderRuntime, llm_model_kind, llm_vendor_name, now_ts_u64,
-    truncate_for_log,
+    llm_model_kind, llm_vendor_name, now_ts_u64, truncate_for_log, AppState, ClaimedTask,
+    LlmProviderRuntime,
 };
 
 fn strip_think_blocks(raw: &str) -> String {
@@ -67,7 +67,7 @@ pub(crate) fn append_model_io_log(
     task: &ClaimedTask,
     provider: &Arc<LlmProviderRuntime>,
     status: &str,
-    prompt_file: &str,
+    prompt_source: &str,
     prompt: &str,
     request_payload: &Value,
     raw_response: Option<&str>,
@@ -76,6 +76,10 @@ pub(crate) fn append_model_io_log(
     sanitized: bool,
     error: Option<&str>,
 ) {
+    if !state.routing.debug_log_prompt {
+        return;
+    }
+    state.note_task_llm_call(&task.task_id);
     let logs_dir = state.workspace_root.join("logs");
     if let Err(err) = create_dir_all(&logs_dir) {
         warn!("create model io logs dir failed: {err}");
@@ -106,7 +110,7 @@ pub(crate) fn append_model_io_log(
         "model": provider.config.model,
         "model_kind": llm_model_kind(provider),
         "status": status,
-        "prompt_file": prompt_file,
+        "prompt_source": prompt_source,
         "prompt": truncate_for_log(prompt),
         "request_payload": request_payload,
         "response": clean_response.map(truncate_for_log),

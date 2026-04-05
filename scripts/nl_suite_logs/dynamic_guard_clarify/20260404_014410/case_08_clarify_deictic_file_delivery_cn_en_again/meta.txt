@@ -1,0 +1,7 @@
+index=8
+case_name=clarify_deictic_file_delivery_cn_en_again
+chat_id=17752372489
+turn1_task_id=b6eca6fe-34aa-4b78-b9c5-585fc740a1bd
+turn1_prompt=把那个 file 发给我，不要贴内容
+turn2_task_id=b4b7d4ef-dc57-416c-8e28-cd29c3beff11
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md

@@ -1,0 +1,56 @@
+# Skill-oriented NL smoke cases aligned with the current enabled skills.
+# Format: suite|name|tags|prompt
+# Notes:
+# - Prefer this file for skill routing smoke, not strict golden-output regression.
+# - Tags are descriptive only; keep prompts stable and concrete.
+# - Builtin filesystem/shell skills are included at the top; runner skills follow.
+# - Network / external-provider skills are tagged `network`.
+# - Cases that may mutate workspace state are tagged `side_effect`.
+# - Cases that depend on local services or host tools are tagged `conditional`.
+
+# Builtin skills
+act|builtin_run_cmd_pwd_only|builtin,skill:run_cmd,local|执行 pwd，只输出当前工作目录的绝对路径
+act|builtin_read_file_fixture_name|builtin,skill:read_file,local|读取 scripts/nl_tests/fixtures/device_local/package.json 里的 name，只输出值
+act|builtin_list_dir_fixture_docs|builtin,skill:list_dir,local|列出 scripts/nl_tests/fixtures/device_local/docs 目录下有哪些文件，只输出文件名列表
+file|builtin_write_file_deliver|builtin,skill:write_file,local,side_effect|写一个文本文件 document/builtin_write_smoke.txt，内容是 builtin write smoke，然后把文件发给我
+chat_act|builtin_make_dir_smoke|builtin,skill:make_dir,local,side_effect|创建 document/nl_skill_tmp 目录，然后简短告诉我结果
+chat_act|builtin_remove_file_smoke|builtin,skill:remove_file,local,side_effect|删除 document/builtin_write_smoke.txt，然后简短告诉我结果
+
+# Runner skills: mostly local/read-only
+chat|skill_chat_brief_joke|skill:chat,local|讲一个简短冷笑话
+chat_act|skill_system_basic_info_brief|skill:system_basic,local|帮我看一下这台机器的基础系统信息，简短告诉我最关键的几项
+chat_act|skill_http_basic_local_health|skill:http_basic,local,conditional|请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
+chat_act|skill_git_basic_status|skill:git_basic,local|看一下当前仓库 git 状态，简短告诉我最值得注意的变化
+chat_act|skill_process_basic_top_cpu|skill:process_basic,local|看一下当前最占 CPU 的前 5 个进程，简短告诉我最值得注意的是哪个
+chat_act|skill_package_manager_detect|skill:package_manager,local|检测这台机器上的包管理器，简短告诉我结果
+chat_act|skill_db_basic_schema_version|skill:db_basic,local|查一下 data/skill-calls-smoke.sqlite 的 schema version 是多少，简短告诉我结果
+chat_act|skill_docker_basic_ps|skill:docker_basic,local,conditional|看一下当前 docker 容器列表，简短告诉我有没有在运行的容器
+chat_act|skill_fs_search_readme_paths|skill:fs_search,local|在当前仓库里找名字包含 README 的文件，列出前 5 个完整路径
+chat_act|skill_health_check_summary|skill:health_check,local|帮我做一次基础健康检查，只列最重要的结论
+chat_act|skill_log_analyze_fixture_app|skill:log_analyze,local|分析 scripts/nl_tests/fixtures/device_local/logs/app.log，简短说有没有明显异常
+chat_act|skill_service_control_clawd_status|skill:service_control,local,conditional|检查 clawd 服务状态，简短告诉我
+chat_act|skill_task_control_list|skill:task_control,local|看看当前任务队列里有没有任务，简短告诉我结果
+chat_act|skill_config_guard_validate_main|skill:config_guard,local|检查 configs/config.toml 有没有明显配置问题，简短给我结论
+chat_act|skill_doc_parse_readme|skill:doc_parse,local|解析 README.md，提取前几段重点并简短总结
+chat_act|skill_transform_json_table|skill:transform,local|把这个 JSON 数组按 score 从高到低排序，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+chat_act|skill_kb_ingest_then_report|skill:kb,local,side_effect|把 README.md 导入一个名为 demo_docs_nl 的知识库，简短告诉我是否成功
+
+# Runner skills: local side-effect outputs
+file|skill_archive_basic_pack_skill_calls|skill:archive_basic,local,side_effect|把 scripts/skill_calls 打成 zip，保存到 document/skill_calls_smoke.zip，然后把文件发给我
+file|skill_audio_synthesize_short_cn|skill:audio_synthesize,network,side_effect|把“RustClaw 技能测试通过”合成一段语音，保存到 document/skill_audio_smoke.mp3，然后把文件发给我
+file|skill_image_generate_test_card|skill:image_generate,network,side_effect|生成一张极简测试图片，写上 RustClaw NL Smoke，保存到 document/skill_generate_smoke.png，然后把文件发给我
+
+# Runner skills: network / external integrations
+chat_act|skill_rss_fetch_latest_general|skill:rss_fetch,network|抓取最新 3 条综合 RSS 新闻，简短列出来
+chat_act|skill_browser_web_open_extract|skill:browser_web,network|打开 https://example.com ，提取页面标题并用一句话总结
+chat_act|skill_web_search_extract_rust_async|skill:web_search_extract,network|搜索 rust async tutorial，提取前 3 个结果并简短总结
+chat_act|skill_weather_beijing_today|skill:weather,network|查一下 Beijing 今天天气，简短告诉我
+chat_act|skill_stock_600519_quote|skill:stock,network|查一下 600519 的最新行情，简短告诉我
+chat_act|skill_crypto_btc_quote|skill:crypto,network|查一下 BTCUSDT 的最新价格，简短告诉我
+chat_act|skill_image_vision_remote_describe|skill:image_vision,network|看一下这张图片并用一句话描述它：https://raw.githubusercontent.com/github/explore/main/topics/rust/rust.png
+file|skill_image_edit_remote_restyle|skill:image_edit,network,side_effect|把这张图片改成像素风并保存到 document/rust_icon_pixel.png，然后把文件发给我：https://raw.githubusercontent.com/github/explore/main/topics/rust/rust.png
+chat_act|skill_x_draft_preview|skill:x,network|帮我起草一条发到 X 的短帖，内容是今天完成了 RustClaw NL skill smoke，不要真正发布，只给我预览结果
+
+# Optional templates: higher risk or fixture-dependent
+# chat_act|skill_install_module_jq|skill:install_module,local,side_effect,high_risk|如果系统里没有 jq 就安装它；如果已经安装了就直接告诉我
+# act|skill_audio_transcribe_fixture|skill:audio_transcribe,needs_fixture|转写 document/sample_audio.wav 的内容，只输出识别结果

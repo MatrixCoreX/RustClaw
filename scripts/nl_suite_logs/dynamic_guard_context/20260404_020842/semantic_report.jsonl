@@ -1,0 +1,15 @@
+{"suite": "context_chain", "case_name": "context_bound_readme_followup_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_log_followup_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_config_delivery_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_ambiguous_after_two_files_20260327", "pass": false, "reasons": ["turn1 explicit path exists but output says not found/unreadable"]}
+{"suite": "context_chain", "case_name": "context_bound_alias_rebind_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_en_pronoun_log_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_missing_file_followup_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_db_then_focus_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_two_targets_disambiguate_20260327", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_colloquial_mixed_docs_alias", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_release_note_followup", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_package_name_followup", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_bound_model_log_followup", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_rebind_from_notes_to_release", "pass": true, "reasons": []}
+{"suite": "context_chain", "case_name": "context_docs_archive_then_count", "pass": true, "reasons": []}

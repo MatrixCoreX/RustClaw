@@ -1,0 +1,14 @@
+[app]
+name = "RustClaw NL Fixture"
+mode = "test"
+port = 8787
+
+[features]
+enable_upload = true
+enable_dynamic_guard = true
+default_locale = "zh-CN"
+
+[paths]
+docs_dir = "docs"
+logs_dir = "logs"
+db_path = "data/test_contract.sqlite"

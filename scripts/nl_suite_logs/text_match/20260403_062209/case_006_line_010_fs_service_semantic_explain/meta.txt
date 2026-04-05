@@ -1,0 +1,6 @@
+ordinal=6
+source_line=10
+case_name=fs_service_semantic_explain
+chat_id=1985996996
+task_id=a6910f06-e944-43cb-baef-5075085a2df3
+prompt=检查仓库里有没有 rustclaw.service；如果有，给路径并顺手解释它是干什么的

@@ -1,0 +1,6 @@
+ordinal=7
+source_line=11
+case_name=fs_compare_readmes_semantic
+chat_id=1985996997
+task_id=eb23077e-e46f-46fd-ab2c-245e6d56e8f4
+prompt=比较 README.md 和 README.zh-CN.md 哪个更大，再解释为什么可能不同

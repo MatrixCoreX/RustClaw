@@ -1,0 +1,6 @@
+ordinal=4
+source_line=9
+case_name=act_hidden_files
+chat_id=1985996994
+task_id=ef59d09e-a2b8-46a3-b35f-9dd61c93f631
+prompt=看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子

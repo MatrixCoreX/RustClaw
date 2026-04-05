@@ -1,0 +1,106 @@
+Natural-language manual regression
+  case_file:     /tmp/rustclaw-workspace/scripts/nl_tests/cases/nl_cases_manual.txt
+  run_dir:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_013400
+  run_log:       /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_013400/run.log
+  summary_jsonl: /tmp/rustclaw-workspace/scripts/nl_suite_logs/manual/20260403_013400/summary.jsonl
+  base_url:      http://127.0.0.1:8787
+  user_id:       1985996990
+  chat_id:       1985996990
+  user_key:      <set>
+  wait:          240s
+  poll:          1s
+  retry_logic:   disabled (log only)
+
+
+============================================================
+[CASE]        1
+[SOURCE_LINE] 6
+[NAME]        chat_weather_joke
+[CHAT]        1985996991
+[PROMPT]      今天天气先别查，给我讲一个简短冷笑话
+[TASK]        b7cbcca0-4ac6-48d0-bf4c-20db983c1104
+  [status] <none> -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 问：为什么程序员不爱去海边？ 答：因为那里的 `null` 太多（浪太多）。
+
+============================================================
+[CASE]        2
+[SOURCE_LINE] 7
+[NAME]        act_pwd_only
+[CHAT]        1985996992
+[PROMPT]      只输出当前工作目录的绝对路径，不要解释
+[TASK]        237065a8-1ed7-4ac4-88d2-c41c04eef05e
+  [status] <none> -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+  [text] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+
+============================================================
+[CASE]        3
+[SOURCE_LINE] 8
+[NAME]        act_list_top_dirs
+[CHAT]        1985996993
+[PROMPT]      把当前仓库顶层目录和文件列出来，简单分组就行
+[TASK]        61a235e5-5cc0-4d1a-9391-8d2f1cdf10ed
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] **顶层目录和文件（按类型分组）** 📁 **目录** - .github - ci - cmd - docs - hack - pkg - scripts - site - test - vendor 📄 **文件** - .dockerignore - .editorconfig - .gitignore - .pre-commit-config.yaml - CONTRIBUTING.md - Dockerfile - LICEN...(truncated)
+
+============================================================
+[CASE]        4
+[SOURCE_LINE] 9
+[NAME]        act_hidden_files
+[CHAT]        1985996994
+[PROMPT]      看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+[TASK]        f53a8406-79c6-44c4-87cb-91ca3f5a4185
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+  [text] 当前结果未通过最终校验，我先不返回可能不可靠的成功答复。请补充更明确的信息，或让我重新执行相关步骤。
+
+============================================================
+[CASE]        5
+[SOURCE_LINE] 10
+[NAME]        act_read_readme_head
+[CHAT]        1985996995
+[PROMPT]      扫一眼 README 前 20 行，再提炼成 3 句话
+[TASK]        cc5fe0bf-cab6-4228-a738-ab0b07b1db38
+  [status] <none> -> running
+  [status] running -> failed
+[RESULT]
+  [final] status=failed
+  [error] step 1 failed (skill(system_basic)): read file failed: No such file or directory (os error 2)
+  [text] step 1 failed (skill(system_basic)): read file failed: No such file or directory (os error 2)
+
+============================================================
+[CASE]        6
+[SOURCE_LINE] 11
+[NAME]        chat_act_compare_sizes
+[CHAT]        1985996996
+[PROMPT]      比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+[TASK]        39a692c9-f829-40e3-ac1a-ed6b1582da8f
+  [status] <none> -> queued
+  [status] queued -> running
+  [status] running -> succeeded
+[RESULT]
+  [final] status=succeeded
+  [text] 请确认是否在 /home/guagua/git_upload 目录下比较 Cargo.toml 和 Cargo.lock？
+
+============================================================
+[CASE]        7
+[SOURCE_LINE] 12
+[NAME]        missing_file_graceful
+[CHAT]        1985996997
+[PROMPT]      把 definitely_missing_named_file_rustclaw_001.txt 发给我
+[TASK]        bec01880-5afc-4964-880a-28fc2aa949a4
+  [status] <none> -> running

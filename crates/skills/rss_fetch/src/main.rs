@@ -1658,12 +1658,12 @@ mod tests {
     }
 
     #[test]
-    fn registry_prompt_file_rss_fetch_md_exists() {
+    fn generated_skill_prompt_body_rss_fetch_md_exists() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let p = repo.join("prompts/vendors/default/skills/rss_fetch.md");
+        let p = repo.join("prompts/layers/generated/skills/rss_fetch.md");
         assert!(
             p.is_file(),
-            "skills_registry prompt_file should exist: {}",
+            "generated skill prompt body should exist: {}",
             p.display()
         );
     }

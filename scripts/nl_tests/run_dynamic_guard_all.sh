@@ -5,13 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SEMANTIC_EVAL_SCRIPT="${SCRIPT_DIR}/evaluate_dynamic_guard_semantic.py"
 
-MANUAL_CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_dynamic_guard_manual_20260327.txt"
+MANUAL_CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_dynamic_guard_manual.txt"
 MANUAL_LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/dynamic_guard_manual"
 
-CLARIFY_CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_dynamic_guard_clarify_20260327.txt"
+CLARIFY_CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_dynamic_guard_clarify.txt"
 CLARIFY_LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/dynamic_guard_clarify"
 
-CONTEXT_CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_dynamic_guard_context_20260327.txt"
+CONTEXT_CASE_FILE="${SCRIPT_DIR}/cases/nl_cases_dynamic_guard_context.txt"
 CONTEXT_LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/dynamic_guard_context"
 
 RAW_BASE_CHAT_ID="${CHAT_ID:-$(date +%s)}"

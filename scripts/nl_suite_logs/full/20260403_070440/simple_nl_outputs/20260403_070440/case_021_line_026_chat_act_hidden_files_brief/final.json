@@ -1,0 +1,1 @@
+{"ok":true,"data":{"task_id":"877eb004-c39d-4c1e-9603-dd9e473698d3","status":"timeout","result_json":{"progress_messages":["I18N:telegram.progress.skill_completed:{\"skill\":\"list_dir\"}"]},"error_text":"auto timeout: no progress heartbeat for 1200s while status=running"},"error":null}

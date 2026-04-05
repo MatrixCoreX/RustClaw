@@ -1,1 +1,0 @@
-{"ok":true,"data":{"task_id":"4e2cb93d-e992-4cca-87de-b67d6be74661","status":"succeeded","result_json":{"messages":["这是一个用于NL回归测试工件和包装脚本的测试工作区目录，说明runner输入和日志可以存放在此，而被测试的clawd运行时仍使用自己配置的工作区根目录。"],"text":"这是一个用于NL回归测试工件和包装脚本的测试工作区目录，说明runner输入和日志可以存放在此，而被测试的clawd运行时仍使用自己配置的工作区根目录。"},"error_text":null},"error":null}

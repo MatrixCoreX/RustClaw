@@ -1,0 +1,7 @@
+index=10
+case_name=clarify_deictic_db_schema_version_again
+chat_id=17752372491
+turn1_task_id=65c95f68-af61-4f67-bd12-e3793fb66883
+turn1_prompt=看看那个 sqlite 的 schema version 是多少
+turn2_task_id=987c5cb6-cde9-4330-a057-0348d75adeb1
+turn2_prompt=/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
