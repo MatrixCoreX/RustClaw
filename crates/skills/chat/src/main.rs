@@ -32,6 +32,7 @@ struct ChatInput {
     style: String,
     text: String,
     system_prompt: String,
+    persona_prompt: Option<String>,
     prompt_source: String,
     memory_context: Option<String>,
     recent_execution_context: Option<String>,
@@ -133,12 +134,20 @@ fn parse_input(args: Value) -> Result<ChatInput, String> {
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let persona_prompt = map
+        .get("persona_prompt")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string);
     let prompt_source = if explicit_system_prompt.is_some() {
         "inline_system_prompt".to_string()
     } else {
         prompt_source
     };
-    let system_prompt = explicit_system_prompt.unwrap_or(default_system);
+    let base_system_prompt = explicit_system_prompt.unwrap_or(default_system);
+    let system_prompt =
+        compose_system_prompt(persona_prompt.as_deref(), base_system_prompt.as_str());
     let memory_context = map
         .get("_memory")
         .and_then(|v| v.as_object())
@@ -173,6 +182,7 @@ fn parse_input(args: Value) -> Result<ChatInput, String> {
         style,
         text,
         system_prompt,
+        persona_prompt,
         prompt_source,
         memory_context,
         recent_execution_context,
@@ -284,11 +294,23 @@ async fn run_chat(input: ChatInput) -> Result<(String, Value), String> {
             "prompt_source": input.prompt_source,
             "model": model,
             "style": input.style,
+            "persona_attached": input.persona_prompt.is_some(),
             "memory_attached": input.memory_context.is_some(),
             "lang_hint": input.lang_hint.unwrap_or_default()
         }
     });
     Ok((text, extra))
+}
+
+fn compose_system_prompt(persona_prompt: Option<&str>, base_system_prompt: &str) -> String {
+    let Some(persona_prompt) = persona_prompt.map(str::trim).filter(|s| !s.is_empty()) else {
+        return base_system_prompt.trim().to_string();
+    };
+    format!(
+        "Persona:\n{}\n\nAdditional chat-skill rules:\n{}",
+        persona_prompt,
+        base_system_prompt.trim()
+    )
 }
 
 fn strip_think_blocks(raw: &str) -> String {
