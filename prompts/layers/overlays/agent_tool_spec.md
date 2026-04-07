@@ -88,6 +88,33 @@ Skill behavior notes (file/path):
   - `instruction`
 - optional: `image`, `mask`, `output_path`
 
+### photo_organize
+- use this skill when the user wants to sort, classify, archive, or整理照片 / 相片 / 图片文件 based on camera metadata / EXIF / 相机型号.
+- action:
+  - `prepare`: list external drive / USB candidate paths and ask for a concrete directory
+  - `organize`: analyze or execute organization for a concrete `source_dir`
+- required by action:
+  - `prepare`: no required args
+  - `organize`: explicit `source_dir`, or a natural-language request that clearly includes a concrete path
+- optional for `organize`:
+  - `mode` (`plan|copy|move`, default `plan`)
+  - `output_dir`
+  - `group_by` (`brand|model|lens|focal_length|year_month`, string or ordered array)
+  - `capture_month` (`YYYY-MM`)
+  - `selected_brands|brands` (string or array, e.g. `Canon|Sony`)
+  - `include_subdirs`
+  - `preview_limit`
+  - `locale|lang|language` (for example `zh-CN`, `en-US`)
+  - natural-language input via `text|prompt|input|instruction|query`, or even raw string `args`
+- planner guidance:
+  - if the user has **not** provided a concrete directory path, call `photo_organize` without `source_dir` (or with `action="prepare"`) first; this skill must ask for the directory and must show detected external-drive paths before asking.
+  - never invent or silently default a photo directory for this skill.
+  - default to `mode="plan"` unless the user clearly asks to actually copy or move files.
+  - use `mode="move"` only when the user explicitly accepts moving original files; otherwise prefer `plan` or `copy`.
+  - this skill organizes by `品牌/机型/镜头/焦段/年月`; use it not only for camera-brand grouping but also when the user mentions lens or focal-length based sorting.
+  - product-like expressions such as `把佳能和索尼分开整理`、`只整理这个月拍的`、`先按镜头分组，再按年月` should map to structured `group_by` / `capture_month` intent instead of being treated as vague chat.
+  - expressions like `只整理佳能/索尼，其他品牌不动` should map to `selected_brands=["Canon","Sony"]`.
+
 ### crypto
 - action:
   - market/info: `quote|get_price|multi_quote|get_multi_price|get_book_ticker|binance_symbol_check|normalize_symbol|healthcheck|candles|indicator|price_alert_check|onchain`
