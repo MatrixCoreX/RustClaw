@@ -8,6 +8,7 @@
 # 说明:
 # - 本脚本在本机编译，兼容 macOS 和 Ubuntu。
 # - 编译产物来自 target/aarch64-unknown-linux-gnu/release/，上传时会放到远端 target/release/。
+# - `all` 模式默认会先同步技能文档、构建 UI/dist，再交叉编译整个 workspace 并上传。
 # - `dir` 模式会把指定目录完整同步到远端，并额外附带 RustClaw 运行/测试常用依赖文件。
 # - `dir` 模式可结合环境变量:
 #     BUILD_CMD='cargo build -p clawd --release --target aarch64-unknown-linux-gnu'
@@ -28,8 +29,8 @@ if [[ -f "${HOME}/.cargo/env" ]]; then
 	source "${HOME}/.cargo/env"
 fi
 
-DEFAULT_REMOTE_USER="${REMOTE_USER:-testuser}"
-DEFAULT_REMOTE_HOST="${REMOTE_HOST:-192.168.31.162}"
+DEFAULT_REMOTE_USER="${REMOTE_USER:-pi}"
+DEFAULT_REMOTE_HOST="${REMOTE_HOST:-192.168.31.243}"
 DEFAULT_REMOTE_SSH_KEY="${REMOTE_SSH_KEY:-}"
 
 REMOTE_USER="${DEFAULT_REMOTE_USER}"
@@ -43,6 +44,8 @@ SYNC_DELETE="${SYNC_DELETE:-0}"
 SKIP_UI_DIST="${SKIP_UI_DIST:-0}"
 INCLUDE_RUNTIME_BASE="${INCLUDE_RUNTIME_BASE:-1}"
 AUTO_INCLUDE_WORKSPACE_DEPS="${AUTO_INCLUDE_WORKSPACE_DEPS:-1}"
+SYNC_SKILL_DOCS_BEFORE_BUILD="${SYNC_SKILL_DOCS_BEFORE_BUILD:-1}"
+BUILD_UI_DIST_BEFORE_UPLOAD="${BUILD_UI_DIST_BEFORE_UPLOAD:-1}"
 
 MODE=""
 ARG2=""
@@ -50,18 +53,15 @@ ARG2=""
 SSH_OPTS=()
 RSYNC_SSH="ssh"
 RSYNC_PROGRESS_OPTS=()
-if [[ "${SHOW_RSYNC_PROGRESS}" != "0" ]]; then
-	RSYNC_PROGRESS_OPTS=(--info=progress2 --human-readable)
-fi
 
 LOCAL_TARGET_RELEASE_DIR="${SCRIPT_DIR}/target/${TARGET}/${BUILD_PROFILE}"
 STAGE_ROOT=""
-RUSTCLAW_CARGO_METADATA=""
+RUSTCLAW_CARGO_METADATA_FILE=""
 HOST_OS="$(detect_host_os || printf '%s' "unknown")"
 HOST_ARCH="$(detect_host_arch || printf '%s' "unknown")"
 
 log() {
-	echo "[$(date '+%F %T')] $*"
+	echo "[$(date '+%F %T')] $*" >&2
 }
 
 warn() {
@@ -73,6 +73,33 @@ die() {
 	exit 1
 }
 
+log_list() {
+	local label="$1"
+	shift || true
+	local -a items=("$@")
+	local item
+	if [[ "${#items[@]}" -eq 0 ]]; then
+		log "${label}: 无"
+		return 0
+	fi
+	log "${label} (${#items[@]}):"
+	for item in "${items[@]}"; do
+		echo "  - ${item}" >&2
+	done
+}
+
+log_phase() {
+	local title="$1"
+	log "========== ${title} =========="
+}
+
+cleanup_temp_artifacts() {
+	[[ -n "${STAGE_ROOT}" && -d "${STAGE_ROOT}" ]] && rm -rf "${STAGE_ROOT}"
+	[[ -n "${RUSTCLAW_CARGO_METADATA_FILE}" && -f "${RUSTCLAW_CARGO_METADATA_FILE}" ]] && rm -f "${RUSTCLAW_CARGO_METADATA_FILE}"
+}
+
+trap cleanup_temp_artifacts EXIT
+
 abs_path() {
 	resolve_path_python "$1"
 }
@@ -80,6 +107,32 @@ abs_path() {
 require_command() {
 	local cmd="$1"
 	command -v "$cmd" >/dev/null 2>&1 || die "缺少命令: $cmd"
+}
+
+configure_rsync_progress_opts() {
+	RSYNC_PROGRESS_OPTS=()
+	if [[ "${SHOW_RSYNC_PROGRESS}" == "0" ]]; then
+		return 0
+	fi
+
+	if rsync --version 2>/dev/null | python3 - <<'PY'
+import re
+import sys
+
+text = sys.stdin.read()
+match = re.search(r"rsync\s+version\s+(\d+)\.(\d+)", text)
+if not match:
+    raise SystemExit(1)
+major = int(match.group(1))
+minor = int(match.group(2))
+raise SystemExit(0 if (major, minor) >= (3, 1) else 1)
+PY
+	then
+		RSYNC_PROGRESS_OPTS=(--info=progress2 --human-readable)
+	else
+		RSYNC_PROGRESS_OPTS=(--progress)
+		warn "检测到较老版本 rsync，进度显示已降级为 --progress"
+	fi
 }
 
 usage() {
@@ -101,16 +154,18 @@ usage() {
 常用环境变量:
   REMOTE_USER/REMOTE_HOST/REMOTE_SSH_KEY/REMOTE_DIR
   BUILD_CMD               dir 模式下，本机额外执行的构建命令
-  BINARIES                需一并上传到远端 target/release 的二进制，空格分隔
-  EXTRA_INCLUDE_PATHS     额外上传的 repo 相对路径，空格分隔
+  BINARIES                需一并上传到远端 target/release 的二进制，支持空格/换行与 shell 引号
+  EXTRA_INCLUDE_PATHS     额外上传的 repo 相对路径，支持空格/换行与 shell 引号
+  SYNC_SKILL_DOCS_BEFORE_BUILD=0  all 模式下关闭技能文档同步
+  BUILD_UI_DIST_BEFORE_UPLOAD=0   all 模式下关闭 UI/dist 构建
   SHOW_RSYNC_PROGRESS=0   关闭 rsync 进度
   SYNC_DELETE=1           上传时对远端执行 rsync --delete
-  SKIP_UI_DIST=1          不上传 UI/dist
+  SKIP_UI_DIST=1          不构建也不上传 UI/dist
 
 示例:
-  $0 --user pi --host 192.168.31.50 --remote-dir /home/pi/rustclaw_runtime all
-  $0 --user pi --host 192.168.31.50 crate clawd
-  BUILD_CMD='cargo build -p clawd --release --target ${TARGET}' BINARIES='clawd' $0 --host 192.168.31.50 dir crates/clawd
+  $0 all
+  $0 crate clawd
+  BUILD_CMD='cargo build -p clawd --release --target ${TARGET}' BINARIES='clawd' $0 dir crates/clawd
 EOF
 	exit "$exit_code"
 }
@@ -159,7 +214,7 @@ parse_args() {
 
 	[[ -n "${MODE}" ]] || MODE="all"
 	if [[ -z "${REMOTE_DIR}" ]]; then
-		REMOTE_DIR="/home/${REMOTE_USER}/rustclaw_runtime"
+		REMOTE_DIR="/home/${REMOTE_USER}/rustclaw"
 	fi
 }
 
@@ -180,6 +235,13 @@ ensure_cargo() {
 		source "${HOME}/.cargo/env"
 	fi
 	command -v cargo >/dev/null 2>&1 || die "cargo 安装失败，请手动执行: source \$HOME/.cargo/env"
+}
+
+ensure_npm() {
+	if command -v npm >/dev/null 2>&1; then
+		return 0
+	fi
+	die "未检测到 npm，请先安装 Node.js/npm，或设置 BUILD_UI_DIST_BEFORE_UPLOAD=0 / SKIP_UI_DIST=1"
 }
 
 ensure_rust_target() {
@@ -251,6 +313,41 @@ ensure_local_cross_dependencies() {
 	esac
 }
 
+prepare_runtime_assets() {
+	log_phase "1/6 准备运行资源"
+
+	if [[ "${MODE}" != "all" ]]; then
+		log "当前模式不是 all，跳过完整运行资源准备"
+		return 0
+	fi
+
+	if [[ "${SYNC_SKILL_DOCS_BEFORE_BUILD}" == "1" ]]; then
+		log "同步技能文档: scripts/sync_skill_docs.py"
+		python3 "${SCRIPT_DIR}/scripts/sync_skill_docs.py"
+	else
+		log "已按配置跳过技能文档同步"
+	fi
+
+	if [[ "${SKIP_UI_DIST}" == "1" ]]; then
+		log "已按配置跳过 UI/dist 构建与上传"
+		return 0
+	fi
+
+	if [[ "${BUILD_UI_DIST_BEFORE_UPLOAD}" != "1" ]]; then
+		log "已按配置跳过 UI/dist 构建，将直接使用现有产物"
+		return 0
+	fi
+
+	if [[ ! -d "${SCRIPT_DIR}/UI" ]]; then
+		warn "UI 目录不存在，已跳过 UI/dist 构建"
+		return 0
+	fi
+
+	ensure_npm
+	log "构建 UI/dist: build-ui-nginx.sh --build"
+	bash "${SCRIPT_DIR}/build-ui-nginx.sh" --build
+}
+
 detect_cross_gcc() {
 	local gcc_path toolchain_prefix
 
@@ -273,6 +370,7 @@ detect_cross_gcc() {
 setup_cross_env() {
 	local cross_gcc cross_bin_dir cross_bin_prefix gcc_include_dir gcc_sysroot target_include_dir extra_args
 	cross_gcc="$(detect_cross_gcc)" || die "未找到 aarch64 交叉编译 gcc，请先安装依赖"
+	log "交叉编译工具链: ${cross_gcc}"
 
 	export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${cross_gcc}"
 	export CC_aarch64_unknown_linux_gnu="${cross_gcc}"
@@ -308,23 +406,29 @@ setup_cross_env() {
 		fi
 		export BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu="${extra_args}"
 	fi
+
+	log "交叉编译环境已设置: host=${HOST_OS}/${HOST_ARCH}, target=${TARGET}, profile=${BUILD_PROFILE}"
+	log "本地产物目录: ${LOCAL_TARGET_RELEASE_DIR}"
 }
 
 load_cargo_metadata() {
-	if [[ -n "${RUSTCLAW_CARGO_METADATA}" ]]; then
+	if [[ -n "${RUSTCLAW_CARGO_METADATA_FILE}" && -f "${RUSTCLAW_CARGO_METADATA_FILE}" ]]; then
 		return 0
 	fi
-	RUSTCLAW_CARGO_METADATA="$(cargo metadata --format-version 1)"
-	export RUSTCLAW_CARGO_METADATA
+	mkdir -p "${SCRIPT_DIR}/target"
+	RUSTCLAW_CARGO_METADATA_FILE="$(mktemp "${SCRIPT_DIR}/target/local-cross-build-cargo-metadata.XXXXXX")"
+	log "生成 cargo metadata 缓存: ${RUSTCLAW_CARGO_METADATA_FILE}"
+	cargo metadata --format-version 1 > "${RUSTCLAW_CARGO_METADATA_FILE}"
 }
 
 workspace_bins_raw() {
 	load_cargo_metadata
-	python3 - <<'PY'
+	RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" python3 - <<'PY'
 import json
 import os
 
-data = json.loads(os.environ["RUSTCLAW_CARGO_METADATA"])
+with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
+    data = json.load(f)
 workspace_members = set(data.get("workspace_members", []))
 bins = set()
 
@@ -345,13 +449,14 @@ PY
 package_bins_raw() {
 	local package_name="$1"
 	load_cargo_metadata
-	PACKAGE_NAME="$package_name" python3 - <<'PY'
+	PACKAGE_NAME="$package_name" RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" python3 - <<'PY'
 import json
 import os
 import sys
 
 package_name = os.environ["PACKAGE_NAME"]
-data = json.loads(os.environ["RUSTCLAW_CARGO_METADATA"])
+with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
+    data = json.load(f)
 workspace_members = set(data.get("workspace_members", []))
 
 for pkg in data.get("packages", []):
@@ -377,7 +482,7 @@ PY
 package_workspace_dirs_raw() {
 	local package_name="$1"
 	load_cargo_metadata
-	PACKAGE_NAME="$package_name" REPO_ROOT="${SCRIPT_DIR}" python3 - <<'PY'
+	PACKAGE_NAME="$package_name" REPO_ROOT="${SCRIPT_DIR}" RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" python3 - <<'PY'
 import json
 import os
 import sys
@@ -385,7 +490,8 @@ from pathlib import Path
 
 package_name = os.environ["PACKAGE_NAME"]
 repo_root = Path(os.environ["REPO_ROOT"]).resolve()
-data = json.loads(os.environ["RUSTCLAW_CARGO_METADATA"])
+with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
+    data = json.load(f)
 
 workspace_members = set(data.get("workspace_members", []))
 packages = {pkg["id"]: pkg for pkg in data.get("packages", [])}
@@ -435,7 +541,7 @@ PY
 package_name_for_dir() {
 	local repo_rel_dir="$1"
 	load_cargo_metadata
-	DIR_REL="$repo_rel_dir" REPO_ROOT="${SCRIPT_DIR}" python3 - <<'PY'
+	DIR_REL="$repo_rel_dir" REPO_ROOT="${SCRIPT_DIR}" RUSTCLAW_CARGO_METADATA_FILE="${RUSTCLAW_CARGO_METADATA_FILE}" python3 - <<'PY'
 import json
 import os
 import sys
@@ -443,7 +549,8 @@ from pathlib import Path
 
 repo_root = Path(os.environ["REPO_ROOT"]).resolve()
 target_dir = (repo_root / os.environ["DIR_REL"]).resolve()
-data = json.loads(os.environ["RUSTCLAW_CARGO_METADATA"])
+with open(os.environ["RUSTCLAW_CARGO_METADATA_FILE"], "r", encoding="utf-8") as f:
+    data = json.load(f)
 workspace_members = set(data.get("workspace_members", []))
 
 best_name = ""
@@ -478,16 +585,38 @@ copy_repo_rel_into_stage() {
 
 	dest_parent="${STAGE_ROOT}/RustClaw/$(dirname "${repo_rel}")"
 	mkdir -p "${dest_parent}"
+	log "加入 staging: ${repo_rel}"
 	rsync -a "${src}" "${dest_parent}/"
 }
 
-copy_space_separated_paths() {
+split_shell_words_raw() {
 	local raw="${1:-}"
-	local path
-	for path in ${raw}; do
+	[[ -n "${raw}" ]] || return 0
+	LIST_RAW="${raw}" python3 - <<'PY'
+import os
+import shlex
+import sys
+
+raw = os.environ.get("LIST_RAW", "")
+try:
+    items = shlex.split(raw, posix=True)
+except ValueError as exc:
+    print(f"列表解析失败: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+for item in items:
+    print(item)
+PY
+}
+
+copy_list_paths() {
+	local raw="${1:-}"
+	local paths_raw path
+	paths_raw="$(split_shell_words_raw "${raw}")"
+	while IFS= read -r path; do
 		[[ -n "${path}" ]] || continue
 		copy_repo_rel_into_stage "${path}"
-	done
+	done <<< "${paths_raw}"
 }
 
 ensure_repo_relative_dir() {
@@ -505,6 +634,7 @@ copy_binaries_into_stage() {
 	local -a binaries=("$@")
 	local bin
 	if [[ "${#binaries[@]}" -eq 0 ]]; then
+		log "无需附带二进制"
 		return 0
 	fi
 
@@ -512,14 +642,15 @@ copy_binaries_into_stage() {
 	for bin in "${binaries[@]}"; do
 		[[ -n "${bin}" ]] || continue
 		[[ -x "${LOCAL_TARGET_RELEASE_DIR}/${bin}" ]] || die "缺少交叉编译产物: ${LOCAL_TARGET_RELEASE_DIR}/${bin}"
+		log "加入二进制: ${bin}"
 		rsync -a "${LOCAL_TARGET_RELEASE_DIR}/${bin}" "${STAGE_ROOT}/RustClaw/target/release/${bin}"
 	done
 }
 
 prepare_stage_root() {
 	STAGE_ROOT="$(mktemp -d)"
-	trap '[[ -n "${STAGE_ROOT}" ]] && rm -rf "${STAGE_ROOT}"' EXIT
 	mkdir -p "${STAGE_ROOT}/RustClaw"
+	log "创建 staging 目录: ${STAGE_ROOT}"
 }
 
 copy_runtime_base_paths() {
@@ -537,6 +668,7 @@ copy_runtime_base_paths() {
 		"USAGE.md"
 		"rustclaw"
 		"build-all.sh"
+		"deploy-pi-nginx.sh"
 		"install-rustclaw-cmd.sh"
 		"start-all.sh"
 		"start-all-bin.sh"
@@ -552,9 +684,11 @@ copy_runtime_base_paths() {
 	local path
 
 	if [[ "${INCLUDE_RUNTIME_BASE}" != "1" ]]; then
+		log "已跳过运行基础文件集"
 		return 0
 	fi
 
+	log "加入运行基础文件集"
 	for path in "${paths[@]}"; do
 		copy_repo_rel_into_stage "${path}"
 	done
@@ -565,6 +699,8 @@ copy_runtime_base_paths() {
 		else
 			warn "UI/dist 不存在，已跳过前端构建产物"
 		fi
+	else
+		log "已按配置跳过 UI/dist"
 	fi
 }
 
@@ -573,6 +709,8 @@ sync_stage_to_remote() {
 	if [[ "${SYNC_DELETE}" == "1" ]]; then
 		rsync_delete_opt=(--delete)
 	fi
+
+	log_phase "5/6 上传到远端"
 
 	log "确保远端目录存在: ${REMOTE_DIR}"
 	remote_exec "mkdir -p $(printf '%q' "${REMOTE_DIR}")"
@@ -584,6 +722,7 @@ sync_stage_to_remote() {
 		"${STAGE_ROOT}/RustClaw/" \
 		"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 
+	log_phase "6/6 远端检查"
 	log "远端目录大小:"
 	remote_exec "du -sh $(printf '%q' "${REMOTE_DIR}") 2>/dev/null || true"
 	log "远端 target/release 内容:"
@@ -603,17 +742,27 @@ main() {
 	RSYNC_SSH="ssh"
 	if [[ -n "${REMOTE_SSH_KEY}" ]]; then
 		SSH_OPTS=(-i "${REMOTE_SSH_KEY}")
-		RSYNC_SSH="ssh -i ${REMOTE_SSH_KEY}"
+		printf -v RSYNC_SSH 'ssh -i %q' "${REMOTE_SSH_KEY}"
 	fi
-	RSYNC_PROGRESS_OPTS=()
-	if [[ "${SHOW_RSYNC_PROGRESS}" != "0" ]]; then
-		RSYNC_PROGRESS_OPTS=(--info=progress2 --human-readable)
+	configure_rsync_progress_opts
+
+	log_phase "0/6 任务概览"
+	log "部署参数: mode=${MODE}, host=${REMOTE_USER}@${REMOTE_HOST}, remote_dir=${REMOTE_DIR}"
+	log "构建参数: target=${TARGET}, profile=${BUILD_PROFILE}, host_os=${HOST_OS}, host_arch=${HOST_ARCH}"
+	log "上传选项: include_runtime_base=${INCLUDE_RUNTIME_BASE}, auto_include_workspace_deps=${AUTO_INCLUDE_WORKSPACE_DEPS}, skip_ui_dist=${SKIP_UI_DIST}, sync_delete=${SYNC_DELETE}"
+	log "完整部署选项: sync_skill_docs_before_build=${SYNC_SKILL_DOCS_BEFORE_BUILD}, build_ui_dist_before_upload=${BUILD_UI_DIST_BEFORE_UPLOAD}"
+	if [[ -n "${REMOTE_SSH_KEY}" ]]; then
+		log "SSH 私钥: ${REMOTE_SSH_KEY}"
 	fi
+
+	prepare_runtime_assets
 
 	case "${MODE}" in
 	all)
+		log_phase "2/6 检查依赖与环境"
 		ensure_local_cross_dependencies
 		setup_cross_env
+		log_phase "3/6 执行构建"
 		log "本机交叉编译整个 workspace (${TARGET})..."
 		cargo build --workspace --release --target "${TARGET}"
 		bins_raw="$(workspace_bins_raw)"
@@ -622,8 +771,10 @@ main() {
 	crate)
 		[[ -n "${ARG2}" ]] || die "crate 模式必须指定 package 名"
 		package_name="${ARG2}"
+		log_phase "2/6 检查依赖与环境"
 		ensure_local_cross_dependencies
 		setup_cross_env
+		log_phase "3/6 执行构建"
 		log "本机交叉编译 package: ${package_name} (${TARGET})..."
 		cargo build -p "${package_name}" --release --target "${TARGET}"
 		bins_raw="$(package_bins_raw "${package_name}")"
@@ -640,8 +791,10 @@ main() {
 
 		build_cmd="${BUILD_CMD:-}"
 		if [[ -n "${build_cmd}" ]]; then
+			log_phase "2/6 检查依赖与环境"
 			ensure_local_cross_dependencies
 			setup_cross_env
+			log_phase "3/6 执行构建"
 			log "执行本机构建命令: ${build_cmd}"
 			(
 				cd "${SCRIPT_DIR}"
@@ -650,13 +803,14 @@ main() {
 		fi
 
 		if [[ -n "${BINARIES:-}" ]]; then
-			binaries_raw="$(printf '%s\n' ${BINARIES})"
+			binaries_raw="$(split_shell_words_raw "${BINARIES}")"
 			array_from_string_lines binaries "${binaries_raw}"
 		fi
 
 		if [[ "${AUTO_INCLUDE_WORKSPACE_DEPS}" == "1" ]]; then
 			package_from_dir="$(package_name_for_dir "${repo_rel_dir}")"
 			if [[ -n "${package_from_dir}" ]]; then
+				log "dir 模式自动识别 package: ${package_from_dir}"
 				dep_dirs_raw="$(package_workspace_dirs_raw "${package_from_dir}")"
 				array_from_string_lines dep_dirs "${dep_dirs_raw}"
 			fi
@@ -667,6 +821,16 @@ main() {
 		;;
 	esac
 
+	log_list "待上传二进制" "${binaries[@]}"
+	log_list "自动附带的 workspace 目录" "${dep_dirs[@]}"
+	if [[ -n "${repo_rel_dir}" ]]; then
+		log "显式上传目录: ${repo_rel_dir}"
+	fi
+	if [[ -n "${EXTRA_INCLUDE_PATHS:-}" ]]; then
+		log "额外附带路径: ${EXTRA_INCLUDE_PATHS}"
+	fi
+
+	log_phase "4/6 打包 staging"
 	prepare_stage_root
 	copy_runtime_base_paths
 
@@ -680,7 +844,7 @@ main() {
 	done
 
 	if [[ -n "${EXTRA_INCLUDE_PATHS:-}" ]]; then
-		copy_space_separated_paths "${EXTRA_INCLUDE_PATHS}"
+		copy_list_paths "${EXTRA_INCLUDE_PATHS}"
 	fi
 
 	copy_binaries_into_stage "${binaries[@]}"
