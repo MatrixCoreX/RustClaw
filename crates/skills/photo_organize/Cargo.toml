@@ -1,0 +1,17 @@
+[package]
+name = "photo-organize-skill"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "photo-organize-skill"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono = "0.4.44"
+kamadak-exif = "0.6.1"
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true

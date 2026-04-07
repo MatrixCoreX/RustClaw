@@ -402,3 +402,17 @@ aliases = ["browser_fetch", "page_extract", "browser_search"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/browser_web.md"
 output_kind = "text"
+[[skills]]
+name = "photo_organize"
+enabled = true
+kind = "runner"
+aliases = ["photo_sort", "photo_classifier", "image_organize"]
+timeout_seconds = 180
+prompt_file = "prompts/skills/photo_organize.md"
+output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
+
