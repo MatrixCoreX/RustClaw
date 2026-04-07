@@ -27,6 +27,9 @@ Rules:
 - When such delivery marker lines are present, prefer exact passthrough of the user-ready observed output over rewriting, summarizing, translating, reordering, or polishing it.
 - Never delete, merge, rename, paraphrase, or rewrite delivery marker lines.
 - If the user requested comparison, summary, explanation, grouping, yes/no plus examples, or one-sentence conclusion, do that directly from the observed outputs.
+- If the user requested a summary, review, conclusion, recap, analysis, or similar synthesis, you may add concise suggestions or next steps only when they are logically supported by the observed outputs.
+- Keep observed facts and model suggestions clearly separated in wording. Do not present a suggestion, recommendation, or next step as if it were an observed fact.
+- Suggestions must stay conservative and grounded. Prefer 1-3 concise, practical suggestions over broad speculative advice, and omit suggestions entirely when the evidence is too weak.
 - If the user requested a scalar-only answer, return only that scalar value in `answer`.
 - A top-level repository listing can be enough to give a brief project explanation when it clearly shows stable entry files such as README, docs, crates, UI, configs, or similarly descriptive root entries. Do not ask for README again if that listing already grounds a concise answer.
 - A directory listing can be enough to both list entries and give one short purpose summary of that directory from the observed filenames alone. Do not reopen execution just because no separate `respond` step happened.
@@ -69,3 +72,4 @@ Keep only language-specific nuances here; keep general rules in the main prompt 
 -->
 ### zh-CN
 - 中文场景里如果观察结果已经是可直接发给用户的成品文案，并且带有 `BUTTON:`、`FILE:` 等投递标记，优先原样透传，不要为了“更顺口”而改写掉这些标记行。
+- 如果用户要的是“总结 + 建议”或“复盘 + 下一步建议”，可以先给基于观察结果的事实总结，再补 1 到 3 条简短建议；但建议必须明确是建议，不能写成已经观测到的事实。

@@ -66,6 +66,34 @@ pub(crate) fn canonical_skill_name(name: &str) -> &str {
     }
 }
 
+fn inject_skill_persona_context(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_name: &str,
+    args: Value,
+) -> Value {
+    if canonical_skill_name(skill_name) != "chat" {
+        return args;
+    }
+    let mut obj = match args {
+        Value::Object(map) => map,
+        other => return other,
+    };
+    if obj.contains_key("persona_prompt") {
+        return Value::Object(obj);
+    }
+    let persona_prompt = state.task_persona_prompt(task);
+    let trimmed = persona_prompt.trim();
+    if trimmed.is_empty() {
+        return Value::Object(obj);
+    }
+    obj.insert(
+        "persona_prompt".to_string(),
+        Value::String(trimmed.to_string()),
+    );
+    Value::Object(obj)
+}
+
 pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
     matches!(
         name,
@@ -168,6 +196,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
         .await
         .map_err(|err| format!("skill semaphore closed: {err}"))?;
 
+    let args = inject_skill_persona_context(state, task, &skill_name, args);
     let args = inject_skill_memory_context(state, task, &skill_name, args);
     let args = ensure_default_output_dir_for_skill_args(&state.workspace_root, &skill_name, args);
     let source = match task_runtime_channel(state, task) {
