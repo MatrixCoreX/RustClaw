@@ -2,6 +2,7 @@ const fs = require('fs/promises');
 const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 
 const PAGE_TIMEOUT_MS = 45000;
 const SEARCH_SETTLE_MS = 2000;
@@ -11,7 +12,6 @@ const VALID_WAIT_UNTIL = new Set(['domcontentloaded', 'load', 'networkidle']);
 const DEFAULT_MIN_CONTENT_CHARS = 200;
 const DEFAULT_MAX_TEXT_CHARS = 12000;
 const DEFAULT_WAIT_MAP_PATH = path.join(process.cwd(), 'configs', 'browser_web_wait_map.json');
-const DEFAULT_SYSTEM_CHROMIUM_PATHS = ['/usr/bin/chromium', '/usr/bin/chromium-browser'];
 const DEFAULT_CAPTURE_ROOT = path.join(process.cwd(), 'skills_output');
 const DEFAULT_SCREENSHOT_ROOT = path.join(process.cwd(), 'skills_output', 'browser_web', 'screenshots');
 const DEFAULT_CHUNK_CHARS = 3000;
@@ -425,7 +425,11 @@ async function createBrowserContext() {
 }
 
 function chooseChromiumExecutablePath() {
-    for (const p of DEFAULT_SYSTEM_CHROMIUM_PATHS) {
+    const envOverride = process.env.BROWSER_WEB_CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+    if (envOverride && fsSync.existsSync(envOverride)) {
+        return envOverride;
+    }
+    for (const p of chromiumExecutableCandidates()) {
         if (fsSync.existsSync(p)) {
             return p;
         }
@@ -433,7 +437,64 @@ function chooseChromiumExecutablePath() {
     return null;
 }
 
+function chromiumExecutableCandidates() {
+    const homeDir = process.env.HOME || '';
+    const candidates = [
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/opt/homebrew/bin/chromium',
+        '/opt/homebrew/bin/chromium-browser',
+        '/opt/homebrew/bin/google-chrome',
+        '/usr/local/bin/chromium',
+        '/usr/local/bin/chromium-browser',
+        '/usr/local/bin/google-chrome',
+        '/snap/bin/chromium',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+        path.join(homeDir, 'Applications', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+        path.join(homeDir, 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'),
+        path.join(homeDir, 'Applications', 'Microsoft Edge.app', 'Contents', 'MacOS', 'Microsoft Edge'),
+        path.join(homeDir, 'Applications', 'Brave Browser.app', 'Contents', 'MacOS', 'Brave Browser'),
+    ];
+    const commandCandidates = [
+        'chromium',
+        'chromium-browser',
+        'google-chrome',
+        'google-chrome-stable',
+        'chrome',
+        'msedge',
+        'microsoft-edge',
+        'brave-browser',
+    ];
+    for (const command of commandCandidates) {
+        try {
+            const resolved = execFileSync('sh', ['-lc', `command -v ${command} 2>/dev/null`], {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore'],
+            }).trim();
+            if (resolved) {
+                candidates.push(resolved);
+            }
+        } catch {
+            // Ignore missing commands and continue through the candidate chain.
+        }
+    }
+    return [...new Set(candidates.filter(Boolean))];
+}
+
 async function readRuntimeRestrictionSignals() {
+    if (process.platform !== 'linux') {
+        return {
+            platform: process.platform,
+            no_new_privs: null,
+            seccomp: null,
+            restricted: false,
+        };
+    }
     try {
         const content = await fs.readFile('/proc/self/status', 'utf8');
         const noNewPrivs = /NoNewPrivs:\s*(\d+)/.exec(content);
@@ -442,12 +503,14 @@ async function readRuntimeRestrictionSignals() {
         const seccompValue = seccomp ? Number(seccomp[1]) : null;
         const restricted = noNewPrivsValue === 1 && seccompValue === 2;
         return {
+            platform: process.platform,
             no_new_privs: noNewPrivsValue,
             seccomp: seccompValue,
             restricted,
         };
     } catch {
         return {
+            platform: process.platform,
             no_new_privs: null,
             seccomp: null,
             restricted: false,

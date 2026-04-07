@@ -11,7 +11,10 @@ FORCE_BUILD=0
 DO_BUILD=0
 USE_USER_DIR=0
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
-OS_NAME="$(uname -s)"
+HOST_OS="$(detect_host_os || printf '%s' "unknown")"
+HOST_ARCH="$(detect_host_arch || printf '%s' "unknown")"
+REQUESTED_TARGET="host"
+HOST_RUST_TARGET="$(host_rust_target 2>/dev/null || true)"
 # 默认部署 UI 到 nginx：配置 nginx、复制 UI、重启 nginx；--no-deploy-ui 可跳过
 DEPLOY_UI_NGINX=""
 # --pi-app：配置 Pi App 桌面快捷方式 + 开机自启（小屏）
@@ -19,38 +22,23 @@ CONFIGURE_PI_APP=0
 
 # 无构建模式优先使用 Git 跟踪的 release-bin；若本地刚构建，则回退到 target/release
 TRACKED_RELEASE_DIR="$SCRIPT_DIR/release-bin"
-BUILD_RELEASE_DIR="$SCRIPT_DIR/target/release"
 REQUIRED_BIN_NAME="clawd"
 # 交叉编译拉回路径（与 cross-build-upload.sh 一致）
 CROSS_TARGET="${RUSTCLAW_CROSS_TARGET:-aarch64-unknown-linux-gnu}"
-CROSS_RELEASE="$SCRIPT_DIR/target/$CROSS_TARGET/release"
 
 default_nginx_root() {
-  if [[ "$OS_NAME" == "Darwin" ]]; then
-    if command -v brew >/dev/null 2>&1; then
-      local brew_prefix
-      brew_prefix="$(brew --prefix 2>/dev/null || true)"
-      if [[ -n "$brew_prefix" ]]; then
-        printf '%s\n' "$brew_prefix/var/www/rustclaw"
-        return
-      fi
-    fi
-    if [[ -d "/opt/homebrew/var/www" ]]; then
-      printf '%s\n' "/opt/homebrew/var/www/rustclaw"
-      return
-    fi
-    if [[ -d "/usr/local/var/www" ]]; then
-      printf '%s\n' "/usr/local/var/www/rustclaw"
-      return
-    fi
+  if [[ "$HOST_OS" == "macos" ]]; then
+    printf '%s\n' "$HOME/.rustclaw/nginx-ui"
+    return
   fi
   printf '%s\n' "/var/www/html/rustclaw"
 }
 
 DEPLOY_UI_NGINX="$(default_nginx_root)"
+NGINX_SITE_LINK=""
 
 nginx_conf_path() {
-  if [[ "$OS_NAME" == "Darwin" ]]; then
+  if [[ "$HOST_OS" == "macos" ]]; then
     local brew_prefix=""
     if command -v brew >/dev/null 2>&1; then
       brew_prefix="$(brew --prefix 2>/dev/null || true)"
@@ -68,11 +56,49 @@ nginx_conf_path() {
       return
     fi
   fi
+  if [[ -d "/etc/nginx/sites-available" ]]; then
+    printf '%s\n' "/etc/nginx/sites-available/rustclaw-ui.conf"
+    return
+  fi
   printf '%s\n' "/etc/nginx/conf.d/rustclaw-ui.conf"
+}
+
+nginx_main_conf_path() {
+  if [[ "$HOST_OS" == "macos" ]]; then
+    local brew_prefix=""
+    if command -v brew >/dev/null 2>&1; then
+      brew_prefix="$(brew --prefix 2>/dev/null || true)"
+    fi
+    if [[ -n "$brew_prefix" ]]; then
+      printf '%s\n' "$brew_prefix/etc/nginx/nginx.conf"
+      return
+    fi
+    if [[ -f "/opt/homebrew/etc/nginx/nginx.conf" ]]; then
+      printf '%s\n' "/opt/homebrew/etc/nginx/nginx.conf"
+      return
+    fi
+    if [[ -f "/usr/local/etc/nginx/nginx.conf" ]]; then
+      printf '%s\n' "/usr/local/etc/nginx/nginx.conf"
+      return
+    fi
+  fi
+  printf '%s\n' "/etc/nginx/nginx.conf"
+}
+
+nginx_site_link_path() {
+  local conf_path="$1"
+  if [[ "$HOST_OS" == "macos" ]]; then
+    return 0
+  fi
+  if [[ "$conf_path" == /etc/nginx/sites-available/* ]] && [[ -d "/etc/nginx/sites-enabled" ]]; then
+    printf '%s\n' "/etc/nginx/sites-enabled/$(basename "$conf_path")"
+  fi
 }
 
 NGINX_CONF="$(nginx_conf_path)"
 NGINX_CONF_DIR="$(dirname "$NGINX_CONF")"
+NGINX_MAIN_CONF="$(nginx_main_conf_path)"
+NGINX_SITE_LINK="$(nginx_site_link_path "$NGINX_CONF" || true)"
 
 usage() {
   cat <<'EOF'
@@ -82,6 +108,7 @@ Usage:
 Options:
   --build          Install deps and build if needed, then install launcher
   --force-build    Force rebuild before install (implies --build)
+  --target TARGET  Build/install target triple, or use 'host' (default)
   --user           Install to ~/.local/bin (no sudo)
   --dir <path>     Install to custom directory
   --deploy-ui-nginx [path]   Deploy UI to path (default: auto-detect per OS), configure nginx, reload nginx
@@ -90,8 +117,12 @@ Options:
   -h, --help       Show this help
 
 Default: install launcher and deploy UI to nginx (config nginx, copy UI, reload nginx). Default path is auto-detected per OS. Use --no-deploy-ui to skip UI/nginx.
-No build unless --build/--force-build; requires release-bin/clawd or target/release/clawd to exist.
+No build unless --build/--force-build; host builds use target/release/clawd, explicit cross targets use target/<target>/release/clawd, then fall back to release-bin/clawd.
 Use --build or --force-build when building from source.
+Build summary:
+  host platform   -> auto-detected from current machine
+  selected target -> host by default
+  primary output  -> target/release for host, target/<target>/release for explicit cross target
 
 Verify after install:
   command -v rustclaw
@@ -113,6 +144,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --build)
       DO_BUILD=1
+      ;;
+    --target)
+      shift
+      if [[ $# -lt 1 ]]; then
+        echo "Missing value for --target"
+        exit 1
+      fi
+      REQUESTED_TARGET="$1"
       ;;
     --user)
       USE_USER_DIR=1
@@ -154,6 +193,13 @@ while [[ $# -gt 0 ]]; do
   esac
   [[ $# -gt 0 ]] && shift
 done
+
+INSTALL_TARGET="$(resolve_requested_target "$REQUESTED_TARGET")"
+BUILD_RELEASE_DIR="$(preferred_release_dir_for_target "$SCRIPT_DIR" "$INSTALL_TARGET")"
+HOST_BUILD_RELEASE_DIR="$(preferred_release_dir_for_target "$SCRIPT_DIR" "$HOST_RUST_TARGET")"
+FALLBACK_RELEASE_DIR="$(target_release_dir "$SCRIPT_DIR" "")"
+CROSS_RELEASE="$(target_release_dir "$SCRIPT_DIR" "$CROSS_TARGET")"
+PACKAGE_FLAVOR="$(package_flavor_for_target "$INSTALL_TARGET" 2>/dev/null || printf '%s' "$INSTALL_TARGET")"
 
 LINK_PATH="$INSTALL_DIR/rustclaw"
 
@@ -206,6 +252,20 @@ ensure_npm() {
   echo "Node.js/npm ready."
 }
 
+path_writable_or_creatable() {
+  local target="$1"
+  if [[ -e "$target" ]]; then
+    [[ -w "$target" ]]
+    return
+  fi
+  local parent
+  parent="$(dirname "$target")"
+  while [[ ! -e "$parent" && "$parent" != "/" ]]; do
+    parent="$(dirname "$parent")"
+  done
+  [[ -w "$parent" ]]
+}
+
 # ----- 确保 nginx 已安装并启动（用于 --deploy-ui-nginx） -----
 ensure_nginx() {
   if command -v nginx >/dev/null 2>&1; then
@@ -217,6 +277,12 @@ ensure_nginx() {
     brew install nginx
   elif command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update -qq && sudo apt-get install -y nginx
+  elif command -v zypper >/dev/null 2>&1; then
+    sudo zypper --non-interactive install nginx
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm nginx
+  elif command -v apk >/dev/null 2>&1; then
+    sudo apk add nginx
   elif command -v dnf >/dev/null 2>&1; then
     sudo dnf install -y nginx
   elif command -v yum >/dev/null 2>&1; then
@@ -231,23 +297,52 @@ ensure_nginx() {
     exit 1
   fi
 
-  if command -v systemctl >/dev/null 2>&1; then
+  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files >/dev/null 2>&1; then
     sudo systemctl enable nginx >/dev/null 2>&1 || true
     sudo systemctl start nginx >/dev/null 2>&1 || true
-  elif [[ "$OS_NAME" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
+  elif command -v service >/dev/null 2>&1; then
+    sudo service nginx start >/dev/null 2>&1 || true
+  elif command -v rc-service >/dev/null 2>&1; then
+    sudo rc-service nginx start >/dev/null 2>&1 || true
+  elif [[ "$HOST_OS" == "macos" ]] && command -v brew >/dev/null 2>&1; then
     brew services start nginx >/dev/null 2>&1 || true
   fi
   echo "nginx is installed."
 }
 
 reload_nginx() {
-  if command -v systemctl >/dev/null 2>&1; then
+  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files >/dev/null 2>&1; then
+    sudo nginx -t
     sudo systemctl reload nginx
     echo "Nginx config OK and reloaded via systemctl."
     return
   fi
 
-  if [[ "$OS_NAME" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
+  if command -v service >/dev/null 2>&1; then
+    sudo nginx -t
+    if sudo service nginx reload >/dev/null 2>&1; then
+      echo "Nginx config OK and reloaded via service."
+      return
+    fi
+    if sudo service nginx restart >/dev/null 2>&1; then
+      echo "Nginx config OK and restarted via service."
+      return
+    fi
+  fi
+
+  if command -v rc-service >/dev/null 2>&1; then
+    sudo nginx -t
+    if sudo rc-service nginx reload >/dev/null 2>&1; then
+      echo "Nginx config OK and reloaded via rc-service."
+      return
+    fi
+    if sudo rc-service nginx restart >/dev/null 2>&1; then
+      echo "Nginx config OK and restarted via rc-service."
+      return
+    fi
+  fi
+
+  if [[ "$HOST_OS" == "macos" ]] && command -v brew >/dev/null 2>&1; then
     if nginx -t >/dev/null 2>&1; then
       brew services restart nginx >/dev/null 2>&1
       echo "Nginx config OK and restarted via brew services."
@@ -271,21 +366,166 @@ reload_nginx() {
 }
 
 resolve_release_dir() {
-  if [[ -x "$TRACKED_RELEASE_DIR/$REQUIRED_BIN_NAME" ]]; then
-    printf '%s\n' "$TRACKED_RELEASE_DIR"
-    return
-  fi
+  local candidate
+  for candidate in "$BUILD_RELEASE_DIR" "$HOST_BUILD_RELEASE_DIR" "$FALLBACK_RELEASE_DIR" "$TRACKED_RELEASE_DIR"; do
+    if [[ -x "$candidate/$REQUIRED_BIN_NAME" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
   printf '%s\n' "$BUILD_RELEASE_DIR"
 }
 
 nginx_ui_config_matches() {
   local conf_path="$1"
   local ui_root="$2"
+  local proxy_upstream="$3"
   [[ -f "$conf_path" ]] || return 1
   grep -Fq "root $ui_root;" "$conf_path" || return 1
+  grep -Fq "location ^~ /v1/" "$conf_path" || return 1
+  grep -Fq "location ^~ /webd/" "$conf_path" || return 1
+  grep -Fq "proxy_pass $proxy_upstream;" "$conf_path" || return 1
   grep -Fq "try_files \$uri \$uri/ /index.html;" "$conf_path" || return 1
   grep -qE "listen[[:space:]]+.*80[[:space:]]*(default_server)?;" "$conf_path" || return 1
   return 0
+}
+
+resolve_webd_proxy_upstream() {
+  python3 - "$SCRIPT_DIR/configs/channels/webd.toml" <<'PY'
+import sys
+from pathlib import Path
+
+default_upstream = "http://127.0.0.1:8788"
+config_path = Path(sys.argv[1])
+if not config_path.exists():
+    print(default_upstream)
+    raise SystemExit
+
+try:
+    import tomllib  # py311+
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        print(default_upstream)
+        raise SystemExit
+
+try:
+    data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+except Exception:
+    print(default_upstream)
+    raise SystemExit
+
+listen = str((data.get("webd") or {}).get("listen") or "0.0.0.0:8788").strip()
+if not listen:
+    print(default_upstream)
+    raise SystemExit
+
+host = ""
+port = ""
+if listen.startswith("[") and "]:" in listen:
+    host, port = listen[1:].split("]:", 1)
+else:
+    host, sep, port = listen.rpartition(":")
+    if not sep:
+        print(default_upstream)
+        raise SystemExit
+
+host = host.strip() or "127.0.0.1"
+port = port.strip() or "8788"
+if host in {"0.0.0.0", "*"}:
+    host = "127.0.0.1"
+elif host == "::":
+    host = "::1"
+
+if ":" in host and not host.startswith("["):
+    host = f"[{host}]"
+
+print(f"http://{host}:{port}")
+PY
+}
+
+ensure_nginx_site_include() {
+  local main_conf="$1"
+  local include_dir="$2"
+  local include_line="    include ${include_dir}/*.conf;"
+  [[ -f "$main_conf" ]] || return 0
+  if grep -Fq "$include_line" "$main_conf"; then
+    return 0
+  fi
+  if [[ -w "$main_conf" ]]; then
+    python3 - "$main_conf" "$include_line" <<'PY'
+from pathlib import Path
+import sys
+
+conf_path = Path(sys.argv[1])
+include_line = sys.argv[2]
+text = conf_path.read_text(encoding="utf-8")
+if include_line in text:
+    raise SystemExit(0)
+needle = "http {"
+idx = text.find(needle)
+if idx < 0:
+    raise SystemExit("nginx.conf missing `http {` block")
+insert_at = text.find("\n", idx)
+if insert_at < 0:
+    raise SystemExit("nginx.conf malformed after `http {`")
+updated = text[: insert_at + 1] + include_line + "\n" + text[insert_at + 1 :]
+conf_path.write_text(updated, encoding="utf-8")
+PY
+  else
+    local tmp_file
+    tmp_file="$(mktemp)"
+    python3 - "$main_conf" "$include_line" "$tmp_file" <<'PY'
+from pathlib import Path
+import sys
+
+conf_path = Path(sys.argv[1])
+include_line = sys.argv[2]
+tmp_path = Path(sys.argv[3])
+text = conf_path.read_text(encoding="utf-8")
+if include_line in text:
+    tmp_path.write_text(text, encoding="utf-8")
+    raise SystemExit(0)
+needle = "http {"
+idx = text.find(needle)
+if idx < 0:
+    raise SystemExit("nginx.conf missing `http {` block")
+insert_at = text.find("\n", idx)
+if insert_at < 0:
+    raise SystemExit("nginx.conf malformed after `http {`")
+updated = text[: insert_at + 1] + include_line + "\n" + text[insert_at + 1 :]
+tmp_path.write_text(updated, encoding="utf-8")
+PY
+    sudo cp "$tmp_file" "$main_conf"
+    rm -f "$tmp_file"
+  fi
+  echo "Ensured nginx include in $main_conf: $include_line"
+}
+
+ensure_nginx_site_link() {
+  local conf_path="$1"
+  local site_link="$2"
+  [[ -n "$site_link" ]] || return 0
+  if [[ -L "$site_link" ]]; then
+    local current_target=""
+    current_target="$(readlink "$site_link" 2>/dev/null || true)"
+    if [[ "$current_target" == "$conf_path" ]]; then
+      return 0
+    fi
+  elif [[ -e "$site_link" ]]; then
+    echo "Refusing to overwrite existing nginx site entry: $site_link"
+    exit 1
+  fi
+
+  if path_writable_or_creatable "$site_link"; then
+    mkdir -p "$(dirname "$site_link")"
+    ln -sfn "$conf_path" "$site_link"
+  else
+    sudo mkdir -p "$(dirname "$site_link")"
+    sudo ln -sfn "$conf_path" "$site_link"
+  fi
+  echo "Ensured nginx site link: $site_link -> $conf_path"
 }
 
 # 判断是否需要构建 release（源码更新或二进制缺失/过期）
@@ -301,7 +541,7 @@ need_release_build() {
     return
   fi
   local need
-  need="$(python3 - "$SCRIPT_DIR" "$force" <<'PY'
+  need="$(python3 - "$SCRIPT_DIR" "$force" "$INSTALL_TARGET" "$HOST_RUST_TARGET" <<'PY'
 import json
 import os
 import subprocess
@@ -310,7 +550,12 @@ from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
 mode = sys.argv[2].strip().lower()
-release_dir = root / "target" / "release"
+install_target = sys.argv[3].strip()
+host_target = sys.argv[4].strip()
+if not install_target or install_target == host_target:
+    release_dir = root / "target" / "release"
+else:
+    release_dir = root / "target" / install_target / "release"
 
 def latest_source_mtime(base: Path) -> float:
     latest = 0.0
@@ -383,13 +628,16 @@ else:
     print("0")
 PY
   )"
-  echo "$need"
+  printf '%s\n' "$need"
 }
 
 # 仅构建 release：UI（若有）+ cargo build --workspace --release，不调用其他脚本
 do_release_build() {
   [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
   ensure_cargo
+  if [[ "$INSTALL_TARGET" != "$HOST_RUST_TARGET" ]] && command -v rustup >/dev/null 2>&1; then
+    rustup target add "$INSTALL_TARGET" >/dev/null 2>&1 || true
+  fi
   if [[ -d "$SCRIPT_DIR/UI" ]]; then
     ensure_npm
     if [[ ! -d "$SCRIPT_DIR/UI/node_modules" ]]; then
@@ -399,8 +647,12 @@ do_release_build() {
     echo "Building UI assets..."
     (cd "$SCRIPT_DIR/UI" && npm run build)
   fi
-  echo "Building workspace (release)..."
-  (cd "$SCRIPT_DIR" && cargo build --workspace --release)
+  echo "Building workspace (release, target=$INSTALL_TARGET, output=$BUILD_RELEASE_DIR)..."
+  if [[ "$INSTALL_TARGET" == "$HOST_RUST_TARGET" ]]; then
+    (cd "$SCRIPT_DIR" && cargo build --workspace --release)
+  else
+    (cd "$SCRIPT_DIR" && cargo build --workspace --release --target "$INSTALL_TARGET")
+  fi
   if [[ ! -x "$BUILD_RELEASE_DIR/clawd" ]]; then
     echo "Build finished but $BUILD_RELEASE_DIR/clawd missing."
     exit 1
@@ -431,6 +683,11 @@ if [[ ! -f "$TARGET" ]]; then
   exit 1
 fi
 
+echo "Host platform: ${HOST_OS}/${HOST_ARCH} ${HOST_RUST_TARGET:+($HOST_RUST_TARGET)}"
+echo "Selected target: $INSTALL_TARGET"
+echo "Primary output: $BUILD_RELEASE_DIR"
+echo "Flavor tag: $PACKAGE_FLAVOR"
+
 SELECTED_RELEASE_DIR="$(resolve_release_dir)"
 REQUIRED_BIN="$SELECTED_RELEASE_DIR/$REQUIRED_BIN_NAME"
 
@@ -441,7 +698,7 @@ if [[ "$DO_BUILD" == "1" ]]; then
     ensure_build ""
   fi
 else
-  if [[ ! -f "$REQUIRED_BIN" ]]; then
+  if [[ "$INSTALL_TARGET" != "$HOST_RUST_TARGET" ]] && [[ ! -f "$REQUIRED_BIN" ]]; then
     if [[ -x "$CROSS_RELEASE/clawd" ]]; then
       echo "Using cross-compiled binaries from $CROSS_RELEASE"
       mkdir -p "$BUILD_RELEASE_DIR"
@@ -456,7 +713,7 @@ else
   fi
   if [[ ! -f "$REQUIRED_BIN" ]]; then
     echo "Error: binary not found: $REQUIRED_BIN"
-    echo "Copy your built clawd into release-bin/ or target/release/, or run with --build to build from source."
+    echo "Copy your built clawd into $BUILD_RELEASE_DIR/ or release-bin/, or run with --build to build from source."
     echo "To track release executables in git, run: bash scripts/sync-release-bin.sh"
     echo "Cross path checked: $CROSS_RELEASE/clawd (set RUSTCLAW_CROSS_TARGET if different)."
     exit 1
@@ -578,7 +835,7 @@ if [[ -n "$DEPLOY_UI_NGINX" ]]; then
     echo "Error: UI build failed (UI/dist missing)."
     exit 1
   fi
-  if [[ -w "$DEPLOY_UI_NGINX" ]]; then
+  if path_writable_or_creatable "$DEPLOY_UI_NGINX"; then
     mkdir -p "$DEPLOY_UI_NGINX"
     cp -R "$SCRIPT_DIR/UI/dist/." "$DEPLOY_UI_NGINX/"
     echo "Copied UI to $DEPLOY_UI_NGINX (no sudo)."
@@ -588,19 +845,39 @@ if [[ -n "$DEPLOY_UI_NGINX" ]]; then
     echo "Copied UI to $DEPLOY_UI_NGINX (sudo)."
   fi
   ensure_nginx
+  ensure_nginx_site_include "$NGINX_MAIN_CONF" "$NGINX_CONF_DIR"
+  PROXY_UPSTREAM="$(resolve_webd_proxy_upstream)"
   NGINX_CONFIG_CHANGED=0
-  if nginx_ui_config_matches "$NGINX_CONF" "$DEPLOY_UI_NGINX"; then
+  if nginx_ui_config_matches "$NGINX_CONF" "$DEPLOY_UI_NGINX" "$PROXY_UPSTREAM"; then
     echo "Nginx config already up-to-date, skip configure: $NGINX_CONF"
-  elif [[ -w "$NGINX_CONF_DIR" ]]; then
+  elif path_writable_or_creatable "$NGINX_CONF_DIR"; then
     mkdir -p "$NGINX_CONF_DIR"
     cat > "$NGINX_CONF" << NGX
-# RustClaw UI 仅静态托管，root 指向部署目录；API 地址在 UI 中填写。
-# default_server 使本虚拟主机处理 80 端口所有未匹配请求；不用 server_name _ 避免与其它配置冲突。
+# RustClaw UI: 静态资源由 nginx 托管，/v1 与 /webd 反代到 webd。
 server {
     listen 0.0.0.0:80 default_server;
     listen [::]:80 default_server;
     root $DEPLOY_UI_NGINX;
     index index.html;
+
+    location ^~ /v1/ {
+        proxy_pass $PROXY_UPSTREAM;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location ^~ /webd/ {
+        proxy_pass $PROXY_UPSTREAM;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
     location / {
         try_files \$uri \$uri/ /index.html;
     }
@@ -611,13 +888,31 @@ NGX
   else
     sudo mkdir -p "$NGINX_CONF_DIR"
     sudo tee "$NGINX_CONF" >/dev/null << NGX
-# RustClaw UI 仅静态托管，root 指向部署目录；API 地址在 UI 中填写。
-# default_server 使本虚拟主机处理 80 端口所有未匹配请求；不用 server_name _ 避免与其它配置冲突。
+# RustClaw UI: 静态资源由 nginx 托管，/v1 与 /webd 反代到 webd。
 server {
     listen 0.0.0.0:80 default_server;
     listen [::]:80 default_server;
     root $DEPLOY_UI_NGINX;
     index index.html;
+
+    location ^~ /v1/ {
+        proxy_pass $PROXY_UPSTREAM;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location ^~ /webd/ {
+        proxy_pass $PROXY_UPSTREAM;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
     location / {
         try_files \$uri \$uri/ /index.html;
     }
@@ -626,8 +921,9 @@ NGX
     echo "Wrote nginx config: $NGINX_CONF (sudo)."
     NGINX_CONFIG_CHANGED=1
   fi
+  ensure_nginx_site_link "$NGINX_CONF" "$NGINX_SITE_LINK"
   # 禁用 nginx 自带默认页，否则 80 端口会优先显示 default 页面
-  if [[ "$OS_NAME" != "Darwin" ]] && { [[ -f /etc/nginx/sites-enabled/default ]] || [[ -L /etc/nginx/sites-enabled/default ]]; }; then
+  if [[ "$HOST_OS" != "macos" ]] && { [[ -f /etc/nginx/sites-enabled/default ]] || [[ -L /etc/nginx/sites-enabled/default ]]; }; then
     if [[ -w /etc/nginx/sites-enabled ]]; then
       rm -f /etc/nginx/sites-enabled/default
       echo "Disabled nginx default site: removed /etc/nginx/sites-enabled/default"
@@ -639,9 +935,9 @@ NGX
   fi
   if [[ "$NGINX_CONFIG_CHANGED" == "1" ]]; then
     reload_nginx
-    echo "若外网用 IP 无法访问，请检查：1) 防火墙放行 80 端口（如 sudo ufw allow 80）；2) 云安全组/入站规则放行 80。"
+    echo "If the server cannot be reached via its public IP, check: 1) firewall rules allow port 80 (for example: sudo ufw allow 80); 2) cloud security group / inbound rules allow port 80."
   else
     echo "Skip nginx reload (no config changes)."
   fi
-  echo "UI 仅静态；用户在页面中填写 clawd 公网地址访问 API。"
+  echo "UI and API are now unified on nginx port 80. Open http://<host-ip>/ directly."
 fi

@@ -2,6 +2,7 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::cmp::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -78,12 +79,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(30)
                 .min(200);
-            run_command(
-                "ps",
-                &["-eo", "pid,ppid,%cpu,%mem,comm", "--sort=-%cpu"],
-                Some(limit as usize + 1),
-            )
-            .map(|text| {
+            run_ps_snapshot(limit as usize).map(|text| {
                 (
                     text.clone(),
                     json!({"action":"ps","exit_code":0,"limit":limit,"output":text}),
@@ -91,8 +87,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             })
         }
         "port_list" => run_command("ss", &["-ltnp"], None)
-            .or_else(|_| run_command("netstat", &["-ltnp"], None))
-            .or_else(|_| run_command("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"], None))
+            .or_else(|_| run_port_list_snapshot())
             .map(|text| {
                 (
                     text.clone(),
@@ -161,6 +156,87 @@ fn run_command(bin: &str, args: &[&str], limit_lines: Option<usize>) -> Result<S
     } else {
         Err(format!("process command failed: exit={exit_code}\n{text}"))
     }
+}
+
+fn run_ps_snapshot(limit: usize) -> Result<String, String> {
+    let output = Command::new("ps")
+        .args(["-Ao", "pid=,ppid=,pcpu=,pmem=,comm="])
+        .output()
+        .map_err(|err| format!("run ps failed: {err}"))?;
+
+    let stderr_text = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        return Err(format!(
+            "process command failed: exit={}\n{}",
+            output.status.code().unwrap_or(-1),
+            stderr_text
+        ));
+    }
+
+    let stdout_text = String::from_utf8_lossy(&output.stdout);
+    let mut rows = stdout_text
+        .lines()
+        .filter_map(parse_ps_row)
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| {
+        b.cpu
+            .partial_cmp(&a.cpu)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.pid.cmp(&b.pid))
+    });
+
+    let mut lines = vec!["PID PPID %CPU %MEM COMM".to_string()];
+    for row in rows.into_iter().take(limit) {
+        lines.push(format!(
+            "{} {} {:.1} {:.1} {}",
+            row.pid, row.ppid, row.cpu, row.mem, row.comm
+        ));
+    }
+    Ok(format!(
+        "exit={}\n{}",
+        output.status.code().unwrap_or(0),
+        lines.join("\n")
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn run_port_list_snapshot() -> Result<String, String> {
+    run_command("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"], None)
+        .or_else(|_| run_command("netstat", &["-anv", "-p", "tcp"], None))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn run_port_list_snapshot() -> Result<String, String> {
+    run_command("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"], None)
+        .or_else(|_| run_command("netstat", &["-ltnp"], None))
+}
+
+#[derive(Debug)]
+struct PsRow {
+    pid: i64,
+    ppid: i64,
+    cpu: f64,
+    mem: f64,
+    comm: String,
+}
+
+fn parse_ps_row(line: &str) -> Option<PsRow> {
+    let mut parts = line.split_whitespace();
+    let pid = parts.next()?.parse::<i64>().ok()?;
+    let ppid = parts.next()?.parse::<i64>().ok()?;
+    let cpu = parts.next()?.parse::<f64>().ok()?;
+    let mem = parts.next()?.parse::<f64>().ok()?;
+    let comm = parts.collect::<Vec<_>>().join(" ");
+    if comm.is_empty() {
+        return None;
+    }
+    Some(PsRow {
+        pid,
+        ppid,
+        cpu,
+        mem,
+        comm,
+    })
 }
 
 fn format_command_output(stdout: &[u8], stderr: &[u8]) -> String {

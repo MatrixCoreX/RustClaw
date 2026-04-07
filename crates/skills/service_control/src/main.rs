@@ -1,6 +1,6 @@
 //! service_control skill: unified, safe, structured service lifecycle control.
 //! Supports: status, start, stop, restart, reload, logs, verify, diagnose.
-//! Managers: rustclaw (HTTP), systemd, service; others return unimplemented.
+//! Managers: rustclaw (HTTP), systemd, service, brew services, launchd.
 
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
@@ -34,6 +34,8 @@ const ALLOWED_ACTIONS: &[&str] = &[
 ];
 
 const MANAGER_TYPES: &[&str] = &[
+    "brew_services",
+    "launchd",
     "systemd",
     "service",
     "docker_compose",
@@ -202,19 +204,74 @@ pub(crate) fn discover_service_candidates(target: &str) -> Vec<String> {
     out_vec
 }
 
+fn discover_brew_service_candidates(target: &str) -> Vec<String> {
+    let target = target.trim().to_lowercase();
+    if target.is_empty() {
+        return Vec::new();
+    }
+    let Some(entries) = brew_services_list() else {
+        return Vec::new();
+    };
+    rank_candidate_names(
+        entries.into_iter().map(|entry| entry.name).collect(),
+        &target,
+    )
+}
+
+fn discover_launchd_candidates(target: &str) -> Vec<String> {
+    let target = target.trim().to_lowercase();
+    if target.is_empty() {
+        return Vec::new();
+    }
+    let Some(entries) = launchctl_list() else {
+        return Vec::new();
+    };
+    rank_candidate_names(
+        entries.into_iter().map(|entry| entry.label).collect(),
+        &target,
+    )
+}
+
 /// Merge systemd + service candidates, dedup, preserve order (exact > prefix > contains), limit.
 fn discover_all_candidates(normalized_target: &str) -> Vec<String> {
+    let brew = discover_brew_service_candidates(normalized_target);
+    let launchd = discover_launchd_candidates(normalized_target);
     let sys = discover_systemd_candidates(normalized_target);
     let svc = discover_service_candidates(normalized_target);
     let mut seen = std::collections::HashSet::new();
     let mut merged = Vec::new();
-    for name in sys.into_iter().chain(svc) {
+    for name in brew.into_iter().chain(launchd).chain(sys).chain(svc) {
         if seen.insert(name.clone()) {
             merged.push(name);
         }
     }
     merged.truncate(DISCOVER_CANDIDATES_MAX);
     merged
+}
+
+fn rank_candidate_names(names: Vec<String>, target: &str) -> Vec<String> {
+    let mut exact = Vec::new();
+    let mut prefix = Vec::new();
+    let mut contains = Vec::new();
+    for name in names {
+        let name_lower = name.to_lowercase();
+        if name_lower == target {
+            exact.push(name);
+        } else if name_lower.starts_with(target) || target.starts_with(&name_lower) {
+            prefix.push(name);
+        } else if name_lower.contains(target) {
+            contains.push(name);
+        }
+    }
+    exact.sort();
+    prefix.sort();
+    contains.sort();
+    let mut out = Vec::new();
+    out.extend(exact);
+    out.extend(prefix);
+    out.extend(contains);
+    out.truncate(DISCOVER_CANDIDATES_MAX);
+    out
 }
 
 fn command_output_text(outp: &std::process::Output) -> String {
@@ -252,6 +309,15 @@ fn looks_like_permission_error(message: &str) -> bool {
     ]
     .iter()
     .any(|k| m.contains(k))
+}
+
+fn command_exists(bin: &str) -> bool {
+    Command::new("sh")
+        .arg("-lc")
+        .arg(format!("command -v {bin} >/dev/null 2>&1"))
+        .status()
+        .ok()
+        .is_some_and(|status| status.success())
 }
 
 /// Safe unit/target name: alphanumeric, dot, dash, underscore, @ (for systemd units).
@@ -426,10 +492,16 @@ impl OutputContract {
 
 // ---------- Manager detection ----------
 
-/// Lightweight probe: try systemctl then service for a safe target. Returns None on any failure.
+/// Lightweight probe across common Linux/macOS managers.
 fn detect_manager_for_target(target: &str) -> Option<&'static str> {
     if !is_safe_target(target) {
         return None;
+    }
+    if brew_service_entry(target).is_some() {
+        return Some("brew_services");
+    }
+    if launchctl_entry(target).is_some() {
+        return Some("launchd");
     }
     // Try systemctl is-active (read-only)
     if let Ok(cmd_out) = Command::new("systemctl")
@@ -453,6 +525,9 @@ fn detect_manager_for_target(target: &str) -> Option<&'static str> {
         if out.status.code().is_some() {
             return Some("service");
         }
+    }
+    if process_count_for_target(target) > 0 {
+        return Some("process_only");
     }
     None
 }
@@ -639,6 +714,7 @@ fn execute(
             if candidates.is_empty() {
                 let mut out = OutputContract::default();
                 out.service_name = t.to_string();
+                out.manager_type = "unknown".to_string();
                 out.requested_action = input.action.clone();
                 out.fail("no matching service found for the given target");
                 out.next_step = "Provide a more specific service name, or confirm the service exists on this host.".to_string();
@@ -647,6 +723,7 @@ fn execute(
             if candidates.len() > 1 {
                 let mut out = OutputContract::default();
                 out.service_name = t.to_string();
+                out.manager_type = "unknown".to_string();
                 out.requested_action = input.action.clone();
                 out.fail("ambiguous: multiple matching services");
                 out.next_step = format!(
@@ -832,6 +909,170 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
+#[derive(Debug, Clone)]
+struct BrewServiceEntry {
+    name: String,
+    status: String,
+    user: String,
+    file: String,
+}
+
+fn brew_services_list() -> Option<Vec<BrewServiceEntry>> {
+    if !command_exists("brew") {
+        return None;
+    }
+    let output = Command::new("brew").args(["services", "list"]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut entries = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        if idx == 0
+            && line.to_lowercase().contains("name")
+            && line.to_lowercase().contains("status")
+        {
+            continue;
+        }
+        let cols = line.split_whitespace().collect::<Vec<_>>();
+        if cols.len() < 2 {
+            continue;
+        }
+        entries.push(BrewServiceEntry {
+            name: cols[0].to_string(),
+            status: cols[1].to_string(),
+            user: cols.get(2).copied().unwrap_or("").to_string(),
+            file: cols.get(3).copied().unwrap_or("").to_string(),
+        });
+    }
+    Some(entries)
+}
+
+fn brew_service_entry(target: &str) -> Option<BrewServiceEntry> {
+    let normalized = normalize_target_alias(target);
+    brew_services_list()?.into_iter().find(|entry| {
+        let name = entry.name.to_lowercase();
+        name == normalized || normalize_target_alias(&entry.name) == normalized
+    })
+}
+
+#[derive(Debug, Clone)]
+struct LaunchdEntry {
+    pid: Option<i64>,
+    status_code: Option<i64>,
+    label: String,
+}
+
+fn launchctl_list() -> Option<Vec<LaunchdEntry>> {
+    if !command_exists("launchctl") {
+        return None;
+    }
+    let output = Command::new("launchctl").arg("list").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut entries = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("PID") {
+            continue;
+        }
+        let cols = trimmed.split_whitespace().collect::<Vec<_>>();
+        if cols.len() < 3 {
+            continue;
+        }
+        let label = cols[cols.len() - 1].to_string();
+        let status_code = cols
+            .get(cols.len() - 2)
+            .and_then(|v| v.parse::<i64>().ok());
+        let pid = cols
+            .first()
+            .and_then(|v| if *v == "-" { None } else { v.parse::<i64>().ok() });
+        entries.push(LaunchdEntry {
+            pid,
+            status_code,
+            label,
+        });
+    }
+    Some(entries)
+}
+
+fn launchctl_entry(target: &str) -> Option<LaunchdEntry> {
+    let normalized = normalize_target_alias(target);
+    launchctl_list()?.into_iter().find(|entry| {
+        let label = entry.label.to_lowercase();
+        label == normalized
+            || normalize_target_alias(&entry.label) == normalized
+            || label.ends_with(&format!(".{}", normalized))
+            || label.contains(&normalized)
+    })
+}
+
+fn process_count_for_target(target: &str) -> usize {
+    let output = Command::new("ps").args(["-ax", "-o", "command="]).output();
+    let Ok(output) = output else {
+        return 0;
+    };
+    let Ok(text) = String::from_utf8(output.stdout) else {
+        return 0;
+    };
+    let normalized = normalize_target_alias(target);
+    text.lines()
+        .filter(|line| {
+            let lower = line.to_lowercase();
+            lower.contains(&normalized)
+                || lower.contains(target)
+                || lower.contains(&normalized.replace('_', "-"))
+        })
+        .count()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_log_excerpt(target: &str, tail_lines: usize) -> Option<String> {
+    if !command_exists("log") {
+        return None;
+    }
+    let predicate = format!(
+        "process == \"{target}\" OR eventMessage CONTAINS[c] \"{target}\" OR senderImagePath CONTAINS[c] \"{target}\""
+    );
+    let output = Command::new("log")
+        .args([
+            "show",
+            "--style",
+            "compact",
+            "--last",
+            "15m",
+            "--predicate",
+            &predicate,
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let recent = text
+        .lines()
+        .rev()
+        .take(tail_lines.min(20))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if recent.trim().is_empty() {
+        None
+    } else {
+        Some(recent)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_log_excerpt(_target: &str, _tail_lines: usize) -> Option<String> {
+    None
+}
+
 fn rustclaw_health(
     client: &reqwest::blocking::Client,
     req_user_key: Option<&str>,
@@ -1009,6 +1250,54 @@ fn run_status_inner(
                 }
             }
         }
+        "brew_services" => {
+            let t = target.unwrap_or("");
+            let Some(entry) = brew_service_entry(t) else {
+                out.fail("brew service not found");
+                return ("unknown".to_string(), evidence);
+            };
+            let state = if entry.status.eq_ignore_ascii_case("started") {
+                "running".to_string()
+            } else if entry.status.eq_ignore_ascii_case("scheduled") {
+                "loaded".to_string()
+            } else {
+                "stopped".to_string()
+            };
+            evidence.push(format!(
+                "brew services list: name={} status={} user={} file={}",
+                entry.name, entry.status, entry.user, entry.file
+            ));
+            (state, evidence)
+        }
+        "launchd" => {
+            let t = target.unwrap_or("");
+            let Some(entry) = launchctl_entry(t) else {
+                out.fail("launchd service not found");
+                return ("unknown".to_string(), evidence);
+            };
+            let state = if entry.pid.unwrap_or_default() > 0 {
+                "running"
+            } else if entry.status_code == Some(0) {
+                "loaded"
+            } else {
+                "stopped"
+            };
+            evidence.push(format!(
+                "launchctl list: label={} pid={:?} status={:?}",
+                entry.label, entry.pid, entry.status_code
+            ));
+            (state.to_string(), evidence)
+        }
+        "process_only" => {
+            let t = target.unwrap_or("");
+            let count = process_count_for_target(t);
+            evidence.push(format!("process-only count={count}"));
+            if count > 0 {
+                ("running".to_string(), evidence)
+            } else {
+                ("stopped".to_string(), evidence)
+            }
+        }
         _ => {
             out.fail(&format!("manager {} not implemented for status", manager));
             ("unknown".to_string(), evidence)
@@ -1073,6 +1362,42 @@ fn run_verify_inner(
                 }
                 Err(_) => ("unknown".to_string(), evidence),
             }
+        }
+        "brew_services" => {
+            let state = brew_service_entry(target)
+                .map(|entry| {
+                    if entry.status.eq_ignore_ascii_case("started") {
+                        "running".to_string()
+                    } else if entry.status.eq_ignore_ascii_case("scheduled") {
+                        "loaded".to_string()
+                    } else {
+                        "stopped".to_string()
+                    }
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+            evidence.push(format!("brew services verify: {}", state));
+            (state, evidence)
+        }
+        "launchd" => {
+            let state = launchctl_entry(target)
+                .map(|entry| {
+                    if entry.pid.unwrap_or_default() > 0 {
+                        "running".to_string()
+                    } else if entry.status_code == Some(0) {
+                        "loaded".to_string()
+                    } else {
+                        "stopped".to_string()
+                    }
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+            evidence.push(format!("launchctl verify: {}", state));
+            (state, evidence)
+        }
+        "process_only" => {
+            let count = process_count_for_target(target);
+            let state = if count > 0 { "running" } else { "stopped" };
+            evidence.push(format!("process-only verify count={count}"));
+            (state.to_string(), evidence)
         }
         _ => {
             out.fail(&format!("manager {} not implemented for verify", manager));
@@ -1265,6 +1590,81 @@ fn run_control_inner(
                 }
             }
         }
+        "brew_services" => {
+            let cmd = match effective_action {
+                "start" => "start",
+                "stop" => "stop",
+                "restart" | "reload" => "restart",
+                _ => {
+                    out.fail(&format!(
+                        "action {} not supported for brew services",
+                        effective_action
+                    ));
+                    return Err(());
+                }
+            };
+            let o = Command::new("brew")
+                .args(["services", cmd, target])
+                .output();
+            match o {
+                Ok(outp) => {
+                    if outp.status.success() {
+                        out.add_evidence(format!("brew services {} {}", cmd, target));
+                        Ok(())
+                    } else {
+                        let message = command_output_text(&outp);
+                        if looks_like_permission_error(&message) {
+                            let o2 = Command::new("sudo")
+                                .args(["-n", "brew", "services", cmd, target])
+                                .output();
+                            match o2 {
+                                Ok(outp2) => {
+                                    if outp2.status.success() {
+                                        out.add_evidence(format!("brew services {} {}", cmd, target));
+                                        Ok(())
+                                    } else {
+                                        out.fail("unable to execute via sudo");
+                                        out.add_evidence(format!(
+                                            "sudo failed: {}",
+                                            command_output_text(&outp2)
+                                        ));
+                                        out.next_step = "Use an account with sudo privileges, or run brew services manually.".to_string();
+                                        Err(())
+                                    }
+                                }
+                                Err(e) => {
+                                    out.fail("unable to execute via sudo");
+                                    out.add_evidence(format!("sudo launch failed: {e}"));
+                                    out.next_step = "Use an account with sudo privileges, or run brew services manually.".to_string();
+                                    Err(())
+                                }
+                            }
+                        } else {
+                            out.fail(&format!("brew services {} failed: {}", cmd, message));
+                            Err(())
+                        }
+                    }
+                }
+                Err(e) => {
+                    out.fail(&format!("brew services: {e}"));
+                    Err(())
+                }
+            }
+        }
+        "launchd" => {
+            out.fail("launchd lifecycle control is limited in this skill");
+            out.next_step =
+                "Prefer brew services on macOS, or use launchctl manually for this target."
+                    .to_string();
+            Err(())
+        }
+        "process_only" => {
+            out.fail("process_only manager does not support lifecycle control");
+            out.next_step =
+                "This process appears to be manually started; manage it with the original command, supervisor, or shell."
+                    .to_string();
+            Err(())
+        }
         _ => {
             out.fail(&format!(
                 "manager {} does not support lifecycle control",
@@ -1334,6 +1734,23 @@ fn fetch_logs_inner(target: &str, manager: &str, tail_lines: usize) -> Vec<Strin
                 ));
             }
         }
+        "brew_services" => {
+            if let Some(summary) = macos_log_excerpt(target, tail_lines) {
+                evidence.push(format!("macOS log show recent: {}", summary));
+            } else {
+                evidence.push(format!(
+                    "brew service {} logs not directly available; try 'brew services list' or 'log show' manually",
+                    target
+                ));
+            }
+        }
+        "launchd" | "process_only" => {
+            if let Some(summary) = macos_log_excerpt(target, tail_lines) {
+                evidence.push(format!("macOS log show recent: {}", summary));
+            } else {
+                evidence.push(format!("no recent macOS unified log entries found for {}", target));
+            }
+        }
         _ => {
             evidence.push(format!("manager {} logs not implemented", manager));
         }
@@ -1351,8 +1768,8 @@ mod tests {
     #[test]
     fn target_missing_returns_structured_error() {
         let args = json!({"action": "start"});
-        let out =
-            execute("req-1".to_string(), args).expect("execute must return Ok(OutputContract)");
+        let out = execute("req-1".to_string(), args, None)
+            .expect("execute must return Ok(OutputContract)");
         assert_eq!(out.status, "error");
         assert!(!out.failure_reason.is_empty(), "failure_reason must be set");
         assert!(!out.next_step.is_empty());
@@ -1361,8 +1778,8 @@ mod tests {
     #[test]
     fn ambiguous_target_blocks_high_risk_action() {
         let args = json!({"action": "restart", "target": "\u{540E}\u{7AEF}"});
-        let out =
-            execute("req-2".to_string(), args).expect("execute must return Ok(OutputContract)");
+        let out = execute("req-2".to_string(), args, None)
+            .expect("execute must return Ok(OutputContract)");
         assert_eq!(out.status, "error");
         assert!(
             out.failure_reason.contains("ambiguous") || out.failure_reason.contains("high-risk"),
@@ -1374,7 +1791,7 @@ mod tests {
     #[test]
     fn business_failure_produces_runner_error() {
         let args = json!({"action": "start"});
-        let out = execute("req-bf".to_string(), args).unwrap();
+        let out = execute("req-bf".to_string(), args, None).unwrap();
         assert_eq!(out.status, "error");
         let resp = build_runner_response("req-bf".to_string(), Ok(out));
         assert_eq!(resp.status, "error");
@@ -1384,7 +1801,7 @@ mod tests {
     #[test]
     fn status_failure_not_overwritten_by_ok_summary() {
         let args = json!({"action": "status", "target": "nonexistent_xyz_123"});
-        let out = execute("req-status".to_string(), args).unwrap();
+        let out = execute("req-status".to_string(), args, None).unwrap();
         assert_eq!(
             out.status, "error",
             "unknown manager or status failure must set status=error"
@@ -1395,7 +1812,7 @@ mod tests {
     #[test]
     fn verify_failure_not_overwritten_by_ok_summary() {
         let args = json!({"action": "verify", "target": "nonexistent_xyz_456"});
-        let out = execute("req-verify".to_string(), args).unwrap();
+        let out = execute("req-verify".to_string(), args, None).unwrap();
         assert_eq!(
             out.status, "error",
             "unknown manager for verify must set status=error"
@@ -1406,25 +1823,28 @@ mod tests {
     #[test]
     fn manager_rustclaw_whitelist() {
         let args = json!({"action": "status", "target": "clawd"});
-        let out = execute("req-m1".to_string(), args).unwrap();
+        let out = execute("req-m1".to_string(), args, None).unwrap();
         assert_eq!(out.manager_type, "rustclaw");
     }
 
     #[test]
     fn manager_explicit_type() {
         let args = json!({"action": "status", "target": "nginx", "manager_type": "systemd"});
-        let out = execute("req-m2".to_string(), args).unwrap();
+        let out = execute("req-m2".to_string(), args, None).unwrap();
         assert_eq!(out.manager_type, "systemd");
     }
 
     #[test]
     fn manager_unknown_or_detected() {
         let args = json!({"action": "status", "target": "nonexistent_svc_xyz_789"});
-        let out = execute("req-m3".to_string(), args).unwrap();
+        let out = execute("req-m3".to_string(), args, None).unwrap();
         assert!(
             out.manager_type == "unknown"
+                || out.manager_type == "brew_services"
+                || out.manager_type == "launchd"
                 || out.manager_type == "systemd"
-                || out.manager_type == "service",
+                || out.manager_type == "service"
+                || out.manager_type == "process_only",
             "fallback or detected: {}",
             out.manager_type
         );
@@ -1433,7 +1853,7 @@ mod tests {
     #[test]
     fn output_contract_has_required_keys() {
         let args = json!({"action": "start"});
-        let out = execute("req-3".to_string(), args).unwrap();
+        let out = execute("req-3".to_string(), args, None).unwrap();
         let text = serde_json::to_string(&out).unwrap();
         let parsed: Value = serde_json::from_str(&text).unwrap();
         let required = [

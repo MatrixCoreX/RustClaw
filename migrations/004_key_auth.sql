@@ -1,10 +1,12 @@
 CREATE TABLE IF NOT EXISTS auth_keys (
     user_key     TEXT PRIMARY KEY,
-    role         TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+    role         TEXT NOT NULL,
     enabled      INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL,
     last_used_at TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_keys_single_admin
+ON auth_keys(role) WHERE role = 'admin';
 
 CREATE TABLE IF NOT EXISTS channel_bindings (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,

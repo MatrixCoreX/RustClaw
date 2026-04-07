@@ -198,6 +198,17 @@
     background: color-mix(in srgb, var(--theme-card) 80%, white 20%);
   }
 
+  .theme-key-create-btn:hover:not(:disabled) {
+    border-color: rgba(255, 138, 76, 0.38);
+    background: rgba(255, 138, 76, 0.18);
+    color: #fff1e8;
+  }
+
+  .theme-accent-btn.theme-key-create-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #ff955d 0%, #ff7440 100%);
+    color: #ffffff;
+  }
+
   .theme-topbar-nav-btn {
     @apply inline-flex min-h-10 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition;
     color: var(--theme-text-soft);
