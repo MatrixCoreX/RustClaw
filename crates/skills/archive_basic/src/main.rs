@@ -144,7 +144,7 @@ fn unpack_archive(archive: &Path, dest: &Path) -> Result<String, String> {
         // Non-interactive default: overwrite existing files to avoid hanging on prompts.
         run("unzip", &[String::from("-o"), arc, String::from("-d"), dst])
     } else if arc.ends_with(".tar.gz") || arc.ends_with(".tgz") {
-        // Non-interactive default: overwrite existing files when extracting.
+        // Avoid GNU-only flags so both bsdtar (macOS) and GNU tar work.
         run(
             "tar",
             &[
@@ -152,7 +152,6 @@ fn unpack_archive(archive: &Path, dest: &Path) -> Result<String, String> {
                 arc,
                 String::from("-C"),
                 dst,
-                String::from("--overwrite"),
             ],
         )
     } else {

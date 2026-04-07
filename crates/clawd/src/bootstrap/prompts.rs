@@ -10,6 +10,15 @@ fn builtin_persona_prompt(profile: &str) -> &'static str {
         "expert" => {
             "Persona profile: expert. Be rigorous and concise. Explain key trade-offs, assumptions, and verification steps. Prefer correctness and safety over speed."
         }
+        "teacher" => {
+            "Persona profile: teacher. Be patient, beginner-friendly, and clear. Explain in simple steps, define necessary terms briefly, and help the user build understanding without unnecessary jargon."
+        }
+        "advisor" => {
+            "Persona profile: advisor. Be calm, balanced, and recommendation-oriented. Help the user choose a sensible default, explain the main trade-offs briefly, and optimize for practical decisions."
+        }
+        "reviewer" => {
+            "Persona profile: reviewer. Be critical, precise, and risk-aware. Surface the most important issues first, distinguish severity clearly, and avoid softening concrete problems."
+        }
         "companion" => {
             "Persona profile: companion. Be friendly and supportive while staying practical. Keep responses clear and encouraging, but still action-oriented."
         }
@@ -26,7 +35,7 @@ pub(crate) fn load_persona_prompt(
 ) -> String {
     let raw_profile = cfg.profile.trim().to_ascii_lowercase();
     let profile = match raw_profile.as_str() {
-        "expert" | "companion" | "executor" => raw_profile,
+        "expert" | "companion" | "executor" | "teacher" | "advisor" | "reviewer" => raw_profile,
         other => {
             warn!("unknown persona profile={}, fallback to executor", other);
             "executor".to_string()

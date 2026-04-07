@@ -146,9 +146,20 @@ fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
 }
 
 fn process_count(keyword: &str) -> usize {
-    let out = Command::new("pgrep").args(["-fc", keyword]).output().ok();
-    out.and_then(|v| String::from_utf8(v.stdout).ok())
+    let pgrep_out = Command::new("pgrep").args(["-fc", keyword]).output().ok();
+    if let Some(count) = pgrep_out
+        .and_then(|v| String::from_utf8(v.stdout).ok())
         .and_then(|s| s.trim().parse::<usize>().ok())
+    {
+        return count;
+    }
+
+    Command::new("ps")
+        .args(["-ax", "-o", "command="])
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|text| text.lines().filter(|line| line.contains(keyword)).count())
         .unwrap_or(0)
 }
 

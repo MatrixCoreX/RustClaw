@@ -11,9 +11,11 @@ It supports:
 This skill is read-only. It does not submit forms, log in, or execute business actions on web pages.
 
 Runtime behavior notes:
-- Browser launch prefers system Chromium (`/usr/bin/chromium`, `/usr/bin/chromium-browser`) when available.
+- Browser launch prefers system Chromium when available, including common Linux paths, Homebrew installs, and macOS app bundles such as `Google Chrome.app` / `Chromium.app`.
+- You can override browser detection with `BROWSER_WEB_CHROMIUM_PATH` or `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`.
 - If system Chromium is unavailable, fallback is Playwright-managed Chromium.
 - Browser runs in forced headless mode and clears `DISPLAY/WAYLAND_DISPLAY/XAUTHORITY` in child runtime to avoid X11 popup requests.
+- Linux-only sandbox restriction probing (`/proc/self/status`) is skipped automatically on non-Linux systems such as macOS.
 - `open_extract` writes capture artifacts under `skills_output/browser_web/...` with raw HTML, cleaned text, images, and JSONL indexes.
 - At the current interface level, callers can control extraction behavior, but cannot customize capture root/source/run-id/chunking knobs through args.
 

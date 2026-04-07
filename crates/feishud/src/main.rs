@@ -14,7 +14,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ResolveChannelBindingRequest,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind,
+    DetectFeishuBindSessionRequest, DetectFeishuBindSessionResponse,
+    FeishuBindSessionStatusResponse, ResolveChannelBindingRequest,
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
 };
@@ -439,6 +441,58 @@ async fn bind_feishu_identity(
     Ok(body.data)
 }
 
+fn extract_pending_bind_token_candidate(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.strip_prefix("/start") {
+        let candidate = rest.trim();
+        if candidate.starts_with("pb-") {
+            return Some(candidate.to_string());
+        }
+    }
+    if trimmed.starts_with("pb-") {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
+async fn detect_pending_feishu_bind(
+    client: &Client,
+    base_url: &str,
+    open_id: &str,
+    chat_id: &str,
+    bind_token: Option<&str>,
+) -> Result<Option<FeishuBindSessionStatusResponse>, String> {
+    let url = format!(
+        "{}/v1/auth/channel-binds/feishu/detect",
+        base_url.trim_end_matches('/')
+    );
+    let req = DetectFeishuBindSessionRequest {
+        bind_token: bind_token.map(|token| token.trim().to_string()),
+        external_user_id: open_id.to_string(),
+        external_chat_id: chat_id.to_string(),
+    };
+    let resp = client
+        .post(&url)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| format!("detect request failed: {}", e))?;
+    let status = resp.status();
+    let body: ApiResponse<DetectFeishuBindSessionResponse> = resp
+        .json()
+        .await
+        .map_err(|e| format!("detect response parse failed: {}", e))?;
+    if !status.is_success() || !body.ok {
+        return Err(body.error.unwrap_or_else(|| "detect failed".to_string()));
+    }
+    Ok(body
+        .data
+        .and_then(|data| if data.matched { data.session } else { None }))
+}
+
 const FEISHU_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY: &str = "feishu.msg.identity_check_unavailable";
 const FEISHU_I18N_BIND_REQUIRED_KEY: &str = "feishu.msg.bind_key_required_for_chat";
 const FEISHU_I18N_BIND_HELP_KEY: &str = "feishu.msg.bind_help";
@@ -556,6 +610,33 @@ async fn handle_incoming_feishu_text(
         chat_id
     );
     let trimmed = text.trim();
+    let pending_bind_token = extract_pending_bind_token_candidate(trimmed);
+    if let Some(bind_token) = pending_bind_token.as_deref() {
+        match detect_pending_feishu_bind(&client, &base, &open_id, &chat_id, Some(bind_token)).await
+        {
+            Ok(Some(_session)) => {
+                set_expect_key_reply(&state, &chat_id, false);
+                info!(
+                    "feishud: pending bind finalized external_chat_id={}",
+                    chat_id
+                );
+                let msg = feishu_t(
+                    &config,
+                    FEISHU_I18N_BIND_SUCCESS_KEY,
+                    FEISHU_BIND_SUCCESS_FALLBACK,
+                );
+                let _ = send_feishu_text(&config, &client, &token_cache, &chat_id, &msg).await;
+                return;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!(
+                    "feishud: pending bind detect failed err={} external_chat_id={}",
+                    e, chat_id
+                );
+            }
+        }
+    }
     if is_unbound_allowed_command(trimmed) {
         set_expect_key_reply(&state, &chat_id, true);
         let msg = feishu_t(
@@ -1549,7 +1630,20 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_bind_key_candidate, is_unbound_allowed_command};
+    use super::{
+        extract_bind_key_candidate, extract_pending_bind_token_candidate,
+        handle_incoming_feishu_text, is_unbound_allowed_command, AppState, FeishuConfig,
+        FeishuSection,
+    };
+    use axum::extract::State;
+    use axum::routing::post;
+    use axum::{Json, Router};
+    use reqwest::Client;
+    use serde_json::{json, Value};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
+    use tokio::sync::RwLock;
 
     #[test]
     fn unbound_plain_text_requires_binding_prompt() {
@@ -1592,5 +1686,178 @@ mod tests {
     fn unbound_media_like_empty_text_requires_binding_prompt() {
         assert!(!is_unbound_allowed_command(""));
         assert_eq!(extract_bind_key_candidate("", false), None);
+    }
+
+    #[test]
+    fn extract_pending_bind_token_from_start_or_plain_text() {
+        assert_eq!(
+            extract_pending_bind_token_candidate("/start pb-test-token").as_deref(),
+            Some("pb-test-token")
+        );
+        assert_eq!(
+            extract_pending_bind_token_candidate("pb-test-token").as_deref(),
+            Some("pb-test-token")
+        );
+        assert_eq!(extract_pending_bind_token_candidate("/start"), None);
+    }
+
+    #[test]
+    fn start_without_token_does_not_create_pending_bind_token() {
+        assert_eq!(extract_pending_bind_token_candidate("/start"), None);
+        assert_eq!(extract_pending_bind_token_candidate("/start   "), None);
+    }
+
+    #[tokio::test]
+    async fn feishu_pending_bind_requires_explicit_token() {
+        #[derive(Clone)]
+        struct MockClawdState {
+            detect_calls: Arc<AtomicUsize>,
+            bind_calls: Arc<AtomicUsize>,
+        }
+
+        async fn mock_resolve() -> Json<Value> {
+            Json(json!({
+                "ok": true,
+                "data": { "bound": false, "identity": null },
+                "error": null
+            }))
+        }
+
+        async fn mock_detect(
+            State(state): State<MockClawdState>,
+            Json(payload): Json<Value>,
+        ) -> Json<Value> {
+            state.detect_calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(payload["bind_token"], "pb-test-token");
+            assert_eq!(payload["external_user_id"], "ou_test_pending_bind");
+            assert_eq!(payload["external_chat_id"], "oc_test_pending_bind");
+            Json(json!({
+                "ok": true,
+                "data": {
+                    "matched": true,
+                    "session": {
+                        "session_id": 7,
+                        "channel": "feishu",
+                        "bind_token": "pb-test-token",
+                        "status": "bound",
+                        "external_user_id": "ou_test_pending_bind",
+                        "external_chat_id": "oc_test_pending_bind",
+                        "error_text": null,
+                        "created_at": "100",
+                        "updated_at": "101",
+                        "expires_at": "9999999999",
+                        "entry_url": "https://applink.feishu.cn/client/bot/open?appId=cli_test_feishu_app"
+                    }
+                },
+                "error": null
+            }))
+        }
+
+        async fn mock_bind(
+            State(state): State<MockClawdState>,
+            Json(_payload): Json<Value>,
+        ) -> Json<Value> {
+            state.bind_calls.fetch_add(1, Ordering::SeqCst);
+            Json(json!({
+                "ok": true,
+                "data": {
+                    "user_key": "rk-should-not-bind",
+                    "role": "user",
+                    "user_id": 1,
+                    "chat_id": 1
+                },
+                "error": null
+            }))
+        }
+
+        let clawd_state = MockClawdState {
+            detect_calls: Arc::new(AtomicUsize::new(0)),
+            bind_calls: Arc::new(AtomicUsize::new(0)),
+        };
+        let clawd_listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock clawd");
+        let clawd_addr = clawd_listener.local_addr().expect("mock clawd addr");
+        let clawd_app = Router::new()
+            .route("/v1/auth/channel/resolve", post(mock_resolve))
+            .route("/v1/auth/channel-binds/feishu/detect", post(mock_detect))
+            .route("/v1/auth/channel/bind", post(mock_bind))
+            .with_state(clawd_state.clone());
+        tokio::spawn(async move {
+            axum::serve(clawd_listener, clawd_app)
+                .await
+                .expect("serve mock clawd");
+        });
+
+        #[derive(Clone)]
+        struct MockFeishuState {
+            sent_texts: Arc<Mutex<Vec<String>>>,
+        }
+
+        async fn mock_token() -> Json<Value> {
+            Json(json!({
+                "tenant_access_token": "tenant_token",
+                "expire": 7200
+            }))
+        }
+
+        async fn mock_send(
+            State(state): State<MockFeishuState>,
+            Json(payload): Json<Value>,
+        ) -> Json<Value> {
+            let content_str = payload["content"].as_str().expect("content string");
+            let content: Value = serde_json::from_str(content_str).expect("content json");
+            let text = content["text"].as_str().expect("text").to_string();
+            state.sent_texts.lock().expect("sent texts").push(text);
+            Json(json!({ "code": 0 }))
+        }
+
+        let feishu_state = MockFeishuState {
+            sent_texts: Arc::new(Mutex::new(Vec::new())),
+        };
+        let feishu_listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock feishu");
+        let feishu_addr = feishu_listener.local_addr().expect("mock feishu addr");
+        let feishu_app = Router::new()
+            .route("/open-apis/auth/v3/tenant_access_token/internal", post(mock_token))
+            .route("/open-apis/im/v1/messages", post(mock_send))
+            .with_state(feishu_state.clone());
+        tokio::spawn(async move {
+            axum::serve(feishu_listener, feishu_app)
+                .await
+                .expect("serve mock feishu");
+        });
+
+        let state = AppState {
+            config: FeishuConfig {
+                feishu: FeishuSection {
+                    enabled: true,
+                    clawd_base_url: format!("http://{clawd_addr}"),
+                    api_base_url: format!("http://{feishu_addr}"),
+                    app_id: "cli_test_feishu_app".to_string(),
+                    app_secret: "cli_test_secret".to_string(),
+                    ..FeishuSection::default()
+                },
+            },
+            client: Client::new(),
+            token_cache: Arc::new(RwLock::new(None)),
+            workspace_root: std::env::temp_dir(),
+            pending_key_bind_by_chat: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        };
+
+        handle_incoming_feishu_text(
+            state,
+            "ou_test_pending_bind".to_string(),
+            "oc_test_pending_bind".to_string(),
+            "/start pb-test-token".to_string(),
+        )
+        .await;
+
+        assert_eq!(clawd_state.detect_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(clawd_state.bind_calls.load(Ordering::SeqCst), 0);
+        let sent = feishu_state.sent_texts.lock().expect("sent texts");
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].contains("绑定成功") || sent[0].contains("bound"));
     }
 }

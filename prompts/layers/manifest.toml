@@ -243,6 +243,24 @@ overlay = ["prompts/layers/overlays/personas/expert.md"]
 vendor_patch = "text/common.md"
 
 [[prompts]]
+logical_path = "prompts/personas/teacher.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/personas/teacher.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/personas/advisor.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/personas/advisor.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/personas/reviewer.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/personas/reviewer.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
 logical_path = "prompts/meta_respond_classifier_prompt.md"
 base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/meta_respond_classifier_prompt.md"]

@@ -12,6 +12,51 @@ fn generate_user_key() -> String {
     format!("rk-{}", uuid::Uuid::new_v4().simple())
 }
 
+const PENDING_CHANNEL_BIND_STATUS_PENDING: &str = "pending";
+const PENDING_CHANNEL_BIND_STATUS_DETECTED: &str = "detected";
+const PENDING_CHANNEL_BIND_STATUS_BOUND: &str = "bound";
+const PENDING_CHANNEL_BIND_STATUS_FAILED: &str = "failed";
+const PENDING_CHANNEL_BIND_STATUS_EXPIRED: &str = "expired";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingChannelBindSession {
+    pub(crate) id: i64,
+    pub(crate) channel: String,
+    pub(crate) user_key: String,
+    pub(crate) bind_token: String,
+    pub(crate) status: String,
+    pub(crate) external_user_id: Option<String>,
+    pub(crate) external_chat_id: Option<String>,
+    pub(crate) error_text: Option<String>,
+    pub(crate) install_device_code: Option<String>,
+    pub(crate) install_verification_url: Option<String>,
+    pub(crate) install_poll_interval_seconds: Option<i64>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) expires_at: String,
+}
+
+fn map_pending_channel_bind_session(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<PendingChannelBindSession> {
+    Ok(PendingChannelBindSession {
+        id: row.get(0)?,
+        channel: row.get(1)?,
+        user_key: row.get(2)?,
+        bind_token: row.get(3)?,
+        status: row.get(4)?,
+        external_user_id: row.get(5)?,
+        external_chat_id: row.get(6)?,
+        error_text: row.get(7)?,
+        install_device_code: row.get(8)?,
+        install_verification_url: row.get(9)?,
+        install_poll_interval_seconds: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+        expires_at: row.get(13)?,
+    })
+}
+
 pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Option<String>> {
     let existing_count: i64 =
         db.query_row("SELECT COUNT(*) FROM auth_keys", [], |row| row.get(0))?;
@@ -30,6 +75,27 @@ pub(crate) fn ensure_bootstrap_admin_key(db: &Connection) -> anyhow::Result<Opti
 pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)?;
     db.execute_batch(crate::WEBD_LOGIN_SQL)?;
+    db.execute_batch(include_str!(
+        "../../../../migrations/006_pending_channel_bind_sessions.sql"
+    ))?;
+    crate::ensure_column_exists(
+        db,
+        "pending_channel_bind_sessions",
+        "install_device_code",
+        "ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_device_code TEXT",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "pending_channel_bind_sessions",
+        "install_verification_url",
+        "ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_verification_url TEXT",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "pending_channel_bind_sessions",
+        "install_poll_interval_seconds",
+        "ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_poll_interval_seconds INTEGER",
+    )?;
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS exchange_api_credentials (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +147,7 @@ pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
         "user_key",
         "ALTER TABLE user_preferences ADD COLUMN user_key TEXT",
     )?;
+    rebuild_auth_keys_for_flexible_roles(db)?;
     rebuild_user_preferences_for_key_scope(db)?;
     rebuild_long_term_memories_for_key_scope(db)?;
     rebuild_channel_tables_for_ui(db)?;
@@ -91,6 +158,50 @@ pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
          CREATE INDEX IF NOT EXISTS idx_user_preferences_user_key_chat ON user_preferences(user_key, chat_id, updated_at_ts);
          CREATE INDEX IF NOT EXISTS idx_long_term_memories_user_key_chat_updated_ts ON long_term_memories(user_key, chat_id, updated_at_ts);",
     )?;
+    Ok(())
+}
+
+fn rebuild_auth_keys_for_flexible_roles(db: &Connection) -> anyhow::Result<()> {
+    let table_sql: String = db.query_row(
+        "SELECT COALESCE(sql, '') FROM sqlite_master WHERE type = 'table' AND name = 'auth_keys'",
+        [],
+        |row| row.get(0),
+    )?;
+    let needs_rebuild =
+        table_sql.contains("CHECK (role IN ('admin', 'user'))")
+            || table_sql.contains("CHECK(role IN ('admin', 'user'))");
+    if needs_rebuild {
+        db.execute_batch(
+            "BEGIN IMMEDIATE;
+             ALTER TABLE auth_keys RENAME TO auth_keys_old;
+             CREATE TABLE auth_keys (
+                 user_key     TEXT PRIMARY KEY,
+                 role         TEXT NOT NULL,
+                 enabled      INTEGER NOT NULL DEFAULT 1,
+                 created_at   TEXT NOT NULL,
+                 last_used_at TEXT
+             );
+             INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             SELECT user_key, role, enabled, created_at, last_used_at
+             FROM auth_keys_old;
+             DROP TABLE auth_keys_old;
+             COMMIT;",
+        )?;
+    }
+    let admin_count: i64 = db.query_row(
+        "SELECT COUNT(*) FROM auth_keys WHERE role = 'admin'",
+        [],
+        |row| row.get(0),
+    )?;
+    if admin_count <= 1 {
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_keys_single_admin
+             ON auth_keys(role) WHERE role = 'admin'",
+            [],
+        )?;
+    } else {
+        info!("auth_keys schema: skip single-admin unique index because multiple admin rows already exist");
+    }
     Ok(())
 }
 
@@ -310,15 +421,38 @@ fn rebuild_channel_tables_for_ui(db: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn list_auth_keys(
-    state: &AppState,
-) -> anyhow::Result<Vec<(i64, String, String, i64, String, Option<String>)>> {
+pub(crate) struct AuthKeyListRow {
+    pub(crate) key_id: i64,
+    pub(crate) user_key: String,
+    pub(crate) user_key_masked: String,
+    pub(crate) role: String,
+    pub(crate) enabled: i64,
+    pub(crate) created_at: String,
+    pub(crate) last_used_at: Option<String>,
+    pub(crate) webd_username: Option<String>,
+}
+
+pub(crate) fn list_auth_keys(state: &AppState) -> anyhow::Result<Vec<AuthKeyListRow>> {
     let db = state
         .db
         .lock()
         .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
     let mut stmt = db.prepare(
-        "SELECT rowid, user_key, role, enabled, created_at, last_used_at FROM auth_keys ORDER BY created_at DESC",
+        "SELECT rowid,
+                user_key,
+                role,
+                enabled,
+                created_at,
+                last_used_at,
+                (
+                    SELECT username
+                    FROM webd_login_accounts
+                    WHERE user_key = auth_keys.user_key AND enabled = 1
+                    ORDER BY updated_at DESC, username ASC
+                    LIMIT 1
+                ) AS webd_username
+         FROM auth_keys
+         ORDER BY created_at DESC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -328,33 +462,156 @@ pub(crate) fn list_auth_keys(
             row.get::<_, i64>(3)?,
             row.get::<_, String>(4)?,
             row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (key_id, user_key, role, enabled, created_at, last_used_at) = row?;
-        out.push((
+        let (key_id, user_key, role, enabled, created_at, last_used_at, webd_username) = row?;
+        out.push(AuthKeyListRow {
             key_id,
-            mask_secret(&user_key),
+            user_key_masked: mask_secret(&user_key),
+            user_key,
             role,
             enabled,
             created_at,
             last_used_at,
-        ));
+            webd_username,
+        });
     }
     Ok(out)
 }
 
-pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<String> {
-    let role = match role {
-        "admin" => "admin",
-        _ => "user",
+fn normalize_auth_key_role(raw: &str) -> anyhow::Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("role is required");
+    }
+    if trimmed.eq_ignore_ascii_case("admin") {
+        return Ok("admin".to_string());
+    }
+    if trimmed.eq_ignore_ascii_case("user") {
+        return Ok("user".to_string());
+    }
+    if trimmed.eq_ignore_ascii_case("guest") {
+        return Ok("guest".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn has_other_admin_key(db: &Connection, exclude_key_id: Option<i64>) -> anyhow::Result<bool> {
+    let count: i64 = if let Some(key_id) = exclude_key_id {
+        db.query_row(
+            "SELECT COUNT(*) FROM auth_keys WHERE role = 'admin' AND rowid != ?1",
+            params![key_id],
+            |row| row.get(0),
+        )?
+    } else {
+        db.query_row(
+            "SELECT COUNT(*) FROM auth_keys WHERE role = 'admin'",
+            [],
+            |row| row.get(0),
+        )?
     };
-    let user_key = generate_user_key();
+    Ok(count > 0)
+}
+
+fn rebind_user_key_references(
+    tx: &rusqlite::Transaction<'_>,
+    old_user_key: &str,
+    new_user_key: &str,
+) -> anyhow::Result<()> {
+    let updates = [
+        "UPDATE channel_bindings SET user_key = ?2 WHERE user_key = ?1",
+        "UPDATE exchange_api_credentials SET user_key = ?2 WHERE user_key = ?1",
+        "UPDATE tasks SET user_key = ?2 WHERE user_key = ?1",
+        "UPDATE scheduled_jobs SET user_key = ?2 WHERE user_key = ?1",
+        "UPDATE memories SET user_key = ?2 WHERE user_key = ?1",
+        "UPDATE long_term_memories SET user_key = ?2 WHERE user_key = ?1",
+        "UPDATE audit_logs SET user_key = ?2 WHERE user_key = ?1",
+        "UPDATE user_preferences SET user_key = ?2 WHERE user_key = ?1",
+        "UPDATE webd_login_accounts SET user_key = ?2 WHERE user_key = ?1",
+        "UPDATE pending_channel_bind_sessions SET user_key = ?2 WHERE user_key = ?1",
+    ];
+    for sql in updates {
+        tx.execute(sql, params![old_user_key, new_user_key])?;
+    }
+    Ok(())
+}
+
+fn rotate_auth_key_row(
+    tx: &rusqlite::Transaction<'_>,
+    key_rowid: i64,
+    old_user_key: &str,
+    new_user_key: &str,
+) -> anyhow::Result<()> {
+    rebind_user_key_references(tx, old_user_key, new_user_key)?;
+    tx.execute(
+        "UPDATE auth_keys
+         SET user_key = ?2,
+             enabled = 1,
+             created_at = ?3,
+             last_used_at = NULL
+         WHERE rowid = ?1",
+        params![key_rowid, new_user_key, now_ts()],
+    )?;
+    Ok(())
+}
+
+fn get_auth_key_value_by_id_from_db(
+    db: &Connection,
+    key_id: i64,
+) -> anyhow::Result<Option<String>> {
+    let value = db
+        .query_row(
+            "SELECT user_key FROM auth_keys WHERE rowid = ?1",
+            params![key_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(value)
+}
+
+pub(crate) fn get_auth_key_value_by_id(
+    state: &AppState,
+    key_id: i64,
+) -> anyhow::Result<Option<String>> {
     let db = state
         .db
         .lock()
         .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    get_auth_key_value_by_id_from_db(&db, key_id)
+}
+
+pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<String> {
+    let role = normalize_auth_key_role(role)?;
+    let user_key = generate_user_key();
+    let mut db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    if role == "admin" {
+        let existing_admins = {
+            let mut stmt = db.prepare(
+                "SELECT rowid, user_key FROM auth_keys WHERE role = 'admin' ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            out
+        };
+        if existing_admins.len() > 1 {
+            anyhow::bail!("multiple admin keys exist; clean them up before rotating admin");
+        }
+        if let Some((admin_rowid, old_user_key)) = existing_admins.into_iter().next() {
+            let tx = db.transaction()?;
+            rotate_auth_key_row(&tx, admin_rowid, &old_user_key, &user_key)?;
+            tx.commit()?;
+            return Ok(user_key);
+        }
+    }
     db.execute(
         "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
          VALUES (?1, ?2, 1, ?3, NULL)",
@@ -363,10 +620,303 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
     Ok(user_key)
 }
 
+fn upsert_channel_binding_row(
+    db: &Connection,
+    channel: &str,
+    external_user_id: Option<&str>,
+    external_chat_id: Option<&str>,
+    user_key: &str,
+) -> anyhow::Result<()> {
+    let external_user_id = normalize_external_id_opt(external_user_id);
+    let external_chat_id =
+        normalize_external_id_opt(external_chat_id).or_else(|| external_user_id.clone());
+    if external_user_id.is_none() && external_chat_id.is_none() {
+        anyhow::bail!("external_user_id or external_chat_id is required");
+    }
+    let now = now_ts();
+    db.execute(
+        "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, bound_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+         ON CONFLICT(channel, external_user_id, external_chat_id)
+         DO UPDATE SET user_key=excluded.user_key, updated_at=excluded.updated_at",
+        params![channel, external_user_id, external_chat_id, user_key, now],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn create_pending_channel_bind_session(
+    db: &mut Connection,
+    channel: &str,
+    user_key: &str,
+    expires_at: &str,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let channel = channel.trim();
+    let user_key = normalize_user_key(user_key);
+    let expires_at = expires_at.trim();
+    if channel.is_empty() {
+        anyhow::bail!("channel is required");
+    }
+    if user_key.is_empty() {
+        anyhow::bail!("user_key is required");
+    }
+    if expires_at.is_empty() {
+        anyhow::bail!("expires_at is required");
+    }
+    let bind_token = format!("pb-{}", uuid::Uuid::new_v4().simple());
+    let now = now_ts();
+    db.execute(
+        "INSERT INTO pending_channel_bind_sessions (
+            channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+            install_device_code, install_verification_url, install_poll_interval_seconds,
+            created_at, updated_at, expires_at
+        ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, NULL, NULL, NULL, NULL, ?5, ?5, ?6)",
+        params![
+            channel,
+            user_key,
+            bind_token,
+            PENDING_CHANNEL_BIND_STATUS_PENDING,
+            now,
+            expires_at,
+        ],
+    )?;
+    let session_id = db.last_insert_rowid();
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("created pending bind session not found"))
+}
+
+pub(crate) fn attach_pending_channel_bind_session_install_flow(
+    db: &mut Connection,
+    session_id: i64,
+    device_code: &str,
+    verification_url: &str,
+    poll_interval_seconds: i64,
+    expires_at: &str,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let device_code = device_code.trim();
+    let verification_url = verification_url.trim();
+    let expires_at = expires_at.trim();
+    if device_code.is_empty() {
+        anyhow::bail!("device_code is required");
+    }
+    if verification_url.is_empty() {
+        anyhow::bail!("verification_url is required");
+    }
+    if expires_at.is_empty() {
+        anyhow::bail!("expires_at is required");
+    }
+    let now = now_ts();
+    let changed = db.execute(
+        "UPDATE pending_channel_bind_sessions
+         SET install_device_code = ?2,
+             install_verification_url = ?3,
+             install_poll_interval_seconds = ?4,
+             error_text = NULL,
+             updated_at = ?5,
+             expires_at = ?6
+         WHERE id = ?1
+           AND status IN (?7, ?8)",
+        params![
+            session_id,
+            device_code,
+            verification_url,
+            poll_interval_seconds.max(1),
+            now,
+            expires_at,
+            PENDING_CHANNEL_BIND_STATUS_PENDING,
+            PENDING_CHANNEL_BIND_STATUS_DETECTED,
+        ],
+    )?;
+    if changed == 0 {
+        anyhow::bail!("pending bind session not found or already terminal");
+    }
+    get_pending_channel_bind_session_by_id(db, session_id)?.ok_or_else(|| {
+        anyhow::anyhow!("pending bind session not found after install flow update")
+    })
+}
+
+pub(crate) fn get_pending_channel_bind_session_by_id(
+    db: &Connection,
+    session_id: i64,
+) -> anyhow::Result<Option<PendingChannelBindSession>> {
+    Ok(db
+        .query_row(
+            "SELECT id, channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+                    install_device_code, install_verification_url, install_poll_interval_seconds,
+                    created_at, updated_at, expires_at
+             FROM pending_channel_bind_sessions
+             WHERE id = ?1",
+            params![session_id],
+            map_pending_channel_bind_session,
+        )
+        .optional()?)
+}
+
+pub(crate) fn get_pending_channel_bind_session_by_token(
+    db: &Connection,
+    bind_token: &str,
+) -> anyhow::Result<Option<PendingChannelBindSession>> {
+    Ok(db
+        .query_row(
+            "SELECT id, channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+                    install_device_code, install_verification_url, install_poll_interval_seconds,
+                    created_at, updated_at, expires_at
+             FROM pending_channel_bind_sessions
+             WHERE bind_token = ?1",
+            params![bind_token],
+            map_pending_channel_bind_session,
+        )
+        .optional()?)
+}
+
+fn mark_pending_channel_bind_session_status(
+    db: &mut Connection,
+    session_id: i64,
+    status: &str,
+    error_text: Option<&str>,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let now = now_ts();
+    let changed = db.execute(
+        "UPDATE pending_channel_bind_sessions
+         SET status = ?2,
+             error_text = ?3,
+             updated_at = ?4
+         WHERE id = ?1
+           AND status IN (?5, ?6)",
+        params![
+            session_id,
+            status,
+            error_text,
+            now,
+            PENDING_CHANNEL_BIND_STATUS_PENDING,
+            PENDING_CHANNEL_BIND_STATUS_DETECTED,
+        ],
+    )?;
+    if changed == 0 {
+        anyhow::bail!("pending bind session not found or already terminal");
+    }
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("pending bind session not found after update"))
+}
+
+pub(crate) fn mark_pending_channel_bind_session_detected(
+    db: &mut Connection,
+    session_id: i64,
+    external_user_id: &str,
+    external_chat_id: &str,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let external_user_id = normalize_external_id_opt(Some(external_user_id))
+        .ok_or_else(|| anyhow::anyhow!("external_user_id is required"))?;
+    let external_chat_id = normalize_external_id_opt(Some(external_chat_id))
+        .or_else(|| Some(external_user_id.clone()))
+        .ok_or_else(|| anyhow::anyhow!("external_chat_id is required"))?;
+    let now = now_ts();
+    let changed = db.execute(
+        "UPDATE pending_channel_bind_sessions
+         SET status = ?2,
+             external_user_id = ?3,
+             external_chat_id = ?4,
+             error_text = NULL,
+             updated_at = ?5
+         WHERE id = ?1
+           AND status IN (?6, ?7)",
+        params![
+            session_id,
+            PENDING_CHANNEL_BIND_STATUS_DETECTED,
+            external_user_id,
+            external_chat_id,
+            now,
+            PENDING_CHANNEL_BIND_STATUS_PENDING,
+            PENDING_CHANNEL_BIND_STATUS_DETECTED,
+        ],
+    )?;
+    if changed == 0 {
+        anyhow::bail!("pending bind session not found or already terminal");
+    }
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("pending bind session not found after detection"))
+}
+
+pub(crate) fn mark_pending_channel_bind_session_failed(
+    db: &mut Connection,
+    session_id: i64,
+    error_text: &str,
+) -> anyhow::Result<PendingChannelBindSession> {
+    mark_pending_channel_bind_session_status(
+        db,
+        session_id,
+        PENDING_CHANNEL_BIND_STATUS_FAILED,
+        Some(error_text),
+    )
+}
+
+pub(crate) fn mark_pending_channel_bind_session_expired(
+    db: &mut Connection,
+    session_id: i64,
+) -> anyhow::Result<PendingChannelBindSession> {
+    mark_pending_channel_bind_session_status(
+        db,
+        session_id,
+        PENDING_CHANNEL_BIND_STATUS_EXPIRED,
+        Some("expired"),
+    )
+}
+
+pub(crate) fn finalize_pending_channel_bind_session(
+    db: &mut Connection,
+    session_id: i64,
+) -> anyhow::Result<PendingChannelBindSession> {
+    let tx = db.transaction()?;
+    let session = tx
+        .query_row(
+            "SELECT id, channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+                    install_device_code, install_verification_url, install_poll_interval_seconds,
+                    created_at, updated_at, expires_at
+             FROM pending_channel_bind_sessions
+             WHERE id = ?1",
+            params![session_id],
+            map_pending_channel_bind_session,
+        )
+        .optional()?;
+    let Some(session) = session else {
+        anyhow::bail!("pending bind session not found");
+    };
+    if matches!(
+        session.status.as_str(),
+        PENDING_CHANNEL_BIND_STATUS_FAILED | PENDING_CHANNEL_BIND_STATUS_EXPIRED
+    ) {
+        anyhow::bail!("pending bind session is already terminal");
+    }
+    if session.external_user_id.is_none() && session.external_chat_id.is_none() {
+        anyhow::bail!("pending bind session does not have a detected external identity");
+    }
+    upsert_channel_binding_row(
+        &tx,
+        &session.channel,
+        session.external_user_id.as_deref(),
+        session.external_chat_id.as_deref(),
+        &session.user_key,
+    )?;
+    tx.execute(
+        "UPDATE pending_channel_bind_sessions
+         SET status = ?2,
+             error_text = NULL,
+             updated_at = ?3
+         WHERE id = ?1",
+        params![session_id, PENDING_CHANNEL_BIND_STATUS_BOUND, now_ts()],
+    )?;
+    tx.commit()?;
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("pending bind session not found after finalize"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::rebuild_channel_tables_for_ui;
-    use rusqlite::Connection;
+    use super::{
+        get_auth_key_value_by_id_from_db, normalize_auth_key_role, rebind_user_key_references,
+        rebuild_auth_keys_for_flexible_roles, rebuild_channel_tables_for_ui,
+        upsert_webd_login_account, verify_webd_password_login,
+    };
+    use rusqlite::{params, Connection};
 
     #[test]
     fn rebuild_channel_tables_upgrades_channel_constraints_for_wechat() {
@@ -455,6 +1005,327 @@ mod tests {
         )
         .expect("insert wechat task");
     }
+
+    #[test]
+    fn get_auth_key_value_by_id_returns_full_key() {
+        let db = Connection::open_in_memory().expect("open sqlite");
+        db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+            .expect("create auth schema");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'admin', 1, '123', NULL)",
+            params!["rk-full-key-value"],
+        )
+        .expect("insert auth key");
+
+        let resolved = get_auth_key_value_by_id_from_db(&db, 1).expect("query key");
+        assert_eq!(resolved.as_deref(), Some("rk-full-key-value"));
+    }
+
+    #[test]
+    fn normalize_auth_key_role_supports_builtin_and_custom_values() {
+        assert_eq!(normalize_auth_key_role("admin").expect("admin"), "admin");
+        assert_eq!(normalize_auth_key_role("USER").expect("user"), "user");
+        assert_eq!(normalize_auth_key_role(" guest ").expect("guest"), "guest");
+        assert_eq!(
+            normalize_auth_key_role("finance_viewer").expect("custom"),
+            "finance_viewer"
+        );
+    }
+
+    #[test]
+    fn rebuild_auth_keys_for_flexible_roles_allows_guest_and_custom_roles() {
+        let db = Connection::open_in_memory().expect("open sqlite");
+        db.execute_batch(
+            "CREATE TABLE auth_keys (
+                user_key     TEXT PRIMARY KEY,
+                role         TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+                enabled      INTEGER NOT NULL DEFAULT 1,
+                created_at   TEXT NOT NULL,
+                last_used_at TEXT
+            );",
+        )
+        .expect("create legacy auth_keys");
+
+        rebuild_auth_keys_for_flexible_roles(&db).expect("rebuild auth_keys");
+
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, ?2, 1, '123', NULL)",
+            params!["rk-guest", "guest"],
+        )
+        .expect("insert guest role");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, ?2, 1, '124', NULL)",
+            params!["rk-custom", "finance_viewer"],
+        )
+        .expect("insert custom role");
+    }
+
+    #[test]
+    fn rebind_user_key_references_updates_related_tables() {
+        let mut db = Connection::open_in_memory().expect("open sqlite");
+        db.execute_batch(
+            "CREATE TABLE auth_keys (
+                user_key     TEXT PRIMARY KEY,
+                role         TEXT NOT NULL,
+                enabled      INTEGER NOT NULL DEFAULT 1,
+                created_at   TEXT NOT NULL,
+                last_used_at TEXT
+            );
+            CREATE TABLE channel_bindings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel TEXT NOT NULL,
+                external_user_id TEXT,
+                external_chat_id TEXT,
+                user_key TEXT NOT NULL,
+                bound_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE exchange_api_credentials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_key TEXT NOT NULL
+            );
+            CREATE TABLE tasks (
+                task_id TEXT PRIMARY KEY,
+                user_key TEXT
+            );
+            CREATE TABLE scheduled_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_key TEXT
+            );
+            CREATE TABLE memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_key TEXT
+            );
+            CREATE TABLE long_term_memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_key TEXT
+            );
+            CREATE TABLE audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_key TEXT
+            );
+            CREATE TABLE user_preferences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_key TEXT
+            );
+            CREATE TABLE webd_login_accounts (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                user_key TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE pending_channel_bind_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_key TEXT NOT NULL
+            );",
+        )
+        .expect("create minimal tables");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'admin', 1, '123', NULL)",
+            params!["rk-old-admin"],
+        )
+        .expect("insert old admin");
+        db.execute(
+            "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, bound_at, updated_at)
+             VALUES ('telegram', 'u1', 'c1', ?1, '1', '1')",
+            params!["rk-old-admin"],
+        )
+        .expect("insert channel binding");
+        db.execute(
+            "INSERT INTO webd_login_accounts (username, password_hash, user_key, enabled, created_at, updated_at)
+             VALUES ('admin', 'hash', ?1, 1, '1', '1')",
+            params!["rk-old-admin"],
+        )
+        .expect("insert webd login");
+
+        let tx = db.transaction().expect("begin tx");
+        rebind_user_key_references(&tx, "rk-old-admin", "rk-new-admin").expect("rebind refs");
+        tx.commit().expect("commit tx");
+
+        let channel_binding_key: String = db
+            .query_row(
+                "SELECT user_key FROM channel_bindings WHERE channel = 'telegram' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read channel binding user_key");
+        let webd_key: String = db
+            .query_row(
+                "SELECT user_key FROM webd_login_accounts WHERE username = 'admin' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read webd user_key");
+        assert_eq!(channel_binding_key, "rk-new-admin");
+        assert_eq!(webd_key, "rk-new-admin");
+    }
+
+    #[test]
+    fn upsert_webd_login_account_replaces_previous_username_for_same_key() {
+        let db = Connection::open_in_memory().expect("open sqlite");
+        db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+            .expect("create auth schema");
+        db.execute_batch(
+            "CREATE TABLE webd_login_accounts (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                user_key TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );",
+        )
+        .expect("create webd_login_accounts");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'user', 1, '123', NULL)",
+            params!["rk-user-1"],
+        )
+        .expect("insert auth key");
+
+        upsert_webd_login_account(&db, "alice", "pw-1", "rk-user-1").expect("create first username");
+        upsert_webd_login_account(&db, "alice_new", "pw-2", "rk-user-1")
+            .expect("replace username");
+
+        let usernames: Vec<String> = db
+            .prepare("SELECT username FROM webd_login_accounts ORDER BY username")
+            .expect("prepare usernames")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("query usernames")
+            .map(|row| row.expect("username row"))
+            .collect();
+        assert_eq!(usernames, vec!["alice_new".to_string()]);
+        assert_eq!(
+            verify_webd_password_login(&db, "alice_new", "pw-2").expect("verify login"),
+            Some("rk-user-1".to_string())
+        );
+    }
+
+    #[test]
+    fn upsert_webd_login_account_rejects_username_used_by_another_key() {
+        let db = Connection::open_in_memory().expect("open sqlite");
+        db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+            .expect("create auth schema");
+        db.execute_batch(
+            "CREATE TABLE webd_login_accounts (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                user_key TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );",
+        )
+        .expect("create webd_login_accounts");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'user', 1, '123', NULL)",
+            params!["rk-user-1"],
+        )
+        .expect("insert first auth key");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'user', 1, '124', NULL)",
+            params!["rk-user-2"],
+        )
+        .expect("insert second auth key");
+
+        upsert_webd_login_account(&db, "alice", "pw-1", "rk-user-1").expect("create first username");
+        let err =
+            upsert_webd_login_account(&db, "alice", "pw-2", "rk-user-2").expect_err("reject duplicate username");
+        assert!(
+            err.to_string().contains("username already assigned"),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn pending_feishu_bind_session_lifecycle() {
+    let mut db = Connection::open_in_memory().expect("open sqlite");
+    db.execute_batch(crate::INIT_SQL)
+        .expect("create base schema");
+    crate::ensure_memory_schema(&db).expect("create memory schema");
+    ensure_key_auth_schema(&db).expect("create auth schema");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+         VALUES (?1, 'user', 1, '123', NULL)",
+        params!["rk-pending-session-user"],
+    )
+    .expect("insert auth key");
+
+    let expires_at = (crate::now_ts().parse::<i64>().expect("current ts") + 600).to_string();
+    let created =
+        create_pending_channel_bind_session(&mut db, "feishu", "rk-pending-session-user", &expires_at)
+            .expect("create pending bind session");
+    assert_eq!(created.channel, "feishu");
+    assert_eq!(created.user_key, "rk-pending-session-user");
+    assert_eq!(created.status, "pending");
+    assert!(!created.bind_token.is_empty());
+
+    let by_id = get_pending_channel_bind_session_by_id(&db, created.id)
+        .expect("load by id")
+        .expect("session by id");
+    assert_eq!(by_id.bind_token, created.bind_token);
+
+    let by_token = get_pending_channel_bind_session_by_token(&db, &created.bind_token)
+        .expect("load by token")
+        .expect("session by token");
+    assert_eq!(by_token.id, created.id);
+
+    let detected = mark_pending_channel_bind_session_detected(
+        &mut db,
+        created.id,
+        "feishu-user-123",
+        "feishu-chat-456",
+    )
+    .expect("mark detected");
+    assert_eq!(detected.status, "detected");
+    assert_eq!(
+        detected.external_user_id.as_deref(),
+        Some("feishu-user-123")
+    );
+    assert_eq!(
+        detected.external_chat_id.as_deref(),
+        Some("feishu-chat-456")
+    );
+
+    let bound = finalize_pending_channel_bind_session(&mut db, created.id)
+        .expect("finalize pending bind session");
+    assert_eq!(bound.status, "bound");
+
+    let binding: (String, String, String, String) = db
+        .query_row(
+            "SELECT channel, external_user_id, external_chat_id, user_key
+             FROM channel_bindings
+             WHERE channel = 'feishu'
+             ORDER BY id DESC
+             LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read channel binding");
+    assert_eq!(
+        binding,
+        (
+            "feishu".to_string(),
+            "feishu-user-123".to_string(),
+            "feishu-chat-456".to_string(),
+            "rk-pending-session-user".to_string(),
+        )
+    );
+
+    let terminal = get_pending_channel_bind_session_by_id(&db, created.id)
+        .expect("reload terminal session")
+        .expect("terminal session");
+    assert_eq!(terminal.status, "bound");
 }
 
 pub(crate) fn update_auth_key_by_id(
@@ -467,13 +1338,10 @@ pub(crate) fn update_auth_key_by_id(
     if role.is_none() && enabled.is_none() {
         return Err(anyhow::anyhow!("nothing to update"));
     }
-    let normalized_role = role.map(|v| {
-        if v.eq_ignore_ascii_case("admin") {
-            "admin"
-        } else {
-            "user"
-        }
-    });
+    let normalized_role = match role {
+        Some(value) => Some(normalize_auth_key_role(value)?),
+        None => None,
+    };
     let enabled_i64 = enabled.map(|v| if v { 1_i64 } else { 0_i64 });
 
     let db = state
@@ -481,11 +1349,17 @@ pub(crate) fn update_auth_key_by_id(
         .lock()
         .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
     let target = db.query_row(
-        "SELECT user_key FROM auth_keys WHERE rowid = ?1",
+        "SELECT user_key, role, enabled FROM auth_keys WHERE rowid = ?1",
         params![key_id],
-        |row| row.get::<_, String>(0),
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
     );
-    let target_user_key = match target {
+    let (target_user_key, target_role, target_enabled) = match target {
         Ok(v) => v,
         Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(false),
         Err(err) => return Err(err.into()),
@@ -495,9 +1369,28 @@ pub(crate) fn update_auth_key_by_id(
         if enabled == Some(false) {
             return Err(anyhow::anyhow!("cannot disable current key"));
         }
-        if normalized_role == Some("user") {
-            return Err(anyhow::anyhow!("cannot demote current admin key"));
+        if target_role.eq_ignore_ascii_case("admin")
+            && normalized_role.as_deref().is_some_and(|value| !value.eq_ignore_ascii_case("admin"))
+        {
+            return Err(anyhow::anyhow!("cannot change current admin key role"));
         }
+    }
+    if target_role.eq_ignore_ascii_case("admin") {
+        if normalized_role
+            .as_deref()
+            .is_some_and(|value| !value.eq_ignore_ascii_case("admin"))
+        {
+            return Err(anyhow::anyhow!("cannot change the admin key role"));
+        }
+        if enabled == Some(false) && target_enabled != 0 {
+            return Err(anyhow::anyhow!("cannot disable the only admin key"));
+        }
+    }
+    if normalized_role.as_deref() == Some("admin")
+        && !target_role.eq_ignore_ascii_case("admin")
+        && has_other_admin_key(&db, Some(key_id))?
+    {
+        return Err(anyhow::anyhow!("admin key already exists"));
     }
 
     let changed = db.execute(
@@ -508,6 +1401,37 @@ pub(crate) fn update_auth_key_by_id(
         params![key_id, normalized_role, enabled_i64],
     )?;
     Ok(changed > 0)
+}
+
+pub(crate) fn rotate_auth_key_by_user_key(
+    state: &AppState,
+    current_user_key: &str,
+) -> anyhow::Result<Option<String>> {
+    let current_user_key = normalize_user_key(current_user_key);
+    if current_user_key.is_empty() {
+        anyhow::bail!("current key is required");
+    }
+
+    let mut db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    let existing = db
+        .query_row(
+            "SELECT rowid, user_key FROM auth_keys WHERE user_key = ?1",
+            params![current_user_key],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let Some((key_rowid, old_user_key)) = existing else {
+        return Ok(None);
+    };
+
+    let new_user_key = generate_user_key();
+    let tx = db.transaction()?;
+    rotate_auth_key_row(&tx, key_rowid, &old_user_key, &new_user_key)?;
+    tx.commit()?;
+    Ok(Some(new_user_key))
 }
 
 pub(crate) fn delete_auth_key_by_id(
@@ -536,14 +1460,7 @@ pub(crate) fn delete_auth_key_by_id(
     }
 
     if target_role.eq_ignore_ascii_case("admin") {
-        let admin_count: i64 = db.query_row(
-            "SELECT COUNT(*) FROM auth_keys WHERE role = 'admin' AND enabled = 1",
-            [],
-            |row| row.get(0),
-        )?;
-        if admin_count <= 1 {
-            return Err(anyhow::anyhow!("cannot delete the last enabled admin key"));
-        }
+        return Err(anyhow::anyhow!("admin key cannot be deleted; rotate a new admin key instead"));
     }
 
     let tx = db.transaction()?;
@@ -553,6 +1470,10 @@ pub(crate) fn delete_auth_key_by_id(
     )?;
     tx.execute(
         "DELETE FROM exchange_api_credentials WHERE user_key = ?1",
+        params![target_user_key],
+    )?;
+    tx.execute(
+        "DELETE FROM webd_login_accounts WHERE user_key = ?1",
         params![target_user_key],
     )?;
     let changed = tx.execute("DELETE FROM auth_keys WHERE rowid = ?1", params![key_id])?;
@@ -825,23 +1746,16 @@ pub(crate) fn bind_channel_identity(
     if external_user_id.is_none() && external_chat_id.is_none() {
         return Ok(None);
     }
-    let now = now_ts();
     let db = state
         .db
         .lock()
         .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
-    db.execute(
-        "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, bound_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-         ON CONFLICT(channel, external_user_id, external_chat_id)
-         DO UPDATE SET user_key=excluded.user_key, updated_at=excluded.updated_at",
-        params![
-            channel,
-            external_user_id,
-            external_chat_id,
-            &identity.user_key,
-            now
-        ],
+    upsert_channel_binding_row(
+        &db,
+        channel,
+        external_user_id.as_deref(),
+        external_chat_id.as_deref(),
+        &identity.user_key,
     )?;
     touch_auth_key_usage(&db, &identity.user_key)?;
     Ok(Some(build_auth_identity(
@@ -904,8 +1818,12 @@ pub(crate) fn upsert_webd_login_account(
 ) -> anyhow::Result<()> {
     let username_norm = username.trim().to_lowercase();
     let uk = normalize_user_key(user_key);
+    let password = password.trim();
     if username_norm.is_empty() || uk.is_empty() {
         anyhow::bail!("username and user_key required");
+    }
+    if password.is_empty() {
+        anyhow::bail!("password required");
     }
     let exists: bool = db
         .query_row(
@@ -918,8 +1836,25 @@ pub(crate) fn upsert_webd_login_account(
     if !exists {
         anyhow::bail!("user_key does not exist or is disabled in auth_keys");
     }
+    let username_owner = db
+        .query_row(
+            "SELECT user_key FROM webd_login_accounts WHERE username = ?1 LIMIT 1",
+            params![username_norm],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    if username_owner
+        .as_deref()
+        .is_some_and(|existing_user_key| existing_user_key != uk)
+    {
+        anyhow::bail!("username already assigned to another key");
+    }
     let ph = hash_password_for_webd_login(password)?;
     let now = now_ts();
+    db.execute(
+        "DELETE FROM webd_login_accounts WHERE user_key = ?1 AND username != ?2",
+        params![uk, username_norm],
+    )?;
     db.execute(
         "INSERT INTO webd_login_accounts (username, password_hash, user_key, enabled, created_at, updated_at)
          VALUES (?1, ?2, ?3, 1, ?4, ?4)
