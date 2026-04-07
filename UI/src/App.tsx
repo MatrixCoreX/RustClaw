@@ -1549,46 +1549,6 @@ export default function App() {
     }
   };
 
-  const rotateCurrentAuthKey = async (row: AuthKeyListItem) => {
-    const ok = window.confirm(
-      row.role === "admin"
-        ? t(
-            "确认重新生成当前 admin key？系统会自动迁移原有关联绑定，但旧 key 会立即失效。",
-            "Regenerate the current admin key? Existing bindings will be migrated automatically, and the old key will stop working immediately.",
-          )
-        : t(
-            "确认重新生成你当前的 key？旧 key 会立即失效。",
-            "Regenerate your current key? The old key will stop working immediately.",
-          ),
-    );
-    if (!ok) return;
-    setAuthKeyActionLoading(row.key_id);
-    setAuthKeyActionError(null);
-    setNewlyCreatedKey(null);
-    setAuthKeyCopiedTarget(null);
-    try {
-      const res = await apiFetch("/v1/auth/current-key/rotate", { method: "POST" });
-      const body = (await res.json()) as ApiResponse<{ user_key: string; identity?: AuthIdentityResponse | null }>;
-      if (!res.ok || !body.ok || !body.data?.user_key) {
-        throw new Error(body.error || `重新生成 Key 失败 (${res.status})`);
-      }
-      setNewlyCreatedKey(body.data.user_key);
-      if (body.data.identity) {
-        applyIdentity(body.data.identity);
-      }
-      if (authMode === "key") {
-        setUiKey(body.data.user_key);
-        setUiKeyDraft(body.data.user_key);
-        window.localStorage.setItem(STORAGE_KEYS.userKey, body.data.user_key);
-      }
-      await fetchAuthKeys();
-    } catch (err) {
-      setAuthKeyActionError(err instanceof Error ? err.message : "未知错误");
-    } finally {
-      setAuthKeyActionLoading(null);
-    }
-  };
-
   const fetchFullAuthKey = async (keyId: number) => {
     const res = await apiFetch(`/v1/admin/auth-keys/${keyId}/full`);
     const body = (await res.json()) as ApiResponse<{ user_key: string }>;
@@ -4573,12 +4533,12 @@ export default function App() {
                 </div>
                 {isAdminIdentity ? (
                   <p className="mt-3 rounded-lg border border-sky-400/25 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
-                    {t("系统现在只允许 1 个 admin key。admin key 不能删除、不能禁用，只能在列表里重新生成；非 admin 登录后只会看到自己的 key。", "The system now allows only one admin key. Admin keys cannot be deleted or disabled, and can only be regenerated from the list; non-admin users only see their own key.")}
+                    {t("系统现在只允许 1 个 admin key。为保护记忆和绑定关系，key 一旦生成后不能修改；非 admin 登录后只会看到自己的 key。", "The system now allows only one admin key. To preserve memories and bindings, keys cannot be modified after creation; non-admin users only see their own key.")}
                   </p>
                 ) : null}
                 {!isAdminIdentity ? (
                   <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                    {t("当前不是 admin：这里只显示你自己的 key；你不能新增、禁用、删除，只能重新生成自己的 key。", "Current key is not admin: only your own key is shown here; you cannot create, disable, or delete keys, only regenerate your own key.")}
+                    {t("当前不是 admin：这里只显示你自己的 key；你不能新增、禁用、删除，也不能修改当前 key。", "Current key is not admin: only your own key is shown here; you cannot create, disable, delete, or modify the current key.")}
                   </p>
                 ) : null}
                 {authKeysError ? (
@@ -4669,14 +4629,9 @@ export default function App() {
                                             : t("复制 Key", "Copy key")}
                                       </button>
                                       {row.current_key ? (
-                                        <button
-                                          type="button"
-                                          disabled={authKeyActionLoading === row.key_id}
-                                          className="theme-topbar-btn px-2 py-1 text-xs"
-                                          onClick={() => void rotateCurrentAuthKey(row)}
-                                        >
-                                          {t("重新生成", "Regenerate")}
-                                        </button>
+                                        <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/55">
+                                          {t("当前 key 不可修改", "Current key cannot be modified")}
+                                        </span>
                                       ) : (
                                         <button
                                           type="button"
@@ -4715,14 +4670,7 @@ export default function App() {
                                       </button>
                                     </div>
                                   ) : row.current_key ? (
-                                    <button
-                                      type="button"
-                                      disabled={authKeyActionLoading === row.key_id}
-                                      className="theme-topbar-btn px-2 py-1 text-xs"
-                                      onClick={() => void rotateCurrentAuthKey(row)}
-                                    >
-                                      {t("重新生成", "Regenerate")}
-                                    </button>
+                                    <span className="text-xs text-white/45">{t("当前 key 不可修改", "Current key cannot be modified")}</span>
                                   ) : (
                                     <span className="text-xs text-white/45">--</span>
                                   )}

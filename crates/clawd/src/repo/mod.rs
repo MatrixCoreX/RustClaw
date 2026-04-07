@@ -11,7 +11,7 @@ pub(crate) use auth::{
     ensure_key_auth_schema, exchange_credential_status_for_user_key,
     finalize_pending_channel_bind_session, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
-    list_auth_keys, mark_pending_channel_bind_session_detected, rotate_auth_key_by_user_key,
+    list_auth_keys, mark_pending_channel_bind_session_detected,
     mark_pending_channel_bind_session_expired, mark_pending_channel_bind_session_failed,
     normalize_user_key, resolve_auth_identity_by_key,
     resolve_channel_binding_identity, seed_channel_bindings, update_auth_key_by_id,

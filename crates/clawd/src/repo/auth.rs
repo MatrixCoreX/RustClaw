@@ -1403,37 +1403,6 @@ pub(crate) fn update_auth_key_by_id(
     Ok(changed > 0)
 }
 
-pub(crate) fn rotate_auth_key_by_user_key(
-    state: &AppState,
-    current_user_key: &str,
-) -> anyhow::Result<Option<String>> {
-    let current_user_key = normalize_user_key(current_user_key);
-    if current_user_key.is_empty() {
-        anyhow::bail!("current key is required");
-    }
-
-    let mut db = state
-        .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
-    let existing = db
-        .query_row(
-            "SELECT rowid, user_key FROM auth_keys WHERE user_key = ?1",
-            params![current_user_key],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()?;
-    let Some((key_rowid, old_user_key)) = existing else {
-        return Ok(None);
-    };
-
-    let new_user_key = generate_user_key();
-    let tx = db.transaction()?;
-    rotate_auth_key_row(&tx, key_rowid, &old_user_key, &new_user_key)?;
-    tx.commit()?;
-    Ok(Some(new_user_key))
-}
-
 pub(crate) fn delete_auth_key_by_id(
     state: &AppState,
     key_id: i64,
