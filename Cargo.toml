@@ -45,6 +45,7 @@ members = [
     "crates/skills/web_search_extract",
     "crates/skills/kb",
     "crates/skills/browser_web",
+    "crates/skills/photo_organize",
 ]
 
 [workspace.package]
