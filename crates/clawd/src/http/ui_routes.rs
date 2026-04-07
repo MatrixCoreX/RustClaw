@@ -566,6 +566,7 @@ async fn get_auth_keys(
                 .map(|row| {
                     json!({
                         "key_id": row.key_id,
+                        "user_key": row.user_key,
                         "user_key_masked": row.user_key_masked,
                         "role": row.role,
                         "enabled": row.enabled != 0,
