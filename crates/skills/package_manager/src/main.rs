@@ -130,7 +130,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
 }
 
 fn detect_manager() -> Option<String> {
-    for m in ["apt-get", "dnf", "yum", "pacman", "brew"] {
+    for m in ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew"] {
         let ok = Command::new("sh")
             .arg("-lc")
             .arg(format!("command -v {m} >/dev/null 2>&1"))
@@ -158,6 +158,11 @@ fn install_packages(
             argv.push("install".to_string());
             argv.push("-y".to_string());
         }
+        "apt" => {
+            argv.push("apt".to_string());
+            argv.push("install".to_string());
+            argv.push("-y".to_string());
+        }
         "dnf" => {
             argv.push("dnf".to_string());
             argv.push("install".to_string());
@@ -172,6 +177,16 @@ fn install_packages(
             argv.push("pacman".to_string());
             argv.push("-S".to_string());
             argv.push("--noconfirm".to_string());
+        }
+        "apk" => {
+            argv.push("apk".to_string());
+            argv.push("add".to_string());
+            argv.push("--no-cache".to_string());
+        }
+        "zypper" => {
+            argv.push("zypper".to_string());
+            argv.push("--non-interactive".to_string());
+            argv.push("install".to_string());
         }
         "brew" => {
             argv.push("brew".to_string());
@@ -298,7 +313,12 @@ fn extract_packages(obj: &serde_json::Map<String, Value>) -> Result<Vec<String>,
 }
 
 fn is_root() -> bool {
-    std::env::var("USER").ok().is_some_and(|u| u == "root")
+    Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .is_some_and(|uid| uid.trim() == "0")
 }
 
 fn is_safe_token(s: &str) -> bool {

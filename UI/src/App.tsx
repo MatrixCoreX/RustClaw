@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   BellRing,
+  Check,
   ChevronDown,
+  Copy,
   Database,
   FileText,
   LayoutDashboard,
@@ -18,10 +20,22 @@ import {
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import QRCode from "qrcode";
 import {
   countCompletedDashboardSteps,
   getDashboardOverviewItems,
 } from "./lib/dashboard-home";
+import { copyAuthKeyValue } from "./lib/auth-keys";
+import { formatDateOnlyHuman } from "./lib/date-format";
+import {
+  fetchFeishuBindSession,
+  getFeishuBindStatusCopy,
+  getFeishuSetupGuidance,
+  getFeishuStepStatus,
+  isFeishuBindTerminalStatus,
+  startFeishuBindSession,
+  type FeishuBindSessionResponse,
+} from "./lib/feishu-bind";
 import { hasUnsavedLlmDraftChanges } from "./lib/llm-config";
 
 interface ApiResponse<T> {
@@ -42,12 +56,17 @@ interface HealthResponse {
   telegramd_healthy?: boolean | null;
   telegramd_process_count?: number | null;
   telegramd_memory_rss_bytes?: number | null;
+  channel_gateway_healthy?: boolean | null;
+  channel_gateway_process_count?: number | null;
+  channel_gateway_memory_rss_bytes?: number | null;
   whatsappd_healthy?: boolean | null;
   whatsappd_process_count?: number | null;
   whatsappd_memory_rss_bytes?: number | null;
   telegram_bot_healthy?: boolean | null;
   telegram_bot_process_count?: number | null;
   telegram_bot_memory_rss_bytes?: number | null;
+  telegram_configured_bot_count?: number;
+  gateway_instance_statuses?: Array<{ kind: string }>;
   whatsapp_cloud_healthy?: boolean | null;
   whatsapp_cloud_process_count?: number | null;
   whatsapp_cloud_memory_rss_bytes?: number | null;
@@ -97,6 +116,8 @@ interface AuthKeyListItem {
   enabled: boolean;
   created_at: string;
   last_used_at: string | null;
+  webd_username?: string | null;
+  current_key?: boolean;
 }
 
 interface ResolveChannelBindingResponse {
@@ -163,6 +184,15 @@ interface LlmConfigResponse {
   restart_required: boolean;
 }
 
+interface LlmTestResponse {
+  success: boolean;
+  vendor: string;
+  model: string;
+  provider_type: string;
+  message: string;
+  response_text?: string;
+}
+
 interface WechatConfigResponse {
   config_path: string;
   enabled: boolean;
@@ -175,6 +205,21 @@ interface WechatConfigResponse {
   text_chunk_chars: number;
   bot_token_configured: boolean;
   saved_session_present: boolean;
+  restart_required: boolean;
+}
+
+interface FeishuConfigResponse {
+  config_path: string;
+  enabled: boolean;
+  mode: string;
+  listen: string;
+  clawd_base_url: string;
+  api_base_url: string;
+  app_id: string;
+  app_secret: string;
+  verification_token_configured: boolean;
+  encrypt_key_configured: boolean;
+  bind_ready: boolean;
   restart_required: boolean;
 }
 
@@ -191,6 +236,8 @@ interface AgentConfigItem {
 interface TelegramBotConfigItem {
   name: string;
   bot_token: string;
+  bot_token_configured?: boolean;
+  bot_token_masked?: string | null;
   agent_id: string;
   allowlist: number[];
   access_mode: string;
@@ -302,6 +349,11 @@ interface ServiceStatusRow extends AdapterHealthRow {
   category: "ready" | "attention" | "stopped" | "unknown";
   statusLabel: string;
   detail: string;
+}
+
+interface DashboardCommunicationRow extends ServiceStatusRow {
+  memoryLabel: string;
+  usesSharedGatewayMemory: boolean;
 }
 
 interface ServiceActionNotice {
@@ -431,6 +483,8 @@ function buildDefaultTelegramBot(): TelegramBotConfigItem {
   return {
     name: "primary",
     bot_token: "",
+    bot_token_configured: false,
+    bot_token_masked: null,
     agent_id: "main",
     allowlist: [],
     access_mode: "public",
@@ -559,6 +613,9 @@ export default function App() {
   const [wechatConfigDraft, setWechatConfigDraft] = useState<WechatConfigResponse | null>(null);
   const [wechatConfigSaving, setWechatConfigSaving] = useState(false);
   const [wechatConfigSaveMessage, setWechatConfigSaveMessage] = useState<string | null>(null);
+  const [feishuConfigLoading, setFeishuConfigLoading] = useState(false);
+  const [feishuConfigError, setFeishuConfigError] = useState<string | null>(null);
+  const [feishuConfigData, setFeishuConfigData] = useState<FeishuConfigResponse | null>(null);
   const [telegramConfigLoading, setTelegramConfigLoading] = useState(false);
   const [telegramConfigError, setTelegramConfigError] = useState<string | null>(null);
   const [telegramConfigData, setTelegramConfigData] = useState<TelegramConfigResponse | null>(null);
@@ -588,6 +645,9 @@ export default function App() {
   const [llmDraftBaseUrl, setLlmDraftBaseUrl] = useState("");
   const [llmDraftApiKey, setLlmDraftApiKey] = useState("");
   const [llmDraftApiFormat, setLlmDraftApiFormat] = useState("openai_compat");
+  const [llmTestLoading, setLlmTestLoading] = useState(false);
+  const [llmTestMessage, setLlmTestMessage] = useState<string | null>(null);
+  const [llmTestError, setLlmTestError] = useState<string | null>(null);
   const [multimodalConfigData, setMultimodalConfigData] = useState<ModelConfigResponse | null>(null);
   const [multimodalConfigLoading, setMultimodalConfigLoading] = useState(false);
   const [multimodalConfigError, setMultimodalConfigError] = useState<string | null>(null);
@@ -649,6 +709,10 @@ export default function App() {
   const [wechatSessionKey, setWechatSessionKey] = useState<string | null>(null);
   const [wechatQrStarting, setWechatQrStarting] = useState(false);
   const [wechatQrPreviewRequested, setWechatQrPreviewRequested] = useState(false);
+  const [feishuBindLoading, setFeishuBindLoading] = useState(false);
+  const [feishuBindError, setFeishuBindError] = useState<string | null>(null);
+  const [feishuBindSession, setFeishuBindSession] = useState<FeishuBindSessionResponse | null>(null);
+  const [feishuBindQrDataUrl, setFeishuBindQrDataUrl] = useState<string | null>(null);
   const [channelBindingChannel, setChannelBindingChannel] = useState<ChannelName>("telegram");
   const [channelBindingExternalUserId, setChannelBindingExternalUserId] = useState("");
   const [channelBindingExternalChatId, setChannelBindingExternalChatId] = useState("");
@@ -664,8 +728,13 @@ export default function App() {
   const [authKeyCreateLoading, setAuthKeyCreateLoading] = useState(false);
   const [authKeyCreateError, setAuthKeyCreateError] = useState<string | null>(null);
   const [authKeyActionLoading, setAuthKeyActionLoading] = useState<number | null>(null);
+  const [authKeyCopyingTarget, setAuthKeyCopyingTarget] = useState<number | "new" | null>(null);
+  const [authKeyCopiedTarget, setAuthKeyCopiedTarget] = useState<number | "new" | null>(null);
   const [authKeyActionError, setAuthKeyActionError] = useState<string | null>(null);
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
+  const [webdLoginEditorKeyId, setWebdLoginEditorKeyId] = useState<number | null>(null);
+  const [webdLoginUsernameDraft, setWebdLoginUsernameDraft] = useState("");
+  const [webdLoginPasswordDraft, setWebdLoginPasswordDraft] = useState("");
   const [diagnosticsRefreshing, setDiagnosticsRefreshing] = useState(false);
   const [selectedLogFile, setSelectedLogFile] = useState("clawd.log");
   const [logTailLines, setLogTailLines] = useState(200);
@@ -780,6 +849,27 @@ export default function App() {
       return t(
         `${serviceLabel}服务当前没有启用，请先完成配置并保存后再试。`,
         `${serviceLabel} is not enabled yet. Finish the configuration and save it before trying again.`,
+      );
+    }
+
+    if (rawMessage.includes("app_id/app_secret")) {
+      return t(
+        `${serviceLabel}还缺少 App ID 或 App Secret。先把这两项填好并保存，再启动服务。`,
+        `${serviceLabel} still needs an App ID or App Secret. Fill them in, save, and then start the service.`,
+      );
+    }
+
+    if (rawMessage.includes("verification_token or encrypt_key")) {
+      return t(
+        `${serviceLabel}当前是 webhook 模式，还需要 Verification Token 或 Encrypt Key，补齐后才能启动。`,
+        `${serviceLabel} is in webhook mode and still needs a Verification Token or Encrypt Key before it can start.`,
+      );
+    }
+
+    if (rawMessage.includes("managed by channel-gateway")) {
+      return t(
+        `${serviceLabel}当前是由 channel-gateway 统一托管的，不能在这个单独按钮里${actionLabel}。请改为重启 channel-gateway，或先切回独立 ${serviceLabel} 进程。`,
+        `${serviceLabel} is currently managed by channel-gateway, so it cannot be ${actionLabel}ed from this per-service button. Restart channel-gateway instead, or switch back to a dedicated ${serviceLabel} process first.`,
       );
     }
 
@@ -1435,10 +1525,11 @@ export default function App() {
     }
   };
 
-  const createAuthKey = async (role: "user" | "admin" = "user") => {
+  const createAuthKey = async (role = "user") => {
     setAuthKeyCreateLoading(true);
     setAuthKeyCreateError(null);
     setNewlyCreatedKey(null);
+    setAuthKeyCopiedTarget(null);
     try {
       const res = await apiFetch("/v1/admin/auth-keys", {
         method: "POST",
@@ -1458,7 +1549,115 @@ export default function App() {
     }
   };
 
-  const updateAuthKey = async (keyId: number, patch: { role?: "user" | "admin"; enabled?: boolean }) => {
+  const rotateCurrentAuthKey = async (row: AuthKeyListItem) => {
+    const ok = window.confirm(
+      row.role === "admin"
+        ? t(
+            "确认重新生成当前 admin key？系统会自动迁移原有关联绑定，但旧 key 会立即失效。",
+            "Regenerate the current admin key? Existing bindings will be migrated automatically, and the old key will stop working immediately.",
+          )
+        : t(
+            "确认重新生成你当前的 key？旧 key 会立即失效。",
+            "Regenerate your current key? The old key will stop working immediately.",
+          ),
+    );
+    if (!ok) return;
+    setAuthKeyActionLoading(row.key_id);
+    setAuthKeyActionError(null);
+    setNewlyCreatedKey(null);
+    setAuthKeyCopiedTarget(null);
+    try {
+      const res = await apiFetch("/v1/auth/current-key/rotate", { method: "POST" });
+      const body = (await res.json()) as ApiResponse<{ user_key: string; identity?: AuthIdentityResponse | null }>;
+      if (!res.ok || !body.ok || !body.data?.user_key) {
+        throw new Error(body.error || `重新生成 Key 失败 (${res.status})`);
+      }
+      setNewlyCreatedKey(body.data.user_key);
+      if (body.data.identity) {
+        applyIdentity(body.data.identity);
+      }
+      if (authMode === "key") {
+        setUiKey(body.data.user_key);
+        setUiKeyDraft(body.data.user_key);
+        window.localStorage.setItem(STORAGE_KEYS.userKey, body.data.user_key);
+      }
+      await fetchAuthKeys();
+    } catch (err) {
+      setAuthKeyActionError(err instanceof Error ? err.message : "未知错误");
+    } finally {
+      setAuthKeyActionLoading(null);
+    }
+  };
+
+  const fetchFullAuthKey = async (keyId: number) => {
+    const res = await apiFetch(`/v1/admin/auth-keys/${keyId}/full`);
+    const body = (await res.json()) as ApiResponse<{ user_key: string }>;
+    if (!res.ok || !body.ok || !body.data?.user_key) {
+      throw new Error(body.error || `完整 Key 获取失败 (${res.status})`);
+    }
+    return body.data.user_key;
+  };
+
+  const copyAuthKey = async (options: { target: number | "new"; keyId?: number; plaintextKey?: string | null }) => {
+    setAuthKeyActionError(null);
+    setAuthKeyCopyingTarget(options.target);
+    try {
+      await copyAuthKeyValue({
+        keyId: options.keyId,
+        plaintextKey: options.plaintextKey,
+        fetchFullAuthKey,
+        writeClipboard: async (value) => {
+          await navigator.clipboard.writeText(value);
+        },
+      });
+      setAuthKeyCopiedTarget(options.target);
+    } catch (err) {
+      setAuthKeyActionError(err instanceof Error ? err.message : "未知错误");
+    } finally {
+      setAuthKeyCopyingTarget(null);
+    }
+  };
+
+  const beginFeishuBind = async () => {
+    setFeishuBindLoading(true);
+    setFeishuBindError(null);
+    try {
+      const session = await startFeishuBindSession(apiFetch);
+      setFeishuBindSession(session);
+    } catch (err) {
+      setFeishuBindError(err instanceof Error ? err.message : "未知错误");
+    } finally {
+      setFeishuBindLoading(false);
+    }
+  };
+
+  const refreshFeishuBindSession = async (sessionId: number, silent = false) => {
+    if (!silent) {
+      setFeishuBindLoading(true);
+      setFeishuBindError(null);
+    }
+    try {
+      const session = await fetchFeishuBindSession(apiFetch, sessionId);
+      setFeishuBindSession(session);
+      if (session.status === "bound") {
+        await fetchFeishuConfig();
+        await fetchHealth();
+      }
+      return session;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      if (!silent) {
+        setFeishuBindError(message);
+      }
+      return null;
+    } finally {
+      if (!silent) {
+        setFeishuBindLoading(false);
+      }
+    }
+  };
+
+  const updateAuthKey = async (keyId: number, patch: { role?: string; enabled?: boolean }) => {
     setAuthKeyActionLoading(keyId);
     setAuthKeyActionError(null);
     try {
@@ -1479,11 +1678,61 @@ export default function App() {
     }
   };
 
+  const openWebdLoginEditor = (row: AuthKeyListItem) => {
+    setAuthKeyActionError(null);
+    setWebdLoginEditorKeyId(row.key_id);
+    setWebdLoginUsernameDraft(row.webd_username ?? "");
+    setWebdLoginPasswordDraft("");
+  };
+
+  const closeWebdLoginEditor = () => {
+    setWebdLoginEditorKeyId(null);
+    setWebdLoginUsernameDraft("");
+    setWebdLoginPasswordDraft("");
+  };
+
+  const saveWebdLoginEditor = async (row: AuthKeyListItem) => {
+    const normalizedUsername = webdLoginUsernameDraft.trim();
+    const normalizedPassword = webdLoginPasswordDraft.trim();
+    if (!normalizedUsername) {
+      setAuthKeyActionError(t("用户名不能为空", "Username is required"));
+      return;
+    }
+    if (!normalizedPassword) {
+      setAuthKeyActionError(t("密码不能为空", "Password is required"));
+      return;
+    }
+
+    setAuthKeyActionLoading(row.key_id);
+    setAuthKeyActionError(null);
+    try {
+      const res = await apiFetch("/v1/admin/webd-accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: normalizedUsername,
+          password: normalizedPassword,
+          key_id: row.key_id,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<{ updated: boolean }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `保存登录名/密码失败 (${res.status})`);
+      }
+      await fetchAuthKeys();
+      closeWebdLoginEditor();
+    } catch (err) {
+      setAuthKeyActionError(err instanceof Error ? err.message : "未知错误");
+    } finally {
+      setAuthKeyActionLoading(null);
+    }
+  };
+
   const deleteAuthKey = async (row: AuthKeyListItem) => {
     const ok = window.confirm(
       t(
-        `确认删除 ${row.user_key_masked}？删除后将移除该 Key 及关联绑定。`,
-        `Delete ${row.user_key_masked}? This will remove the key and related bindings.`,
+        `确认删除 ${row.user_key_masked}？删除后将移除该 Key、关联绑定，以及它对应的用户名密码登录。`,
+        `Delete ${row.user_key_masked}? This will remove the key, related bindings, and its username/password login.`,
       ),
     );
     if (!ok) return;
@@ -1501,6 +1750,24 @@ export default function App() {
     } finally {
       setAuthKeyActionLoading(null);
     }
+  };
+  const promptCreateCustomAuthKey = async () => {
+    const role = window.prompt(
+      t("请输入自定义角色名称，例如 operator / reviewer / finance", "Enter a custom role, such as operator / reviewer / finance"),
+      "",
+    );
+    const normalized = role?.trim();
+    if (!normalized) return;
+    await createAuthKey(normalized);
+  };
+  const promptUpdateAuthKeyRole = async (row: AuthKeyListItem) => {
+    const role = window.prompt(
+      t("请输入新的角色名称。内置推荐：admin / user / guest，也支持自定义。", "Enter a new role. Suggested built-ins: admin / user / guest, but custom values are also allowed."),
+      row.role,
+    );
+    const normalized = role?.trim();
+    if (!normalized || normalized === row.role) return;
+    await updateAuthKey(row.key_id, { role: normalized });
   };
 
   const refreshDiagnostics = async () => {
@@ -1570,6 +1837,24 @@ export default function App() {
       setWechatConfigError(message);
     } finally {
       setWechatConfigLoading(false);
+    }
+  };
+
+  const fetchFeishuConfig = async () => {
+    setFeishuConfigLoading(true);
+    setFeishuConfigError(null);
+    try {
+      const res = await apiFetch(`/v1/feishu/config`);
+      const body = (await res.json()) as ApiResponse<FeishuConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `飞书配置获取失败 (${res.status})`);
+      }
+      setFeishuConfigData(body.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setFeishuConfigError(message);
+    } finally {
+      setFeishuConfigLoading(false);
     }
   };
 
@@ -1975,6 +2260,51 @@ export default function App() {
       setLlmConfigError(message);
     } finally {
       setLlmConfigSaving(false);
+    }
+  };
+
+  const testLlmConfig = async () => {
+    if (!llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()) {
+      setLlmTestMessage(null);
+      setLlmTestError(
+        t(
+          "请先补齐厂商、模型和 Base URL，再测试连接。",
+          "Please fill in vendor, model, and base URL before testing the connection.",
+        ),
+      );
+      return;
+    }
+    setLlmTestLoading(true);
+    setLlmTestMessage(null);
+    setLlmTestError(null);
+    try {
+      const res = await apiFetch(`/v1/llm/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selected_vendor: llmDraftVendor,
+          selected_model: llmDraftModel,
+          vendor_base_url: llmDraftBaseUrl,
+          vendor_api_key: llmDraftApiKey.trim(),
+          vendor_api_format: llmDraftVendor === "minimax" ? llmDraftApiFormat : undefined,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<LlmTestResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `模型连接测试失败 (${res.status})`);
+      }
+      const message = hasUnsavedLlmChanges
+        ? `${body.data.message}${t(
+            " 这是页面里的临时草稿；确认没问题后，再点“保存模型设置”。",
+            " This used the current draft values; save the settings once you're happy with them.",
+          )}`
+        : body.data.message;
+      setLlmTestMessage(message);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setLlmTestError(message);
+    } finally {
+      setLlmTestLoading(false);
     }
   };
 
@@ -2507,6 +2837,11 @@ export default function App() {
     window.localStorage.setItem(STORAGE_KEYS.currentPage, currentPage);
   }, [currentPage]);
 
+  useEffect(() => {
+    setLlmTestMessage(null);
+    setLlmTestError(null);
+  }, [llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
+
   // 切换导航页时仅将主内容区滚动到顶部，不移动导航栏（不调用 scrollIntoView，避免小屏横向导航条滚动或整页抖动）
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
@@ -2518,6 +2853,7 @@ export default function App() {
     void fetchSkills();
     void fetchSkillsConfig();
     void fetchWechatConfig();
+    void fetchFeishuConfig();
     void fetchTelegramConfig();
     void fetchLlmConfig();
     void fetchLocalInteractionContext();
@@ -2543,6 +2879,7 @@ export default function App() {
     if (currentPage === "channels") {
       void fetchAuthKeys();
       void fetchWechatConfig();
+      void fetchFeishuConfig();
       void fetchTelegramConfig();
     }
   }, [currentPage, uiAuthReady, isAdminIdentity]);
@@ -2642,10 +2979,56 @@ export default function App() {
     };
   }, [wechatLoginDialogOpen]);
 
+  useEffect(() => {
+    const entryUrl = feishuBindSession?.entry_url?.trim() ?? "";
+    if (!entryUrl) {
+      setFeishuBindQrDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void QRCode.toDataURL(entryUrl, {
+      width: 288,
+      margin: 1,
+      color: {
+        dark: "#111827",
+        light: "#ffffff",
+      },
+    })
+      .then((url) => {
+        if (!cancelled) {
+          setFeishuBindQrDataUrl(url);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setFeishuBindError(err instanceof Error ? err.message : "未知错误");
+          setFeishuBindQrDataUrl(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [feishuBindSession?.entry_url]);
+
+  useEffect(() => {
+    if (!uiAuthReady) return;
+    if (!feishuBindSession) return;
+    if (isFeishuBindTerminalStatus(feishuBindSession.status)) return;
+    const timer = window.setInterval(() => {
+      void refreshFeishuBindSession(feishuBindSession.session_id, true);
+    }, 1800);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uiAuthReady, feishuBindSession?.session_id, feishuBindSession?.status]);
+
   const maskedSavedUiKey = useMemo(() => {
     if (authMode === "webd") return "";
     return maskStoredKey(uiKey);
   }, [uiKey, authMode]);
+  const maskedIdentityKey = useMemo(() => {
+    const currentKey = authIdentity?.user_key?.trim() || "";
+    return currentKey ? maskStoredKey(currentKey) : "";
+  }, [authIdentity?.user_key]);
   const adapterHealthRows = useMemo<AdapterHealthRow[]>(() => {
     const servicePriority: Record<AdapterHealthRow["key"], number> = {
       wechat_bot: 0,
@@ -2671,6 +3054,22 @@ export default function App() {
         healthy: health?.telegram_bot_healthy ?? health?.telegramd_healthy,
         processCount: health?.telegram_bot_process_count ?? health?.telegramd_process_count,
         memoryRssBytes: health?.telegram_bot_memory_rss_bytes ?? health?.telegramd_memory_rss_bytes,
+      },
+      {
+        key: "whatsapp_cloud",
+        label: serviceDisplayName("whatsapp_cloud"),
+        serviceName: "whatsappd",
+        healthy: health?.whatsapp_cloud_healthy ?? health?.whatsappd_healthy,
+        processCount: health?.whatsapp_cloud_process_count ?? health?.whatsappd_process_count,
+        memoryRssBytes: health?.whatsapp_cloud_memory_rss_bytes ?? health?.whatsappd_memory_rss_bytes,
+      },
+      {
+        key: "whatsapp_web",
+        label: serviceDisplayName("whatsapp_web"),
+        serviceName: "whatsapp_webd",
+        healthy: health?.whatsapp_web_healthy,
+        processCount: health?.whatsapp_web_process_count,
+        memoryRssBytes: health?.whatsapp_web_memory_rss_bytes,
       },
       {
         key: "feishu_bot",
@@ -2763,6 +3162,16 @@ export default function App() {
       { ready: 0, attention: 0, stopped: 0, unknown: 0 },
     );
   }, [serviceStatusRows]);
+  const sortedAuthKeysList = useMemo(
+    () =>
+      [...authKeysList].sort((a, b) => {
+        const aPriority = a.role === "admin" ? 0 : 1;
+        const bPriority = b.role === "admin" ? 0 : 1;
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        return b.created_at.localeCompare(a.created_at);
+      }),
+    [authKeysList],
+  );
   const selectedChannelPreset = useMemo(() => channelPresets[channelBindingChannel], [channelBindingChannel, channelPresets]);
   const hasUnsavedWechatConfigChanges = useMemo(() => {
     if (!wechatConfigData || !wechatConfigDraft) return false;
@@ -2877,7 +3286,7 @@ export default function App() {
   }, [telegramConfigData, telegramConfigDraft]);
   const telegramBotTokenConfigured = useMemo(() => {
     const token = primaryTelegramBot.bot_token?.trim() || "";
-    return token.length > 0 && token !== "REPLACE_ME";
+    return (token.length > 0 && token !== "REPLACE_ME") || primaryTelegramBot.bot_token_configured === true;
   }, [primaryTelegramBot]);
   const hasUnsavedTelegramConfigChanges = useMemo(() => {
     if (!telegramConfigData || !telegramConfigDraft) return false;
@@ -2893,6 +3302,81 @@ export default function App() {
     if (health?.telegramd_healthy === true) return "done";
     return "attention";
   }, [health?.telegramd_healthy, telegramBotTokenConfigured]);
+  const dashboardCommunicationRows = useMemo<DashboardCommunicationRow[]>(() => {
+    const gatewayKinds = new Set((health?.gateway_instance_statuses ?? []).map((item) => item.kind));
+    const enabledKeys = new Set<string>();
+    if (wechatConfigData?.enabled) enabledKeys.add("wechat_bot");
+    if (telegramBotTokenConfigured || (health?.telegram_configured_bot_count ?? 0) > 0 || gatewayKinds.has("telegram")) {
+      enabledKeys.add("telegram_bot");
+    }
+    if (feishuConfigData?.enabled || feishuConfigData?.bind_ready || gatewayKinds.has("feishu")) {
+      enabledKeys.add("feishu_bot");
+    }
+    if (gatewayKinds.has("lark") || health?.larkd_healthy != null || health?.larkd_process_count != null) {
+      enabledKeys.add("lark_bot");
+    }
+    if (gatewayKinds.has("whatsapp_cloud") || health?.whatsapp_cloud_healthy != null || health?.whatsapp_cloud_process_count != null) {
+      enabledKeys.add("whatsapp_cloud");
+    }
+    if (gatewayKinds.has("whatsapp_web") || health?.whatsapp_web_healthy != null || health?.whatsapp_web_process_count != null) {
+      enabledKeys.add("whatsapp_web");
+    }
+
+    return serviceStatusRows
+      .filter((row) => enabledKeys.has(row.key) && row.healthy === true)
+      .map((row) => {
+        const usesSharedGatewayMemory =
+          row.memoryRssBytes == null &&
+          row.healthy === true &&
+          ["telegram_bot", "whatsapp_cloud", "whatsapp_web", "feishu_bot", "lark_bot"].includes(row.key) &&
+          (health?.channel_gateway_memory_rss_bytes ?? null) != null;
+        const memoryValue = usesSharedGatewayMemory ? health?.channel_gateway_memory_rss_bytes ?? null : row.memoryRssBytes;
+        return {
+          ...row,
+          memoryLabel: formatBytes(memoryValue),
+          usesSharedGatewayMemory,
+        };
+      });
+  }, [
+    feishuConfigData?.bind_ready,
+    feishuConfigData?.enabled,
+    health?.channel_gateway_memory_rss_bytes,
+    health?.gateway_instance_statuses,
+    health?.larkd_healthy,
+    health?.larkd_process_count,
+    health?.telegram_configured_bot_count,
+    health?.whatsapp_cloud_healthy,
+    health?.whatsapp_cloud_process_count,
+    health?.whatsapp_web_healthy,
+    health?.whatsapp_web_process_count,
+    serviceStatusRows,
+    telegramBotTokenConfigured,
+    wechatConfigData?.enabled,
+  ]);
+  const feishuBindStatusCopy = useMemo(
+    () => getFeishuBindStatusCopy(feishuBindSession?.status ?? "pending"),
+    [feishuBindSession?.status],
+  );
+  const feishuSetupGuidance = useMemo(
+    () =>
+      getFeishuSetupGuidance({
+        bindReady: feishuConfigData?.bind_ready ?? false,
+        hasUnsavedConfigChanges: false,
+        serviceHealthy: health?.feishud_healthy === true,
+        hasActiveSession: Boolean(
+          feishuBindSession && !isFeishuBindTerminalStatus(feishuBindSession.status),
+        ),
+        bound: feishuBindSession?.status === "bound",
+      }),
+    [feishuBindSession, feishuConfigData?.bind_ready, health?.feishud_healthy],
+  );
+  const feishuStepStatus = useMemo<"done" | "attention" | "todo">(() => {
+    return getFeishuStepStatus({
+      bindReady: feishuConfigData?.bind_ready ?? false,
+      serviceHealthy: health?.feishud_healthy === true,
+      session: feishuBindSession,
+    });
+  }, [feishuBindSession, feishuConfigData?.bind_ready, health?.feishud_healthy]);
   const wechatStatusSummary = useMemo(() => {
     if (wechatStepStatus === "done") {
       return t("设置和登录都已完成，现在可以直接通过微信发送消息。", "Setup and sign-in are complete. You can now send messages through WeChat.");
@@ -3008,11 +3492,11 @@ export default function App() {
       },
       chat: {
         title: t("对话交互", "Chat Interaction"),
-        desc: t("在这里发一条最简单的测试消息，确认模型和已接入渠道已经真正可用。", "Send a simple test message here to confirm the model and connected channel really work."),
+        desc: t("在这里发一条最简单的测试消息，确认模型和已接入通信方式已经真正可用。", "Send a simple test message here to confirm the model and connected communication methods really work."),
       },
       services: {
-        title: t("频道接入", "Channel Setup"),
-        desc: t("微信和 Telegram 都在这里接入。按你要使用的渠道完成配置即可。", "Connect WeChat and Telegram here. Configure the channel you plan to use."),
+        title: t("通信接入", "Communication Setup"),
+        desc: t("微信、Telegram 和飞书都在这里接入。按你要使用的通信方式完成配置即可。", "Connect WeChat, Telegram, and Feishu here. Configure only the communication method you plan to use."),
       },
       channels: {
         title: t("账号绑定", "Account Binding"),
@@ -3065,8 +3549,8 @@ export default function App() {
       },
       {
         id: "services" as const,
-        label: t("频道接入", "Channel Setup"),
-        hint: t("连微信 TG", "connect channels"),
+        label: t("通信接入", "Communication Setup"),
+        hint: t("通微信 TG", "connect comms"),
         icon: <Server className="h-4 w-4" />,
       },
       {
@@ -3111,10 +3595,10 @@ export default function App() {
       {
         key: "wechat",
         title: t("连接机器人", "Connect the bot"),
-        description: t("如果你准备接入微信或 Telegram，就到频道接入页继续完成配置、启动服务和登录验证。", "If you are ready to connect WeChat or Telegram, continue in Channel Setup to finish configuration, start the service, and complete sign-in verification."),
+        description: t("如果你准备接入微信、Telegram 或飞书，就到通信接入页继续完成配置、启动服务和登录验证。", "If you are ready to connect WeChat, Telegram, or Feishu, continue in Communication Setup to finish configuration, start the service, and complete sign-in verification."),
         status: wechatStepStatus,
         page: "services" as const,
-        cta: t("去频道接入", "Open Channel Setup"),
+        cta: t("去通信接入", "Open Communication Setup"),
       },
     ],
     [lang, llmStepStatus, testMessageStepStatus, wechatStepStatus],
@@ -3463,9 +3947,15 @@ export default function App() {
             <div className="theme-panel-soft mt-3 p-3.5 text-sm text-white/70">
               <p className="font-medium text-white">{t("当前登录身份", "Current identity")}</p>
               {authMode === "webd" ? (
-                <p className="mt-2 text-xs text-white/55">
-                  {t("Web 会话（由 webd 注入访问凭证，浏览器不保存明文 key）", "Web session (webd injects credentials; no plaintext key in browser)")}
-                </p>
+                <div className="mt-2 space-y-1 text-xs text-white/55">
+                  <p>{t("Web 会话（由 webd 注入访问凭证，浏览器不保存明文 key）", "Web session (webd injects credentials; no plaintext key in browser)")}</p>
+                  <p>
+                    {t("角色", "Role")}: <span className="text-white/75">{authIdentity?.role || "--"}</span>
+                  </p>
+                  <p className="break-all font-mono">
+                    {t("Key（脱敏）", "Key (masked)")}: <span className="text-white/75">{maskedIdentityKey || "--"}</span>
+                  </p>
+                </div>
               ) : (
                 <p className="mt-2 break-all font-mono text-xs text-white/55">{maskedSavedUiKey || "--"}</p>
               )}
@@ -3550,6 +4040,76 @@ export default function App() {
                   ))}
                 </div>
               </section>
+
+              {dashboardCommunicationRows.length > 0 ? (
+                <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold">{t("已启动的通信端", "Running communication services")}</h3>
+                      <p className="mt-2 text-sm text-white/65">
+                        {t(
+                          "首页只显示当前已经启动的通信端，并展示它们的运行状态、进程数量和内存占用。",
+                          "Home only shows communication services that are currently running, together with their runtime status, process count, and memory usage.",
+                        )}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => setCurrentPage("services")} className="theme-topbar-btn px-3 py-2 text-sm">
+                      {t("去通信接入", "Open Communication Setup")}
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                    {dashboardCommunicationRows.map((row) => (
+                      <div key={row.key} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-white">{row.label}</p>
+                            <p className="mt-1 text-xs text-white/55">{row.statusLabel}</p>
+                          </div>
+                          <span
+                            className={
+                              row.category === "ready"
+                                ? "setup-status setup-status-done"
+                                : row.category === "attention"
+                                  ? "setup-status setup-status-attention"
+                                  : row.category === "stopped"
+                                    ? "setup-status setup-status-todo"
+                                    : "setup-status"
+                            }
+                          >
+                            {row.category === "ready"
+                              ? t("运行中", "Running")
+                              : row.category === "attention"
+                                ? t("待处理", "Needs attention")
+                                : row.category === "stopped"
+                                  ? t("未运行", "Stopped")
+                                  : t("未知", "Unknown")}
+                          </span>
+                        </div>
+
+                        <p className="mt-3 text-sm leading-6 text-white/68">{row.detail}</p>
+
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-white/8 bg-white/5 px-3 py-3">
+                            <p className="text-[11px] tracking-[0.14em] text-white/45">{t("内存占用", "Memory usage")}</p>
+                            <p className="mt-2 text-sm font-semibold text-white/92">{row.memoryLabel}</p>
+                            <p className="mt-1 text-xs text-white/50">
+                              {row.usesSharedGatewayMemory
+                                ? t("当前显示的是共享 channel-gateway 内存。", "Currently showing shared channel-gateway memory.")
+                                : t("当前显示的是该通信端进程内存。", "Currently showing memory for this service process.")}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-white/8 bg-white/5 px-3 py-3">
+                            <p className="text-[11px] tracking-[0.14em] text-white/45">{t("进程数量", "Process count")}</p>
+                            <p className="mt-2 text-sm font-semibold text-white/92">{row.processCount ?? "--"}</p>
+                            <p className="mt-1 text-xs text-white/50">{row.statusLabel}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
 
               {(queuePressureHigh || runningTooOld || !isOnline) && (
                 <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
@@ -3726,20 +4286,20 @@ export default function App() {
               <section className="theme-panel-soft channel-setup-hero p-5">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div className="max-w-2xl">
-                    <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("渠道接入", "Channel setup")}</p>
+                    <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">{t("通信接入", "Communication setup")}</p>
                     <h3 className="mt-2 text-xl font-semibold tracking-tight">
-                      {t("微信和 Telegram 都可以在这里接入。", "You can connect both WeChat and Telegram here.")}
+                      {t("微信、Telegram 和飞书都可以在这里接入。", "WeChat, Telegram, and Feishu can all be connected here.")}
                     </h3>
                     <p className="mt-3 text-sm leading-7 text-white/70">
                       {t(
-                        "按你要使用的渠道完成配置即可。需要微信时，打开接入窗口完成设置和扫码；需要 Telegram 时，填好 Bot Token 后保存并启动服务。",
-                        "Configure the channel you plan to use. For WeChat, open the setup window to finish configuration and QR sign-in. For Telegram, enter the bot token, save it, and start the service.",
+                        "按你要使用的通信方式完成配置即可。微信支持扫码登录，Telegram 支持 Bot Token 接入，飞书支持扫码打开机器人后发送绑定码完成绑定。",
+                        "Configure only the communication method you plan to use. WeChat supports QR sign-in, Telegram uses a bot token, and Feishu lets you scan to open the bot and then send a bind code to finish binding.",
                       )}
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                <div className="mt-5 grid gap-4 xl:grid-cols-3">
                   <div className="setup-channel-card channel-setup-card flex h-full flex-col">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -3800,10 +4360,20 @@ export default function App() {
                           className="theme-input"
                           value={primaryTelegramBot.bot_token}
                           onChange={(e) => setTelegramPrimaryBotDraftField("bot_token", e.target.value)}
-                          placeholder="123456789:AA..."
                         />
                         <p className="text-xs text-white/45">
                           {t("这里只填 Bot Token 就够了。更复杂的设置以后再说。", "Only the Bot Token is needed here. More advanced settings can wait until later.")}
+                        </p>
+                        {primaryTelegramBot.bot_token_masked ? (
+                          <p className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/65">
+                            {t("当前正在使用：", "Currently in use: ")}
+                            <span className="ml-1 font-mono text-white/88">{primaryTelegramBot.bot_token_masked}</span>
+                          </p>
+                        ) : null}
+                        <p className="text-xs text-white/35">
+                          {telegramBotTokenConfigured
+                            ? t("出于安全考虑，当前已保存的 Bot Token 不会回显到输入框。", "For safety, the currently saved bot token is not echoed back into the input.")
+                            : t("这里不会回显已保存的 Token。需要更新时，直接输入新的 Bot Token 即可。", "Saved tokens are not echoed here. To update it, just enter a new bot token.")}
                         </p>
                       </label>
                     </div>
@@ -3819,7 +4389,7 @@ export default function App() {
                         type="button"
                         onClick={() => void saveTelegramConfig()}
                         disabled={telegramConfigSaving || telegramConfigLoading || !hasUnsavedTelegramConfigChanges}
-                        className="theme-accent-btn px-3 py-2 text-sm"
+                        className="theme-accent-btn theme-key-create-btn px-3 py-2 text-sm"
                       >
                         {telegramConfigSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
                         {t("保存 Telegram", "Save Telegram")}
@@ -3828,11 +4398,118 @@ export default function App() {
                         type="button"
                         onClick={() => void controlService("telegramd", health?.telegramd_healthy === true ? "restart" : "start")}
                         disabled={Boolean(serviceActionLoading.telegramd) || !telegramBotTokenConfigured}
-                        className="theme-secondary-btn px-3 py-2 text-sm"
+                        className="theme-secondary-btn theme-key-create-btn px-3 py-2 text-sm"
                       >
                         {serviceActionLoading.telegramd ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
                         {health?.telegramd_healthy === true ? t("重启 Telegram 服务", "Restart the Telegram service") : t("启动 Telegram 服务", "Start the Telegram service")}
                       </button>
+                    </div>
+                  </div>
+
+                  <div className="setup-channel-card channel-setup-card flex h-full flex-col">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-lg font-semibold text-white">{t("飞书", "Feishu")}</h4>
+                        <p className="mt-2 text-sm leading-7 text-white/65">
+                          {t(
+                            "开始后会生成二维码，扫码打开机器人，再发送绑定码完成绑定。",
+                            "Start to generate a QR code, then scan to open the bot and send the bind code to finish binding.",
+                          )}
+                        </p>
+                      </div>
+                      <span className={feishuStepStatus === "done" ? "setup-status setup-status-done" : feishuStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
+                        {feishuStepStatus === "done" ? t("已可用", "Ready") : feishuStepStatus === "attention" ? t("进行中", "In progress") : t("还没开始", "Not started")}
+                      </span>
+                    </div>
+
+                    <p className="mt-4 text-sm leading-7 text-white/65">
+                      {lang === "zh" ? feishuSetupGuidance.zhSummary : feishuSetupGuidance.enSummary}
+                    </p>
+
+                    {feishuConfigError ? (
+                      <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{feishuConfigError}</p>
+                    ) : null}
+                    <p className="mt-3 text-sm text-white/55">
+                      {lang === "zh" ? feishuSetupGuidance.zhHint : feishuSetupGuidance.enHint}
+                    </p>
+
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-black/18 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-white/92">{lang === "zh" ? feishuBindStatusCopy.zhLabel : feishuBindStatusCopy.enLabel}</p>
+                          <p className="mt-2 text-xs leading-6 text-white/58">
+                            {lang === "zh" ? feishuBindStatusCopy.zhDescription : feishuBindStatusCopy.enDescription}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex min-h-52 items-center justify-center rounded-[24px] border border-dashed border-white/12 bg-white/4">
+                        {feishuBindQrDataUrl ? (
+                          <div className="inline-block rounded-[24px] border border-white/12 bg-white p-4 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
+                            <img src={feishuBindQrDataUrl} alt="Feishu QR" className="h-52 w-52" />
+                          </div>
+                        ) : (
+                          <div className="max-w-xs text-center">
+                            <p className="text-sm font-medium text-white/80">{t("开始飞书接入后，这里会显示二维码。", "The Feishu QR code will appear here after you start Feishu setup.")}</p>
+                            <p className="mt-2 text-xs leading-6 text-white/48">
+                              {t("扫码后会打开机器人，对它发送下方绑定码即可完成绑定。", "Scanning opens the bot. Send the bind code below to finish binding.")}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      {feishuBindSession && !isFeishuBindTerminalStatus(feishuBindSession.status) ? (
+                        <div className="mt-4 rounded-2xl border border-sky-400/20 bg-sky-500/10 p-4">
+                          <p className="text-xs font-medium uppercase tracking-[0.22em] text-sky-100/70">
+                            {t("绑定码", "Bind code")}
+                          </p>
+                          <p className="mt-3 break-all rounded-xl bg-black/25 px-3 py-3 font-mono text-sm text-sky-50">
+                            {feishuBindSession.bind_token}
+                          </p>
+                          <p className="mt-3 text-xs leading-6 text-sky-100/80">
+                            {t(
+                              "1. 扫码打开 RustClaw 飞书机器人。2. 把这串绑定码原样发给机器人。3. 页面会自动刷新为绑定成功。",
+                              "1. Scan to open the RustClaw Feishu bot. 2. Send this bind code to the bot exactly as shown. 3. The page will refresh when binding succeeds.",
+                            )}
+                          </p>
+                        </div>
+                      ) : null}
+                      {feishuBindSession && !feishuBindSession.entry_url ? (
+                        <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-xs leading-6 text-amber-100/85">
+                          {t(
+                            "这次飞书接入还没有拿到可用二维码。稍等 1 到 2 秒后重试；如果还是不行，再去日志页面看 feishud.log。",
+                            "This Feishu setup did not get a usable QR code yet. Wait 1-2 seconds and try again. If it still fails, check feishud.log on the logs page.",
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {feishuBindError ? (
+                      <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{feishuBindError}</p>
+                    ) : null}
+
+                    <div className="channel-setup-actions mt-auto flex flex-wrap gap-2 pt-5">
+                      <button
+                        type="button"
+                        onClick={() => void beginFeishuBind()}
+                        disabled={feishuBindLoading || !isAdminIdentity || !feishuSetupGuidance.canStartBind}
+                        className="theme-accent-btn px-3 py-2 text-sm"
+                      >
+                        {feishuBindLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        {feishuBindSession ? t("重新生成二维码", "Refresh QR") : t("开始飞书接入", "Start Feishu setup")}
+                      </button>
+                      {feishuSetupGuidance.canStartService || health?.feishud_healthy === true ? (
+                        <button
+                          type="button"
+                          onClick={() => void controlService("feishud", health?.feishud_healthy === true ? "restart" : "start")}
+                          disabled={Boolean(serviceActionLoading.feishud) || !feishuSetupGuidance.canStartService}
+                          className="theme-secondary-btn px-3 py-2 text-sm"
+                        >
+                          {serviceActionLoading.feishud ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
+                          {health?.feishud_healthy === true
+                            ? t("重启飞书服务", "Restart Feishu service")
+                            : t("启动飞书服务", "Start Feishu service")}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -3848,7 +4525,7 @@ export default function App() {
                   <div>
                     <h3 className="text-base font-semibold">{t("账号绑定与 Key 管理", "Account binding and key management")}</h3>
                     <p className="mt-2 text-sm text-white/65">
-                      {t("微信和 Telegram 的快捷接入已经移到频道接入页。这里现在只保留账号绑定、访问 Key 生成与管理。", "Quick WeChat and Telegram setup moved to Channel Setup. This page now keeps account bindings plus access key generation and management.")}
+                      {t("微信、Telegram 和飞书的快捷接入已经移到通信接入页。这里现在只保留账号绑定、访问 Key 生成与管理。", "Quick WeChat, Telegram, and Feishu setup moved to Communication Setup. This page now keeps account bindings plus access key generation and management.")}
                     </p>
                   </div>
                 </div>
@@ -3862,28 +4539,46 @@ export default function App() {
                     {authKeysLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                     {t("刷新列表", "Refresh list")}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void createAuthKey("user")}
-                    disabled={authKeyCreateLoading || !isAdminIdentity}
-                    className="theme-accent-btn px-3 py-2 text-sm"
-                  >
-                    {authKeyCreateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    {t("生成新 Key（user）", "Generate new key (user)")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void createAuthKey("admin")}
-                    disabled={authKeyCreateLoading || !isAdminIdentity}
-                    className="theme-secondary-btn px-3 py-2 text-sm"
-                  >
-                    {authKeyCreateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    {t("生成新 Key（admin）", "Generate new key (admin)")}
-                  </button>
+                  {isAdminIdentity ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void createAuthKey("user")}
+                        disabled={authKeyCreateLoading}
+                        className="theme-accent-btn px-3 py-2 text-sm"
+                      >
+                        {authKeyCreateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        {t("生成新 Key（user）", "Generate new key (user)")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void createAuthKey("guest")}
+                        disabled={authKeyCreateLoading}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        {authKeyCreateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        {t("生成新 Key（guest）", "Generate new key (guest)")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void promptCreateCustomAuthKey()}
+                        disabled={authKeyCreateLoading}
+                        className="theme-topbar-btn theme-key-create-btn px-3 py-2 text-sm"
+                      >
+                        {authKeyCreateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        {t("生成新 Key（自定义角色）", "Generate new key (custom role)")}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
+                {isAdminIdentity ? (
+                  <p className="mt-3 rounded-lg border border-sky-400/25 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
+                    {t("系统现在只允许 1 个 admin key。admin key 不能删除、不能禁用，只能在列表里重新生成；非 admin 登录后只会看到自己的 key。", "The system now allows only one admin key. Admin keys cannot be deleted or disabled, and can only be regenerated from the list; non-admin users only see their own key.")}
+                  </p>
+                ) : null}
                 {!isAdminIdentity ? (
                   <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                    {t("当前不是 admin 账号：可查看页面，但不能创建/修改/删除账号。", "Current key is not admin: view-only mode for account management.")}
+                    {t("当前不是 admin：这里只显示你自己的 key；你不能新增、禁用、删除，只能重新生成自己的 key。", "Current key is not admin: only your own key is shown here; you cannot create, disable, or delete keys, only regenerate your own key.")}
                   </p>
                 ) : null}
                 {authKeysError ? (
@@ -3899,13 +4594,28 @@ export default function App() {
                   <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
                     <p className="text-sm font-medium text-emerald-200">{t("新 Key 已生成，请复制保存（只显示一次）", "New key generated. Copy and save it (shown once).")}</p>
                     <p className="mt-2 break-all font-mono text-sm text-white/90">{newlyCreatedKey}</p>
-                    <button
-                      type="button"
-                      onClick={() => setNewlyCreatedKey(null)}
-                      className="mt-2 text-xs text-white/70 underline"
-                    >
-                      {t("关闭", "Dismiss")}
-                    </button>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void copyAuthKey({ target: "new", plaintextKey: newlyCreatedKey })}
+                        disabled={authKeyCopyingTarget === "new"}
+                        className="theme-secondary-btn px-3 py-2 text-xs"
+                      >
+                        {authKeyCopiedTarget === "new" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                        {authKeyCopyingTarget === "new"
+                          ? t("复制中...", "Copying...")
+                          : authKeyCopiedTarget === "new"
+                            ? t("已复制", "Copied")
+                            : t("复制 Key", "Copy key")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewlyCreatedKey(null)}
+                        className="text-xs text-white/70 underline"
+                      >
+                        {t("关闭", "Dismiss")}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
                 <div className="mt-4 rounded-xl border border-white/10 bg-black/20 overflow-hidden">
@@ -3914,6 +4624,7 @@ export default function App() {
                       <tr className="border-b border-white/10 bg-white/5">
                         <th className="px-4 py-3 font-medium text-white/80">{t("Key（脱敏）", "Key (masked)")}</th>
                         <th className="px-4 py-3 font-medium text-white/80">role</th>
+                        <th className="px-4 py-3 font-medium text-white/80">{t("网页登录", "Web login")}</th>
                         <th className="px-4 py-3 font-medium text-white/80">{t("启用", "Enabled")}</th>
                         <th className="px-4 py-3 font-medium text-white/80">{t("创建时间", "Created")}</th>
                         <th className="px-4 py-3 font-medium text-white/80">{t("最后使用", "Last used")}</th>
@@ -3923,52 +4634,165 @@ export default function App() {
                     <tbody>
                       {authKeysList.length === 0 && !authKeysLoading ? (
                         <tr>
-                          <td colSpan={6} className="px-4 py-6 text-center text-white/50">
-                            {t("暂无数据，点击「刷新列表」或「生成新 Key」", "No keys yet. Click Refresh list or Generate new key.")}
+                          <td colSpan={7} className="px-4 py-6 text-center text-white/50">
+                            {isAdminIdentity
+                              ? t("暂无数据，点击「刷新列表」或「生成新 Key」", "No keys yet. Click Refresh list or Generate new key.")
+                              : t("暂无可显示的 key，请点击「刷新列表」", "No visible key yet. Click Refresh list.")}
                           </td>
                         </tr>
                       ) : (
-                        authKeysList.map((row) => (
-                          <tr key={row.key_id} className="border-b border-white/5">
-                            <td className="px-4 py-2 font-mono text-white/85">{row.user_key_masked}</td>
-                            <td className="px-4 py-2 text-white/75">{row.role}</td>
-                            <td className="px-4 py-2">{row.enabled ? t("是", "Yes") : t("否", "No")}</td>
-                            <td className="px-4 py-2 text-white/65">{formatDateTimeHuman(row.created_at)}</td>
-                            <td className="px-4 py-2 text-white/65">{formatDateTimeHuman(row.last_used_at)}</td>
-                            <td className="px-4 py-2">
-                              {isAdminIdentity ? (
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <button
-                                    type="button"
-                                    disabled={authKeyActionLoading === row.key_id}
-                                    className="theme-topbar-btn px-2 py-1 text-xs"
-                                    onClick={() => void updateAuthKey(row.key_id, { enabled: !row.enabled })}
-                                  >
-                                    {row.enabled ? t("禁用", "Disable") : t("启用", "Enable")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={authKeyActionLoading === row.key_id}
-                                    className="theme-secondary-btn px-2 py-1 text-xs"
-                                    onClick={() => void updateAuthKey(row.key_id, { role: row.role === "admin" ? "user" : "admin" })}
-                                  >
-                                    {row.role === "admin" ? t("设为 user", "Set as user") : t("设为 admin", "Set as admin")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={authKeyActionLoading === row.key_id}
-                                    className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200 transition hover:bg-red-500/20 disabled:opacity-50"
-                                    onClick={() => void deleteAuthKey(row)}
-                                  >
-                                    {t("删除", "Delete")}
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-white/45">--</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))
+                        sortedAuthKeysList.map((row) => {
+                          const editingWebdLogin = webdLoginEditorKeyId === row.key_id;
+                          return (
+                            <Fragment key={row.key_id}>
+                              <tr className="border-b border-white/5">
+                                <td className="px-4 py-2 font-mono text-white/85">{row.user_key_masked}</td>
+                                <td className="px-4 py-2 text-white/75">{row.role}</td>
+                                <td className="px-4 py-2 text-white/75">{row.webd_username || "--"}</td>
+                                <td className="px-4 py-2">{row.enabled ? t("是", "Yes") : t("否", "No")}</td>
+                                <td className="px-4 py-2 text-white/65">{formatDateOnlyHuman(row.created_at, lang === "zh" ? "zh-CN" : "en-US")}</td>
+                                <td className="px-4 py-2 text-white/65">{formatDateTimeHuman(row.last_used_at)}</td>
+                                <td className="px-4 py-2">
+                                  {isAdminIdentity ? (
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <button
+                                        type="button"
+                                        disabled={authKeyCopyingTarget === row.key_id}
+                                        className="theme-secondary-btn px-2 py-1 text-xs"
+                                        onClick={() => void copyAuthKey({ target: row.key_id, keyId: row.key_id })}
+                                      >
+                                        {authKeyCopiedTarget === row.key_id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                                        {authKeyCopyingTarget === row.key_id
+                                          ? t("复制中...", "Copying...")
+                                          : authKeyCopiedTarget === row.key_id
+                                            ? t("已复制", "Copied")
+                                            : t("复制 Key", "Copy key")}
+                                      </button>
+                                      {row.current_key ? (
+                                        <button
+                                          type="button"
+                                          disabled={authKeyActionLoading === row.key_id}
+                                          className="theme-topbar-btn px-2 py-1 text-xs"
+                                          onClick={() => void rotateCurrentAuthKey(row)}
+                                        >
+                                          {t("重新生成", "Regenerate")}
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          disabled={authKeyActionLoading === row.key_id}
+                                          className="theme-topbar-btn px-2 py-1 text-xs"
+                                          onClick={() => void updateAuthKey(row.key_id, { enabled: !row.enabled })}
+                                        >
+                                          {row.enabled ? t("禁用", "Disable") : t("启用", "Enable")}
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        disabled={authKeyActionLoading === row.key_id || row.role === "admin"}
+                                        className="theme-secondary-btn px-2 py-1 text-xs"
+                                        onClick={() => void promptUpdateAuthKeyRole(row)}
+                                      >
+                                        {t("修改角色", "Change role")}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={authKeyActionLoading === row.key_id}
+                                        className="theme-secondary-btn px-2 py-1 text-xs"
+                                        onClick={() => (editingWebdLogin ? closeWebdLoginEditor() : openWebdLoginEditor(row))}
+                                      >
+                                        {row.webd_username
+                                          ? t("修改登录名/密码", "Update username/password")
+                                          : t("设置登录名/密码", "Set username/password")}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={authKeyActionLoading === row.key_id || row.role === "admin"}
+                                        className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200 transition hover:bg-red-500/20 disabled:opacity-50"
+                                        onClick={() => void deleteAuthKey(row)}
+                                      >
+                                        {t("删除", "Delete")}
+                                      </button>
+                                    </div>
+                                  ) : row.current_key ? (
+                                    <button
+                                      type="button"
+                                      disabled={authKeyActionLoading === row.key_id}
+                                      className="theme-topbar-btn px-2 py-1 text-xs"
+                                      onClick={() => void rotateCurrentAuthKey(row)}
+                                    >
+                                      {t("重新生成", "Regenerate")}
+                                    </button>
+                                  ) : (
+                                    <span className="text-xs text-white/45">--</span>
+                                  )}
+                                </td>
+                              </tr>
+                              {isAdminIdentity && editingWebdLogin ? (
+                                <tr className="border-b border-white/5 bg-white/[0.03]">
+                                  <td colSpan={7} className="px-4 py-4">
+                                    <div className="rounded-xl border border-white/10 bg-black/15 p-4">
+                                      <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div>
+                                          <p className="text-sm font-medium text-white/90">
+                                            {t("修改登录名/密码", "Update username/password")}
+                                          </p>
+                                          <p className="mt-1 text-xs text-white/55">
+                                            {t(
+                                              "为这个 Key 设置网页登录用户名和新密码。用户名会自动转成小写。",
+                                              "Set the web login username and a new password for this key. The username will be normalized to lowercase.",
+                                            )}
+                                          </p>
+                                        </div>
+                                        <p className="font-mono text-xs text-white/45">{row.user_key_masked}</p>
+                                      </div>
+                                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                                        <label className="space-y-2">
+                                          <span className="text-xs uppercase tracking-widest text-white/50">{t("登录名", "Username")}</span>
+                                          <input
+                                            value={webdLoginUsernameDraft}
+                                            onChange={(e) => setWebdLoginUsernameDraft(e.target.value)}
+                                            className="theme-input"
+                                            placeholder={t("例如 rustclaw_admin", "For example rustclaw_admin")}
+                                          />
+                                        </label>
+                                        <label className="space-y-2">
+                                          <span className="text-xs uppercase tracking-widest text-white/50">{t("新密码", "New password")}</span>
+                                          <input
+                                            type="password"
+                                            value={webdLoginPasswordDraft}
+                                            onChange={(e) => setWebdLoginPasswordDraft(e.target.value)}
+                                            className="theme-input"
+                                            placeholder={t("输入新的登录密码", "Enter a new login password")}
+                                          />
+                                        </label>
+                                      </div>
+                                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                                        <button
+                                          type="button"
+                                          disabled={authKeyActionLoading === row.key_id}
+                                          className="theme-accent-btn px-3 py-2 text-sm"
+                                          onClick={() => void saveWebdLoginEditor(row)}
+                                        >
+                                          {authKeyActionLoading === row.key_id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                                          {t("保存登录名/密码", "Save username/password")}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={authKeyActionLoading === row.key_id}
+                                          className="theme-topbar-btn px-3 py-2 text-sm"
+                                          onClick={() => closeWebdLoginEditor()}
+                                        >
+                                          {t("取消", "Cancel")}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ) : null}
+                            </Fragment>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -4009,6 +4833,15 @@ export default function App() {
                         {t("自定义模型", "Custom model")}
                       </button>
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void testLlmConfig()}
+                      disabled={llmTestLoading || llmConfigLoading || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
+                      className="theme-secondary-btn px-3 py-2 text-xs"
+                    >
+                      {llmTestLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      {t("测试连接", "Test Connection")}
+                    </button>
                     <button
                       onClick={() => void saveLlmConfig()}
                       disabled={llmConfigSaving || llmConfigLoading || !hasUnsavedLlmChanges || !llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()}
@@ -4141,6 +4974,16 @@ export default function App() {
                     {llmConfigSaveMessage ? (
                       <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
                         {llmConfigSaveMessage}
+                      </p>
+                    ) : null}
+                    {llmTestMessage ? (
+                      <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                        {llmTestMessage}
+                      </p>
+                    ) : null}
+                    {llmTestError ? (
+                      <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                        {llmTestError}
                       </p>
                     ) : null}
                     {hasUnsavedLlmChanges ? (

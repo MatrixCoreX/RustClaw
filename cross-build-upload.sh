@@ -25,8 +25,10 @@ fi
 REMOTE_DIR="${REMOTE_DIR:-/tmp/rustclaw-cross-build}"
 LOCAL_SOURCE="${SCRIPT_DIR}"
 LOCAL_OUTPUT="${SCRIPT_DIR}"
-TARGET="aarch64-unknown-linux-gnu"
-LOCAL_RELEASE_DIR="${LOCAL_OUTPUT}/target/release"
+TARGET="${TARGET:-${RUSTCLAW_CROSS_TARGET:-aarch64-unknown-linux-gnu}}"
+LOCAL_RELEASE_DIR="$(target_release_dir "${LOCAL_OUTPUT}" "${TARGET}")"
+HOST_OS="$(detect_host_os || printf '%s' "unknown")"
+HOST_ARCH="$(detect_host_arch || printf '%s' "unknown")"
 
 abs_path() { echo "$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")" || echo "$1"; }
 format_mib() { awk -v bytes="${1:-0}" 'BEGIN { printf "%.2f", bytes / 1048576 }'; }
@@ -352,6 +354,7 @@ usage() {
 	local exit_code="${1:-1}"
 	echo "用法: $0 [all|skill <技能名>|crate <包名>|dir]"
 	echo "  默认仅远程编译，并把 release 中的 bin 直接覆盖回本地 target/release（不拉非 release/非 bin 产物）。"
+	echo "  当前主机平台: ${HOST_OS}/${HOST_ARCH}，交叉目标: ${TARGET}"
 	echo "  all            - 编译整个 workspace"
 	echo "  skill <name>   - 仅编译指定技能，如: skill health_check"
 	echo "  crate <name>   - 仅编译指定包，如: crate clawd"

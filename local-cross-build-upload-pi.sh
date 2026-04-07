@@ -57,6 +57,8 @@ fi
 LOCAL_TARGET_RELEASE_DIR="${SCRIPT_DIR}/target/${TARGET}/${BUILD_PROFILE}"
 STAGE_ROOT=""
 RUSTCLAW_CARGO_METADATA=""
+HOST_OS="$(detect_host_os || printf '%s' "unknown")"
+HOST_ARCH="$(detect_host_arch || printf '%s' "unknown")"
 
 log() {
 	echo "[$(date '+%F %T')] $*"
@@ -221,9 +223,6 @@ ensure_ubuntu_packages() {
 }
 
 ensure_local_cross_dependencies() {
-	local os_name
-	os_name="$(uname -s)"
-
 	require_command ssh
 	require_command rsync
 	require_command python3
@@ -232,8 +231,8 @@ ensure_local_cross_dependencies() {
 	ensure_cargo
 	ensure_rust_target
 
-	case "$os_name" in
-	Darwin)
+	case "$HOST_OS" in
+	macos)
 		ensure_homebrew
 		if ! xcode-select -p >/dev/null 2>&1; then
 			die "macOS 需要先安装 Xcode Command Line Tools"
@@ -242,21 +241,20 @@ ensure_local_cross_dependencies() {
 		brew_install_if_missing aarch64-unknown-linux-gnu
 		brew_install_if_missing perl
 		;;
-	Linux)
+	linux)
 		command -v apt-get >/dev/null 2>&1 || die "当前仅自动支持 Ubuntu/Debian 安装交叉编译依赖"
 		ensure_ubuntu_packages gcc-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config make perl clang libclang-dev
 		;;
 	*)
-		die "不支持的本机系统: $os_name"
+		die "不支持的本机系统: $HOST_OS"
 		;;
 	esac
 }
 
 detect_cross_gcc() {
-	local os_name gcc_path toolchain_prefix
-	os_name="$(uname -s)"
+	local gcc_path toolchain_prefix
 
-	if [[ "$os_name" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
+	if [[ "$HOST_OS" == "macos" ]] && command -v brew >/dev/null 2>&1; then
 		toolchain_prefix="$(brew --prefix aarch64-unknown-linux-gnu 2>/dev/null || true)"
 		if [[ -n "$toolchain_prefix" && -d "$toolchain_prefix/bin" ]]; then
 			export PATH="${toolchain_prefix}/bin:${PATH}"

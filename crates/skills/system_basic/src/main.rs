@@ -103,10 +103,7 @@ fn execute_action(workspace_root: &Path, args: Value) -> Result<String, String> 
 }
 
 fn system_info(workspace_root: &Path) -> Result<String, String> {
-    let hostname = std::fs::read_to_string("/etc/hostname")
-        .unwrap_or_else(|_| "unknown".to_string())
-        .trim()
-        .to_string();
+    let hostname = detect_hostname();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -140,14 +137,7 @@ fn system_info(workspace_root: &Path) -> Result<String, String> {
 }
 
 fn memory_rss_bytes() -> Option<u64> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    for line in status.lines() {
-        if let Some(rest) = line.strip_prefix("VmRSS:") {
-            let kb = rest.split_whitespace().next()?.parse::<u64>().ok()?;
-            return Some(kb * 1024);
-        }
-    }
-    None
+    memory_rss_bytes_platform()
 }
 
 fn inventory_dir(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
@@ -928,18 +918,18 @@ fn diagnose_runtime(workspace_root: &Path, obj: &Map<String, Value>) -> Result<S
     let include_ports = bool_arg(obj, "include_ports", false);
     let include_env_summary = bool_arg(obj, "include_env_summary", false);
 
-    let loadavg = std::fs::read_to_string("/proc/loadavg")
-        .ok()
-        .and_then(|s| s.lines().next().map(str::trim).map(str::to_string));
-    let meminfo = summarize_meminfo();
+    let loadavg = load_average_platform();
+    let meminfo = summarize_meminfo_platform();
     let disk = summarize_df(workspace_root);
     let process_snapshot = if include_process {
-        run_command_lines("ps", &["-eo", "pid,comm,%cpu,rss", "--sort=-rss"], 8)
+        top_process_snapshot(8)
     } else {
         None
     };
     let ports_snapshot = if include_ports {
         run_command_lines("ss", &["-ltn"], 10)
+            .or_else(|| run_command_lines("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"], 10))
+            .or_else(|| run_command_lines("netstat", &["-anv", "-p", "tcp"], 10))
             .or_else(|| run_command_lines("netstat", &["-ltn"], 10))
     } else {
         None
@@ -982,10 +972,37 @@ struct TreeSummaryState {
     truncated_nodes: usize,
 }
 
-fn summarize_meminfo() -> Value {
+#[cfg(target_os = "linux")]
+fn memory_rss_bytes_platform() -> Option<u64> {
+    memory_rss_bytes_from_proc().or_else(memory_rss_bytes_from_ps)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn memory_rss_bytes_platform() -> Option<u64> {
+    memory_rss_bytes_from_ps()
+}
+
+#[cfg(target_os = "linux")]
+fn load_average_platform() -> Option<String> {
+    std::fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|s| s.lines().next().map(str::trim).map(str::to_string))
+        .or_else(|| {
+            run_command_lines("sysctl", &["-n", "vm.loadavg"], 1)
+                .and_then(|lines| lines.into_iter().next())
+        })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn load_average_platform() -> Option<String> {
+    run_command_lines("sysctl", &["-n", "vm.loadavg"], 1).and_then(|lines| lines.into_iter().next())
+}
+
+#[cfg(target_os = "linux")]
+fn summarize_meminfo_platform() -> Value {
     let text = match std::fs::read_to_string("/proc/meminfo") {
         Ok(v) => v,
-        Err(_) => return Value::Null,
+        Err(_) => return summarize_meminfo_from_sysctl(),
     };
     let mut picked = Map::new();
     for line in text.lines() {
@@ -1000,6 +1017,100 @@ fn summarize_meminfo() -> Value {
         }
     }
     Value::Object(picked)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn summarize_meminfo_platform() -> Value {
+    summarize_meminfo_from_sysctl()
+}
+
+fn detect_hostname() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            Command::new("hostname")
+                .output()
+                .ok()
+                .and_then(|out| String::from_utf8(out.stdout).ok())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn memory_rss_bytes_from_proc() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            let kb = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+            return Some(kb * 1024);
+        }
+    }
+    None
+}
+
+fn memory_rss_bytes_from_ps() -> Option<u64> {
+    let pid = std::process::id().to_string();
+    let lines = run_command_lines("ps", &["-o", "rss=", "-p", &pid], 1)?;
+    let kb = lines.first()?.trim().parse::<u64>().ok()?;
+    Some(kb * 1024)
+}
+
+fn summarize_meminfo_from_sysctl() -> Value {
+    let total_bytes = run_command_lines("sysctl", &["-n", "hw.memsize"], 1)
+        .and_then(|lines| lines.into_iter().next())
+        .map(|v| v.trim().to_string());
+    match total_bytes {
+        Some(total_bytes) => json!({
+            "MemTotalBytes": total_bytes,
+        }),
+        None => Value::Null,
+    }
+}
+
+fn top_process_snapshot(limit: usize) -> Option<Vec<String>> {
+    let lines = run_command_lines("ps", &["-Ao", "pid=,comm=,pcpu=,rss="], 4096)?;
+    let mut rows = lines
+        .into_iter()
+        .filter_map(|line| parse_process_snapshot_row(&line))
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| {
+        b.rss_kb
+            .cmp(&a.rss_kb)
+            .then_with(|| a.pid.cmp(&b.pid))
+    });
+    let mut out = vec!["PID COMM %CPU RSS_KB".to_string()];
+    for row in rows.into_iter().take(limit) {
+        out.push(format!(
+            "{} {} {:.1} {}",
+            row.pid, row.comm, row.cpu, row.rss_kb
+        ));
+    }
+    Some(out)
+}
+
+struct ProcessSnapshotRow {
+    pid: u32,
+    comm: String,
+    cpu: f64,
+    rss_kb: u64,
+}
+
+fn parse_process_snapshot_row(line: &str) -> Option<ProcessSnapshotRow> {
+    let mut parts = line.split_whitespace();
+    let pid = parts.next()?.parse::<u32>().ok()?;
+    let comm = parts.next()?.to_string();
+    let cpu = parts.next()?.parse::<f64>().ok()?;
+    let rss_kb = parts.next()?.parse::<u64>().ok()?;
+    Some(ProcessSnapshotRow {
+        pid,
+        comm,
+        cpu,
+        rss_kb,
+    })
 }
 
 fn summarize_df(workspace_root: &Path) -> Value {

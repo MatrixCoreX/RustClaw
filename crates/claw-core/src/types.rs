@@ -95,6 +95,46 @@ pub struct BindChannelKeyRequest {
     pub user_key: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StartFeishuBindSessionRequest {
+    #[serde(default)]
+    pub expires_in_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeishuBindSessionStatusResponse {
+    pub session_id: i64,
+    pub channel: String,
+    pub bind_token: String,
+    pub status: String,
+    #[serde(default)]
+    pub external_user_id: Option<String>,
+    #[serde(default)]
+    pub external_chat_id: Option<String>,
+    #[serde(default)]
+    pub error_text: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub expires_at: String,
+    #[serde(default)]
+    pub entry_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DetectFeishuBindSessionRequest {
+    #[serde(default)]
+    pub bind_token: Option<String>,
+    pub external_user_id: String,
+    pub external_chat_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectFeishuBindSessionResponse {
+    pub matched: bool,
+    #[serde(default)]
+    pub session: Option<FeishuBindSessionStatusResponse>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramBotRuntimeStatus {
     pub name: String,
