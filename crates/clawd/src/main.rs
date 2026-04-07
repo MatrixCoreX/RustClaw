@@ -108,7 +108,7 @@ pub(crate) use repo::{
     insert_submitted_task, is_user_allowed, list_active_tasks_internal, list_auth_keys,
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
     mark_pending_channel_bind_session_failed, maybe_find_submit_task_dedup, normalize_user_key,
-    resolve_auth_identity_by_key, rotate_auth_key_by_user_key,
+    resolve_auth_identity_by_key,
     resolve_channel_binding_identity, resolve_submit_task_context, stable_i64_from_key,
     submit_task_audit_detail, task_count_by_status, task_kind_name, update_auth_key_by_id,
     update_task_timeout, upsert_exchange_credential_for_user_key, upsert_webd_login_account,

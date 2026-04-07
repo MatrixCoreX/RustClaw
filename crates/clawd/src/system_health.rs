@@ -1,6 +1,6 @@
 use rusqlite::OptionalExtension;
+#[cfg(not(target_os = "linux"))]
 use std::process::Command as StdCommand;
-
 use crate::AppState;
 
 pub(crate) fn current_rss_bytes() -> Option<u64> {

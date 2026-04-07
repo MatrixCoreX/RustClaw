@@ -27,7 +27,7 @@ use super::super::{
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
     mark_pending_channel_bind_session_failed, mask_secret, oldest_running_task_age_seconds,
     reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
-    rotate_auth_key_by_user_key, task_count_by_status, telegramd_process_stats,
+    task_count_by_status, telegramd_process_stats,
     update_auth_key_by_id,
     upsert_exchange_credential_for_user_key, upsert_webd_login_account,
     verify_webd_password_login, wa_webd_process_stats, webd_process_stats,
@@ -457,7 +457,6 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
     Router::new()
         .route("/auth/ui-key/verify", post(verify_ui_key))
         .route("/auth/me", get(auth_me))
-        .route("/auth/current-key/rotate", post(rotate_current_auth_key_handler))
         .route("/auth/channel/resolve", post(resolve_channel_binding))
         .route("/auth/channel/bind", post(bind_channel_key))
         .route(
@@ -1505,53 +1504,6 @@ async fn create_auth_key_handler(
                 ok: false,
                 data: None,
                 error: Some(format!("create auth key failed: {err}")),
-            }),
-        ),
-    }
-}
-
-async fn rotate_current_auth_key_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
-    match rotate_auth_key_by_user_key(&state, &identity.user_key) {
-        Ok(Some(user_key)) => {
-            let identity_user_key = user_key.clone();
-            (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    ok: true,
-                    data: Some(json!({
-                        "user_key": user_key,
-                        "identity": {
-                            "user_id": identity.user_id,
-                            "chat_id": identity.chat_id,
-                            "role": identity.role,
-                            "user_key": identity_user_key,
-                        }
-                    })),
-                    error: None,
-                }),
-            )
-        }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("current key not found".to_string()),
-            }),
-        ),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("rotate auth key failed: {err}")),
             }),
         ),
     }
