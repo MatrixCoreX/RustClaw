@@ -111,6 +111,7 @@ interface AuthIdentityResponse extends LocalInteractionContextResponse {
 
 interface AuthKeyListItem {
   key_id: number;
+  user_key: string;
   user_key_masked: string;
   role: string;
   enabled: boolean;
@@ -1691,8 +1692,8 @@ export default function App() {
   const deleteAuthKey = async (row: AuthKeyListItem) => {
     const ok = window.confirm(
       t(
-        `确认删除 ${row.user_key_masked}？删除后将移除该 Key、关联绑定，以及它对应的用户名密码登录。`,
-        `Delete ${row.user_key_masked}? This will remove the key, related bindings, and its username/password login.`,
+        `确认删除 ${row.user_key}？删除后将移除该 Key、关联绑定，以及它对应的用户名密码登录。`,
+        `Delete ${row.user_key}? This will remove the key, related bindings, and its username/password login.`,
       ),
     );
     if (!ok) return;
@@ -4552,7 +4553,7 @@ export default function App() {
                 ) : null}
                 {newlyCreatedKey ? (
                   <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-                    <p className="text-sm font-medium text-emerald-200">{t("新 Key 已生成，请复制保存（只显示一次）", "New key generated. Copy and save it (shown once).")}</p>
+                    <p className="text-sm font-medium text-emerald-200">{t("新 Key 已生成，请复制保存", "New key generated. Copy and save it.")}</p>
                     <p className="mt-2 break-all font-mono text-sm text-white/90">{newlyCreatedKey}</p>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
@@ -4606,7 +4607,7 @@ export default function App() {
                           return (
                             <Fragment key={row.key_id}>
                               <tr className="border-b border-white/5">
-                                <td className="px-4 py-2 font-mono text-white/85">{row.user_key_masked}</td>
+                                <td className="px-4 py-2 font-mono text-white/85">{row.user_key}</td>
                                 <td className="px-4 py-2 text-white/75">{row.role}</td>
                                 <td className="px-4 py-2 text-white/75">{row.webd_username || "--"}</td>
                                 <td className="px-4 py-2">{row.enabled ? t("是", "Yes") : t("否", "No")}</td>
@@ -4692,7 +4693,7 @@ export default function App() {
                                             )}
                                           </p>
                                         </div>
-                                        <p className="font-mono text-xs text-white/45">{row.user_key_masked}</p>
+                                        <p className="font-mono text-xs text-white/45">{row.user_key}</p>
                                       </div>
                                       <div className="mt-4 grid gap-3 md:grid-cols-2">
                                         <label className="space-y-2">
