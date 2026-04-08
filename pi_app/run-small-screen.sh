@@ -11,4 +11,11 @@ if [[ -z "${DISPLAY}" ]]; then
   exit 1
 fi
 
+# 小屏运行时尽量关闭 X 层空闲熄屏/DPMS，避免长时间无人操作后画面看似“卡住”。
+if command -v xset >/dev/null 2>&1; then
+  xset s off >/dev/null 2>&1 || true
+  xset -dpms >/dev/null 2>&1 || true
+  xset s noblank >/dev/null 2>&1 || true
+fi
+
 exec /usr/bin/env python3 "${PI_APP_DIR}/rustclaw_small_screen.py"

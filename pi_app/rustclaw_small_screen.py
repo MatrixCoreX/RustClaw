@@ -9,6 +9,7 @@ import os
 import random
 import re
 import secrets
+import queue
 import sqlite3
 import subprocess
 import sys
@@ -29,12 +30,12 @@ API_BASE = "http://127.0.0.1:8787"
 # 复用至 clawd 的 HTTP 连接（多线程通过锁访问，减少本机 TCP 握手与 TIME_WAIT）
 _api_http_conn = None
 _api_http_lock = threading.Lock()
-HEALTH_REFRESH_SEC = 15
+HEALTH_REFRESH_SEC = 5
 LOGS_REFRESH_SEC = 5
 W, H = 480, 320
 ASSETS_DIR = None
-CRYPTOAUTHLIB_PYTHON = "/home/guagua/cryptoauthlib/python/.venv/bin/python"
-CRYPTOAUTHLIB_LIB_DIR = "/home/guagua/cryptoauthlib/build-pyfix"
+CRYPTOAUTHLIB_PYTHON = "../../cryptoauthlib/python/.venv/bin/python"
+CRYPTOAUTHLIB_LIB_DIR = "../../cryptoauthlib/build-pyfix"
 
 
 def _pi_app_dir():
@@ -435,31 +436,29 @@ def ensure_small_screen_auth_key():
     db_path = _load_sqlite_path_from_config()
     try:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        conn = sqlite3.connect(db_path)
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS auth_keys (
-                user_key     TEXT PRIMARY KEY,
-                role         TEXT NOT NULL CHECK (role IN ('admin', 'user')),
-                enabled      INTEGER NOT NULL DEFAULT 1,
-                created_at   TEXT NOT NULL,
-                last_used_at TEXT
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_keys (
+                    user_key     TEXT PRIMARY KEY,
+                    role         TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+                    enabled      INTEGER NOT NULL DEFAULT 1,
+                    created_at   TEXT NOT NULL,
+                    last_used_at TEXT
+                )
+                """
             )
-            """
-        )
-        if not user_key:
-            user_key = _generate_user_key()
-            save_auth_key(user_key)
-        conn.execute(
-            """
-            INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-            VALUES (?, 'user', 1, strftime('%s','now'), NULL)
-            ON CONFLICT(user_key) DO UPDATE SET enabled=1
-            """,
-            (user_key,),
-        )
-        conn.commit()
-        conn.close()
+            if not user_key:
+                user_key = _generate_user_key()
+                save_auth_key(user_key)
+            conn.execute(
+                """
+                INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+                VALUES (?, 'user', 1, strftime('%s','now'), NULL)
+                ON CONFLICT(user_key) DO UPDATE SET enabled=1
+                """,
+                (user_key,),
+            )
         return user_key
     except Exception:
         return user_key
@@ -1625,11 +1624,21 @@ class SmallScreenApp:
         self._lang = load_lang()
         self._theme = load_theme()
         self._auth_key = ensure_small_screen_auth_key()
+        self._ui_queue = queue.SimpleQueue()
+        self._ui_pump_job = None
+        self._refresh_thread = None
+        self._time_job = None
+        self._gif_job = None
+        self._after_splash_job = None
+        self._clear_topmost_job = None
+        self._raise_window_job = None
+        self._settings_restart_job = None
         self._i18n = []  # [(widget, key), ...] 用于切换语言时更新
         self.root.title(STRINGS.get(self._lang, STRINGS["CN"])["app_title"])
         self.root.geometry(f"{W}x{H}")
         self.root.resizable(False, False)
         self.root.configure(bg=self._c("bg"))
+        self._start_ui_pump()
         self.health = None
         self.log_summary = []
         self.log_entries = []
@@ -1664,6 +1673,12 @@ class SmallScreenApp:
         self._llm_info_frame = None
         self._llm_info_pady = (0, 8)
         self._llm_join_in_progress = False
+        self._llm_content = None
+        self._llm_dot_labels = []
+        self._llm_lobster_count = 0
+        self._llm_lobster_photo = None
+        self._llm_matrix_cols = []
+        self._llm_matrix_max_rows = 0
         self.gif_frames = []
         self.gif_delays = []
         self.gif_frame_idx = 0
@@ -1676,7 +1691,7 @@ class SmallScreenApp:
             self._show_splash(splash_path)
             self._start_fullscreen()
             self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-            self.root.after(2000, self._after_splash)
+            self._after_splash_job = self.root.after(2000, self._after_splash)
         else:
             self._build_ui()
             self._schedule_refresh()
@@ -1693,10 +1708,11 @@ class SmallScreenApp:
         self._splash_photo = None
         try:
             from PIL import Image, ImageTk
-            img = Image.open(image_path).convert("RGB")
-            # 全屏：缩放到窗口大小 W×H 填满
-            img = img.resize((W, H), Image.Resampling.LANCZOS)
-            self._splash_photo = ImageTk.PhotoImage(img)
+            with Image.open(image_path) as img:
+                splash = img.convert("RGB")
+                # 全屏：缩放到窗口大小 W×H 填满
+                splash = splash.resize((W, H), Image.Resampling.LANCZOS)
+                self._splash_photo = ImageTk.PhotoImage(splash)
         except Exception:
             try:
                 self._splash_photo = tk.PhotoImage(file=image_path)
@@ -1708,8 +1724,75 @@ class SmallScreenApp:
         else:
             tk.Label(self._splash_frame, text="RustClaw", font=("", 24, "bold"), bg=self._c("bg"), fg=self._c("accent")).place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
+    def _start_ui_pump(self):
+        if getattr(self, "_closing", False):
+            return
+        try:
+            self._ui_pump_job = self.root.after(100, self._drain_ui_queue)
+        except tk.TclError:
+            self._ui_pump_job = None
+
+    def _post_ui(self, callback):
+        if getattr(self, "_closing", False):
+            return
+        self._ui_queue.put(callback)
+
+    def _cancel_job(self, attr):
+        job = getattr(self, attr, None)
+        if job is None:
+            return
+        try:
+            self.root.after_cancel(job)
+        except tk.TclError:
+            pass
+        setattr(self, attr, None)
+
+    def _stop_market_jobs(self):
+        self._cancel_job("_crypto_job")
+        self._cancel_job("_stock_job")
+
+    def _teardown_gallery_view(self):
+        self._cancel_job("_gallery_job")
+        self._cancel_llm_clear_job()
+        self._stop_llm_animation()
+
+    def _teardown_current_view(self):
+        mode = getattr(self, "_view_mode", None)
+        if mode == "crypto" or mode == "stock":
+            self._stop_market_jobs()
+        elif mode == "gallery":
+            self._teardown_gallery_view()
+
+    def _prepare_for_ui_rebuild(self):
+        self._teardown_current_view()
+        self._teardown_gallery_view()
+        self._stop_market_jobs()
+        self._cancel_log_append_job()
+        self._cancel_llm_clear_job()
+        for attr in ("_blink_job", "_gif_job", "_time_job", "_after_splash_job", "_clear_topmost_job", "_raise_window_job", "_settings_restart_job"):
+            self._cancel_job(attr)
+
+    def _drain_ui_queue(self):
+        self._ui_pump_job = None
+        if getattr(self, "_closing", False):
+            return
+        try:
+            while True:
+                callback = self._ui_queue.get_nowait()
+                try:
+                    callback()
+                except tk.TclError:
+                    if getattr(self, "_closing", False):
+                        return
+                except Exception:
+                    pass
+        except queue.Empty:
+            pass
+        self._start_ui_pump()
+
     def _after_splash(self):
         """等待界面结束后构建主界面。"""
+        self._after_splash_job = None
         if getattr(self, "_closing", False):
             return
         if hasattr(self, "_splash_frame") and self._splash_frame.winfo_exists():
@@ -1719,7 +1802,8 @@ class SmallScreenApp:
         self._tick_time()
         if self.gif_frames:
             self._animate_gif()
-        self.root.after(200, self._raise_window)
+        self._cancel_job("_raise_window_job")
+        self._raise_window_job = self.root.after(200, self._raise_window)
 
     def _build_ui(self):
         global ASSETS_DIR
@@ -1736,18 +1820,18 @@ class SmallScreenApp:
             if os.path.isfile(gif_path):
                 try:
                     from PIL import Image, ImageTk
-                    img = Image.open(gif_path)
-                    try:
-                        n = 0
-                        while True:
-                            img.seek(n)
-                            frame = img.copy().convert("RGBA")
-                            self.gif_frames.append(ImageTk.PhotoImage(frame.resize((48, 48), Image.Resampling.LANCZOS)))
-                            delay = img.info.get("duration", 100)
-                            self.gif_delays.append(max(50, int(delay)))
-                            n += 1
-                    except EOFError:
-                        pass
+                    with Image.open(gif_path) as img:
+                        try:
+                            n = 0
+                            while True:
+                                img.seek(n)
+                                frame = img.copy().convert("RGBA")
+                                self.gif_frames.append(ImageTk.PhotoImage(frame.resize((48, 48), Image.Resampling.LANCZOS)))
+                                delay = img.info.get("duration", 100)
+                                self.gif_delays.append(max(50, int(delay)))
+                                n += 1
+                        except EOFError:
+                            pass
                     if self.gif_frames:
                         self.lobster_label.configure(image=self.gif_frames[0])
                     else:
@@ -1863,7 +1947,17 @@ class SmallScreenApp:
         a1 = tk.Label(adapters_row, text=_t("adapters") + " ", font=adapters_font, bg=self._c("bg"), fg=self._c("adapters_fg"))
         a1.pack(side=tk.LEFT)
         self._i18n.append((a1, "adapters"))
-        tk.Label(adapters_row, textvariable=self.adapters_var, font=adapters_font, bg=self._c("bg"), fg=self._c("adapters_value_fg")).pack(side=tk.LEFT)
+        self._adapters_value_label = tk.Label(
+            adapters_row,
+            textvariable=self.adapters_var,
+            font=adapters_font,
+            bg=self._c("bg"),
+            fg=self._c("adapters_value_fg"),
+            justify=tk.LEFT,
+            anchor=tk.W,
+            wraplength=380,
+        )
+        self._adapters_value_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.users_count_var = tk.StringVar(value="--")
         self.bound_channels_var = tk.StringVar(value="--")
         self._dashboard_summary_row = tk.Frame(content, bg=self._c("bg"))
@@ -2552,7 +2646,7 @@ class SmallScreenApp:
                     self._wifi_status_text = self._t("wifi_scan_failed").format(error=(err or "unknown error"))
                 self._render_wifi_view()
 
-            self.root.after(0, finish)
+            self._post_ui(finish)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2605,7 +2699,7 @@ class SmallScreenApp:
                         pass
                     self._render_wifi_view()
 
-            self.root.after(0, finish)
+            self._post_ui(finish)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2643,7 +2737,7 @@ class SmallScreenApp:
                         pass
                     self._render_wifi_view()
 
-            self.root.after(0, finish)
+            self._post_ui(finish)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2656,6 +2750,7 @@ class SmallScreenApp:
         self._dashboard_users_value.config(bg=self._c("bg"), fg=self._c("fg"))
         self._dashboard_channels_label.config(text="    " + self._t("bound_channels") + ": ", bg=self._c("bg"), fg=self._c("fg_dim"))
         self._dashboard_channels_value.config(bg=self._c("bg"), fg=self._c("adapters_value_fg"))
+        self._adapters_value_label.config(bg=self._c("bg"), fg=self._c("adapters_value_fg"))
         self._refresh_topbar()
         self._last_user_messages_signature = None
         self._update_user_summary_view()
@@ -2774,7 +2869,11 @@ class SmallScreenApp:
                     w.destroy()
                 except tk.TclError:
                     pass
-        self._llm_dot_labels.clear()
+        dot_labels = getattr(self, "_llm_dot_labels", None)
+        if isinstance(dot_labels, list):
+            dot_labels.clear()
+        else:
+            self._llm_dot_labels = []
         self._llm_lobster_count = 0
 
     def _start_llm_pubkey_and_sign_flow(self):
@@ -2812,7 +2911,7 @@ class SmallScreenApp:
                         pass
                     self._refresh_llm_pubkey_label()
 
-                self.root.after(0, finish_pubkey_failed)
+                self._post_ui(finish_pubkey_failed)
                 return
 
             now_ts = int(time.time())
@@ -2827,7 +2926,7 @@ class SmallScreenApp:
                 self._llm_signature_timestamp = str(now_ts)
                 self._refresh_llm_pubkey_label()
 
-            self.root.after(0, switch_to_signing)
+            self._post_ui(switch_to_signing)
             payload, sign_error = sign_unix_time_via_helper(now_ts)
 
             def finish():
@@ -2868,7 +2967,7 @@ class SmallScreenApp:
                         pass
                 self._refresh_llm_pubkey_label()
 
-            self.root.after(0, finish)
+            self._post_ui(finish)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2893,7 +2992,7 @@ class SmallScreenApp:
                 self._llm_pubkey_error = (error or "").strip()
                 self._refresh_llm_pubkey_label()
 
-            self.root.after(0, finish)
+            self._post_ui(finish)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2924,7 +3023,7 @@ class SmallScreenApp:
                     self._llm_signature_error = (error or "").strip()
                 self._refresh_llm_pubkey_label()
 
-            self.root.after(0, finish)
+            self._post_ui(finish)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -3187,6 +3286,7 @@ class SmallScreenApp:
 
     def _rebuild_ui(self):
         """主题切换后重建界面。"""
+        self._prepare_for_ui_rebuild()
         for w in self.root.winfo_children():
             w.destroy()
         self._i18n.clear()
@@ -3197,6 +3297,7 @@ class SmallScreenApp:
         self._tick_time()
         if self.gif_frames:
             self._animate_gif()
+        self._refresh_health_once()
 
     def _on_settings_ok(self):
         self._lang = self._settings_lang_var.get()
@@ -3247,7 +3348,8 @@ class SmallScreenApp:
                 except tk.TclError:
                     pass
 
-        self.root.after(15000, reenable)
+        self._cancel_job("_settings_restart_job")
+        self._settings_restart_job = self.root.after(15000, reenable)
 
     def _on_settings_reset_admin_login(self):
         btn = self._settings_reset_admin_btn
@@ -3285,15 +3387,13 @@ class SmallScreenApp:
                         self._t("reset_admin_login_failed").format(error=(err or "unknown error"))
                     )
 
-            self.root.after(0, finish)
+            self._post_ui(finish)
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _toggle_view(self):
         """左滑/下一页：dashboard -> users -> logs -> skills -> stock -> crypto -> gallery -> settings -> wifi -> dashboard"""
-        if self._gallery_job:
-            self.root.after_cancel(self._gallery_job)
-            self._gallery_job = None
+        self._teardown_current_view()
         if self._view_mode == "dashboard":
             self._view_mode = "users"
             self.dashboard_frame.pack_forget()
@@ -3315,18 +3415,12 @@ class SmallScreenApp:
             self.stock_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._show_stock()
         elif self._view_mode == "stock":
-            if self._stock_job:
-                self.root.after_cancel(self._stock_job)
-                self._stock_job = None
             self.stock_frame.pack_forget()
             self._view_mode = "crypto"
             self.crypto_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._show_crypto()
         elif self._view_mode == "crypto":
             self._view_mode = "gallery"
-            if self._crypto_job:
-                self.root.after_cancel(self._crypto_job)
-                self._crypto_job = None
             self.crypto_frame.pack_forget()
             self.gallery_frame.pack(fill=tk.BOTH, expand=True, padx=(2, 14), pady=4)
             self._show_gallery()
@@ -3350,9 +3444,7 @@ class SmallScreenApp:
 
     def _go_prev_view(self):
         """右滑/上一页：dashboard -> wifi -> settings -> gallery -> crypto -> stock -> skills -> logs -> users -> dashboard（循环）。"""
-        if self._gallery_job:
-            self.root.after_cancel(self._gallery_job)
-            self._gallery_job = None
+        self._teardown_current_view()
         if self._view_mode == "dashboard":
             self._view_mode = "wifi"
             self.dashboard_frame.pack_forget()
@@ -3377,17 +3469,11 @@ class SmallScreenApp:
             self._show_crypto()
         elif self._view_mode == "crypto":
             self._view_mode = "stock"
-            if self._crypto_job:
-                self.root.after_cancel(self._crypto_job)
-                self._crypto_job = None
             self.crypto_frame.pack_forget()
             self.stock_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._show_stock()
         elif self._view_mode == "stock":
             self._view_mode = "skills"
-            if self._stock_job:
-                self.root.after_cancel(self._stock_job)
-                self._stock_job = None
             self.stock_frame.pack_forget()
             self.skills_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
             self._refresh_skills_view()
@@ -3409,8 +3495,7 @@ class SmallScreenApp:
 
     def _show_gallery(self):
         """NNI分布式模型页：Matrix 主题下无标题无按钮、矩阵雨占满屏并自动开始；非 Matrix 为标题+加入/停止+龙虾图。"""
-        if self._llm_lobster_job:
-            return
+        self._teardown_gallery_view()
         for w in self.gallery_frame.winfo_children():
             w.destroy()
         self._llm_per_line = max(6, (W - 32) // 28)
@@ -3533,16 +3618,16 @@ class SmallScreenApp:
                 continue
             try:
                 from PIL import Image, ImageTk
-                img = Image.open(path)
-                img = img.convert("RGBA")
-                img = img.resize((22, 22), Image.Resampling.LANCZOS)
+                with Image.open(path) as img:
+                    icon = img.convert("RGBA")
+                    icon = icon.resize((22, 22), Image.Resampling.LANCZOS)
                 bg_rgb = self._c("bg_rgb")
                 if isinstance(bg_rgb, (list, tuple)) and len(bg_rgb) >= 3:
                     bg_rgb = tuple(int(x) for x in bg_rgb[:3])
                 else:
                     bg_rgb = (0x1a, 0x1a, 0x2e)
-                out = Image.new("RGB", img.size, bg_rgb)
-                out.paste(img, mask=img.split()[3])
+                out = Image.new("RGB", icon.size, bg_rgb)
+                out.paste(icon, mask=icon.split()[3])
                 return ImageTk.PhotoImage(out)
             except Exception:
                 try:
@@ -3555,7 +3640,7 @@ class SmallScreenApp:
 
     def _llm_matrix_tick(self):
         """Matrix 主题：多列竖排随机字符，每列速度不同步；满 6 行清空该列；单次定时驱动所有列。"""
-        if getattr(self, "_closing", False):
+        if getattr(self, "_closing", False) or self._view_mode != "gallery":
             self._llm_lobster_job = None
             btn = getattr(self, "_llm_join_btn", None)
             if btn and btn.winfo_exists():
@@ -3601,7 +3686,7 @@ class SmallScreenApp:
 
     def _llm_lobster_tick(self):
         """每 0.5 秒多画一个龙虾小图，按行网格排；画满 6 行后清空重新画；切页后也继续画。"""
-        if getattr(self, "_closing", False):
+        if getattr(self, "_closing", False) or self._view_mode != "gallery":
             self._llm_lobster_job = None
             try:
                 self._llm_join_btn.config(text=self._t("llm_join"))
@@ -3677,7 +3762,7 @@ class SmallScreenApp:
                 tk.Label(inner, textvariable=var, font=("", 12, "bold"), bg=box_bg, fg=self._c("fg")).pack(side=tk.RIGHT)
         def _fetch_and_update():
             prices = fetch_crypto_prices(self._crypto_items)
-            self.root.after(0, lambda: self._update_crypto_prices(prices))
+            self._post_ui(lambda: self._update_crypto_prices(prices))
         threading.Thread(target=_fetch_and_update, daemon=True).start()
         self._crypto_job = self.root.after(self._crypto_refresh_sec * 1000, self._crypto_refresh_loop)
 
@@ -3700,8 +3785,8 @@ class SmallScreenApp:
                 return
             prices = fetch_crypto_prices(getattr(self, "_crypto_items", None))
             try:
-                self.root.after(0, lambda: self._update_crypto_prices(prices))
-            except tk.TclError:
+                self._post_ui(lambda: self._update_crypto_prices(prices))
+            except Exception:
                 pass
 
         threading.Thread(target=_fetch, daemon=True).start()
@@ -3725,7 +3810,7 @@ class SmallScreenApp:
             if getattr(self, "_closing", False):
                 return
             prices = fetch_crypto_prices(getattr(self, "_crypto_items", None))
-            self.root.after(0, lambda: self._update_crypto_prices(prices))
+            self._post_ui(lambda: self._update_crypto_prices(prices))
         threading.Thread(target=_fetch, daemon=True).start()
         self._crypto_job = self.root.after(self._crypto_refresh_sec * 1000, self._crypto_refresh_loop)
 
@@ -3867,8 +3952,8 @@ class SmallScreenApp:
         def _fetch_and_update():
             stock_data = fetch_a_share_quotes(getattr(self, "_stock_items", None))
             try:
-                self.root.after(0, lambda: self._update_stock_quotes(stock_data))
-            except tk.TclError:
+                self._post_ui(lambda: self._update_stock_quotes(stock_data))
+            except Exception:
                 pass
 
         threading.Thread(target=_fetch_and_update, daemon=True).start()
@@ -3913,8 +3998,8 @@ class SmallScreenApp:
                 return
             stock_data = fetch_a_share_quotes(getattr(self, "_stock_items", None))
             try:
-                self.root.after(0, lambda: self._update_stock_quotes(stock_data))
-            except tk.TclError:
+                self._post_ui(lambda: self._update_stock_quotes(stock_data))
+            except Exception:
                 pass
 
         threading.Thread(target=_fetch, daemon=True).start()
@@ -3938,7 +4023,7 @@ class SmallScreenApp:
             if getattr(self, "_closing", False):
                 return
             stock_data = fetch_a_share_quotes(getattr(self, "_stock_items", None))
-            self.root.after(0, lambda: self._update_stock_quotes(stock_data))
+            self._post_ui(lambda: self._update_stock_quotes(stock_data))
 
         threading.Thread(target=_fetch, daemon=True).start()
         self._stock_job = self.root.after(self._stock_refresh_sec * 1000, self._stock_refresh_loop)
@@ -3954,7 +4039,7 @@ class SmallScreenApp:
             result = fetch_skills_config(self._auth_key)
             if getattr(self, "_closing", False):
                 return
-            self.root.after(0, lambda: self._fill_skills_view(result))
+            self._post_ui(lambda: self._fill_skills_view(result))
         threading.Thread(target=_fetch, daemon=True).start()
 
     def _refresh_health_once(self):
@@ -3963,10 +4048,7 @@ class SmallScreenApp:
             logs, user_messages, _summary_err = fetch_clawd_activity(self._auth_key, self._lang)
             if getattr(self, "_closing", False):
                 return
-            try:
-                self.root.after(0, lambda d=data, e=err, logs=logs, user_messages=user_messages: self._update(d, e, logs=logs, user_messages=user_messages))
-            except tk.TclError:
-                pass
+            self._post_ui(lambda d=data, e=err, logs=logs, user_messages=user_messages: self._update(d, e, logs=logs, user_messages=user_messages))
         threading.Thread(target=_fetch, daemon=True).start()
 
     def _fill_skills_view(self, result):
@@ -4067,6 +4149,9 @@ class SmallScreenApp:
                 _bind_scroll(child)
 
     def _schedule_refresh(self):
+        existing = getattr(self, "_refresh_thread", None)
+        if existing and existing.is_alive():
+            return
         def loop():
             health_data = self.health
             health_err = self.error
@@ -4079,17 +4164,15 @@ class SmallScreenApp:
                 logs, user_messages, _summary_err = fetch_clawd_activity(self._auth_key, self._lang)
                 if getattr(self, "_closing", False):
                     break
-                try:
-                    self.root.after(
-                        0,
-                        lambda d=health_data, e=health_err, logs=logs, user_messages=user_messages: self._update(
-                            d, e, logs=logs, user_messages=user_messages
-                        ),
+                self._post_ui(
+                    lambda d=health_data, e=health_err, logs=logs, user_messages=user_messages: self._update(
+                        d, e, logs=logs, user_messages=user_messages
                     )
-                except tk.TclError:
-                    break
+                )
                 time.sleep(LOGS_REFRESH_SEC)
+            self._refresh_thread = None
         t = threading.Thread(target=loop, daemon=True)
+        self._refresh_thread = t
         t.start()
 
     def _blink_step(self):
@@ -4160,6 +4243,9 @@ class SmallScreenApp:
         self.rss_var.set(fmt_bytes(data.get("memory_rss_bytes")))
         # 通信端：TG 后显示 TG 占用内存，WA / WA-Web / WEBD / FS(Feishu) / Lark / WX(wechatd)
         parts = []
+        if data.get("webd_healthy"):
+            webd_rss = data.get("webd_memory_rss_bytes")
+            parts.append("WEBD " + fmt_bytes(webd_rss) if webd_rss is not None else "WEBD")
         if data.get("telegramd_healthy") or data.get("telegram_bot_healthy"):
             tg_rss = data.get("telegramd_memory_rss_bytes") or data.get("telegram_bot_memory_rss_bytes")
             parts.append("TG " + fmt_bytes(tg_rss) if tg_rss is not None else "TG")
@@ -4167,9 +4253,6 @@ class SmallScreenApp:
             parts.append("WA")
         if data.get("whatsapp_web_healthy"):
             parts.append("WA-Web")
-        if data.get("webd_healthy"):
-            webd_rss = data.get("webd_memory_rss_bytes")
-            parts.append("WEBD " + fmt_bytes(webd_rss) if webd_rss is not None else "WEBD")
         if data.get("feishud_healthy"):
             fs_rss = data.get("feishud_memory_rss_bytes")
             parts.append("FS " + fmt_bytes(fs_rss) if fs_rss is not None else "FS")
@@ -4200,14 +4283,8 @@ class SmallScreenApp:
     def _on_close(self):
         self._closing = True
         self._close_wifi_keyboard()
-        for attr in ("_blink_job", "_gallery_job", "_crypto_job", "_stock_job", "_llm_lobster_job"):
-            job = getattr(self, attr, None)
-            if job is not None:
-                try:
-                    self.root.after_cancel(job)
-                except tk.TclError:
-                    pass
-                setattr(self, attr, None)
+        self._prepare_for_ui_rebuild()
+        self._cancel_job("_ui_pump_job")
         lock_fd = getattr(self, "_lock_fd", None)
         if lock_fd is not None:
             try:
@@ -4226,15 +4303,17 @@ class SmallScreenApp:
 
     def _raise_window(self):
         """自启动时把窗口提到最前并获取焦点，避免被其它窗口挡住。"""
+        self._raise_window_job = None
         try:
             self.root.lift()
             self.root.attributes("-topmost", True)
-            self.root.after(400, self._clear_topmost)
+            self._clear_topmost_job = self.root.after(400, self._clear_topmost)
             self.root.focus_force()
         except tk.TclError:
             pass
 
     def _clear_topmost(self):
+        self._clear_topmost_job = None
         try:
             if not getattr(self, "_closing", False):
                 self.root.attributes("-topmost", False)
@@ -4255,7 +4334,8 @@ class SmallScreenApp:
         self.root.bind_all("<ButtonPress-1>", self._on_swipe_start)
         self.root.bind_all("<ButtonRelease-1>", self._on_swipe_end)
         # 自启动时窗口容易被挡，启动后置前一次
-        self.root.after(300, self._raise_window)
+        self._cancel_job("_raise_window_job")
+        self._raise_window_job = self.root.after(300, self._raise_window)
 
     def _on_swipe_start(self, event):
         self._swipe_start_x = getattr(self, "_swipe_start_x", 0)
@@ -4294,17 +4374,19 @@ class SmallScreenApp:
 
     def _tick_time(self):
         if getattr(self, "_closing", False):
+            self._time_job = None
             return
         self.time_var.set(datetime.now().strftime("%H:%M:%S"))
-        self.root.after(1000, self._tick_time)
+        self._time_job = self.root.after(1000, self._tick_time)
 
     def _animate_gif(self):
         if getattr(self, "_closing", False) or not self.gif_frames or not self.gif_delays:
+            self._gif_job = None
             return
         self.lobster_label.configure(image=self.gif_frames[self.gif_frame_idx])
         delay = self.gif_delays[self.gif_frame_idx]
         self.gif_frame_idx = (self.gif_frame_idx + 1) % len(self.gif_frames)
-        self.root.after(delay, self._animate_gif)
+        self._gif_job = self.root.after(delay, self._animate_gif)
 
     def run(self):
         self.root.mainloop()
