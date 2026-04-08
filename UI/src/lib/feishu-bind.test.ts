@@ -82,6 +82,7 @@ test("failed session does not keep the top-level step in progress", () => {
       bindReady: false,
       serviceHealthy: false,
       session,
+      currentKeyBound: false,
     }),
     "todo",
   );

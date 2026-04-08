@@ -644,6 +644,70 @@ fn upsert_channel_binding_row(
     Ok(())
 }
 
+fn finalize_latest_pending_channel_bind_session_for_user(
+    db: &mut Connection,
+    channel: &str,
+    user_key: &str,
+    external_user_id: Option<&str>,
+    external_chat_id: Option<&str>,
+) -> anyhow::Result<()> {
+    let channel = channel.trim();
+    let user_key = normalize_user_key(user_key);
+    let external_user_id = normalize_external_id_opt(external_user_id);
+    let external_chat_id =
+        normalize_external_id_opt(external_chat_id).or_else(|| external_user_id.clone());
+    if channel.is_empty() || user_key.is_empty() {
+        return Ok(());
+    }
+    let Some(external_user_id) = external_user_id.as_deref() else {
+        return Ok(());
+    };
+    let Some(external_chat_id) = external_chat_id.as_deref() else {
+        return Ok(());
+    };
+
+    let session = db
+        .query_row(
+            "SELECT id, channel, user_key, bind_token, status, external_user_id, external_chat_id, error_text,
+                    install_device_code, install_verification_url, install_poll_interval_seconds,
+                    created_at, updated_at, expires_at
+             FROM pending_channel_bind_sessions
+             WHERE channel = ?1
+               AND user_key = ?2
+               AND status IN (?3, ?4)
+             ORDER BY id DESC
+             LIMIT 1",
+            params![
+                channel,
+                user_key,
+                PENDING_CHANNEL_BIND_STATUS_PENDING,
+                PENDING_CHANNEL_BIND_STATUS_DETECTED,
+            ],
+            map_pending_channel_bind_session,
+        )
+        .optional()?;
+    let Some(session) = session else {
+        return Ok(());
+    };
+
+    let session = if session.status == PENDING_CHANNEL_BIND_STATUS_DETECTED
+        && session.external_user_id.as_deref() == Some(external_user_id)
+        && session.external_chat_id.as_deref() == Some(external_chat_id)
+    {
+        session
+    } else {
+        mark_pending_channel_bind_session_detected(
+            db,
+            session.id,
+            external_user_id,
+            external_chat_id,
+        )?
+    };
+
+    let _ = finalize_pending_channel_bind_session(db, session.id)?;
+    Ok(())
+}
+
 pub(crate) fn create_pending_channel_bind_session(
     db: &mut Connection,
     channel: &str,
@@ -1328,6 +1392,45 @@ fn pending_feishu_bind_session_lifecycle() {
     assert_eq!(terminal.status, "bound");
 }
 
+#[cfg(test)]
+#[test]
+fn direct_bind_finalizes_latest_pending_feishu_session() {
+    let mut db = Connection::open_in_memory().expect("open sqlite");
+    db.execute_batch(crate::INIT_SQL)
+        .expect("create base schema");
+    crate::ensure_memory_schema(&db).expect("create memory schema");
+    ensure_key_auth_schema(&db).expect("create auth schema");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+         VALUES (?1, 'user', 1, '123', NULL)",
+        params!["rk-direct-bind-user"],
+    )
+    .expect("insert auth key");
+
+    let expires_at = (crate::now_ts().parse::<i64>().expect("current ts") + 600).to_string();
+    let created = create_pending_channel_bind_session(&mut db, "feishu", "rk-direct-bind-user", &expires_at)
+        .expect("create pending bind session");
+    assert_eq!(created.status, "pending");
+    assert!(created.external_user_id.is_none());
+    assert!(created.external_chat_id.is_none());
+
+    finalize_latest_pending_channel_bind_session_for_user(
+        &mut db,
+        "feishu",
+        "rk-direct-bind-user",
+        Some("ou-direct-bind"),
+        Some("oc-direct-bind"),
+    )
+    .expect("finalize latest pending session");
+
+    let terminal = get_pending_channel_bind_session_by_id(&db, created.id)
+        .expect("reload terminal session")
+        .expect("terminal session");
+    assert_eq!(terminal.status, "bound");
+    assert_eq!(terminal.external_user_id.as_deref(), Some("ou-direct-bind"));
+    assert_eq!(terminal.external_chat_id.as_deref(), Some("oc-direct-bind"));
+}
+
 pub(crate) fn update_auth_key_by_id(
     state: &AppState,
     key_id: i64,
@@ -1699,6 +1802,62 @@ pub(crate) fn resolve_channel_binding_identity(
     Ok(None)
 }
 
+pub(crate) fn has_channel_binding_for_user_key(
+    state: &AppState,
+    channel: &str,
+    raw_user_key: &str,
+) -> anyhow::Result<bool> {
+    let channel = channel.trim();
+    let user_key = normalize_user_key(raw_user_key);
+    if channel.is_empty() || user_key.is_empty() {
+        return Ok(false);
+    }
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    let count: i64 = db.query_row(
+        "SELECT COUNT(*)
+         FROM channel_bindings
+         WHERE channel = ?1
+           AND user_key = ?2",
+        params![channel, user_key],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+pub(crate) fn reset_channel_binding_state_for_user_key(
+    state: &AppState,
+    channel: &str,
+    raw_user_key: &str,
+) -> anyhow::Result<()> {
+    let channel = channel.trim();
+    let user_key = normalize_user_key(raw_user_key);
+    if channel.is_empty() || user_key.is_empty() {
+        return Ok(());
+    }
+    let mut db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+    let tx = db.transaction()?;
+    tx.execute(
+        "DELETE FROM channel_bindings
+         WHERE channel = ?1
+           AND user_key = ?2",
+        params![channel, user_key],
+    )?;
+    tx.execute(
+        "DELETE FROM pending_channel_bind_sessions
+         WHERE channel = ?1
+           AND user_key = ?2",
+        params![channel, user_key],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 pub(crate) fn bind_channel_identity(
     state: &AppState,
     channel: &str,
@@ -1715,7 +1874,7 @@ pub(crate) fn bind_channel_identity(
     if external_user_id.is_none() && external_chat_id.is_none() {
         return Ok(None);
     }
-    let db = state
+    let mut db = state
         .db
         .lock()
         .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
@@ -1725,6 +1884,13 @@ pub(crate) fn bind_channel_identity(
         external_user_id.as_deref(),
         external_chat_id.as_deref(),
         &identity.user_key,
+    )?;
+    finalize_latest_pending_channel_bind_session_for_user(
+        &mut db,
+        channel,
+        &identity.user_key,
+        external_user_id.as_deref(),
+        external_chat_id.as_deref(),
     )?;
     touch_auth_key_usage(&db, &identity.user_key)?;
     Ok(Some(build_auth_identity(

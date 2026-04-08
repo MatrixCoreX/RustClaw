@@ -221,6 +221,7 @@ interface FeishuConfigResponse {
   verification_token_configured: boolean;
   encrypt_key_configured: boolean;
   bind_ready: boolean;
+  current_key_bound: boolean;
   restart_required: boolean;
 }
 
@@ -703,7 +704,6 @@ export default function App() {
   const [waLoginStatus, setWaLoginStatus] = useState<WhatsappWebLoginStatus | null>(null);
   const [waWebBridgeReachable, setWaWebBridgeReachable] = useState(false);
   const [waLogoutLoading, setWaLogoutLoading] = useState(false);
-  const [wechatLoginDialogOpen, setWechatLoginDialogOpen] = useState(false);
   const [wechatLoginLoading, setWechatLoginLoading] = useState(false);
   const [wechatLoginError, setWechatLoginError] = useState<string | null>(null);
   const [wechatLoginStatus, setWechatLoginStatus] = useState<WechatLoginStatus | null>(null);
@@ -714,6 +714,7 @@ export default function App() {
   const [feishuBindError, setFeishuBindError] = useState<string | null>(null);
   const [feishuBindSession, setFeishuBindSession] = useState<FeishuBindSessionResponse | null>(null);
   const [feishuBindQrDataUrl, setFeishuBindQrDataUrl] = useState<string | null>(null);
+  const [feishuResetLoading, setFeishuResetLoading] = useState(false);
   const [channelBindingChannel, setChannelBindingChannel] = useState<ChannelName>("telegram");
   const [channelBindingExternalUserId, setChannelBindingExternalUserId] = useState("");
   const [channelBindingExternalChatId, setChannelBindingExternalChatId] = useState("");
@@ -1618,6 +1619,35 @@ export default function App() {
     }
   };
 
+  const resetFeishuSetup = async () => {
+    const confirmed = window.confirm(
+      t(
+        "确认重置飞书接入吗？这会清空飞书配置里的关键凭据，并删除当前 Key 的飞书绑定状态与待绑定会话。",
+        "Reset Feishu setup? This clears the Feishu credentials and removes the current key's Feishu bindings and pending setup sessions.",
+      ),
+    );
+    if (!confirmed) return;
+    setFeishuResetLoading(true);
+    setFeishuConfigError(null);
+    setFeishuBindError(null);
+    try {
+      const res = await apiFetch(`/v1/admin/feishu/reset`, { method: "POST" });
+      const body = (await res.json()) as ApiResponse<FeishuConfigResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `飞书重置失败 (${res.status})`);
+      }
+      setFeishuConfigData(body.data);
+      setFeishuBindSession(null);
+      setFeishuBindQrDataUrl(null);
+      await fetchHealth();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setFeishuBindError(message);
+    } finally {
+      setFeishuResetLoading(false);
+    }
+  };
+
   const updateAuthKey = async (keyId: number, patch: { role?: string; enabled?: boolean }) => {
     setAuthKeyActionLoading(keyId);
     setAuthKeyActionError(null);
@@ -2033,18 +2063,6 @@ export default function App() {
     } finally {
       setTelegramConfigSaving(false);
     }
-  };
-
-  const openWechatLoginDialog = () => {
-    setWechatLoginDialogOpen(true);
-    setWechatLoginError(null);
-    setWechatQrPreviewRequested(false);
-    void fetchWechatConfig();
-  };
-
-  const closeWechatLoginDialog = () => {
-    setWechatLoginDialogOpen(false);
-    setWechatQrPreviewRequested(false);
   };
 
   const importExternalSkill = async () => {
@@ -2906,14 +2924,6 @@ export default function App() {
 
   useEffect(() => {
     if (!uiAuthReady) return;
-    if (!wechatLoginDialogOpen) return;
-    void fetchWechatLoginStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wechatLoginDialogOpen, apiBase, uiAuthReady]);
-
-  useEffect(() => {
-    if (!uiAuthReady) return;
-    if (!wechatLoginDialogOpen) return;
     if (!wechatSessionKey) return;
     if (wechatLoginStatus?.connected) return;
     const timer = window.setInterval(() => {
@@ -2922,23 +2932,7 @@ export default function App() {
     }, 2000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wechatLoginDialogOpen, wechatSessionKey, wechatLoginStatus?.connected, apiBase, uiAuthReady]);
-
-  useEffect(() => {
-    if (!wechatLoginDialogOpen) return;
-    const originalOverflow = document.body.style.overflow;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setWechatLoginDialogOpen(false);
-      }
-    };
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = originalOverflow;
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [wechatLoginDialogOpen]);
+  }, [wechatSessionKey, wechatLoginStatus?.connected, apiBase, uiAuthReady]);
 
   useEffect(() => {
     const entryUrl = feishuBindSession?.entry_url?.trim() ?? "";
@@ -3253,6 +3247,10 @@ export default function App() {
     if (!telegramConfigData || !telegramConfigDraft) return false;
     return JSON.stringify(telegramConfigData) !== JSON.stringify(telegramConfigDraft);
   }, [telegramConfigData, telegramConfigDraft]);
+  const healthStatusLoading = health == null && error == null;
+  const wechatStatusLoading = healthStatusLoading || (wechatConfigData == null && wechatConfigError == null);
+  const telegramStatusLoading = healthStatusLoading || (telegramConfigData == null && telegramConfigError == null);
+  const feishuStatusLoading = healthStatusLoading || (feishuConfigData == null && feishuConfigError == null);
   const wechatStepStatus = useMemo<"done" | "attention" | "todo">(() => {
     if (!wechatConfigData?.enabled) return "todo";
     if (health?.wechatd_healthy === true && wechatLoginStatus?.connected) return "done";
@@ -3318,6 +3316,7 @@ export default function App() {
     () => getFeishuBindStatusCopy(feishuBindSession?.status ?? "pending"),
     [feishuBindSession?.status],
   );
+  const feishuCurrentKeyBound = feishuConfigData?.current_key_bound === true;
   const feishuSetupGuidance = useMemo(
     () =>
       getFeishuSetupGuidance({
@@ -3327,27 +3326,62 @@ export default function App() {
         hasActiveSession: Boolean(
           feishuBindSession && !isFeishuBindTerminalStatus(feishuBindSession.status),
         ),
-        bound: feishuBindSession?.status === "bound",
+        bound: feishuCurrentKeyBound || feishuBindSession?.status === "bound",
       }),
-    [feishuBindSession, feishuConfigData?.bind_ready, health?.feishud_healthy],
+    [feishuBindSession, feishuConfigData?.bind_ready, feishuCurrentKeyBound, health?.feishud_healthy],
   );
   const feishuStepStatus = useMemo<"done" | "attention" | "todo">(() => {
     return getFeishuStepStatus({
       bindReady: feishuConfigData?.bind_ready ?? false,
       serviceHealthy: health?.feishud_healthy === true,
       session: feishuBindSession,
+      currentKeyBound: feishuCurrentKeyBound,
     });
-  }, [feishuBindSession, feishuConfigData?.bind_ready, health?.feishud_healthy]);
+  }, [feishuBindSession, feishuConfigData?.bind_ready, feishuCurrentKeyBound, health?.feishud_healthy]);
+  const canControlFeishuService = feishuSetupGuidance.canStartService || health?.feishud_healthy === true;
   const wechatStatusSummary = useMemo(() => {
+    if (wechatStatusLoading) {
+      return t("正在读取微信当前状态。", "Loading the current WeChat status.");
+    }
     if (wechatStepStatus === "done") {
       return t("设置和登录都已完成，现在可以直接通过微信发送消息。", "Setup and sign-in are complete. You can now send messages through WeChat.");
     }
     if (wechatStepStatus === "attention") {
-      return t("微信已经接近可用。打开接入窗口后，完成剩下的启动或扫码即可。", "WeChat is almost ready. Open the setup window and finish the remaining service start or QR sign-in steps.");
+      return t("微信已经接近可用。完成剩下的启动或扫码即可。", "WeChat is almost ready. Finish the remaining service start or QR sign-in steps.");
     }
-    return t("还没有开始微信接入。打开接入窗口后，按页面提示完成设置即可。", "WeChat setup has not started yet. Open the setup window and follow the prompts there.");
-  }, [lang, t, wechatStepStatus]);
+    return t("还没有开始微信接入。按页面提示完成设置即可。", "WeChat setup has not started yet. Follow the prompts on the card to finish setup.");
+  }, [lang, t, wechatStatusLoading, wechatStepStatus]);
+  const wechatServiceReady = health?.wechatd_healthy === true;
+  const wechatQrVisible = wechatQrPreviewRequested && Boolean(wechatLoginStatus?.qrcode_url);
+  const wechatAwaitingPhoneConfirm = wechatLoginStatus?.qr_status === "scaned";
+  const wechatInlineHeadline = useMemo(() => {
+    if (!wechatServiceReady) {
+      return t("先启动微信服务，再生成二维码。", "Start the WeChat service before generating a QR code.");
+    }
+    if (wechatQrStarting || wechatLoginStatus?.qr_status === "generating") {
+      return t("新的二维码正在生成。", "A new QR code is being generated.");
+    }
+    if (wechatLoginStatus?.connected) {
+      return t("微信已经连接成功，可以直接收发消息。", "WeChat is connected and ready to send or receive messages.");
+    }
+    if (wechatAwaitingPhoneConfirm) {
+      return t("二维码已被扫描，请在手机上确认登录。", "The QR code was scanned. Please confirm the login on your phone.");
+    }
+    if (wechatQrVisible) {
+      return t("请使用手机微信扫描左侧二维码。", "Please scan the QR code on the left with WeChat.");
+    }
+    return t("服务就绪后，生成二维码即可开始扫码登录。", "Once the service is ready, generate a QR code to begin sign-in.");
+  }, [lang, t, wechatAwaitingPhoneConfirm, wechatLoginStatus?.connected, wechatLoginStatus?.qr_status, wechatQrStarting, wechatQrVisible, wechatServiceReady]);
+  const wechatInlineHint = useMemo(() => {
+    if (wechatLoginStatus?.connected) {
+      return t("保持当前登录状态即可，不需要再重复扫码。", "Keep the current session as is. There is no need to scan again.");
+    }
+    return wechatLoginStatus?.message || t("界面会自动刷新扫码状态；如果长时间没有变化，可以手动刷新。", "The setup area refreshes scan status automatically. If nothing changes for a while, you can refresh it manually.");
+  }, [lang, t, wechatLoginStatus?.connected, wechatLoginStatus?.message]);
   const telegramStatusSummary = useMemo(() => {
+    if (telegramStatusLoading) {
+      return t("正在读取 Telegram 当前状态。", "Loading the current Telegram status.");
+    }
     if (telegramStepStatus === "done") {
       return t("Telegram 已经可用。你可以直接在 Telegram 里收发消息。", "Telegram is ready. You can send and receive messages there now.");
     }
@@ -3358,7 +3392,13 @@ export default function App() {
       return t("Bot Token 已填好，再启动一次服务就可以了。", "The bot token is ready. Start the service once more to finish setup.");
     }
     return t("填入 Bot Token 后保存，再启动服务，就可以开始使用 Telegram。", "Enter the bot token, save it, and start the service to begin using Telegram.");
-  }, [hasUnsavedTelegramConfigChanges, lang, t, telegramStepStatus]);
+  }, [hasUnsavedTelegramConfigChanges, lang, t, telegramStatusLoading, telegramStepStatus]);
+  const feishuStatusSummary = useMemo(() => {
+    if (feishuStatusLoading) {
+      return t("正在读取飞书当前状态。", "Loading the current Feishu status.");
+    }
+    return lang === "zh" ? feishuSetupGuidance.zhSummary : feishuSetupGuidance.enSummary;
+  }, [feishuSetupGuidance.enSummary, feishuSetupGuidance.zhSummary, feishuStatusLoading, lang, t]);
   const testMessageStepStatus = useMemo<"done" | "attention" | "todo">(() => {
     const hasAssistantReply = chatMessages.some((msg) => msg.role === "assistant");
     if (hasAssistantReply) return "done";
@@ -3914,7 +3954,7 @@ export default function App() {
                     {t("角色", "Role")}: <span className="text-white/75">{authIdentity?.role || "--"}</span>
                   </p>
                   <p className="break-all font-mono">
-                    {t("Key（脱敏）", "Key (masked)")}: <span className="text-white/75">{maskedIdentityKey || "--"}</span>
+                    {t("Key", "Key")}: <span className="text-white/75">{maskedIdentityKey || "--"}</span>
                   </p>
                 </div>
               ) : (
@@ -4260,43 +4300,103 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-5 grid gap-4 xl:grid-cols-3">
-                  <div className="setup-channel-card channel-setup-card flex h-full flex-col">
+                <div className="mt-5 grid items-start gap-4 xl:grid-cols-3">
+                  <div className="setup-channel-card channel-setup-card flex self-start flex-col">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h4 className="text-lg font-semibold text-white">{t("微信", "WeChat")}</h4>
                         <p className="mt-2 text-sm leading-7 text-white/65">
                           {t(
-                            "打开微信接入窗口后，就可以在里面完成设置、启动服务和扫码登录。",
-                            "Open the WeChat setup window to complete configuration, start the service, and sign in with a QR code.",
+                            "可以直接在当前卡片里完成设置、启动服务和扫码登录。",
+                            "Complete configuration, start the service, and sign in with a QR code directly in this card.",
                           )}
                         </p>
                       </div>
-                      <span className={wechatStepStatus === "done" ? "setup-status setup-status-done" : wechatStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
-                        {wechatStepStatus === "done" ? t("已可用", "Ready") : wechatStepStatus === "attention" ? t("还差一步", "In progress") : t("还没开始", "Not started")}
+                      <span className={wechatStatusLoading ? "setup-status" : wechatStepStatus === "done" ? "setup-status setup-status-done" : wechatStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
+                        {wechatStatusLoading ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {t("载入中", "Loading")}
+                          </>
+                        ) : wechatStepStatus === "done" ? t("已可用", "Ready") : wechatStepStatus === "attention" ? t("还差一步", "In progress") : t("还没开始", "Not started")}
                       </span>
                     </div>
 
                     <p className="mt-4 text-sm leading-7 text-white/65">{wechatStatusSummary}</p>
 
-                    <div className="channel-setup-actions mt-auto flex flex-wrap gap-2 pt-5">
-                      <button type="button" onClick={() => openWechatLoginDialog()} className="theme-accent-btn px-3 py-2 text-sm">
-                        <RefreshCw className="h-4 w-4" />
-                        {t("打开微信接入", "Open WeChat setup")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void controlService("wechatd", health?.wechatd_healthy === true ? "restart" : "start")}
-                        disabled={Boolean(serviceActionLoading.wechatd) || !wechatConfigDraft?.enabled}
-                        className="theme-secondary-btn px-3 py-2 text-sm"
-                      >
-                        {serviceActionLoading.wechatd ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
-                        {health?.wechatd_healthy === true ? t("重启微信服务", "Restart the WeChat service") : t("启动微信服务", "Start the WeChat service")}
-                      </button>
+                    <div className="mt-4 flex flex-1 flex-col gap-4 border-t border-white/10 pt-4">
+                      {wechatQrStarting || wechatLoginStatus?.qr_status === "generating" || (wechatQrPreviewRequested && wechatLoginStatus?.qrcode_url) ? (
+                        <div className="wechat-login-visual space-y-3">
+                          {wechatQrStarting || wechatLoginStatus?.qr_status === "generating" ? (
+                            <div className="wechat-login-stage flex min-h-[20rem] items-center justify-center rounded-[24px] border border-dashed border-sky-500/25 bg-sky-500/6 p-5">
+                              <div className="flex flex-col items-center gap-3 text-center">
+                                <Loader2 className="h-8 w-8 animate-spin text-sky-200" />
+                                <p className="text-sm font-medium text-sky-100">{t("正在生成二维码", "Generating QR code")}</p>
+                                <p className="max-w-sm text-xs leading-6 text-sky-100/70">
+                                  {t("生成完成后，这里会自动切换成可扫码的二维码。", "This panel will switch to a scannable QR code automatically once generation finishes.")}
+                                </p>
+                              </div>
+                            </div>
+                          ) : wechatQrPreviewRequested && wechatLoginStatus?.qrcode_url ? (
+                            <div className="space-y-3">
+                              <div className="inline-block rounded-[24px] border border-white/12 bg-white p-4 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
+                                <img src={wechatLoginStatus.qrcode_url} alt="WeChat QR" className="wechat-login-qr-image h-72 w-72" />
+                              </div>
+                              <p className="text-xs text-white/52">
+                                {t("二维码有效期较短，过期后点击“刷新二维码”即可。", "The QR code expires quickly. Click Refresh QR if it expires.")}
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <div className="flex flex-1 flex-col gap-4">
+                          {wechatLoginStatus?.connected ? (
+                            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-100/85">
+                              {t("当前登录状态可继续使用；如果要更换登录，也可以重新生成二维码。", "The current login is active. If you want to switch accounts, you can also regenerate the QR code.")}
+                            </div>
+                          ) : null}
+
+                          {wechatLoginStatus?.last_error ? (
+                            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                              {wechatLoginStatus.last_error}
+                            </p>
+                          ) : null}
+                          {wechatLoginError ? (
+                            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                              {wechatLoginError}
+                            </p>
+                          ) : null}
+
+                          <div className="mt-auto flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void controlService("wechatd", health?.wechatd_healthy === true ? "restart" : "start")}
+                              disabled={Boolean(serviceActionLoading.wechatd) || !wechatConfigDraft?.enabled}
+                              className="theme-secondary-btn px-4 py-2.5 text-sm"
+                            >
+                              {serviceActionLoading.wechatd ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                              {health?.wechatd_healthy === true ? t("重启微信服务", "Restart the WeChat service") : t("启动微信服务", "Start the WeChat service")}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void startWechatQrLogin(true)}
+                              disabled={Boolean(serviceActionLoading.wechatd) || wechatQrStarting || health?.wechatd_healthy !== true}
+                              className="theme-accent-btn px-4 py-2.5 text-sm"
+                            >
+                              {wechatQrStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                              {wechatLoginStatus?.connected
+                                ? t("重新生成二维码", "Regenerate QR")
+                                : wechatQrPreviewRequested && wechatLoginStatus?.qrcode_url
+                                  ? t("刷新二维码", "Refresh QR")
+                                  : t("生成二维码", "Generate QR")}
+                            </button>
+                          </div>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="setup-channel-card channel-setup-card flex h-full flex-col">
+                  <div className="setup-channel-card channel-setup-card flex self-start flex-col">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h4 className="text-lg font-semibold text-white">Telegram</h4>
@@ -4307,8 +4407,13 @@ export default function App() {
                           )}
                         </p>
                       </div>
-                      <span className={telegramStepStatus === "done" ? "setup-status setup-status-done" : telegramStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
-                        {telegramStepStatus === "done" ? t("已可用", "Ready") : telegramStepStatus === "attention" ? t("还差一步", "In progress") : t("还没开始", "Not started")}
+                      <span className={telegramStatusLoading ? "setup-status" : telegramStepStatus === "done" ? "setup-status setup-status-done" : telegramStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
+                        {telegramStatusLoading ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {t("载入中", "Loading")}
+                          </>
+                        ) : telegramStepStatus === "done" ? t("已可用", "Ready") : telegramStepStatus === "attention" ? t("还差一步", "In progress") : t("还没开始", "Not started")}
                       </span>
                     </div>
 
@@ -4367,7 +4472,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="setup-channel-card channel-setup-card flex h-full flex-col">
+                  <div className="setup-channel-card channel-setup-card flex self-start flex-col">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h4 className="text-lg font-semibold text-white">{t("飞书", "Feishu")}</h4>
@@ -4378,14 +4483,17 @@ export default function App() {
                           )}
                         </p>
                       </div>
-                      <span className={feishuStepStatus === "done" ? "setup-status setup-status-done" : feishuStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
-                        {feishuStepStatus === "done" ? t("已可用", "Ready") : feishuStepStatus === "attention" ? t("进行中", "In progress") : t("还没开始", "Not started")}
+                      <span className={feishuStatusLoading ? "setup-status" : feishuStepStatus === "done" ? "setup-status setup-status-done" : feishuStepStatus === "attention" ? "setup-status setup-status-attention" : "setup-status setup-status-todo"}>
+                        {feishuStatusLoading ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {t("载入中", "Loading")}
+                          </>
+                        ) : feishuStepStatus === "done" ? t("已可用", "Ready") : feishuStepStatus === "attention" ? t("进行中", "In progress") : t("还没开始", "Not started")}
                       </span>
                     </div>
 
-                    <p className="mt-4 text-sm leading-7 text-white/65">
-                      {lang === "zh" ? feishuSetupGuidance.zhSummary : feishuSetupGuidance.enSummary}
-                    </p>
+                    <p className="mt-4 text-sm leading-7 text-white/65">{feishuStatusSummary}</p>
 
                     {feishuConfigError ? (
                       <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{feishuConfigError}</p>
@@ -4394,55 +4502,57 @@ export default function App() {
                       {lang === "zh" ? feishuSetupGuidance.zhHint : feishuSetupGuidance.enHint}
                     </p>
 
-                    <div className="mt-4 rounded-2xl border border-white/10 bg-black/18 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-white/92">{lang === "zh" ? feishuBindStatusCopy.zhLabel : feishuBindStatusCopy.enLabel}</p>
-                          <p className="mt-2 text-xs leading-6 text-white/58">
-                            {lang === "zh" ? feishuBindStatusCopy.zhDescription : feishuBindStatusCopy.enDescription}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex min-h-52 items-center justify-center rounded-[24px] border border-dashed border-white/12 bg-white/4">
-                        {feishuBindQrDataUrl ? (
-                          <div className="inline-block rounded-[24px] border border-white/12 bg-white p-4 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
-                            <img src={feishuBindQrDataUrl} alt="Feishu QR" className="h-52 w-52" />
-                          </div>
-                        ) : (
-                          <div className="max-w-xs text-center">
-                            <p className="text-sm font-medium text-white/80">{t("开始飞书接入后，这里会显示二维码。", "The Feishu QR code will appear here after you start Feishu setup.")}</p>
-                            <p className="mt-2 text-xs leading-6 text-white/48">
-                              {t("扫码后会打开机器人，对它发送下方绑定码即可完成绑定。", "Scanning opens the bot. Send the bind code below to finish binding.")}
+                    {!feishuCurrentKeyBound ? (
+                      <div className="mt-4 rounded-2xl border border-white/10 bg-black/18 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-white/92">{lang === "zh" ? feishuBindStatusCopy.zhLabel : feishuBindStatusCopy.enLabel}</p>
+                            <p className="mt-2 text-xs leading-6 text-white/58">
+                              {lang === "zh" ? feishuBindStatusCopy.zhDescription : feishuBindStatusCopy.enDescription}
                             </p>
                           </div>
-                        )}
-                      </div>
-                      {feishuBindSession && !isFeishuBindTerminalStatus(feishuBindSession.status) ? (
-                        <div className="mt-4 rounded-2xl border border-sky-400/20 bg-sky-500/10 p-4">
-                          <p className="text-xs font-medium uppercase tracking-[0.22em] text-sky-100/70">
-                            {t("绑定码", "Bind code")}
-                          </p>
-                          <p className="mt-3 break-all rounded-xl bg-black/25 px-3 py-3 font-mono text-sm text-sky-50">
-                            {feishuBindSession.bind_token}
-                          </p>
-                          <p className="mt-3 text-xs leading-6 text-sky-100/80">
-                            {t(
-                              "1. 扫码打开 RustClaw 飞书机器人。2. 把这串绑定码原样发给机器人。3. 页面会自动刷新为绑定成功。",
-                              "1. Scan to open the RustClaw Feishu bot. 2. Send this bind code to the bot exactly as shown. 3. The page will refresh when binding succeeds.",
-                            )}
-                          </p>
                         </div>
-                      ) : null}
-                      {feishuBindSession && !feishuBindSession.entry_url ? (
-                        <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-xs leading-6 text-amber-100/85">
-                          {t(
-                            "这次飞书接入还没有拿到可用二维码。稍等 1 到 2 秒后重试；如果还是不行，再去日志页面看 feishud.log。",
-                            "This Feishu setup did not get a usable QR code yet. Wait 1-2 seconds and try again. If it still fails, check feishud.log on the logs page.",
+
+                        <div className="mt-4 flex min-h-52 items-center justify-center rounded-[24px] border border-dashed border-white/12 bg-white/4">
+                          {feishuBindQrDataUrl ? (
+                            <div className="inline-block rounded-[24px] border border-white/12 bg-white p-4 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
+                              <img src={feishuBindQrDataUrl} alt="Feishu QR" className="h-52 w-52" />
+                            </div>
+                          ) : (
+                            <div className="max-w-xs text-center">
+                              <p className="text-sm font-medium text-white/80">{t("开始飞书接入后，这里会显示二维码。", "The Feishu QR code will appear here after you start Feishu setup.")}</p>
+                              <p className="mt-2 text-xs leading-6 text-white/48">
+                                {t("扫码后会打开机器人，对它发送下方绑定码即可完成绑定。", "Scanning opens the bot. Send the bind code below to finish binding.")}
+                              </p>
+                            </div>
                           )}
                         </div>
-                      ) : null}
-                    </div>
+                        {feishuBindSession && !isFeishuBindTerminalStatus(feishuBindSession.status) ? (
+                          <div className="mt-4 rounded-2xl border border-sky-400/20 bg-sky-500/10 p-4">
+                            <p className="text-xs font-medium uppercase tracking-[0.22em] text-sky-100/70">
+                              {t("绑定码", "Bind code")}
+                            </p>
+                            <p className="mt-3 break-all rounded-xl bg-black/25 px-3 py-3 font-mono text-sm text-sky-50">
+                              {feishuBindSession.bind_token}
+                            </p>
+                            <p className="mt-3 text-xs leading-6 text-sky-100/80">
+                              {t(
+                                "1. 扫码打开 RustClaw 飞书机器人。2. 把这串绑定码原样发给机器人。3. 页面会自动刷新为绑定成功。",
+                                "1. Scan to open the RustClaw Feishu bot. 2. Send this bind code to the bot exactly as shown. 3. The page will refresh when binding succeeds.",
+                              )}
+                            </p>
+                          </div>
+                        ) : null}
+                        {feishuBindSession && !feishuBindSession.entry_url ? (
+                          <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-xs leading-6 text-amber-100/85">
+                            {t(
+                              "这次飞书接入还没有拿到可用二维码。稍等 1 到 2 秒后重试；如果还是不行，再去日志页面看 feishud.log。",
+                              "This Feishu setup did not get a usable QR code yet. Wait 1-2 seconds and try again. If it still fails, check feishud.log on the logs page.",
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
 
                     {feishuBindError ? (
                       <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{feishuBindError}</p>
@@ -4452,7 +4562,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => void beginFeishuBind()}
-                        disabled={feishuBindLoading || !isAdminIdentity || !feishuSetupGuidance.canStartBind}
+                        disabled={feishuBindLoading || feishuResetLoading || !isAdminIdentity || !feishuSetupGuidance.canStartBind}
                         className="theme-accent-btn px-3 py-2 text-sm"
                       >
                         {feishuBindLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -4462,7 +4572,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => void controlService("feishud", health?.feishud_healthy === true ? "restart" : "start")}
-                          disabled={Boolean(serviceActionLoading.feishud) || !feishuSetupGuidance.canStartService}
+                          disabled={Boolean(serviceActionLoading.feishud) || !canControlFeishuService}
                           className="theme-secondary-btn px-3 py-2 text-sm"
                         >
                           {serviceActionLoading.feishud ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
@@ -4471,6 +4581,15 @@ export default function App() {
                             : t("启动飞书服务", "Start Feishu service")}
                         </button>
                       ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void resetFeishuSetup()}
+                        disabled={feishuResetLoading || feishuBindLoading || !isAdminIdentity}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        {feishuResetLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        {t("重置飞书", "Reset Feishu")}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -4583,7 +4702,7 @@ export default function App() {
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="border-b border-white/10 bg-white/5">
-                        <th className="px-4 py-3 font-medium text-white/80">{t("Key（脱敏）", "Key (masked)")}</th>
+                        <th className="px-4 py-3 font-medium text-white/80">{t("Key", "Key")}</th>
                         <th className="px-4 py-3 font-medium text-white/80">role</th>
                         <th className="px-4 py-3 font-medium text-white/80">{t("网页登录", "Web login")}</th>
                         <th className="px-4 py-3 font-medium text-white/80">{t("启用", "Enabled")}</th>
@@ -5679,153 +5798,6 @@ export default function App() {
         </main>
       </div>
 
-      {wechatLoginDialogOpen ? (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/78 backdrop-blur-sm"
-          onClick={() => closeWechatLoginDialog()}
-        >
-          <div className="wechat-login-shell flex min-h-full items-center justify-center p-4 sm:p-6">
-            <div
-              className="wechat-login-dialog w-full max-w-6xl overflow-hidden rounded-[28px] border border-white/10 bg-[#0f131c] shadow-2xl"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="wechat-login-header flex items-start justify-between gap-4 border-b border-white/10 bg-white/5 px-5 py-4 sm:px-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-white/95">{t("扫码登录微信", "Sign in to WeChat with a QR code")}</h3>
-                  <p className="mt-2 text-sm text-white/60">
-                    {t(
-                      "先启动微信服务，再生成二维码用手机扫码。连接成功后，就可以直接开始使用。",
-                      "Start the WeChat service, generate a QR code, and scan it with your phone. Once connected, you can start using it right away.",
-                    )}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => closeWechatLoginDialog()}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white"
-                  aria-label={t("关闭弹窗", "Close dialog")}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="theme-scrollbar wechat-login-body max-h-[calc(100vh-7rem)] overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
-                <section className="wechat-login-card rounded-[26px] border border-white/10 bg-white/5 p-5 sm:p-6">
-                  <div className="wechat-login-layout mt-5 grid gap-5 xl:grid-cols-[minmax(19rem,24rem)_minmax(0,1fr)]">
-                    <div className="wechat-login-visual space-y-3">
-                      {wechatLoginStatus?.connected ? (
-                        <div className="wechat-login-stage flex min-h-[23rem] items-center justify-center rounded-[28px] border border-emerald-500/20 bg-emerald-500/8">
-                          <div className="max-w-sm text-center">
-                            <p className="text-base font-semibold text-emerald-100">{t("微信已经连接成功", "WeChat is connected")}</p>
-                            <p className="mt-3 text-sm leading-7 text-emerald-100/75">
-                              {t("现在可以直接在微信里给 RustClaw 发消息了。需要重新扫码时，再手动生成新的二维码。", "You can now message RustClaw from WeChat. Generate a new QR code manually only when you need to sign in again.")}
-                            </p>
-                          </div>
-                        </div>
-                      ) : wechatQrStarting || wechatLoginStatus?.qr_status === "generating" ? (
-                        <div className="wechat-login-stage flex min-h-[23rem] items-center justify-center rounded-[28px] border border-dashed border-sky-500/25 bg-sky-500/6">
-                          <div className="flex flex-col items-center gap-3 text-center">
-                            <Loader2 className="h-8 w-8 animate-spin text-sky-200" />
-                            <p className="text-sm font-medium text-sky-100">{t("正在生成二维码", "Generating QR code")}</p>
-                            <p className="max-w-sm text-xs leading-6 text-sky-100/70">
-                              {t("生成完成后，这里会自动切换成可扫码的二维码。", "This panel will switch to a scannable QR code automatically once generation finishes.")}
-                            </p>
-                          </div>
-                        </div>
-                      ) : wechatQrPreviewRequested && wechatLoginStatus?.qrcode_url ? (
-                        <div className="space-y-3">
-                          <div className="inline-block rounded-[28px] border border-white/12 bg-white p-5 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
-                            <img src={wechatLoginStatus.qrcode_url} alt="WeChat QR" className="wechat-login-qr-image h-72 w-72" />
-                          </div>
-                          <p className="text-xs text-white/52">
-                            {t("二维码有效期较短，过期后点击“刷新二维码”即可。", "The QR code expires quickly. Click Refresh QR if it expires.")}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="wechat-login-stage flex min-h-[23rem] items-center justify-center rounded-[28px] border border-dashed border-white/12 bg-black/15">
-                          <div className="max-w-sm text-center">
-                            <p className="text-sm font-medium text-white/82">{t("还没有显示二维码", "No QR code shown yet")}</p>
-                            <p className="mt-2 text-xs leading-6 text-white/50">
-                              {t("需要登录时，点击右侧“生成二维码”，这里才会显示可扫码的二维码。", "When you need to sign in, click Generate QR on the right and the scannable code will appear here.")}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="wechat-login-panel space-y-4">
-                      <div className="rounded-2xl border border-white/10 bg-black/18 p-4">
-                        <p className="text-base font-medium text-white/92">
-                          {health?.wechatd_healthy !== true
-                            ? t("先启动微信服务，再生成二维码。", "Start the WeChat service before generating a QR code.")
-                            : wechatQrStarting || wechatLoginStatus?.qr_status === "generating"
-                              ? t("新的二维码正在生成。", "A new QR code is being generated.")
-                              : wechatLoginStatus?.connected
-                                ? t("微信已经连接成功，可以直接收发消息。", "WeChat is connected and ready to send or receive messages.")
-                              : wechatLoginStatus?.qr_status === "scaned"
-                                  ? t("二维码已被扫描，请在手机上确认登录。", "The QR code was scanned. Please confirm the login on your phone.")
-                                  : wechatQrPreviewRequested && wechatLoginStatus?.qrcode_url
-                                    ? t("请使用手机微信扫描左侧二维码。", "Please scan the QR code on the left with WeChat.")
-                                    : t("服务就绪后，生成二维码即可开始扫码登录。", "Once the service is ready, generate a QR code to begin sign-in.")}
-                        </p>
-                        <p className="mt-2 text-sm leading-7 text-white/60">
-                          {wechatLoginStatus?.connected
-                            ? t("保持当前登录状态即可，不需要再重复扫码。", "Keep the current session as is. There is no need to scan again.")
-                            : wechatLoginStatus?.message || t("界面会自动刷新扫码状态；如果长时间没有变化，可以手动刷新。", "The dialog refreshes scan status automatically. If nothing changes for a while, you can refresh it manually.")}
-                        </p>
-                        <div className="wechat-login-actions mt-3 flex flex-wrap gap-3">
-                          <button
-                            type="button"
-                            onClick={() => void controlService("wechatd", health?.wechatd_healthy === true ? "restart" : "start")}
-                            disabled={Boolean(serviceActionLoading.wechatd) || !wechatConfigDraft?.enabled}
-                            className="theme-secondary-btn px-4 py-2.5 text-sm"
-                          >
-                            {serviceActionLoading.wechatd ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                            {health?.wechatd_healthy === true ? t("重启微信服务", "Restart the WeChat service") : t("启动微信服务", "Start the WeChat service")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void startWechatQrLogin(true)}
-                            disabled={Boolean(serviceActionLoading.wechatd) || wechatQrStarting || health?.wechatd_healthy !== true}
-                            className="theme-accent-btn px-4 py-2.5 text-sm"
-                          >
-                            {wechatQrStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                            {wechatQrPreviewRequested && wechatLoginStatus?.qrcode_url ? t("刷新二维码", "Refresh QR") : t("生成二维码", "Generate QR")}
-                          </button>
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/58">
-                          <button
-                            type="button"
-                            onClick={() => void fetchWechatLoginStatus()}
-                            disabled={wechatLoginLoading}
-                            className="inline-flex items-center gap-2 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {wechatLoginLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                            {t("手动刷新状态", "Refresh status manually")}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {wechatLoginStatus?.last_error ? (
-                    <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                      {wechatLoginStatus.last_error}
-                    </p>
-                  ) : null}
-                  {wechatLoginError ? (
-                    <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                      {wechatLoginError}
-                    </p>
-                  ) : null}
-
-                </section>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

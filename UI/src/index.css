@@ -43,6 +43,10 @@
   --theme-secondary-btn-bg-hover: rgba(121, 175, 230, 0.2);
   --theme-secondary-btn-border: rgba(121, 175, 230, 0.28);
   --theme-secondary-btn-text: #dbeeff;
+  --theme-scrollbar-track: rgba(255, 255, 255, 0.04);
+  --theme-scrollbar-thumb: rgba(255, 150, 96, 0.4);
+  --theme-scrollbar-thumb-hover: rgba(255, 161, 114, 0.56);
+  --theme-scrollbar-thumb-active: rgba(255, 171, 132, 0.68);
 }
 
 :root[data-theme="light"] {
@@ -82,12 +86,18 @@
   --theme-secondary-btn-bg-hover: rgba(104, 112, 255, 0.14);
   --theme-secondary-btn-border: rgba(104, 112, 255, 0.22);
   --theme-secondary-btn-text: #4c55d6;
+  --theme-scrollbar-track: rgba(124, 136, 170, 0.12);
+  --theme-scrollbar-thumb: rgba(104, 112, 255, 0.34);
+  --theme-scrollbar-thumb-hover: rgba(104, 112, 255, 0.5);
+  --theme-scrollbar-thumb-active: rgba(96, 104, 243, 0.62);
 }
 
 @layer base {
   html {
     /* 始终为滚动条预留空间，避免首页/对话/绑定等页面切换时标题栏左右偏移 */
     scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--theme-scrollbar-thumb) var(--theme-scrollbar-track);
   }
   @supports not (scrollbar-gutter: stable) {
     html {
@@ -99,6 +109,47 @@
     background: var(--theme-body-bg);
     color: var(--theme-body-text);
     font-feature-settings: "ss01" 1, "cv01" 1;
+    scrollbar-width: thin;
+    scrollbar-color: var(--theme-scrollbar-thumb) var(--theme-scrollbar-track);
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    width: 13px;
+  }
+
+  html::-webkit-scrollbar-track,
+  body::-webkit-scrollbar-track {
+    background: var(--theme-scrollbar-track);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+
+  html::-webkit-scrollbar-thumb,
+  body::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-scrollbar-thumb) 86%, white 14%) 0%, var(--theme-scrollbar-thumb) 100%);
+    background-clip: padding-box;
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--theme-scrollbar-thumb) 22%, white 78%),
+      0 0 0 1px color-mix(in srgb, var(--theme-scrollbar-track) 78%, transparent);
+  }
+
+  html::-webkit-scrollbar-thumb:hover,
+  body::-webkit-scrollbar-thumb:hover {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-scrollbar-thumb-hover) 84%, white 16%) 0%, var(--theme-scrollbar-thumb-hover) 100%);
+    background-clip: padding-box;
+  }
+
+  html::-webkit-scrollbar-thumb:active,
+  body::-webkit-scrollbar-thumb:active {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-scrollbar-thumb-active) 82%, white 18%) 0%, var(--theme-scrollbar-thumb-active) 100%);
+    background-clip: padding-box;
   }
 }
 
@@ -247,31 +298,41 @@
 
   .theme-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 138, 76, 0.32) rgba(255, 255, 255, 0.06);
+    scrollbar-color: var(--theme-scrollbar-thumb) var(--theme-scrollbar-track);
     scrollbar-gutter: stable;
   }
 
   .theme-scrollbar::-webkit-scrollbar {
-    width: 12px;
+    width: 13px;
   }
 
   .theme-scrollbar::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.035);
+    background: var(--theme-scrollbar-track);
     border-radius: 999px;
     border: 3px solid transparent;
     background-clip: padding-box;
   }
 
   .theme-scrollbar::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, rgba(255, 138, 76, 0.42) 0%, rgba(255, 116, 64, 0.3) 100%);
     border-radius: 999px;
     border: 3px solid transparent;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-scrollbar-thumb) 86%, white 14%) 0%, var(--theme-scrollbar-thumb) 100%);
     background-clip: padding-box;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--theme-scrollbar-thumb) 22%, white 78%),
+      0 0 0 1px color-mix(in srgb, var(--theme-scrollbar-track) 78%, transparent);
   }
 
   .theme-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, rgba(255, 149, 93, 0.58) 0%, rgba(255, 116, 64, 0.42) 100%);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-scrollbar-thumb-hover) 84%, white 16%) 0%, var(--theme-scrollbar-thumb-hover) 100%);
+    background-clip: padding-box;
+  }
+
+  .theme-scrollbar::-webkit-scrollbar-thumb:active {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-scrollbar-thumb-active) 82%, white 18%) 0%, var(--theme-scrollbar-thumb-active) 100%);
     background-clip: padding-box;
   }
 
@@ -319,6 +380,10 @@
     @apply rounded-[22px] border p-4 transition;
     border-color: var(--theme-border);
     background: rgba(0, 0, 0, 0.22);
+  }
+
+  .setup-channel-card {
+    min-height: 32rem;
   }
 
   .setup-step-card {
