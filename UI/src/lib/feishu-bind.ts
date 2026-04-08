@@ -18,6 +18,7 @@ export interface FeishuStepStatusInput {
   bindReady: boolean;
   serviceHealthy: boolean;
   session: FeishuBindSessionResponse | null;
+  currentKeyBound: boolean;
 }
 
 export interface FeishuBindStatusCopy {
@@ -104,6 +105,7 @@ export function isFeishuBindTerminalStatus(status: string): boolean {
 }
 
 export function getFeishuStepStatus(input: FeishuStepStatusInput): "done" | "attention" | "todo" {
+  if (input.currentKeyBound) return "done";
   if (input.session?.status === "bound") return "done";
   if (input.serviceHealthy) return "attention";
   if (input.session && !isFeishuBindTerminalStatus(input.session.status)) return "attention";
