@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { copyAuthKeyValue } from "./auth-keys.ts";
+import { copyAuthKeyValue, writeTextToClipboard } from "./auth-keys.ts";
 
 test("copies plaintext key directly when it is already available", async () => {
   const writes: string[] = [];
@@ -49,4 +49,59 @@ test("throws when neither plaintext key nor key id is provided", async () => {
     }),
     /missing auth key id/,
   );
+});
+
+test("uses clipboard api when available", async () => {
+  const writes: string[] = [];
+
+  await writeTextToClipboard("rk-plain", {
+    clipboard: {
+      writeText: async (value) => {
+        writes.push(value);
+      },
+    },
+  });
+
+  assert.deepEqual(writes, ["rk-plain"]);
+});
+
+test("falls back to execCommand copy when clipboard api is unavailable", async () => {
+  const operations: string[] = [];
+  const textarea = {
+    value: "",
+    setAttribute: (name: string, value: string) => {
+      operations.push(`set:${name}=${value}`);
+    },
+    style: {} as Record<string, string>,
+    focus: () => {
+      operations.push("focus");
+    },
+    select: () => {
+      operations.push("select");
+    },
+  };
+
+  await writeTextToClipboard("rk-fallback", {
+    document: {
+      body: {
+        appendChild: () => {
+          operations.push("append");
+        },
+        removeChild: () => {
+          operations.push("remove");
+        },
+      },
+      createElement: (tag) => {
+        assert.equal(tag, "textarea");
+        return textarea;
+      },
+      execCommand: (command) => {
+        operations.push(`exec:${command}`);
+        return true;
+      },
+    },
+  });
+
+  assert.equal(textarea.value, "rk-fallback");
+  assert.deepEqual(operations, ["set:readonly=", "append", "focus", "select", "exec:copy", "remove"]);
 });
