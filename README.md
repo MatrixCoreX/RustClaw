@@ -112,11 +112,8 @@ cargo build --workspace --release
 Examples with the launcher:
 
 ```bash
-# Quick start with release profile and all supported launcher-managed channels
-rustclaw start -q
-
-# Start with explicit vendor/model
-rustclaw -start --vendor openai --model gpt-5 --profile release --channels all --quick --skip-setup
+# Start with release profile; configure launcher-managed channels in the terminal flow
+rustclaw -start release all
 
 # Start with UI enabled
 rustclaw -start release all --with-ui

@@ -108,9 +108,12 @@ fi
 if ! stop_by_pid_file "$PID_DIR/feishud.pid" "feishud" 'target/release/feishud|cargo run -p feishud'; then
   stop_by_name 'target/release/feishud|cargo run -p feishud'
 fi
+if ! stop_by_pid_file "$PID_DIR/larkd.pid" "larkd" 'target/release/larkd|cargo run -p larkd'; then
+  stop_by_name 'target/release/larkd|cargo run -p larkd'
+fi
 
 if [[ -d "$PID_DIR" ]]; then
-  rm -f "$PID_DIR/webd.pid" "$PID_DIR/clawd.pid" "$PID_DIR/telegramd.pid" "$PID_DIR/whatsappd.pid" "$PID_DIR/whatsapp_webd.pid" "$PID_DIR/wechatd.pid" "$PID_DIR/feishud.pid"
+  rm -f "$PID_DIR/webd.pid" "$PID_DIR/clawd.pid" "$PID_DIR/telegramd.pid" "$PID_DIR/whatsappd.pid" "$PID_DIR/whatsapp_webd.pid" "$PID_DIR/wechatd.pid" "$PID_DIR/feishud.pid" "$PID_DIR/larkd.pid"
 fi
 
 echo "RustClaw has been stopped." # zh: RustClaw 已停止。

@@ -32,31 +32,6 @@ fi
 
 export WECHAT_CONFIG_PATH="${WECHAT_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/wechat.toml}"
 
-if python3 - <<'PY'
-import tomllib
-from pathlib import Path
-
-path = Path("configs/channels/wechat.toml")
-if not path.exists():
-    print("configs/channels/wechat.toml not found, skip starting wechatd.")
-    raise SystemExit(2)
-cfg = tomllib.loads(path.read_text(encoding="utf-8"))
-wechat = cfg.get("wechat", {}) or {}
-if not bool(wechat.get("enabled", False)):
-    print("wechat.enabled=false, skip starting wechatd.")
-    raise SystemExit(2)
-print("WeChat preflight passed.")
-PY
-then
-  :
-else
-  code=$?
-  if [[ "$code" == "2" ]]; then
-    exit 0
-  fi
-  exit "$code"
-fi
-
 if pgrep -f 'target/release/wechatd|cargo run -p wechatd' >/dev/null 2>&1; then
   echo "Detected wechatd already running on this host. Stop old instance first."
   exit 1
