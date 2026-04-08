@@ -25,7 +25,7 @@ import {
   countCompletedDashboardSteps,
   getDashboardOverviewItems,
 } from "./lib/dashboard-home";
-import { copyAuthKeyValue } from "./lib/auth-keys";
+import { copyAuthKeyValue, writeTextToClipboard } from "./lib/auth-keys";
 import { formatDateOnlyHuman } from "./lib/date-format";
 import {
   fetchFeishuBindSession,
@@ -1569,7 +1569,7 @@ export default function App() {
         plaintextKey: options.plaintextKey,
         fetchFullAuthKey,
         writeClipboard: async (value) => {
-          await navigator.clipboard.writeText(value);
+          await writeTextToClipboard(value);
         },
       });
       setAuthKeyCopiedTarget(options.target);
@@ -4502,7 +4502,7 @@ export default function App() {
                       {lang === "zh" ? feishuSetupGuidance.zhHint : feishuSetupGuidance.enHint}
                     </p>
 
-                    {!feishuCurrentKeyBound ? (
+                    {!feishuCurrentKeyBound && feishuBindQrDataUrl ? (
                       <div className="mt-4 rounded-2xl border border-white/10 bg-black/18 p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -4514,18 +4514,9 @@ export default function App() {
                         </div>
 
                         <div className="mt-4 flex min-h-52 items-center justify-center rounded-[24px] border border-dashed border-white/12 bg-white/4">
-                          {feishuBindQrDataUrl ? (
-                            <div className="inline-block rounded-[24px] border border-white/12 bg-white p-4 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
-                              <img src={feishuBindQrDataUrl} alt="Feishu QR" className="h-52 w-52" />
-                            </div>
-                          ) : (
-                            <div className="max-w-xs text-center">
-                              <p className="text-sm font-medium text-white/80">{t("开始飞书接入后，这里会显示二维码。", "The Feishu QR code will appear here after you start Feishu setup.")}</p>
-                              <p className="mt-2 text-xs leading-6 text-white/48">
-                                {t("扫码后会打开机器人，对它发送下方绑定码即可完成绑定。", "Scanning opens the bot. Send the bind code below to finish binding.")}
-                              </p>
-                            </div>
-                          )}
+                          <div className="inline-block rounded-[24px] border border-white/12 bg-white p-4 shadow-[0_24px_70px_rgba(6,10,18,0.22)]">
+                            <img src={feishuBindQrDataUrl} alt="Feishu QR" className="h-52 w-52" />
+                          </div>
                         </div>
                         {feishuBindSession && !isFeishuBindTerminalStatus(feishuBindSession.status) ? (
                           <div className="mt-4 rounded-2xl border border-sky-400/20 bg-sky-500/10 p-4">
