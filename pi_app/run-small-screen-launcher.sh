@@ -33,6 +33,13 @@ else
   export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 fi
 
+# 小屏运行时尽量关闭 X 层空闲熄屏/DPMS，避免长时间无人操作后画面看似“卡住”。
+if command -v xset >/dev/null 2>&1; then
+  xset s off >/dev/null 2>&1 || true
+  xset -dpms >/dev/null 2>&1 || true
+  xset s noblank >/dev/null 2>&1 || true
+fi
+
 # 若小屏进程已在运行，直接退出，避免重复启动
 if pgrep -f "rustclaw_small_screen\.py" >/dev/null 2>&1; then
   exit 0
