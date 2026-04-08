@@ -22,10 +22,12 @@ use super::super::{
     current_rss_bytes, daemon_process_pids_by_name, delete_auth_key_by_id,
     exchange_credential_status_for_user_key, feishud_process_stats,
     finalize_pending_channel_bind_session, get_auth_key_value_by_id,
+    has_channel_binding_for_user_key,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
     larkd_process_stats, list_auth_keys,
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
     mark_pending_channel_bind_session_failed, mask_secret, oldest_running_task_age_seconds,
+    reset_channel_binding_state_for_user_key,
     reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
     task_count_by_status, telegramd_process_stats,
     update_auth_key_by_id,
@@ -50,6 +52,48 @@ const FEISHU_BIND_SESSION_DEFAULT_TTL_SECONDS: u64 = 600;
 const FEISHU_BIND_SESSION_MIN_TTL_SECONDS: u64 = 60;
 const FEISHU_BIND_SESSION_MAX_TTL_SECONDS: u64 = 1800;
 const FEISHU_OFFICIAL_ACCOUNTS_BASE_URL: &str = "https://accounts.feishu.cn";
+const FEISHU_CONFIG_TEMPLATE: &str = r#"# Feishu（中国站）应用机器人通道配置 - 与 lark.toml（国际版）独立，勿混用
+# 飞书中国站使用 open.feishu.cn；国际版 Lark 使用 open.larksuite.com，由 lark.toml 配置
+# 支持文本与入站媒体（图片/文件/音视频）落盘后再提交 clawd ask
+# 使用方式（二选一）：
+#   - webhook：应用机器人 → 事件订阅 → 请求地址配置为本服务 callback URL（需公网可达）
+#   - long_connection：应用机器人 → 事件订阅 → 使用长连接接收事件（无需公网，内网优先）
+
+[feishu]
+# 是否启用
+enabled = true
+# 入站模式：webhook | long_connection
+mode = "long_connection"
+# 本服务监听地址（webhook 模式时用于接收回调；long_connection 模式可选用于健康检查等）
+listen = "0.0.0.0:8789"
+# clawd 基地址，用于提交任务与轮询结果
+clawd_base_url = "http://127.0.0.1:8787"
+# 飞书中国站 API 根地址（与 lark.toml 的国际版分开，勿改为 open.larksuite.com）
+api_base_url = "https://open.feishu.cn"
+# i18n 语言（优先尝试 configs/i18n/feishud.<language>.toml）
+language = "zh-CN"
+# i18n 文件路径（当 language 对应文件不存在时回退到此路径）
+i18n_path = "configs/i18n/feishud.zh-CN.toml"
+# 入站媒体落盘根目录（相对 feishud 进程工作目录；实际路径为 <目录>/<chat_id>/<文件名>）
+image_inbox_dir = "data/feishud/image"
+video_inbox_dir = "data/feishud/video"
+audio_inbox_dir = "data/feishud/audio"
+file_inbox_dir = "data/feishud/file"
+# 飞书应用 App ID
+app_id = ""
+# 飞书应用 App Secret（日志不打印）
+app_secret = ""
+# 事件订阅 Verification Token（webhook 时校验请求来自飞书）
+verification_token = ""
+# 事件加密密钥（webhook 时用于消息解密/签名校验）
+encrypt_key = ""
+# 单次 HTTP 请求超时秒数（submit / poll / 发消息等单次请求）
+request_timeout_seconds = 30
+# 任务投递软超时阈值（秒）：达到后会提示“任务仍在执行，完成后回复”，并继续轮询，不会中断投递
+task_delivery_timeout_seconds = 600
+# 长文本分段发送时每段最大字符数（按 UTF-8 安全截断）
+text_chunk_chars = 4000
+"#;
 const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
 
 fn hide_skill_in_ui(state: &AppState, name: &str) -> bool {
@@ -187,6 +231,126 @@ fn read_feishu_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
         return Ok(toml::Value::Table(Default::default()));
     }
     Ok(toml::from_str(&raw)?)
+}
+
+fn read_feishu_config_raw(state: &AppState) -> anyhow::Result<String> {
+    let path = feishu_config_path(state);
+    if !path.exists() {
+        return Ok(FEISHU_CONFIG_TEMPLATE.to_string());
+    }
+    let raw = std::fs::read_to_string(&path)?;
+    if raw.trim().is_empty() {
+        return Ok(FEISHU_CONFIG_TEMPLATE.to_string());
+    }
+    Ok(raw)
+}
+
+fn toml_string_literal(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
+}
+
+fn upsert_section_key_line(
+    raw: &str,
+    section: &str,
+    key: &str,
+    rendered_value: &str,
+) -> String {
+    let mut lines: Vec<String> = raw.lines().map(|line| line.to_string()).collect();
+    let section_header = format!("[{section}]");
+    let mut section_start = lines.iter().position(|line| line.trim() == section_header);
+    if section_start.is_none() {
+        if !lines.is_empty() && !lines.last().is_some_and(|line| line.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push(section_header);
+        section_start = Some(lines.len() - 1);
+    }
+    let start = section_start.expect("section start must exist");
+    let section_end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, line)| {
+            let trimmed = line.trim();
+            trimmed.starts_with('[') && trimmed.ends_with(']')
+        })
+        .map(|(idx, _)| idx)
+        .unwrap_or(lines.len());
+    let target_idx = (start + 1..section_end).find(|idx| {
+        let trimmed = lines[*idx].trim_start();
+        if trimmed.starts_with('#') {
+            return false;
+        }
+        trimmed
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    });
+    let new_line = format!("{key} = {rendered_value}");
+    if let Some(idx) = target_idx {
+        lines[idx] = new_line;
+    } else {
+        let mut insert_at = section_end;
+        while insert_at > start + 1 && lines[insert_at - 1].trim().is_empty() {
+            insert_at -= 1;
+        }
+        lines.insert(insert_at, new_line);
+    }
+    let mut output = lines.join("\n");
+    output.push('\n');
+    output
+}
+
+fn update_feishu_config_raw_preserving_format(raw: &str, app_id: &str, app_secret: &str) -> String {
+    let enabled = !app_id.trim().is_empty() && !app_secret.trim().is_empty();
+    let mut output = if raw.trim().is_empty() {
+        FEISHU_CONFIG_TEMPLATE.to_string()
+    } else {
+        raw.to_string()
+    };
+    for (key, rendered_value) in [
+        ("enabled", enabled.to_string()),
+        ("app_id", toml_string_literal(app_id.trim())),
+        ("app_secret", toml_string_literal(app_secret.trim())),
+        ("mode", toml_string_literal("long_connection")),
+        ("listen", toml_string_literal("0.0.0.0:8789")),
+        ("clawd_base_url", toml_string_literal("http://127.0.0.1:8787")),
+        ("api_base_url", toml_string_literal("https://open.feishu.cn")),
+        ("language", toml_string_literal("zh-CN")),
+        (
+            "i18n_path",
+            toml_string_literal("configs/i18n/feishud.zh-CN.toml"),
+        ),
+        ("image_inbox_dir", toml_string_literal("data/feishud/image")),
+        ("video_inbox_dir", toml_string_literal("data/feishud/video")),
+        ("audio_inbox_dir", toml_string_literal("data/feishud/audio")),
+        ("file_inbox_dir", toml_string_literal("data/feishud/file")),
+        ("verification_token", toml_string_literal("")),
+        ("encrypt_key", toml_string_literal("")),
+        ("request_timeout_seconds", "30".to_string()),
+        ("task_delivery_timeout_seconds", "600".to_string()),
+        ("text_chunk_chars", "4000".to_string()),
+    ] {
+        output = upsert_section_key_line(&output, "feishu", key, &rendered_value);
+    }
+    output
+}
+
+fn reset_feishu_config_raw_preserving_format(raw: &str) -> String {
+    let mut output = if raw.trim().is_empty() {
+        FEISHU_CONFIG_TEMPLATE.to_string()
+    } else {
+        raw.to_string()
+    };
+    for (key, rendered_value) in [
+        ("enabled", "false".to_string()),
+        ("app_id", toml_string_literal("")),
+        ("app_secret", toml_string_literal("")),
+        ("verification_token", toml_string_literal("")),
+        ("encrypt_key", toml_string_literal("")),
+    ] {
+        output = upsert_section_key_line(&output, "feishu", key, &rendered_value);
+    }
+    output
 }
 
 fn ensure_toml_table<'a>(
@@ -485,6 +649,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/feishu/config",
             get(get_feishu_config).post(update_feishu_config),
         )
+        .route("/admin/feishu/reset", post(reset_feishu_config_handler))
         .route("/skills/import", post(import_external_skill))
         .route("/skills/import/upload", post(import_external_skill_upload))
         .route("/skills/uninstall", post(uninstall_external_skill))
@@ -773,7 +938,7 @@ fn feishu_bind_entry_url(
     state: &AppState,
     session: Option<&PendingChannelBindSession>,
 ) -> Option<String> {
-    let config = load_feishu_config_response(state).ok()?;
+    let config = load_feishu_config_response(state, None).ok()?;
     if config.bind_ready {
         if let Some(entry_url) = feishu_entry_url_for_app_id(&config.app_id) {
             return Some(entry_url);
@@ -822,36 +987,8 @@ fn write_feishu_generated_credentials(
     app_id: &str,
     app_secret: &str,
 ) -> anyhow::Result<()> {
-    let mut value = read_feishu_config_value(state)?;
-    let feishu_table = ensure_toml_table(&mut value, &["feishu"])?;
-    feishu_table.insert("enabled".to_string(), toml::Value::Boolean(true));
-    feishu_table.insert(
-        "app_id".to_string(),
-        toml::Value::String(app_id.trim().to_string()),
-    );
-    feishu_table.insert(
-        "app_secret".to_string(),
-        toml::Value::String(app_secret.trim().to_string()),
-    );
-    feishu_table
-        .entry("mode".to_string())
-        .or_insert_with(|| toml::Value::String("long_connection".to_string()));
-    feishu_table
-        .entry("listen".to_string())
-        .or_insert_with(|| toml::Value::String("0.0.0.0:8789".to_string()));
-    feishu_table
-        .entry("clawd_base_url".to_string())
-        .or_insert_with(|| toml::Value::String("http://127.0.0.1:8787".to_string()));
-    feishu_table
-        .entry("api_base_url".to_string())
-        .or_insert_with(|| toml::Value::String("https://open.feishu.cn".to_string()));
-    feishu_table
-        .entry("verification_token".to_string())
-        .or_insert_with(|| toml::Value::String(String::new()));
-    feishu_table
-        .entry("encrypt_key".to_string())
-        .or_insert_with(|| toml::Value::String(String::new()));
-    let output = toml::to_string_pretty(&value)?;
+    let raw = read_feishu_config_raw(state)?;
+    let output = update_feishu_config_raw_preserving_format(&raw, app_id, app_secret);
     write_workspace_and_mounted_file(&state.workspace_root, "configs/channels/feishu.toml", &output)?;
     Ok(())
 }
@@ -1019,7 +1156,7 @@ async fn start_feishu_bind_session_handler(
         }
     };
 
-    let config = match load_feishu_config_response(&state) {
+    let config = match load_feishu_config_response(&state, Some(&identity.user_key)) {
         Ok(config) => config,
         Err(err) => {
             return (
@@ -2252,7 +2389,10 @@ fn load_wechat_config_response(state: &AppState) -> anyhow::Result<WechatConfigR
     })
 }
 
-fn load_feishu_config_response(state: &AppState) -> anyhow::Result<FeishuConfigResponse> {
+fn load_feishu_config_response(
+    state: &AppState,
+    current_user_key: Option<&str>,
+) -> anyhow::Result<FeishuConfigResponse> {
     let value = read_feishu_config_value(state)?;
     let feishu = value
         .get("feishu")
@@ -2293,6 +2433,10 @@ fn load_feishu_config_response(state: &AppState) -> anyhow::Result<FeishuConfigR
         .get("enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(!app_id.is_empty() && !app_secret.is_empty());
+    let current_key_bound = match current_user_key {
+        Some(user_key) => has_channel_binding_for_user_key(state, "feishu", user_key)?,
+        None => false,
+    };
     Ok(FeishuConfigResponse {
         config_path: "configs/channels/feishu.toml".to_string(),
         enabled,
@@ -2317,6 +2461,7 @@ fn load_feishu_config_response(state: &AppState) -> anyhow::Result<FeishuConfigR
         verification_token_configured: !verification_token.is_empty(),
         encrypt_key_configured: !encrypt_key.is_empty(),
         bind_ready: !app_id.is_empty() && !app_secret.is_empty(),
+        current_key_bound,
         restart_required: true,
     })
 }
@@ -2359,17 +2504,20 @@ async fn get_feishu_config(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<FeishuConfigResponse>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
-        return (
-            status,
-            Json(ApiResponse {
-                ok: resp.ok,
-                data: None,
-                error: resp.error,
-            }),
-        );
-    }
-    match load_feishu_config_response(&state) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    match load_feishu_config_response(&state, Some(&identity.user_key)) {
         Ok(data) => (
             StatusCode::OK,
             Json(ApiResponse {
@@ -2531,19 +2679,22 @@ async fn update_feishu_config(
     headers: HeaderMap,
     Json(req): Json<UpdateFeishuConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<FeishuConfigResponse>>) {
-    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
-        return (
-            status,
-            Json(ApiResponse {
-                ok: resp.ok,
-                data: None,
-                error: resp.error,
-            }),
-        );
-    }
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
 
-    let mut value = match read_feishu_config_value(&state) {
-        Ok(value) => value,
+    let raw = match read_feishu_config_raw(&state) {
+        Ok(raw) => raw,
         Err(err) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -2555,59 +2706,10 @@ async fn update_feishu_config(
             );
         }
     };
-    let feishu_table = match ensure_toml_table(&mut value, &["feishu"]) {
-        Ok(table) => table,
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("prepare feishu config failed: {err}")),
-                }),
-            );
-        }
-    };
 
     let app_id = req.app_id.trim().to_string();
     let app_secret = req.app_secret.trim().to_string();
-    let enabled = !app_id.is_empty() && !app_secret.is_empty();
-
-    feishu_table.insert("enabled".to_string(), toml::Value::Boolean(enabled));
-    feishu_table.insert("app_id".to_string(), toml::Value::String(app_id));
-    feishu_table.insert("app_secret".to_string(), toml::Value::String(app_secret));
-    feishu_table
-        .entry("mode".to_string())
-        .or_insert_with(|| toml::Value::String("long_connection".to_string()));
-    feishu_table
-        .entry("listen".to_string())
-        .or_insert_with(|| toml::Value::String("0.0.0.0:8789".to_string()));
-    feishu_table
-        .entry("clawd_base_url".to_string())
-        .or_insert_with(|| toml::Value::String("http://127.0.0.1:8787".to_string()));
-    feishu_table
-        .entry("api_base_url".to_string())
-        .or_insert_with(|| toml::Value::String("https://open.feishu.cn".to_string()));
-    feishu_table
-        .entry("verification_token".to_string())
-        .or_insert_with(|| toml::Value::String(String::new()));
-    feishu_table
-        .entry("encrypt_key".to_string())
-        .or_insert_with(|| toml::Value::String(String::new()));
-
-    let output = match toml::to_string_pretty(&value) {
-        Ok(output) => output,
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("serialize feishu config failed: {err}")),
-                }),
-            );
-        }
-    };
+    let output = update_feishu_config_raw_preserving_format(&raw, &app_id, &app_secret);
     if let Err(err) =
         write_workspace_and_mounted_file(&state.workspace_root, "configs/channels/feishu.toml", &output)
     {
@@ -2621,7 +2723,92 @@ async fn update_feishu_config(
         );
     }
 
-    match load_feishu_config_response(&state) {
+    match load_feishu_config_response(&state, Some(&identity.user_key)) {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("reload feishu config failed: {err}")),
+            }),
+        ),
+    }
+}
+
+async fn reset_feishu_config_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<FeishuConfigResponse>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can reset feishu config".to_string()),
+            }),
+        );
+    }
+
+    let raw = match read_feishu_config_raw(&state) {
+        Ok(raw) => raw,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("read feishu config failed: {err}")),
+                }),
+            );
+        }
+    };
+    let output = reset_feishu_config_raw_preserving_format(&raw);
+    if let Err(err) =
+        write_workspace_and_mounted_file(&state.workspace_root, "configs/channels/feishu.toml", &output)
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("write feishu config failed: {err}")),
+            }),
+        );
+    }
+    if let Err(err) = reset_channel_binding_state_for_user_key(&state, "feishu", &identity.user_key) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(format!("reset feishu bindings failed: {err}")),
+            }),
+        );
+    }
+
+    match load_feishu_config_response(&state, Some(&identity.user_key)) {
         Ok(data) => (
             StatusCode::OK,
             Json(ApiResponse {
@@ -3905,7 +4092,7 @@ fn spawn_background_shell(cmd: &str) -> std::io::Result<()> {
 fn validate_service_start_readiness(state: &AppState, service: &str) -> Result<(), String> {
     match service {
         "feishud" => {
-            let config = load_feishu_config_response(state)
+            let config = load_feishu_config_response(state, None)
                 .map_err(|err| format!("read feishu config failed: {err}"))?;
             if !config.enabled {
                 return Err("service disabled".to_string());
@@ -5046,6 +5233,7 @@ struct FeishuConfigResponse {
     verification_token_configured: bool,
     encrypt_key_configured: bool,
     bind_ready: bool,
+    current_key_bound: bool,
     restart_required: bool,
 }
 
@@ -8103,6 +8291,37 @@ mod tests {
             .expect("read mounted");
         assert_eq!(active, raw);
         assert_eq!(mounted, raw);
+    }
+
+    #[test]
+    fn update_feishu_config_raw_preserves_template_comments_and_updates_only_keys() {
+        let output =
+            update_feishu_config_raw_preserving_format(FEISHU_CONFIG_TEMPLATE, "cli_test_app", "secret_test");
+        assert!(output.contains("# Feishu（中国站）应用机器人通道配置"));
+        assert!(output.contains("# 入站模式：webhook | long_connection"));
+        assert!(output.contains("enabled = true"));
+        assert!(output.contains("app_id = \"cli_test_app\""));
+        assert!(output.contains("app_secret = \"secret_test\""));
+        assert!(output.contains("image_inbox_dir = \"data/feishud/image\""));
+    }
+
+    #[test]
+    fn update_feishu_config_raw_keeps_unrelated_lines_when_updating_existing_file() {
+        let raw = r#"# header
+[feishu]
+# before
+app_id = ""
+app_secret = ""
+enabled = false
+custom_keep = "yes"
+"#;
+        let output =
+            update_feishu_config_raw_preserving_format(raw, "cli_keep_format", "secret_keep_format");
+        assert!(output.contains("# before"));
+        assert!(output.contains("custom_keep = \"yes\""));
+        assert!(output.contains("app_id = \"cli_keep_format\""));
+        assert!(output.contains("app_secret = \"secret_keep_format\""));
+        assert!(output.contains("enabled = true"));
     }
 
     #[test]
