@@ -793,8 +793,8 @@ echo "  rustclaw -key generate admin"
 echo
 echo "Try:"
 echo "  rustclaw -status"
-echo "  rustclaw -start release all --quick --skip-setup   # 免配置直接启动"
-echo "  rustclaw -restart release all --quick --skip-setup # 免配置直接重启（跳过所有配置)"
+echo "  rustclaw -start release all                        # 配置通信端后直接启动"
+echo "  rustclaw -restart release all                      # 配置通信端后直接重启"
 echo "  rustclaw -start release"
 echo "  rustclaw -stop"
 echo

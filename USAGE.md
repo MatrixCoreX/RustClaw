@@ -98,11 +98,8 @@ cargo build --workspace --release
 ### 4.1 推荐：使用 `rustclaw`
 
 ```bash
-# 免配置快速启动
-rustclaw start -q
-
-# 指定模型厂商和模型
-rustclaw -start --vendor openai --model gpt-5 --profile release --channels all --quick --skip-setup
+# 启动时在终端里配置通信端，然后直接启动
+rustclaw -start release all
 
 # 带 UI 启动
 rustclaw -start release all --with-ui

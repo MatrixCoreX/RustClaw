@@ -36,45 +36,4 @@ if pgrep -f 'target/release/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1; t
   exit 1
 fi
 
-if python3 - <<'PY'
-import sys
-import tomllib
-from pathlib import Path
-
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-for name in ("whatsapp.toml", "whatsapp-cloud.toml"):
-    extra = Path("configs/channels") / name
-    if extra.exists():
-        cfg.update(tomllib.loads(extra.read_text(encoding="utf-8")))
-wa_legacy = cfg.get("whatsapp", {}) or {}
-wa_cloud = cfg.get("whatsapp_cloud", {}) or {}
-enabled = bool(wa_cloud.get("enabled", False) or wa_legacy.get("enabled", False))
-if not enabled:
-    print("whatsapp_cloud.enabled=false and whatsapp.enabled=false, skip starting whatsappd.")  # zh: whatsapp_cloud.enabled=false 且 whatsapp.enabled=false，跳过启动。
-    raise SystemExit(2)
-
-required = {
-    "access_token": str((wa_cloud.get("access_token") or wa_legacy.get("access_token") or "")).strip(),
-    "app_secret": str((wa_cloud.get("app_secret") or wa_legacy.get("app_secret") or "")).strip(),
-    "verify_token": str((wa_cloud.get("verify_token") or wa_legacy.get("verify_token") or "")).strip(),
-    "phone_number_id": str((wa_cloud.get("phone_number_id") or wa_legacy.get("phone_number_id") or "")).strip(),
-}
-
-for k, v in required.items():
-    if not v or v.startswith("REPLACE_ME"):
-        print(f"whatsapp_cloud.{k}/whatsapp.{k} is not configured; cannot start whatsappd.")  # zh: 配置缺失，无法启动 whatsappd。
-        raise SystemExit(1)
-
-print("WhatsApp preflight passed.")
-PY
-then
-  :
-else
-  code=$?
-  if [[ "$code" == "2" ]]; then
-    exit 0
-  fi
-  exit "$code"
-fi
-
 exec "$BIN_PATH"

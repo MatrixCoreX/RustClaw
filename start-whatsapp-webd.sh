@@ -36,29 +36,4 @@ if pgrep -f 'target/release/whatsapp_webd|cargo run -p whatsapp_webd' >/dev/null
   exit 1
 fi
 
-if python3 - <<'PY'
-import tomllib
-from pathlib import Path
-
-cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-for name in ("whatsapp.toml", "whatsapp-web.toml"):
-    extra = Path("configs/channels") / name
-    if extra.exists():
-        cfg.update(tomllib.loads(extra.read_text(encoding="utf-8")))
-enabled = bool(cfg.get("whatsapp_web", {}).get("enabled", False))
-if not enabled:
-    print("whatsapp_web.enabled=false, skip starting whatsapp_webd.")  # zh: whatsapp_web.enabled=false，跳过启动。
-    raise SystemExit(2)
-print("whatsapp_webd preflight passed.")
-PY
-then
-  :
-else
-  code=$?
-  if [[ "$code" == "2" ]]; then
-    exit 0
-  fi
-  exit "$code"
-fi
-
 exec "$BIN_PATH"
