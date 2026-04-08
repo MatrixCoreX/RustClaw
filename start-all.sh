@@ -44,11 +44,6 @@ LOG_DIR="$SCRIPT_DIR/logs"
 PID_DIR="$SCRIPT_DIR/.pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
-# Stop any already running RustClaw processes before starting.
-if [[ -f "$SCRIPT_DIR/stop-rustclaw.sh" ]]; then
-	"$SCRIPT_DIR/stop-rustclaw.sh" || true
-fi
-
 # Optional args:
 #   ./start-all.sh <vendor(openai|google|anthropic|grok|deepseek|qwen|minimax|custom)> [model] [release] [channels]
 # channels:
@@ -57,16 +52,8 @@ SELECTED_VENDOR_ARG="${1:-}"
 SELECTED_MODEL_ARG="${2:-}"
 PROFILE="${3:-${RUSTCLAW_START_PROFILE:-release}}"
 CHANNELS_ARG="${4:-${RUSTCLAW_START_CHANNELS:-}}"
-QUICK_START_ARG="${5:-${RUSTCLAW_QUICK_START:-0}}"
-SKIP_SETUP="${RUSTCLAW_SKIP_SETUP:-0}"
 ENABLE_UI="${RUSTCLAW_ENABLE_UI:-0}"
 UI_FORCE_REBUILD="${RUSTCLAW_UI_FORCE_REBUILD:-0}"
-QUICK_START=0
-case "$(echo "$QUICK_START_ARG" | tr '[:upper:]' '[:lower:]')" in
-1 | true | yes | y | quick | fast)
-	QUICK_START=1
-	;;
-esac
 case "$PROFILE" in
 release) ;;
 *)
@@ -131,281 +118,15 @@ fi
 export RUSTCLAW_MODEL_SELECT=0
 
 run_embedded_setup() {
-	local do_interactive_setup=1
-	if [[ "$SKIP_SETUP" == "1" ]]; then
-		do_interactive_setup=0
-		echo "Skip interactive setup by RUSTCLAW_SKIP_SETUP=1."
-	fi
-
 	local config_path="$SCRIPT_DIR/configs/config.toml"
 	if [[ ! -f "$config_path" ]]; then
 		echo "Config file not found: $config_path"
 		exit 1
 	fi
 
-	if [[ "$do_interactive_setup" == "1" && -t 0 && -t 1 ]]; then
-		python3 - <<'PY'
-import getpass
-import json
-import os
-import re
-import sys
-import tomllib
-import urllib.parse
-import urllib.request
-from pathlib import Path
-
-cfg_path = Path("configs/config.toml")
-text = cfg_path.read_text(encoding="utf-8")
-cfg = tomllib.loads(text)
-telegram_cfg_path = Path("configs/channels/telegram.toml")
-telegram_text = telegram_cfg_path.read_text(encoding="utf-8") if telegram_cfg_path.exists() else ""
-telegram_cfg = tomllib.loads(telegram_text) if telegram_text else {}
-changed = False
-telegram_changed = False
-force = str(os.environ.get("RUSTCLAW_SETUP_FORCE", "0")).strip().lower() not in ("0", "false", "no")
-
-try:
-    tty_in = open("/dev/tty", "r", encoding="utf-8", errors="ignore")
-    tty_out = open("/dev/tty", "w", encoding="utf-8", errors="ignore")
-except OSError:
-    raise SystemExit(0)
-
-def ask(prompt: str) -> str:
-    tty_out.write(prompt)
-    tty_out.flush()
-    line = tty_in.readline()
-    if line == "":
-        raise SystemExit(0)
-    return line.rstrip("\n")
-
-def is_empty_or_placeholder(v: str) -> bool:
-    return (not v) or v.startswith("REPLACE_ME")
-
-def set_key_in_section(src: str, section: str, key: str, value_literal: str) -> str:
-    sec_header = f"[{section}]"
-    sec_pat = rf"(?ms)^({re.escape(sec_header)}\n)(.*?)(?=^\[|\Z)"
-    m = re.search(sec_pat, src)
-    key_line_pat = rf"(?m)^{re.escape(key)}\s*=\s*.*$"
-    new_line = f"{key} = {value_literal}"
-    if m:
-        body = m.group(2)
-        if re.search(key_line_pat, body):
-            body = re.sub(key_line_pat, new_line, body, count=1)
-        else:
-            body = new_line + "\n" + body
-        return src[:m.start()] + m.group(1) + body + src[m.end():]
-    insert = f"\n{sec_header}\n{new_line}\n"
-    return src.rstrip() + insert + "\n"
-
-def quote_toml_string(s: str) -> str:
-    escaped = s.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-def get_nested(d, *keys, default=None):
-    cur = d
-    for k in keys:
-        if not isinstance(cur, dict) or k not in cur:
-            return default
-        cur = cur[k]
-    return cur
-
-def to_int_or_none(v):
-    try:
-        if isinstance(v, bool):
-            return None
-        return int(v)
-    except (TypeError, ValueError):
-        return None
-
-telegram_enabled = str(os.environ.get("RUSTCLAW_ENABLE_TG", "0")).strip() == "1"
-# 仅使用 [telegram].bot_token 作为唯一 token 配置，与 clawd/telegramd 一致
-telegram_token = str(get_nested(telegram_cfg, "telegram", "bot_token", default="") or get_nested(cfg, "telegram", "bot_token", default="") or "")
-selected_vendor = ""
-selected_model = ""
-
-if force or is_empty_or_placeholder(telegram_token) or (telegram_enabled and is_empty_or_placeholder(telegram_token)):
-    token_prompt = "Enter Telegram bot_token: " if telegram_enabled else "Enter Telegram bot_token (empty to skip): "
-    token = ask(token_prompt).strip()
-    if token:
-        while is_empty_or_placeholder(token):
-            retry_prompt = "bot_token cannot be empty/placeholder; enter again: " if telegram_enabled else "bot_token cannot be placeholder; enter again (empty to skip): "
-            token = ask(retry_prompt).strip()
-            if not token:
-                break
-        if token:
-            telegram_text = set_key_in_section(telegram_text, "telegram", "bot_token", quote_toml_string(token))
-            telegram_changed = True
-    elif telegram_enabled:
-        # telegram is enabled; token is required
-        while not token:
-            token = ask("Telegram enabled: bot_token is required, please enter: ").strip()
-            if token and not is_empty_or_placeholder(token):
-                telegram_text = set_key_in_section(telegram_text, "telegram", "bot_token", quote_toml_string(token))
-                telegram_changed = True
-                break
-
-# admins 现仅通过 configs/channels/telegram.toml 或控制台 UI 配置，此处不再交互询问
-vendors = ["openai", "google", "anthropic", "grok", "qwen", "custom"]
-available_vendors = [v for v in vendors if isinstance(get_nested(cfg, "llm", v, default=None), dict)]
-if not available_vendors:
-    raise SystemExit(0)
-
-print("Select model vendor:")  # always choose on startup
-for i, v in enumerate(available_vendors, start=1):
-    print(f"  {i}) {v}")
-choice = ask("> ").strip()
-while not (choice.isdigit() and 1 <= int(choice) <= len(available_vendors)):
-    choice = ask("Invalid input, enter option number: ").strip()
-selected_vendor = available_vendors[int(choice) - 1]
-text = set_key_in_section(text, "llm", "selected_vendor", quote_toml_string(selected_vendor))
-changed = True
-
-vendor_cfg = get_nested(cfg, "llm", selected_vendor, default={}) or {}
-vendor_models = vendor_cfg.get("models", [])
-if not isinstance(vendor_models, list):
-    vendor_models = []
-vendor_models = [str(m) for m in vendor_models if isinstance(m, str) and m]
-default_vendor_model = str(vendor_cfg.get("model", "") or "")
-if default_vendor_model and default_vendor_model not in vendor_models:
-    vendor_models.insert(0, default_vendor_model)
-
-selected_api_key = str(get_nested(cfg, "llm", selected_vendor, "api_key", default="") or "")
-if force or is_empty_or_placeholder(selected_api_key):
-    key = getpass.getpass(f"Enter {selected_vendor} api_key (empty to skip remote fetch): ").strip()
-    if key:
-        while is_empty_or_placeholder(key):
-            key = getpass.getpass("api_key cannot be placeholder; enter again (empty to skip remote fetch): ").strip()
-            if not key:
-                break
-        if key:
-            text = set_key_in_section(text, f"llm.{selected_vendor}", "api_key", quote_toml_string(key))
-            changed = True
-            selected_api_key = key
-
-def uniq_keep_order(items):
-    out = []
-    seen = set()
-    for it in items:
-        s = str(it).strip()
-        if not s or s in seen:
-            continue
-        seen.add(s)
-        out.append(s)
-    return out
-
-def fetch_remote_models(vendor: str, base_url: str, api_key: str):
-    if not api_key:
-        return [], "missing_api_key"
-    base = (base_url or "").rstrip("/")
-    if not base:
-        return [], "missing_base_url"
-    headers = {"Accept": "application/json"}
-    if vendor == "google":
-        url = f"{base}/models?key={urllib.parse.quote(api_key, safe='')}"
-    elif vendor == "anthropic":
-        url = f"{base}/models"
-        headers["x-api-key"] = api_key
-        headers["anthropic-version"] = "2023-06-01"
-    else:
-        url = f"{base}/models"
-        headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(url, headers=headers, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read().decode("utf-8", errors="ignore")
-        data = json.loads(body)
-    except Exception as e:
-        return [], str(e)
-
-    models = []
-    if isinstance(data, dict):
-        rows = data.get("data")
-        if isinstance(rows, list):
-            for item in rows:
-                if isinstance(item, dict):
-                    models.append(item.get("id") or item.get("name") or "")
-        rows2 = data.get("models")
-        if isinstance(rows2, list):
-            for item in rows2:
-                if isinstance(item, dict):
-                    name = item.get("name") or item.get("id") or ""
-                    if isinstance(name, str) and name.startswith("models/"):
-                        name = name.split("/", 1)[1]
-                    models.append(name)
-    return uniq_keep_order(models), ""
-
-base_url = str(vendor_cfg.get("base_url", "") or "")
-remote_models, remote_err = fetch_remote_models(selected_vendor, base_url, selected_api_key)
-if remote_models:
-    model_options = remote_models
-    print(f"Fetched {len(model_options)} models from {selected_vendor} API.")
-else:
-    model_options = uniq_keep_order(vendor_models)
-    if remote_err:
-        print(f"Model fetch failed ({selected_vendor}), fallback to preset list: {remote_err}")
-
-if model_options:
-    print(f"Select model for {selected_vendor}:")
-    for i, m in enumerate(model_options, start=1):
-        print(f"  {i}) {m}")
-    print("  0) custom input")
-    choice = ask("> ").strip()
-    while True:
-        c = choice.strip().lower()
-        if c in ("0", "m", "manual", "custom"):
-            selected_model = ask(f"Enter model name for {selected_vendor}: ").strip()
-            while not selected_model:
-                selected_model = ask("Model name cannot be empty, enter again: ").strip()
-            break
-        if c.isdigit() and 1 <= int(c) <= len(model_options):
-            selected_model = model_options[int(c) - 1]
-            break
-        choice = ask("Invalid input, enter option number (or 0 for custom): ").strip()
-else:
-    selected_model = ask(f"Enter model name for {selected_vendor}: ").strip()
-    while not selected_model:
-        selected_model = ask("Model name cannot be empty, enter again: ").strip()
-text = set_key_in_section(text, "llm", "selected_model", quote_toml_string(selected_model))
-changed = True
-
-tools_cmd_timeout = to_int_or_none(get_nested(cfg, "tools", "cmd_timeout_seconds", default=None))
-if tools_cmd_timeout is None or tools_cmd_timeout <= 0:
-    raw = ask("Enter tools.cmd_timeout_seconds (default 10): ").strip()
-    timeout_seconds = 10 if not raw else int(raw) if raw.isdigit() and int(raw) > 0 else 10
-    text = set_key_in_section(text, "tools", "cmd_timeout_seconds", str(timeout_seconds))
-    changed = True
-
-tools_max_cmd_length = to_int_or_none(get_nested(cfg, "tools", "max_cmd_length", default=None))
-if tools_max_cmd_length is None or tools_max_cmd_length <= 0:
-    raw = ask("Enter tools.max_cmd_length (default 240): ").strip()
-    max_cmd_length = 240 if not raw else int(raw) if raw.isdigit() and int(raw) > 0 else 240
-    text = set_key_in_section(text, "tools", "max_cmd_length", str(max_cmd_length))
-    changed = True
-
-if changed:
-    cfg_path.write_text(text, encoding="utf-8")
-if telegram_changed:
-    telegram_cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    telegram_cfg_path.write_text(telegram_text, encoding="utf-8")
-if changed:
-    print("Configuration updated: configs/config.toml")
-if telegram_changed:
-    print("Configuration updated: configs/channels/telegram.toml")
-PY
-	else
-		if [[ "$do_interactive_setup" == "0" ]]; then
-			echo "Interactive setup prompts are disabled."
-		else
-			echo "Non-interactive terminal detected; skip interactive setup prompts."
-		fi
-	fi
+	echo "Startup setup prompts are disabled; manage these settings in UI or config files." # zh: 启动阶段不再弹出配置问题，这些设置请在 UI 或配置文件中完成。
 
 	echo "Checking skill/runtime dependencies..."
-	if ! command -v cargo >/dev/null 2>&1; then
-		echo "cargo not found. Please install Rust toolchain first."
-		exit 1
-	fi
 	if ! command -v python3 >/dev/null 2>&1; then
 		echo "python3 not found."
 		exit 1
@@ -417,7 +138,7 @@ PY
 import tomllib
 from pathlib import Path
 cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-for extra in ("configs/channels/telegram.toml", "configs/channels/whatsapp.toml"):
+for extra in ("configs/channels/telegram.toml", "configs/channels/whatsapp-web.toml", "configs/channels/whatsapp-cloud.toml"):
     p = Path(extra)
     if p.exists():
         cfg.update(tomllib.loads(p.read_text(encoding="utf-8")))
@@ -489,7 +210,6 @@ PY
 			skill="$(echo "$skill" | xargs)"
 			[[ -z "$skill" ]] && continue
 			if ! bin_name="$(skill_bin_name "$skill")"; then
-				echo "Skip unknown skill in skills_list: $skill"
 				continue
 			fi
 			if [[ ! -x "$SCRIPT_DIR/$target_dir/$bin_name" ]]; then
@@ -502,40 +222,102 @@ PY
 	if [[ ",${SKILLS_LIST:-}," == *",x,"* ]]; then
 		echo "Checking X skill dependency (xurl)..."
 		if ! command -v npm >/dev/null 2>&1; then
-			echo "npm not found. Please install npm first."
-			exit 1
+			echo "npm not found."
+			echo "Suggested install: sudo apt-get install -y npm"
+			echo "Continue startup without auto-install." # zh: 仅提示缺失，继续启动流程。
 		fi
-		if ! command -v "${XURL_BIN:-xurl}" >/dev/null 2>&1; then
-			echo "xurl binary not found (${XURL_BIN:-xurl}), installing @xdevplatform/xurl globally..."
-			npm install -g @xdevplatform/xurl
+		if command -v npm >/dev/null 2>&1 && ! command -v "${XURL_BIN:-xurl}" >/dev/null 2>&1; then
+			echo "xurl binary not found (${XURL_BIN:-xurl})."
+			echo "Suggested install: sudo npm install -g @xdevplatform/xurl"
+			echo "Continue startup without auto-install." # zh: 仅提示缺失，继续启动流程。
 		fi
 	fi
 
 	if [[ "${WA_WEB_ENABLED:-0}" == "1" ]]; then
 		echo "Checking WhatsApp Web bridge dependencies..."
 		if ! command -v node >/dev/null 2>&1; then
-			echo "node not found. Please install Node.js 18+."
-			exit 1
+			echo "node not found."
+			echo "Suggested install: sudo apt-get install -y nodejs"
+			echo "Continue startup without auto-install." # zh: 仅提示缺失，继续启动流程。
 		fi
 		if ! command -v npm >/dev/null 2>&1; then
-			echo "npm not found. Please install npm."
-			exit 1
+			echo "npm not found."
+			echo "Suggested install: sudo apt-get install -y npm"
+			echo "Continue startup without auto-install." # zh: 仅提示缺失，继续启动流程。
 		fi
 		local bridge_dir="$SCRIPT_DIR/services/wa-web-bridge"
-		if [[ -f "$bridge_dir/package.json" && ! -d "$bridge_dir/node_modules" ]]; then
-			echo "Installing wa-web-bridge npm dependencies..."
-			npm --prefix "$bridge_dir" install
+		if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && [[ -f "$bridge_dir/package.json" && ! -d "$bridge_dir/node_modules" ]]; then
+			echo "WhatsApp Web bridge dependencies missing: $bridge_dir/node_modules"
+			echo "Suggested install: cd \"$bridge_dir\" && npm install"
+			echo "Continue startup without auto-install." # zh: 仅提示缺失，继续启动流程。
 		fi
 	fi
 }
 
+refresh_channel_flags() {
+	eval "$(
+		python3 - <<'PY'
+import tomllib
+from pathlib import Path
+
+channels = [
+    ("CHANNEL_WEBD", Path("configs/channels/webd.toml"), ("webd", "enabled"), False),
+    ("CHANNEL_TG", Path("configs/channels/telegram.toml"), ("telegram_bot", "enabled"), True),
+    ("CHANNEL_WA_WEB", Path("configs/channels/whatsapp-web.toml"), ("whatsapp_web", "enabled"), False),
+    ("CHANNEL_WA_CLOUD", Path("configs/channels/whatsapp-cloud.toml"), ("whatsapp", "enabled"), False),
+    ("CHANNEL_WECHAT", Path("configs/channels/wechat.toml"), ("wechat", "enabled"), False),
+    ("CHANNEL_FEISHU", Path("configs/channels/feishu.toml"), ("feishu", "enabled"), False),
+    ("CHANNEL_LARK", Path("configs/channels/lark.toml"), ("lark", "enabled"), False),
+]
+
+for var_name, path, key_path, default in channels:
+    enabled = default
+    if path.exists():
+        try:
+            cfg = tomllib.loads(path.read_text(encoding="utf-8"))
+            cur = cfg
+            for key in key_path:
+                if not isinstance(cur, dict):
+                    cur = None
+                    break
+                cur = cur.get(key)
+            if isinstance(cur, bool):
+                enabled = cur
+        except Exception:
+            pass
+    print(f'{var_name}={"1" if enabled else "0"}')
+PY
+	)"
+}
+
+print_channel_flags_summary() {
+	local title="${1:-Current communication endpoints}"
+	refresh_channel_flags
+	echo "$title"
+	printf '  [%s] webd            -> configs/channels/webd.toml\n' "$([[ "$CHANNEL_WEBD" == "1" ]] && echo x || echo ' ')"
+	printf '  [%s] telegram        -> configs/channels/telegram.toml\n' "$([[ "$CHANNEL_TG" == "1" ]] && echo x || echo ' ')"
+	printf '  [%s] whatsapp_web    -> configs/channels/whatsapp-web.toml\n' "$([[ "$CHANNEL_WA_WEB" == "1" ]] && echo x || echo ' ')"
+	printf '  [%s] whatsapp_cloud  -> configs/channels/whatsapp-cloud.toml\n' "$([[ "$CHANNEL_WA_CLOUD" == "1" ]] && echo x || echo ' ')"
+	printf '  [%s] wechat          -> configs/channels/wechat.toml\n' "$([[ "$CHANNEL_WECHAT" == "1" ]] && echo x || echo ' ')"
+	printf '  [%s] feishu          -> configs/channels/feishu.toml\n' "$([[ "$CHANNEL_FEISHU" == "1" ]] && echo x || echo ' ')"
+	printf '  [%s] lark            -> configs/channels/lark.toml\n' "$([[ "$CHANNEL_LARK" == "1" ]] && echo x || echo ' ')"
+}
+
 apply_channel_flags() {
-	local enable_tg="$1"
-	local enable_wa_web="$2"
-	local enable_wa_cloud="$3"
+	local enable_webd="$1"
+	local enable_tg="$2"
+	local enable_wa_web="$3"
+	local enable_wa_cloud="$4"
+	local enable_wechat="$5"
+	local enable_feishu="$6"
+	local enable_lark="$7"
+	export RUSTCLAW_ENABLE_WEBD="$enable_webd"
 	export RUSTCLAW_ENABLE_TG="$enable_tg"
 	export RUSTCLAW_ENABLE_WA_WEB="$enable_wa_web"
 	export RUSTCLAW_ENABLE_WA_CLOUD="$enable_wa_cloud"
+	export RUSTCLAW_ENABLE_WECHAT="$enable_wechat"
+	export RUSTCLAW_ENABLE_FEISHU="$enable_feishu"
+	export RUSTCLAW_ENABLE_LARK="$enable_lark"
 
 	python3 - <<'PY'
 import os
@@ -568,51 +350,205 @@ def set_flag(text: str, section: str, key: str, value: bool) -> str:
     lines.insert(end_idx, f"{key} = {'true' if value else 'false'}")
     return "\n".join(lines) + "\n"
 
+def write_flag(path_str: str, updates):
+    path = Path(path_str)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    for section, key, value in updates:
+        text = set_flag(text, section, key, value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+enable_webd = os.environ.get("RUSTCLAW_ENABLE_WEBD", "0") == "1"
 enable_tg = os.environ.get("RUSTCLAW_ENABLE_TG", "0") == "1"
 enable_wa_web = os.environ.get("RUSTCLAW_ENABLE_WA_WEB", "0") == "1"
 enable_wa_cloud = os.environ.get("RUSTCLAW_ENABLE_WA_CLOUD", "0") == "1"
+enable_wechat = os.environ.get("RUSTCLAW_ENABLE_WECHAT", "0") == "1"
+enable_feishu = os.environ.get("RUSTCLAW_ENABLE_FEISHU", "0") == "1"
+enable_lark = os.environ.get("RUSTCLAW_ENABLE_LARK", "0") == "1"
 
-tg_path = Path("configs/channels/telegram.toml")
-wa_path = Path("configs/channels/whatsapp.toml")
-tg_text = tg_path.read_text(encoding="utf-8") if tg_path.exists() else ""
-wa_text = wa_path.read_text(encoding="utf-8") if wa_path.exists() else ""
+write_flag("configs/channels/webd.toml", [("webd", "enabled", enable_webd)])
+write_flag("configs/channels/telegram.toml", [("telegram_bot", "enabled", enable_tg)])
+write_flag("configs/channels/whatsapp-web.toml", [("whatsapp_web", "enabled", enable_wa_web)])
+write_flag(
+    "configs/channels/whatsapp-cloud.toml",
+    [("whatsapp", "enabled", enable_wa_cloud), ("whatsapp_cloud", "enabled", enable_wa_cloud)],
+)
+write_flag("configs/channels/wechat.toml", [("wechat", "enabled", enable_wechat)])
+write_flag("configs/channels/feishu.toml", [("feishu", "enabled", enable_feishu)])
+write_flag("configs/channels/lark.toml", [("lark", "enabled", enable_lark)])
 
-tg_text = set_flag(tg_text, "telegram_bot", "enabled", enable_tg)
-wa_text = set_flag(wa_text, "whatsapp_web", "enabled", enable_wa_web)
-wa_text = set_flag(wa_text, "whatsapp", "enabled", enable_wa_cloud)
-wa_text = set_flag(wa_text, "whatsapp_cloud", "enabled", enable_wa_cloud)
-
-tg_path.parent.mkdir(parents=True, exist_ok=True)
-wa_path.parent.mkdir(parents=True, exist_ok=True)
-tg_path.write_text(tg_text, encoding="utf-8")
-wa_path.write_text(wa_text, encoding="utf-8")
 print(
     "Applied channel flags: "
+    f"webd={'on' if enable_webd else 'off'}, "
     f"telegram={'on' if enable_tg else 'off'}, "
     f"whatsapp_web={'on' if enable_wa_web else 'off'}, "
-    f"whatsapp_cloud={'on' if enable_wa_cloud else 'off'}"
+    f"whatsapp_cloud={'on' if enable_wa_cloud else 'off'}, "
+    f"wechat={'on' if enable_wechat else 'off'}, "
+    f"feishu={'on' if enable_feishu else 'off'}, "
+    f"lark={'on' if enable_lark else 'off'}"
 )
 PY
 }
 
+ask_yes_no_default() {
+	local prompt="$1"
+	local default="$2"
+	local ans normalized
+	local suffix="[y/N]"
+	[[ "$default" == "1" ]] && suffix="[Y/n]"
+	while true; do
+		read -r -p "$prompt $suffix > " ans
+		ans="$(echo "$ans" | tr '[:upper:]' '[:lower:]' | xargs)"
+		if [[ -z "$ans" ]]; then
+			[[ "$default" == "1" ]] && echo "Selected: Y" || echo "Selected: N"
+			[[ "$default" == "1" ]]
+			return
+		fi
+		case "$ans" in
+		y | yes)
+			echo "Selected: Y"
+			return 0
+			;;
+		n | no)
+			echo "Selected: N"
+			return 1
+			;;
+		*) echo "Please input y or n." ;;
+		esac
+	done
+}
+
+choose_channel_mode_picker() {
+	local labels=("webd" "telegram" "whatsapp_web" "whatsapp_cloud" "wechat" "feishu" "lark")
+	local descs=(
+		"Web HTTP gateway"
+		"Telegram bot"
+		"WhatsApp Web QR mode"
+		"WhatsApp Cloud webhook"
+		"WeChat iLink"
+		"Feishu"
+		"Lark"
+	)
+	local states=("$1" "$2" "$3" "$4" "$5" "$6" "$7")
+	local cursor=0
+	local count="${#labels[@]}"
+	local key=""
+	local key2=""
+	local key3=""
+	local idx=""
+	local i=""
+	local mark=""
+	local pointer=""
+
+	while true; do
+		printf '\033[2J\033[H'
+		echo "Step 1/5: Select communication endpoints"
+		echo "Use Up/Down (or j/k) to move, Space to toggle, Enter to confirm, c to save and exit."
+		echo "You can also press 1-7 to toggle an item directly."
+		echo
+		for ((i = 0; i < count; i++)); do
+			mark=" "
+			[[ "${states[$i]}" == "1" ]] && mark="x"
+			pointer="  "
+			[[ "$i" -eq "$cursor" ]] && pointer="> "
+			printf "%s[%s] %d. %-16s %s\n" "$pointer" "$mark" "$((i + 1))" "${labels[$i]}" "${descs[$i]}"
+		done
+
+		IFS= read -rsn1 key
+		case "$key" in
+		"")
+			break
+			;;
+		" ")
+			if [[ "${states[$cursor]}" == "1" ]]; then
+				states[$cursor]="0"
+			else
+				states[$cursor]="1"
+			fi
+			;;
+		[jJ])
+			cursor=$(((cursor + 1) % count))
+			;;
+		[kK])
+			cursor=$(((cursor - 1 + count) % count))
+			;;
+		[cCqQ])
+			CHANNEL_PICK_WEBD="${states[0]}"
+			CHANNEL_PICK_TG="${states[1]}"
+			CHANNEL_PICK_WA_WEB="${states[2]}"
+			CHANNEL_PICK_WA_CLOUD="${states[3]}"
+			CHANNEL_PICK_WECHAT="${states[4]}"
+			CHANNEL_PICK_FEISHU="${states[5]}"
+			CHANNEL_PICK_LARK="${states[6]}"
+			printf '\033[2J\033[H'
+			return 2
+			;;
+		$'\x1b')
+			IFS= read -rsn1 -t 0.05 key2 || true
+			if [[ "$key2" == "[" ]]; then
+				IFS= read -rsn1 -t 0.05 key3 || true
+				case "$key3" in
+				A) cursor=$(((cursor - 1 + count) % count)) ;;
+				B) cursor=$(((cursor + 1) % count)) ;;
+				esac
+			fi
+			;;
+		[1-7])
+			idx=$((10#$key - 1))
+			if [[ "$idx" -ge 0 && "$idx" -lt "$count" ]]; then
+				cursor="$idx"
+				if [[ "${states[$idx]}" == "1" ]]; then
+					states[$idx]="0"
+				else
+					states[$idx]="1"
+				fi
+			fi
+			;;
+		esac
+	done
+
+	printf '\033[2J\033[H'
+	CHANNEL_PICK_WEBD="${states[0]}"
+	CHANNEL_PICK_TG="${states[1]}"
+	CHANNEL_PICK_WA_WEB="${states[2]}"
+	CHANNEL_PICK_WA_CLOUD="${states[3]}"
+	CHANNEL_PICK_WECHAT="${states[4]}"
+	CHANNEL_PICK_FEISHU="${states[5]}"
+	CHANNEL_PICK_LARK="${states[6]}"
+	return 0
+}
+
 choose_channel_mode() {
-	local enable_tg="0"
-	local enable_wa_web="0"
-	local enable_wa_cloud="0"
+	refresh_channel_flags
+	print_channel_flags_summary "Step 1/5: Current communication endpoints (enabled comes from config files)"
+	local enable_webd="$CHANNEL_WEBD"
+	local enable_tg="$CHANNEL_TG"
+	local enable_wa_web="$CHANNEL_WA_WEB"
+	local enable_wa_cloud="$CHANNEL_WA_CLOUD"
+	local enable_wechat="$CHANNEL_WECHAT"
+	local enable_feishu="$CHANNEL_FEISHU"
+	local enable_lark="$CHANNEL_LARK"
 
 	if [[ -n "$CHANNELS_ARG" ]]; then
 		case "$CHANNELS_ARG" in
 		telegram)
 			enable_tg="1"
+			enable_wa_web="0"
+			enable_wa_cloud="0"
 			;;
 		whatsapp_web)
+			enable_tg="0"
 			enable_wa_web="1"
+			enable_wa_cloud="0"
 			;;
 		both)
 			enable_tg="1"
 			enable_wa_web="1"
+			enable_wa_cloud="0"
 			;;
 		whatsapp_cloud)
+			enable_tg="0"
+			enable_wa_web="0"
 			enable_wa_cloud="1"
 			;;
 		all)
@@ -626,7 +562,7 @@ choose_channel_mode() {
 			exit 1
 			;;
 		esac
-		apply_channel_flags "$enable_tg" "$enable_wa_web" "$enable_wa_cloud"
+		apply_channel_flags "$enable_webd" "$enable_tg" "$enable_wa_web" "$enable_wa_cloud" "$enable_wechat" "$enable_feishu" "$enable_lark"
 		return 0
 	fi
 
@@ -635,54 +571,40 @@ choose_channel_mode() {
 		return 0
 	fi
 
-	echo "Step 1/5: Select startup channel(s)" # zh: 第 1/5 步：选择启动渠道（可多选）
-	ask_yes_no() {
-		local prompt="$1"
-		local ans
-		while true; do
-			read -r -p "$prompt [Y/n] > " ans
-			ans="${ans:-y}"
-			ans="$(echo "$ans" | tr '[:upper:]' '[:lower:]' | xargs)"
-			case "$ans" in
-			y | yes)
-				echo "Selected: Y"
-				return 0
-				;;
-			n | no)
-				echo "Selected: N"
-				return 1
-				;;
-			*) echo "Please input y or n." ;; # zh: 请输入 y 或 n。
-			esac
-		done
-	}
-
-	if ask_yes_no "Enable telegram channel?"; then
-		enable_tg="1"
-	fi
-	if ask_yes_no "Enable whatsapp_web channel?"; then
-		enable_wa_web="1"
-	fi
-	if ask_yes_no "Enable whatsapp_cloud channel?"; then
-		enable_wa_cloud="1"
+	echo "Select which communication endpoints to enable (only edits *.enabled)." # zh: 请选择要启用的通信端，仅修改配置文件中的 enabled。
+	local picker_status=0
+	choose_channel_mode_picker "$enable_webd" "$enable_tg" "$enable_wa_web" "$enable_wa_cloud" "$enable_wechat" "$enable_feishu" "$enable_lark" || picker_status=$?
+	if [[ "$picker_status" == "0" ]]; then
+		enable_webd="${CHANNEL_PICK_WEBD:-$enable_webd}"
+		enable_tg="${CHANNEL_PICK_TG:-$enable_tg}"
+		enable_wa_web="${CHANNEL_PICK_WA_WEB:-$enable_wa_web}"
+		enable_wa_cloud="${CHANNEL_PICK_WA_CLOUD:-$enable_wa_cloud}"
+		enable_wechat="${CHANNEL_PICK_WECHAT:-$enable_wechat}"
+		enable_feishu="${CHANNEL_PICK_FEISHU:-$enable_feishu}"
+		enable_lark="${CHANNEL_PICK_LARK:-$enable_lark}"
+	elif [[ "$picker_status" == "2" ]]; then
+		enable_webd="${CHANNEL_PICK_WEBD:-$enable_webd}"
+		enable_tg="${CHANNEL_PICK_TG:-$enable_tg}"
+		enable_wa_web="${CHANNEL_PICK_WA_WEB:-$enable_wa_web}"
+		enable_wa_cloud="${CHANNEL_PICK_WA_CLOUD:-$enable_wa_cloud}"
+		enable_wechat="${CHANNEL_PICK_WECHAT:-$enable_wechat}"
+		enable_feishu="${CHANNEL_PICK_FEISHU:-$enable_feishu}"
+		enable_lark="${CHANNEL_PICK_LARK:-$enable_lark}"
+		echo "Channel selection exited early; writing current enable flags back to config." # zh: 已提前退出通信端选择，当前勾选结果会回写到配置文件。
+	else
+		if ask_yes_no_default "Enable webd channel?" "$enable_webd"; then enable_webd="1"; else enable_webd="0"; fi
+		if ask_yes_no_default "Enable telegram channel?" "$enable_tg"; then enable_tg="1"; else enable_tg="0"; fi
+		if ask_yes_no_default "Enable whatsapp_web channel?" "$enable_wa_web"; then enable_wa_web="1"; else enable_wa_web="0"; fi
+		if ask_yes_no_default "Enable whatsapp_cloud channel?" "$enable_wa_cloud"; then enable_wa_cloud="1"; else enable_wa_cloud="0"; fi
+		if ask_yes_no_default "Enable wechat channel?" "$enable_wechat"; then enable_wechat="1"; else enable_wechat="0"; fi
+		if ask_yes_no_default "Enable feishu channel?" "$enable_feishu"; then enable_feishu="1"; else enable_feishu="0"; fi
+		if ask_yes_no_default "Enable lark channel?" "$enable_lark"; then enable_lark="1"; else enable_lark="0"; fi
 	fi
 
-	if [[ "$enable_tg" != "1" && "$enable_wa_web" != "1" && "$enable_wa_cloud" != "1" ]]; then
-		echo "No channel selected, keep current channel flags." # zh: 未选择任何渠道，保持当前渠道配置不变。
-		return 0
-	fi
-
-	apply_channel_flags "$enable_tg" "$enable_wa_web" "$enable_wa_cloud"
+	apply_channel_flags "$enable_webd" "$enable_tg" "$enable_wa_web" "$enable_wa_cloud" "$enable_wechat" "$enable_feishu" "$enable_lark"
 }
 
-if [[ "$QUICK_START" == "1" ]]; then
-	echo "Step 1/5: Quick mode enabled; skip channel prompt and keep channel config." # zh: 第 1/5 步：快速模式，跳过渠道提问，使用当前配置。
-	if [[ -n "$CHANNELS_ARG" ]]; then
-		echo "Quick mode ignores channels argument and keeps existing config."
-	fi
-else
-	choose_channel_mode
-fi
+choose_channel_mode
 
 echo "Step 2/5: Service selection skipped; startup follows enable flags." # zh: 第 2/5 步：跳过服务选择，按 enabled 配置自动启动。
 
@@ -691,37 +613,9 @@ choose_ui_mode() {
 		ENABLE_UI=1
 		return 0
 	fi
-	if [[ "${RUSTCLAW_ENABLE_UI:-}" == "0" && -n "${RUSTCLAW_ENABLE_UI:-}" ]]; then
-		ENABLE_UI=0
-		unset RUSTCLAW_UI_DIST || true
-		return 0
-	fi
-	if [[ ! -t 0 || ! -t 1 ]]; then
-		ENABLE_UI=0
-		unset RUSTCLAW_UI_DIST || true
-		return 0
-	fi
-
-	local ans
-	while true; do
-		read -r -p "Enable Web UI for clawd? [Y/n] > " ans
-		ans="${ans:-y}"
-		ans="$(echo "$ans" | tr '[:upper:]' '[:lower:]' | xargs)"
-		case "$ans" in
-		y | yes)
-			ENABLE_UI=1
-			echo "Selected: Y"
-			break
-			;;
-		n | no)
-			ENABLE_UI=0
-			unset RUSTCLAW_UI_DIST || true
-			echo "Selected: N"
-			break
-			;;
-		*) echo "Please input y or n." ;;
-		esac
-	done
+	ENABLE_UI=0
+	unset RUSTCLAW_UI_DIST || true
+	return 0
 }
 
 ui_assets_need_build() {
@@ -812,10 +706,11 @@ build_ui_if_needed() {
 	exit 1
 }
 
-if [[ "$QUICK_START" == "1" ]]; then
-	echo "Quick mode: skip UI prompt."
+choose_ui_mode
+if [[ "$ENABLE_UI" == "1" ]]; then
+	echo "Web UI startup enabled via --with-ui; continuing with release startup." # zh: 已通过 --with-ui 启用 Web UI，继续执行 release 启动。
 else
-	choose_ui_mode
+	echo "Web UI prompt skipped; continuing with release startup." # zh: 跳过 Web UI 交互，继续执行 release 启动。
 fi
 
 echo "Step 3/5: Setup and dependency check" # zh: 第 3/5 步：执行初始化与依赖检查
@@ -827,12 +722,14 @@ WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/webd"
 TELEGRAMD_BIN="$SCRIPT_DIR/target/$PROFILE/telegramd"
 WHATSAPPD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsappd"
 WHATSAPP_WEBD_BIN="$SCRIPT_DIR/target/$PROFILE/whatsapp_webd"
+WECHATD_BIN="$SCRIPT_DIR/target/$PROFILE/wechatd"
 FEISHUD_BIN="$SCRIPT_DIR/target/$PROFILE/feishud"
+LARKD_BIN="$SCRIPT_DIR/target/$PROFILE/larkd"
 
 echo "Step 4/5: Build check" # zh: 第 4/5 步：检查编译产物
-if [[ ! -x "$CLAWD_BIN" || ! -x "$TELEGRAMD_BIN" ]]; then
+if [[ ! -x "$CLAWD_BIN" ]]; then
 	echo "Prebuilt binaries missing for profile=$PROFILE." # zh: 缺少预编译二进制
-	echo "Required: $CLAWD_BIN, $TELEGRAMD_BIN"
+	echo "Required: $CLAWD_BIN"
 	echo "Copy your built binaries to target/$PROFILE/ or run: cargo build --workspace --release"
 	exit 1
 fi
@@ -926,7 +823,7 @@ start_whatsapp_webd() {
 import tomllib
 from pathlib import Path
 cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-wa_cfg = Path("configs/channels/whatsapp.toml")
+wa_cfg = Path("configs/channels/whatsapp-web.toml")
 if wa_cfg.exists():
     cfg.update(tomllib.loads(wa_cfg.read_text(encoding="utf-8")))
 print("1" if bool(cfg.get("whatsapp_web", {}).get("enabled", False)) else "0")
@@ -957,7 +854,7 @@ start_whatsappd() {
 import tomllib
 from pathlib import Path
 cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
-wa_cfg = Path("configs/channels/whatsapp.toml")
+wa_cfg = Path("configs/channels/whatsapp-cloud.toml")
 if wa_cfg.exists():
     cfg.update(tomllib.loads(wa_cfg.read_text(encoding="utf-8")))
 print("1" if bool(cfg.get("whatsapp", {}).get("enabled", False)) else "0")
@@ -1015,11 +912,84 @@ PY
 	echo "Starting feishud binary, PID=$pid, log: $LOG_DIR/feishud.log" # zh: feishud 二进制启动中，PID=$pid, 日志: $LOG_DIR/feishud.log
 }
 
+start_wechatd() {
+	local wechat_enabled
+	wechat_enabled="$(
+		python3 - <<'PY'
+import tomllib
+from pathlib import Path
+path = Path("configs/channels/wechat.toml")
+if not path.exists():
+    print("0")
+    raise SystemExit(0)
+cfg = tomllib.loads(path.read_text(encoding="utf-8"))
+wechat = cfg.get("wechat", {}) or {}
+print("1" if bool(wechat.get("enabled", False)) else "0")
+PY
+	)"
+	if [[ "$wechat_enabled" != "1" ]]; then
+		echo "wechat.enabled=false, skipping wechatd startup."
+		return 0
+	fi
+	if [[ ! -x "$WECHATD_BIN" ]]; then
+		echo "Binary not found or not executable: $WECHATD_BIN"
+		return 1
+	fi
+	if pgrep -f 'target/release/wechatd|cargo run -p wechatd' >/dev/null 2>&1; then
+		echo "wechatd is already running, skipping startup."
+		return 0
+	fi
+	export WECHAT_CONFIG_PATH="${WECHAT_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/wechat.toml}"
+	nohup "$WECHATD_BIN" >"$LOG_DIR/wechatd.log" 2>&1 &
+	local pid=$!
+	echo "$pid" >"$PID_DIR/wechatd.pid"
+	echo "Starting wechatd binary, PID=$pid, log: $LOG_DIR/wechatd.log"
+}
+
+start_larkd() {
+	local lark_enabled
+	lark_enabled="$(
+		python3 - <<'PY'
+import tomllib
+from pathlib import Path
+path = Path("configs/channels/lark.toml")
+if not path.exists():
+    print("0")
+    raise SystemExit(0)
+cfg = tomllib.loads(path.read_text(encoding="utf-8"))
+lark = cfg.get("lark", {}) or {}
+print("1" if bool(lark.get("enabled", False)) else "0")
+PY
+	)"
+	if [[ "$lark_enabled" != "1" ]]; then
+		echo "lark.enabled=false, skipping larkd startup."
+		return 0
+	fi
+	if [[ ! -x "$LARKD_BIN" ]]; then
+		echo "Binary not found or not executable: $LARKD_BIN"
+		return 0
+	fi
+	if pgrep -f 'target/release/larkd|cargo run -p larkd' >/dev/null 2>&1; then
+		echo "larkd is already running, skipping startup."
+		return 0
+	fi
+	export LARK_CONFIG_PATH="${LARK_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/lark.toml}"
+	nohup "$LARKD_BIN" >"$LOG_DIR/larkd.log" 2>&1 &
+	local pid=$!
+	echo "$pid" >"$PID_DIR/larkd.pid"
+	echo "Starting larkd binary, PID=$pid, log: $LOG_DIR/larkd.log"
+}
+
 echo "Step 5/5: Start services" # zh: 第 5/5 步：启动服务
 start_clawd
 start_webd
 start_telegramd
 start_whatsapp_webd
 start_whatsappd
+start_wechatd
 start_feishud
-echo "One-click startup command executed (profile: $PROFILE)." # zh: 一键启动命令已执行（profile: $PROFILE）。
+start_larkd
+echo "Startup finished (profile: $PROFILE)." # zh: 启动完成（profile: $PROFILE）。
+echo "Next: configure LLM provider/model, API keys, and communication channels in the UI." # zh: 下一步：请在 UI 中配置大模型厂商/模型、API Key、通信端等设置。
+echo "You can also edit config files directly under: $SCRIPT_DIR/configs/" # zh: 也可以直接修改配置目录：$SCRIPT_DIR/configs/
+echo "Common files: configs/config.toml and configs/channels/*.toml" # zh: 常用配置文件：configs/config.toml 和 configs/channels/*.toml
