@@ -1,9 +1,13 @@
 import json
+import logging
 import os
 import re
+import threading
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from time import perf_counter
 
 try:
     import tomllib
@@ -12,6 +16,8 @@ except ModuleNotFoundError:
 
 from small_screen_config import _pi_app_dir
 from small_screen_formatters import _fmt_signed_pct, _strip_trailing_zeros
+
+logger = logging.getLogger(__name__)
 
 BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
 SINA_HQ_URL = "http://hq.sinajs.cn/list="
@@ -45,6 +51,13 @@ DEFAULT_US_STOCK_ITEMS = [
     {"name": "Tesla", "symbol": "TSLA"},
 ]
 
+_MARKET_CONFIG_CACHE_LOCK = threading.Lock()
+_MARKET_CONFIG_CACHE = {"mtime": None, "data": {}}
+_US_STOCK_RESULT_CACHE_LOCK = threading.Lock()
+_US_STOCK_RESULT_CACHE = {"key": None, "at": 0.0, "value": None}
+US_STOCK_RESULT_CACHE_TTL_SEC = 10
+US_STOCK_MAX_WORKERS = 4
+
 
 def _small_screen_market_config_path():
     return os.path.join(_pi_app_dir(), "small_screen_markets.toml")
@@ -53,12 +66,26 @@ def _small_screen_market_config_path():
 def _load_small_screen_market_config():
     if tomllib is None:
         return {}
+    path = _small_screen_market_config_path()
     try:
-        with open(_small_screen_market_config_path(), "rb") as f:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        mtime = None
+    with _MARKET_CONFIG_CACHE_LOCK:
+        cached_mtime = _MARKET_CONFIG_CACHE.get("mtime")
+        cached_data = _MARKET_CONFIG_CACHE.get("data")
+        if cached_mtime == mtime and isinstance(cached_data, dict):
+            return cached_data
+    try:
+        with open(path, "rb") as f:
             cfg = tomllib.load(f)
-        return cfg if isinstance(cfg, dict) else {}
+        result = cfg if isinstance(cfg, dict) else {}
     except Exception:
-        return {}
+        result = {}
+    with _MARKET_CONFIG_CACHE_LOCK:
+        _MARKET_CONFIG_CACHE["mtime"] = mtime
+        _MARKET_CONFIG_CACHE["data"] = result
+    return result
 
 
 def _parse_refresh_seconds(value, default_value):
@@ -159,6 +186,30 @@ def _load_small_screen_us_stock_config():
     return items, refresh_seconds
 
 
+def _us_stock_cache_key(items):
+    normalized = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            (
+                str(item.get("name") or "").strip(),
+                str(item.get("symbol") or "").strip().upper(),
+            )
+        )
+    return tuple(normalized)
+
+
+def _fetch_us_stock_quote_meta(symbol):
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/" + urllib.parse.quote(symbol) + "?interval=1d&range=5d"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        data = json.loads(r.read().decode("utf-8", "replace"))
+    result = (((data or {}).get("chart") or {}).get("result") or [None])[0] or {}
+    meta = (result.get("meta") or {}) if isinstance(result, dict) else {}
+    return meta if meta else None
+
+
 def _decode_sina_body(raw):
     try:
         text = raw.decode("utf-8")
@@ -235,23 +286,32 @@ def fetch_a_share_quotes(stock_items=None):
 
 def fetch_us_stock_quotes(stock_items=None):
     items = stock_items or _load_small_screen_us_stock_config()[0]
+    started_at = perf_counter()
+    cache_key = _us_stock_cache_key(items)
+    now_ts = datetime.now().timestamp()
+    with _US_STOCK_RESULT_CACHE_LOCK:
+        if (
+            _US_STOCK_RESULT_CACHE.get("key") == cache_key
+            and _US_STOCK_RESULT_CACHE.get("value") is not None
+            and (now_ts - float(_US_STOCK_RESULT_CACHE.get("at") or 0.0)) < US_STOCK_RESULT_CACHE_TTL_SEC
+        ):
+            logger.debug("US stock quotes served from cache (%s items)", len(items))
+            return _US_STOCK_RESULT_CACHE["value"]
     quotes = {}
-    error = None
-    for item in items:
-        symbol = item.get("symbol") or ""
-        if not symbol:
-            continue
-        try:
-            url = "https://query1.finance.yahoo.com/v8/finance/chart/" + urllib.parse.quote(symbol) + "?interval=1d&range=5d"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=8) as r:
-                data = json.loads(r.read().decode("utf-8", "replace"))
-            result = (((data or {}).get("chart") or {}).get("result") or [None])[0] or {}
-            meta = (result.get("meta") or {}) if isinstance(result, dict) else {}
-            if meta:
-                quotes[symbol] = meta
-        except Exception as exc:
-            error = str(exc)
+    errors = []
+    symbols = [str(item.get("symbol") or "").strip().upper() for item in items if str(item.get("symbol") or "").strip()]
+    max_workers = max(1, min(US_STOCK_MAX_WORKERS, len(symbols)))
+    if symbols:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {executor.submit(_fetch_us_stock_quote_meta, symbol): symbol for symbol in symbols}
+            for future in as_completed(future_map):
+                symbol = future_map[future]
+                try:
+                    meta = future.result()
+                    if meta:
+                        quotes[symbol] = meta
+                except Exception as exc:
+                    errors.append(f"{symbol}: {exc}")
 
     out = []
     for item in items:
@@ -297,7 +357,7 @@ def fetch_us_stock_quotes(stock_items=None):
                 "meta2": "  ".join(meta2_parts),
             })
             continue
-        reason = "行情获取失败" if error else "暂无行情"
+        reason = "行情获取失败" if errors else "暂无行情"
         out.append({
             "title": item.get("name") or symbol or "--",
             "price": "--",
@@ -305,4 +365,15 @@ def fetch_us_stock_quotes(stock_items=None):
             "meta1": reason[:28],
             "meta2": symbol[:28],
         })
-    return {"items": out, "error": error}
+    result = {"items": out, "error": " | ".join(errors[:3]) if errors else None}
+    with _US_STOCK_RESULT_CACHE_LOCK:
+        _US_STOCK_RESULT_CACHE["key"] = cache_key
+        _US_STOCK_RESULT_CACHE["at"] = now_ts
+        _US_STOCK_RESULT_CACHE["value"] = result
+    logger.debug(
+        "US stock quotes fetched in %sms (%s symbols, %s errors)",
+        int((perf_counter() - started_at) * 1000),
+        len(symbols),
+        len(errors),
+    )
+    return result
