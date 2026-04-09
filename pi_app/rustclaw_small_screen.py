@@ -2,879 +2,118 @@
 # RustClaw 小屏监控：480×320 全屏，健康状态慢刷新、日志温和刷新，左侧龙虾动图 + RustClaw 标题。
 # 需先启动 clawd（8787）。按 F11 或 Escape 退出全屏/关闭。
 
-import errno
-import http.client
 import json
 import os
 import random
 import re
-import secrets
 import queue
-import sqlite3
-import subprocess
 import sys
 import tkinter as tk
-import tkinter.font as tkfont
-import urllib.parse
-import urllib.request
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    tomllib = None
+from small_screen_assets import find_assets, find_image_dir, find_splash_image, list_gallery_images
+from small_screen_clawd_client import (
+    API_BASE,
+    fetch_health,
+    fetch_skills_config,
+    localhost_api_request,
+    reset_admin_login_account,
+)
+from small_screen_config import (
+    _config_path,
+    _default_lang_from_system,
+    _key_file,
+    _lang_file,
+    _load_bool_setting,
+    _load_sqlite_path_from_config,
+    _pi_app_dir,
+    _root_dir,
+    _save_bool_setting,
+    _theme_file,
+    _writable_pi_app_dir,
+    ensure_small_screen_auth_key,
+    load_auth_key,
+    load_crypto_page_visible,
+    load_gallery_page_visible,
+    load_lang,
+    load_logs_page_visible,
+    load_messages_page_visible,
+    load_skills_page_visible,
+    load_stock_page_visible,
+    load_theme,
+    load_us_stock_page_visible,
+    load_weather_page_visible,
+    save_auth_key,
+    save_crypto_page_visible,
+    save_gallery_page_visible,
+    save_lang,
+    save_logs_page_visible,
+    save_messages_page_visible,
+    save_skills_page_visible,
+    save_stock_page_visible,
+    save_theme,
+    save_us_stock_page_visible,
+    save_weather_page_visible,
+)
+from small_screen_cryptoauth_service import read_slot0_pubkey_via_helper, sign_unix_time_via_helper
+from small_screen_formatters import (
+    _fmt_signed_pct,
+    _line_clamp_text,
+    _safe_float,
+    _strip_trailing_zeros,
+    fmt_bytes,
+    fmt_duration,
+)
+from small_screen_market_service import (
+    DEFAULT_A_SHARE_REFRESH_SEC,
+    DEFAULT_CRYPTO_REFRESH_SEC,
+    DEFAULT_US_STOCK_REFRESH_SEC,
+    _decode_sina_body,
+    _load_small_screen_crypto_config,
+    _load_small_screen_market_config,
+    _load_small_screen_stock_config,
+    _load_small_screen_us_stock_config,
+    _normalize_stock_code,
+    _normalize_us_stock_symbol,
+    _parse_refresh_seconds,
+    _parse_sina_quotes,
+    fetch_a_share_quotes,
+    fetch_crypto_prices,
+    fetch_us_stock_quotes,
+)
+from small_screen_overview_ui import (
+    build_overview_layout as overview_build_layout,
+    render_dashboard_overview as overview_render_dashboard,
+)
+from small_screen_settings_ui import (
+    close_wifi_to_settings as settings_close_wifi_to_settings,
+    open_wifi_from_settings as settings_open_wifi_from_settings,
+    prepare_settings_view as settings_prepare_view,
+    refresh_settings_choice_labels as settings_refresh_choice_labels,
+    show_settings_category as settings_show_category,
+    show_settings_menu as settings_show_menu,
+)
+from small_screen_strings import STRINGS
+from small_screen_themes import MATRIX_CHARS, THEMES
+from small_screen_weather_service import (
+    _fetch_today_weather_once,
+    _format_weather_wind,
+    _load_small_screen_weather_config,
+    _pick_weather_text,
+    _weather_day_label,
+    _weather_desc_for_code,
+    _weather_icon_for_code,
+    _wind_level_from_kmh,
+    fetch_today_weather,
+)
+from small_screen_wifi_service import connect_wifi_network, disconnect_wifi_network, scan_wifi_networks
 
-API_BASE = "http://127.0.0.1:8787"
-# 复用至 clawd 的 HTTP 连接（多线程通过锁访问，减少本机 TCP 握手与 TIME_WAIT）
-_api_http_conn = None
-_api_http_lock = threading.Lock()
 HEALTH_REFRESH_SEC = 5
 LOGS_REFRESH_SEC = 5
 W, H = 480, 320
 ASSETS_DIR = None
-CRYPTOAUTHLIB_PYTHON = "../../cryptoauthlib/python/.venv/bin/python"
-CRYPTOAUTHLIB_LIB_DIR = "../../cryptoauthlib/build-pyfix"
-
-
-def _pi_app_dir():
-    """资源根：源码为 pi_app 目录；PyInstaller 打包后为 sys._MEIPASS。"""
-    if getattr(sys, "frozen", False):
-        return sys._MEIPASS
-    return os.path.dirname(os.path.abspath(__file__))
-
-
-def _writable_pi_app_dir():
-    """可写配置（语言/主题/key）：打包后与可执行文件同目录。"""
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
-
-
-# Matrix 主题下竖排随机字符（数字、拉丁、片假名等）
-MATRIX_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝｦｧｨｩｪｫｬｭｮｯｰ"
-
-# 多语言文案（CN / EN）
-STRINGS = {
-    "CN": {
-        "app_title": "RustClaw 小屏",
-        "switch": "切换",
-        "settings": "设置",
-        "version": "版本",
-        "uptime": "运行时长",
-        "queue": "队列",
-        "running": "执行中",
-        "worker": "Worker",
-        "worker_offline": "未运行",
-        "memory_rss": "内存 RSS",
-        "adapters": "通信端",
-        "adapters_memory": "通信端内存",
-        "adapters_memory_space": "  通信端内存 ",
-        "foot_prefix": "同源请求 /v1/health",
-        "update_fmt": "更新: {time} (每{sec}s)",
-        "skills_title": "SKILLS",
-        "skills_load_fail": "无法加载技能配置",
-        "users_title": "用户",
-        "users_count": "启用用户",
-        "bound_channels": "已绑定通信端",
-        "clawd_summary": "Logs",
-        "clawd_summary_empty": "暂无摘要",
-        "logs_title": "Logs",
-        "recent_messages_title": "最近消息",
-        "recent_messages_empty": "暂无用户消息",
-        "recent_message_more_hint": "在通信端查看",
-        "msg_replied_label": "已回复",
-        "msg_replied_hint": "已回复，在通信端查看",
-        "logs_empty": "暂无日志",
-        "settings_title": "设置",
-        "language": "语言",
-        "lang_en": "EN",
-        "lang_cn": "CN",
-        "ok": "确定",
-        "cancel": "取消",
-        "crypto_refresh_hint": "每{sec}秒自动刷新",
-        "crypto_empty": "请在 small_screen_markets.toml 配置展示币种",
-        "stock_refresh_hint": "每{sec}秒自动刷新",
-        "stock_empty": "请在 small_screen_markets.toml 配置展示股票",
-        "refresh": "刷新",
-        "llm_title": "NNI分布式模型 (test)",
-        "llm_join": "加入",
-        "llm_stop": "停止",
-        "llm_pubkey_slot0": "slot 0",
-        "llm_pubkey_loading": "正在读取 slot 0.....",
-        "llm_pubkey_empty": "还未读取 slot 0",
-        "llm_pubkey_error": "获取不到公钥",
-        "llm_signing": "正在签名.....",
-        "llm_sign_failed": "签名失败",
-        "llm_sign_timestamp": "时间",
-        "llm_sign_signature": "签名",
-        "theme": "界面",
-        "theme_default": "默认",
-        "theme_matrix": "Matrix",
-        "restart": "重启RustClaw核心",
-        "restarting": "重启中.....",
-        "wifi_title": "WiFi",
-        "wifi_refresh": "刷新列表",
-        "wifi_refreshing": "扫描中.....",
-        "wifi_connect": "连接 WiFi",
-        "wifi_connecting": "连接中.....",
-        "wifi_join": "加入",
-        "wifi_disconnect": "断开",
-        "wifi_disconnecting": "断开中.....",
-        "wifi_selected": "已选网络",
-        "wifi_password": "密码",
-        "wifi_edit_password": "输入密码",
-        "wifi_keyboard_done": "完成",
-        "wifi_show_password": "显示",
-        "wifi_hide_password": "隐藏",
-        "wifi_backspace": "退格",
-        "wifi_clear": "清空",
-        "wifi_space": "空格",
-        "wifi_shift": "大小写",
-        "wifi_symbols": "符号",
-        "wifi_letters": "字母",
-        "wifi_prev_page": "上一页",
-        "wifi_next_page": "下一页",
-        "wifi_no_selection": "请先选择一个 WiFi",
-        "wifi_password_required": "该 WiFi 需要密码，请先输入密码。",
-        "wifi_empty": "没有扫描到可用 WiFi",
-        "wifi_open_hint": "开放网络可直接连接，密码可留空。",
-        "wifi_secure_hint": "加密网络请输入密码后连接。",
-        "wifi_connected_tag": "已连接",
-        "wifi_connect_success": "已连接到 {ssid}",
-        "wifi_connect_failed": "连接失败: {error}",
-        "wifi_disconnect_success": "已断开 {ssid}",
-        "wifi_disconnect_failed": "断开失败: {error}",
-        "wifi_scan_failed": "扫描失败: {error}",
-        "wifi_scan_hint": "点按列表选择 WiFi，再用屏幕键盘输入密码。",
-        "reset_admin_login": "重置管理员账号密码",
-        "resetting_admin_login": "重置中.....",
-        "reset_admin_login_success": "已重置：admin 账号 rustclaw / rustclaw123456",
-        "reset_admin_login_failed": "重置失败: {error}",
-        "reset_admin_login_dialog_title": "管理员账号已重置",
-        "reset_admin_login_dialog_body": "用户名: rustclaw\n密码: rustclaw123456",
-    },
-    "EN": {
-        "app_title": "RustClaw Small Screen",
-        "switch": "Switch",
-        "settings": "Settings",
-        "version": "Version",
-        "uptime": "Uptime",
-        "queue": "Queue",
-        "running": "Running",
-        "worker": "Worker",
-        "worker_offline": "Not running",
-        "memory_rss": "Memory RSS",
-        "adapters": "Adapters",
-        "adapters_memory": "Adapters memory",
-        "adapters_memory_space": "  Adapters memory ",
-        "foot_prefix": "Same-origin /v1/health",
-        "update_fmt": "Update: {time} (every {sec}s)",
-        "skills_title": "SKILLS",
-        "skills_load_fail": "Failed to load skills config",
-        "users_title": "Users",
-        "users_count": "Enabled users",
-        "bound_channels": "Bound channels",
-        "clawd_summary": "Logs",
-        "clawd_summary_empty": "No summary",
-        "logs_title": "Logs",
-        "recent_messages_title": "Recent Messages",
-        "recent_messages_empty": "No user messages",
-        "recent_message_more_hint": "See in Adapters",
-        "msg_replied_label": "Replied",
-        "msg_replied_hint": "Replied, see in Adapters",
-        "logs_empty": "No logs",
-        "settings_title": "Settings",
-        "language": "Language",
-        "lang_en": "EN",
-        "lang_cn": "CN",
-        "ok": "OK",
-        "cancel": "Cancel",
-        "crypto_refresh_hint": "Auto refresh every {sec}s",
-        "crypto_empty": "Configure crypto items in small_screen_markets.toml",
-        "stock_refresh_hint": "Auto refresh every {sec}s",
-        "stock_empty": "Configure stock items in small_screen_markets.toml",
-        "refresh": "Refresh",
-        "llm_title": "Network Native Intelligence (test)",
-        "llm_join": "Join",
-        "llm_stop": "Stop",
-        "llm_pubkey_slot0": "Slot 0",
-        "llm_pubkey_loading": "Loading slot 0.....",
-        "llm_pubkey_empty": "Slot 0 not loaded yet",
-        "llm_pubkey_error": "Public key unavailable",
-        "llm_signing": "Signing.....",
-        "llm_sign_failed": "Sign failed",
-        "llm_sign_timestamp": "Time",
-        "llm_sign_signature": "Signature",
-        "theme": "Theme",
-        "theme_default": "Default",
-        "theme_matrix": "Matrix",
-        "restart": "Restart RustClaw Core",
-        "restarting": "Restarting.....",
-        "wifi_title": "WiFi",
-        "wifi_refresh": "Refresh",
-        "wifi_refreshing": "Scanning.....",
-        "wifi_connect": "Connect WiFi",
-        "wifi_connecting": "Connecting.....",
-        "wifi_join": "Join",
-        "wifi_disconnect": "Disconnect",
-        "wifi_disconnecting": "Disconnecting.....",
-        "wifi_selected": "Selected",
-        "wifi_password": "Password",
-        "wifi_edit_password": "Enter Password",
-        "wifi_keyboard_done": "Done",
-        "wifi_show_password": "Show",
-        "wifi_hide_password": "Hide",
-        "wifi_backspace": "Back",
-        "wifi_clear": "Clear",
-        "wifi_space": "Space",
-        "wifi_shift": "Shift",
-        "wifi_symbols": "Symbols",
-        "wifi_letters": "Letters",
-        "wifi_prev_page": "Prev",
-        "wifi_next_page": "Next",
-        "wifi_no_selection": "Select a WiFi first",
-        "wifi_password_required": "This WiFi requires a password. Enter the password first.",
-        "wifi_empty": "No WiFi networks found",
-        "wifi_open_hint": "Open network: password can be empty.",
-        "wifi_secure_hint": "Secure network: enter password first.",
-        "wifi_connected_tag": "Connected",
-        "wifi_connect_success": "Connected to {ssid}",
-        "wifi_connect_failed": "Connect failed: {error}",
-        "wifi_disconnect_success": "Disconnected from {ssid}",
-        "wifi_disconnect_failed": "Disconnect failed: {error}",
-        "wifi_scan_failed": "Scan failed: {error}",
-        "wifi_scan_hint": "Tap a WiFi, then use the on-screen keyboard to enter the password.",
-        "reset_admin_login": "Reset admin username/password",
-        "resetting_admin_login": "Resetting.....",
-        "reset_admin_login_success": "Reset done: admin rustclaw / rustclaw123456",
-        "reset_admin_login_failed": "Reset failed: {error}",
-        "reset_admin_login_dialog_title": "Admin login reset",
-        "reset_admin_login_dialog_body": "Username: rustclaw\nPassword: rustclaw123456",
-    },
-}
-
-# 界面主题：default 深蓝 | matrix 黑客帝国绿
-THEMES = {
-    "default": {
-        "bg": "#1a1a2e",
-        "fg": "#e8e6e3",
-        "fg_dim": "#8a8580",
-        "accent": "#ff6b4a",
-        "button_bg": "#2a2a3a",
-        "button_fg": "#e8e6e3",
-        "button_active_bg": "#3a3a4a",
-        "box_bg": "#12121a",
-        "box_border": "#2a2a3a",
-        "adapters_fg": "#5bc0be",
-        "adapters_value_fg": "#98e6e4",
-        "foot_fg": "#666",
-        "status_outline": "#444",
-        "status_off": "#888",
-        "status_ok": "#5cdb5c",
-        "status_err": "#ff6b6b",
-        "summary_llm": "#ffd166",
-        "summary_task": "#5bc0eb",
-        "summary_error": "#ff6b6b",
-        "summary_routing": "#c77dff",
-        "summary_tool": "#7bd389",
-        "summary_skill": "#39d2c0",
-        "summary_other": "#bfc7d5",
-        "msg_user_fg": "#e8e6e3",
-        "msg_agent_fg": "#ffd166",
-        "selectcolor": "#2a2a3a",
-        "bg_rgb": (0x1a, 0x1a, 0x2e),
-    },
-    "matrix": {
-        "bg": "#000000",
-        "fg": "#00ff41",
-        "fg_dim": "#008f11",
-        "accent": "#00ff41",
-        "button_bg": "#0a1a0a",
-        "button_fg": "#00ff41",
-        "button_active_bg": "#0d2a0d",
-        "box_bg": "#001100",
-        "box_border": "#003300",
-        "adapters_fg": "#00ff41",
-        "adapters_value_fg": "#39ff14",
-        "foot_fg": "#004400",
-        "status_outline": "#003300",
-        "status_off": "#005500",
-        "status_ok": "#00ff41",
-        "status_err": "#ff0040",
-        "summary_llm": "#ffe600",
-        "summary_task": "#00d5ff",
-        "summary_error": "#ff0040",
-        "summary_routing": "#ff66ff",
-        "summary_tool": "#00ff9c",
-        "summary_skill": "#39ff14",
-        "summary_other": "#7dff7d",
-        "msg_user_fg": "#7dff7d",
-        "msg_agent_fg": "#00d5ff",
-        "selectcolor": "#0a2a0a",
-        "bg_rgb": (0, 0, 0),
-    },
-}
-
-
-def find_assets():
-    return os.path.join(_pi_app_dir(), "assets")
-
-
-def find_splash_image():
-    """启动图：脚本目录下 RustClaw480X320.png，若存在则用于全屏启动界面。"""
-    path = os.path.join(_pi_app_dir(), "RustClaw480X320.png")
-    return path if os.path.isfile(path) else None
-
-
-def find_image_dir():
-    return os.path.join(_pi_app_dir(), "image")
-
-
-def list_gallery_images():
-    """返回 scripts/image 下图片路径列表，按文件名排序。"""
-    ext = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")
-    path = find_image_dir()
-    if not os.path.isdir(path):
-        return []
-    out = []
-    for name in sorted(os.listdir(path)):
-        if name.lower().endswith(ext):
-            out.append(os.path.join(path, name))
-    return out
-
-
-def _lang_file():
-    return os.path.join(_writable_pi_app_dir(), ".rustclaw_small_screen_lang")
-
-
-def _theme_file():
-    return os.path.join(_writable_pi_app_dir(), ".rustclaw_small_screen_theme")
-
-
-def _key_file():
-    return os.path.join(_writable_pi_app_dir(), ".rustclaw_small_screen_key")
-
-
-def _root_dir():
-    """含 configs/、data/ 的仓库根。打包后从可执行文件位置向上探测 configs/config.toml。"""
-    if getattr(sys, "frozen", False):
-        exe = os.path.abspath(sys.executable)
-        cur = os.path.dirname(exe)
-        for _ in range(6):
-            trial = os.path.join(cur, "configs", "config.toml")
-            if os.path.isfile(trial):
-                return cur
-            parent = os.path.dirname(cur)
-            if parent == cur:
-                break
-            cur = parent
-        exe_dir = os.path.dirname(exe)
-        return os.path.normpath(os.path.join(exe_dir, "..", "..", ".."))
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.dirname(script_dir)
-
-
-def _config_path():
-    return os.path.join(_root_dir(), "configs", "config.toml")
-
-
-def load_theme():
-    try:
-        with open(_theme_file(), "r", encoding="utf-8") as f:
-            t = f.read().strip().lower()
-            if t in ("default", "matrix"):
-                return t
-    except Exception:
-        pass
-    return "default"
-
-
-def save_theme(theme):
-    try:
-        with open(_theme_file(), "w", encoding="utf-8") as f:
-            f.write(theme)
-    except Exception:
-        pass
-
-
-def load_auth_key():
-    try:
-        with open(_key_file(), "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except Exception:
-        return ""
-
-
-def save_auth_key(user_key):
-    try:
-        with open(_key_file(), "w", encoding="utf-8") as f:
-            f.write((user_key or "").strip())
-    except Exception:
-        pass
-
-
-def _load_sqlite_path_from_config():
-    if tomllib is None:
-        return os.path.join(_root_dir(), "data", "rustclaw.db")
-    try:
-        with open(_config_path(), "rb") as f:
-            cfg = tomllib.load(f)
-        db_rel = (((cfg or {}).get("database") or {}).get("sqlite_path")) or "data/rustclaw.db"
-        return os.path.join(_root_dir(), db_rel)
-    except Exception:
-        return os.path.join(_root_dir(), "data", "rustclaw.db")
-
-
-def _generate_user_key():
-    return "rk-" + secrets.token_urlsafe(18)
-
-
-def ensure_small_screen_auth_key():
-    user_key = load_auth_key().strip()
-    db_path = _load_sqlite_path_from_config()
-    try:
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        with sqlite3.connect(db_path) as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS auth_keys (
-                    user_key     TEXT PRIMARY KEY,
-                    role         TEXT NOT NULL CHECK (role IN ('admin', 'user')),
-                    enabled      INTEGER NOT NULL DEFAULT 1,
-                    created_at   TEXT NOT NULL,
-                    last_used_at TEXT
-                )
-                """
-            )
-            if not user_key:
-                user_key = _generate_user_key()
-                save_auth_key(user_key)
-            conn.execute(
-                """
-                INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-                VALUES (?, 'user', 1, strftime('%s','now'), NULL)
-                ON CONFLICT(user_key) DO UPDATE SET enabled=1
-                """,
-                (user_key,),
-            )
-        return user_key
-    except Exception:
-        return user_key
-
-
-def load_enabled_admin_user_key():
-    db_path = _load_sqlite_path_from_config()
-    try:
-        conn = sqlite3.connect(db_path)
-        row = conn.execute(
-            """
-            SELECT user_key
-            FROM auth_keys
-            WHERE role = 'admin' AND enabled = 1
-            ORDER BY rowid ASC
-            LIMIT 1
-            """
-        ).fetchone()
-        conn.close()
-        if row and row[0]:
-            return str(row[0]).strip()
-    except Exception:
-        pass
-    return ""
-
-
-def post_admin_webd_account(user_key, username, password):
-    payload = {
-        "username": (username or "").strip(),
-        "password": password or "",
-        "user_key": (user_key or "").strip(),
-    }
-    if not payload["username"] or not payload["password"] or not payload["user_key"]:
-        return False, "missing username/password/user_key"
-    body = json.dumps(payload).encode("utf-8")
-    try:
-        raw = localhost_api_request("POST", "/v1/admin/webd-accounts", user_key, body=body).decode()
-        parsed = json.loads(raw) if raw else {}
-        if not isinstance(parsed, dict):
-            return False, "invalid response"
-        if parsed.get("ok"):
-            return True, ""
-        return False, str(parsed.get("error") or "request failed")
-    except Exception as exc:
-        return False, str(exc)
-
-
-def reset_admin_login_account(username="rustclaw", password="rustclaw123456"):
-    admin_key = load_enabled_admin_user_key()
-    if not admin_key:
-        return False, "enabled admin key not found"
-    return post_admin_webd_account(admin_key, username, password)
-
-
-def _wifi_sort_key(item):
-    active_rank = 0 if item.get("active") else 1
-    signal_rank = -(item.get("signal") or 0)
-    name_rank = (item.get("ssid") or "").lower()
-    return (active_rank, signal_rank, name_rank)
-
-
-def _split_nmcli_escaped(line, expected_parts=4):
-    parts = []
-    current = []
-    escaped = False
-    for ch in line:
-        if escaped:
-            current.append(ch)
-            escaped = False
-            continue
-        if ch == "\\":
-            escaped = True
-            continue
-        if ch == ":" and len(parts) < expected_parts - 1:
-            parts.append("".join(current))
-            current = []
-            continue
-        current.append(ch)
-    parts.append("".join(current))
-    while len(parts) < expected_parts:
-        parts.append("")
-    return parts[:expected_parts]
-
-
-def scan_wifi_networks():
-    try:
-        result = subprocess.run(
-            [
-                "nmcli",
-                "-t",
-                "--escape",
-                "yes",
-                "-f",
-                "IN-USE,SSID,SECURITY,SIGNAL",
-                "dev",
-                "wifi",
-                "list",
-                "--rescan",
-                "yes",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except FileNotFoundError:
-        return None, "nmcli not found"
-    except Exception as exc:
-        return None, str(exc)
-    if result.returncode != 0:
-        error = (result.stderr or result.stdout or "nmcli failed").strip()
-        return None, error
-
-    dedup = {}
-    for raw_line in (result.stdout or "").splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        active, ssid, security, signal_text = _split_nmcli_escaped(line, expected_parts=4)
-        ssid = (ssid or "").strip()
-        if not ssid:
-            continue
-        try:
-            signal = int((signal_text or "0").strip() or "0")
-        except Exception:
-            signal = 0
-        item = {
-            "active": active.strip().lower() in ("*", "yes", "true", "activated"),
-            "ssid": ssid,
-            "security": (security or "").strip(),
-            "signal": max(0, min(signal, 100)),
-        }
-        existing = dedup.get(ssid)
-        if existing is None or _wifi_sort_key(item) < _wifi_sort_key(existing):
-            dedup[ssid] = item
-    return sorted(dedup.values(), key=_wifi_sort_key), None
-
-
-def connect_wifi_network(ssid, password=""):
-    ssid = (ssid or "").strip()
-    if not ssid:
-        return False, "SSID required"
-    cmd = ["nmcli", "dev", "wifi", "connect", ssid]
-    if password:
-        cmd += ["password", password]
-
-    def _run_connect():
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-
-    try:
-        result = _run_connect()
-    except FileNotFoundError:
-        return False, "nmcli not found"
-    except Exception as exc:
-        return False, str(exc)
-    if result.returncode == 0:
-        return True, (result.stdout or "").strip()
-    error = (result.stderr or result.stdout or "nmcli failed").strip()
-    lower_error = error.lower()
-    should_retry = (
-        bool(password)
-        and (
-            "property is missing" in lower_error
-            or "secrets were required" in lower_error
-            or "no valid secrets" in lower_error
-        )
-    )
-    if should_retry:
-        try:
-            cleanup = subprocess.run(
-                ["nmcli", "connection", "delete", "id", ssid],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=False,
-            )
-            if cleanup.returncode == 0 or "unknown connection" in (cleanup.stderr or "").lower():
-                retry = _run_connect()
-                if retry.returncode == 0:
-                    return True, (retry.stdout or "").strip()
-                retry_error = (retry.stderr or retry.stdout or "nmcli failed").strip()
-                return False, retry_error
-        except FileNotFoundError:
-            return False, "nmcli not found"
-        except Exception as exc:
-            return False, str(exc)
-    return False, error
-
-
-def disconnect_wifi_network(ssid=""):
-    ssid = (ssid or "").strip()
-    try:
-        status = subprocess.run(
-            [
-                "nmcli",
-                "-t",
-                "--escape",
-                "no",
-                "-f",
-                "DEVICE,TYPE,STATE,CONNECTION",
-                "device",
-                "status",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except FileNotFoundError:
-        return False, "nmcli not found"
-    except Exception as exc:
-        return False, str(exc)
-    if status.returncode != 0:
-        error = (status.stderr or status.stdout or "nmcli failed").strip()
-        return False, error
-
-    target_device = ""
-    for raw_line in (status.stdout or "").splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = line.split(":")
-        if len(parts) < 4:
-            continue
-        device, dev_type, state = parts[0].strip(), parts[1].strip(), parts[2].strip().lower()
-        connection = ":".join(parts[3:]).strip()
-        if dev_type != "wifi" or state != "connected":
-            continue
-        if not ssid or connection == ssid:
-            target_device = device
-            break
-    if not target_device and ssid:
-        try:
-            result = subprocess.run(
-                ["nmcli", "connection", "down", "id", ssid],
-                capture_output=True,
-                text=True,
-                timeout=20,
-                check=False,
-            )
-        except FileNotFoundError:
-            return False, "nmcli not found"
-        except Exception as exc:
-            return False, str(exc)
-        if result.returncode == 0:
-            return True, (result.stdout or "").strip()
-        error = (result.stderr or result.stdout or "nmcli failed").strip()
-        return False, error
-    if not target_device:
-        return False, "connected wifi device not found"
-    try:
-        result = subprocess.run(
-            ["nmcli", "device", "disconnect", target_device],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-    except FileNotFoundError:
-        return False, "nmcli not found"
-    except Exception as exc:
-        return False, str(exc)
-    if result.returncode == 0:
-        return True, (result.stdout or "").strip()
-    error = (result.stderr or result.stdout or "nmcli failed").strip()
-    return False, error
-
-
-def _run_signature_helper(args):
-    script_path = os.path.join(_pi_app_dir(), "signature.py")
-    if not os.path.isfile(script_path):
-        return None, "helper script not found"
-    if not os.path.isfile(CRYPTOAUTHLIB_PYTHON):
-        return None, "cryptoauthlib python not found"
-    env = os.environ.copy()
-    if os.path.isdir(CRYPTOAUTHLIB_LIB_DIR):
-        env["LD_LIBRARY_PATH"] = f"{CRYPTOAUTHLIB_LIB_DIR}:{env.get('LD_LIBRARY_PATH', '')}".rstrip(":")
-    try:
-        result = subprocess.run(
-            [CRYPTOAUTHLIB_PYTHON, script_path, *args],
-            capture_output=True,
-            text=True,
-            timeout=12,
-            check=False,
-            env=env,
-        )
-    except Exception as exc:
-        return None, str(exc)
-    raw = (result.stdout or "").strip()
-    if not raw:
-        return None, (result.stderr or "empty helper response").strip()
-    try:
-        payload = json.loads(raw)
-    except Exception:
-        return None, raw
-    if payload.get("ok"):
-        return payload, ""
-    return None, str(payload.get("error") or "helper request failed")
-
-
-def read_slot0_pubkey_via_helper():
-    payload, error = _run_signature_helper(["pubkey"])
-    if payload and payload.get("pubkey"):
-        return str(payload.get("pubkey")).strip(), ""
-    return None, error or "public key unavailable"
-
-
-def sign_unix_time_via_helper(unix_time):
-    payload, error = _run_signature_helper(["sign_timestamp", str(int(unix_time))])
-    if payload and payload.get("signature"):
-        return payload, ""
-    return None, error or "sign failed"
-
-
-def _default_lang_from_system():
-    """根据系统语言返回默认语言，兜底为英语 EN。"""
-    try:
-        import locale
-        loc, _ = locale.getdefaultlocale()
-        if loc:
-            if loc.lower().startswith("zh"):
-                return "CN"
-    except Exception:
-        pass
-    for key in ("LANG", "LC_ALL", "LANGUAGE"):
-        val = os.environ.get(key, "")
-        if isinstance(val, str) and val.lower().startswith("zh"):
-            return "CN"
-    return "EN"
-
-
-def load_lang():
-    try:
-        with open(_lang_file(), "r", encoding="utf-8") as f:
-            lang = f.read().strip().upper()
-            if lang in ("EN", "CN"):
-                return lang
-    except Exception:
-        pass
-    return _default_lang_from_system()
-
-
-def save_lang(lang):
-    try:
-        with open(_lang_file(), "w", encoding="utf-8") as f:
-            f.write(lang)
-    except Exception:
-        pass
-
-
-def _api_host_port():
-    u = urllib.parse.urlparse(API_BASE)
-    host = u.hostname or "127.0.0.1"
-    port = u.port
-    if port is None:
-        port = 443 if (u.scheme or "http").lower() == "https" else 80
-    return host, port
-
-
-def _api_drop_connection_unlocked():
-    global _api_http_conn
-    if _api_http_conn is not None:
-        try:
-            _api_http_conn.close()
-        except Exception:
-            pass
-        _api_http_conn = None
-
-
-def localhost_api_request(method, path, user_key="", body=None):
-    """对 API_BASE 发 GET/POST，在同一条 HTTP/1.1 连接上复用（失败时自动重连一次）。"""
-    global _api_http_conn
-    if not path.startswith("/"):
-        path = "/" + path
-    headers = {}
-    uk = (user_key or "").strip()
-    if uk:
-        headers["X-RustClaw-Key"] = uk
-    if body is not None:
-        headers["Content-Type"] = "application/json"
-    host, port = _api_host_port()
-    last_err = None
-    with _api_http_lock:
-        for attempt in range(2):
-            try:
-                if _api_http_conn is None:
-                    _api_http_conn = http.client.HTTPConnection(host, port, timeout=8)
-                _api_http_conn.request(method, path, body=body, headers=headers)
-                resp = _api_http_conn.getresponse()
-                raw = resp.read()
-                if resp.status >= 400:
-                    _api_drop_connection_unlocked()
-                    raise OSError(f"HTTP {resp.status}")
-                return raw
-            except Exception as e:
-                last_err = e
-                _api_drop_connection_unlocked()
-                if attempt == 0:
-                    continue
-                raise last_err
-
-
-def fetch_health(user_key=""):
-    try:
-        raw = localhost_api_request("GET", "/v1/health", user_key)
-        body = json.loads(raw.decode())
-        data = body.get("data") or body
-        return data, None
-    except Exception as e:
-        return None, str(e)
 
 
 def _strip_ansi(text):
@@ -927,36 +166,6 @@ def _extract_log_time_label(line):
     if m:
         return m.group(1)
     return "--:--:--"
-
-
-def _line_clamp_text(text, font, wraplength, max_lines=3, ellipsis="..."):
-    content = str(text or "")
-    if max_lines <= 0:
-        return content
-    measure_font = tkfont.Font(font=font)
-    wrapped_lines = []
-    for raw_line in content.split("\n"):
-        if raw_line == "":
-            wrapped_lines.append("")
-            continue
-        current = ""
-        for ch in raw_line:
-            candidate = current + ch
-            if current and measure_font.measure(candidate) > wraplength:
-                wrapped_lines.append(current)
-                current = ch
-            else:
-                current = candidate
-        wrapped_lines.append(current)
-    if len(wrapped_lines) > max_lines:
-        wrapped_lines = wrapped_lines[:max_lines]
-        tail = wrapped_lines[-1].rstrip()
-        while tail and measure_font.measure(tail + ellipsis) > wraplength:
-            tail = tail[:-1]
-        wrapped_lines[-1] = (tail + ellipsis) if tail else ellipsis
-    if len(wrapped_lines) < max_lines:
-        wrapped_lines.extend([""] * (max_lines - len(wrapped_lines)))
-    return "\n".join(wrapped_lines)
 
 
 def _status_tag(line):
@@ -1306,11 +515,365 @@ def fetch_clawd_log_summary(user_key="", lang="CN"):
     return fetch_clawd_logs(user_key=user_key, lang=lang, lines=80, limit=8)
 
 
+def _pick_weather_text(values):
+    if not isinstance(values, list):
+        return ""
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("value") or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _weather_icon_for_code(code):
+    try:
+        value = int(str(code or "").strip() or "-1")
+    except Exception:
+        value = -1
+    if value == 113:
+        return "☀"
+    if value == 116:
+        return "☁"
+    if value in (119, 122):
+        return "☁"
+    if value in (143, 248, 260):
+        return "≋"
+    if value in (176, 263, 266, 293, 296, 299, 353, 356):
+        return "☂"
+    if value in (182, 185, 281, 284, 302, 305, 308, 311, 314, 317, 320, 359, 362, 365):
+        return "☂"
+    if value in (179, 227, 230, 323, 326, 329, 332, 335, 338, 368, 371):
+        return "❄"
+    if value in (200, 386, 389, 392, 395):
+        return "⚡"
+    return "◌"
+
+
+def _weather_desc_for_code(code, lang="CN", fallback=""):
+    try:
+        value = int(str(code or "").strip() or "-1")
+    except Exception:
+        value = -1
+    lang = "EN" if str(lang).upper() == "EN" else "CN"
+    mapping = {
+        113: {"CN": "晴", "EN": "Clear"},
+        116: {"CN": "局部多云", "EN": "Partly cloudy"},
+        119: {"CN": "多云", "EN": "Cloudy"},
+        122: {"CN": "阴", "EN": "Overcast"},
+        143: {"CN": "薄雾", "EN": "Mist"},
+        176: {"CN": "局地阵雨", "EN": "Patchy rain"},
+        179: {"CN": "局地小雪", "EN": "Patchy snow"},
+        182: {"CN": "局地雨夹雪", "EN": "Patchy sleet"},
+        185: {"CN": "局地冻毛雨", "EN": "Patchy freezing drizzle"},
+        200: {"CN": "局地雷暴", "EN": "Thundery nearby"},
+        227: {"CN": "吹雪", "EN": "Blowing snow"},
+        230: {"CN": "暴风雪", "EN": "Blizzard"},
+        248: {"CN": "雾", "EN": "Fog"},
+        260: {"CN": "冻雾", "EN": "Freezing fog"},
+        263: {"CN": "零星毛毛雨", "EN": "Patchy drizzle"},
+        266: {"CN": "毛毛雨", "EN": "Drizzle"},
+        281: {"CN": "冻毛雨", "EN": "Freezing drizzle"},
+        284: {"CN": "强冻毛雨", "EN": "Heavy freezing drizzle"},
+        293: {"CN": "零星小雨", "EN": "Patchy light rain"},
+        296: {"CN": "小雨", "EN": "Light rain"},
+        299: {"CN": "间歇中雨", "EN": "Moderate rain at times"},
+        302: {"CN": "中雨", "EN": "Moderate rain"},
+        305: {"CN": "间歇大雨", "EN": "Heavy rain at times"},
+        308: {"CN": "大雨", "EN": "Heavy rain"},
+        311: {"CN": "轻度冻雨", "EN": "Light freezing rain"},
+        314: {"CN": "冻雨", "EN": "Freezing rain"},
+        317: {"CN": "轻度雨夹雪", "EN": "Light sleet"},
+        320: {"CN": "雨夹雪", "EN": "Sleet"},
+        323: {"CN": "零星小雪", "EN": "Patchy light snow"},
+        326: {"CN": "小雪", "EN": "Light snow"},
+        329: {"CN": "间歇中雪", "EN": "Patchy moderate snow"},
+        332: {"CN": "中雪", "EN": "Moderate snow"},
+        335: {"CN": "间歇大雪", "EN": "Patchy heavy snow"},
+        338: {"CN": "大雪", "EN": "Heavy snow"},
+        353: {"CN": "小阵雨", "EN": "Light shower"},
+        356: {"CN": "阵雨", "EN": "Rain shower"},
+        359: {"CN": "暴雨", "EN": "Torrential rain"},
+        362: {"CN": "轻度雨夹雪阵雨", "EN": "Light sleet shower"},
+        365: {"CN": "雨夹雪阵雨", "EN": "Sleet shower"},
+        368: {"CN": "小阵雪", "EN": "Light snow shower"},
+        371: {"CN": "阵雪", "EN": "Snow shower"},
+        386: {"CN": "局地雷阵雨", "EN": "Patchy thunder rain"},
+        389: {"CN": "强雷雨", "EN": "Heavy thunder rain"},
+        392: {"CN": "局地雷阵雪", "EN": "Patchy thunder snow"},
+        395: {"CN": "强雷阵雪", "EN": "Heavy thunder snow"},
+    }
+    if value in mapping:
+        return mapping[value][lang]
+    fallback = str(fallback or "").strip()
+    if fallback:
+        return fallback
+    return {"CN": "多云", "EN": "Cloudy"}[lang]
+
+
+def _wind_level_from_kmh(speed_kmh):
+    try:
+        speed = float(str(speed_kmh or "").strip())
+    except Exception:
+        return None
+    thresholds = [1, 5, 11, 19, 28, 38, 49, 61, 74, 88, 102, 117]
+    for level, upper in enumerate(thresholds):
+        if speed <= upper:
+            return level
+    return 12
+
+
+def _format_weather_wind(speed_kmh, direction="", lang="CN"):
+    speed_text = str(speed_kmh or "--").strip() or "--"
+    direction_text = str(direction or "").strip()
+    base = " ".join(part for part in (f"{speed_text} km/h", direction_text) if part).strip() or "--"
+    level = _wind_level_from_kmh(speed_kmh)
+    if level is None:
+        return base
+    if str(lang).upper() == "EN":
+        return f"{base} (L{level})"
+    return f"{base} ({level}级)"
+
+
+def _load_small_screen_weather_config():
+    cfg = _load_small_screen_market_config()
+    section = (cfg.get("weather") or {}) if isinstance(cfg, dict) else {}
+    city = str(section.get("city") or "").strip()
+    return {"city": city}
+
+
+def _weather_day_label(date_text, offset=0, lang="CN"):
+    lang = "EN" if str(lang).upper() == "EN" else "CN"
+    if offset == 0:
+        return "Today" if lang == "EN" else "今天"
+    if offset == 1:
+        return "Tomorrow" if lang == "EN" else "明天"
+    try:
+        dt = datetime.strptime(str(date_text or "").strip(), "%Y-%m-%d")
+        idx = dt.weekday()
+    except Exception:
+        return f"D+{offset}" if lang == "EN" else f"{offset}天后"
+    cn_days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    en_days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    return (en_days if lang == "EN" else cn_days)[idx]
+
+
+def _fetch_today_weather_once(lang="CN", city=""):
+    city = str(city or "").strip()
+    query = urllib.parse.urlencode(
+        {
+            "format": "j1",
+            "lang": "zh" if str(lang).upper() == "CN" else "en",
+        }
+    )
+    base_url = "https://wttr.in/"
+    if city:
+        base_url += urllib.parse.quote(city)
+    req = urllib.request.Request(
+        base_url + "?" + query,
+        headers={
+            "User-Agent": "RustClawSmallScreen/1.0",
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=12) as resp:
+        payload = json.loads(resp.read().decode("utf-8", "replace"))
+
+    current = ((payload or {}).get("current_condition") or [{}])[0]
+    today = ((payload or {}).get("weather") or [{}])[0]
+    daily_items = (payload or {}).get("weather") or []
+    nearest = ((payload or {}).get("nearest_area") or [{}])[0]
+    if not current or not today:
+        raise ValueError("invalid weather payload")
+
+    astronomy = (today.get("astronomy") or [{}])[0]
+    hourly = today.get("hourly") or []
+    area_name = _pick_weather_text(nearest.get("areaName"))
+    region_name = _pick_weather_text(nearest.get("region"))
+    country_name = _pick_weather_text(nearest.get("country"))
+    location = area_name or region_name or country_name or "--"
+    if country_name and location and country_name != location:
+        location = f"{location}, {country_name}"
+
+    rain_values = []
+    for item in hourly:
+        try:
+            rain_values.append(int(str(item.get("chanceofrain") or "0").strip() or "0"))
+        except Exception:
+            continue
+    rain_chance = f"{max(rain_values)}%" if rain_values else "--"
+    details = [
+        {
+            "day": _weather_day_label(today.get("date"), offset=0, lang=lang),
+            "location": location,
+            "code": str(current.get("weatherCode") or "").strip(),
+            "icon": _weather_icon_for_code(current.get("weatherCode")),
+            "temperature": f"{str(current.get('temp_C') or '--').strip()}°C",
+            "description": _weather_desc_for_code(
+                current.get("weatherCode"),
+                lang=lang,
+                fallback=_pick_weather_text(current.get("weatherDesc")) or "--",
+            ),
+            "feels_like": f"{str(current.get('FeelsLikeC') or '--').strip()}°C",
+            "high_low": (
+                f"{str(today.get('maxtempC') or '--').strip()}°C / "
+                f"{str(today.get('mintempC') or '--').strip()}°C"
+            ),
+            "humidity": f"{str(current.get('humidity') or '--').strip()}%",
+            "wind": _format_weather_wind(
+                current.get("windspeedKmph"),
+                current.get("winddir16Point"),
+                lang=lang,
+            ),
+            "rain": rain_chance,
+            "sunrise": str(astronomy.get("sunrise") or "--").strip() or "--",
+            "sunset": str(astronomy.get("sunset") or "--").strip() or "--",
+            "updated_at": datetime.now().strftime("%H:%M"),
+        }
+    ]
+    forecast = []
+    for offset, item in enumerate(daily_items[1:4], start=1):
+        if not isinstance(item, dict):
+            continue
+        hourly_items = item.get("hourly") or []
+        sample = hourly_items[min(4, len(hourly_items) - 1)] if hourly_items else {}
+        code = str(sample.get("weatherCode") or "").strip()
+        astronomy_item = (item.get("astronomy") or [{}])[0]
+        day_rain_values = []
+        for hourly_item in hourly_items:
+            try:
+                day_rain_values.append(int(str(hourly_item.get("chanceofrain") or "0").strip() or "0"))
+            except Exception:
+                continue
+        day_rain = f"{max(day_rain_values)}%" if day_rain_values else "--"
+        detail = {
+            "day": _weather_day_label(item.get("date"), offset=offset, lang=lang),
+            "location": location,
+            "code": code,
+            "icon": _weather_icon_for_code(code),
+            "temperature": f"{str(sample.get('tempC') or item.get('avgtempC') or '--').strip()}°C",
+            "description": _weather_desc_for_code(
+                code,
+                lang=lang,
+                fallback=_pick_weather_text(sample.get("weatherDesc")) or "--",
+            ),
+            "feels_like": f"{str(sample.get('FeelsLikeC') or sample.get('tempC') or item.get('avgtempC') or '--').strip()}°C",
+            "high_low": (
+                f"{str(item.get('maxtempC') or '--').strip()}°C / "
+                f"{str(item.get('mintempC') or '--').strip()}°C"
+            ),
+            "humidity": f"{str(sample.get('humidity') or '--').strip()}%",
+            "wind": _format_weather_wind(
+                sample.get("windspeedKmph"),
+                sample.get("winddir16Point"),
+                lang=lang,
+            ),
+            "rain": day_rain,
+            "sunrise": str(astronomy_item.get("sunrise") or "--").strip() or "--",
+            "sunset": str(astronomy_item.get("sunset") or "--").strip() or "--",
+            "updated_at": datetime.now().strftime("%H:%M"),
+        }
+        forecast.append(
+            {
+                "offset": offset,
+                "day": detail["day"],
+                "icon": detail["icon"],
+                "description": detail["description"],
+                "high_low": (
+                    f"{str(item.get('maxtempC') or '--').strip()}° / "
+                    f"{str(item.get('mintempC') or '--').strip()}°"
+                ),
+            }
+        )
+        details.append(detail)
+
+    return {
+        "location": location,
+        "code": str(current.get("weatherCode") or "").strip(),
+        "icon": _weather_icon_for_code(current.get("weatherCode")),
+        "temperature": f"{str(current.get('temp_C') or '--').strip()}°C",
+        "description": _weather_desc_for_code(
+            current.get("weatherCode"),
+            lang=lang,
+            fallback=_pick_weather_text(current.get("weatherDesc")) or "--",
+        ),
+        "feels_like": f"{str(current.get('FeelsLikeC') or '--').strip()}°C",
+        "high_low": (
+            f"{str(today.get('maxtempC') or '--').strip()}°C / "
+            f"{str(today.get('mintempC') or '--').strip()}°C"
+        ),
+        "humidity": f"{str(current.get('humidity') or '--').strip()}%",
+        "wind": _format_weather_wind(
+            current.get("windspeedKmph"),
+            current.get("winddir16Point"),
+            lang=lang,
+        ),
+        "rain": rain_chance,
+        "sunrise": str(astronomy.get("sunrise") or "--").strip() or "--",
+        "sunset": str(astronomy.get("sunset") or "--").strip() or "--",
+        "details": details,
+        "forecast": forecast,
+        "updated_at": datetime.now().strftime("%H:%M"),
+    }
+
+
+def fetch_today_weather(lang="CN"):
+    weather_cfg = _load_small_screen_weather_config()
+    city = str(weather_cfg.get("city") or "").strip()
+    if city:
+        try:
+            return _fetch_today_weather_once(lang=lang, city=city), None
+        except Exception:
+            pass
+    try:
+        return _fetch_today_weather_once(lang=lang, city=""), None
+    except Exception as exc:
+        return None, str(exc)
+
+
 BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
 SINA_HQ_URL = "http://hq.sinajs.cn/list="
 SINA_REFERER = "https://finance.sina.com.cn"
 DEFAULT_A_SHARE_REFRESH_SEC = 15
 DEFAULT_CRYPTO_REFRESH_SEC = 15
+DEFAULT_US_STOCK_REFRESH_SEC = 15
+from small_screen_clawd_client import fetch_skills_config as fetch_skills_config
+from small_screen_market_service import (
+    _decode_sina_body as _decode_sina_body,
+    _load_small_screen_crypto_config as _load_small_screen_crypto_config,
+    _load_small_screen_market_config as _load_small_screen_market_config,
+    _load_small_screen_stock_config as _load_small_screen_stock_config,
+    _load_small_screen_us_stock_config as _load_small_screen_us_stock_config,
+    _normalize_stock_code as _normalize_stock_code,
+    _normalize_us_stock_symbol as _normalize_us_stock_symbol,
+    _parse_refresh_seconds as _parse_refresh_seconds,
+    _parse_sina_quotes as _parse_sina_quotes,
+    fetch_a_share_quotes as fetch_a_share_quotes,
+    fetch_crypto_prices as fetch_crypto_prices,
+    fetch_us_stock_quotes as fetch_us_stock_quotes,
+)
+from small_screen_weather_service import (
+    _fetch_today_weather_once as _fetch_today_weather_once,
+    _format_weather_wind as _format_weather_wind,
+    _load_small_screen_weather_config as _load_small_screen_weather_config,
+    _pick_weather_text as _pick_weather_text,
+    _weather_day_label as _weather_day_label,
+    _weather_desc_for_code as _weather_desc_for_code,
+    _weather_icon_for_code as _weather_icon_for_code,
+    _wind_level_from_kmh as _wind_level_from_kmh,
+    fetch_today_weather as fetch_today_weather,
+)
+
+WEATHER_REFRESH_SEC = 15 * 60
+OVERVIEW_SCROLL_SEC = 4
+OVERVIEW_DOUBLE_TAP_SEC = 0.65
+OVERVIEW_US_STOCK_HEIGHT = 90
+OVERVIEW_A_STOCK_WIDTH = 216
+OVERVIEW_MARKET_HEIGHT = 150
+OVERVIEW_MARKET_GAP = 10
+OVERVIEW_CRYPTO_HEIGHT = 74
+OVERVIEW_RUNTIME_HEIGHT = 64
 DEFAULT_A_SHARE_ITEMS = [
     {"name": "中国移动", "code": "600941"},
     {"name": "贵州茅台", "code": "600519"},
@@ -1329,16 +892,12 @@ DEFAULT_CRYPTO_ITEMS = [
     {"name": "PEPE", "symbol": "PEPEUSDT"},
     {"name": "SHIB", "symbol": "SHIBUSDT"},
 ]
-
-
-def _strip_trailing_zeros(price_str):
-    """去掉价格字符串小数点后尾部的 0，若小数部分全为 0 则去掉小数点。"""
-    s = str(price_str).strip()
-    if "." not in s:
-        return s
-    int_part, _, frac = s.partition(".")
-    frac = frac.rstrip("0")
-    return int_part if not frac else f"{int_part}.{frac}"
+DEFAULT_US_STOCK_ITEMS = [
+    {"name": "Apple", "symbol": "AAPL"},
+    {"name": "NVIDIA", "symbol": "NVDA"},
+    {"name": "Microsoft", "symbol": "MSFT"},
+    {"name": "Tesla", "symbol": "TSLA"},
+]
 
 
 def _small_screen_market_config_path():
@@ -1435,6 +994,28 @@ def _load_small_screen_stock_config():
     return items, refresh_seconds
 
 
+def _normalize_us_stock_symbol(input_text):
+    s = str(input_text or "").strip().upper()
+    return re.sub(r"[^A-Z0-9\.\-]", "", s)
+
+
+def _load_small_screen_us_stock_config():
+    cfg = _load_small_screen_market_config()
+    section = (cfg.get("us_stocks") or {}) if isinstance(cfg, dict) else {}
+    refresh_seconds = _parse_refresh_seconds(section.get("refresh_seconds"), DEFAULT_US_STOCK_REFRESH_SEC)
+    items = []
+    for item in section.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        symbol = _normalize_us_stock_symbol(item.get("symbol"))
+        if symbol:
+            items.append({"name": name or symbol, "symbol": symbol})
+    if not items:
+        items = [dict(item) for item in DEFAULT_US_STOCK_ITEMS]
+    return items, refresh_seconds
+
+
 def _decode_sina_body(raw):
     try:
         text = raw.decode("utf-8")
@@ -1443,23 +1024,6 @@ def _decode_sina_body(raw):
     except UnicodeDecodeError:
         pass
     return raw.decode("gbk", errors="ignore")
-
-
-def _safe_float(value):
-    try:
-        return float(str(value).strip())
-    except Exception:
-        return None
-
-
-def _fmt_signed_pct(current, prev_close):
-    current_num = _safe_float(current)
-    prev_num = _safe_float(prev_close)
-    if current_num is None or prev_num is None or prev_num <= 0:
-        return "--"
-    pct = (current_num - prev_num) / prev_num * 100.0
-    sign = "+" if pct >= 0 else ""
-    return f"{sign}{pct:.2f}%"
 
 
 def _parse_sina_quotes(body):
@@ -1527,6 +1091,85 @@ def fetch_a_share_quotes(stock_items=None):
     return {"items": out, "error": error}
 
 
+def fetch_us_stock_quotes(stock_items=None):
+    items = stock_items or _load_small_screen_us_stock_config()[0]
+    quotes = {}
+    error = None
+    for item in items:
+        symbol = item.get("symbol") or ""
+        if not symbol:
+            continue
+        try:
+            url = (
+                "https://query1.finance.yahoo.com/v8/finance/chart/"
+                + urllib.parse.quote(symbol)
+                + "?interval=1d&range=5d"
+            )
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                data = json.loads(r.read().decode("utf-8", "replace"))
+            result = (((data or {}).get("chart") or {}).get("result") or [None])[0] or {}
+            meta = (result.get("meta") or {}) if isinstance(result, dict) else {}
+            if meta:
+                quotes[symbol] = meta
+        except Exception as exc:
+            error = str(exc)
+
+    out = []
+    for item in items:
+        symbol = item.get("symbol") or ""
+        quote = quotes.get(symbol)
+        if quote:
+            display_name = item.get("name") or quote.get("shortName") or quote.get("longName") or symbol
+            price = quote.get("regularMarketPrice")
+            price_text = _strip_trailing_zeros(str(price)) if price is not None else "--"
+            prev_close = quote.get("previousClose")
+            if prev_close is None:
+                prev_close = quote.get("chartPreviousClose")
+            pct_text = _fmt_signed_pct(price, prev_close)
+            exchange = str(quote.get("fullExchangeName") or quote.get("exchangeName") or "").strip()
+            open_price = quote.get("regularMarketOpen")
+            if open_price is None:
+                open_price = quote.get("chartPreviousClose")
+            high = quote.get("regularMarketDayHigh")
+            low = quote.get("regularMarketDayLow")
+            market_ts = quote.get("regularMarketTime")
+            meta1 = "Open {open}  Prev {prev}".format(
+                open=_strip_trailing_zeros(str(open_price)) if open_price is not None else "--",
+                prev=_strip_trailing_zeros(str(prev_close)) if prev_close is not None else "--",
+            )
+            meta2_parts = [
+                "H/L {high}/{low}".format(
+                    high=_strip_trailing_zeros(str(high)) if high is not None else "--",
+                    low=_strip_trailing_zeros(str(low)) if low is not None else "--",
+                )
+            ]
+            if exchange:
+                meta2_parts.append(exchange[:18])
+            if isinstance(market_ts, (int, float)) and market_ts > 0:
+                try:
+                    meta2_parts.append(datetime.fromtimestamp(market_ts).strftime("%H:%M"))
+                except Exception:
+                    pass
+            out.append({
+                "title": f"{display_name} · {symbol}",
+                "price": price_text,
+                "pct": pct_text,
+                "meta1": meta1,
+                "meta2": "  ".join(meta2_parts),
+            })
+            continue
+        reason = "行情获取失败" if error else "暂无行情"
+        out.append({
+            "title": item.get("name") or symbol or "--",
+            "price": "--",
+            "pct": "--",
+            "meta1": reason[:28],
+            "meta2": symbol[:28],
+        })
+    return {"items": out, "error": error}
+
+
 def fetch_skills_config(user_key=""):
     """GET /v1/skills/config，返回 (all_skills, enabled_set) 或 (None, None) 表示失败。"""
     try:
@@ -1543,19 +1186,6 @@ def fetch_skills_config(user_key=""):
         return all_names, enabled_set
     except Exception:
         return None, None
-
-
-def fmt_duration(sec):
-    if sec is None or sec < 0:
-        return "--"
-    h = int(sec // 3600)
-    m = int((sec % 3600) // 60)
-    s = int(sec % 60)
-    if h > 0:
-        return f"{h}h{m}m"
-    if m > 0:
-        return f"{m}m{s}s"
-    return f"{s}s"
 
 
 def _single_instance_lock():
@@ -1577,14 +1207,32 @@ def _single_instance_lock():
         return (None, None)
 
 
-def fmt_bytes(n):
-    if n is None or n < 0:
-        return "--"
-    if n < 1024:
-        return f"{n} B"
-    if n < 1024 * 1024:
-        return f"{n/1024:.1f} KB"
-    return f"{n/(1024*1024):.1f} MB"
+# Ensure the split service implementations are the active bindings.
+from small_screen_clawd_client import fetch_skills_config as _service_fetch_skills_config
+from small_screen_market_service import (
+    _load_small_screen_crypto_config as _service_load_small_screen_crypto_config,
+    _load_small_screen_market_config as _service_load_small_screen_market_config,
+    _load_small_screen_stock_config as _service_load_small_screen_stock_config,
+    _load_small_screen_us_stock_config as _service_load_small_screen_us_stock_config,
+    _normalize_stock_code as _service_normalize_stock_code,
+    _normalize_us_stock_symbol as _service_normalize_us_stock_symbol,
+    _parse_refresh_seconds as _service_parse_refresh_seconds,
+    fetch_a_share_quotes as _service_fetch_a_share_quotes,
+    fetch_crypto_prices as _service_fetch_crypto_prices,
+    fetch_us_stock_quotes as _service_fetch_us_stock_quotes,
+)
+
+_load_small_screen_market_config = _service_load_small_screen_market_config
+_parse_refresh_seconds = _service_parse_refresh_seconds
+_load_small_screen_crypto_config = _service_load_small_screen_crypto_config
+fetch_crypto_prices = _service_fetch_crypto_prices
+_normalize_stock_code = _service_normalize_stock_code
+_load_small_screen_stock_config = _service_load_small_screen_stock_config
+_normalize_us_stock_symbol = _service_normalize_us_stock_symbol
+_load_small_screen_us_stock_config = _service_load_small_screen_us_stock_config
+fetch_a_share_quotes = _service_fetch_a_share_quotes
+fetch_us_stock_quotes = _service_fetch_us_stock_quotes
+fetch_skills_config = _service_fetch_skills_config
 
 
 class SmallScreenApp:
@@ -1623,6 +1271,14 @@ class SmallScreenApp:
             sys.exit(1)
         self._lang = load_lang()
         self._theme = load_theme()
+        self._show_messages_page = load_messages_page_visible()
+        self._show_logs_page = load_logs_page_visible()
+        self._show_gallery_page = load_gallery_page_visible()
+        self._show_skills_page = load_skills_page_visible()
+        self._show_weather_page = load_weather_page_visible()
+        self._show_stock_page = load_stock_page_visible()
+        self._show_us_stock_page = load_us_stock_page_visible()
+        self._show_crypto_page = load_crypto_page_visible()
         self._auth_key = ensure_small_screen_auth_key()
         self._ui_queue = queue.SimpleQueue()
         self._ui_pump_job = None
@@ -1679,6 +1335,36 @@ class SmallScreenApp:
         self._llm_lobster_photo = None
         self._llm_matrix_cols = []
         self._llm_matrix_max_rows = 0
+        self._weather_data = None
+        self._weather_error = ""
+        self._weather_loading = False
+        self._weather_selected_offset = 0
+        self._weather_refresh_job = None
+        self._weather_manual_refresh_job = None
+        self._overview_return_on_swipe = False
+        self._weather_return_view_on_swipe = None
+        self._overview_tap_press_x = 0
+        self._overview_tap_press_y = 0
+        self._overview_last_tap_at = 0.0
+        self._overview_last_tap_mode = None
+        self._overview_last_tap_x = 0
+        self._overview_last_tap_y = 0
+        self._overview_scroll_job = None
+        self._overview_stock_scroll_idx = 0
+        self._overview_us_stock_scroll_idx = 0
+        self._overview_crypto_scroll_idx = 0
+        self._overview_skills_loading = False
+        self._overview_skills_updated_at = 0.0
+        self._overview_skills_summary = None
+        self._overview_stock_loading = False
+        self._overview_stock_updated_at = 0.0
+        self._overview_stock_summary = None
+        self._overview_us_stock_loading = False
+        self._overview_us_stock_updated_at = 0.0
+        self._overview_us_stock_summary = None
+        self._overview_crypto_loading = False
+        self._overview_crypto_updated_at = 0.0
+        self._overview_crypto_summary = None
         self.gif_frames = []
         self.gif_delays = []
         self.gif_frame_idx = 0
@@ -1695,6 +1381,7 @@ class SmallScreenApp:
         else:
             self._build_ui()
             self._schedule_refresh()
+            self._start_weather_refresh_cycle()
             self._start_fullscreen()
             self.root.protocol("WM_DELETE_WINDOW", self._on_close)
             self._tick_time()
@@ -1750,6 +1437,7 @@ class SmallScreenApp:
     def _stop_market_jobs(self):
         self._cancel_job("_crypto_job")
         self._cancel_job("_stock_job")
+        self._cancel_job("_us_stock_job")
 
     def _teardown_gallery_view(self):
         self._cancel_job("_gallery_job")
@@ -1758,8 +1446,10 @@ class SmallScreenApp:
 
     def _teardown_current_view(self):
         mode = getattr(self, "_view_mode", None)
-        if mode == "crypto" or mode == "stock":
+        if mode in {"crypto", "stock", "us_stock"}:
             self._stop_market_jobs()
+        elif mode == "overview":
+            self._cancel_job("_overview_scroll_job")
         elif mode == "gallery":
             self._teardown_gallery_view()
 
@@ -1769,7 +1459,7 @@ class SmallScreenApp:
         self._stop_market_jobs()
         self._cancel_log_append_job()
         self._cancel_llm_clear_job()
-        for attr in ("_blink_job", "_gif_job", "_time_job", "_after_splash_job", "_clear_topmost_job", "_raise_window_job", "_settings_restart_job"):
+        for attr in ("_blink_job", "_gif_job", "_time_job", "_after_splash_job", "_clear_topmost_job", "_raise_window_job", "_settings_restart_job", "_weather_refresh_job", "_weather_manual_refresh_job", "_overview_scroll_job"):
             self._cancel_job(attr)
 
     def _drain_ui_queue(self):
@@ -1799,6 +1489,7 @@ class SmallScreenApp:
             self._splash_frame.destroy()
         self._build_ui()
         self._schedule_refresh()
+        self._start_weather_refresh_cycle()
         self._tick_time()
         if self.gif_frames:
             self._animate_gif()
@@ -1863,12 +1554,37 @@ class SmallScreenApp:
             justify=tk.LEFT,
         )
         self._top_recent_message_label.pack(fill=tk.X, anchor=tk.W)
-        # 右侧：当前时间（左） + 状态在线/离线（右）
+        # 右侧：天气图标 + 简短天气说明 + 当前时间（左） + 状态在线/离线（右）
+        self._top_weather_icon_var = tk.StringVar(value="◌")
+        self._top_weather_text_var = tk.StringVar(value="--")
         self.time_var = tk.StringVar(value="--:--:--")
         right_frame = tk.Frame(top, bg=self._c("bg"))
         right_frame.pack(side=tk.RIGHT)
+        self._top_weather_icon_label = tk.Label(
+            right_frame,
+            textvariable=self._top_weather_icon_var,
+            font=("DejaVu Sans", 20),
+            bg=self._c("bg"),
+            fg=self._c("accent"),
+            width=2,
+            anchor="e",
+        )
+        self._top_weather_icon_label.pack(side=tk.LEFT, padx=(0, 6))
+        self._top_weather_icon_label.bind("<Button-1>", self._open_weather_from_topbar)
+        self._top_weather_text_label = tk.Label(
+            right_frame,
+            textvariable=self._top_weather_text_var,
+            font=("", 10),
+            bg=self._c("bg"),
+            fg=self._c("fg_dim"),
+            anchor="e",
+            justify=tk.RIGHT,
+            width=16,
+        )
+        self._top_weather_text_label.pack(side=tk.LEFT, padx=(0, 8))
+        self._top_weather_text_label.bind("<Button-1>", self._open_weather_from_topbar)
         tk.Label(
-            right_frame, textvariable=self.time_var, font=("", 14),
+            right_frame, textvariable=self.time_var, font=("", 12),
             bg=self._c("bg"), fg=self._c("fg_dim")
         ).pack(side=tk.LEFT, padx=(0, 10))
         # 状态：在线=绿色圆圈闪烁，离线=红色圆圈不闪
@@ -1882,18 +1598,22 @@ class SmallScreenApp:
         self.switch_container.pack(fill=tk.BOTH, expand=True)
         self.dashboard_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=8, pady=4)
         self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
+        self.overview_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=8, pady=4)
         self.skills_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.gallery_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
+        self.weather_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.crypto_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.stock_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
+        self.us_stock_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.wifi_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=12, pady=8)
         self.users_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=20, pady=18)
         self.logs_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=10, pady=8)
         self.settings_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=24, pady=20)
-        # 顺序（左滑下一页）：首页 → 用户 → 日志 → 技能 → A股 → 加密货币 → 挖矿 → 设置 → WiFi → 首页；右滑=上一页
-        self._view_mode = "dashboard"  # dashboard | users | logs | skills | stock | crypto | gallery | wifi | settings
+        # 顺序（左滑下一页）：首页 → 总览 → 用户 → 日志 → 技能 → 天气 → A股 → 加密货币 → 挖矿 → 设置；右滑=上一页
+        self._view_mode = "dashboard"  # dashboard | overview | users | logs | skills | weather | stock | crypto | gallery | wifi | settings
         self._crypto_job = None
         self._stock_job = None
+        self._us_stock_job = None
         self._gallery_images = []
         self._gallery_index = 0
         self._gallery_photos = []
@@ -1973,6 +1693,22 @@ class SmallScreenApp:
         self.foot_var = tk.StringVar(value=_t("foot_prefix"))
         tk.Label(content, textvariable=self.foot_var, font=("", 11), bg=self._c("bg"), fg=self._c("foot_fg")).pack(anchor=tk.W)
         self.clawd_summary_var = tk.StringVar(value=_t("clawd_summary_empty"))
+        self._overview_body = tk.Frame(self.overview_frame, bg=self._c("bg"))
+        self._overview_body.pack(fill=tk.BOTH, expand=True)
+        self._overview_weather_icon_var = tk.StringVar(value="◌")
+        self._overview_weather_main_var = tk.StringVar(value="--")
+        self._overview_weather_meta_var = tk.StringVar(value="")
+        self._overview_weather_detail_var = tk.StringVar(value="")
+        self._overview_stock_title_var = tk.StringVar(value=self._t("show_stock_page"))
+        self._overview_stock_value_var = tk.StringVar(value="--")
+        self._overview_stock_meta_var = tk.StringVar(value="")
+        self._overview_crypto_title_var = tk.StringVar(value="Crypto")
+        self._overview_crypto_value_var = tk.StringVar(value="-- USDT")
+        self._overview_crypto_meta_var = tk.StringVar(value="")
+        self._overview_dashboard_value_var = tk.StringVar(value="--")
+        self._overview_dashboard_meta_var = tk.StringVar(value="")
+        self._build_overview_layout()
+        self._render_dashboard_overview()
         self._users_body = tk.Frame(self.users_frame, bg=self._c("bg"))
         self._users_body.pack(fill=tk.BOTH, expand=True)
         self._users_messages_body = tk.Frame(self._users_body, bg=self._c("bg"))
@@ -1981,43 +1717,439 @@ class SmallScreenApp:
         self._logs_body.pack(fill=tk.BOTH, expand=True)
         # 翻页：左右滑屏可到仪表盘 / 技能 / 加密货币 / 图库 / 用户 / 设置
         # 设置页（内嵌在主窗口，左滑可进入）
-        self._settings_lang_label = tk.Label(self.settings_frame, text=_t("language") + ":", font=("", 12), bg=self._c("bg"), fg=self._c("fg"))
-        self._settings_lang_label.pack(anchor=tk.W)
         self._settings_lang_var = tk.StringVar(value=self._lang)
-        rf = tk.Frame(self.settings_frame, bg=self._c("bg"))
-        rf.pack(fill=tk.X, pady=6)
-        tk.Radiobutton(rf, text="EN", variable=self._settings_lang_var, value="EN", font=("", 11), bg=self._c("bg"), fg=self._c("fg"), selectcolor=self._c("selectcolor"), activebackground=self._c("bg"), activeforeground=self._c("fg")).pack(side=tk.LEFT, padx=(0, 16))
-        tk.Radiobutton(rf, text="CN", variable=self._settings_lang_var, value="CN", font=("", 11), bg=self._c("bg"), fg=self._c("fg"), selectcolor=self._c("selectcolor"), activebackground=self._c("bg"), activeforeground=self._c("fg")).pack(side=tk.LEFT)
-        self._settings_theme_label = tk.Label(self.settings_frame, text=_t("theme") + ":", font=("", 12), bg=self._c("bg"), fg=self._c("fg"))
-        self._settings_theme_label.pack(anchor=tk.W, pady=(12, 4))
         self._settings_theme_var = tk.StringVar(value=self._theme)
-        rf2 = tk.Frame(self.settings_frame, bg=self._c("bg"))
-        rf2.pack(fill=tk.X, pady=2)
-        tk.Radiobutton(rf2, text=_t("theme_default"), variable=self._settings_theme_var, value="default", font=("", 11), bg=self._c("bg"), fg=self._c("fg"), selectcolor=self._c("selectcolor"), activebackground=self._c("bg"), activeforeground=self._c("fg")).pack(side=tk.LEFT, padx=(0, 16))
-        tk.Radiobutton(rf2, text=_t("theme_matrix"), variable=self._settings_theme_var, value="matrix", font=("", 11), bg=self._c("bg"), fg=self._c("fg"), selectcolor=self._c("selectcolor"), activebackground=self._c("bg"), activeforeground=self._c("fg")).pack(side=tk.LEFT)
-        bf = tk.Frame(self.settings_frame, bg=self._c("bg"))
-        bf.pack(fill=tk.X, pady=(12, 0))
-        self._settings_ok_btn = tk.Button(bf, text=_t("ok"), font=("", 11), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"), command=self._on_settings_ok)
-        self._settings_ok_btn.pack(side=tk.LEFT, padx=(0, 8))
-        self._settings_cancel_btn = tk.Button(bf, text=_t("cancel"), font=("", 11), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"), command=self._on_settings_cancel)
-        self._settings_cancel_btn.pack(side=tk.LEFT, padx=(0, 8))
-        self._settings_restart_btn = tk.Button(bf, text=_t("restart"), font=("", 11), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"), command=self._on_settings_restart)
-        self._settings_restart_btn.pack(side=tk.LEFT)
-        bf2 = tk.Frame(self.settings_frame, bg=self._c("bg"))
-        bf2.pack(fill=tk.X, pady=(8, 0))
+        self._settings_show_messages_var = tk.BooleanVar(value=self._show_messages_page)
+        self._settings_show_logs_var = tk.BooleanVar(value=self._show_logs_page)
+        self._settings_show_gallery_var = tk.BooleanVar(value=self._show_gallery_page)
+        self._settings_show_skills_var = tk.BooleanVar(value=self._show_skills_page)
+        self._settings_show_weather_var = tk.BooleanVar(value=self._show_weather_page)
+        self._settings_show_stock_var = tk.BooleanVar(value=self._show_stock_page)
+        self._settings_show_us_stock_var = tk.BooleanVar(value=self._show_us_stock_page)
+        self._settings_show_crypto_var = tk.BooleanVar(value=self._show_crypto_page)
+        self._settings_category = "menu"
+        self._settings_header_row = tk.Frame(self.settings_frame, bg=self._c("bg"))
+        self._settings_header_title_var = tk.StringVar(value=_t("settings_title"))
+        self._settings_header_title_label = tk.Label(
+            self._settings_header_row,
+            textvariable=self._settings_header_title_var,
+            font=("", 14, "bold"),
+            bg=self._c("bg"),
+            fg=self._c("fg"),
+        )
+        self._settings_back_btn = tk.Button(
+            self._settings_header_row,
+            text=_t("back"),
+            font=("", 10),
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("fg"),
+            command=self._show_settings_menu,
+        )
+        self._settings_content_frame = tk.Frame(self.settings_frame, bg=self._c("bg"))
+        self._settings_content_frame.pack(fill=tk.BOTH, expand=True)
+        self._settings_menu_frame = tk.Frame(self._settings_content_frame, bg=self._c("bg"))
+        self._settings_menu_language_btn = tk.Button(
+            self._settings_menu_frame,
+            font=("", 13, "bold"),
+            relief=tk.FLAT,
+            anchor="w",
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("bg"),
+            fg=self._c("accent"),
+            activebackground=self._c("bg"),
+            activeforeground=self._c("fg"),
+            command=lambda: self._show_settings_category("language"),
+            padx=2,
+            pady=6,
+        )
+        self._settings_menu_language_btn.pack(fill=tk.X, pady=(0, 8))
+        self._settings_menu_theme_btn = tk.Button(
+            self._settings_menu_frame,
+            font=("", 13, "bold"),
+            relief=tk.FLAT,
+            anchor="w",
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("bg"),
+            fg=self._c("accent"),
+            activebackground=self._c("bg"),
+            activeforeground=self._c("fg"),
+            command=lambda: self._show_settings_category("theme"),
+            padx=2,
+            pady=6,
+        )
+        self._settings_menu_theme_btn.pack(fill=tk.X, pady=(0, 8))
+        self._settings_menu_pages_btn = tk.Button(
+            self._settings_menu_frame,
+            font=("", 13, "bold"),
+            relief=tk.FLAT,
+            anchor="w",
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("bg"),
+            fg=self._c("accent"),
+            activebackground=self._c("bg"),
+            activeforeground=self._c("fg"),
+            command=lambda: self._show_settings_category("pages"),
+            padx=2,
+            pady=6,
+        )
+        self._settings_menu_pages_btn.pack(fill=tk.X, pady=(0, 8))
+        self._settings_menu_system_btn = tk.Button(
+            self._settings_menu_frame,
+            font=("", 13, "bold"),
+            relief=tk.FLAT,
+            anchor="w",
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("bg"),
+            fg=self._c("accent"),
+            activebackground=self._c("bg"),
+            activeforeground=self._c("fg"),
+            command=lambda: self._show_settings_category("system"),
+            padx=2,
+            pady=6,
+        )
+        self._settings_menu_system_btn.pack(fill=tk.X)
+        self._settings_language_frame = tk.Frame(self._settings_content_frame, bg=self._c("bg"))
+        self._settings_lang_en_btn = tk.Radiobutton(
+            self._settings_language_frame,
+            text="EN",
+            variable=self._settings_lang_var,
+            value="EN",
+            command=lambda: self._apply_settings_changes("language"),
+            font=("", 12),
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_lang_en_btn.pack(anchor=tk.W, pady=(4, 10), fill=tk.X)
+        self._settings_lang_cn_btn = tk.Radiobutton(
+            self._settings_language_frame,
+            text="CN",
+            variable=self._settings_lang_var,
+            value="CN",
+            command=lambda: self._apply_settings_changes("language"),
+            font=("", 12),
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_lang_cn_btn.pack(anchor=tk.W, fill=tk.X)
+        self._settings_theme_frame = tk.Frame(self._settings_content_frame, bg=self._c("bg"))
+        self._settings_theme_default_btn = tk.Radiobutton(
+            self._settings_theme_frame,
+            text=_t("theme_default"),
+            variable=self._settings_theme_var,
+            value="default",
+            command=lambda: self._apply_settings_changes("theme"),
+            font=("", 12),
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_theme_default_btn.pack(anchor=tk.W, pady=(4, 10), fill=tk.X)
+        self._settings_theme_matrix_btn = tk.Radiobutton(
+            self._settings_theme_frame,
+            text=_t("theme_matrix"),
+            variable=self._settings_theme_var,
+            value="matrix",
+            command=lambda: self._apply_settings_changes("theme"),
+            font=("", 12),
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_theme_matrix_btn.pack(anchor=tk.W, fill=tk.X)
+        self._settings_pages_frame = tk.Frame(self._settings_content_frame, bg=self._c("bg"))
+        self._settings_pages_row1 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
+        self._settings_pages_row1.pack(fill=tk.X, pady=(4, 10))
+        self._settings_pages_row2 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
+        self._settings_pages_row2.pack(fill=tk.X, pady=(0, 10))
+        self._settings_pages_row3 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
+        self._settings_pages_row3.pack(fill=tk.X, pady=(0, 10))
+        self._settings_pages_row4 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
+        self._settings_pages_row4.pack(fill=tk.X, pady=(0, 10))
+        self._settings_pages_row5 = tk.Frame(self._settings_pages_frame, bg=self._c("bg"))
+        self._settings_pages_row5.pack(fill=tk.X)
+        for row in (
+            self._settings_pages_row1,
+            self._settings_pages_row2,
+            self._settings_pages_row3,
+            self._settings_pages_row4,
+            self._settings_pages_row5,
+        ):
+            row.grid_columnconfigure(0, weight=1, uniform="settings-pages")
+            row.grid_columnconfigure(1, weight=1, uniform="settings-pages")
+        self._settings_show_messages_btn = tk.Checkbutton(
+            self._settings_pages_row1,
+            text=_t("show_messages_page"),
+            variable=self._settings_show_messages_var,
+            onvalue=True,
+            offvalue=False,
+            command=lambda: self._apply_settings_changes("pages"),
+            font=("", 12),
+            indicatoron=False,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_show_messages_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._settings_show_logs_btn = tk.Checkbutton(
+            self._settings_pages_row1,
+            text=_t("show_logs_page"),
+            variable=self._settings_show_logs_var,
+            onvalue=True,
+            offvalue=False,
+            command=lambda: self._apply_settings_changes("pages"),
+            font=("", 12),
+            indicatoron=False,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_show_logs_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._settings_show_skills_btn = tk.Checkbutton(
+            self._settings_pages_row2,
+            text=_t("show_skills_page"),
+            variable=self._settings_show_skills_var,
+            onvalue=True,
+            offvalue=False,
+            command=lambda: self._apply_settings_changes("pages"),
+            font=("", 12),
+            indicatoron=False,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_show_skills_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._settings_show_gallery_btn = tk.Checkbutton(
+            self._settings_pages_row2,
+            text=_t("show_nni_page"),
+            variable=self._settings_show_gallery_var,
+            onvalue=True,
+            offvalue=False,
+            command=lambda: self._apply_settings_changes("pages"),
+            font=("", 12),
+            indicatoron=False,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_show_gallery_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._settings_show_weather_btn = tk.Checkbutton(
+            self._settings_pages_row3,
+            text=_t("show_weather_page"),
+            variable=self._settings_show_weather_var,
+            onvalue=True,
+            offvalue=False,
+            command=lambda: self._apply_settings_changes("pages"),
+            font=("", 12),
+            indicatoron=False,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_show_weather_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._settings_show_stock_btn = tk.Checkbutton(
+            self._settings_pages_row3,
+            text=_t("show_stock_page"),
+            variable=self._settings_show_stock_var,
+            onvalue=True,
+            offvalue=False,
+            command=lambda: self._apply_settings_changes("pages"),
+            font=("", 12),
+            indicatoron=False,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_show_stock_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._settings_show_crypto_btn = tk.Checkbutton(
+            self._settings_pages_row4,
+            text=_t("show_crypto_page"),
+            variable=self._settings_show_crypto_var,
+            onvalue=True,
+            offvalue=False,
+            command=lambda: self._apply_settings_changes("pages"),
+            font=("", 12),
+            indicatoron=False,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_show_crypto_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._settings_show_us_stock_btn = tk.Checkbutton(
+            self._settings_pages_row4,
+            text=_t("show_us_stock_page"),
+            variable=self._settings_show_us_stock_var,
+            onvalue=True,
+            offvalue=False,
+            command=lambda: self._apply_settings_changes("pages"),
+            font=("", 12),
+            indicatoron=False,
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            selectcolor=self._c("button_bg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            anchor="w",
+            padx=10,
+            pady=6,
+        )
+        self._settings_show_us_stock_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._settings_pages_row5_spacer = tk.Frame(self._settings_pages_row5, bg=self._c("bg"))
+        self._settings_pages_row5_spacer.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._settings_system_frame = tk.Frame(self._settings_content_frame, bg=self._c("bg"))
+        self._settings_wifi_btn = tk.Button(
+            self._settings_system_frame,
+            text=_t("wifi_title"),
+            font=("", 11),
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            takefocus=0,
+            command=self._open_wifi_from_settings,
+        )
+        self._settings_wifi_btn.pack(fill=tk.X, pady=(4, 8))
+        self._settings_restart_btn = tk.Button(
+            self._settings_system_frame,
+            text=_t("restart"),
+            font=("", 11),
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            disabledforeground=self._c("fg_dim"),
+            takefocus=0,
+            command=self._on_settings_restart,
+        )
+        self._settings_restart_btn.pack(fill=tk.X, pady=(0, 8))
+        bf2 = tk.Frame(self._settings_system_frame, bg=self._c("bg"))
+        bf2.pack(fill=tk.X)
         self._settings_reset_admin_btn = tk.Button(
             bf2,
             text=_t("reset_admin_login"),
             font=("", 11),
             relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
             bg=self._c("button_bg"),
             fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("button_fg"),
+            disabledforeground=self._c("fg_dim"),
+            takefocus=0,
             command=self._on_settings_reset_admin_login,
         )
         self._settings_reset_admin_btn.pack(fill=tk.X)
         self._settings_reset_status_var = tk.StringVar(value="")
         self._settings_reset_status_label = tk.Label(
-            self.settings_frame,
+            self._settings_system_frame,
             textvariable=self._settings_reset_status_var,
             font=("", 10),
             bg=self._c("bg"),
@@ -2027,6 +2159,7 @@ class SmallScreenApp:
             wraplength=440,
         )
         self._settings_reset_status_label.pack(anchor=tk.W, pady=(8, 0))
+        self._show_settings_menu()
         self._wifi_status_var = tk.StringVar(value=_t("wifi_scan_hint"))
         self._wifi_status_label = tk.Label(
             self.wifi_frame,
@@ -2048,8 +2181,14 @@ class SmallScreenApp:
             text=_t("wifi_prev_page"),
             font=("", 10),
             relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
             bg=self._c("button_bg"),
             fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("fg"),
+            disabledforeground=self._c("fg_dim"),
+            takefocus=0,
             command=lambda: self._change_wifi_page(-1),
         )
         self._wifi_prev_btn.pack(side=tk.LEFT)
@@ -2067,8 +2206,14 @@ class SmallScreenApp:
             text=_t("wifi_next_page"),
             font=("", 10),
             relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
             bg=self._c("button_bg"),
             fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("fg"),
+            disabledforeground=self._c("fg_dim"),
+            takefocus=0,
             command=lambda: self._change_wifi_page(1),
         )
         self._wifi_next_btn.pack(side=tk.LEFT, padx=(0, 8))
@@ -2079,18 +2224,45 @@ class SmallScreenApp:
             text=_t("wifi_refresh"),
             font=("", 10),
             relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
             bg=self._c("button_bg"),
             fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("fg"),
+            disabledforeground=self._c("fg_dim"),
+            takefocus=0,
             command=self._refresh_wifi_networks,
         )
         self._wifi_refresh_btn.pack(side=tk.LEFT)
+        self._wifi_back_btn = tk.Button(
+            self._wifi_right_actions,
+            text=_t("back"),
+            font=("", 10),
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("fg"),
+            takefocus=0,
+            command=self._close_wifi_to_settings,
+        )
+        self._wifi_back_btn.pack(side=tk.LEFT, padx=(8, 0))
         self._wifi_join_btn = tk.Button(
             self._wifi_right_actions,
             text=_t("wifi_join"),
             font=("", 10),
             relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
             bg=self._c("button_bg"),
             fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("fg"),
+            disabledforeground=self._c("fg_dim"),
+            takefocus=0,
             command=self._on_wifi_join_click,
         )
         self._wifi_selected_var = tk.StringVar(value="--")
@@ -2235,6 +2407,24 @@ class SmallScreenApp:
             pass
         self.foot_var.set(self._t("foot_prefix"))
         self._refresh_topbar()
+        self._refresh_dashboard_overview_if_needed()
+
+    def _refresh_weather_icon_display(self):
+        icon = "◌"
+        summary = "--"
+        if isinstance(getattr(self, "_weather_data", None), dict):
+            weather = self._weather_data
+            icon = str(weather.get("icon") or "").strip() or "◌"
+            desc = str(weather.get("description") or "").strip()
+            temp = str(weather.get("temperature") or "").strip()
+            summary = " ".join(part for part in (desc, temp) if part).strip() or "--"
+        try:
+            self._top_weather_icon_var.set(icon)
+            self._top_weather_text_var.set(summary)
+            self._top_weather_icon_label.config(bg=self._c("bg"), fg=self._c("accent"))
+            self._top_weather_text_label.config(bg=self._c("bg"), fg=self._c("fg_dim"))
+        except tk.TclError:
+            pass
 
     def _refresh_topbar(self):
         try:
@@ -2243,12 +2433,19 @@ class SmallScreenApp:
                 self._top_title_label.pack(anchor=tk.W, before=self._top_recent_message_label)
         except tk.TclError:
             pass
+        self._refresh_weather_icon_display()
         if self._view_mode == "users":
             self._top_recent_message_var.set(self._t("recent_messages_title"))
         elif self._view_mode == "logs":
             self._top_recent_message_var.set("logs")
         elif self._view_mode == "skills":
             self._top_recent_message_var.set("skills")
+        elif self._view_mode == "weather":
+            self._top_recent_message_var.set(self._t("weather_title"))
+        elif self._view_mode == "us_stock":
+            self._top_recent_message_var.set(self._t("show_us_stock_page"))
+        elif self._view_mode == "settings":
+            self._top_recent_message_var.set(self._t("settings_title"))
         elif self._view_mode == "wifi":
             self._top_recent_message_var.set(self._t("wifi_title"))
         else:
@@ -2259,29 +2456,595 @@ class SmallScreenApp:
         if self._top_recent_message_label.winfo_manager() != "pack":
             self._top_recent_message_label.pack(fill=tk.X, anchor=tk.W)
 
-    def _prepare_settings_view(self):
-        """进入设置页时刷新标题和按钮文案。"""
-        self._settings_lang_label.config(text=self._t("language") + ":", bg=self._c("bg"), fg=self._c("fg"))
-        self._settings_theme_label.config(text=self._t("theme") + ":", bg=self._c("bg"), fg=self._c("fg"))
-        self._settings_ok_btn.config(text=self._t("ok"), bg=self._c("button_bg"), fg=self._c("button_fg"))
-        self._settings_cancel_btn.config(text=self._t("cancel"), bg=self._c("button_bg"), fg=self._c("button_fg"))
-        self._settings_restart_btn.config(bg=self._c("button_bg"), fg=self._c("button_fg"))
-        self._settings_reset_admin_btn.config(
-            text=self._t("reset_admin_login")
-            if self._settings_reset_admin_btn["state"] != tk.DISABLED
-            else self._t("resetting_admin_login"),
-            bg=self._c("button_bg"),
-            fg=self._c("button_fg"),
+    def _refresh_dashboard_overview_if_needed(self):
+        if getattr(self, "_view_mode", None) == "overview":
+            self._render_dashboard_overview()
+
+    def _theme_label(self):
+        return self._t("theme_matrix") if self._theme == "matrix" else self._t("theme_default")
+
+    def _overview_dashboard_summary(self):
+        uptime = self.uptime_var.get().strip() or "--"
+        return uptime
+
+    def _overview_dashboard_meta(self):
+        rss = self.rss_var.get().strip() or "--"
+        return f"RSS: {rss}"
+
+    def _overview_stock_meta_text(self):
+        summary = self._overview_stock_summary if isinstance(self._overview_stock_summary, dict) else {}
+        items = summary.get("items") or []
+        if items:
+            first = items[0]
+            meta1 = str(first.get("meta1") or "").strip()
+            meta2 = str(first.get("meta2") or "").strip()
+            detail = meta1 or meta2
+            if detail:
+                return detail
+        stock_items, _refresh_sec = _load_small_screen_stock_config()
+        if not stock_items:
+            return ""
+        first = stock_items[0]
+        code = str(first.get("code") or "").strip()
+        return code.upper()
+
+    def _overview_market_primary_text(self, title, prefer_symbol=False):
+        text = str(title or "").strip()
+        if not text:
+            return "--"
+        if "·" in text:
+            left, right = [part.strip() for part in text.split("·", 1)]
+            if prefer_symbol and right:
+                return right
+            if left:
+                return left
+        return text
+
+    def _overview_market_lines(self, items, visible_count, offset=0, prefer_symbol=False):
+        normalized = [item for item in (items or []) if isinstance(item, dict)]
+        if not normalized:
+            return []
+        total = len(normalized)
+        if total <= visible_count:
+            window = normalized
+        else:
+            start = offset % total
+            window = [normalized[(start + idx) % total] for idx in range(visible_count)]
+        lines = []
+        for item in window:
+            title = self._overview_market_primary_text(item.get("title"), prefer_symbol=prefer_symbol)
+            price = str(item.get("price") or "--").strip() or "--"
+            pct = str(item.get("pct") or "--").strip() or "--"
+            lines.append(f"{title} {price} {pct}".strip())
+        return lines
+
+    def _overview_compact_rows(self, lines, per_row=2, separator="    "):
+        normalized = [str(line).strip() for line in (lines or []) if str(line).strip()]
+        if not normalized:
+            return []
+        rows = []
+        for idx in range(0, len(normalized), per_row):
+            rows.append(separator.join(normalized[idx:idx + per_row]))
+        return rows
+
+    def _overview_crypto_compact_per_row(self):
+        self._ensure_overview_crypto_summary()
+        summary = self._overview_crypto_summary if isinstance(self._overview_crypto_summary, dict) else {}
+        if not summary:
+            return 2
+        crypto_items, _refresh_sec = _load_small_screen_crypto_config()
+        if not crypto_items:
+            return 2
+        total = len(crypto_items)
+        if total <= 4:
+            window = crypto_items
+        else:
+            start = self._overview_crypto_scroll_idx % total
+            window = [crypto_items[(start + idx) % total] for idx in range(4)]
+        for item in window:
+            name = str(item.get("name") or item.get("symbol") or "--").strip().upper() or "--"
+            price = str((summary or {}).get(name) or "--").strip()
+            if "." not in price:
+                continue
+            frac = price.split(".", 1)[1].strip()
+            if len(frac) >= 5:
+                return 1
+        return 2
+
+    def _overview_stock_display_lines(self):
+        self._ensure_overview_stock_summary()
+        summary = self._overview_stock_summary if isinstance(self._overview_stock_summary, dict) else {}
+        items = summary.get("items") or []
+        if items:
+            return self._overview_market_lines(items, visible_count=4, offset=self._overview_stock_scroll_idx)
+        stock_items, _refresh_sec = _load_small_screen_stock_config()
+        if not stock_items:
+            return [self._t("stock_empty")]
+        lines = []
+        for item in stock_items[:4]:
+            name = str(item.get("name") or item.get("code") or "--").strip() or "--"
+            code = str(item.get("code") or "").strip().upper()
+            lines.append(f"{name} {code}".strip())
+        return lines
+
+    def _ensure_overview_us_stock_summary(self):
+        us_stock_items, refresh_sec = _load_small_screen_us_stock_config()
+        now_ts = time.time()
+        ttl = max(30, refresh_sec)
+        if self._overview_us_stock_loading or (now_ts - self._overview_us_stock_updated_at) < ttl:
+            return
+        self._overview_us_stock_loading = True
+
+        def worker():
+            summary = fetch_us_stock_quotes(us_stock_items)
+
+            def finish():
+                self._overview_us_stock_loading = False
+                self._overview_us_stock_updated_at = time.time()
+                self._overview_us_stock_summary = summary
+                self._refresh_dashboard_overview_if_needed()
+
+            self._post_ui(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _overview_us_stock_summary_text(self):
+        self._ensure_overview_us_stock_summary()
+        summary = self._overview_us_stock_summary if isinstance(self._overview_us_stock_summary, dict) else {}
+        if self._overview_us_stock_loading and not summary:
+            return self._t("overview_loading")
+        items = summary.get("items") or []
+        if items:
+            first = items[0]
+            return f"{first.get('title') or '--'}\n{first.get('price') or '--'}  {first.get('pct') or '--'}"
+        us_stock_items, _refresh_sec = _load_small_screen_us_stock_config()
+        if not us_stock_items:
+            return self._t("us_stock_empty")
+        first = us_stock_items[0]
+        name = first.get("name") or first.get("symbol") or "--"
+        return f"{name}\n{self._t('overview_configured_count').format(count=len(us_stock_items))}"
+
+    def _overview_us_stock_meta_text(self):
+        summary = self._overview_us_stock_summary if isinstance(self._overview_us_stock_summary, dict) else {}
+        items = summary.get("items") or []
+        if items:
+            first = items[0]
+            meta1 = str(first.get("meta1") or "").strip()
+            meta2 = str(first.get("meta2") or "").strip()
+            detail = meta1 or meta2
+            if detail:
+                return detail
+        us_stock_items, _refresh_sec = _load_small_screen_us_stock_config()
+        if not us_stock_items:
+            return ""
+        first = us_stock_items[0]
+        return str(first.get("symbol") or "").strip().upper()
+
+    def _overview_us_stock_display_lines(self):
+        self._ensure_overview_us_stock_summary()
+        summary = self._overview_us_stock_summary if isinstance(self._overview_us_stock_summary, dict) else {}
+        items = summary.get("items") or []
+        if self._overview_us_stock_loading and not items:
+            return [self._t("overview_loading")]
+        if items:
+            return self._overview_market_lines(items, visible_count=6, offset=self._overview_us_stock_scroll_idx, prefer_symbol=True)
+        us_stock_items, _refresh_sec = _load_small_screen_us_stock_config()
+        if not us_stock_items:
+            return [self._t("us_stock_empty")]
+        lines = []
+        for item in us_stock_items[:6]:
+            name = str(item.get("symbol") or item.get("name") or "--").strip().upper() or "--"
+            lines.append(name)
+        return lines
+
+    def _schedule_overview_scroll(self):
+        self._cancel_job("_overview_scroll_job")
+        if getattr(self, "_view_mode", None) != "overview":
+            return
+        stock_items = self._overview_stock_summary.get("items") if isinstance(self._overview_stock_summary, dict) else []
+        us_stock_items = self._overview_us_stock_summary.get("items") if isinstance(self._overview_us_stock_summary, dict) else []
+        crypto_items, _refresh_sec = _load_small_screen_crypto_config()
+        needs_scroll = len(stock_items or []) > 4 or len(us_stock_items or []) > 6 or len(crypto_items or []) > 4
+        if not needs_scroll:
+            return
+        self._overview_scroll_job = self.root.after(OVERVIEW_SCROLL_SEC * 1000, self._overview_scroll_step)
+
+    def _overview_scroll_step(self):
+        self._overview_scroll_job = None
+        if getattr(self, "_view_mode", None) != "overview":
+            return
+        stock_items = self._overview_stock_summary.get("items") if isinstance(self._overview_stock_summary, dict) else []
+        us_stock_items = self._overview_us_stock_summary.get("items") if isinstance(self._overview_us_stock_summary, dict) else []
+        crypto_items, _refresh_sec = _load_small_screen_crypto_config()
+        if len(stock_items or []) > 4:
+            self._overview_stock_scroll_idx = (self._overview_stock_scroll_idx + 1) % len(stock_items)
+        if len(us_stock_items or []) > 6:
+            self._overview_us_stock_scroll_idx = (self._overview_us_stock_scroll_idx + 1) % len(us_stock_items)
+        if len(crypto_items or []) > 4:
+            self._overview_crypto_scroll_idx = (self._overview_crypto_scroll_idx + 1) % len(crypto_items)
+        self._render_dashboard_overview()
+
+    def _overview_users_summary(self):
+        items = self.user_messages if isinstance(self.user_messages, list) else []
+        lines = []
+        if items:
+            latest = items[0]
+            preview = _single_line_message_preview(
+                latest.get("question") or latest.get("text") or "",
+                self._lang,
+            )
+            if preview:
+                lines.append(preview)
+        user_count = self.users_count_var.get().strip() or "--"
+        bound_count = self.bound_channels_var.get().strip() or "--"
+        lines.append(f"{self._t('users_count')}: {user_count}  {self._t('bound_channels')}: {bound_count}")
+        return "\n".join(lines[:2]) if lines else self._t("recent_messages_empty")
+
+    def _overview_logs_summary(self):
+        items = self.log_entries if isinstance(self.log_entries, list) else []
+        if not items:
+            return self._t("logs_empty")
+        latest = items[0]
+        detail = _sanitize_display_text(latest.get("detail") or latest.get("raw") or "").strip()
+        prefix = f"{latest.get('kind') or 'LOG'}  {latest.get('time') or '--:--:--'}"
+        return prefix if not detail else prefix + "\n" + detail
+
+    def _ensure_overview_skills_summary(self):
+        now_ts = time.time()
+        if self._overview_skills_loading or (now_ts - self._overview_skills_updated_at) < 60:
+            return
+        self._overview_skills_loading = True
+
+        def worker():
+            all_skills, enabled_set = fetch_skills_config(self._auth_key)
+
+            def finish():
+                self._overview_skills_loading = False
+                self._overview_skills_updated_at = time.time()
+                if all_skills is None:
+                    self._overview_skills_summary = {"error": True}
+                else:
+                    self._overview_skills_summary = {
+                        "total": len(all_skills),
+                        "enabled": len(enabled_set or set()),
+                        "sample": list(all_skills[:2]),
+                    }
+                self._refresh_dashboard_overview_if_needed()
+
+            self._post_ui(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _overview_skills_summary_text(self):
+        self._ensure_overview_skills_summary()
+        summary = self._overview_skills_summary if isinstance(self._overview_skills_summary, dict) else {}
+        if self._overview_skills_loading and not summary:
+            return self._t("overview_loading")
+        if summary.get("error"):
+            return self._t("skills_load_fail")
+        total = summary.get("total")
+        enabled = summary.get("enabled")
+        if total is None:
+            return self._t("overview_tap_hint")
+        sample = ", ".join(summary.get("sample") or [])
+        first_line = self._t("overview_skills_enabled").format(enabled=enabled, total=total)
+        return first_line if not sample else first_line + "\n" + sample
+
+    def _ensure_overview_stock_summary(self):
+        stock_items, refresh_sec = _load_small_screen_stock_config()
+        now_ts = time.time()
+        ttl = max(30, refresh_sec)
+        if self._overview_stock_loading or (now_ts - self._overview_stock_updated_at) < ttl:
+            return
+        self._overview_stock_loading = True
+
+        def worker():
+            summary = fetch_a_share_quotes(stock_items)
+
+            def finish():
+                self._overview_stock_loading = False
+                self._overview_stock_updated_at = time.time()
+                self._overview_stock_summary = summary
+                self._refresh_dashboard_overview_if_needed()
+
+            self._post_ui(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _overview_stock_summary_text(self):
+        self._ensure_overview_stock_summary()
+        summary = self._overview_stock_summary if isinstance(self._overview_stock_summary, dict) else {}
+        if self._overview_stock_loading and not summary:
+            return self._t("overview_loading")
+        items = summary.get("items") or []
+        if items:
+            first = items[0]
+            return f"{first.get('title') or '--'}\n{first.get('price') or '--'}  {first.get('pct') or '--'}"
+        stock_items, _refresh_sec = _load_small_screen_stock_config()
+        if not stock_items:
+            return self._t("stock_empty")
+        first = stock_items[0]
+        name = first.get("name") or (first.get("code") or "--").upper()
+        return f"{name}\n{self._t('overview_configured_count').format(count=len(stock_items))}"
+
+    def _ensure_overview_crypto_summary(self):
+        crypto_items, refresh_sec = _load_small_screen_crypto_config()
+        now_ts = time.time()
+        ttl = max(30, refresh_sec)
+        if self._overview_crypto_loading or (now_ts - self._overview_crypto_updated_at) < ttl:
+            return
+        self._overview_crypto_loading = True
+
+        def worker():
+            prices = fetch_crypto_prices(crypto_items)
+
+            def finish():
+                self._overview_crypto_loading = False
+                self._overview_crypto_updated_at = time.time()
+                self._overview_crypto_summary = prices
+                self._refresh_dashboard_overview_if_needed()
+
+            self._post_ui(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _overview_crypto_summary_text(self):
+        self._ensure_overview_crypto_summary()
+        summary = self._overview_crypto_summary if isinstance(self._overview_crypto_summary, dict) else {}
+        if self._overview_crypto_loading and not summary:
+            return self._t("overview_loading")
+        crypto_items, _refresh_sec = _load_small_screen_crypto_config()
+        if not crypto_items:
+            return self._t("crypto_empty")
+        target = crypto_items[self._overview_crypto_scroll_idx % len(crypto_items)]
+        if summary and target:
+            name = str(target.get("name") or target.get("symbol") or "--").strip().upper() or "--"
+            return f"{name}\n{summary.get(name) or '--'} USDT"
+        name = str(target.get("name") or target.get("symbol") or "--").strip().upper() or "--"
+        return f"{name}\n-- USDT"
+
+    def _overview_crypto_meta_text(self):
+        crypto_items, _refresh_sec = _load_small_screen_crypto_config()
+        if not crypto_items:
+            return ""
+        target = crypto_items[self._overview_crypto_scroll_idx % len(crypto_items)]
+        symbol = str(target.get("symbol") or "").strip().upper()
+        return symbol or str(target.get("name") or "--").strip().upper()
+
+    def _overview_crypto_display_lines(self):
+        self._ensure_overview_crypto_summary()
+        summary = self._overview_crypto_summary if isinstance(self._overview_crypto_summary, dict) else {}
+        if self._overview_crypto_loading and not summary:
+            return [self._t("overview_loading")]
+        crypto_items, _refresh_sec = _load_small_screen_crypto_config()
+        if not crypto_items:
+            return [self._t("crypto_empty")]
+        total = len(crypto_items)
+        if total <= 4:
+            window = crypto_items
+        else:
+            start = self._overview_crypto_scroll_idx % total
+            window = [crypto_items[(start + idx) % total] for idx in range(4)]
+        lines = []
+        for item in window:
+            name = str(item.get("name") or item.get("symbol") or "--").strip().upper() or "--"
+            price = str((summary or {}).get(name) or "--").strip() or "--"
+            lines.append(f"{name} {price}")
+        return lines
+
+    def _overview_weather_summary(self):
+        return self._overview_us_stock_summary_text()
+
+    def _overview_weather_detail_text(self):
+        return self._overview_us_stock_meta_text()
+
+    def _overview_gallery_summary(self):
+        state = self._t("overview_gallery_running") if self._llm_lobster_job else self._t("overview_gallery_idle")
+        if self._llm_pubkey_loading or self._llm_signing or self._llm_join_in_progress:
+            return state + "\n" + self._t("overview_loading")
+        if self._llm_signature_hex:
+            return state + "\n" + self._t("llm_sign_signature")
+        if self._llm_pubkey_hex:
+            return state + "\n" + self._t("llm_pubkey_slot0")
+        return state + "\n" + self._t("overview_tap_hint")
+
+    def _overview_settings_summary(self):
+        visible_pages = len([mode for mode in self._visible_view_modes() if mode not in {"dashboard", "settings"}])
+        return (
+            f"{self._t('language')}: {self._lang}  {self._t('theme')}: {self._theme_label()}\n"
+            + self._t("overview_visible_pages").format(count=visible_pages)
         )
-        self._settings_reset_status_label.config(bg=self._c("bg"), fg=self._c("fg_dim"))
-        try:
-            self._settings_restart_btn.config(text=self._t("restart") if self._settings_restart_btn["state"] != tk.DISABLED else self._t("restarting"))
-        except tk.TclError:
-            pass
-        self._settings_lang_var.set(self._lang)
-        self._settings_theme_var.set(self._theme)
+
+    def _overview_card_specs(self):
+        cards = [("dashboard", "RustClaw", self._overview_dashboard_summary())]
+        if self._show_weather_page:
+            cards.append(("weather", self._t("show_weather_page"), self._overview_weather_summary()))
+        if self._show_stock_page:
+            cards.append(("stock", self._t("show_stock_page"), self._overview_stock_summary_text()))
+        if self._show_crypto_page:
+            cards.append(("crypto", self._t("show_crypto_page"), self._overview_crypto_summary_text()))
+        return cards
+
+    def _open_view_from_overview(self, mode):
+        self._overview_return_on_swipe = True
+        self._switch_view(mode)
+
+    def _open_weather_from_topbar(self, _event=None):
+        current_mode = getattr(self, "_view_mode", None)
+        if current_mode is None or current_mode == "weather":
+            return
+        self._weather_return_view_on_swipe = current_mode
+        self._switch_view("weather")
+
+    def _reset_overview_double_tap(self):
+        self._overview_last_tap_at = 0.0
+        self._overview_last_tap_mode = None
+        self._overview_last_tap_x = 0
+        self._overview_last_tap_y = 0
+
+    def _start_overview_open_tap(self, event):
+        self._overview_tap_press_x = getattr(event, "x_root", 0)
+        self._overview_tap_press_y = getattr(event, "y_root", 0)
+
+    def _finish_overview_open_tap(self, event, target_mode):
+        if getattr(self, "_view_mode", None) != "overview":
+            self._reset_overview_double_tap()
+            return
+        x = getattr(event, "x_root", 0)
+        y = getattr(event, "y_root", 0)
+        press_dx = abs(x - getattr(self, "_overview_tap_press_x", 0))
+        press_dy = abs(y - getattr(self, "_overview_tap_press_y", 0))
+        if press_dx > 18 or press_dy > 18:
+            self._reset_overview_double_tap()
+            return
+        now = time.monotonic()
+        last_at = float(getattr(self, "_overview_last_tap_at", 0.0) or 0.0)
+        last_mode = getattr(self, "_overview_last_tap_mode", None)
+        last_x = getattr(self, "_overview_last_tap_x", 0)
+        last_y = getattr(self, "_overview_last_tap_y", 0)
+        same_mode = last_mode == target_mode
+        close_enough = abs(x - last_x) <= 28 and abs(y - last_y) <= 28
+        if same_mode and close_enough and (now - last_at) <= OVERVIEW_DOUBLE_TAP_SEC:
+            self._reset_overview_double_tap()
+            self._open_view_from_overview(target_mode)
+            return
+        self._overview_last_tap_at = now
+        self._overview_last_tap_mode = target_mode
+        self._overview_last_tap_x = x
+        self._overview_last_tap_y = y
+
+    def _bind_overview_open(self, widget, target_mode):
+        widget.bind("<ButtonPress-1>", self._start_overview_open_tap)
+        widget.bind("<ButtonRelease-1>", lambda evt, m=target_mode: self._finish_overview_open_tap(evt, m))
+
+    def _build_overview_layout(self):
+        return overview_build_layout(
+            self,
+            OVERVIEW_US_STOCK_HEIGHT,
+            OVERVIEW_A_STOCK_WIDTH,
+            OVERVIEW_MARKET_HEIGHT,
+            OVERVIEW_MARKET_GAP,
+            OVERVIEW_CRYPTO_HEIGHT,
+            OVERVIEW_RUNTIME_HEIGHT,
+        )
+
+    def _render_dashboard_overview(self):
+        return overview_render_dashboard(self)
+
+    def _prepare_settings_view(self):
+        return settings_prepare_view(self)
+
+    def _refresh_settings_choice_labels(self):
+        return settings_refresh_choice_labels(self)
+
+    def _show_settings_category(self, category):
+        return settings_show_category(self, category)
+
+    def _show_settings_menu(self):
+        return settings_show_menu(self)
+
+    def _open_wifi_from_settings(self):
+        return settings_open_wifi_from_settings(self)
+
+    def _close_wifi_to_settings(self):
+        return settings_close_wifi_to_settings(self)
+
+    def _visible_view_modes(self):
+        modes = ["dashboard", "overview"]
+        if self._show_messages_page:
+            modes.append("users")
+        if self._show_logs_page:
+            modes.append("logs")
+        if self._show_skills_page:
+            modes.append("skills")
+        if self._show_weather_page:
+            modes.append("weather")
+        if self._show_stock_page:
+            modes.append("stock")
+        if self._show_us_stock_page:
+            modes.append("us_stock")
+        if self._show_crypto_page:
+            modes.append("crypto")
+        if self._show_gallery_page:
+            modes.append("gallery")
+        modes.append("settings")
+        return modes
+
+    def _switch_view(self, mode):
+        if mode not in {"dashboard", "overview", "users", "logs", "skills", "weather", "stock", "us_stock", "crypto", "gallery", "settings", "wifi"}:
+            mode = "dashboard"
+        self._reset_overview_double_tap()
+        self._teardown_current_view()
+        for frame in (
+            self.dashboard_frame,
+            self.overview_frame,
+            self.users_frame,
+            self.logs_frame,
+            self.skills_frame,
+            self.weather_frame,
+            self.stock_frame,
+            self.us_stock_frame,
+            self.crypto_frame,
+            self.gallery_frame,
+            self.settings_frame,
+            self.wifi_frame,
+        ):
+            if frame.winfo_manager():
+                frame.pack_forget()
+        self._view_mode = mode
+        if mode != "weather":
+            self._weather_return_view_on_swipe = None
+        if mode == "overview":
+            self._overview_return_on_swipe = False
+        if mode == "dashboard":
+            self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
+        elif mode == "overview":
+            self.overview_frame.pack(fill=tk.BOTH, expand=True)
+            self._render_dashboard_overview()
+        elif mode == "users":
+            self._prepare_users_view()
+            self.users_frame.pack(fill=tk.BOTH, expand=True)
+        elif mode == "logs":
+            self._prepare_logs_view()
+            self.logs_frame.pack(fill=tk.BOTH, expand=True)
+        elif mode == "skills":
+            self.skills_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            self._refresh_skills_view()
+        elif mode == "weather":
+            self.weather_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            self._show_weather()
+        elif mode == "stock":
+            self.stock_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            self._show_stock()
+        elif mode == "us_stock":
+            self.us_stock_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            self._show_us_stock()
+        elif mode == "crypto":
+            self.crypto_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            self._show_crypto()
+        elif mode == "gallery":
+            self.gallery_frame.pack(fill=tk.BOTH, expand=True, padx=(2, 14), pady=4)
+            self._show_gallery()
+        elif mode == "settings":
+            self._prepare_settings_view()
+            self.settings_frame.pack(fill=tk.BOTH, expand=True)
+        elif mode == "wifi":
+            self._prepare_wifi_view()
+            self.wifi_frame.pack(fill=tk.BOTH, expand=True)
+            if not self._wifi_networks and not self._wifi_scan_in_progress:
+                self._refresh_wifi_networks()
+        self._refresh_topbar()
 
     def _prepare_wifi_view(self):
+        self._wifi_pager_row.config(bg=self._c("bg"))
+        self._wifi_right_actions.config(bg=self._c("bg"))
+        self._wifi_back_btn.config(
+            text=self._t("back"),
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("fg"),
+        )
         self._wifi_refresh_btn.config(
             text=self._t("wifi_refreshing") if self._wifi_scan_in_progress else self._t("wifi_refresh"),
             bg=self._c("button_bg"),
@@ -2294,6 +3057,8 @@ class SmallScreenApp:
         )
         self._wifi_prev_btn.config(text=self._t("wifi_prev_page"), bg=self._c("button_bg"), fg=self._c("button_fg"))
         self._wifi_next_btn.config(text=self._t("wifi_next_page"), bg=self._c("button_bg"), fg=self._c("button_fg"))
+        self._wifi_prev_btn.config(activebackground=self._c("button_active_bg"), activeforeground=self._c("fg"), disabledforeground=self._c("fg_dim"))
+        self._wifi_next_btn.config(activebackground=self._c("button_active_bg"), activeforeground=self._c("fg"), disabledforeground=self._c("fg_dim"))
         self._wifi_status_label.config(bg=self._c("bg"), fg=self._c("fg_dim"))
         self._wifi_selected_label.config(bg=self._c("bg"), fg=self._c("accent"))
         self._wifi_hint_label.config(bg=self._c("bg"), fg=self._c("fg_dim"))
@@ -2369,12 +3134,15 @@ class SmallScreenApp:
                     text=self._format_wifi_name(item),
                     font=("", 10, "bold" if selected else "normal"),
                     relief=tk.FLAT,
+                    borderwidth=0,
+                    highlightthickness=0,
                     anchor="w",
                     justify=tk.LEFT,
                     bg=self._c("accent") if selected else self._c("box_bg"),
                     fg=self._c("button_fg") if selected else self._c("fg"),
                     activebackground=self._c("button_active_bg"),
                     activeforeground=self._c("fg"),
+                    takefocus=0,
                     command=lambda data=item: self._select_wifi_network(data),
                 )
                 btn.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
@@ -2384,8 +3152,14 @@ class SmallScreenApp:
                         text=self._t("wifi_disconnecting") if self._wifi_disconnect_in_progress else self._t("wifi_disconnect"),
                         font=("", 9),
                         relief=tk.FLAT,
+                        borderwidth=0,
+                        highlightthickness=0,
                         bg=self._c("button_bg"),
                         fg=self._c("button_fg"),
+                        activebackground=self._c("button_active_bg"),
+                        activeforeground=self._c("fg"),
+                        disabledforeground=self._c("fg_dim"),
+                        takefocus=0,
                         state=tk.DISABLED if self._wifi_disconnect_in_progress else tk.NORMAL,
                         command=lambda ssid=item.get("ssid") or "": self._disconnect_wifi(ssid),
                     )
@@ -3284,7 +4058,7 @@ class SmallScreenApp:
         if self._log_append_job is None:
             self._append_next_log_entry()
 
-    def _rebuild_ui(self):
+    def _rebuild_ui(self, reopen_settings_category=None):
         """主题切换后重建界面。"""
         self._prepare_for_ui_rebuild()
         for w in self.root.winfo_children():
@@ -3294,40 +4068,96 @@ class SmallScreenApp:
         self.gif_delays.clear()
         self._build_ui()
         self._schedule_refresh()
+        self._start_weather_refresh_cycle()
         self._tick_time()
         if self.gif_frames:
             self._animate_gif()
         self._refresh_health_once()
+        if reopen_settings_category is not None:
+            self._switch_view("settings")
+            if reopen_settings_category == "menu":
+                self._show_settings_menu()
+            else:
+                self._show_settings_category(reopen_settings_category)
 
-    def _on_settings_ok(self):
+    def _apply_settings_changes(self, reopen_settings_category=None):
+        old_lang = self._lang
+        old_theme = self._theme
+        old_show_messages = self._show_messages_page
+        old_show_logs = self._show_logs_page
+        old_show_gallery = self._show_gallery_page
+        old_show_skills = self._show_skills_page
+        old_show_weather = self._show_weather_page
+        old_show_stock = self._show_stock_page
+        old_show_us_stock = self._show_us_stock_page
+        old_show_crypto = self._show_crypto_page
         self._lang = self._settings_lang_var.get()
         new_theme = self._settings_theme_var.get()
+        self._show_messages_page = bool(self._settings_show_messages_var.get())
+        self._show_logs_page = bool(self._settings_show_logs_var.get())
+        self._show_gallery_page = bool(self._settings_show_gallery_var.get())
+        self._show_skills_page = bool(self._settings_show_skills_var.get())
+        self._show_weather_page = bool(self._settings_show_weather_var.get())
+        self._show_stock_page = bool(self._settings_show_stock_var.get())
+        self._show_us_stock_page = bool(self._settings_show_us_stock_var.get())
+        self._show_crypto_page = bool(self._settings_show_crypto_var.get())
         save_lang(self._lang)
+        save_messages_page_visible(self._show_messages_page)
+        save_logs_page_visible(self._show_logs_page)
+        save_gallery_page_visible(self._show_gallery_page)
+        save_skills_page_visible(self._show_skills_page)
+        save_weather_page_visible(self._show_weather_page)
+        save_stock_page_visible(self._show_stock_page)
+        save_us_stock_page_visible(self._show_us_stock_page)
+        save_crypto_page_visible(self._show_crypto_page)
         if new_theme != self._theme:
             self._theme = new_theme
             save_theme(self._theme)
-            self._rebuild_ui()
+            self._rebuild_ui(
+                reopen_settings_category=(
+                    reopen_settings_category
+                    if reopen_settings_category is not None
+                    else getattr(self, "_settings_category", "menu")
+                )
+            )
             return
-        self._apply_lang()
-        self.settings_frame.pack_forget()
-        self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
-        self._view_mode = "dashboard"
-        self._refresh_health_once()
-
-    def _on_settings_cancel(self):
-        self.settings_frame.pack_forget()
-        self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
-        self._view_mode = "dashboard"
+        if self._lang != old_lang:
+            self._apply_lang()
+            self._prepare_settings_view()
+            self._fetch_weather(force=True)
+        self._refresh_settings_choice_labels()
+        if (
+            self._show_messages_page != old_show_messages
+            or self._show_logs_page != old_show_logs
+            or self._show_gallery_page != old_show_gallery
+            or self._show_skills_page != old_show_skills
+            or self._show_weather_page != old_show_weather
+            or self._show_stock_page != old_show_stock
+            or self._show_us_stock_page != old_show_us_stock
+            or self._show_crypto_page != old_show_crypto
+            or self._theme != old_theme
+        ):
+            self._refresh_health_once()
+        if self._view_mode == "settings":
+            category = (
+                reopen_settings_category
+                if reopen_settings_category is not None
+                else getattr(self, "_settings_category", "menu")
+            )
+            if category == "menu":
+                self._show_settings_menu()
+            else:
+                self._show_settings_category(category)
 
     def _on_settings_restart(self):
-        """后台执行 rustclaw -restart release all --quick --skip-setup；15 秒内按钮禁用并显示「重启中.....」。"""
+        """后台执行 rustclaw -restart release all；15 秒内按钮禁用并显示「重启中.....」。"""
         btn = self._settings_restart_btn
         if btn["state"] == tk.DISABLED:
             return
         btn.config(state=tk.DISABLED, text=self._t("restarting"))
         try:
             subprocess.Popen(
-                ["rustclaw", "-restart", "release", "all", "--quick", "--skip-setup"],
+                ["rustclaw", "-restart", "release", "all"],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -3392,106 +4222,46 @@ class SmallScreenApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _toggle_view(self):
-        """左滑/下一页：dashboard -> users -> logs -> skills -> stock -> crypto -> gallery -> settings -> wifi -> dashboard"""
-        self._teardown_current_view()
-        if self._view_mode == "dashboard":
-            self._view_mode = "users"
-            self.dashboard_frame.pack_forget()
-            self._prepare_users_view()
-            self.users_frame.pack(fill=tk.BOTH, expand=True)
-        elif self._view_mode == "users":
-            self._view_mode = "logs"
-            self.users_frame.pack_forget()
-            self._prepare_logs_view()
-            self.logs_frame.pack(fill=tk.BOTH, expand=True)
-        elif self._view_mode == "logs":
-            self._view_mode = "skills"
-            self.logs_frame.pack_forget()
-            self.skills_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-            self._refresh_skills_view()
-        elif self._view_mode == "skills":
-            self._view_mode = "stock"
-            self.skills_frame.pack_forget()
-            self.stock_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-            self._show_stock()
-        elif self._view_mode == "stock":
-            self.stock_frame.pack_forget()
-            self._view_mode = "crypto"
-            self.crypto_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-            self._show_crypto()
-        elif self._view_mode == "crypto":
-            self._view_mode = "gallery"
-            self.crypto_frame.pack_forget()
-            self.gallery_frame.pack(fill=tk.BOTH, expand=True, padx=(2, 14), pady=4)
-            self._show_gallery()
-        elif self._view_mode == "gallery":
-            self._view_mode = "settings"
-            self.gallery_frame.pack_forget()
-            self._prepare_settings_view()
-            self.settings_frame.pack(fill=tk.BOTH, expand=True)
-        elif self._view_mode == "settings":
-            self._view_mode = "wifi"
-            self.settings_frame.pack_forget()
-            self._prepare_wifi_view()
-            self.wifi_frame.pack(fill=tk.BOTH, expand=True)
-            if not self._wifi_networks and not self._wifi_scan_in_progress:
-                self._refresh_wifi_networks()
-        else:
-            self._view_mode = "dashboard"
-            self.wifi_frame.pack_forget()
-            self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
-        self._refresh_topbar()
+        """左滑/下一页：按当前启用的页面顺序循环切换。"""
+        if self._view_mode == "wifi":
+            self._switch_view("settings")
+            self._show_settings_category("system")
+            return
+        if self._view_mode == "weather" and self._weather_return_view_on_swipe:
+            target_mode = self._weather_return_view_on_swipe
+            self._weather_return_view_on_swipe = None
+            self._switch_view(target_mode)
+            return
+        if self._overview_return_on_swipe and self._view_mode != "overview":
+            self._switch_view("overview")
+            return
+        modes = self._visible_view_modes()
+        try:
+            idx = modes.index(self._view_mode)
+        except ValueError:
+            idx = 0
+        self._switch_view(modes[(idx + 1) % len(modes)])
 
     def _go_prev_view(self):
-        """右滑/上一页：dashboard -> wifi -> settings -> gallery -> crypto -> stock -> skills -> logs -> users -> dashboard（循环）。"""
-        self._teardown_current_view()
-        if self._view_mode == "dashboard":
-            self._view_mode = "wifi"
-            self.dashboard_frame.pack_forget()
-            self._prepare_wifi_view()
-            self.wifi_frame.pack(fill=tk.BOTH, expand=True)
-            if not self._wifi_networks and not self._wifi_scan_in_progress:
-                self._refresh_wifi_networks()
-        elif self._view_mode == "wifi":
-            self._view_mode = "settings"
-            self.wifi_frame.pack_forget()
-            self._prepare_settings_view()
-            self.settings_frame.pack(fill=tk.BOTH, expand=True)
-        elif self._view_mode == "settings":
-            self._view_mode = "gallery"
-            self.settings_frame.pack_forget()
-            self.gallery_frame.pack(fill=tk.BOTH, expand=True, padx=(2, 14), pady=4)
-            self._show_gallery()
-        elif self._view_mode == "gallery":
-            self._view_mode = "crypto"
-            self.gallery_frame.pack_forget()
-            self.crypto_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-            self._show_crypto()
-        elif self._view_mode == "crypto":
-            self._view_mode = "stock"
-            self.crypto_frame.pack_forget()
-            self.stock_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-            self._show_stock()
-        elif self._view_mode == "stock":
-            self._view_mode = "skills"
-            self.stock_frame.pack_forget()
-            self.skills_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-            self._refresh_skills_view()
-        elif self._view_mode == "skills":
-            self._view_mode = "logs"
-            self.skills_frame.pack_forget()
-            self._prepare_logs_view()
-            self.logs_frame.pack(fill=tk.BOTH, expand=True)
-        elif self._view_mode == "logs":
-            self._view_mode = "users"
-            self.logs_frame.pack_forget()
-            self._prepare_users_view()
-            self.users_frame.pack(fill=tk.BOTH, expand=True)
-        else:
-            self._view_mode = "dashboard"
-            self.users_frame.pack_forget()
-            self.dashboard_frame.pack(fill=tk.BOTH, expand=True)
-        self._refresh_topbar()
+        """右滑/上一页：按当前启用的页面顺序循环切换。"""
+        if self._view_mode == "wifi":
+            self._switch_view("settings")
+            self._show_settings_category("system")
+            return
+        if self._view_mode == "weather" and self._weather_return_view_on_swipe:
+            target_mode = self._weather_return_view_on_swipe
+            self._weather_return_view_on_swipe = None
+            self._switch_view(target_mode)
+            return
+        if self._overview_return_on_swipe and self._view_mode != "overview":
+            self._switch_view("overview")
+            return
+        modes = self._visible_view_modes()
+        try:
+            idx = modes.index(self._view_mode)
+        except ValueError:
+            idx = 0
+        self._switch_view(modes[(idx - 1) % len(modes)])
 
     def _show_gallery(self):
         """NNI分布式模型页：Matrix 主题下无标题无按钮、矩阵雨占满屏并自动开始；非 Matrix 为标题+加入/停止+龙虾图。"""
@@ -3710,6 +4480,310 @@ class SmallScreenApp:
             lbl.grid(row=r, column=c, padx=2, pady=2)
             self._llm_dot_labels.append(lbl)
         self._llm_lobster_job = self.root.after(500, self._llm_lobster_tick)
+
+    def _start_weather_refresh_cycle(self):
+        self._schedule_weather_refresh()
+        if self._weather_data is None:
+            self._fetch_weather(force=True)
+
+    def _schedule_weather_refresh(self):
+        self._cancel_job("_weather_refresh_job")
+        if getattr(self, "_closing", False):
+            return
+        delay_ms = max(1000, WEATHER_REFRESH_SEC * 1000)
+        self._weather_refresh_job = self.root.after(delay_ms, self._weather_refresh_due)
+
+    def _weather_refresh_due(self):
+        self._weather_refresh_job = None
+        if getattr(self, "_closing", False):
+            return
+        self._fetch_weather(force=True)
+        self._schedule_weather_refresh()
+
+    def _weather_reenable_refresh_btn(self):
+        self._weather_manual_refresh_job = None
+        if getattr(self, "_closing", False) or self._view_mode != "weather":
+            return
+        btn = getattr(self, "_weather_refresh_btn", None)
+        if btn and btn.winfo_exists():
+            try:
+                btn.config(state=tk.NORMAL)
+            except tk.TclError:
+                pass
+
+    def _select_weather_detail(self, offset=0):
+        try:
+            self._weather_selected_offset = max(0, int(offset))
+        except Exception:
+            self._weather_selected_offset = 0
+        if getattr(self, "_closing", False):
+            return
+        if self._view_mode == "weather":
+            self._show_weather()
+
+    def _fetch_weather(self, force=False):
+        if getattr(self, "_closing", False):
+            return
+        if self._weather_loading:
+            return
+        self._weather_loading = True
+        btn = getattr(self, "_weather_refresh_btn", None)
+        if btn and btn.winfo_exists():
+            try:
+                btn.config(state=tk.DISABLED)
+            except tk.TclError:
+                pass
+        self._cancel_job("_weather_manual_refresh_job")
+        self._weather_manual_refresh_job = self.root.after(3000, self._weather_reenable_refresh_btn)
+
+        def worker():
+            weather, error = fetch_today_weather(self._lang)
+
+            def finish():
+                self._weather_loading = False
+                if weather is not None:
+                    self._weather_data = weather
+                    self._weather_error = ""
+                    max_offset = max(0, len(weather.get("details") or []) - 1)
+                    self._weather_selected_offset = min(
+                        max(0, int(getattr(self, "_weather_selected_offset", 0))),
+                        max_offset,
+                    )
+                else:
+                    self._weather_error = (error or "").strip()
+                    self._weather_selected_offset = 0
+                self._refresh_weather_icon_display()
+                self._refresh_dashboard_overview_if_needed()
+                if self._view_mode == "weather":
+                    self._show_weather()
+
+            self._post_ui(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_weather(self):
+        for w in self.weather_frame.winfo_children():
+            w.destroy()
+
+        def bind_reset_today(widget):
+            widget.bind("<Button-1>", lambda _evt: self._select_weather_detail(0))
+
+        def metric_cell(parent, title, value, right_gap=True):
+            box_border = self._c("box_border")
+            box_bg = self._c("box_bg")
+            cell_gap = 6
+            cell_w = (W - 16 - 8 - cell_gap) // 2
+            box = tk.Frame(parent, bg=box_border, padx=2, pady=2, width=cell_w)
+            box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, cell_gap if right_gap else 0))
+            inner = tk.Frame(box, bg=box_bg, padx=5, pady=3)
+            inner.pack(fill=tk.BOTH, expand=True)
+            tk.Label(
+                inner,
+                text=f"{title}: {value}",
+                font=("", 9, "bold"),
+                bg=box_bg,
+                fg=self._c("fg"),
+                anchor="center",
+                justify=tk.CENTER,
+                wraplength=160,
+            ).pack(fill=tk.BOTH, expand=True)
+
+        self._weather_refresh_btn = tk.Button(
+            self.weather_frame,
+            text=self._t("refresh"),
+            font=("", 9),
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=self._c("button_bg"),
+            fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"),
+            activeforeground=self._c("fg"),
+            disabledforeground=self._c("fg_dim"),
+            takefocus=0,
+            command=lambda: self._fetch_weather(force=True),
+            padx=6,
+            pady=1,
+        )
+        if self._weather_loading:
+            self._weather_refresh_btn.config(state=tk.DISABLED)
+
+        weather = self._weather_data or {}
+        bind_reset_today(self.weather_frame)
+
+        if not weather:
+            empty_text = self._t("weather_loading")
+            if self._weather_error:
+                empty_text = self._t("weather_error").format(error=self._weather_error)
+            tk.Label(
+                self.weather_frame,
+                text=empty_text,
+                font=("", 11),
+                bg=self._c("bg"),
+                fg=self._c("status_err") if self._weather_error else self._c("fg_dim"),
+                anchor="w",
+                justify=tk.LEFT,
+                wraplength=440,
+            ).pack(fill=tk.X, pady=(14, 0))
+            return
+
+        details = weather.get("details") or []
+        selected_offset = min(
+            max(0, int(getattr(self, "_weather_selected_offset", 0))),
+            max(0, len(details) - 1),
+        )
+        selected = details[selected_offset] if details else weather
+        location_text = str(selected.get("location") or weather.get("location") or "--").strip() or "--"
+        source_text = str(weather.get("source") or "--").strip() or "--"
+        hero = tk.Frame(self.weather_frame, bg=self._c("box_border"), padx=2, pady=2)
+        hero.pack(fill=tk.X, pady=(0, 4))
+        bind_reset_today(hero)
+        hero_inner = tk.Frame(hero, bg=self._c("box_bg"), padx=7, pady=5)
+        hero_inner.pack(fill=tk.BOTH, expand=True)
+        bind_reset_today(hero_inner)
+        temp_row = tk.Frame(hero_inner, bg=self._c("box_bg"))
+        temp_row.pack(fill=tk.X)
+        bind_reset_today(temp_row)
+        tk.Label(
+            temp_row,
+            text=str(selected.get("temperature") or "--"),
+            font=("", 20, "bold"),
+            bg=self._c("box_bg"),
+            fg=self._c("accent"),
+            anchor="w",
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            temp_row,
+            text=str(selected.get("description") or "--"),
+            font=("", 10, "bold"),
+            bg=self._c("box_bg"),
+            fg=self._c("fg"),
+            anchor="e",
+            justify=tk.RIGHT,
+            wraplength=200,
+        ).pack(side=tk.RIGHT)
+        meta_row = tk.Frame(hero_inner, bg=self._c("box_bg"))
+        meta_row.pack(fill=tk.X, pady=(1, 0))
+        bind_reset_today(meta_row)
+        tk.Label(
+            meta_row,
+            text=location_text,
+            font=("", 8),
+            bg=self._c("box_bg"),
+            fg=self._c("fg_dim"),
+            anchor="w",
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Label(
+            meta_row,
+            text=(
+                f"{str(selected.get('day') or '--')}   "
+                f"{self._t('weather_updated')}: {str(weather.get('updated_at') or '--')}   "
+                f"{self._t('weather_source')}: {source_text}"
+            ),
+            font=("", 8),
+            bg=self._c("box_bg"),
+            fg=self._c("fg_dim"),
+            anchor="e",
+        ).pack(side=tk.RIGHT)
+
+        row1 = tk.Frame(self.weather_frame, bg=self._c("bg"))
+        row1.pack(fill=tk.X, pady=(0, 3))
+        bind_reset_today(row1)
+        metric_cell(row1, self._t("weather_feels_like"), str(selected.get("feels_like") or "--"), right_gap=True)
+        metric_cell(row1, self._t("weather_high_low"), str(selected.get("high_low") or "--"), right_gap=False)
+
+        row2 = tk.Frame(self.weather_frame, bg=self._c("bg"))
+        row2.pack(fill=tk.X, pady=(0, 3))
+        bind_reset_today(row2)
+        metric_cell(row2, self._t("weather_humidity"), str(selected.get("humidity") or "--"), right_gap=True)
+        metric_cell(row2, self._t("weather_wind"), str(selected.get("wind") or "--"), right_gap=False)
+
+        forecast_items = weather.get("forecast") or []
+        if forecast_items:
+            forecast_row = tk.Frame(self.weather_frame, bg=self._c("bg"))
+            forecast_row.pack(fill=tk.X, pady=(0, 3))
+            bind_reset_today(forecast_row)
+            for idx, item in enumerate(forecast_items[:3]):
+                item_offset = int(item.get("offset") or (idx + 1))
+                is_selected = item_offset == selected_offset
+                card = tk.Frame(
+                    forecast_row,
+                    bg=self._c("accent") if is_selected else self._c("box_border"),
+                    padx=2,
+                    pady=2,
+                )
+                card.pack(
+                    side=tk.LEFT,
+                    fill=tk.BOTH,
+                    expand=True,
+                    padx=(0, 4 if idx < min(2, len(forecast_items[:3]) - 1) else 0),
+                )
+                inner = tk.Frame(card, bg=self._c("box_bg"), padx=3, pady=2)
+                inner.pack(fill=tk.BOTH, expand=True)
+                day_label = tk.Label(
+                    inner,
+                    text=str(item.get("day") or "--"),
+                    font=("", 8),
+                    bg=self._c("box_bg"),
+                    fg=self._c("accent") if is_selected else self._c("fg_dim"),
+                    anchor="center",
+                )
+                day_label.pack()
+                forecast_mid = tk.Frame(inner, bg=self._c("box_bg"))
+                forecast_mid.pack(pady=(1, 0))
+                icon_label = tk.Label(
+                    forecast_mid,
+                    text=str(item.get("icon") or "◌"),
+                    font=("", 14),
+                    bg=self._c("box_bg"),
+                    fg=self._c("accent"),
+                )
+                icon_label.pack(side=tk.LEFT, padx=(0, 4))
+                temp_label = tk.Label(
+                    forecast_mid,
+                    text=str(item.get("high_low") or "--"),
+                    font=("", 8, "bold"),
+                    bg=self._c("box_bg"),
+                    fg=self._c("fg"),
+                )
+                temp_label.pack(side=tk.LEFT)
+                for widget in (card, inner, day_label, forecast_mid, icon_label, temp_label):
+                    widget.bind("<Button-1>", lambda _evt, off=item_offset: self._select_weather_detail(off))
+
+        info_row = tk.Frame(self.weather_frame, bg=self._c("bg"))
+        info_row.pack(fill=tk.X, pady=(0, 2))
+        bind_reset_today(info_row)
+        tk.Label(
+            info_row,
+            text=(
+                f"{self._t('weather_rain')}: {str(selected.get('rain') or '--')}   "
+                f"{self._t('weather_sunrise')}: {str(selected.get('sunrise') or '--')}   "
+                f"{self._t('weather_sunset')}: {str(selected.get('sunset') or '--')}"
+            ),
+            font=("", 8),
+            bg=self._c("bg"),
+            fg=self._c("fg"),
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=440,
+        ).pack(fill=tk.X)
+
+        if self._weather_error:
+            tk.Label(
+                self.weather_frame,
+                text=self._t("weather_error").format(error=self._weather_error),
+                font=("", 8),
+                bg=self._c("bg"),
+                fg=self._c("status_err"),
+                anchor="w",
+                justify=tk.LEFT,
+                wraplength=440,
+            ).pack(fill=tk.X, pady=(3, 0))
+
+        action_row = tk.Frame(self.weather_frame, bg=self._c("bg"))
+        action_row.pack(fill=tk.X, pady=(2, 0))
+        bind_reset_today(action_row)
+        self._weather_refresh_btn.pack(in_=action_row, side=tk.RIGHT)
 
     def _show_crypto(self):
         for w in self.crypto_frame.winfo_children():
@@ -4028,6 +5102,220 @@ class SmallScreenApp:
         threading.Thread(target=_fetch, daemon=True).start()
         self._stock_job = self.root.after(self._stock_refresh_sec * 1000, self._stock_refresh_loop)
 
+    def _show_us_stock(self):
+        for w in self.us_stock_frame.winfo_children():
+            w.destroy()
+        self._us_stock_items, self._us_stock_refresh_sec = _load_small_screen_us_stock_config()
+        title_row = tk.Frame(self.us_stock_frame, bg=self._c("bg"))
+        title_row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(
+            title_row, text="US STOCKS", font=("DejaVu Sans", 14, "bold"),
+            bg=self._c("bg"), fg=self._c("fg")
+        ).pack(side=tk.LEFT)
+        self._us_stock_refresh_btn = tk.Button(
+            title_row, text=self._t("refresh"), font=("", 10), relief=tk.FLAT, bg=self._c("button_bg"), fg=self._c("button_fg"),
+            activebackground=self._c("button_active_bg"), activeforeground=self._c("fg"), cursor="hand2",
+            command=self._us_stock_manual_refresh, padx=8, pady=2
+        )
+        self._us_stock_refresh_btn.pack(side=tk.RIGHT, padx=(6, 0))
+        tk.Label(
+            title_row, text=self._t("us_stock_refresh_hint").format(sec=self._us_stock_refresh_sec), font=("", 10),
+            bg=self._c("bg"), fg=self._c("foot_fg")
+        ).pack(side=tk.RIGHT)
+
+        items = [
+            {"title": symbol, "price": "--", "pct": "--", "meta1": "...", "meta2": ""}
+            for symbol in [item.get("name") or item.get("symbol") or "--" for item in self._us_stock_items]
+        ]
+        self._us_stock_cards = []
+        list_wrapper = tk.Frame(self.us_stock_frame, bg=self._c("bg"))
+        list_wrapper.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(list_wrapper, bg=self._c("bg"), highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_wrapper)
+        inner = tk.Frame(canvas, bg=self._c("bg"))
+        win_id = canvas.create_window((0, 0), window=inner, anchor=tk.NW)
+
+        def _on_inner_configure(_):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(evt):
+            canvas.itemconfig(win_id, width=evt.width)
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._style_scrollbar(scrollbar)
+
+        def _after_scroll():
+            canvas.update_idletasks()
+
+        def _scrollbar_cmd(*args):
+            canvas.yview(*args)
+            _after_scroll()
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.configure(command=_scrollbar_cmd)
+
+        if not items:
+            tk.Label(
+                inner, text=self._t("us_stock_empty"), font=("", 12),
+                bg=self._c("bg"), fg=self._c("status_off")
+            ).pack(anchor=tk.W, pady=(12, 0))
+            return
+
+        box_bg = self._c("box_bg")
+        box_border = self._c("box_border")
+        for item in items:
+            card = tk.Frame(inner, bg=box_border, padx=2, pady=2)
+            card.pack(fill=tk.X, pady=2)
+            inner_card = tk.Frame(card, bg=box_bg, padx=8, pady=4)
+            inner_card.pack(fill=tk.BOTH, expand=True)
+            title_var = tk.StringVar(value=item.get("title") or "--")
+            price_var = tk.StringVar(value=item.get("price") or "--")
+            pct_var = tk.StringVar(value=item.get("pct") or "--")
+            detail_var = tk.StringVar(value=item.get("meta1") or "")
+            top_row = tk.Frame(inner_card, bg=box_bg)
+            top_row.pack(fill=tk.X)
+            tk.Label(top_row, textvariable=title_var, font=("", 10), bg=box_bg, fg=self._c("fg_dim"), anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            price_label = tk.Label(top_row, textvariable=price_var, font=("", 12, "bold"), bg=box_bg, fg=self._c("fg"))
+            price_label.pack(side=tk.RIGHT)
+            pct_label = tk.Label(top_row, textvariable=pct_var, font=("", 10, "bold"), bg=box_bg, fg=self._c("fg"))
+            pct_label.pack(side=tk.RIGHT, padx=(0, 8))
+            tk.Label(inner_card, textvariable=detail_var, font=("", 9), bg=box_bg, fg=self._c("fg"), anchor=tk.W, justify=tk.LEFT).pack(anchor=tk.W, pady=(1, 0))
+            self._us_stock_cards.append({
+                "title": title_var,
+                "price": price_var,
+                "pct": pct_var,
+                "detail": detail_var,
+                "pct_label": pct_label,
+                "price_label": price_label,
+            })
+
+        _scroll_units = 3
+
+        def _scroll(evt):
+            if getattr(evt, "num", None) == 5 or getattr(evt, "delta", 0) == -120:
+                canvas.yview_scroll(_scroll_units, "units")
+            else:
+                canvas.yview_scroll(-_scroll_units, "units")
+            _after_scroll()
+
+        _drag_y_root = [None]
+
+        def _on_drag_start(evt):
+            _drag_y_root[0] = evt.y_root
+
+        def _on_drag_motion(evt):
+            if _drag_y_root[0] is not None:
+                dy = evt.y_root - _drag_y_root[0]
+                step = max(-12, min(12, int(dy)))
+                if step != 0:
+                    canvas.yview_scroll(step, "units")
+                    _after_scroll()
+                _drag_y_root[0] = evt.y_root
+
+        def _on_drag_end(_evt):
+            _drag_y_root[0] = None
+
+        def _bind_scroll(widget):
+            widget.bind("<MouseWheel>", _scroll)
+            widget.bind("<Button-4>", lambda e: (canvas.yview_scroll(-_scroll_units, "units"), _after_scroll()))
+            widget.bind("<Button-5>", lambda e: (canvas.yview_scroll(_scroll_units, "units"), _after_scroll()))
+            widget.bind("<Button-1>", _on_drag_start)
+            widget.bind("<B1-Motion>", _on_drag_motion)
+            widget.bind("<ButtonRelease-1>", _on_drag_end)
+
+        _bind_scroll(list_wrapper)
+        _bind_scroll(canvas)
+        _bind_scroll(inner)
+        _bind_scroll(scrollbar)
+        for row in inner.winfo_children():
+            _bind_scroll(row)
+            for child in row.winfo_children():
+                _bind_scroll(child)
+                for grand in child.winfo_children():
+                    _bind_scroll(grand)
+
+        def _fetch_and_update():
+            us_stock_data = fetch_us_stock_quotes(getattr(self, "_us_stock_items", None))
+            try:
+                self._post_ui(lambda: self._update_us_stock_quotes(us_stock_data))
+            except Exception:
+                pass
+
+        threading.Thread(target=_fetch_and_update, daemon=True).start()
+        self._us_stock_job = self.root.after(self._us_stock_refresh_sec * 1000, self._us_stock_refresh_loop)
+
+    def _update_us_stock_quotes(self, us_stock_data):
+        if getattr(self, "_closing", False) or self._view_mode != "us_stock" or not isinstance(us_stock_data, dict):
+            return
+        items = us_stock_data.get("items") or []
+        for idx, card in enumerate(getattr(self, "_us_stock_cards", [])):
+            item = items[idx] if idx < len(items) else {}
+            card["title"].set(item.get("title") or "--")
+            card["price"].set(item.get("price") or "--")
+            pct_text = item.get("pct") or "--"
+            card["pct"].set(pct_text)
+            detail_text = "   ".join(part for part in [item.get("meta1") or "", item.get("meta2") or ""] if part).strip()
+            card["detail"].set(detail_text)
+            pct_fg = self._c("fg")
+            price_fg = self._c("fg")
+            if pct_text.startswith("+"):
+                pct_fg = self._c("status_ok")
+            elif pct_text.startswith("-"):
+                pct_fg = self._c("status_err")
+            if item.get("price") == "--":
+                price_fg = self._c("fg_dim")
+            try:
+                card["pct_label"].config(fg=pct_fg)
+                card["price_label"].config(fg=price_fg)
+            except tk.TclError:
+                pass
+
+    def _us_stock_manual_refresh(self):
+        if getattr(self, "_closing", False) or self._view_mode != "us_stock":
+            return
+        btn = getattr(self, "_us_stock_refresh_btn", None)
+        if btn and btn.winfo_exists():
+            btn.config(state=tk.DISABLED)
+            self.root.after(3000, self._us_stock_reenable_refresh_btn)
+
+        def _fetch():
+            if getattr(self, "_closing", False):
+                return
+            us_stock_data = fetch_us_stock_quotes(getattr(self, "_us_stock_items", None))
+            try:
+                self._post_ui(lambda: self._update_us_stock_quotes(us_stock_data))
+            except Exception:
+                pass
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _us_stock_reenable_refresh_btn(self):
+        if getattr(self, "_closing", False) or self._view_mode != "us_stock":
+            return
+        btn = getattr(self, "_us_stock_refresh_btn", None)
+        if btn and btn.winfo_exists():
+            try:
+                btn.config(state=tk.NORMAL)
+            except tk.TclError:
+                pass
+
+    def _us_stock_refresh_loop(self):
+        if getattr(self, "_closing", False) or self._view_mode != "us_stock":
+            self._us_stock_job = None
+            return
+
+        def _fetch():
+            if getattr(self, "_closing", False):
+                return
+            us_stock_data = fetch_us_stock_quotes(getattr(self, "_us_stock_items", None))
+            self._post_ui(lambda: self._update_us_stock_quotes(us_stock_data))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+        self._us_stock_job = self.root.after(self._us_stock_refresh_sec * 1000, self._us_stock_refresh_loop)
+
     def _refresh_skills_view(self):
         for w in self.skills_frame.winfo_children():
             w.destroy()
@@ -4226,6 +5514,7 @@ class SmallScreenApp:
             if self._view_mode == "logs":
                 self._render_logs_view()
             self.foot_var.set(err[:60])
+            self._refresh_dashboard_overview_if_needed()
             return
         self.health = data
         self._online = True
@@ -4279,6 +5568,7 @@ class SmallScreenApp:
         self._update_user_summary_view()
         self._refresh_topbar()
         self.foot_var.set(self._t("update_fmt").format(time=datetime.now().strftime("%H:%M:%S"), sec=LOGS_REFRESH_SEC))
+        self._refresh_dashboard_overview_if_needed()
 
     def _on_close(self):
         self._closing = True
@@ -4343,6 +5633,13 @@ class SmallScreenApp:
         self._swipe_start_x = event.x
         self._swipe_start_y = event.y
 
+    def _is_nested_menu_active(self):
+        if getattr(self, "_view_mode", None) == "wifi":
+            return True
+        if getattr(self, "_view_mode", None) == "settings" and getattr(self, "_settings_category", "menu") != "menu":
+            return True
+        return False
+
     def _on_swipe_end(self, event):
         if getattr(self, "_closing", False):
             return
@@ -4360,12 +5657,16 @@ class SmallScreenApp:
             return
         if getattr(self, "_view_mode", None) is None:
             return
+        if self._is_nested_menu_active():
+            return
         self._toggle_view()
 
     def _on_swipe_prev(self, _event=None):
         if getattr(self, "_closing", False):
             return
         if getattr(self, "_view_mode", None) is None:
+            return
+        if self._is_nested_menu_active():
             return
         self._go_prev_view()
 
