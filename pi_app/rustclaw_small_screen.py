@@ -3,6 +3,7 @@
 # 需先启动 clawd（8787）。按 F11 或 Escape 退出全屏/关闭。
 
 import json
+import logging
 import os
 import random
 import re
@@ -109,6 +110,8 @@ from small_screen_weather_service import (
     fetch_today_weather,
 )
 from small_screen_wifi_service import connect_wifi_network, disconnect_wifi_network, scan_wifi_networks
+
+logger = logging.getLogger(__name__)
 
 HEALTH_REFRESH_SEC = 5
 LOGS_REFRESH_SEC = 5
@@ -515,7 +518,7 @@ def fetch_clawd_log_summary(user_key="", lang="CN"):
     return fetch_clawd_logs(user_key=user_key, lang=lang, lines=80, limit=8)
 
 
-def _pick_weather_text(values):
+def _legacy_pick_weather_text(values):
     if not isinstance(values, list):
         return ""
     for item in values:
@@ -527,7 +530,7 @@ def _pick_weather_text(values):
     return ""
 
 
-def _weather_icon_for_code(code):
+def _legacy_weather_icon_for_code(code):
     try:
         value = int(str(code or "").strip() or "-1")
     except Exception:
@@ -551,7 +554,7 @@ def _weather_icon_for_code(code):
     return "◌"
 
 
-def _weather_desc_for_code(code, lang="CN", fallback=""):
+def _legacy_weather_desc_for_code(code, lang="CN", fallback=""):
     try:
         value = int(str(code or "").strip() or "-1")
     except Exception:
@@ -612,7 +615,7 @@ def _weather_desc_for_code(code, lang="CN", fallback=""):
     return {"CN": "多云", "EN": "Cloudy"}[lang]
 
 
-def _wind_level_from_kmh(speed_kmh):
+def _legacy_wind_level_from_kmh(speed_kmh):
     try:
         speed = float(str(speed_kmh or "").strip())
     except Exception:
@@ -624,7 +627,7 @@ def _wind_level_from_kmh(speed_kmh):
     return 12
 
 
-def _format_weather_wind(speed_kmh, direction="", lang="CN"):
+def _legacy_format_weather_wind(speed_kmh, direction="", lang="CN"):
     speed_text = str(speed_kmh or "--").strip() or "--"
     direction_text = str(direction or "").strip()
     base = " ".join(part for part in (f"{speed_text} km/h", direction_text) if part).strip() or "--"
@@ -636,14 +639,14 @@ def _format_weather_wind(speed_kmh, direction="", lang="CN"):
     return f"{base} ({level}级)"
 
 
-def _load_small_screen_weather_config():
+def _legacy_load_small_screen_weather_config():
     cfg = _load_small_screen_market_config()
     section = (cfg.get("weather") or {}) if isinstance(cfg, dict) else {}
     city = str(section.get("city") or "").strip()
     return {"city": city}
 
 
-def _weather_day_label(date_text, offset=0, lang="CN"):
+def _legacy_weather_day_label(date_text, offset=0, lang="CN"):
     lang = "EN" if str(lang).upper() == "EN" else "CN"
     if offset == 0:
         return "Today" if lang == "EN" else "今天"
@@ -659,7 +662,7 @@ def _weather_day_label(date_text, offset=0, lang="CN"):
     return (en_days if lang == "EN" else cn_days)[idx]
 
 
-def _fetch_today_weather_once(lang="CN", city=""):
+def _legacy_fetch_today_weather_once(lang="CN", city=""):
     city = str(city or "").strip()
     query = urllib.parse.urlencode(
         {
@@ -818,7 +821,7 @@ def _fetch_today_weather_once(lang="CN", city=""):
     }
 
 
-def fetch_today_weather(lang="CN"):
+def _legacy_fetch_today_weather(lang="CN"):
     weather_cfg = _load_small_screen_weather_config()
     city = str(weather_cfg.get("city") or "").strip()
     if city:
@@ -832,12 +835,12 @@ def fetch_today_weather(lang="CN"):
         return None, str(exc)
 
 
-BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
-SINA_HQ_URL = "http://hq.sinajs.cn/list="
-SINA_REFERER = "https://finance.sina.com.cn"
-DEFAULT_A_SHARE_REFRESH_SEC = 15
-DEFAULT_CRYPTO_REFRESH_SEC = 15
-DEFAULT_US_STOCK_REFRESH_SEC = 15
+LEGACY_BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/price"
+LEGACY_SINA_HQ_URL = "http://hq.sinajs.cn/list="
+LEGACY_SINA_REFERER = "https://finance.sina.com.cn"
+LEGACY_DEFAULT_A_SHARE_REFRESH_SEC = 15
+LEGACY_DEFAULT_CRYPTO_REFRESH_SEC = 15
+LEGACY_DEFAULT_US_STOCK_REFRESH_SEC = 15
 from small_screen_clawd_client import fetch_skills_config as fetch_skills_config
 from small_screen_market_service import (
     _decode_sina_body as _decode_sina_body,
@@ -900,11 +903,11 @@ DEFAULT_US_STOCK_ITEMS = [
 ]
 
 
-def _small_screen_market_config_path():
+def _legacy_small_screen_market_config_path():
     return os.path.join(_pi_app_dir(), "small_screen_markets.toml")
 
 
-def _load_small_screen_market_config():
+def _legacy_load_small_screen_market_config():
     if tomllib is None:
         return {}
     try:
@@ -915,13 +918,13 @@ def _load_small_screen_market_config():
         return {}
 
 
-def _parse_refresh_seconds(value, default_value):
+def _legacy_parse_refresh_seconds(value, default_value):
     if isinstance(value, (int, float)):
         return max(5, min(int(value), 3600))
     return default_value
 
 
-def _load_small_screen_crypto_config():
+def _legacy_load_small_screen_crypto_config():
     cfg = _load_small_screen_market_config()
     section = (cfg.get("crypto") or {}) if isinstance(cfg, dict) else {}
     refresh_seconds = _parse_refresh_seconds(section.get("refresh_seconds"), DEFAULT_CRYPTO_REFRESH_SEC)
@@ -938,7 +941,7 @@ def _load_small_screen_crypto_config():
     return items, refresh_seconds
 
 
-def fetch_crypto_prices(crypto_items=None):
+def _legacy_fetch_crypto_prices(crypto_items=None):
     """从币安 API 拉取 USDT 价格，返回 { "BTC": "43210.5", ... }，失败返回 None。去掉小数点后尾部的 0。"""
     items = crypto_items or _load_small_screen_crypto_config()[0]
     try:
@@ -964,7 +967,7 @@ def fetch_crypto_prices(crypto_items=None):
         return None
 
 
-def _normalize_stock_code(input_text):
+def _legacy_normalize_stock_code(input_text):
     s = str(input_text or "").strip().lower()
     digits = "".join(ch for ch in s if ch.isdigit())
     if s.startswith(("sh", "sz")) and len(digits) == 6:
@@ -974,7 +977,7 @@ def _normalize_stock_code(input_text):
     return ""
 
 
-def _load_small_screen_stock_config():
+def _legacy_load_small_screen_stock_config():
     cfg = _load_small_screen_market_config()
     section = (cfg.get("stocks") or {}) if isinstance(cfg, dict) else {}
     refresh_seconds = _parse_refresh_seconds(section.get("refresh_seconds"), DEFAULT_A_SHARE_REFRESH_SEC)
@@ -994,12 +997,12 @@ def _load_small_screen_stock_config():
     return items, refresh_seconds
 
 
-def _normalize_us_stock_symbol(input_text):
+def _legacy_normalize_us_stock_symbol(input_text):
     s = str(input_text or "").strip().upper()
     return re.sub(r"[^A-Z0-9\.\-]", "", s)
 
 
-def _load_small_screen_us_stock_config():
+def _legacy_load_small_screen_us_stock_config():
     cfg = _load_small_screen_market_config()
     section = (cfg.get("us_stocks") or {}) if isinstance(cfg, dict) else {}
     refresh_seconds = _parse_refresh_seconds(section.get("refresh_seconds"), DEFAULT_US_STOCK_REFRESH_SEC)
@@ -1050,7 +1053,7 @@ def _parse_sina_quotes(body):
     return out
 
 
-def fetch_a_share_quotes(stock_items=None):
+def _legacy_fetch_a_share_quotes(stock_items=None):
     items = stock_items or _load_small_screen_stock_config()[0]
     stock_codes = [item["code"] for item in items if item.get("code")]
     quotes = {}
@@ -1091,7 +1094,7 @@ def fetch_a_share_quotes(stock_items=None):
     return {"items": out, "error": error}
 
 
-def fetch_us_stock_quotes(stock_items=None):
+def _legacy_fetch_us_stock_quotes(stock_items=None):
     items = stock_items or _load_small_screen_us_stock_config()[0]
     quotes = {}
     error = None
@@ -1170,7 +1173,7 @@ def fetch_us_stock_quotes(stock_items=None):
     return {"items": out, "error": error}
 
 
-def fetch_skills_config(user_key=""):
+def _legacy_fetch_skills_config(user_key=""):
     """GET /v1/skills/config，返回 (all_skills, enabled_set) 或 (None, None) 表示失败。"""
     try:
         raw = localhost_api_request("GET", "/v1/skills/config", user_key)
@@ -1300,9 +1303,17 @@ class SmallScreenApp:
         self.log_entries = []
         self.user_messages = []
         self._last_user_messages_signature = None
+        self._last_logs_signature = None
+        self._last_overview_render_signature = None
         self._log_entry_limit = 24
         self._pending_log_entries = []
         self._log_append_job = None
+        self._logs_empty_label = None
+        self._logs_list_wrapper = None
+        self._logs_canvas = None
+        self._logs_inner = None
+        self._logs_canvas_window_id = None
+        self._logs_rows = []
         self.error = None
         self._wifi_networks = []
         self._wifi_scan_error = None
@@ -1475,7 +1486,7 @@ class SmallScreenApp:
                     if getattr(self, "_closing", False):
                         return
                 except Exception:
-                    pass
+                    logger.exception("UI callback failed")
         except queue.Empty:
             pass
         self._start_ui_pump()
@@ -1695,10 +1706,10 @@ class SmallScreenApp:
         self.clawd_summary_var = tk.StringVar(value=_t("clawd_summary_empty"))
         self._overview_body = tk.Frame(self.overview_frame, bg=self._c("bg"))
         self._overview_body.pack(fill=tk.BOTH, expand=True)
-        self._overview_weather_icon_var = tk.StringVar(value="◌")
-        self._overview_weather_main_var = tk.StringVar(value="--")
-        self._overview_weather_meta_var = tk.StringVar(value="")
-        self._overview_weather_detail_var = tk.StringVar(value="")
+        self._overview_us_stock_icon_var = tk.StringVar(value="◌")
+        self._overview_us_stock_main_var = tk.StringVar(value="--")
+        self._overview_us_stock_meta_var = tk.StringVar(value="")
+        self._overview_us_stock_detail_var = tk.StringVar(value="")
         self._overview_stock_title_var = tk.StringVar(value=self._t("show_stock_page"))
         self._overview_stock_value_var = tk.StringVar(value="--")
         self._overview_stock_meta_var = tk.StringVar(value="")
@@ -2457,8 +2468,48 @@ class SmallScreenApp:
             self._top_recent_message_label.pack(fill=tk.X, anchor=tk.W)
 
     def _refresh_dashboard_overview_if_needed(self):
-        if getattr(self, "_view_mode", None) == "overview":
-            self._render_dashboard_overview()
+        if getattr(self, "_view_mode", None) != "overview":
+            return
+        signature = self._overview_render_signature()
+        if signature == getattr(self, "_last_overview_render_signature", None):
+            return
+        self._render_dashboard_overview()
+
+    def _overview_render_signature(self):
+        weather = self._weather_data if isinstance(getattr(self, "_weather_data", None), dict) else {}
+        return (
+            tuple(str(item) for item in self._visible_view_modes()),
+            self._overview_stock_updated_at,
+            self._overview_us_stock_updated_at,
+            self._overview_crypto_updated_at,
+            self._overview_skills_updated_at,
+            self._overview_stock_scroll_idx,
+            self._overview_us_stock_scroll_idx,
+            self._overview_crypto_scroll_idx,
+            bool(self._overview_stock_loading),
+            bool(self._overview_us_stock_loading),
+            bool(self._overview_crypto_loading),
+            bool(self._overview_skills_loading),
+            self.uptime_var.get(),
+            self.rss_var.get(),
+            str(weather.get("temperature") or ""),
+            str(weather.get("description") or ""),
+            str(weather.get("updated_at") or ""),
+            len(self.log_entries if isinstance(self.log_entries, list) else []),
+            len(self.user_messages if isinstance(self.user_messages, list) else []),
+        )
+
+    def _overview_loading_count(self):
+        return sum(
+            1
+            for attr in (
+                "_overview_stock_loading",
+                "_overview_us_stock_loading",
+                "_overview_crypto_loading",
+                "_overview_skills_loading",
+            )
+            if getattr(self, attr, False)
+        )
 
     def _theme_label(self):
         return self._t("theme_matrix") if self._theme == "matrix" else self._t("theme_default")
@@ -2572,6 +2623,8 @@ class SmallScreenApp:
         now_ts = time.time()
         ttl = max(30, refresh_sec)
         if self._overview_us_stock_loading or (now_ts - self._overview_us_stock_updated_at) < ttl:
+            return
+        if self._overview_loading_count() >= 2:
             return
         self._overview_us_stock_loading = True
 
@@ -2693,6 +2746,8 @@ class SmallScreenApp:
         now_ts = time.time()
         if self._overview_skills_loading or (now_ts - self._overview_skills_updated_at) < 60:
             return
+        if self._overview_loading_count() >= 2:
+            return
         self._overview_skills_loading = True
 
         def worker():
@@ -2736,6 +2791,8 @@ class SmallScreenApp:
         ttl = max(30, refresh_sec)
         if self._overview_stock_loading or (now_ts - self._overview_stock_updated_at) < ttl:
             return
+        if self._overview_loading_count() >= 2:
+            return
         self._overview_stock_loading = True
 
         def worker():
@@ -2772,6 +2829,8 @@ class SmallScreenApp:
         now_ts = time.time()
         ttl = max(30, refresh_sec)
         if self._overview_crypto_loading or (now_ts - self._overview_crypto_updated_at) < ttl:
+            return
+        if self._overview_loading_count() >= 2:
             return
         self._overview_crypto_loading = True
 
@@ -2832,12 +2891,6 @@ class SmallScreenApp:
             lines.append(f"{name} {price}")
         return lines
 
-    def _overview_weather_summary(self):
-        return self._overview_us_stock_summary_text()
-
-    def _overview_weather_detail_text(self):
-        return self._overview_us_stock_meta_text()
-
     def _overview_gallery_summary(self):
         state = self._t("overview_gallery_running") if self._llm_lobster_job else self._t("overview_gallery_idle")
         if self._llm_pubkey_loading or self._llm_signing or self._llm_join_in_progress:
@@ -2854,16 +2907,6 @@ class SmallScreenApp:
             f"{self._t('language')}: {self._lang}  {self._t('theme')}: {self._theme_label()}\n"
             + self._t("overview_visible_pages").format(count=visible_pages)
         )
-
-    def _overview_card_specs(self):
-        cards = [("dashboard", "RustClaw", self._overview_dashboard_summary())]
-        if self._show_weather_page:
-            cards.append(("weather", self._t("show_weather_page"), self._overview_weather_summary()))
-        if self._show_stock_page:
-            cards.append(("stock", self._t("show_stock_page"), self._overview_stock_summary_text()))
-        if self._show_crypto_page:
-            cards.append(("crypto", self._t("show_crypto_page"), self._overview_crypto_summary_text()))
-        return cards
 
     def _open_view_from_overview(self, mode):
         self._overview_return_on_swipe = True
@@ -2929,7 +2972,9 @@ class SmallScreenApp:
         )
 
     def _render_dashboard_overview(self):
-        return overview_render_dashboard(self)
+        result = overview_render_dashboard(self)
+        self._last_overview_render_signature = self._overview_render_signature()
+        return result
 
     def _prepare_settings_view(self):
         return settings_prepare_view(self)
@@ -3516,7 +3561,18 @@ class SmallScreenApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _prepare_logs_view(self):
+        self._last_logs_signature = None
         self._render_logs_view()
+
+    def _activity_fetch_profile(self):
+        mode = getattr(self, "_view_mode", None)
+        if mode == "logs":
+            return {"lines": 300, "log_limit": 24, "message_limit": 5}
+        if mode == "users":
+            return {"lines": 220, "log_limit": 12, "message_limit": 5}
+        if mode == "overview":
+            return {"lines": 120, "log_limit": 10, "message_limit": 4}
+        return {"lines": 90, "log_limit": 8, "message_limit": 3}
 
     def _prepare_users_view(self):
         self._dashboard_summary_row.config(bg=self._c("bg"))
@@ -3885,36 +3941,28 @@ class SmallScreenApp:
                 ).pack(fill=tk.X, padx=8, pady=(0, 6))
 
     def _render_logs_view(self):
-        for child in self._logs_body.winfo_children():
-            child.destroy()
         items = self.log_entries if isinstance(self.log_entries, list) else []
-        if not items:
-            tk.Label(
-                self._logs_body,
-                text=self._t("logs_empty"),
-                font=("", 11),
-                bg=self._c("bg"),
-                fg=self._c("fg_dim"),
-                anchor="w",
-                justify=tk.LEFT,
-            ).pack(anchor=tk.W)
+        signature = tuple(self._log_entry_key(item) for item in items)
+        if signature == self._last_logs_signature and getattr(self, "_logs_canvas", None):
             return
-        list_wrapper = tk.Frame(self._logs_body, bg=self._c("bg"))
-        list_wrapper.pack(fill=tk.BOTH, expand=True)
-        canvas = tk.Canvas(list_wrapper, bg=self._c("bg"), highlightthickness=0)
-        inner = tk.Frame(canvas, bg=self._c("bg"))
-        win_id = canvas.create_window((0, 0), window=inner, anchor=tk.NW)
-
-        def _on_inner_configure(_event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        def _on_canvas_configure(event):
-            canvas.itemconfig(win_id, width=event.width)
-
-        inner.bind("<Configure>", _on_inner_configure)
-        canvas.bind("<Configure>", _on_canvas_configure)
-        canvas.pack(fill=tk.BOTH, expand=True)
-
+        self._last_logs_signature = signature
+        self._ensure_logs_view_widgets()
+        if not items:
+            if self._logs_list_wrapper and self._logs_list_wrapper.winfo_exists():
+                self._logs_list_wrapper.pack_forget()
+            if self._logs_empty_label and self._logs_empty_label.winfo_exists():
+                self._logs_empty_label.config(
+                    text=self._t("logs_empty"),
+                    bg=self._c("bg"),
+                    fg=self._c("fg_dim"),
+                )
+                if self._logs_empty_label.winfo_manager() != "pack":
+                    self._logs_empty_label.pack(anchor=tk.W)
+            return
+        if self._logs_empty_label and self._logs_empty_label.winfo_exists() and self._logs_empty_label.winfo_manager():
+            self._logs_empty_label.pack_forget()
+        if self._logs_list_wrapper and self._logs_list_wrapper.winfo_exists() and self._logs_list_wrapper.winfo_manager() != "pack":
+            self._logs_list_wrapper.pack(fill=tk.BOTH, expand=True)
         color_map = {
             "LLM": self._c("summary_llm"),
             "TASK": self._c("summary_task"),
@@ -3924,43 +3972,110 @@ class SmallScreenApp:
             "SKILL": self._c("summary_skill"),
             "OTHER": self._c("summary_other"),
         }
-        for item in items:
+        self._ensure_logs_row_pool(len(items))
+        for idx, item in enumerate(items):
             time_label = item.get("time") or "--:--:--"
             detail = item.get("detail") or item.get("raw") or ""
             kind = item.get("kind") or "OTHER"
-            row = tk.Frame(inner, bg=self._c("bg"), height=18)
-            row.pack(fill=tk.X, pady=0)
-            row.pack_propagate(False)
-            tk.Label(
-                row,
+            row = self._logs_rows[idx]
+            row["frame"].config(bg=self._c("bg"), height=18)
+            row["label"].config(
                 text=f"{time_label} {detail}",
-                font=("", 9),
                 bg=self._c("bg"),
                 fg=color_map.get(kind, self._c("fg")),
+            )
+            if row["frame"].winfo_manager() != "pack":
+                row["frame"].pack(fill=tk.X, pady=0)
+        for row in self._logs_rows[len(items):]:
+            if row["frame"].winfo_exists() and row["frame"].winfo_manager():
+                row["frame"].pack_forget()
+        self._refresh_logs_scroll_region()
+        self._scroll_logs_to_end()
+
+    def _ensure_logs_view_widgets(self):
+        body = getattr(self, "_logs_body", None)
+        if body is None or not body.winfo_exists():
+            return
+        if self._logs_empty_label is None or not self._logs_empty_label.winfo_exists():
+            self._logs_empty_label = tk.Label(
+                body,
+                text=self._t("logs_empty"),
+                font=("", 11),
+                bg=self._c("bg"),
+                fg=self._c("fg_dim"),
                 anchor="w",
                 justify=tk.LEFT,
-            ).pack(fill=tk.X, padx=(2, 0))
+            )
+        if self._logs_list_wrapper is not None and self._logs_list_wrapper.winfo_exists():
+            return
+        self._logs_list_wrapper = tk.Frame(body, bg=self._c("bg"))
+        self._logs_canvas = tk.Canvas(self._logs_list_wrapper, bg=self._c("bg"), highlightthickness=0)
+        self._logs_inner = tk.Frame(self._logs_canvas, bg=self._c("bg"))
+        self._logs_canvas_window_id = self._logs_canvas.create_window((0, 0), window=self._logs_inner, anchor=tk.NW)
+
+        self._logs_inner.bind("<Configure>", lambda _event: self._refresh_logs_scroll_region())
+        self._logs_canvas.bind(
+            "<Configure>",
+            lambda event: self._logs_canvas.itemconfig(self._logs_canvas_window_id, width=event.width)
+            if self._logs_canvas and self._logs_canvas.winfo_exists()
+            else None,
+        )
+        self._logs_canvas.pack(fill=tk.BOTH, expand=True)
 
         def _scroll(evt):
             if getattr(evt, "num", None) == 5 or getattr(evt, "delta", 0) == -120:
-                canvas.yview_scroll(4, "units")
+                self._logs_canvas.yview_scroll(4, "units")
             else:
-                canvas.yview_scroll(-4, "units")
+                self._logs_canvas.yview_scroll(-4, "units")
 
         def _bind_scroll(widget):
             widget.bind("<MouseWheel>", _scroll)
-            widget.bind("<Button-4>", lambda e: canvas.yview_scroll(-4, "units"))
-            widget.bind("<Button-5>", lambda e: canvas.yview_scroll(4, "units"))
+            widget.bind("<Button-4>", lambda e: self._logs_canvas.yview_scroll(-4, "units"))
+            widget.bind("<Button-5>", lambda e: self._logs_canvas.yview_scroll(4, "units"))
 
-        _bind_scroll(canvas)
-        _bind_scroll(inner)
-        for row in inner.winfo_children():
-            _bind_scroll(row)
-            for child in row.winfo_children():
-                _bind_scroll(child)
+        self._logs_scroll_handler = _bind_scroll
+        _bind_scroll(self._logs_list_wrapper)
+        _bind_scroll(self._logs_canvas)
+        _bind_scroll(self._logs_inner)
+        self._logs_rows = []
+
+    def _ensure_logs_row_pool(self, size):
+        self._ensure_logs_view_widgets()
+        while len(self._logs_rows) < size:
+            row = tk.Frame(self._logs_inner, bg=self._c("bg"), height=18)
+            row.pack_propagate(False)
+            label = tk.Label(
+                row,
+                font=("", 9),
+                bg=self._c("bg"),
+                fg=self._c("fg"),
+                anchor="w",
+                justify=tk.LEFT,
+            )
+            label.pack(fill=tk.X, padx=(2, 0))
+            bind_scroll = getattr(self, "_logs_scroll_handler", None)
+            if bind_scroll is not None:
+                bind_scroll(row)
+                bind_scroll(label)
+            self._logs_rows.append({"frame": row, "label": label})
+
+    def _refresh_logs_scroll_region(self):
+        if self._logs_canvas is None or not self._logs_canvas.winfo_exists():
+            return
         try:
-            canvas.update_idletasks()
-            canvas.yview_moveto(1.0)
+            self._logs_canvas.configure(scrollregion=self._logs_canvas.bbox("all"))
+        except tk.TclError:
+            pass
+
+    def _scroll_logs_to_end(self):
+        if self._logs_canvas is None or not self._logs_canvas.winfo_exists():
+            return
+        items = self.log_entries if isinstance(self.log_entries, list) else []
+        if not items:
+            return
+        try:
+            self._logs_canvas.update_idletasks()
+            self._logs_canvas.yview_moveto(1.0)
         except tk.TclError:
             pass
 
@@ -5449,7 +5564,26 @@ class SmallScreenApp:
                 if now_ts >= next_health_at:
                     health_data, health_err = fetch_health(self._auth_key)
                     next_health_at = now_ts + HEALTH_REFRESH_SEC
-                logs, user_messages, _summary_err = fetch_clawd_activity(self._auth_key, self._lang)
+                profile = self._activity_fetch_profile()
+                activity_started_at = time.perf_counter()
+                logs, user_messages, summary_err = fetch_clawd_activity(
+                    self._auth_key,
+                    self._lang,
+                    lines=profile["lines"],
+                    log_limit=profile["log_limit"],
+                    message_limit=profile["message_limit"],
+                )
+                activity_elapsed_ms = int((time.perf_counter() - activity_started_at) * 1000)
+                if summary_err:
+                    logger.warning("Activity refresh failed: %s", summary_err)
+                else:
+                    logger.debug(
+                        "Activity refresh completed in %sms (lines=%s, logs=%s, messages=%s)",
+                        activity_elapsed_ms,
+                        profile["lines"],
+                        len(logs or []),
+                        len(user_messages or []),
+                    )
                 if getattr(self, "_closing", False):
                     break
                 self._post_ui(
