@@ -1,0 +1,35 @@
+{
+  "atcab_get_device": {
+    "restype": "ctypes.c_void_p",
+    "argtypes": null,
+    "docstring": "Get the global device object. ",
+    "parameters": []
+  },
+  "atcab_get_device_type_ext": {
+    "restype": "ctypes.c_uint8",
+    "argtypes": [
+      "ctypes.c_void_p"
+    ],
+    "docstring": "Get the selected device type of rthe device context. ",
+    "parameters": [
+      [
+        "device",
+        "Device context pointer "
+      ]
+    ]
+  },
+  "atcab_get_device_type": {
+    "restype": "ctypes.c_uint8",
+    "argtypes": null,
+    "docstring": "Get the current device type configured for the global ATCADevice. ",
+    "parameters": []
+  },
+  "atcab_get_device_address": {
+    "restype": "ctypes.c_uint8",
+    "argtypes": [
+      "ctypes.c_void_p"
+    ],
+    "docstring": "Get the current device address based on the configured device and interface. ",
+    "parameters": []
+  }
+}

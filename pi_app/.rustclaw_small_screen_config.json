@@ -1,0 +1,13 @@
+{
+  "lang": "CN",
+  "show_crypto": true,
+  "show_gallery": true,
+  "show_logs": true,
+  "show_messages": true,
+  "show_skills": true,
+  "show_stock": true,
+  "show_us_stock": true,
+  "show_weather": true,
+  "theme": "matrix",
+  "user_key": "rk-a0832faf44d14ba1b174226120291aa7"
+}
