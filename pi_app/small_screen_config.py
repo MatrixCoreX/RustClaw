@@ -1,3 +1,4 @@
+import json
 import os
 import secrets
 import sqlite3
@@ -65,6 +66,26 @@ def _key_file():
     return os.path.join(_writable_pi_app_dir(), ".rustclaw_small_screen_key")
 
 
+def _settings_file():
+    return os.path.join(_writable_pi_app_dir(), ".rustclaw_small_screen_config.json")
+
+
+def _legacy_setting_files():
+    return {
+        "lang": _lang_file(),
+        "theme": _theme_file(),
+        "show_stock": _stock_page_visible_file(),
+        "show_us_stock": _us_stock_page_visible_file(),
+        "show_messages": _messages_page_visible_file(),
+        "show_logs": _logs_page_visible_file(),
+        "show_gallery": _gallery_page_visible_file(),
+        "show_skills": _skills_page_visible_file(),
+        "show_weather": _weather_page_visible_file(),
+        "show_crypto": _crypto_page_visible_file(),
+        "user_key": _key_file(),
+    }
+
+
 def _root_dir():
     if getattr(sys, "frozen", False):
         exe = os.path.abspath(sys.executable)
@@ -87,36 +108,120 @@ def _config_path():
     return os.path.join(_root_dir(), "configs", "config.toml")
 
 
-def load_theme():
+def _load_settings_dict():
     try:
-        with open(_theme_file(), "r", encoding="utf-8") as f:
-            theme = f.read().strip().lower()
-            if theme in ("default", "matrix"):
-                return theme
+        with open(_settings_file(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_settings_dict(settings):
+    try:
+        with open(_settings_file(), "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=True, indent=2, sort_keys=True)
     except Exception:
         pass
+
+
+def _save_setting_value(name, value):
+    settings = _load_settings_dict()
+    settings[name] = value
+    _save_settings_dict(settings)
+    legacy_path = _legacy_setting_files().get(name)
+    if legacy_path and os.path.exists(legacy_path):
+        try:
+            os.remove(legacy_path)
+        except Exception:
+            pass
+
+
+def _legacy_read_text(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return None
+
+
+def _legacy_load_theme():
+    theme = (_legacy_read_text(_theme_file()) or "").strip().lower()
+    if theme in ("default", "matrix"):
+        return theme
     return "default"
 
 
-def save_theme(theme):
-    try:
-        with open(_theme_file(), "w", encoding="utf-8") as f:
-            f.write(theme)
-    except Exception:
-        pass
+def _legacy_load_lang():
+    lang = (_legacy_read_text(_lang_file()) or "").strip().upper()
+    if lang in ("EN", "CN"):
+        return lang
+    return _default_lang_from_system()
 
 
-def _load_bool_setting(path, default=True):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            value = f.read().strip().lower()
-    except Exception:
+def _legacy_load_auth_key():
+    return (_legacy_read_text(_key_file()) or "").strip()
+
+
+def _load_bool_text(raw, default=True):
+    if raw is None:
         return default
+    value = str(raw).strip().lower()
     if value in ("1", "true", "yes", "on"):
         return True
     if value in ("0", "false", "no", "off"):
         return False
     return default
+
+
+def _legacy_load_bool_setting(path, default=True):
+    return _load_bool_text(_legacy_read_text(path), default=default)
+
+
+def migrate_small_screen_settings(remove_legacy=False):
+    settings = _load_settings_dict()
+    merged = {
+        "lang": str(settings.get("lang") or _legacy_load_lang()).upper(),
+        "theme": str(settings.get("theme") or _legacy_load_theme()).lower(),
+        "show_stock": bool(settings.get("show_stock", _legacy_load_bool_setting(_stock_page_visible_file(), True))),
+        "show_us_stock": bool(settings.get("show_us_stock", _legacy_load_bool_setting(_us_stock_page_visible_file(), True))),
+        "show_messages": bool(settings.get("show_messages", _legacy_load_bool_setting(_messages_page_visible_file(), True))),
+        "show_logs": bool(settings.get("show_logs", _legacy_load_bool_setting(_logs_page_visible_file(), True))),
+        "show_gallery": bool(settings.get("show_gallery", _legacy_load_bool_setting(_gallery_page_visible_file(), True))),
+        "show_skills": bool(settings.get("show_skills", _legacy_load_bool_setting(_skills_page_visible_file(), True))),
+        "show_weather": bool(settings.get("show_weather", _legacy_load_bool_setting(_weather_page_visible_file(), True))),
+        "show_crypto": bool(settings.get("show_crypto", _legacy_load_bool_setting(_crypto_page_visible_file(), True))),
+        "user_key": str(settings.get("user_key") or _legacy_load_auth_key()).strip(),
+    }
+    if merged["lang"] not in ("EN", "CN"):
+        merged["lang"] = _default_lang_from_system()
+    if merged["theme"] not in ("default", "matrix"):
+        merged["theme"] = "default"
+    _save_settings_dict(merged)
+    if remove_legacy:
+        for path in _legacy_setting_files().values():
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+    return merged
+
+
+def load_theme():
+    settings = _load_settings_dict()
+    theme = str(settings.get("theme") or "").strip().lower()
+    if theme in ("default", "matrix"):
+        return theme
+    return _legacy_load_theme()
+
+
+def save_theme(theme):
+    _save_setting_value("theme", str(theme).strip().lower())
+
+
+def _load_bool_setting(path, default=True):
+    return _legacy_load_bool_setting(path, default=default)
 
 
 def _save_bool_setting(path, value):
@@ -128,83 +233,102 @@ def _save_bool_setting(path, value):
 
 
 def load_stock_page_visible():
-    return _load_bool_setting(_stock_page_visible_file(), default=True)
+    settings = _load_settings_dict()
+    if "show_stock" in settings:
+        return bool(settings.get("show_stock"))
+    return _legacy_load_bool_setting(_stock_page_visible_file(), default=True)
 
 
 def save_stock_page_visible(visible):
-    _save_bool_setting(_stock_page_visible_file(), visible)
+    _save_setting_value("show_stock", bool(visible))
 
 
 def load_us_stock_page_visible():
-    return _load_bool_setting(_us_stock_page_visible_file(), default=True)
+    settings = _load_settings_dict()
+    if "show_us_stock" in settings:
+        return bool(settings.get("show_us_stock"))
+    return _legacy_load_bool_setting(_us_stock_page_visible_file(), default=True)
 
 
 def save_us_stock_page_visible(visible):
-    _save_bool_setting(_us_stock_page_visible_file(), visible)
+    _save_setting_value("show_us_stock", bool(visible))
 
 
 def load_messages_page_visible():
-    return _load_bool_setting(_messages_page_visible_file(), default=True)
+    settings = _load_settings_dict()
+    if "show_messages" in settings:
+        return bool(settings.get("show_messages"))
+    return _legacy_load_bool_setting(_messages_page_visible_file(), default=True)
 
 
 def save_messages_page_visible(visible):
-    _save_bool_setting(_messages_page_visible_file(), visible)
+    _save_setting_value("show_messages", bool(visible))
 
 
 def load_logs_page_visible():
-    return _load_bool_setting(_logs_page_visible_file(), default=True)
+    settings = _load_settings_dict()
+    if "show_logs" in settings:
+        return bool(settings.get("show_logs"))
+    return _legacy_load_bool_setting(_logs_page_visible_file(), default=True)
 
 
 def save_logs_page_visible(visible):
-    _save_bool_setting(_logs_page_visible_file(), visible)
+    _save_setting_value("show_logs", bool(visible))
 
 
 def load_gallery_page_visible():
-    return _load_bool_setting(_gallery_page_visible_file(), default=True)
+    settings = _load_settings_dict()
+    if "show_gallery" in settings:
+        return bool(settings.get("show_gallery"))
+    return _legacy_load_bool_setting(_gallery_page_visible_file(), default=True)
 
 
 def save_gallery_page_visible(visible):
-    _save_bool_setting(_gallery_page_visible_file(), visible)
+    _save_setting_value("show_gallery", bool(visible))
 
 
 def load_skills_page_visible():
-    return _load_bool_setting(_skills_page_visible_file(), default=True)
+    settings = _load_settings_dict()
+    if "show_skills" in settings:
+        return bool(settings.get("show_skills"))
+    return _legacy_load_bool_setting(_skills_page_visible_file(), default=True)
 
 
 def save_skills_page_visible(visible):
-    _save_bool_setting(_skills_page_visible_file(), visible)
+    _save_setting_value("show_skills", bool(visible))
 
 
 def load_weather_page_visible():
-    return _load_bool_setting(_weather_page_visible_file(), default=True)
+    settings = _load_settings_dict()
+    if "show_weather" in settings:
+        return bool(settings.get("show_weather"))
+    return _legacy_load_bool_setting(_weather_page_visible_file(), default=True)
 
 
 def save_weather_page_visible(visible):
-    _save_bool_setting(_weather_page_visible_file(), visible)
+    _save_setting_value("show_weather", bool(visible))
 
 
 def load_crypto_page_visible():
-    return _load_bool_setting(_crypto_page_visible_file(), default=True)
+    settings = _load_settings_dict()
+    if "show_crypto" in settings:
+        return bool(settings.get("show_crypto"))
+    return _legacy_load_bool_setting(_crypto_page_visible_file(), default=True)
 
 
 def save_crypto_page_visible(visible):
-    _save_bool_setting(_crypto_page_visible_file(), visible)
+    _save_setting_value("show_crypto", bool(visible))
 
 
 def load_auth_key():
-    try:
-        with open(_key_file(), "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except Exception:
-        return ""
+    settings = _load_settings_dict()
+    if "user_key" in settings:
+        return str(settings.get("user_key") or "").strip()
+    return _legacy_load_auth_key()
 
 
 def save_auth_key(user_key):
-    try:
-        with open(_key_file(), "w", encoding="utf-8") as f:
-            f.write((user_key or "").strip())
-    except Exception:
-        pass
+    _save_setting_value("user_key", (user_key or "").strip())
 
 
 def _load_sqlite_path_from_config():
@@ -293,19 +417,12 @@ def _default_lang_from_system():
 
 
 def load_lang():
-    try:
-        with open(_lang_file(), "r", encoding="utf-8") as f:
-            lang = f.read().strip().upper()
-            if lang in ("EN", "CN"):
-                return lang
-    except Exception:
-        pass
-    return _default_lang_from_system()
+    settings = _load_settings_dict()
+    lang = str(settings.get("lang") or "").strip().upper()
+    if lang in ("EN", "CN"):
+        return lang
+    return _legacy_load_lang()
 
 
 def save_lang(lang):
-    try:
-        with open(_lang_file(), "w", encoding="utf-8") as f:
-            f.write(lang)
-    except Exception:
-        pass
+    _save_setting_value("lang", str(lang).strip().upper())
