@@ -14,9 +14,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind,
-    DetectFeishuBindSessionRequest, DetectFeishuBindSessionResponse,
-    FeishuBindSessionStatusResponse, ResolveChannelBindingRequest,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, DetectFeishuBindSessionRequest,
+    DetectFeishuBindSessionResponse, FeishuBindSessionStatusResponse, ResolveChannelBindingRequest,
     ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
     TaskQueryResponse, TaskStatus,
 };
@@ -1820,7 +1819,10 @@ mod tests {
             .expect("bind mock feishu");
         let feishu_addr = feishu_listener.local_addr().expect("mock feishu addr");
         let feishu_app = Router::new()
-            .route("/open-apis/auth/v3/tenant_access_token/internal", post(mock_token))
+            .route(
+                "/open-apis/auth/v3/tenant_access_token/internal",
+                post(mock_token),
+            )
             .route("/open-apis/im/v1/messages", post(mock_send))
             .with_state(feishu_state.clone());
         tokio::spawn(async move {

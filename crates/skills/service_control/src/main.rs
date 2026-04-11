@@ -921,7 +921,10 @@ fn brew_services_list() -> Option<Vec<BrewServiceEntry>> {
     if !command_exists("brew") {
         return None;
     }
-    let output = Command::new("brew").args(["services", "list"]).output().ok()?;
+    let output = Command::new("brew")
+        .args(["services", "list"])
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -983,12 +986,14 @@ fn launchctl_list() -> Option<Vec<LaunchdEntry>> {
             continue;
         }
         let label = cols[cols.len() - 1].to_string();
-        let status_code = cols
-            .get(cols.len() - 2)
-            .and_then(|v| v.parse::<i64>().ok());
-        let pid = cols
-            .first()
-            .and_then(|v| if *v == "-" { None } else { v.parse::<i64>().ok() });
+        let status_code = cols.get(cols.len() - 2).and_then(|v| v.parse::<i64>().ok());
+        let pid = cols.first().and_then(|v| {
+            if *v == "-" {
+                None
+            } else {
+                v.parse::<i64>().ok()
+            }
+        });
         entries.push(LaunchdEntry {
             pid,
             status_code,
@@ -1620,7 +1625,10 @@ fn run_control_inner(
                             match o2 {
                                 Ok(outp2) => {
                                     if outp2.status.success() {
-                                        out.add_evidence(format!("brew services {} {}", cmd, target));
+                                        out.add_evidence(format!(
+                                            "brew services {} {}",
+                                            cmd, target
+                                        ));
                                         Ok(())
                                     } else {
                                         out.fail("unable to execute via sudo");
@@ -1748,7 +1756,10 @@ fn fetch_logs_inner(target: &str, manager: &str, tail_lines: usize) -> Vec<Strin
             if let Some(summary) = macos_log_excerpt(target, tail_lines) {
                 evidence.push(format!("macOS log show recent: {}", summary));
             } else {
-                evidence.push(format!("no recent macOS unified log entries found for {}", target));
+                evidence.push(format!(
+                    "no recent macOS unified log entries found for {}",
+                    target
+                ));
             }
         }
         _ => {

@@ -337,8 +337,11 @@ async fn read_skill_runner_stderr_line(stderr: &mut Option<tokio::process::Child
     };
     let mut err_reader = BufReader::new(stderr);
     let mut err_line = String::new();
-    let _ = tokio::time::timeout(Duration::from_millis(200), err_reader.read_line(&mut err_line))
-        .await;
+    let _ = tokio::time::timeout(
+        Duration::from_millis(200),
+        err_reader.read_line(&mut err_line),
+    )
+    .await;
     err_line
 }
 

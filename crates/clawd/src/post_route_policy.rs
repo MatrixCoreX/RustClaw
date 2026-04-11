@@ -58,7 +58,10 @@ pub(crate) fn apply_post_route_policy(
     route_result: RouteResult,
     raw_has_concrete_locator_hint: bool,
     resolved_has_concrete_locator_hint: bool,
+    raw_has_explicit_path_locator_hint: bool,
+    resolved_has_explicit_path_locator_hint: bool,
     resolved_intent_inherits_prior_operation: bool,
+    immediate_prior_turn_was_clarify: bool,
     locator_resolution: LocatorResolution,
 ) -> PostRoutePolicyResult {
     let mut execution_route_result = route_result.clone();
@@ -118,17 +121,59 @@ pub(crate) fn apply_post_route_policy(
 
     let inherited_operation_with_direct_locator = auto_locator_resolved_direct
         && resolved_intent_inherits_prior_operation
+        && immediate_prior_turn_was_clarify
         && matches!(execution_route_result.routed_mode, RoutedMode::AskClarify)
         && execution_route_result.needs_clarify;
     if inherited_operation_with_direct_locator {
         execution_route_result.needs_clarify = false;
-        execution_route_result.routed_mode = if matches!(
-            execution_route_result.output_contract.response_shape,
-            OutputResponseShape::Scalar | OutputResponseShape::FileToken
-        ) || execution_route_result.output_contract.delivery_required
-        {
+        execution_route_result.routed_mode =
+            if matches!(
+                execution_route_result.output_contract.response_shape,
+                OutputResponseShape::Scalar | OutputResponseShape::FileToken
+            ) || execution_route_result.output_contract.delivery_required
+            {
+                RoutedMode::Act
+            } else if execution_route_result
+                .output_contract
+                .requires_content_evidence
+            {
+                RoutedMode::ChatAct
+            } else {
+                RoutedMode::Act
+            };
+    }
+
+    let explicit_path_requires_execution =
+        matches!(execution_route_result.routed_mode, RoutedMode::AskClarify)
+            && execution_route_result.needs_clarify
+            && !auto_locator_resolved_direct
+            && locator_kind_requires_path_binding(
+                execution_route_result.output_contract.locator_kind,
+            )
+            && (raw_has_explicit_path_locator_hint || resolved_has_explicit_path_locator_hint)
+            && (resolved_intent_inherits_prior_operation
+                || execution_route_result
+                    .output_contract
+                    .requires_content_evidence
+                || execution_route_result.output_contract.delivery_required
+                || matches!(
+                    execution_route_result.output_contract.response_shape,
+                    OutputResponseShape::Scalar
+                ));
+    if explicit_path_requires_execution {
+        execution_route_result.needs_clarify = false;
+        execution_route_result.routed_mode = if execution_route_result
+            .output_contract
+            .delivery_required
+            || matches!(
+                execution_route_result.output_contract.response_shape,
+                OutputResponseShape::Scalar | OutputResponseShape::FileToken
+            ) {
             RoutedMode::Act
-        } else if execution_route_result.output_contract.requires_content_evidence {
+        } else if execution_route_result
+            .output_contract
+            .requires_content_evidence
+        {
             RoutedMode::ChatAct
         } else {
             RoutedMode::Act
@@ -151,10 +196,10 @@ pub(crate) fn apply_post_route_policy(
 
     let clarify_reason = if missing_locator_for_path_scoped_content {
         if execution_route_result.route_reason.trim().is_empty() {
-            "missing_concrete_locator_for_path_scoped_content".to_string()
+            "locator_required_for_path_scoped_content".to_string()
         } else {
             format!(
-                "{}; missing_concrete_locator_for_path_scoped_content",
+                "{}; locator_required_for_path_scoped_content",
                 execution_route_result.route_reason
             )
         }
@@ -202,6 +247,8 @@ mod tests {
             risk_ceiling: RiskCeiling::Unknown,
             resume_behavior: ResumeBehavior::None,
             schedule_kind: ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: IntentOutputContract {
                 response_shape: OutputResponseShape::Scalar,
@@ -221,6 +268,9 @@ mod tests {
             true,
             true,
             false,
+            false,
+            false,
+            false,
             LocatorResolution::Fuzzy(vec!["/tmp/a".to_string(), "/tmp/b".to_string()]),
         );
         assert!(matches!(
@@ -232,8 +282,16 @@ mod tests {
 
     #[test]
     fn missing_locator_still_forces_clarify() {
-        let result =
-            apply_post_route_policy(route_result(), false, false, false, LocatorResolution::None);
+        let result = apply_post_route_policy(
+            route_result(),
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::None,
+        );
         assert!(matches!(
             result.execution_route_result.routed_mode,
             RoutedMode::AskClarify
@@ -247,6 +305,9 @@ mod tests {
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
         let result = apply_post_route_policy(
             route,
+            false,
+            false,
+            false,
             false,
             false,
             false,
@@ -270,6 +331,9 @@ mod tests {
             route,
             true,
             true,
+            false,
+            false,
+            false,
             false,
             LocatorResolution::Direct("/tmp/README.md".to_string()),
         );
@@ -296,6 +360,9 @@ mod tests {
             route,
             false,
             false,
+            false,
+            false,
+            true,
             true,
             LocatorResolution::Direct("/tmp/document".to_string()),
         );
@@ -305,5 +372,78 @@ mod tests {
         ));
         assert!(!result.execution_route_result.needs_clarify);
         assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/document"));
+    }
+
+    #[test]
+    fn explicit_relative_path_can_rescue_ask_clarify_back_to_execution() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::AskClarify;
+        route.needs_clarify = true;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert!(!result.execution_route_result.needs_clarify);
+        assert!(matches!(
+            result.execution_route_result.routed_mode,
+            RoutedMode::ChatAct
+        ));
+    }
+
+    #[test]
+    fn explicit_relative_path_followup_rescues_scalar_binding_execution() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::AskClarify;
+        route.needs_clarify = true;
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+            LocatorResolution::None,
+        );
+        assert!(!result.execution_route_result.needs_clarify);
+        assert!(matches!(
+            result.execution_route_result.routed_mode,
+            RoutedMode::Act
+        ));
+    }
+
+    #[test]
+    fn inherited_operation_without_prior_clarify_stays_in_ask_clarify() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::AskClarify;
+        route.needs_clarify = true;
+        route.output_contract.locator_kind = OutputLocatorKind::None;
+        route.output_contract.requires_content_evidence = false;
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            LocatorResolution::Direct("/tmp/restart_clawd_latest.sh".to_string()),
+        );
+        assert!(result.execution_route_result.needs_clarify);
+        assert!(matches!(
+            result.execution_route_result.routed_mode,
+            RoutedMode::AskClarify
+        ));
     }
 }

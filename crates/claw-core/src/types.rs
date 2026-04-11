@@ -53,6 +53,25 @@ pub struct SubmitTaskResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectClassifyRequest {
+    pub source: String,
+    pub text: String,
+    #[serde(default)]
+    pub chat_id: Option<i64>,
+    #[serde(default)]
+    pub channel: Option<ChannelKind>,
+    #[serde(default)]
+    pub external_user_id: Option<String>,
+    #[serde(default)]
+    pub external_chat_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectClassifyResponse {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthIdentity {
     pub user_key: String,
     pub role: String,

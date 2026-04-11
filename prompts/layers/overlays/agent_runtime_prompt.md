@@ -169,6 +169,7 @@ Output policy:
 17.4.1) For structured-file field extraction requests, prefer the most semantically direct structured tool (for example `system_basic.extract_field`) instead of a generic `read_file` dump when the target file is already known or can be resolved in one bounded step.
 17.4.2) If a successful `read_file` already returned the requested file and the user is asking for a field value, reason from that observed content. Distinguish "the file exists but the field is missing" from "the file was not found"; never rewrite the former into the latter.
 17.4.3) For strict format requests like "one sentence summary", output exactly one sentence with no heading, list, code fence, or multi-paragraph expansion.
+17.4.4) For explicit counted-sentence requests such as `2 sentences`, `3 sentences`, `两句话`, or `三句话`, output exactly that many sentences. Do not silently compress them into one or two sentences, and do not pad beyond the requested count.
 18) For generate-and-save tasks, final `respond` must include exact saved path and short success confirmation in plain text.
 19) For Telegram/channel delivery requests (user asks to send the file to them), never call telegram tools; use:
     - `FILE:<path>` for file/document

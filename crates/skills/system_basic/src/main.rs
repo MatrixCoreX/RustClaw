@@ -1077,11 +1077,7 @@ fn top_process_snapshot(limit: usize) -> Option<Vec<String>> {
         .into_iter()
         .filter_map(|line| parse_process_snapshot_row(&line))
         .collect::<Vec<_>>();
-    rows.sort_by(|a, b| {
-        b.rss_kb
-            .cmp(&a.rss_kb)
-            .then_with(|| a.pid.cmp(&b.pid))
-    });
+    rows.sort_by(|a, b| b.rss_kb.cmp(&a.rss_kb).then_with(|| a.pid.cmp(&b.pid)));
     let mut out = vec!["PID COMM %CPU RSS_KB".to_string()];
     for row in rows.into_iter().take(limit) {
         out.push(format!(

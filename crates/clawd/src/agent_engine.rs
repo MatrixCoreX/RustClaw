@@ -912,7 +912,7 @@ mod tests {
     #[test]
     fn test_normalized_observed_listing_trims_blank_lines() {
         let observed = "\n file1.txt \n\n subdir/ \n";
-        let out = super::observed_output::normalized_observed_listing(observed);
+        let out = super::observed_output::normalized_observed_listing(observed, None);
         assert_eq!(out.as_deref(), Some("file1.txt\nsubdir/"));
     }
 

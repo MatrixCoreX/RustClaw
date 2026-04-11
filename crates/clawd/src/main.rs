@@ -9,7 +9,8 @@ use axum::{Json, Router};
 use claw_core::config::AppConfig;
 use claw_core::hard_rules::types::MainFlowRules;
 use claw_core::types::{
-    ApiResponse, HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse,
+    ApiResponse, AuthIdentity, ChannelKind, DirectClassifyRequest, DirectClassifyResponse,
+    HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -88,9 +89,9 @@ pub(crate) use pipeline_types::{
     ScheduleKind,
 };
 pub(crate) use prompt_utils::{
-    extract_first_json_object_any, log_prompt_render, parse_agent_action_json_with_repair,
-    parse_llm_json_extract_or_any, parse_llm_json_extract_then_raw, parse_llm_json_raw_or_any,
-    render_prompt_template,
+    extract_first_json_object_any, extract_first_json_value_any, log_prompt_render,
+    parse_agent_action_json_with_repair, parse_llm_json_extract_or_any,
+    parse_llm_json_extract_then_raw, parse_llm_json_raw_or_any, render_prompt_template,
 };
 use providers::{
     append_model_io_log, call_provider_with_retry, log_color_enabled,
@@ -104,18 +105,16 @@ pub(crate) use repo::{
     delete_auth_key_by_id, exchange_credential_status_for_user_key,
     finalize_pending_channel_bind_session, find_recent_failed_resume_context,
     get_auth_key_value_by_id, get_pending_channel_bind_session_by_id,
-    get_pending_channel_bind_session_by_token, get_task_query_record, insert_audit_log,
-    has_channel_binding_for_user_key, insert_submitted_task, is_user_allowed,
-    list_active_tasks_internal, list_auth_keys,
-    mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
-    mark_pending_channel_bind_session_failed, maybe_find_submit_task_dedup, normalize_user_key,
-    reset_channel_binding_state_for_user_key,
-    resolve_auth_identity_by_key,
-    resolve_channel_binding_identity, resolve_submit_task_context, stable_i64_from_key,
-    submit_task_audit_detail, task_count_by_status, task_kind_name, update_auth_key_by_id,
-    update_task_timeout, upsert_exchange_credential_for_user_key, upsert_webd_login_account,
-    verify_webd_password_login, PendingChannelBindSession, SubmitTaskAccessError,
-    SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
+    get_pending_channel_bind_session_by_token, get_task_query_record,
+    has_channel_binding_for_user_key, insert_audit_log, insert_submitted_task, is_user_allowed,
+    list_active_tasks_internal, list_auth_keys, mark_pending_channel_bind_session_detected,
+    mark_pending_channel_bind_session_expired, mark_pending_channel_bind_session_failed,
+    maybe_find_submit_task_dedup, normalize_user_key, reset_channel_binding_state_for_user_key,
+    resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
+    stable_i64_from_key, submit_task_audit_detail, task_count_by_status, task_kind_name,
+    update_auth_key_by_id, update_task_timeout, upsert_exchange_credential_for_user_key,
+    upsert_webd_login_account, verify_webd_password_login, PendingChannelBindSession,
+    SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 pub(crate) use runtime::{
@@ -130,8 +129,8 @@ use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
 pub(crate) use system_health::{
     channel_gateway_process_stats, current_rss_bytes, daemon_process_pids_by_name,
     feishud_process_stats, larkd_process_stats, oldest_running_task_age_seconds,
-    telegramd_process_stats, wa_webd_process_stats,
-    webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
+    telegramd_process_stats, wa_webd_process_stats, webd_process_stats, wechatd_process_stats,
+    whatsappd_process_stats,
 };
 pub(crate) use worker::task_payload_value;
 use worker::{
@@ -538,6 +537,7 @@ async fn main() -> anyhow::Result<()> {
     let api = Router::new()
         .merge(http::ui_routes::build_ui_router())
         .route("/tasks", post(submit_task))
+        .route("/classifiers/direct", post(classify_direct))
         .route("/tasks/:task_id", get(get_task))
         .route("/tasks/active", post(list_active_tasks))
         .route("/tasks/cancel", post(cancel_tasks))
@@ -815,6 +815,114 @@ async fn get_task(
         Err(err) => {
             error!("Read task failed: {}", err);
             api_err::<TaskQueryResponse>(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        }
+    }
+}
+
+fn classifier_source_allowed(rules: &MainFlowRules, source: &str) -> bool {
+    let normalized = source.trim().to_ascii_lowercase();
+    !normalized.is_empty()
+        && rules
+            .classifier_direct_sources
+            .iter()
+            .any(|v| v == &normalized)
+}
+
+fn channel_kind_label(kind: ChannelKind) -> &'static str {
+    match kind {
+        ChannelKind::Telegram => "telegram",
+        ChannelKind::Whatsapp => "whatsapp",
+        ChannelKind::Ui => "ui",
+        ChannelKind::Wechat => "wechat",
+        ChannelKind::Feishu => "feishu",
+        ChannelKind::Lark => "lark",
+    }
+}
+
+fn require_auth_identity_for_api<T: Serialize>(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<AuthIdentity, (StatusCode, Json<ApiResponse<T>>)> {
+    let Some(raw_key) = headers
+        .get("x-rustclaw-key")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        return Err(api_err::<T>(
+            StatusCode::UNAUTHORIZED,
+            "Missing X-RustClaw-Key header",
+        ));
+    };
+    match resolve_auth_identity_by_key(state, raw_key) {
+        Ok(Some(identity)) => Ok(identity),
+        Ok(None) => Err(api_err::<T>(StatusCode::UNAUTHORIZED, "Invalid user_key")),
+        Err(err) => {
+            error!("resolve auth identity failed: {}", err);
+            Err(api_err::<T>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Auth lookup failed",
+            ))
+        }
+    }
+}
+
+async fn classify_direct(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<DirectClassifyRequest>,
+) -> (StatusCode, Json<ApiResponse<DirectClassifyResponse>>) {
+    let identity = match require_auth_identity_for_api(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    let source = req.source.trim().to_ascii_lowercase();
+    if !classifier_source_allowed(main_flow_rules(&state), &source) {
+        return api_err::<DirectClassifyResponse>(
+            StatusCode::BAD_REQUEST,
+            "source is not enabled for direct classifier",
+        );
+    }
+    let text = req.text.trim();
+    if text.is_empty() {
+        return api_err::<DirectClassifyResponse>(StatusCode::BAD_REQUEST, "text is required");
+    }
+    let channel_kind = req.channel.unwrap_or(ChannelKind::Ui);
+    let task = ClaimedTask {
+        task_id: format!("direct-classify-{}", Uuid::new_v4()),
+        user_id: identity.user_id,
+        chat_id: req.chat_id.unwrap_or(identity.chat_id),
+        user_key: Some(identity.user_key.clone()),
+        channel: channel_kind_label(channel_kind).to_string(),
+        external_user_id: normalize_external_id_opt(req.external_user_id.as_deref()),
+        external_chat_id: normalize_external_id_opt(req.external_chat_id.as_deref()),
+        kind: "ask".to_string(),
+        payload_json: json!({
+            "text": text,
+            "source": source,
+            "agent_mode": false
+        })
+        .to_string(),
+    };
+    info!(
+        "direct_classifier_request task_id={} source={} user_id={} chat_id={}",
+        task.task_id, source, task.user_id, task.chat_id
+    );
+    let result = worker::run_classifier_direct_reply(&state, &task, text).await;
+    state.clear_task_llm_call_count(&task.task_id);
+    match result {
+        Ok(reply) => api_ok(DirectClassifyResponse {
+            text: reply.text.trim().to_string(),
+        }),
+        Err(err) => {
+            warn!(
+                "direct classifier failed: task_id={} source={} err={}",
+                task.task_id, source, err
+            );
+            api_err::<DirectClassifyResponse>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Direct classifier failed",
+            )
         }
     }
 }

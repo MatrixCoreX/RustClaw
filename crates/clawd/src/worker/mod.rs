@@ -24,7 +24,8 @@ pub(crate) use channels::{
     task_payload_value, task_runtime_channel,
 };
 pub(super) use locator::{
-    has_concrete_locator_hint, try_resolve_implicit_locator_path, LocatorAutoResolution,
+    has_concrete_locator_hint, has_explicit_path_or_url_locator_hint,
+    try_resolve_implicit_locator_path, LocatorAutoResolution,
 };
 pub(super) use run_skill_finalize::finalize_run_skill_result;
 use runtime_support::spawn_long_term_summary_refresh;

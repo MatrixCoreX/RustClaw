@@ -91,22 +91,23 @@ pub(super) enum FileDeliveryLocatorInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum FileDeliveryTargetResolution {
     Resolved(PathBuf),
+    Candidates(Vec<PathBuf>),
     UserMessage(DeliveryMessageKind),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum DirectoryFileLookupResult {
     Found(PathBuf),
+    Candidates(Vec<PathBuf>),
     NotFound,
-    Multiple,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum FilenameScanResult {
+pub(crate) enum FilenameScanResult {
     Found(PathBuf),
+    Candidates(Vec<PathBuf>),
     NotFound,
     TooManyEntries,
-    Multiple,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

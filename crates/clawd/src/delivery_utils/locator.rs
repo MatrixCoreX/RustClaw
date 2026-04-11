@@ -8,6 +8,7 @@ use super::{trim_path_token, DirectoryLookupInput, FileDeliveryLocatorInput};
 pub(super) fn parse_directory_lookup_input(text: &str) -> Option<DirectoryLookupInput> {
     let trimmed = text.trim();
     if trimmed.is_empty()
+        || looks_like_directory_batch_file_request(trimmed)
         || extract_directory_and_file_pair(trimmed).is_some()
         || extract_filename_candidates(trimmed).len() == 1
         || extract_definite_file_path_candidate(trimmed).is_some()
@@ -24,6 +25,22 @@ pub(super) fn parse_directory_lookup_input(text: &str) -> Option<DirectoryLookup
         return directory_lookup_input_from_hint(&hint);
     }
     None
+}
+
+fn looks_like_directory_batch_file_request(text: &str) -> bool {
+    let normalized = normalize_locator_text(text);
+    let mentions_directory = normalized.contains("目录")
+        || normalized.contains("文件夹")
+        || normalized.contains("directory")
+        || normalized.contains("folder");
+    let mentions_file_delivery = normalized.contains("发给我")
+        || normalized.contains("发送")
+        || normalized.contains("send")
+        || normalized.contains("文件路径")
+        || normalized.contains("file path")
+        || normalized.contains("filepath")
+        || normalized.contains("path");
+    mentions_directory && mentions_file_delivery
 }
 
 pub(super) fn directory_lookup_input_from_hint(raw_hint: &str) -> Option<DirectoryLookupInput> {
@@ -63,6 +80,7 @@ pub(super) fn extract_directory_path_candidate_from_request(text: &str) -> Optio
 
 pub(super) fn extract_directory_name_hint(text: &str) -> Option<String> {
     static QUOTED_RE: OnceLock<Regex> = OnceLock::new();
+    static BARE_DIR_RE: OnceLock<Regex> = OnceLock::new();
 
     if let Some(path) = extract_directory_path_candidate_from_request(text) {
         return Some(path);
@@ -73,6 +91,21 @@ pub(super) fn extract_directory_name_hint(text: &str) -> Option<String> {
     });
     for caps in quoted.captures_iter(text) {
         let Some(raw) = caps.name("q").map(|m| trim_path_token(m.as_str())) else {
+            continue;
+        };
+        if let Some(v) = directory_hint_from_token(&raw) {
+            return Some(v);
+        }
+    }
+
+    let bare_dir = BARE_DIR_RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?P<hint>[A-Za-z0-9][A-Za-z0-9._-]{1,63})\s*(?:目录|文件夹|directory|folder|dir)\S*",
+        )
+        .expect("bare directory hint regex")
+    });
+    for caps in bare_dir.captures_iter(text) {
+        let Some(raw) = caps.name("hint").map(|m| trim_path_token(m.as_str())) else {
             continue;
         };
         if let Some(v) = directory_hint_from_token(&raw) {
@@ -118,6 +151,12 @@ pub(super) fn classify_file_delivery_locator_input(
     if filename_tokens.len() == 1 {
         return Some(FileDeliveryLocatorInput::FilenameOnly {
             file_name: filename_tokens[0].clone(),
+        });
+    }
+    let bare_stem_tokens = extract_bare_filename_stem_candidates(user_request);
+    if bare_stem_tokens.len() == 1 {
+        return Some(FileDeliveryLocatorInput::FilenameOnly {
+            file_name: bare_stem_tokens[0].clone(),
         });
     }
     None
@@ -187,23 +226,83 @@ pub(super) fn extract_filename_candidates(text: &str) -> Vec<String> {
     out
 }
 
+pub(super) fn extract_bare_filename_stem_candidates(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in text.split_whitespace() {
+        let token = trim_path_token(raw);
+        if !looks_like_bare_filename_stem_token(&token) || out.iter().any(|v| v == &token) {
+            continue;
+        }
+        out.push(token);
+    }
+    out
+}
+
 pub(super) fn extract_directory_and_file_pair(text: &str) -> Option<(String, String)> {
     let filename_tokens = extract_filename_candidates(text);
-    if filename_tokens.len() != 1 {
-        return None;
-    }
-    let file = filename_tokens[0].clone();
+    let file = if filename_tokens.len() == 1 {
+        filename_tokens[0].clone()
+    } else {
+        String::new()
+    };
     let file_norm = normalize_locator_text(&file);
-
-    if let Some(path) = extract_directory_path_candidate_for_file_pair(text) {
-        return Some((path, file));
-    }
-
     let tokens = text
         .split_whitespace()
         .map(trim_path_token)
         .filter(|token| !token.is_empty())
         .collect::<Vec<_>>();
+
+    if file.is_empty() {
+        if let Some(path) = extract_directory_path_candidate_for_file_pair(text) {
+            let path_norm = normalize_locator_text(&path);
+            let path_idx = tokens
+                .iter()
+                .position(|token| normalize_locator_text(token) == path_norm);
+            let bare_after_path = tokens
+                .iter()
+                .enumerate()
+                .skip(path_idx.map(|idx| idx + 1).unwrap_or(0))
+                .filter_map(|(_, token)| {
+                    looks_like_bare_filename_stem_token(token).then_some(token.clone())
+                })
+                .collect::<Vec<_>>();
+            if bare_after_path.len() == 1 {
+                return Some((path, bare_after_path[0].clone()));
+            }
+        }
+
+        let bare_candidates = tokens
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, token)| {
+                looks_like_bare_filename_stem_token(token).then_some((idx, token.clone()))
+            })
+            .collect::<Vec<_>>();
+        if bare_candidates.len() != 1 {
+            return None;
+        }
+        let (file_idx, file) = bare_candidates[0].clone();
+        let mut preceding_candidates = Vec::new();
+        for token in tokens.iter().take(file_idx) {
+            if is_compact_directory_hint_token(token) {
+                preceding_candidates.push(token.clone());
+            }
+        }
+        if let Some(candidate) = preceding_candidates
+            .iter()
+            .find(|token| token.chars().count() > 2 || !token.is_ascii())
+        {
+            return Some((candidate.clone(), file));
+        }
+        if let Some(candidate) = preceding_candidates.first() {
+            return Some((candidate.clone(), file));
+        }
+        return None;
+    }
+
+    if let Some(path) = extract_directory_path_candidate_for_file_pair(text) {
+        return Some((path, file));
+    }
 
     let file_idx = tokens
         .iter()
@@ -309,6 +408,30 @@ pub(super) fn looks_like_filename_token(token: &str) -> bool {
         return false;
     }
     ext.chars().all(|ch| ch.is_ascii_alphanumeric())
+}
+
+pub(super) fn looks_like_bare_filename_stem_token(token: &str) -> bool {
+    let cleaned = trim_path_token(token);
+    if cleaned.is_empty()
+        || cleaned.contains('\n')
+        || cleaned.contains('\r')
+        || cleaned.contains('\t')
+        || cleaned.contains("://")
+        || cleaned.contains('/')
+        || cleaned.contains('\\')
+        || looks_like_filename_token(&cleaned)
+        || looks_like_directory_path_hint(&cleaned)
+        || looks_like_explicit_directory_path_expression(&cleaned)
+    {
+        return false;
+    }
+    let chars = cleaned.chars().count();
+    if chars < 2 || chars > 64 || !cleaned.is_ascii() {
+        return false;
+    }
+    cleaned
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
 pub(super) fn looks_like_directory_token(token: &str) -> bool {

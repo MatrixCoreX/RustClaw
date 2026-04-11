@@ -138,7 +138,10 @@ fn extract_minimax_tool_call_steps(raw: &str) -> Vec<Value> {
         let step = match invoke_name {
             "call_skill" => {
                 let skill = params.get("skill").and_then(|v| v.as_str()).map(str::trim);
-                let args = params.get("args").cloned().unwrap_or_else(|| serde_json::json!({}));
+                let args = params
+                    .get("args")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
                 skill.map(|skill| {
                     serde_json::json!({
                         "type": "call_skill",
@@ -149,7 +152,10 @@ fn extract_minimax_tool_call_steps(raw: &str) -> Vec<Value> {
             }
             "call_tool" => {
                 let tool = params.get("tool").and_then(|v| v.as_str()).map(str::trim);
-                let args = params.get("args").cloned().unwrap_or_else(|| serde_json::json!({}));
+                let args = params
+                    .get("args")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
                 tool.map(|tool| {
                     serde_json::json!({
                         "type": "call_tool",
@@ -159,7 +165,10 @@ fn extract_minimax_tool_call_steps(raw: &str) -> Vec<Value> {
                 })
             }
             other => {
-                let args = params.get("args").cloned().unwrap_or_else(|| serde_json::json!({}));
+                let args = params
+                    .get("args")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
                 Some(serde_json::json!({
                     "type": "call_skill",
                     "skill": other,
@@ -181,7 +190,7 @@ async fn parse_single_plan_actions(
     task: &ClaimedTask,
 ) -> Option<Vec<AgentAction>> {
     let mut step_values = Vec::new();
-    if let Some(value) = crate::parse_llm_json_raw_or_any::<Value>(raw) {
+    if let Some(value) = crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw) {
         match value {
             Value::Object(map) => {
                 if let Some(steps) = map.get("steps").and_then(|v| v.as_array()) {
@@ -205,7 +214,7 @@ async fn parse_single_plan_actions(
         step_values.extend(extract_minimax_tool_call_steps(raw));
     }
     if step_values.is_empty() {
-        let value = crate::parse_llm_json_raw_or_any::<Value>(raw)?;
+        let value = crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw)?;
         let env = serde_json::from_value::<SinglePlanEnvelope>(value).ok()?;
         step_values.extend(env.steps);
     }
@@ -295,6 +304,16 @@ fn has_discussion_followup_action(actions: &[AgentAction]) -> bool {
     })
 }
 
+fn is_discussion_followup_action(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::Respond { .. } => true,
+        AgentAction::CallSkill { skill, .. } | AgentAction::CallTool { tool: skill, .. } => {
+            skill.eq_ignore_ascii_case("chat")
+        }
+        AgentAction::Think { .. } => false,
+    }
+}
+
 fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
     !loop_state.delivery_messages.is_empty()
         || loop_state
@@ -309,6 +328,21 @@ fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
             .is_some_and(|text| !text.is_empty())
 }
 
+fn is_plain_respond_only_plan(actions: &[AgentAction]) -> Option<&str> {
+    match actions {
+        [AgentAction::Respond { content }] => Some(content.as_str()),
+        _ => None,
+    }
+}
+
+fn is_delivery_failure_terminal_reply(actions: &[AgentAction]) -> bool {
+    let Some(content) = is_plain_respond_only_plan(actions) else {
+        return false;
+    };
+    let trimmed = content.trim();
+    !trimmed.is_empty() && crate::finalizer::parse_delivery_token(trimmed).is_none()
+}
+
 fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
     if route_result.output_contract.delivery_required {
         return false;
@@ -319,11 +353,146 @@ fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
     )
 }
 
+fn should_prefer_observed_finalize(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> bool {
+    let Some(route_result) = route_result else {
+        return false;
+    };
+    !route_result.needs_clarify
+        && route_result.output_contract.requires_content_evidence
+        && route_expects_terminal_user_answer(route_result)
+        && !has_authoritative_delivery(loop_state)
+}
+
+fn strip_terminal_discussion_for_observed_finalize(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !should_prefer_observed_finalize(route_result, loop_state)
+        || loop_state.has_tool_or_skill_output
+        || !has_executable_observation_or_action(&actions)
+        || !has_discussion_followup_action(&actions)
+    {
+        return actions;
+    }
+    let mut stripped = actions.clone();
+    while stripped.last().is_some_and(is_discussion_followup_action) {
+        stripped.pop();
+    }
+    if has_executable_observation_or_action(&stripped) && !has_discussion_followup_action(&stripped)
+    {
+        stripped
+    } else {
+        actions
+    }
+}
+
+fn should_rewrite_service_status_run_cmd_probe(
+    route_result: Option<&RouteResult>,
+    actions: &[AgentAction],
+) -> bool {
+    let Some(route_result) = route_result else {
+        return false;
+    };
+    if route_result.needs_clarify
+        || route_result.output_contract.delivery_required
+        || !matches!(
+            route_result.routed_mode,
+            RoutedMode::Act | RoutedMode::ChatAct
+        )
+    {
+        return false;
+    }
+    let target = route_result.output_contract.locator_hint.trim();
+    if target.is_empty() {
+        return false;
+    }
+    let intent = route_result.resolved_intent.trim();
+    if intent.is_empty() {
+        return false;
+    }
+    let intent_lower = intent.to_ascii_lowercase();
+    if intent.contains("执行命令")
+        || intent.contains("执行结果")
+        || intent_lower.contains("run command")
+        || intent_lower.contains("execute command")
+        || intent_lower.contains("show command output")
+        || intent_lower.contains("raw output")
+        || intent_lower.contains("grep ")
+        || intent_lower.contains("pgrep")
+    {
+        return false;
+    }
+    let status_like = intent.contains("正在运行")
+        || intent.contains("还活着")
+        || intent.contains("活着没")
+        || intent.contains("状态")
+        || intent_lower.contains("running")
+        || intent_lower.contains("alive")
+        || intent_lower.contains("status");
+    if !status_like {
+        return false;
+    }
+    let Some(AgentAction::CallSkill { skill, args }) = actions.first() else {
+        return false;
+    };
+    if skill != "run_cmd" {
+        return false;
+    }
+    let command = args
+        .get("command")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let target_lower = target.to_ascii_lowercase();
+    (command.contains("ps aux")
+        || command.contains("ps -")
+        || command.contains("pgrep")
+        || command.contains("grep -i"))
+        && command.contains(&target_lower)
+}
+
+fn rewrite_service_status_probe_actions(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !should_rewrite_service_status_run_cmd_probe(route_result, &actions) {
+        return actions;
+    }
+    let Some(route_result) = route_result else {
+        return actions;
+    };
+    let target = route_result.output_contract.locator_hint.trim();
+    let mut rewritten = actions;
+    if let Some(first) = rewritten.first_mut() {
+        *first = AgentAction::CallSkill {
+            skill: "service_control".to_string(),
+            args: serde_json::json!({
+                "action": "status",
+                "target": target,
+            }),
+        };
+    }
+    info!(
+        "plan_rewrite_service_status_probe target={} intent={}",
+        target,
+        crate::truncate_for_log(&route_result.resolved_intent)
+    );
+    rewritten
+}
+
 fn observation_only_plan_missing_user_answer(
     route_result: &RouteResult,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
+    if should_prefer_observed_finalize(Some(route_result), loop_state) {
+        return false;
+    }
     has_executable_observation_or_action(actions)
         && !has_discussion_followup_action(actions)
         && route_expects_terminal_user_answer(route_result)
@@ -339,6 +508,12 @@ fn should_force_actionable_plan_repair(
         return false;
     };
     if route_result.needs_clarify {
+        return false;
+    }
+    if route_result.output_contract.delivery_required
+        && !loop_state.has_tool_or_skill_output
+        && is_delivery_failure_terminal_reply(actions)
+    {
         return false;
     }
     if observation_only_plan_missing_user_answer(route_result, loop_state, actions) {
@@ -427,6 +602,20 @@ fn plan_repair_reason(
         return "plan_missing_terminal_user_answer";
     }
     "non_actionable_plan_for_current_route"
+}
+
+fn can_fallback_to_initial_plan_after_repair_failure(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    let Some(route_result) = route_result else {
+        return false;
+    };
+    !route_result.needs_clarify
+        && !loop_state.has_tool_or_skill_output
+        && has_executable_observation_or_action(actions)
+        && !has_discussion_followup_action(actions)
 }
 
 pub(super) async fn plan_round_actions(
@@ -549,7 +738,12 @@ pub(super) async fn plan_round_actions(
         loop_state.round_no,
         crate::truncate_for_log(&plan_raw)
     );
-    let initial_actions = parse_single_plan_actions(&plan_raw, state, task).await;
+    let initial_actions = parse_single_plan_actions(&plan_raw, state, task)
+        .await
+        .map(|actions| {
+            strip_terminal_discussion_for_observed_finalize(route_result, loop_state, actions)
+        })
+        .map(|actions| rewrite_service_status_probe_actions(route_result, actions));
     let needs_repair = match initial_actions.as_ref() {
         Some(actions) => should_force_actionable_plan_repair(route_result, loop_state, actions),
         None => true,
@@ -561,7 +755,7 @@ pub(super) async fn plan_round_actions(
             "plan_repair_required task_id={} round={} reason={}",
             task.task_id, loop_state.round_no, repair_reason
         );
-        let repaired = repair_plan_actions(
+        match repair_plan_actions(
             state,
             task,
             goal,
@@ -571,14 +765,81 @@ pub(super) async fn plan_round_actions(
             &plan_raw,
             loop_state.round_no,
         )
-        .await?;
-        (
-            parse_single_plan_actions(&repaired, state, task)
-                .await
-                .ok_or_else(|| "single plan parser failed: no executable steps".to_string())?,
-            PlanKind::Repair,
-            repaired,
-        )
+        .await
+        {
+            Ok(repaired) => {
+                let repaired_actions =
+                    parse_single_plan_actions(&repaired, state, task)
+                        .await
+                        .map(|actions| {
+                            let actions = strip_terminal_discussion_for_observed_finalize(
+                                route_result,
+                                loop_state,
+                                actions,
+                            );
+                            rewrite_service_status_probe_actions(route_result, actions)
+                        });
+                match repaired_actions {
+                    Some(actions) => (actions, PlanKind::Repair, repaired),
+                    None => {
+                        let fallback_actions = initial_actions.as_ref().filter(|actions| {
+                            can_fallback_to_initial_plan_after_repair_failure(
+                                route_result,
+                                loop_state,
+                                actions,
+                            )
+                        });
+                        if let Some(actions) = fallback_actions {
+                            warn!(
+                                "plan_repair_parse_failed_fallback_to_initial task_id={} round={}",
+                                task.task_id, loop_state.round_no
+                            );
+                            (
+                                actions.clone(),
+                                if loop_state.round_no <= 1 {
+                                    PlanKind::Single
+                                } else {
+                                    PlanKind::Incremental
+                                },
+                                plan_raw.clone(),
+                            )
+                        } else {
+                            return Err(
+                                "single plan parser failed: no executable steps".to_string()
+                            );
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                let fallback_actions = initial_actions.as_ref().filter(|actions| {
+                    can_fallback_to_initial_plan_after_repair_failure(
+                        route_result,
+                        loop_state,
+                        actions,
+                    )
+                });
+                if let Some(actions) = fallback_actions {
+                    warn!(
+                        "plan_repair_llm_failed_fallback_to_initial task_id={} round={} error={}",
+                        task.task_id,
+                        loop_state.round_no,
+                        crate::truncate_for_log(&err)
+                    );
+                    (
+                        actions.clone(),
+                        if loop_state.round_no <= 1 {
+                            PlanKind::Single
+                        } else {
+                            PlanKind::Incremental
+                        },
+                        plan_raw.clone(),
+                    )
+                } else {
+                    return Err(err);
+                }
+            }
+        }
     } else {
         (
             initial_actions.expect("checked Some above"),
@@ -603,7 +864,10 @@ pub(super) async fn plan_round_actions(
 
 #[cfg(test)]
 mod tests {
-    use super::{should_force_actionable_plan_repair, LoopState};
+    use super::{
+        rewrite_service_status_probe_actions, should_force_actionable_plan_repair,
+        strip_terminal_discussion_for_observed_finalize, LoopState,
+    };
     use crate::{
         AgentAction, IntentOutputContract, OutputLocatorKind, OutputResponseShape, ResumeBehavior,
         RiskCeiling, RouteResult, RoutedMode, ScheduleKind,
@@ -625,6 +889,8 @@ mod tests {
             risk_ceiling: RiskCeiling::Unknown,
             resume_behavior: ResumeBehavior::None,
             schedule_kind: ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: IntentOutputContract {
                 response_shape,
@@ -635,6 +901,50 @@ mod tests {
                 locator_hint: String::new(),
             },
         }
+    }
+
+    fn delivery_route_result() -> RouteResult {
+        let mut route = route_result(RoutedMode::Act, false, OutputResponseShape::FileToken);
+        route.output_contract.delivery_required = true;
+        route
+    }
+
+    #[test]
+    fn service_status_probe_rewrites_run_cmd_grep_to_service_control() {
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.resolved_intent = "检查 telegramd 进程是否正在运行，并用一句话解释状态".to_string();
+        route.output_contract.locator_hint = "telegramd".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({ "command": "ps aux | grep -i telegramd | grep -v grep" }),
+        }];
+
+        let rewritten = rewrite_service_status_probe_actions(Some(&route), actions);
+        assert!(matches!(
+            &rewritten[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "service_control"
+                    && args.get("action").and_then(|v| v.as_str()) == Some("status")
+                    && args.get("target").and_then(|v| v.as_str()) == Some("telegramd")
+        ));
+    }
+
+    #[test]
+    fn explicit_command_request_keeps_run_cmd_probe() {
+        let mut route = route_result(RoutedMode::Act, false, OutputResponseShape::Free);
+        route.resolved_intent =
+            "执行命令 ps aux | grep -i telegramd | grep -v grep，并直接回复执行结果".to_string();
+        route.output_contract.locator_hint = "telegramd".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({ "command": "ps aux | grep -i telegramd | grep -v grep" }),
+        }];
+
+        let rewritten = rewrite_service_status_probe_actions(Some(&route), actions.clone());
+        assert!(matches!(
+            &rewritten[0],
+            AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
+        ));
     }
 
     #[test]
@@ -690,13 +1000,13 @@ mod tests {
     }
 
     #[test]
-    fn non_scalar_route_repairs_observation_only_plan() {
+    fn content_evidence_route_keeps_observation_only_plan_for_observed_finalize() {
         let loop_state = LoopState::new(2);
         let actions = vec![AgentAction::CallSkill {
             skill: "read_file".to_string(),
             args: serde_json::json!({ "path": "README.md" }),
         }];
-        assert!(should_force_actionable_plan_repair(
+        assert!(!should_force_actionable_plan_repair(
             Some(&route_result(
                 RoutedMode::ChatAct,
                 true,
@@ -704,6 +1014,40 @@ mod tests {
             )),
             &loop_state,
             &actions,
+        ));
+    }
+
+    #[test]
+    fn content_evidence_route_strips_terminal_discussion_followup_before_observation() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "read_range",
+                    "path": "README.md",
+                    "mode": "head",
+                    "n": 20
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "chat".to_string(),
+                args: json!({ "text": "summarize {{last_output}}" }),
+            },
+        ];
+        let stripped = strip_terminal_discussion_for_observed_finalize(
+            Some(&route_result(
+                RoutedMode::ChatAct,
+                true,
+                OutputResponseShape::Free,
+            )),
+            &loop_state,
+            actions,
+        );
+        assert_eq!(stripped.len(), 1);
+        assert!(matches!(
+            &stripped[0],
+            AgentAction::CallSkill { skill, .. } if skill == "system_basic"
         ));
     }
 
@@ -781,6 +1125,19 @@ mod tests {
                 false,
                 OutputResponseShape::Scalar,
             )),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn file_delivery_route_allows_plain_not_found_terminal_reply() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![AgentAction::Respond {
+            content: "未找到该文件。".to_string(),
+        }];
+        assert!(!should_force_actionable_plan_repair(
+            Some(&delivery_route_result()),
             &loop_state,
             &actions,
         ));
