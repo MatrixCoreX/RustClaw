@@ -23,6 +23,15 @@ struct Resp {
     error_text: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct LogAnalysis {
+    requested_path: String,
+    path: String,
+    total_lines: usize,
+    keyword_counts: BTreeMap<String, usize>,
+    recent_matches: Vec<String>,
+}
+
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -74,9 +83,6 @@ fn execute(args: Value) -> Result<String, String> {
         .unwrap_or(20)
         .min(200) as usize;
 
-    let resolved_path = resolve_log_path(&path)?;
-    let text =
-        std::fs::read_to_string(&resolved_path).map_err(|err| format!("read log failed: {err}"))?;
     let default_keywords = [
         "error",
         "failed",
@@ -97,35 +103,13 @@ fn execute(args: Value) -> Result<String, String> {
         .filter(|v: &Vec<String>| !v.is_empty())
         .unwrap_or_else(|| default_keywords.iter().map(|s| s.to_string()).collect());
 
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    let mut matches = Vec::new();
-    for (idx, line) in text.lines().enumerate() {
-        let lower = line.to_ascii_lowercase();
-        let mut hit = false;
-        for key in &keywords {
-            if lower.contains(key) {
-                *counts.entry(key.clone()).or_insert(0) += 1;
-                hit = true;
-            }
-        }
-        if hit {
-            matches.push(format!(
-                "{}: {}",
-                idx + 1,
-                sanitize_match_line(line, MATCH_LINE_MAX_CHARS)
-            ));
-        }
-    }
-    if matches.len() > max_matches {
-        matches = matches[matches.len().saturating_sub(max_matches)..].to_vec();
-    }
-
+    let analysis = analyze_log_target(&path, &keywords, max_matches)?;
     Ok(json!({
-        "requested_path": path.display().to_string(),
-        "path": resolved_path.display().to_string(),
-        "total_lines": text.lines().count(),
-        "keyword_counts": counts,
-        "recent_matches": matches
+        "requested_path": analysis.requested_path,
+        "path": analysis.path,
+        "total_lines": analysis.total_lines,
+        "keyword_counts": analysis.keyword_counts,
+        "recent_matches": analysis.recent_matches
     })
     .to_string())
 }
@@ -170,6 +154,103 @@ fn resolve_log_path(path: &PathBuf) -> Result<PathBuf, String> {
     }
     candidates.sort_by(|a, b| b.cmp(a));
     Ok(candidates.remove(0).2)
+}
+
+fn analyze_log_target(
+    path: &PathBuf,
+    keywords: &[String],
+    max_matches: usize,
+) -> Result<LogAnalysis, String> {
+    if path.is_dir() {
+        return analyze_log_directory(path, keywords, max_matches);
+    }
+    let resolved = resolve_log_path(path)?;
+    analyze_log_file(&resolved, path.display().to_string(), keywords, max_matches)
+}
+
+fn analyze_log_directory(
+    path: &PathBuf,
+    keywords: &[String],
+    max_matches: usize,
+) -> Result<LogAnalysis, String> {
+    let entries = fs::read_dir(path).map_err(|err| format!("read log dir failed: {err}"))?;
+    let mut best: Option<(usize, u8, SystemTime, LogAnalysis)> = None;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read log dir entry failed: {err}"))?;
+        let candidate_path = entry.path();
+        if !candidate_path.is_file() {
+            continue;
+        }
+        let metadata = entry
+            .metadata()
+            .map_err(|err| format!("read log file metadata failed: {err}"))?;
+        let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        let analysis = match analyze_log_file(
+            &candidate_path,
+            path.display().to_string(),
+            keywords,
+            max_matches,
+        ) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let total_hits = analysis.keyword_counts.values().copied().sum::<usize>();
+        let priority = candidate_priority(&candidate_path);
+        let replace = best
+            .as_ref()
+            .map(|(best_hits, best_priority, best_modified, _)| {
+                (total_hits, priority, modified) > (*best_hits, *best_priority, *best_modified)
+            })
+            .unwrap_or(true);
+        if replace {
+            best = Some((total_hits, priority, modified, analysis));
+        }
+    }
+    best.map(|(_, _, _, analysis)| analysis).ok_or_else(|| {
+        format!(
+            "log directory contains no readable files: {}",
+            path.display()
+        )
+    })
+}
+
+fn analyze_log_file(
+    resolved_path: &PathBuf,
+    requested_path: String,
+    keywords: &[String],
+    max_matches: usize,
+) -> Result<LogAnalysis, String> {
+    let text =
+        std::fs::read_to_string(resolved_path).map_err(|err| format!("read log failed: {err}"))?;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut matches = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        let lower = line.to_ascii_lowercase();
+        let mut hit = false;
+        for key in keywords {
+            if lower.contains(key) {
+                *counts.entry(key.clone()).or_insert(0) += 1;
+                hit = true;
+            }
+        }
+        if hit {
+            matches.push(format!(
+                "{}: {}",
+                idx + 1,
+                sanitize_match_line(line, MATCH_LINE_MAX_CHARS)
+            ));
+        }
+    }
+    if matches.len() > max_matches {
+        matches = matches[matches.len().saturating_sub(max_matches)..].to_vec();
+    }
+    Ok(LogAnalysis {
+        requested_path,
+        path: resolved_path.display().to_string(),
+        total_lines: text.lines().count(),
+        keyword_counts: counts,
+        recent_matches: matches,
+    })
 }
 
 fn candidate_priority(path: &std::path::Path) -> u8 {
@@ -233,8 +314,14 @@ mod tests {
 
     #[test]
     fn candidate_priority_prefers_operational_logs_over_model_io() {
-        assert!(candidate_priority(Path::new("clawd.log")) > candidate_priority(Path::new("model_io.log")));
-        assert!(candidate_priority(Path::new("telegramd.log")) > candidate_priority(Path::new("model_io.log")));
+        assert!(
+            candidate_priority(Path::new("clawd.log"))
+                > candidate_priority(Path::new("model_io.log"))
+        );
+        assert!(
+            candidate_priority(Path::new("telegramd.log"))
+                > candidate_priority(Path::new("model_io.log"))
+        );
     }
 
     #[test]

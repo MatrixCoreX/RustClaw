@@ -18,10 +18,11 @@ use claw_core::hard_rules::voice_mode::{
 };
 use claw_core::prompt_layers;
 use claw_core::types::{
-    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, ExchangeCredentialStatus,
-    GatewayInstanceRuntimeStatus, HealthResponse, ResolveChannelBindingRequest,
-    ResolveChannelBindingResponse, SubmitTaskRequest, SubmitTaskResponse, TaskKind,
-    TaskQueryResponse, TaskStatus, TelegramBotRuntimeStatus, UpsertExchangeCredentialRequest,
+    ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, DirectClassifyRequest,
+    DirectClassifyResponse, ExchangeCredentialStatus, GatewayInstanceRuntimeStatus, HealthResponse,
+    ResolveChannelBindingRequest, ResolveChannelBindingResponse, SubmitTaskRequest,
+    SubmitTaskResponse, TaskKind, TaskQueryResponse, TaskStatus, TelegramBotRuntimeStatus,
+    UpsertExchangeCredentialRequest,
 };
 use reqwest::Client;
 use serde_json::{json, Value as JsonValue};
@@ -372,33 +373,52 @@ async fn detect_voice_mode_intent_with_llm(
         VOICE_MODE_INTENT_PROMPT_LOGICAL_PATH
     );
     let prompt = render_voice_mode_intent_prompt(&state.voice_mode_intent_prompt_template, text);
-    let task_id = match submit_task_only(
+    let direct_out = match classify_direct_text_via_clawd(
         state,
-        user_id,
+        bound_user_key_for_chat(state, chat_id).as_deref(),
         chat_id,
-        TaskKind::Ask,
-        json!({ "text": prompt, "agent_mode": false, "source": "voice_mode_intent_detect" }),
+        "voice_mode_intent_detect",
+        &prompt,
     )
     .await
     {
-        Ok(id) => id,
+        Ok(out) => Some(out),
         Err(err) => {
-            warn!("voice mode llm detect submit failed: {err}");
-            return None;
+            warn!("voice mode direct classify failed, fallback to task flow: {err}");
+            None
         }
     };
-    let out = match poll_task_result(
-        state,
-        &task_id,
-        bound_user_key_for_chat(state, chat_id).as_deref(),
-        Some(12),
-    )
-    .await
-    {
-        Ok(v) => v.into_iter().next().unwrap_or_default(),
-        Err(err) => {
-            warn!("voice mode llm detect poll failed: {err}");
-            return None;
+    let out = if let Some(out) = direct_out {
+        out
+    } else {
+        let task_id = match submit_task_only(
+            state,
+            user_id,
+            chat_id,
+            TaskKind::Ask,
+            json!({ "text": prompt, "agent_mode": false, "source": "voice_mode_intent_detect" }),
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(err) => {
+                warn!("voice mode llm detect submit failed: {err}");
+                return None;
+            }
+        };
+        match poll_task_result(
+            state,
+            &task_id,
+            bound_user_key_for_chat(state, chat_id).as_deref(),
+            Some(12),
+        )
+        .await
+        {
+            Ok(v) => v.into_iter().next().unwrap_or_default(),
+            Err(err) => {
+                warn!("voice mode llm detect poll failed: {err}");
+                return None;
+            }
         }
     };
     let decision = parse_voice_mode_intent_decision(&out, state.voice_mode_intent_aliases.as_ref());
@@ -418,6 +438,54 @@ async fn detect_voice_mode_intent_with_llm(
         );
     }
     decision.map(|d| d.mode)
+}
+
+async fn classify_direct_text_via_clawd(
+    state: &BotState,
+    user_key: Option<&str>,
+    chat_id: i64,
+    source: &str,
+    text: &str,
+) -> anyhow::Result<String> {
+    let url = format!("{}/v1/classifiers/direct", state.clawd_base_url);
+    let req = DirectClassifyRequest {
+        source: source.trim().to_string(),
+        text: text.trim().to_string(),
+        chat_id: Some(chat_id),
+        channel: Some(ChannelKind::Telegram),
+        external_user_id: None,
+        external_chat_id: Some(chat_id.to_string()),
+    };
+    let resp = maybe_with_user_key_header(state.client.post(&url), user_key)
+        .json(&req)
+        .send()
+        .await
+        .context("request direct classifier failed")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(anyhow!("direct classifier http {status}: {body}"));
+    }
+    let body: ApiResponse<DirectClassifyResponse> = resp
+        .json()
+        .await
+        .context("decode direct classifier response failed")?;
+    if !body.ok {
+        return Err(anyhow!(
+            "direct classifier failed: {}",
+            body.error.unwrap_or_else(|| "unknown error".to_string())
+        ));
+    }
+    let text = body
+        .data
+        .map(|v| v.text)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        return Err(anyhow!("direct classifier returned empty text"));
+    }
+    Ok(text)
 }
 
 fn pending_resume_valid_for(pending: &PendingResumeContext, user_id: i64, now_secs: u64) -> bool {

@@ -3,12 +3,18 @@ use std::path::{Path, PathBuf};
 use crate::AppState;
 
 pub(crate) fn has_concrete_locator_hint(text: &str) -> bool {
-    if has_explicit_path_or_url_locator(text) {
+    if has_explicit_path_or_url_locator(text)
+        || crate::delivery_utils::has_concrete_locator_input(text)
+    {
         return true;
     }
     text.split_whitespace()
         .map(trim_locator_token)
         .any(|token| looks_like_filename_locator(&token))
+}
+
+pub(crate) fn has_explicit_path_or_url_locator_hint(text: &str) -> bool {
+    has_explicit_path_or_url_locator(text)
 }
 
 #[derive(Debug)]
@@ -22,35 +28,51 @@ pub(crate) fn try_resolve_implicit_locator_path(
     raw_text: &str,
     resolved_text: &str,
     locator_kind: crate::OutputLocatorKind,
-    _context_hint: Option<&str>,
+    context_hint: Option<&str>,
 ) -> Option<LocatorAutoResolution> {
     let query_text = format!("{raw_text}\n{resolved_text}");
+    if let Some(explicit_path) = resolve_explicit_locator_path_from_text(
+        &state.workspace_root,
+        &state.default_locator_search_dir,
+        &query_text,
+    ) {
+        return Some(LocatorAutoResolution::Direct(explicit_path));
+    }
     let keywords = extract_locator_keywords(&query_text);
     let filename_tokens = extract_filename_like_tokens(&query_text);
     if matches!(locator_kind, crate::OutputLocatorKind::CurrentWorkspace) {
-        let workspace_root = state.default_locator_search_dir.clone();
-        if workspace_root.is_dir() {
-            if let Some(path) = try_resolve_direct_child_locator(&workspace_root, &keywords) {
-                return Some(LocatorAutoResolution::Direct(path));
-            }
-            if let Some(resolved) = try_resolve_implicit_locator_path_in_roots(
-                std::slice::from_ref(&workspace_root),
-                &keywords,
-                &filename_tokens,
-                state.locator_scan_max_depth,
-                state.locator_scan_max_files,
-            ) {
-                return Some(resolved);
-            }
+        if let Some(resolved) = resolve_current_workspace_target(
+            &state.workspace_root,
+            &keywords,
+            &filename_tokens,
+            state.locator_scan_max_depth,
+            state.locator_scan_max_files,
+        ) {
+            return Some(resolved);
         }
         return Some(LocatorAutoResolution::Direct(resolve_workspace_root_path(
             &state.workspace_root,
         )));
     }
+    if let Some(resolved) = resolve_explicit_workspace_child_target(
+        &state.workspace_root,
+        &state.default_locator_search_dir,
+        &keywords,
+        &filename_tokens,
+    ) {
+        return Some(resolved);
+    }
     let mut roots = vec![state.default_locator_search_dir.clone()];
     let system_root = PathBuf::from("/");
     if state.default_locator_search_dir != system_root && system_root.is_dir() {
         roots.push(system_root);
+    }
+    if let Some(context_root) = resolve_contextual_locator_root(
+        &state.workspace_root,
+        &state.default_locator_search_dir,
+        context_hint,
+    ) {
+        prepend_root_if_missing(&mut roots, context_root);
     }
     try_resolve_implicit_locator_path_in_roots(
         &roots,
@@ -61,12 +83,105 @@ pub(crate) fn try_resolve_implicit_locator_path(
     )
 }
 
+fn resolve_current_workspace_target(
+    workspace_root: &Path,
+    keywords: &[String],
+    filename_tokens: &[String],
+    max_depth: usize,
+    max_files: usize,
+) -> Option<LocatorAutoResolution> {
+    if !workspace_root.is_dir() {
+        return None;
+    }
+    if let Some(path) = try_resolve_direct_child_locator(workspace_root, keywords) {
+        let direct_path = PathBuf::from(&path);
+        if direct_child_path_compatible_with_filename_tokens(&direct_path, filename_tokens) {
+            return Some(LocatorAutoResolution::Direct(path));
+        }
+    }
+    try_resolve_implicit_locator_path_in_roots(
+        &[workspace_root.to_path_buf()],
+        keywords,
+        filename_tokens,
+        max_depth,
+        max_files,
+    )
+}
+
+fn resolve_explicit_workspace_child_target(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    keywords: &[String],
+    filename_tokens: &[String],
+) -> Option<LocatorAutoResolution> {
+    let direct =
+        try_resolve_direct_child_locator(default_locator_search_dir, keywords).or_else(|| {
+            (workspace_root != default_locator_search_dir)
+                .then(|| try_resolve_direct_child_locator(workspace_root, keywords))
+                .flatten()
+        })?;
+    let direct_path = PathBuf::from(&direct);
+    if !direct_child_path_compatible_with_filename_tokens(&direct_path, filename_tokens) {
+        return None;
+    }
+    Some(LocatorAutoResolution::Direct(direct))
+}
+
 fn resolve_workspace_root_path(workspace_root: &Path) -> String {
     workspace_root
         .canonicalize()
         .unwrap_or_else(|_| workspace_root.to_path_buf())
         .display()
         .to_string()
+}
+
+fn prepend_root_if_missing(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+    let canonical = candidate.canonicalize().unwrap_or(candidate);
+    if let Some(idx) = roots
+        .iter()
+        .position(|root| root.canonicalize().unwrap_or_else(|_| root.clone()) == canonical)
+    {
+        if idx != 0 {
+            let existing = roots.remove(idx);
+            roots.insert(0, existing);
+        }
+        return;
+    }
+    roots.insert(0, canonical);
+}
+
+fn resolve_contextual_locator_root(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    context_hint: Option<&str>,
+) -> Option<PathBuf> {
+    let context_text = context_hint
+        .map(str::trim)
+        .filter(|text| !text.is_empty() && *text != "<none>")?;
+    if let Some(path) = resolve_explicit_locator_path_from_text(
+        workspace_root,
+        default_locator_search_dir,
+        context_text,
+    ) {
+        let path_buf = PathBuf::from(path);
+        return if path_buf.is_dir() {
+            Some(path_buf)
+        } else {
+            path_buf.parent().map(Path::to_path_buf)
+        };
+    }
+    let keywords = extract_locator_keywords(context_text);
+    if keywords.is_empty() {
+        return None;
+    }
+    let direct = try_resolve_direct_child_locator(default_locator_search_dir, &keywords)
+        .or_else(|| try_resolve_direct_child_locator(workspace_root, &keywords))?;
+    let path_buf = PathBuf::from(direct);
+    if path_buf.is_dir() {
+        Some(path_buf)
+    } else {
+        path_buf.parent().map(Path::to_path_buf)
+    }
 }
 
 fn try_resolve_implicit_locator_path_in_roots(
@@ -79,6 +194,34 @@ fn try_resolve_implicit_locator_path_in_roots(
     for root in roots {
         if !root.is_dir() {
             continue;
+        }
+        for token in filename_tokens {
+            match crate::delivery_utils::scan_filename_matches_with_limit(
+                root,
+                token,
+                max_depth,
+                max_files,
+            ) {
+                crate::delivery_utils::FilenameScanResult::Found(path) => {
+                    return Some(LocatorAutoResolution::Direct(path.display().to_string()));
+                }
+                crate::delivery_utils::FilenameScanResult::Candidates(paths) => {
+                    let candidates = paths
+                        .into_iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>();
+                    if let Some(preferred) =
+                        prefer_direct_child_filename_match(root, &candidates, token)
+                    {
+                        return Some(LocatorAutoResolution::Direct(preferred));
+                    }
+                    if !candidates.is_empty() {
+                        return Some(LocatorAutoResolution::Fuzzy(candidates));
+                    }
+                }
+                crate::delivery_utils::FilenameScanResult::NotFound
+                | crate::delivery_utils::FilenameScanResult::TooManyEntries => {}
+            }
         }
         let files = collect_files_for_locator_scan(root, max_depth, max_files);
         if files.is_empty() {
@@ -125,12 +268,14 @@ fn prefer_direct_child_filename_match(
     token: &str,
 ) -> Option<String> {
     let want_stem_match = !token.contains('.');
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut direct_hits = matches
         .iter()
         .filter_map(|raw| {
             let path = PathBuf::from(raw);
-            let parent = path.parent()?;
-            if parent != root {
+            let parent = path.parent()?.to_path_buf();
+            let normalized_parent = parent.canonicalize().unwrap_or(parent);
+            if normalized_parent != canonical_root {
                 return None;
             }
             let file_name = path.file_name()?.to_string_lossy().to_string();
@@ -151,6 +296,33 @@ fn prefer_direct_child_filename_match(
     direct_hits.sort();
     direct_hits.dedup();
     (direct_hits.len() == 1).then(|| direct_hits.into_iter().next().unwrap_or_default())
+}
+
+fn direct_child_path_compatible_with_filename_tokens(
+    direct_path: &Path,
+    filename_tokens: &[String],
+) -> bool {
+    if filename_tokens.is_empty() {
+        return true;
+    }
+    if direct_path.is_dir() {
+        return false;
+    }
+    let Some(file_name) = direct_path.file_name().and_then(|v| v.to_str()) else {
+        return false;
+    };
+    filename_tokens.iter().any(|token| {
+        if file_name.eq_ignore_ascii_case(token) {
+            return true;
+        }
+        if token.contains('.') {
+            return false;
+        }
+        direct_path
+            .file_stem()
+            .and_then(|v| v.to_str())
+            .is_some_and(|stem| stem.eq_ignore_ascii_case(token))
+    })
 }
 
 fn trim_locator_token(token: &str) -> String {
@@ -189,18 +361,95 @@ fn trim_locator_token(token: &str) -> String {
 fn has_explicit_path_or_url_locator(text: &str) -> bool {
     text.split_whitespace()
         .map(trim_locator_token)
-        .any(|token| {
-            if token.is_empty() {
-                return false;
-            }
-            token.starts_with('/')
-                || token.starts_with("./")
-                || token.starts_with("../")
-                || token.starts_with("~/")
-                || token.starts_with("http://")
-                || token.starts_with("https://")
-                || token.contains(":\\")
-        })
+        .any(|token| looks_like_explicit_path_or_url_token(&token))
+}
+
+fn looks_like_explicit_path_or_url_token(token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+    token.starts_with('/')
+        || token.starts_with("./")
+        || token.starts_with("../")
+        || token.starts_with("~/")
+        || token.starts_with("http://")
+        || token.starts_with("https://")
+        || token.contains(":\\")
+        || (token.contains('/') && !token.contains("://"))
+}
+
+fn extract_explicit_path_like_tokens(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in text.split_whitespace() {
+        let token = trim_locator_token(raw);
+        if looks_like_explicit_path_or_url_token(&token) && !out.iter().any(|v| v == &token) {
+            out.push(token);
+        }
+        if out.len() >= 8 {
+            break;
+        }
+    }
+    out
+}
+
+fn expand_home_prefixed_path(token: &str) -> Option<PathBuf> {
+    let suffix = token.strip_prefix("~/")?;
+    let home = std::env::var_os("HOME")?;
+    let mut out = PathBuf::from(home);
+    out.push(suffix);
+    Some(out)
+}
+
+fn resolve_explicit_locator_path_token(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    token: &str,
+) -> Option<String> {
+    if token.starts_with("http://") || token.starts_with("https://") {
+        return None;
+    }
+    let raw_path = if let Some(expanded) = expand_home_prefixed_path(token) {
+        expanded
+    } else {
+        PathBuf::from(token)
+    };
+    let mut candidates = Vec::new();
+    if raw_path.is_absolute() {
+        candidates.push(raw_path);
+    } else {
+        candidates.push(workspace_root.join(&raw_path));
+        if default_locator_search_dir != workspace_root {
+            candidates.push(default_locator_search_dir.join(&raw_path));
+        }
+    }
+    for candidate in candidates {
+        if let Some(canonical) = if candidate.is_file() || candidate.is_dir() {
+            Some(candidate.canonicalize().unwrap_or(candidate))
+        } else {
+            crate::delivery_utils::resolve_existing_path_under_root_case_insensitive(
+                Path::new("/"),
+                &candidate.display().to_string(),
+            )
+        } {
+            return Some(canonical.display().to_string());
+        }
+    }
+    None
+}
+
+fn resolve_explicit_locator_path_from_text(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    text: &str,
+) -> Option<String> {
+    for token in extract_explicit_path_like_tokens(text) {
+        if let Some(path) =
+            resolve_explicit_locator_path_token(workspace_root, default_locator_search_dir, &token)
+        {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn looks_like_filename_locator(token: &str) -> bool {
@@ -499,16 +748,25 @@ mod tests {
         assert!(super::has_concrete_locator_hint(
             "read /home/guagua/test/README.md and summarize"
         ));
+        assert!(super::has_concrete_locator_hint(
+            "read scripts/nl_tests/fixtures/device_local/package.json"
+        ));
         assert!(super::has_concrete_locator_hint("send Cargo.toml"));
         assert!(super::has_concrete_locator_hint(
             "open https://example.com/file.txt"
+        ));
+        assert!(super::has_concrete_locator_hint(
+            "发 document 目录下最后一个"
+        ));
+        assert!(super::has_concrete_locator_hint(
+            "列出 logs 目录下前 5 个文件名"
         ));
     }
 
     #[test]
     fn concrete_locator_hint_rejects_deictic_without_locator() {
         assert!(!super::has_concrete_locator_hint(
-            "读一下那个 README 开头并用一句话总结"
+            "读一下那个开头并用一句话总结"
         ));
         assert!(!super::has_concrete_locator_hint("that config please"));
     }
@@ -529,6 +787,52 @@ mod tests {
         assert!(out.iter().any(|v| v == "doc"));
         assert!(out.iter().any(|v| v == "目录"));
         assert!(out.iter().any(|v| v == "app_config.toml"));
+    }
+
+    #[test]
+    fn resolve_explicit_relative_locator_path_from_text_prefers_workspace_root() {
+        let root = TempDirGuard::new("relative_explicit_path");
+        let nested = root.path.join("fixtures").join("device_local");
+        fs::create_dir_all(&nested).expect("create nested dirs");
+        let file = nested.join("package.json");
+        fs::write(&file, "{}").expect("write fixture");
+        let out = super::resolve_explicit_locator_path_from_text(
+            &root.path,
+            &root.path,
+            "去 fixtures/device_local/package.json 里找 name",
+        );
+        assert_eq!(
+            out.as_deref(),
+            Some(
+                file.canonicalize()
+                    .expect("canonical file")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+    }
+
+    #[test]
+    fn resolve_explicit_relative_locator_path_from_text_supports_case_mismatch() {
+        let root = TempDirGuard::new("relative_explicit_path_case_mismatch");
+        let nested = root.path.join("Fixtures").join("Device_Local");
+        fs::create_dir_all(&nested).expect("create nested dirs");
+        let file = nested.join("Package.JSON");
+        fs::write(&file, "{}").expect("write fixture");
+        let out = super::resolve_explicit_locator_path_from_text(
+            &root.path,
+            &root.path,
+            "去 fixtures/device_local/package.json 里找 name",
+        );
+        assert_eq!(
+            out.as_deref(),
+            Some(
+                file.canonicalize()
+                    .expect("canonical file")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
     }
 
     #[test]
@@ -644,6 +948,25 @@ mod tests {
     }
 
     #[test]
+    fn explicit_workspace_child_does_not_bind_filename_fragment_to_existing_file() {
+        let root = TempDirGuard::new("explicit_workspace_child_missing_filename_fragment");
+        fs::write(root.path.join("rustclaw"), "binary").expect("write rustclaw");
+        let query = "把 definitely_missing_named_file_rustclaw_001.txt 发给我";
+        let keywords = super::extract_locator_keywords(query);
+        let filename_tokens = super::extract_filename_like_tokens(query);
+        let out = super::resolve_explicit_workspace_child_target(
+            &root.path,
+            &root.path,
+            &keywords,
+            &filename_tokens,
+        );
+        assert!(
+            out.is_none(),
+            "unexpected explicit child resolution: {out:?}"
+        );
+    }
+
+    #[test]
     fn current_workspace_locator_binds_to_workspace_root() {
         let root = TempDirGuard::new("workspace_scope");
         let out = super::resolve_workspace_root_path(&root.path);
@@ -657,5 +980,157 @@ mod tests {
                     .to_string()
             )
         );
+    }
+
+    #[test]
+    fn current_workspace_locator_prefers_direct_child_target_when_present() {
+        let root = TempDirGuard::new("workspace_direct_child");
+        let logs = root.path.join("logs");
+        fs::create_dir_all(&logs).expect("create logs");
+        fs::write(logs.join("act_plan.log"), "ok\n").expect("write act_plan");
+
+        let out =
+            super::resolve_current_workspace_target(&root.path, &["logs".to_string()], &[], 2, 100);
+
+        match out {
+            Some(super::LocatorAutoResolution::Direct(path)) => {
+                assert_eq!(
+                    path,
+                    logs.canonicalize()
+                        .expect("canonical logs")
+                        .display()
+                        .to_string()
+                );
+            }
+            other => panic!("expected direct logs path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_workspace_child_directory_beats_context_root() {
+        let root = TempDirGuard::new("explicit_child_beats_context");
+        let workspace_logs = root.path.join("logs");
+        let fixture_logs = root.path.join("fixtures").join("logs");
+        fs::create_dir_all(&workspace_logs).expect("create workspace logs");
+        fs::create_dir_all(&fixture_logs).expect("create fixture logs");
+        fs::write(workspace_logs.join("clawd.log"), "ok\n").expect("write workspace log");
+        fs::write(fixture_logs.join("app.log"), "ok\n").expect("write fixture log");
+
+        let out = super::resolve_explicit_workspace_child_target(
+            &root.path,
+            &root.path,
+            &["logs".to_string()],
+            &[],
+        );
+
+        match out {
+            Some(super::LocatorAutoResolution::Direct(path)) => {
+                assert_eq!(
+                    path,
+                    workspace_logs
+                        .canonicalize()
+                        .expect("canonical workspace logs")
+                        .display()
+                        .to_string()
+                );
+            }
+            other => panic!("expected workspace logs path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn contextual_locator_root_prefers_recent_directory_scope() {
+        let root = TempDirGuard::new("context_root");
+        let logs = root.path.join("logs");
+        fs::create_dir_all(&logs).expect("create logs");
+        fs::write(logs.join("act_plan.log"), "ok\n").expect("write act_plan");
+
+        let out = super::resolve_contextual_locator_root(
+            &root.path,
+            &root.path,
+            Some("### RECENT_EXECUTION_EVENTS\n- request=先列出 logs 目录下前 5 个文件名 result=act_plan.log"),
+        );
+
+        assert_eq!(
+            out.map(|v| v.canonicalize().unwrap_or(v).display().to_string()),
+            Some(
+                logs.canonicalize()
+                    .expect("canonical logs")
+                    .display()
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn implicit_locator_uses_contextual_directory_root_for_followup_file() {
+        let root = TempDirGuard::new("contextual_followup");
+        let logs = root.path.join("logs");
+        fs::create_dir_all(&logs).expect("create logs");
+        fs::write(logs.join("act_plan.log"), "line1\nline2\n").expect("write act_plan");
+        fs::write(root.path.join("README.md"), "hello").expect("write readme");
+
+        let roots = vec![logs.clone(), root.path.clone()];
+        let out = super::try_resolve_implicit_locator_path_in_roots(
+            &roots,
+            &["读取".to_string(), "act_plan.log".to_string()],
+            &["act_plan.log".to_string()],
+            3,
+            128,
+        );
+
+        match out {
+            Some(super::LocatorAutoResolution::Direct(path)) => {
+                assert_eq!(
+                    PathBuf::from(path)
+                        .canonicalize()
+                        .expect("canonical resolved follow-up"),
+                    logs.join("act_plan.log")
+                        .canonicalize()
+                        .expect("canonical act_plan")
+                );
+            }
+            other => panic!("expected direct follow-up file resolution, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implicit_filename_locator_finds_nested_target_before_deep_noise_exhausts_budget() {
+        let root = TempDirGuard::new("filename_nested_target");
+        let alpha = root.path.join("alpha");
+        let scripts = root.path.join("scripts");
+        fs::create_dir_all(&alpha).expect("create alpha");
+        fs::create_dir_all(&scripts).expect("create scripts");
+        for idx in 0..8 {
+            fs::write(alpha.join(format!("noise_{idx}.txt")), "x\n").expect("write noise");
+        }
+        let target = scripts.join("restart_clawd_latest.sh");
+        fs::write(&target, "#!/bin/sh\necho ok\n").expect("write target");
+
+        let out = super::try_resolve_implicit_locator_path_in_roots(
+            &[root.path.clone()],
+            &["restart_clawd_latest.sh".to_string()],
+            &["restart_clawd_latest.sh".to_string()],
+            2,
+            10,
+        );
+
+        match out {
+            Some(super::LocatorAutoResolution::Direct(path)) => {
+                assert_eq!(
+                    PathBuf::from(path)
+                        .canonicalize()
+                        .expect("canonical resolved target")
+                        .display()
+                        .to_string(),
+                    target
+                        .canonicalize()
+                        .expect("canonical target")
+                        .display()
+                        .to_string()
+                );
+            }
+            other => panic!("expected direct nested filename match, got {other:?}"),
+        }
     }
 }

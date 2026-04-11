@@ -68,6 +68,61 @@ pub(crate) fn parse_llm_json_raw_or_any_with_repair<T: DeserializeOwned>(raw: &s
     })
 }
 
+pub(crate) fn extract_first_json_value_any(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let opener = bytes[i];
+        if opener != b'{' && opener != b'[' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut stack = vec![opener];
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut j = i + 1;
+        while j < bytes.len() {
+            let c = bytes[j];
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if c == b'\\' {
+                    escaped = true;
+                } else if c == b'"' {
+                    in_string = false;
+                }
+                j += 1;
+                continue;
+            }
+            match c {
+                b'"' => in_string = true,
+                b'{' | b'[' => stack.push(c),
+                b'}' | b']' => {
+                    let Some(last) = stack.pop() else {
+                        break;
+                    };
+                    let matched = matches!((last, c), (b'{', b'}') | (b'[', b']'));
+                    if !matched {
+                        break;
+                    }
+                    if stack.is_empty() {
+                        let candidate = &text[start..=j];
+                        if serde_json::from_str::<Value>(candidate).is_ok() {
+                            return Some(candidate.to_string());
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        i = start + 1;
+    }
+    None
+}
+
 pub(crate) fn extract_first_json_object_any(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let mut i = 0usize;
@@ -125,6 +180,7 @@ pub(crate) fn extract_agent_action_objects(text: &str) -> Vec<String> {
             let mut in_string = false;
             let mut escaped = false;
             let mut j = i;
+            let mut closed = false;
 
             while j < bytes.len() {
                 let c = bytes[j];
@@ -146,6 +202,7 @@ pub(crate) fn extract_agent_action_objects(text: &str) -> Vec<String> {
                     }
                     depth -= 1;
                     if depth == 0 {
+                        closed = true;
                         let candidate = &text[start..=j];
                         if is_agent_action_candidate(candidate) {
                             out.push(candidate.to_string());
@@ -154,7 +211,11 @@ pub(crate) fn extract_agent_action_objects(text: &str) -> Vec<String> {
                 }
                 j += 1;
             }
-            i = j;
+            if closed {
+                i = j;
+            } else {
+                i = start;
+            }
         }
         i += 1;
     }
@@ -420,6 +481,25 @@ mod tests {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default(),
             "chat"
+        );
+    }
+
+    #[test]
+    fn extract_agent_action_objects_recovers_inner_actions_from_malformed_wrapper() {
+        let raw = r#"{"steps":[{"type":"call_skill","skill":"read_file","args":{"path":"README.md"}},{"type":"call_skill","skill":"chat","args":{"text":"summarize","style":"chat"}]}"#;
+        let extracted = super::extract_agent_action_objects(raw);
+        assert_eq!(extracted.len(), 2);
+        let parsed: Value =
+            serde_json::from_str(&extracted[0]).expect("first inner action should parse");
+        assert_eq!(
+            parsed.get("skill").and_then(|v| v.as_str()),
+            Some("read_file")
+        );
+        let parsed_second: Value =
+            serde_json::from_str(&extracted[1]).expect("second inner action should parse");
+        assert_eq!(
+            parsed_second.get("skill").and_then(|v| v.as_str()),
+            Some("chat")
         );
     }
 }

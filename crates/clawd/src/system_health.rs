@@ -1,7 +1,7 @@
+use crate::AppState;
 use rusqlite::OptionalExtension;
 #[cfg(not(target_os = "linux"))]
 use std::process::Command as StdCommand;
-use crate::AppState;
 
 pub(crate) fn current_rss_bytes() -> Option<u64> {
     process_snapshots()
@@ -153,7 +153,10 @@ fn process_snapshots_from_ps() -> anyhow::Result<Vec<ProcessSnapshot>> {
             Ok(value) => value,
             Err(_) => continue,
         };
-        let rss_bytes = rss_kb_raw.parse::<u64>().ok().map(|kb| kb.saturating_mul(1024));
+        let rss_bytes = rss_kb_raw
+            .parse::<u64>()
+            .ok()
+            .map(|kb| kb.saturating_mul(1024));
         let args = parts.collect::<Vec<_>>().join(" ");
         processes.push(ProcessSnapshot {
             pid,
@@ -270,7 +273,10 @@ mod tests {
     #[test]
     fn process_basename_handles_paths_and_quotes() {
         assert_eq!(process_basename("/usr/local/bin/clawd"), "clawd");
-        assert_eq!(process_basename("\"/Applications/RustClaw/feishud\""), "feishud");
+        assert_eq!(
+            process_basename("\"/Applications/RustClaw/feishud\""),
+            "feishud"
+        );
     }
 
     #[test]
@@ -286,7 +292,8 @@ mod tests {
                 pid: 42,
                 rss_bytes: Some(1024),
                 comm: "bash".to_string(),
-                args: "cargo run -p telegramd -- --config configs/channels/telegram.toml".to_string(),
+                args: "cargo run -p telegramd -- --config configs/channels/telegram.toml"
+                    .to_string(),
             },
             ProcessSnapshot {
                 pid: 43,

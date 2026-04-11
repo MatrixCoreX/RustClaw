@@ -167,9 +167,8 @@ fn rebuild_auth_keys_for_flexible_roles(db: &Connection) -> anyhow::Result<()> {
         [],
         |row| row.get(0),
     )?;
-    let needs_rebuild =
-        table_sql.contains("CHECK (role IN ('admin', 'user'))")
-            || table_sql.contains("CHECK(role IN ('admin', 'user'))");
+    let needs_rebuild = table_sql.contains("CHECK (role IN ('admin', 'user'))")
+        || table_sql.contains("CHECK(role IN ('admin', 'user'))");
     if needs_rebuild {
         db.execute_batch(
             "BEGIN IMMEDIATE;
@@ -595,7 +594,9 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
             let mut stmt = db.prepare(
                 "SELECT rowid, user_key FROM auth_keys WHERE role = 'admin' ORDER BY created_at DESC",
             )?;
-            let rows = stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
             let mut out = Vec::new();
             for row in rows {
                 out.push(row?);
@@ -793,9 +794,8 @@ pub(crate) fn attach_pending_channel_bind_session_install_flow(
     if changed == 0 {
         anyhow::bail!("pending bind session not found or already terminal");
     }
-    get_pending_channel_bind_session_by_id(db, session_id)?.ok_or_else(|| {
-        anyhow::anyhow!("pending bind session not found after install flow update")
-    })
+    get_pending_channel_bind_session_by_id(db, session_id)?
+        .ok_or_else(|| anyhow::anyhow!("pending bind session not found after install flow update"))
 }
 
 pub(crate) fn get_pending_channel_bind_session_by_id(
@@ -1253,9 +1253,9 @@ mod tests {
         )
         .expect("insert auth key");
 
-        upsert_webd_login_account(&db, "alice", "pw-1", "rk-user-1").expect("create first username");
-        upsert_webd_login_account(&db, "alice_new", "pw-2", "rk-user-1")
-            .expect("replace username");
+        upsert_webd_login_account(&db, "alice", "pw-1", "rk-user-1")
+            .expect("create first username");
+        upsert_webd_login_account(&db, "alice_new", "pw-2", "rk-user-1").expect("replace username");
 
         let usernames: Vec<String> = db
             .prepare("SELECT username FROM webd_login_accounts ORDER BY username")
@@ -1300,9 +1300,10 @@ mod tests {
         )
         .expect("insert second auth key");
 
-        upsert_webd_login_account(&db, "alice", "pw-1", "rk-user-1").expect("create first username");
-        let err =
-            upsert_webd_login_account(&db, "alice", "pw-2", "rk-user-2").expect_err("reject duplicate username");
+        upsert_webd_login_account(&db, "alice", "pw-1", "rk-user-1")
+            .expect("create first username");
+        let err = upsert_webd_login_account(&db, "alice", "pw-2", "rk-user-2")
+            .expect_err("reject duplicate username");
         assert!(
             err.to_string().contains("username already assigned"),
             "unexpected error: {err}"
@@ -1326,9 +1327,13 @@ fn pending_feishu_bind_session_lifecycle() {
     .expect("insert auth key");
 
     let expires_at = (crate::now_ts().parse::<i64>().expect("current ts") + 600).to_string();
-    let created =
-        create_pending_channel_bind_session(&mut db, "feishu", "rk-pending-session-user", &expires_at)
-            .expect("create pending bind session");
+    let created = create_pending_channel_bind_session(
+        &mut db,
+        "feishu",
+        "rk-pending-session-user",
+        &expires_at,
+    )
+    .expect("create pending bind session");
     assert_eq!(created.channel, "feishu");
     assert_eq!(created.user_key, "rk-pending-session-user");
     assert_eq!(created.status, "pending");
@@ -1408,8 +1413,9 @@ fn direct_bind_finalizes_latest_pending_feishu_session() {
     .expect("insert auth key");
 
     let expires_at = (crate::now_ts().parse::<i64>().expect("current ts") + 600).to_string();
-    let created = create_pending_channel_bind_session(&mut db, "feishu", "rk-direct-bind-user", &expires_at)
-        .expect("create pending bind session");
+    let created =
+        create_pending_channel_bind_session(&mut db, "feishu", "rk-direct-bind-user", &expires_at)
+            .expect("create pending bind session");
     assert_eq!(created.status, "pending");
     assert!(created.external_user_id.is_none());
     assert!(created.external_chat_id.is_none());
@@ -1473,7 +1479,9 @@ pub(crate) fn update_auth_key_by_id(
             return Err(anyhow::anyhow!("cannot disable current key"));
         }
         if target_role.eq_ignore_ascii_case("admin")
-            && normalized_role.as_deref().is_some_and(|value| !value.eq_ignore_ascii_case("admin"))
+            && normalized_role
+                .as_deref()
+                .is_some_and(|value| !value.eq_ignore_ascii_case("admin"))
         {
             return Err(anyhow::anyhow!("cannot change current admin key role"));
         }
@@ -1532,7 +1540,9 @@ pub(crate) fn delete_auth_key_by_id(
     }
 
     if target_role.eq_ignore_ascii_case("admin") {
-        return Err(anyhow::anyhow!("admin key cannot be deleted; rotate a new admin key instead"));
+        return Err(anyhow::anyhow!(
+            "admin key cannot be deleted; rotate a new admin key instead"
+        ));
     }
 
     let tx = db.transaction()?;

@@ -16,6 +16,7 @@ struct ExecutionAnchor {
 }
 
 fn query_recent_execution_rows(
+    state: &AppState,
     db: &rusqlite::Connection,
     user_id: i64,
     chat_id: i64,
@@ -44,9 +45,48 @@ fn query_recent_execution_rows(
     })?;
     let mut out = Vec::new();
     for row in rows {
-        out.push(row?);
+        let row = row?;
+        if should_skip_recent_execution_row(state, &row.0, &row.2) {
+            continue;
+        }
+        out.push(row);
     }
     Ok(out)
+}
+
+fn provider_unavailable_answer_text(state: &AppState) -> String {
+    crate::i18n_t_with_default(
+        state,
+        "clawd.msg.clarify_question_fallback",
+        "I need to clarify: what task is this message about? Please provide the target or context.",
+    )
+}
+
+fn result_json_primary_text(result_json: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<Value>(result_json).ok()?;
+    parsed
+        .get("text")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            parsed
+                .get("messages")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+}
+
+fn should_skip_recent_execution_row(state: &AppState, kind: &str, result_json: &str) -> bool {
+    if kind != "ask" {
+        return false;
+    }
+    let provider_unavailable = provider_unavailable_answer_text(state);
+    result_json_primary_text(result_json)
+        .map(|text| text == provider_unavailable.trim())
+        .unwrap_or(false)
 }
 
 pub(crate) fn build_recent_execution_context(
@@ -89,7 +129,14 @@ fn load_recent_execution_rows(
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    let rows = match query_recent_execution_rows(&db, task.user_id, task.chat_id, user_key, limit) {
+    let rows = match query_recent_execution_rows(
+        state,
+        &db,
+        task.user_id,
+        task.chat_id,
+        user_key,
+        limit,
+    ) {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
@@ -98,8 +145,15 @@ fn load_recent_execution_rows(
     }
 
     if let Some(legacy_chat_id) = legacy_chat_id {
-        return query_recent_execution_rows(&db, task.user_id, legacy_chat_id, user_key, limit)
-            .unwrap_or_default();
+        return query_recent_execution_rows(
+            state,
+            &db,
+            task.user_id,
+            legacy_chat_id,
+            user_key,
+            limit,
+        )
+        .unwrap_or_default();
     }
 
     Vec::new()

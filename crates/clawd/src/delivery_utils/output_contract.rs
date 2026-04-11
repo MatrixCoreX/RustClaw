@@ -5,8 +5,69 @@ use crate::{AppState, IntentOutputContract, OutputResponseShape};
 use super::file_delivery::resolve_file_delivery_target_with_hint;
 use super::{
     extract_delivery_file_tokens, extract_file_path_from_delivery_token, localize_delivery_message,
-    FileDeliveryTargetResolution,
+    trim_path_token, FileDeliveryTargetResolution,
 };
+
+fn existing_file_path_literal(text: &str) -> Option<PathBuf> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.contains('\n') {
+        return None;
+    }
+    let path = Path::new(trimmed);
+    if !path.is_file() {
+        return None;
+    }
+    Some(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
+}
+
+fn looks_like_delivery_locator_literal(text: &str, locator_hint: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || trimmed.contains('\n')
+        || crate::finalizer::looks_like_planner_artifact(trimmed)
+        || crate::finalizer::parse_delivery_file_token(trimmed).is_some()
+    {
+        return false;
+    }
+
+    let normalized = trim_path_token(trimmed);
+    if normalized.is_empty() {
+        return false;
+    }
+
+    let hint = trim_path_token(locator_hint);
+    if !hint.is_empty() {
+        if normalized == hint {
+            return true;
+        }
+        if Path::new(&hint)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| normalized == name)
+        {
+            return true;
+        }
+    }
+
+    if normalized.starts_with('/')
+        || normalized.starts_with("./")
+        || normalized.starts_with("../")
+        || normalized.contains('/')
+        || normalized.contains('\\')
+    {
+        return true;
+    }
+
+    if normalized.chars().any(char::is_whitespace) {
+        return false;
+    }
+
+    normalized
+        .rsplit('/')
+        .next()
+        .unwrap_or(&normalized)
+        .contains('.')
+}
 
 pub(super) fn enforce_output_contract(
     state: &AppState,
@@ -33,27 +94,56 @@ pub(super) fn enforce_output_contract(
             OutputResponseShape::FileToken
         );
     if file_contract && !response_has_any_delivery_token(normalized_text, normalized_messages) {
-        match resolve_file_delivery_target_with_hint(
-            user_request,
-            Path::new("/"),
-            &state.default_locator_search_dir,
-            state.locator_scan_max_depth,
-            state.locator_scan_max_files,
-            Some(output_contract.locator_hint.as_str()),
-        ) {
-            Some(FileDeliveryTargetResolution::Resolved(path)) => {
-                let token = format!("FILE:{}", path.display());
-                *normalized_text = token.clone();
-                if !normalized_messages.iter().any(|m| m == &token) {
-                    normalized_messages.push(token);
+        let current_output = canonical_output_text(normalized_text, normalized_messages);
+        if let Some(path) = existing_file_path_literal(normalized_text).or_else(|| {
+            normalized_messages
+                .iter()
+                .rev()
+                .find_map(|message| existing_file_path_literal(message))
+        }) {
+            let token = format!("FILE:{}", path.display());
+            *normalized_text = token.clone();
+            normalized_messages.clear();
+            normalized_messages.push(token);
+        } else if current_output.trim().is_empty()
+            || looks_like_delivery_locator_literal(&current_output, &output_contract.locator_hint)
+        {
+            match resolve_file_delivery_target_with_hint(
+                user_request,
+                Path::new("/"),
+                &state.default_locator_search_dir,
+                state.locator_scan_max_depth,
+                state.locator_scan_max_files,
+                Some(output_contract.locator_hint.as_str()),
+            ) {
+                Some(FileDeliveryTargetResolution::Resolved(path)) => {
+                    let token = format!("FILE:{}", path.display());
+                    *normalized_text = token.clone();
+                    if !normalized_messages.iter().any(|m| m == &token) {
+                        normalized_messages.push(token);
+                    }
                 }
+                Some(FileDeliveryTargetResolution::UserMessage(msg)) => {
+                    *normalized_text = localize_delivery_message(state, msg);
+                    normalized_messages
+                        .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
+                }
+                Some(FileDeliveryTargetResolution::Candidates(paths)) => {
+                    let mut lines = Vec::with_capacity(paths.len() + 1);
+                    lines.push(localize_delivery_message(
+                        state,
+                        super::DeliveryMessageKind::FilenameNotUnique,
+                    ));
+                    lines.extend(paths.into_iter().map(|path| path.display().to_string()));
+                    let text = lines.join("\n");
+                    *normalized_text = text.clone();
+                    normalized_messages
+                        .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
+                    normalized_messages.clear();
+                    normalized_messages.push(text);
+                }
+                None => {}
             }
-            Some(FileDeliveryTargetResolution::UserMessage(msg)) => {
-                *normalized_text = localize_delivery_message(state, msg);
-                normalized_messages
-                    .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
-            }
-            None => {}
         }
     }
     sync_output_payload(output_contract, normalized_text, normalized_messages);
@@ -109,7 +199,17 @@ pub(crate) fn sync_output_payload(
     normalized_text: &mut String,
     normalized_messages: &mut Vec<String>,
 ) {
-    let canonical = canonical_output_text(normalized_text, normalized_messages);
+    let mut canonical = canonical_output_text(normalized_text, normalized_messages);
+    let file_contract = output_contract.delivery_required
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::FileToken
+        );
+    if file_contract {
+        if let Some(path) = existing_file_path_literal(&canonical) {
+            canonical = format!("FILE:{}", path.display());
+        }
+    }
     *normalized_text = canonical.clone();
     normalized_messages.retain(|message| !message.trim().is_empty());
     if canonical.is_empty() {
@@ -238,6 +338,40 @@ pub(crate) fn take_first_sentence(text: &str) -> String {
         source.to_string()
     } else {
         out.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::looks_like_delivery_locator_literal;
+
+    #[test]
+    fn delivery_locator_literal_accepts_hint_and_path_shapes() {
+        assert!(looks_like_delivery_locator_literal(
+            "README.md",
+            "README.md"
+        ));
+        assert!(looks_like_delivery_locator_literal(
+            "/tmp/report.md",
+            "README.md"
+        ));
+        assert!(looks_like_delivery_locator_literal(
+            "configs/config.toml",
+            "configs/config.toml"
+        ));
+        assert!(looks_like_delivery_locator_literal("LICENSE", "LICENSE"));
+    }
+
+    #[test]
+    fn delivery_locator_literal_rejects_user_facing_sentences() {
+        assert!(!looks_like_delivery_locator_literal(
+            "未找到该文件。文件 `definitely_missing_named_file_rustclaw_001.txt` 在工作区中不存在。",
+            "definitely_missing_named_file_rustclaw_001.txt"
+        ));
+        assert!(!looks_like_delivery_locator_literal(
+            "请提供具体的文件名或路径。",
+            "README.md"
+        ));
     }
 }
 
