@@ -563,6 +563,8 @@ primary_fallback_role = "fallback"
             risk_ceiling: crate::RiskCeiling::Unknown,
             resume_behavior: crate::ResumeBehavior::None,
             schedule_kind: ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: crate::IntentOutputContract::default(),
         }

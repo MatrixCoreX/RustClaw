@@ -130,7 +130,15 @@ fn execute(args: Value) -> Result<(String, Value), String> {
 }
 
 fn detect_manager() -> Option<String> {
-    for m in ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew"] {
+    let candidates: &[&str] = match std::env::consts::OS {
+        "macos" => &[
+            "brew", "apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper",
+        ],
+        _ => &[
+            "apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew",
+        ],
+    };
+    for m in candidates {
         let ok = Command::new("sh")
             .arg("-lc")
             .arg(format!("command -v {m} >/dev/null 2>&1"))

@@ -1,7 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::runtime::types::AgentAction;
-use crate::runtime::types::RoutedMode;
+use crate::runtime::types::{AgentAction, RoutedMode, ScheduleIntentOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum OutputResponseShape {
@@ -91,6 +90,18 @@ pub(crate) enum ScheduleKind {
     Query,
 }
 
+impl ScheduleKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Create => "create",
+            Self::Update => "update",
+            Self::Delete => "delete",
+            Self::Query => "query",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum RiskCeiling {
     #[default]
@@ -111,12 +122,14 @@ pub(crate) struct RouteResult {
     pub(crate) routed_mode: RoutedMode,
     pub(crate) resolved_intent: String,
     pub(crate) needs_clarify: bool,
+    pub(crate) clarify_question: String,
     pub(crate) route_reason: String,
     pub(crate) route_confidence: Option<f64>,
     pub(crate) visible_skill_candidates: Vec<String>,
     pub(crate) risk_ceiling: RiskCeiling,
     pub(crate) resume_behavior: ResumeBehavior,
     pub(crate) schedule_kind: ScheduleKind,
+    pub(crate) schedule_intent: Option<ScheduleIntentOutput>,
     pub(crate) wants_file_delivery: bool,
     pub(crate) output_contract: IntentOutputContract,
 }

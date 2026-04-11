@@ -596,19 +596,27 @@ pub(crate) async fn try_handle_schedule_request(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
+    precompiled_intent: Option<&ScheduleIntentOutput>,
 ) -> Result<Option<String>, String> {
-    let compile_args = json!({
-        "action": "compile",
-        "text": prompt
-    });
-    let compiled_text =
-        match crate::execution_adapters::run_skill(state, task, "schedule", compile_args).await {
+    let intent = if let Some(intent) = precompiled_intent
+        .filter(|intent| intent.needs_clarify || !clean_schedule_kind(&intent.kind).is_empty())
+    {
+        intent.clone()
+    } else {
+        let compile_args = json!({
+            "action": "compile",
+            "text": prompt
+        });
+        let compiled_text =
+            match crate::execution_adapters::run_skill(state, task, "schedule", compile_args).await
+            {
+                Ok(v) => v,
+                Err(_) => return Ok(None),
+            };
+        match serde_json::from_str::<ScheduleIntentOutput>(&compiled_text) {
             Ok(v) => v,
             Err(_) => return Ok(None),
-        };
-    let intent = match serde_json::from_str::<ScheduleIntentOutput>(&compiled_text) {
-        Ok(v) => v,
-        Err(_) => return Ok(None),
+        }
     };
     let kind = clean_schedule_kind(&intent.kind);
     if intent.needs_clarify {

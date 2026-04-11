@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use super::directory_lookup::{resolve_directory_locator_input, resolve_directory_target};
@@ -233,6 +234,17 @@ pub(super) fn enforce_file_delivery_locator_contract(
                 }
             }
         }
+        FileDeliveryTargetResolution::Candidates(paths) => {
+            let mut lines = Vec::with_capacity(paths.len() + 1);
+            lines.push(localize_delivery_message(
+                state,
+                DeliveryMessageKind::FilenameNotUnique,
+            ));
+            lines.extend(paths.into_iter().map(|path| path.display().to_string()));
+            *normalized_text = lines.join("\n");
+            normalized_messages
+                .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
+        }
         FileDeliveryTargetResolution::UserMessage(msg) => {
             *normalized_text = localize_delivery_message(state, msg);
             normalized_messages
@@ -343,11 +355,11 @@ pub(super) fn resolve_directory_and_file(
     };
     match find_file_in_directory_non_recursive(&directory, file_name) {
         DirectoryFileLookupResult::Found(path) => FileDeliveryTargetResolution::Resolved(path),
+        DirectoryFileLookupResult::Candidates(paths) => {
+            FileDeliveryTargetResolution::Candidates(paths)
+        }
         DirectoryFileLookupResult::NotFound => {
             FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule2FileNotFound)
-        }
-        DirectoryFileLookupResult::Multiple => {
-            FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::FilenameNotUnique)
         }
     }
 }
@@ -367,9 +379,7 @@ pub(super) fn scan_filename_under_roots(
     );
     match project_outcome.result {
         FilenameScanResult::Found(path) => FileDeliveryTargetResolution::Resolved(path),
-        FilenameScanResult::Multiple => {
-            FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::FilenameNotUnique)
-        }
+        FilenameScanResult::Candidates(paths) => FileDeliveryTargetResolution::Candidates(paths),
         FilenameScanResult::TooManyEntries => {
             FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule3ScanTooMany)
         }
@@ -383,18 +393,74 @@ pub(super) fn scan_filename_under_roots(
             .result
             {
                 FilenameScanResult::Found(path) => FileDeliveryTargetResolution::Resolved(path),
+                FilenameScanResult::Candidates(paths) => {
+                    FileDeliveryTargetResolution::Candidates(paths)
+                }
                 FilenameScanResult::NotFound => FileDeliveryTargetResolution::UserMessage(
                     DeliveryMessageKind::Rule3FileNotFound,
                 ),
                 FilenameScanResult::TooManyEntries => {
                     FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule3ScanTooMany)
                 }
-                FilenameScanResult::Multiple => FileDeliveryTargetResolution::UserMessage(
-                    DeliveryMessageKind::FilenameNotUnique,
-                ),
             }
         }
     }
+}
+
+fn ranked_candidate_paths(mut paths: Vec<PathBuf>, target: &str) -> Vec<PathBuf> {
+    for path in &mut paths {
+        if let Ok(canonical) = path.canonicalize() {
+            *path = canonical;
+        }
+    }
+    let target_norm = normalize_locator_text(target);
+    paths.sort_by(|a, b| {
+        let score_a = fuzzy_filename_candidate_score(a, &target_norm);
+        let score_b = fuzzy_filename_candidate_score(b, &target_norm);
+        score_b
+            .cmp(&score_a)
+            .then_with(|| {
+                a.file_name()
+                    .map(|v| v.to_string_lossy().len())
+                    .unwrap_or(usize::MAX)
+                    .cmp(
+                        &b.file_name()
+                            .map(|v| v.to_string_lossy().len())
+                            .unwrap_or(usize::MAX),
+                    )
+            })
+            .then_with(|| a.to_string_lossy().cmp(&b.to_string_lossy()))
+    });
+    paths.dedup();
+    paths.into_iter().take(3).collect()
+}
+
+fn fuzzy_filename_candidate_score(path: &Path, target_norm: &str) -> i32 {
+    let file_name = path
+        .file_name()
+        .map(|v| v.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let file_name_norm = normalize_locator_text(&file_name);
+    let stem_norm = path
+        .file_stem()
+        .map(|v| normalize_locator_text(&v.to_string_lossy()))
+        .unwrap_or_default();
+    if stem_norm == target_norm {
+        return 500;
+    }
+    if stem_norm.starts_with(target_norm) {
+        return 400;
+    }
+    if stem_norm.contains(target_norm) {
+        return 300;
+    }
+    if file_name_norm.starts_with(target_norm) {
+        return 200;
+    }
+    if file_name_norm.contains(target_norm) {
+        return 100;
+    }
+    0
 }
 
 pub(super) fn find_file_in_directory_non_recursive(
@@ -414,6 +480,7 @@ pub(super) fn find_file_in_directory_non_recursive(
     }
 
     let mut exact_matches = Vec::new();
+    let mut stem_matches = Vec::new();
     let mut fuzzy_matches = Vec::new();
     let entries = match std::fs::read_dir(directory) {
         Ok(v) => v,
@@ -427,8 +494,13 @@ pub(super) fn find_file_in_directory_non_recursive(
             .unwrap_or_default();
         let file_name_norm = normalize_locator_text(&file_name);
         let is_exact = file_name_norm == target_norm;
+        let is_stem_match = !target.contains('.')
+            && path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().eq_ignore_ascii_case(&target))
+                .unwrap_or(false);
         let is_fuzzy = !is_exact && file_name_norm.contains(&target_norm);
-        if !is_exact && !is_fuzzy {
+        if !is_exact && !is_stem_match && !is_fuzzy {
             continue;
         }
         let meta = match std::fs::symlink_metadata(&path) {
@@ -439,6 +511,8 @@ pub(super) fn find_file_in_directory_non_recursive(
         if file_type.is_file() || (file_type.is_symlink() && path.is_file()) {
             if is_exact {
                 exact_matches.push(path);
+            } else if is_stem_match {
+                stem_matches.push(path);
             } else {
                 fuzzy_matches.push(path);
             }
@@ -455,19 +529,38 @@ pub(super) fn find_file_in_directory_non_recursive(
             .unwrap_or(DirectoryFileLookupResult::NotFound);
     }
     if exact_matches.len() > 1 {
-        return DirectoryFileLookupResult::Multiple;
+        return DirectoryFileLookupResult::Candidates(ranked_candidate_paths(
+            exact_matches,
+            &target,
+        ));
+    }
+    stem_matches.sort();
+    stem_matches.dedup();
+    if stem_matches.len() == 1 {
+        return stem_matches
+            .into_iter()
+            .next()
+            .and_then(|path| path.canonicalize().ok())
+            .map(DirectoryFileLookupResult::Found)
+            .unwrap_or(DirectoryFileLookupResult::NotFound);
+    }
+    if stem_matches.len() > 1 {
+        return DirectoryFileLookupResult::Candidates(ranked_candidate_paths(
+            stem_matches,
+            &target,
+        ));
     }
     fuzzy_matches.sort();
     fuzzy_matches.dedup();
     if fuzzy_matches.is_empty() {
         DirectoryFileLookupResult::NotFound
     } else {
-        DirectoryFileLookupResult::Multiple
+        DirectoryFileLookupResult::Candidates(ranked_candidate_paths(fuzzy_matches, &target))
     }
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-pub(super) fn scan_filename_matches_with_limit(
+pub(crate) fn scan_filename_matches_with_limit(
     project_root: &Path,
     file_name: &str,
     max_depth: usize,
@@ -501,11 +594,12 @@ fn scan_filename_matches_with_limit_internal(
     let target_norm = normalize_locator_text(&target);
 
     let mut exact_matches = Vec::new();
+    let mut stem_matches = Vec::new();
     let mut fuzzy_matches = Vec::new();
     let mut seen_entries = 0usize;
-    let mut stack = vec![(project_root.to_path_buf(), 0usize)];
+    let mut queue = VecDeque::from([(project_root.to_path_buf(), 0usize)]);
 
-    while let Some((dir, depth)) = stack.pop() {
+    while let Some((dir, depth)) = queue.pop_front() {
         let mut entries = match std::fs::read_dir(&dir) {
             Ok(v) => v
                 .filter_map(Result::ok)
@@ -514,6 +608,7 @@ fn scan_filename_matches_with_limit_internal(
             Err(_) => continue,
         };
         entries.sort();
+        let mut child_dirs = Vec::new();
         for path in entries {
             seen_entries += 1;
             if seen_entries > max_files.max(1) {
@@ -528,7 +623,7 @@ fn scan_filename_matches_with_limit_internal(
             let file_type = meta.file_type();
             if file_type.is_dir() {
                 if depth < max_depth {
-                    stack.push((path, depth + 1));
+                    child_dirs.push((path, depth + 1));
                 }
                 continue;
             }
@@ -542,9 +637,19 @@ fn scan_filename_matches_with_limit_internal(
             let current_name_norm = normalize_locator_text(&current_name);
             if current_name_norm == target_norm {
                 exact_matches.push(path);
+            } else if !target.contains('.')
+                && path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().eq_ignore_ascii_case(&target))
+                    .unwrap_or(false)
+            {
+                stem_matches.push(path);
             } else if current_name_norm.contains(&target_norm) {
                 fuzzy_matches.push(path);
             }
+        }
+        for child in child_dirs {
+            queue.push_back(child);
         }
     }
 
@@ -562,7 +667,24 @@ fn scan_filename_matches_with_limit_internal(
     }
     if exact_matches.len() > 1 {
         return FilenameScanOutcome {
-            result: FilenameScanResult::Multiple,
+            result: FilenameScanResult::Candidates(ranked_candidate_paths(exact_matches, &target)),
+        };
+    }
+    stem_matches.sort();
+    stem_matches.dedup();
+    if stem_matches.len() == 1 {
+        return FilenameScanOutcome {
+            result: stem_matches
+                .into_iter()
+                .next()
+                .and_then(|path| path.canonicalize().ok())
+                .map(FilenameScanResult::Found)
+                .unwrap_or(FilenameScanResult::NotFound),
+        };
+    }
+    if stem_matches.len() > 1 {
+        return FilenameScanOutcome {
+            result: FilenameScanResult::Candidates(ranked_candidate_paths(stem_matches, &target)),
         };
     }
     fuzzy_matches.sort();
@@ -570,7 +692,7 @@ fn scan_filename_matches_with_limit_internal(
     let result = if fuzzy_matches.is_empty() {
         FilenameScanResult::NotFound
     } else {
-        FilenameScanResult::Multiple
+        FilenameScanResult::Candidates(ranked_candidate_paths(fuzzy_matches, &target))
     };
     FilenameScanOutcome { result }
 }

@@ -145,15 +145,7 @@ fn unpack_archive(archive: &Path, dest: &Path) -> Result<String, String> {
         run("unzip", &[String::from("-o"), arc, String::from("-d"), dst])
     } else if arc.ends_with(".tar.gz") || arc.ends_with(".tgz") {
         // Avoid GNU-only flags so both bsdtar (macOS) and GNU tar work.
-        run(
-            "tar",
-            &[
-                String::from("-xzf"),
-                arc,
-                String::from("-C"),
-                dst,
-            ],
-        )
+        run("tar", &[String::from("-xzf"), arc, String::from("-C"), dst])
     } else {
         Err("unsupported archive format for unpack".to_string())
     }

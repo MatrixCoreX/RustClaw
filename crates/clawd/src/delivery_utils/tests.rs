@@ -12,16 +12,18 @@ use super::file_delivery::{
     scan_filename_matches_with_limit,
 };
 use super::locator::{
-    directory_lookup_input_from_hint, extract_directory_and_file_pair,
-    extract_explicit_file_path_candidates, extract_filename_candidates,
+    directory_lookup_input_from_hint, extract_bare_filename_stem_candidates,
+    extract_directory_and_file_pair, extract_explicit_file_path_candidates,
+    extract_filename_candidates,
 };
 use super::output_contract::{sync_output_payload, take_first_sentence};
 use super::{
     classify_batch_directory_delivery_input, classify_directory_lookup_input,
-    resolve_file_delivery_target, BatchDirectoryDeliveryResolution, CurrentLevelDeliveryEntries,
+    resolve_directory_locator_for_execution, resolve_file_delivery_target,
+    BatchDirectoryDeliveryResolution, CurrentLevelDeliveryEntries,
     CurrentLevelDeliveryEntriesResult, DeliveryMessageKind, DirectoryEntriesListResult,
-    DirectoryFileLookupResult, DirectoryLookupInput, DirectoryLookupResolution,
-    FileDeliveryTargetResolution, FilenameScanResult,
+    DirectoryFileLookupResult, DirectoryLocatorExecutionResolution, DirectoryLookupInput,
+    DirectoryLookupResolution, FileDeliveryTargetResolution, FilenameScanResult,
 };
 use crate::{IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape};
 
@@ -148,6 +150,27 @@ fn sync_output_payload_collapses_file_token_to_single_exit() {
 }
 
 #[test]
+fn sync_output_payload_wraps_existing_file_path_for_file_token_contract() {
+    let tmp = TempDirGuard::new("file_token_existing_path");
+    let target = tmp.path().join("report.md");
+    write_text_file(&target);
+    let canonical = target.canonicalize().expect("canonical target");
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::FileToken,
+        delivery_required: true,
+        ..IntentOutputContract::default()
+    };
+    let mut text = canonical.display().to_string();
+    let mut messages = vec![canonical.display().to_string()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    let expected = format!("FILE:{}", canonical.display());
+    assert_eq!(text, expected);
+    assert_eq!(messages, vec![expected]);
+}
+
+#[test]
 fn sync_output_payload_collapses_one_sentence_contract_to_single_message() {
     let contract = IntentOutputContract {
         response_shape: OutputResponseShape::OneSentence,
@@ -191,6 +214,29 @@ fn rule1_explicit_file_path_hits_project_root() {
     let system_root = TempDirGuard::new("rule1_system_project_hit");
     let project_root = TempDirGuard::new("rule1_project_hit");
     let target = project_root.path().join("alpha/report.md");
+    write_text_file(&target);
+
+    let resolved = resolve_file_delivery_target(
+        "把 /alpha/report.md 发给我",
+        system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::Resolved(
+            target.canonicalize().expect("canonical target")
+        ))
+    );
+}
+
+#[test]
+fn rule1_explicit_file_path_case_mismatch_still_hits_project_root() {
+    let system_root = TempDirGuard::new("rule1_project_case_mismatch_system");
+    let project_root = TempDirGuard::new("rule1_project_case_mismatch_project");
+    let target = project_root.path().join("Alpha/Report.MD");
     write_text_file(&target);
 
     let resolved = resolve_file_delivery_target(
@@ -277,6 +323,61 @@ fn rule2_directory_and_file_found() {
 }
 
 #[test]
+fn rule2_directory_and_bare_stem_unique_extension_found() {
+    let system_root = TempDirGuard::new("rule2_system_stem_unique");
+    let project_root = TempDirGuard::new("rule2_project_stem_unique");
+    let target = project_root.path().join("docs/reports/ABCD.txt");
+    write_text_file(&target);
+
+    let resolved = resolve_file_delivery_target(
+        "去 docs/reports 找 abcd",
+        system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::Resolved(
+            target.canonicalize().expect("canonical target")
+        ))
+    );
+}
+
+#[test]
+fn rule2_directory_and_bare_stem_multiple_extensions_requires_confirmation() {
+    let system_root = TempDirGuard::new("rule2_system_stem_multi");
+    let project_root = TempDirGuard::new("rule2_project_stem_multi");
+    write_text_file(&project_root.path().join("docs/reports/abcd.txt"));
+    write_text_file(&project_root.path().join("docs/reports/abcd.cpp"));
+
+    let resolved = resolve_file_delivery_target(
+        "去 docs/reports 找 abcd",
+        system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::Candidates(vec![
+            project_root
+                .path()
+                .join("docs/reports/abcd.cpp")
+                .canonicalize()
+                .expect("canonical abcd.cpp"),
+            project_root
+                .path()
+                .join("docs/reports/abcd.txt")
+                .canonicalize()
+                .expect("canonical abcd.txt"),
+        ]))
+    );
+}
+
+#[test]
 fn rule2_directory_found_but_file_missing() {
     let system_root = TempDirGuard::new("rule2_system_file_missing");
     let project_root = TempDirGuard::new("rule2_project_file_missing");
@@ -315,9 +416,9 @@ fn rule2_directory_fuzzy_name_requires_confirmation_instead_of_auto_delivery() {
 
     assert_eq!(
         resolved,
-        Some(FileDeliveryTargetResolution::UserMessage(
-            DeliveryMessageKind::FilenameNotUnique
-        ))
+        Some(FileDeliveryTargetResolution::Candidates(vec![target
+            .canonicalize()
+            .expect("canonical target"),]))
     );
 }
 
@@ -341,6 +442,61 @@ fn rule3_filename_only_scan_hits_under_project_root() {
         Some(FileDeliveryTargetResolution::Resolved(
             target.canonicalize().expect("canonical target")
         ))
+    );
+}
+
+#[test]
+fn rule3_filename_only_bare_stem_unique_extension_resolves_directly() {
+    let system_root = TempDirGuard::new("rule3_system_stem_unique");
+    let project_root = TempDirGuard::new("rule3_project_stem_unique");
+    let target = project_root.path().join("docs/ABCD.txt");
+    write_text_file(&target);
+
+    let resolved = resolve_file_delivery_target(
+        "把 abcd 发给我",
+        system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::Resolved(
+            target.canonicalize().expect("canonical target")
+        ))
+    );
+}
+
+#[test]
+fn rule3_filename_only_bare_stem_multiple_extensions_requires_confirmation() {
+    let system_root = TempDirGuard::new("rule3_system_stem_multi");
+    let project_root = TempDirGuard::new("rule3_project_stem_multi");
+    write_text_file(&project_root.path().join("docs/abcd.txt"));
+    write_text_file(&project_root.path().join("docs/abcd.cpp"));
+
+    let resolved = resolve_file_delivery_target(
+        "把 abcd 发给我",
+        system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::Candidates(vec![
+            project_root
+                .path()
+                .join("docs/abcd.cpp")
+                .canonicalize()
+                .expect("canonical abcd.cpp"),
+            project_root
+                .path()
+                .join("docs/abcd.txt")
+                .canonicalize()
+                .expect("canonical abcd.txt"),
+        ]))
     );
 }
 
@@ -384,9 +540,40 @@ fn rule3_filename_only_fuzzy_name_requires_confirmation_instead_of_auto_delivery
 
     assert_eq!(
         resolved,
-        Some(FileDeliveryTargetResolution::UserMessage(
-            DeliveryMessageKind::FilenameNotUnique
-        ))
+        Some(FileDeliveryTargetResolution::Candidates(vec![target
+            .canonicalize()
+            .expect("canonical target"),]))
+    );
+}
+
+#[test]
+fn rule3_filename_only_fuzzy_name_returns_ranked_top3_candidates() {
+    let system_root = TempDirGuard::new("rule3_system_fuzzy_top3");
+    let project_root = TempDirGuard::new("rule3_project_fuzzy_top3");
+    let c1 = project_root.path().join("docs/abcd_report.md");
+    let c2 = project_root.path().join("docs/my_abcd.txt");
+    let c3 = project_root.path().join("docs/x_abcd_log.txt");
+    let c4 = project_root.path().join("docs/zz_abcd_backup.log");
+    write_text_file(&c1);
+    write_text_file(&c2);
+    write_text_file(&c3);
+    write_text_file(&c4);
+
+    let resolved = resolve_file_delivery_target(
+        "把 abcd 发给我",
+        system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::Candidates(vec![
+            c1.canonicalize().expect("canonical c1"),
+            c2.canonicalize().expect("canonical c2"),
+            c3.canonicalize().expect("canonical c3"),
+        ]))
     );
 }
 
@@ -531,6 +718,30 @@ fn directory_rule_explicit_path_hits_project_root() {
 }
 
 #[test]
+fn directory_rule_explicit_path_case_mismatch_hits_project_root() {
+    let system_root = TempDirGuard::new("dir_rule_system_project_case_mismatch");
+    let project_root = TempDirGuard::new("dir_rule_project_case_mismatch");
+    let dir = project_root.path().join("Reports");
+    fs::create_dir_all(&dir).expect("create reports");
+    write_text_file(&dir.join("daily.txt"));
+
+    let resolved = resolve_directory_target(
+        DirectoryLookupInput::ExplicitPath {
+            directory_path: "/reports".to_string(),
+        },
+        system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        DirectoryLookupResolution::Resolved(dir.canonicalize().expect("canonical reports"))
+    );
+}
+
+#[test]
 fn directory_rule_explicit_path_miss_both_roots() {
     let system_root = TempDirGuard::new("dir_rule_system_miss");
     let project_root = TempDirGuard::new("dir_rule_project_miss");
@@ -621,6 +832,42 @@ fn directory_rule_name_hint_not_found() {
         resolved,
         DirectoryLookupResolution::UserMessage(DeliveryMessageKind::DirectoryBothRootsMiss)
     );
+}
+
+#[test]
+fn directory_execution_resolution_finds_unique_directory_hint() {
+    let project_root = TempDirGuard::new("dir_exec_hint_unique_project");
+    let archive_dir = project_root.path().join("docs/archive");
+    fs::create_dir_all(&archive_dir).expect("create archive dir");
+    write_text_file(&archive_dir.join("one.txt"));
+
+    let resolved = resolve_directory_locator_for_execution("archive", project_root.path(), 4, 300);
+
+    assert_eq!(
+        resolved,
+        Some(DirectoryLocatorExecutionResolution::Resolved(
+            archive_dir.canonicalize().expect("canonical archive")
+        ))
+    );
+}
+
+#[test]
+fn directory_execution_resolution_returns_top3_for_ambiguous_hint() {
+    let project_root = TempDirGuard::new("dir_exec_hint_multi_project");
+    fs::create_dir_all(project_root.path().join("a/archive")).expect("create a/archive");
+    fs::create_dir_all(project_root.path().join("b/archive")).expect("create b/archive");
+    fs::create_dir_all(project_root.path().join("c/archive")).expect("create c/archive");
+    fs::create_dir_all(project_root.path().join("d/archive")).expect("create d/archive");
+
+    let resolved = resolve_directory_locator_for_execution("archive", project_root.path(), 4, 500);
+
+    match resolved {
+        Some(DirectoryLocatorExecutionResolution::MultipleCandidates(candidates)) => {
+            assert_eq!(candidates.len(), 3);
+            assert!(candidates.iter().all(|path| path.is_absolute()));
+        }
+        other => panic!("expected multiple candidates, got {other:?}"),
+    }
 }
 
 #[test]
@@ -755,6 +1002,14 @@ fn chinese_filename_candidates_are_extracted() {
 }
 
 #[test]
+fn ascii_bare_filename_stem_candidates_are_extracted_without_action_words() {
+    let out = extract_bare_filename_stem_candidates("把 abcd 发给我，然后去 docs/reports 找 efgh");
+    assert!(out.iter().any(|v| v == "abcd"));
+    assert!(out.iter().any(|v| v == "efgh"));
+    assert!(!out.iter().any(|v| v == "docs"));
+}
+
+#[test]
 fn chinese_directory_name_hint_is_extracted() {
     assert_eq!(
         directory_lookup_input_from_hint("日志"),
@@ -766,6 +1021,22 @@ fn chinese_directory_name_hint_is_extracted() {
         directory_lookup_input_from_hint("项目资料"),
         Some(DirectoryLookupInput::NameHint {
             directory_hint: "项目资料".to_string()
+        })
+    );
+}
+
+#[test]
+fn inline_ascii_directory_name_hint_is_extracted_from_request() {
+    assert_eq!(
+        classify_directory_lookup_input("发 document 目录下最后一个"),
+        Some(DirectoryLookupInput::NameHint {
+            directory_hint: "document".to_string()
+        })
+    );
+    assert_eq!(
+        classify_directory_lookup_input("列出 logs directory 下面前 5 个文件"),
+        Some(DirectoryLookupInput::NameHint {
+            directory_hint: "logs".to_string()
         })
     );
 }
@@ -821,7 +1092,12 @@ fn chinese_filename_supports_normalized_contains_match_non_recursive() {
     write_text_file(&target);
 
     let out = find_file_in_directory_non_recursive(&dir, "最终版.txt");
-    assert_eq!(out, DirectoryFileLookupResult::Multiple);
+    assert_eq!(
+        out,
+        DirectoryFileLookupResult::Candidates(vec![target
+            .canonicalize()
+            .expect("canonical target")])
+    );
 }
 
 #[test]
@@ -844,7 +1120,10 @@ fn chinese_filename_supports_normalized_contains_match_project_scan() {
     write_text_file(&target);
 
     let out = scan_filename_matches_with_limit(root.path(), "最终版.txt", 3, 100);
-    assert_eq!(out, FilenameScanResult::Multiple);
+    assert_eq!(
+        out,
+        FilenameScanResult::Candidates(vec![target.canonicalize().expect("canonical target")])
+    );
 }
 
 // Batch directory delivery behavior stays in the file-delivery submodule.

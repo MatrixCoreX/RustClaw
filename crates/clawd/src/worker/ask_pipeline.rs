@@ -41,6 +41,14 @@ fn normalize_brief_route_text(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn clarify_reason_matches_route_reason(
+    route_result: &crate::RouteResult,
+    clarify_reason: &str,
+) -> bool {
+    normalize_brief_route_text(&route_result.route_reason)
+        == normalize_brief_route_text(clarify_reason)
+}
+
 fn resolved_intent_inherits_prior_operation(prompt: &str, resolved_prompt: &str) -> bool {
     let prompt_norm = normalize_brief_route_text(prompt.trim());
     let resolved_norm = normalize_brief_route_text(resolved_prompt.trim());
@@ -50,12 +58,43 @@ fn resolved_intent_inherits_prior_operation(prompt: &str, resolved_prompt: &str)
         && resolved_norm.len() > prompt_norm.len()
 }
 
+fn should_preserve_original_inline_structured_input(
+    prompt: &str,
+    resolved_prompt_for_execution: &str,
+) -> bool {
+    let prompt_trimmed = prompt.trim();
+    let resolved_trimmed = resolved_prompt_for_execution.trim();
+    if prompt_trimmed.is_empty()
+        || resolved_trimmed.is_empty()
+        || prompt_trimmed == resolved_trimmed
+    {
+        return false;
+    }
+    let Some(inline_value) = crate::extract_first_json_value_any(prompt_trimmed) else {
+        return false;
+    };
+    !resolved_trimmed.contains(inline_value.trim())
+}
+
+fn execution_user_request<'a>(prompt: &'a str, resolved_prompt_for_execution: &'a str) -> &'a str {
+    if should_preserve_original_inline_structured_input(prompt, resolved_prompt_for_execution) {
+        prompt
+    } else {
+        resolved_prompt_for_execution
+    }
+}
+
 fn build_locator_fuzzy_clarify_context(
     recent_execution_context: &str,
     fuzzy_locator_suggestions: &[String],
+    include_recent_execution_context: bool,
 ) -> String {
     if fuzzy_locator_suggestions.is_empty() {
-        return recent_execution_context.to_string();
+        return if include_recent_execution_context {
+            recent_execution_context.to_string()
+        } else {
+            "<none>".to_string()
+        };
     }
     let candidate_block = fuzzy_locator_suggestions
         .iter()
@@ -63,7 +102,10 @@ fn build_locator_fuzzy_clarify_context(
         .collect::<Vec<_>>()
         .join("\n");
     let fuzzy_notice = "Exact target was not found. The following are only similar locator candidates for confirmation; they are not confirmed matches to the requested file.";
-    if recent_execution_context.trim().is_empty() || recent_execution_context.trim() == "<none>" {
+    if !include_recent_execution_context
+        || recent_execution_context.trim().is_empty()
+        || recent_execution_context.trim() == "<none>"
+    {
         format!("### LOCATOR_FUZZY_CANDIDATES\n{fuzzy_notice}\n{candidate_block}\n")
     } else {
         format!(
@@ -73,24 +115,107 @@ fn build_locator_fuzzy_clarify_context(
     }
 }
 
+fn should_suppress_recent_execution_in_clarify_context(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    fuzzy_locator_suggestions: &[String],
+) -> bool {
+    fuzzy_locator_suggestions.is_empty()
+        && route_result.needs_clarify
+        && matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::Url
+        )
+        && !super::has_concrete_locator_hint(prompt)
+}
+
+fn should_reuse_route_clarify_question(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    clarify_reason: &str,
+    fuzzy_locator_suggestions: &[String],
+) -> bool {
+    !should_suppress_recent_execution_in_clarify_context(
+        prompt,
+        route_result,
+        fuzzy_locator_suggestions,
+    ) && fuzzy_locator_suggestions.is_empty()
+        && clarify_reason_matches_route_reason(route_result, clarify_reason)
+}
+
+fn structured_missing_locator_clarify_question(
+    state: &AppState,
+    route_result: &crate::RouteResult,
+) -> Option<String> {
+    if !route_result.needs_clarify || !route_result.output_contract.locator_hint.trim().is_empty() {
+        return None;
+    }
+    if route_result.output_contract.delivery_required {
+        return Some(crate::i18n_t_with_default(
+            state,
+            "clawd.msg.clarify_missing_file_locator",
+            "Please provide the specific file name or path.",
+        ));
+    }
+    if route_result.output_contract.requires_content_evidence
+        && matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+        )
+    {
+        return Some(crate::i18n_t_with_default(
+            state,
+            "clawd.msg.clarify_missing_read_target",
+            "Please provide the specific file name or path to read.",
+        ));
+    }
+    None
+}
+
+fn should_short_circuit_structured_clarify(route_result: &crate::RouteResult) -> bool {
+    route_result.needs_clarify
+        && route_result.output_contract.locator_hint.trim().is_empty()
+        && route_result.output_contract.requires_content_evidence
+        && matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+        )
+}
+
 fn apply_ask_post_route(
     state: &AppState,
     task: &crate::ClaimedTask,
     prompt: &str,
     resolved_prompt: &str,
     recent_execution_context: &str,
+    immediate_prior_turn_was_clarify: bool,
     route_result: crate::RouteResult,
     mut resolved_prompt_for_execution: String,
     mut prompt_with_memory_for_execution: String,
 ) -> AppliedAskPostRoute {
     let locator_resolution = if should_attempt_auto_locator(&route_result) {
-        match super::try_resolve_implicit_locator_path(
-            state,
-            prompt,
-            resolved_prompt,
-            route_result.output_contract.locator_kind,
-            Some(recent_execution_context),
-        ) {
+        let locator_from_hint = if route_result.output_contract.locator_hint.trim().is_empty() {
+            None
+        } else {
+            super::try_resolve_implicit_locator_path(
+                state,
+                route_result.output_contract.locator_hint.trim(),
+                route_result.output_contract.locator_hint.trim(),
+                route_result.output_contract.locator_kind,
+                Some(recent_execution_context),
+            )
+        };
+        match locator_from_hint.or_else(|| {
+            super::try_resolve_implicit_locator_path(
+                state,
+                prompt,
+                resolved_prompt,
+                route_result.output_contract.locator_kind,
+                Some(recent_execution_context),
+            )
+        }) {
             Some(super::LocatorAutoResolution::Direct(path)) => {
                 crate::post_route_policy::LocatorResolution::Direct(path)
             }
@@ -106,7 +231,10 @@ fn apply_ask_post_route(
         route_result.clone(),
         super::has_concrete_locator_hint(prompt),
         super::has_concrete_locator_hint(resolved_prompt),
+        super::has_explicit_path_or_url_locator_hint(prompt),
+        super::has_explicit_path_or_url_locator_hint(resolved_prompt),
         resolved_intent_inherits_prior_operation(prompt, resolved_prompt),
+        immediate_prior_turn_was_clarify,
         locator_resolution,
     );
     if let Some(hint) = post_route.auto_locator_hint.as_deref() {
@@ -133,7 +261,7 @@ fn apply_ask_post_route(
     }
     if post_route.missing_locator_for_path_scoped_content {
         info!(
-            "{} worker_once: ask force_clarify_by_locator_guard task_id={} reason=missing_concrete_locator_for_path_scoped_content raw_text={} resolved_text={}",
+            "{} worker_once: ask force_clarify_by_locator_guard task_id={} reason=locator_required_for_path_scoped_content raw_text={} resolved_text={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(prompt),
@@ -189,6 +317,7 @@ pub(super) async fn prepare_ask_flow(
         prompt,
         &prepared_routing.resolved_prompt,
         &prepared_execution.recent_execution_context,
+        prepared_routing.immediate_prior_turn_was_clarify,
         prepared_routing.route_result,
         prepared_execution.resolved_prompt_for_execution,
         prepared_execution.prompt_with_memory_for_execution,
@@ -235,17 +364,44 @@ pub(super) async fn execute_ask_dispatch(
     should_route_schedule_direct: bool,
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Result<Option<Result<crate::AskReply, String>>> {
+    let execution_user_request = execution_user_request(prompt, resolved_prompt_for_execution);
     if matches!(route_result.routed_mode, crate::RoutedMode::AskClarify) {
+        let suppress_recent_execution_context = should_suppress_recent_execution_in_clarify_context(
+            prompt,
+            route_result,
+            fuzzy_locator_suggestions,
+        );
         let clarify_context = build_locator_fuzzy_clarify_context(
             recent_execution_context,
             fuzzy_locator_suggestions,
+            !suppress_recent_execution_context,
         );
-        let clarify = crate::intent_router::generate_clarify_question(
+        let structured_clarify_question =
+            structured_missing_locator_clarify_question(state, route_result);
+        if should_short_circuit_structured_clarify(route_result) {
+            if let Some(clarify) = structured_clarify_question {
+                return Ok(Some(Ok(crate::AskReply::non_llm(clarify))));
+            }
+        }
+        let preferred_clarify_question = structured_clarify_question.as_deref().or_else(|| {
+            if should_reuse_route_clarify_question(
+                prompt,
+                route_result,
+                clarify_reason,
+                fuzzy_locator_suggestions,
+            ) {
+                Some(route_result.clarify_question.as_str())
+            } else {
+                None
+            }
+        });
+        let clarify = crate::intent_router::generate_or_reuse_clarify_question(
             state,
             task,
             prompt,
             clarify_reason,
             Some(&clarify_context),
+            preferred_clarify_question,
         )
         .await;
         return Ok(Some(Ok(crate::AskReply::non_llm(clarify))));
@@ -279,7 +435,7 @@ pub(super) async fn execute_ask_dispatch(
                 state,
                 task,
                 prompt_with_memory_for_execution,
-                resolved_prompt_for_execution,
+                execution_user_request,
                 agent_run_context.clone(),
             )
             .await,
@@ -292,6 +448,7 @@ pub(super) async fn execute_ask_dispatch(
             payload,
             prompt,
             resolved_prompt_for_execution,
+            route_result,
         )
         .await?
         {
@@ -313,6 +470,7 @@ pub(super) async fn execute_ask_dispatch(
                 chat_prompt_context,
                 prompt_with_memory_for_execution,
                 resolved_prompt_for_execution,
+                execution_user_request,
                 agent_mode,
                 direct_resume_discussion,
                 Some(route_result.routed_mode),
@@ -333,6 +491,7 @@ pub(super) async fn execute_ask_dispatch(
             chat_prompt_context,
             prompt_with_memory_for_execution,
             resolved_prompt_for_execution,
+            execution_user_request,
             agent_mode,
             false,
             Some(route_result.routed_mode),
@@ -345,8 +504,11 @@ pub(super) async fn execute_ask_dispatch(
 #[cfg(test)]
 mod tests {
     use super::{
-        resolved_intent_inherits_prior_operation, should_allow_classifier_direct,
-        should_attempt_auto_locator,
+        execution_user_request, resolved_intent_inherits_prior_operation,
+        should_allow_classifier_direct, should_attempt_auto_locator,
+        should_preserve_original_inline_structured_input, should_reuse_route_clarify_question,
+        should_short_circuit_structured_clarify,
+        should_suppress_recent_execution_in_clarify_context,
     };
 
     #[test]
@@ -361,6 +523,8 @@ mod tests {
             risk_ceiling: crate::RiskCeiling::Unknown,
             resume_behavior: crate::ResumeBehavior::None,
             schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: crate::IntentOutputContract {
                 locator_kind: crate::OutputLocatorKind::Path,
@@ -383,6 +547,8 @@ mod tests {
             risk_ceiling: crate::RiskCeiling::Unknown,
             resume_behavior: crate::ResumeBehavior::None,
             schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: crate::IntentOutputContract {
                 locator_kind: crate::OutputLocatorKind::None,
@@ -405,6 +571,8 @@ mod tests {
             risk_ceiling: crate::RiskCeiling::Unknown,
             resume_behavior: crate::ResumeBehavior::None,
             schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: crate::IntentOutputContract {
                 locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
@@ -427,6 +595,8 @@ mod tests {
             risk_ceiling: crate::RiskCeiling::Unknown,
             resume_behavior: crate::ResumeBehavior::None,
             schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: crate::IntentOutputContract {
                 locator_kind: crate::OutputLocatorKind::Filename,
@@ -449,6 +619,8 @@ mod tests {
             risk_ceiling: crate::RiskCeiling::Unknown,
             resume_behavior: crate::ResumeBehavior::None,
             schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: crate::IntentOutputContract::default(),
         };
@@ -467,6 +639,8 @@ mod tests {
             risk_ceiling: crate::RiskCeiling::Unknown,
             resume_behavior: crate::ResumeBehavior::None,
             schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: crate::IntentOutputContract::default(),
         };
@@ -485,6 +659,8 @@ mod tests {
             risk_ceiling: crate::RiskCeiling::Unknown,
             resume_behavior: crate::ResumeBehavior::None,
             schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: crate::IntentOutputContract::default(),
         };
@@ -504,6 +680,87 @@ mod tests {
         assert!(!resolved_intent_inherits_prior_operation(
             "读取 README 前 20 行",
             "读取 README 前 20 行"
+        ));
+    }
+
+    #[test]
+    fn inline_json_payload_prefers_original_user_request_for_execution() {
+        let prompt = r#"把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]"#;
+        let resolved =
+            "Sort the provided JSON array by score in descending order and output as a markdown table";
+        assert!(should_preserve_original_inline_structured_input(
+            prompt, resolved
+        ));
+        assert_eq!(execution_user_request(prompt, resolved), prompt);
+    }
+
+    #[test]
+    fn non_structured_prompt_keeps_resolved_execution_request() {
+        let prompt = "帮我检查 telegramd 现在是不是在运行，顺手简短解释状态";
+        let resolved = "检查 telegramd 进程当前是否在运行，并简要说明其状态";
+        assert!(!should_preserve_original_inline_structured_input(
+            prompt, resolved
+        ));
+        assert_eq!(execution_user_request(prompt, resolved), resolved);
+    }
+
+    fn clarify_route(locator_kind: crate::OutputLocatorKind) -> crate::RouteResult {
+        crate::RouteResult {
+            routed_mode: crate::RoutedMode::AskClarify,
+            resolved_intent: "读取那个文件".to_string(),
+            needs_clarify: true,
+            route_reason: "need concrete locator".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: "你是指哪个文件？".to_string(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            output_contract: crate::IntentOutputContract {
+                locator_kind,
+                requires_content_evidence: true,
+                response_shape: crate::OutputResponseShape::Scalar,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn scalar_missing_locator_clarify_short_circuits_to_structured_prompt() {
+        let route = clarify_route(crate::OutputLocatorKind::Path);
+        assert!(should_short_circuit_structured_clarify(&route));
+    }
+
+    #[test]
+    fn path_scoped_clarify_without_locator_suppresses_recent_execution_context() {
+        let route = clarify_route(crate::OutputLocatorKind::Path);
+        assert!(should_suppress_recent_execution_in_clarify_context(
+            "把那个配置文件发给我",
+            &route,
+            &[],
+        ));
+    }
+
+    #[test]
+    fn filename_clarify_without_locator_does_not_reuse_router_question() {
+        let route = clarify_route(crate::OutputLocatorKind::Filename);
+        assert!(!should_reuse_route_clarify_question(
+            "读一下那个文件里的名字字段，只输出值",
+            &route,
+            "need concrete locator",
+            &[],
+        ));
+    }
+
+    #[test]
+    fn clarify_with_fuzzy_candidates_keeps_recent_context_available() {
+        let route = clarify_route(crate::OutputLocatorKind::Filename);
+        assert!(!should_suppress_recent_execution_in_clarify_context(
+            "读一下那个文件里的名字字段，只输出值",
+            &route,
+            &["/tmp/a".to_string()],
         ));
     }
 }

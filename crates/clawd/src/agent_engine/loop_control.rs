@@ -65,7 +65,13 @@ fn should_stop_for_observed_finalize(
         return false;
     }
     if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && super::observed_output::extract_direct_scalar_from_generic_output(loop_state).is_some()
+        && super::observed_output::extract_direct_scalar_from_generic_output_with_locator_hint(
+            loop_state,
+            Some(route_result.output_contract.locator_hint.as_str()),
+            None,
+            false,
+        )
+        .is_some()
     {
         return true;
     }
@@ -248,6 +254,8 @@ mod tests {
             risk_ceiling: RiskCeiling::Unknown,
             resume_behavior: ResumeBehavior::None,
             schedule_kind: ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
             wants_file_delivery: false,
             output_contract: IntentOutputContract {
                 response_shape: shape,
@@ -296,9 +304,11 @@ mod tests {
     fn observation_only_freeform_round_can_stop_for_observed_fallback() {
         let mut loop_state = LoopState::new(2);
         loop_state.has_tool_or_skill_output = true;
-        loop_state
-            .executed_step_results
-            .push(ok_step("step_1", "list_dir", "README.md\ndocs/\ncrates/\n"));
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "list_dir",
+            "README.md\ndocs/\ncrates/\n",
+        ));
         let actions = vec![AgentAction::CallSkill {
             skill: "list_dir".to_string(),
             args: json!({"path":"."}),

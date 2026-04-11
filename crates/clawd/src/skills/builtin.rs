@@ -97,11 +97,50 @@ pub(crate) async fn execute_builtin_skill(
         "list_dir" => {
             ensure_only_keys(map, &["path"])?;
             let path = optional_string(map, "path").unwrap_or(".");
-            let real_path = resolve_workspace_path(
+            let requested_path = resolve_workspace_path(
                 &state.workspace_root,
                 path,
                 state.allow_path_outside_workspace,
             )?;
+            let real_path = if requested_path.is_dir() {
+                requested_path
+            } else {
+                match crate::delivery_utils::resolve_directory_locator_for_execution(
+                    path,
+                    &state.default_locator_search_dir,
+                    state.locator_scan_max_depth,
+                    state.locator_scan_max_files,
+                ) {
+                    Some(crate::delivery_utils::DirectoryLocatorExecutionResolution::Resolved(
+                        directory,
+                    )) => directory,
+                    Some(
+                        crate::delivery_utils::DirectoryLocatorExecutionResolution::MultipleCandidates(
+                            candidates,
+                        ),
+                    ) => {
+                        let mut lines = vec![crate::i18n_t_with_default(
+                            state,
+                            "clawd.msg.directory.multiple_candidates",
+                            "Found multiple possible directories. Please confirm which one:",
+                        )];
+                        lines.extend(
+                            candidates
+                                .into_iter()
+                                .map(|candidate| candidate.display().to_string()),
+                        );
+                        return Ok(lines.join("\n"));
+                    }
+                    Some(crate::delivery_utils::DirectoryLocatorExecutionResolution::NotFound) => {
+                        return Ok(crate::i18n_t_with_default(
+                            state,
+                            "clawd.msg.directory.not_found_dual_root",
+                            "Directory not found under system root and project root.",
+                        ));
+                    }
+                    None => requested_path,
+                }
+            };
             let mut items = Vec::new();
             for entry in
                 std::fs::read_dir(&real_path).map_err(|err| format!("read_dir failed: {err}"))?
@@ -312,6 +351,9 @@ pub(crate) async fn run_safe_command(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    // Prevent host-shell locale misconfiguration from polluting command output with
+    // bash startup warnings such as "setlocale: LC_ALL...".
+    cmd.env_remove("LC_ALL");
     cmd.kill_on_drop(true);
 
     let soft_timeout = cmd_timeout_seconds.max(1);

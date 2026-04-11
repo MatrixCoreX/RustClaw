@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use crate::{AppState, IntentOutputContract, OutputResponseShape};
 
@@ -14,21 +15,24 @@ mod types;
 
 use self::directory_lookup::try_handle_directory_lookup_request;
 use self::file_delivery::enforce_file_delivery_locator_contract;
+pub(crate) use self::file_delivery::scan_filename_matches_with_limit;
 pub(crate) use self::message_media::{
     collect_recent_image_candidates, extract_file_path_from_delivery_token,
     normalize_delivery_message, trim_path_token,
 };
 use self::output_contract::enforce_output_contract;
 pub(super) use self::output_contract::response_has_same_file_token;
-pub(super) use self::path_helpers::{
+pub(crate) use self::path_helpers::{
     dedup_and_sort_paths, resolve_existing_dir_under_root, resolve_existing_file_under_root,
+    resolve_existing_path_under_root_case_insensitive,
 };
 use self::types::localize_delivery_message;
+pub(crate) use self::types::FilenameScanResult;
 use self::types::{
     BatchDirectoryDeliveryResolution, CurrentLevelDeliveryEntries,
     CurrentLevelDeliveryEntriesResult, DeliveryMessageKind, DirectoryEntriesListResult,
     DirectoryFileLookupResult, DirectoryLookupInput, DirectoryLookupResolution,
-    FileDeliveryLocatorInput, FileDeliveryTargetResolution, FilenameScanResult,
+    FileDeliveryLocatorInput, FileDeliveryTargetResolution,
 };
 
 pub(crate) fn extract_delivery_file_tokens(text: &str) -> Vec<String> {
@@ -47,6 +51,47 @@ pub(crate) fn extract_delivery_file_tokens(text: &str) -> Vec<String> {
 
 pub(crate) fn intercept_response_text_for_delivery(text: &str) -> String {
     text.trim().to_string()
+}
+
+pub(crate) fn has_concrete_locator_input(user_request: &str) -> bool {
+    let text = user_request.trim();
+    !text.is_empty()
+        && (locator::classify_file_delivery_locator_input(text, None).is_some()
+            || locator::parse_directory_lookup_input(text).is_some())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DirectoryLocatorExecutionResolution {
+    Resolved(PathBuf),
+    MultipleCandidates(Vec<PathBuf>),
+    NotFound,
+}
+
+pub(crate) fn resolve_directory_locator_for_execution(
+    raw_hint: &str,
+    default_locator_search_dir: &Path,
+    max_depth: usize,
+    max_scan_entries: usize,
+) -> Option<DirectoryLocatorExecutionResolution> {
+    let request = locator::directory_lookup_input_from_hint(raw_hint)
+        .or_else(|| locator::parse_directory_lookup_input(raw_hint.trim()))?;
+    match directory_lookup::resolve_directory_target(
+        request,
+        Path::new("/"),
+        default_locator_search_dir,
+        max_depth,
+        max_scan_entries,
+    ) {
+        DirectoryLookupResolution::Resolved(path) => {
+            Some(DirectoryLocatorExecutionResolution::Resolved(path))
+        }
+        DirectoryLookupResolution::MultipleCandidates(paths) => Some(
+            DirectoryLocatorExecutionResolution::MultipleCandidates(paths),
+        ),
+        DirectoryLookupResolution::UserMessage(_) => {
+            Some(DirectoryLocatorExecutionResolution::NotFound)
+        }
+    }
 }
 
 pub(crate) fn intercept_response_payload_for_delivery(

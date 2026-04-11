@@ -20,6 +20,29 @@ fn ask_result_payload(
     }
 }
 
+fn provider_unavailable_answer_text(state: &AppState) -> String {
+    crate::i18n_t_with_default(
+        state,
+        "clawd.msg.clarify_question_fallback",
+        "I need to clarify: what task is this message about? Please provide the target or context.",
+    )
+}
+
+fn should_skip_ask_memory_pair(
+    state: &AppState,
+    answer_text: &str,
+    answer_messages: &[String],
+) -> bool {
+    let provider_unavailable = provider_unavailable_answer_text(state);
+    if answer_text.trim() == provider_unavailable.trim() {
+        return true;
+    }
+    answer_messages
+        .iter()
+        .map(|message| message.trim())
+        .any(|message| !message.is_empty() && message == provider_unavailable.trim())
+}
+
 fn ensure_journal_task_metrics(
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &str,
@@ -45,6 +68,9 @@ fn insert_ask_memory_pair(
     answer_messages: &[String],
     is_llm_reply: bool,
 ) {
+    if should_skip_ask_memory_pair(state, answer_text, answer_messages) {
+        return;
+    }
     let _ = crate::memory::service::insert_memory(
         state,
         task.user_id,
@@ -297,11 +323,13 @@ pub(crate) async fn try_finalize_schedule_direct_success(
     payload: &Value,
     prompt: &str,
     resolved_prompt_for_execution: &str,
+    route_result: &crate::RouteResult,
 ) -> Result<bool> {
     if let Ok(Some(schedule_reply)) = crate::intent_router::try_handle_schedule_request(
         state,
         task,
         resolved_prompt_for_execution,
+        route_result.schedule_intent.as_ref(),
     )
     .await
     {
@@ -395,7 +423,12 @@ pub(crate) async fn finalize_ask_result(
             } else {
                 crate::intercept_response_payload_for_delivery(
                     state,
-                    resolved_prompt_for_execution,
+                    // Delivery interception must stay grounded in the original user request.
+                    // The execution prompt may contain injected runtime hints such as
+                    // [AUTO_LOCATOR], which are useful for planning/execution but must not be
+                    // reinterpreted as fresh user-provided locator input during final delivery
+                    // normalization.
+                    prompt,
                     route_result.wants_file_delivery,
                     &route_result.output_contract,
                     answer.text,

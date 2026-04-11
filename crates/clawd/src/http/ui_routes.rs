@@ -22,25 +22,21 @@ use super::super::{
     current_rss_bytes, daemon_process_pids_by_name, delete_auth_key_by_id,
     exchange_credential_status_for_user_key, feishud_process_stats,
     finalize_pending_channel_bind_session, get_auth_key_value_by_id,
-    has_channel_binding_for_user_key,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
-    larkd_process_stats, list_auth_keys,
+    has_channel_binding_for_user_key, larkd_process_stats, list_auth_keys,
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
     mark_pending_channel_bind_session_failed, mask_secret, oldest_running_task_age_seconds,
-    reset_channel_binding_state_for_user_key,
-    reload_skill_views, resolve_auth_identity_by_key, resolve_channel_binding_identity,
-    task_count_by_status, telegramd_process_stats,
-    update_auth_key_by_id,
-    upsert_exchange_credential_for_user_key, upsert_webd_login_account,
-    verify_webd_password_login, wa_webd_process_stats, webd_process_stats,
-    wechatd_process_stats, whatsappd_process_stats, ApiResponse, AppState, HealthResponse,
-    LlmProviderRuntime, LocalInteractionContext, PendingChannelBindSession,
+    reload_skill_views, reset_channel_binding_state_for_user_key, resolve_auth_identity_by_key,
+    resolve_channel_binding_identity, task_count_by_status, telegramd_process_stats,
+    update_auth_key_by_id, upsert_exchange_credential_for_user_key, upsert_webd_login_account,
+    verify_webd_password_login, wa_webd_process_stats, webd_process_stats, wechatd_process_stats,
+    whatsappd_process_stats, ApiResponse, AppState, HealthResponse, LlmProviderRuntime,
+    LocalInteractionContext, PendingChannelBindSession,
 };
 use claw_core::types::{
     AuthIdentity, BindChannelKeyRequest, DetectFeishuBindSessionRequest,
-    DetectFeishuBindSessionResponse, ExchangeCredentialStatus,
-    FeishuBindSessionStatusResponse, GatewayInstanceRuntimeStatus,
-    ResolveChannelBindingRequest, ResolveChannelBindingResponse,
+    DetectFeishuBindSessionResponse, ExchangeCredentialStatus, FeishuBindSessionStatusResponse,
+    GatewayInstanceRuntimeStatus, ResolveChannelBindingRequest, ResolveChannelBindingResponse,
     StartFeishuBindSessionRequest, TelegramBotRuntimeStatus, UiKeyVerifyRequest,
     UpsertExchangeCredentialRequest,
 };
@@ -249,12 +245,7 @@ fn toml_string_literal(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
-fn upsert_section_key_line(
-    raw: &str,
-    section: &str,
-    key: &str,
-    rendered_value: &str,
-) -> String {
+fn upsert_section_key_line(raw: &str, section: &str, key: &str, rendered_value: &str) -> String {
     let mut lines: Vec<String> = raw.lines().map(|line| line.to_string()).collect();
     let section_header = format!("[{section}]");
     let mut section_start = lines.iter().position(|line| line.trim() == section_header);
@@ -313,8 +304,14 @@ fn update_feishu_config_raw_preserving_format(raw: &str, app_id: &str, app_secre
         ("app_secret", toml_string_literal(app_secret.trim())),
         ("mode", toml_string_literal("long_connection")),
         ("listen", toml_string_literal("0.0.0.0:8789")),
-        ("clawd_base_url", toml_string_literal("http://127.0.0.1:8787")),
-        ("api_base_url", toml_string_literal("https://open.feishu.cn")),
+        (
+            "clawd_base_url",
+            toml_string_literal("http://127.0.0.1:8787"),
+        ),
+        (
+            "api_base_url",
+            toml_string_literal("https://open.feishu.cn"),
+        ),
         ("language", toml_string_literal("zh-CN")),
         (
             "i18n_path",
@@ -431,10 +428,15 @@ fn telegram_bots_from_config(config: &claw_core::config::AppConfig) -> Vec<Teleg
     bots
 }
 
-fn telegram_bot_tokens_from_config(config: &claw_core::config::AppConfig) -> std::collections::HashMap<String, String> {
+fn telegram_bot_tokens_from_config(
+    config: &claw_core::config::AppConfig,
+) -> std::collections::HashMap<String, String> {
     let mut tokens = std::collections::HashMap::new();
     if !config.telegram.bot_token.trim().is_empty() {
-        tokens.insert("primary".to_string(), config.telegram.bot_token.trim().to_string());
+        tokens.insert(
+            "primary".to_string(),
+            config.telegram.bot_token.trim().to_string(),
+        );
     }
     for bot in &config.telegram.bots {
         let name = bot.name.trim();
@@ -681,7 +683,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/admin/auth-keys",
             get(get_auth_keys).post(create_auth_key_handler),
         )
-        .route("/admin/auth-keys/:key_id/full", get(get_auth_key_full_handler))
+        .route(
+            "/admin/auth-keys/:key_id/full",
+            get(get_auth_key_full_handler),
+        )
         .route(
             "/admin/channel-binds/feishu/start",
             post(start_feishu_bind_session_handler),
@@ -989,7 +994,11 @@ fn write_feishu_generated_credentials(
 ) -> anyhow::Result<()> {
     let raw = read_feishu_config_raw(state)?;
     let output = update_feishu_config_raw_preserving_format(&raw, app_id, app_secret);
-    write_workspace_and_mounted_file(&state.workspace_root, "configs/channels/feishu.toml", &output)?;
+    write_workspace_and_mounted_file(
+        &state.workspace_root,
+        "configs/channels/feishu.toml",
+        &output,
+    )?;
     Ok(())
 }
 
@@ -1041,7 +1050,10 @@ async fn maybe_complete_feishu_official_scan(
 
     let poll = poll_feishu_official_registration(state, device_code).await?;
     if let (Some(client_id), Some(client_secret), Some(_open_id)) = (
-        poll.client_id.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        poll.client_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
         poll.client_secret
             .as_deref()
             .map(str::trim)
@@ -1063,7 +1075,11 @@ async fn maybe_complete_feishu_official_scan(
         return Ok(session);
     }
 
-    let Some(error_code) = poll.error.as_deref().map(str::trim).filter(|value| !value.is_empty())
+    let Some(error_code) = poll
+        .error
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     else {
         return Ok(session);
     };
@@ -1081,7 +1097,9 @@ async fn maybe_complete_feishu_official_scan(
     match error_code {
         "authorization_pending" | "slow_down" => Ok(session),
         "expired_token" => mark_pending_channel_bind_session_expired(&mut db, session.id),
-        "access_denied" => mark_pending_channel_bind_session_failed(&mut db, session.id, &error_text),
+        "access_denied" => {
+            mark_pending_channel_bind_session_failed(&mut db, session.id, &error_text)
+        }
         _ => mark_pending_channel_bind_session_failed(&mut db, session.id, &error_text),
     }
 }
@@ -1100,7 +1118,10 @@ async fn start_feishu_bind_session_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<StartFeishuBindSessionRequest>,
-) -> (StatusCode, Json<ApiResponse<FeishuBindSessionStatusResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<FeishuBindSessionStatusResponse>>,
+) {
     let identity = match require_ui_identity(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
@@ -1126,7 +1147,9 @@ async fn start_feishu_bind_session_handler(
     }
 
     let ttl_seconds = clamp_feishu_bind_ttl_seconds(req.expires_in_seconds);
-    let default_expires_at = current_unix_ts().saturating_add(ttl_seconds as i64).to_string();
+    let default_expires_at = current_unix_ts()
+        .saturating_add(ttl_seconds as i64)
+        .to_string();
     let session = {
         let mut db = match state.db.lock() {
             Ok(db) => db,
@@ -1141,7 +1164,12 @@ async fn start_feishu_bind_session_handler(
                 );
             }
         };
-        match create_pending_channel_bind_session(&mut db, "feishu", &identity.user_key, &default_expires_at) {
+        match create_pending_channel_bind_session(
+            &mut db,
+            "feishu",
+            &identity.user_key,
+            &default_expires_at,
+        ) {
             Ok(session) => session,
             Err(err) => {
                 return (
@@ -1245,7 +1273,9 @@ async fn start_feishu_bind_session_handler(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("persist feishu official registration failed: {err}")),
+                error: Some(format!(
+                    "persist feishu official registration failed: {err}"
+                )),
             }),
         ),
     }
@@ -1255,7 +1285,10 @@ async fn get_feishu_bind_session_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxumPath(session_id): AxumPath<i64>,
-) -> (StatusCode, Json<ApiResponse<FeishuBindSessionStatusResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<FeishuBindSessionStatusResponse>>,
+) {
     let identity = match require_ui_identity(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
@@ -1366,10 +1399,17 @@ async fn get_feishu_bind_session_handler(
 async fn detect_feishu_bind_session_handler(
     State(state): State<AppState>,
     Json(req): Json<DetectFeishuBindSessionRequest>,
-) -> (StatusCode, Json<ApiResponse<DetectFeishuBindSessionResponse>>) {
+) -> (
+    StatusCode,
+    Json<ApiResponse<DetectFeishuBindSessionResponse>>,
+) {
     let external_user_id = req.external_user_id.trim();
     let external_chat_id = req.external_chat_id.trim();
-    let bind_token = req.bind_token.as_deref().map(str::trim).filter(|token| !token.is_empty());
+    let bind_token = req
+        .bind_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty());
     if external_user_id.is_empty() || external_chat_id.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -2710,9 +2750,11 @@ async fn update_feishu_config(
     let app_id = req.app_id.trim().to_string();
     let app_secret = req.app_secret.trim().to_string();
     let output = update_feishu_config_raw_preserving_format(&raw, &app_id, &app_secret);
-    if let Err(err) =
-        write_workspace_and_mounted_file(&state.workspace_root, "configs/channels/feishu.toml", &output)
-    {
+    if let Err(err) = write_workspace_and_mounted_file(
+        &state.workspace_root,
+        "configs/channels/feishu.toml",
+        &output,
+    ) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -2785,9 +2827,11 @@ async fn reset_feishu_config_handler(
         }
     };
     let output = reset_feishu_config_raw_preserving_format(&raw);
-    if let Err(err) =
-        write_workspace_and_mounted_file(&state.workspace_root, "configs/channels/feishu.toml", &output)
-    {
+    if let Err(err) = write_workspace_and_mounted_file(
+        &state.workspace_root,
+        "configs/channels/feishu.toml",
+        &output,
+    ) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -2797,7 +2841,8 @@ async fn reset_feishu_config_handler(
             }),
         );
     }
-    if let Err(err) = reset_channel_binding_state_for_user_key(&state, "feishu", &identity.user_key) {
+    if let Err(err) = reset_channel_binding_state_for_user_key(&state, "feishu", &identity.user_key)
+    {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -8295,8 +8340,11 @@ mod tests {
 
     #[test]
     fn update_feishu_config_raw_preserves_template_comments_and_updates_only_keys() {
-        let output =
-            update_feishu_config_raw_preserving_format(FEISHU_CONFIG_TEMPLATE, "cli_test_app", "secret_test");
+        let output = update_feishu_config_raw_preserving_format(
+            FEISHU_CONFIG_TEMPLATE,
+            "cli_test_app",
+            "secret_test",
+        );
         assert!(output.contains("# Feishu（中国站）应用机器人通道配置"));
         assert!(output.contains("# 入站模式：webhook | long_connection"));
         assert!(output.contains("enabled = true"));
@@ -8315,8 +8363,11 @@ app_secret = ""
 enabled = false
 custom_keep = "yes"
 "#;
-        let output =
-            update_feishu_config_raw_preserving_format(raw, "cli_keep_format", "secret_keep_format");
+        let output = update_feishu_config_raw_preserving_format(
+            raw,
+            "cli_keep_format",
+            "secret_keep_format",
+        );
         assert!(output.contains("# before"));
         assert!(output.contains("custom_keep = \"yes\""));
         assert!(output.contains("app_id = \"cli_keep_format\""));

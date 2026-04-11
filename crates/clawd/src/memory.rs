@@ -556,7 +556,432 @@ fn extract_last_turn_user_text_from_payload(payload_json: &str) -> Option<String
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AssistantContextReplyKind {
+    Normal,
+    ClarifyPlaceholder,
+    ProviderUnavailablePlaceholder,
+}
+
+fn provider_unavailable_clarify_fallback_text(state: &AppState) -> String {
+    crate::i18n_t_with_default(
+        state,
+        "clawd.msg.clarify_question_fallback",
+        "I need to clarify: what task is this message about? Please provide the target or context.",
+    )
+}
+
+fn provider_unavailable_assistant_placeholder() -> &'static str {
+    "[provider_unavailable_reply_omitted]"
+}
+
+fn clarify_assistant_placeholder() -> &'static str {
+    "[clarification_requested]"
+}
+
+fn looks_like_structured_machine_output(text: &str) -> bool {
+    serde_json::from_str::<Value>(text)
+        .map(|value| value.is_object() || value.is_array())
+        .unwrap_or(false)
+}
+
+fn looks_like_linewise_json_machine_output(text: &str) -> bool {
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    !lines.is_empty()
+        && lines
+            .iter()
+            .all(|line| looks_like_structured_machine_output(line))
+}
+
+fn normalize_read_range_excerpt_for_recent_turns(excerpt: &str) -> Option<String> {
+    let lines = excerpt
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            line.split_once('|')
+                .filter(|(prefix, _)| {
+                    !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit())
+                })
+                .map(|(_, rest)| rest.trim_start().to_string())
+                .unwrap_or_else(|| line.trim().to_string())
+        })
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn normalize_observed_listing_for_recent_turns(text: &str) -> Option<String> {
+    if looks_like_structured_machine_output(text) || looks_like_linewise_json_machine_output(text) {
+        return None;
+    }
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with("bash: warning: setlocale:")
+                && !line.starts_with("warning: setlocale:")
+        })
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if lines.len() < 2 {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn strip_ordered_list_prefix(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let digit_count = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digit_count == 0 {
+        return None;
+    }
+    let rest = &trimmed[digit_count..];
+    let stripped = if let Some(rest) = rest.strip_prefix(". ") {
+        rest
+    } else if let Some(rest) = rest.strip_prefix(") ") {
+        rest
+    } else if let Some(rest) = rest.strip_prefix("、") {
+        rest
+    } else {
+        return None;
+    };
+    let stripped = stripped.trim();
+    (!stripped.is_empty()).then(|| stripped.to_string())
+}
+
+fn is_ordered_list_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let digit_count = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digit_count == 0 {
+        return false;
+    }
+    let rest = &trimmed[digit_count..];
+    rest.starts_with(". ") || rest.starts_with(") ") || rest.starts_with("、")
+}
+
+fn looks_like_wrapped_ordered_listing_answer(text: &str) -> bool {
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    lines.len() >= 3
+        && lines
+            .iter()
+            .skip(1)
+            .filter(|line| is_ordered_list_line(line))
+            .count()
+            >= 2
+}
+
+fn is_delivery_token_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    matches!(
+        trimmed.split_once(':').map(|(prefix, _)| prefix),
+        Some("FILE")
+            | Some("IMAGE_FILE")
+            | Some("IMAGE_URL")
+            | Some("VIDEO_URL")
+            | Some("FILE_URL")
+            | Some("MEDIA_URL")
+    )
+}
+
+fn extract_delivery_token_target(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let (_, rest) = trimmed.split_once(':')?;
+    let rest = rest.trim();
+    (!rest.is_empty()).then(|| rest.to_string())
+}
+
+fn normalize_recent_assistant_ordered_entry(entry: &str) -> Option<String> {
+    let trimmed = entry
+        .trim()
+        .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '“' | '”' | '‘' | '’'))
+        .trim_end_matches(|c| matches!(c, ';' | '；' | ',' | '，' | '。'))
+        .trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if is_delivery_token_line(trimmed) {
+        return extract_delivery_token_target(trimmed);
+    }
+    Some(trimmed.to_string())
+}
+
+fn looks_like_locatorish_recent_assistant_entry(entry: &str) -> bool {
+    let trimmed = entry.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('.')
+        || (!trimmed.contains(char::is_whitespace) && trimmed.len() <= 128)
+}
+
+fn ordered_entries_from_assistant_reply(text: &str, max_entries: usize) -> Vec<String> {
+    let max_entries = max_entries.max(2);
+
+    let numbered = text
+        .lines()
+        .filter_map(strip_ordered_list_prefix)
+        .filter_map(|entry| normalize_recent_assistant_ordered_entry(&entry))
+        .take(max_entries)
+        .collect::<Vec<_>>();
+    if numbered.len() >= 2 {
+        return numbered;
+    }
+
+    let token_lines = text
+        .lines()
+        .filter_map(extract_delivery_token_target)
+        .take(max_entries)
+        .collect::<Vec<_>>();
+    if token_lines.len() >= 2 {
+        return token_lines;
+    }
+
+    let semicolon_source = text
+        .rsplit_once('：')
+        .map(|(_, tail)| tail)
+        .or_else(|| text.rsplit_once(':').map(|(_, tail)| tail))
+        .unwrap_or(text);
+    let semicolon_entries = semicolon_source
+        .split([';', '；'])
+        .filter_map(normalize_recent_assistant_ordered_entry)
+        .collect::<Vec<_>>();
+    if semicolon_entries.len() >= 2
+        && semicolon_entries
+            .iter()
+            .filter(|entry| looks_like_locatorish_recent_assistant_entry(entry))
+            .count()
+            >= 2
+    {
+        return semicolon_entries.into_iter().take(max_entries).collect();
+    }
+
+    Vec::new()
+}
+
+fn format_recent_assistant_ordered_entries(text: &str) -> Option<String> {
+    let entries = ordered_entries_from_assistant_reply(text, 10);
+    if entries.len() < 2 {
+        return None;
+    }
+    Some(
+        entries
+            .iter()
+            .enumerate()
+            .map(|(idx, entry)| format!("{}:{}", idx + 1, entry))
+            .collect::<Vec<_>>()
+            .join(" | "),
+    )
+}
+
+fn extract_observed_step_text_for_recent_turns(value: &Value) -> Option<String> {
+    let step_results = value
+        .get("task_journal")
+        .and_then(|v| v.get("trace"))
+        .and_then(|v| v.get("step_results"))
+        .and_then(Value::as_array)?;
+    for step in step_results.iter().rev() {
+        let skill = step
+            .get("skill")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let output = step
+            .get("output_excerpt")
+            .or_else(|| step.get("output"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        if skill == "system_basic" {
+            let output = output?;
+            let parsed = serde_json::from_str::<Value>(output).ok()?;
+            let action = parsed
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if action == "read_range" {
+                if let Some(excerpt) = parsed
+                    .get("excerpt")
+                    .and_then(Value::as_str)
+                    .and_then(normalize_read_range_excerpt_for_recent_turns)
+                {
+                    let path = parsed
+                        .get("resolved_path")
+                        .or_else(|| parsed.get("path"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty());
+                    return Some(match path {
+                        Some(path) => format!("read_range path={path}\n{excerpt}"),
+                        None => excerpt,
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_observed_listing_text_for_recent_turns(value: &Value) -> Option<String> {
+    let step_results = value
+        .get("task_journal")
+        .and_then(|v| v.get("trace"))
+        .and_then(|v| v.get("step_results"))
+        .and_then(Value::as_array)?;
+    for step in step_results.iter().rev() {
+        let skill = step
+            .get("skill")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let output = step
+            .get("output_excerpt")
+            .or_else(|| step.get("output"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())?;
+        if matches!(skill, "run_cmd" | "list_dir") {
+            if let Some(listing) = normalize_observed_listing_for_recent_turns(output) {
+                return Some(listing);
+            }
+        }
+        if skill == "system_basic" {
+            let parsed = serde_json::from_str::<Value>(output).ok()?;
+            let action = parsed
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if action == "inventory_dir" {
+                if let Some(listing) = parsed
+                    .get("entries")
+                    .and_then(Value::as_array)
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .filter_map(|entry| entry.get("name").and_then(Value::as_str))
+                            .map(str::trim)
+                            .filter(|name| !name.is_empty())
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|entries| entries.len() >= 2)
+                    .map(|entries| entries.join("\n"))
+                {
+                    return Some(listing);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_result_text_for_recent_turns(value: &Value) -> Option<String> {
+    if let Some(observed_text) = extract_observed_step_text_for_recent_turns(value) {
+        return Some(observed_text);
+    }
+    let direct_text = value
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string);
+    let first_message = value
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string);
+    let final_answer = value
+        .get("task_journal")
+        .and_then(|v| v.get("summary"))
+        .and_then(|v| v.get("final_answer"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string);
+    let should_prefer_observed = direct_text
+        .iter()
+        .chain(first_message.iter())
+        .chain(final_answer.iter())
+        .any(|text| {
+            looks_like_structured_machine_output(text)
+                || looks_like_linewise_json_machine_output(text)
+        });
+    if should_prefer_observed {
+        if let Some(observed_text) = extract_observed_step_text_for_recent_turns(value) {
+            return Some(observed_text);
+        }
+    }
+    let should_prefer_observed_listing = direct_text
+        .iter()
+        .chain(first_message.iter())
+        .chain(final_answer.iter())
+        .any(|text| looks_like_wrapped_ordered_listing_answer(text));
+    if should_prefer_observed_listing {
+        if let Some(observed_listing) = extract_observed_listing_text_for_recent_turns(value) {
+            return Some(observed_listing);
+        }
+    }
+    direct_text.or(first_message).or(final_answer).or_else(|| {
+        value
+            .as_str()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(ToString::to_string)
+    })
+}
+
+fn classify_assistant_context_reply_kind(
+    parsed_result: Option<&Value>,
+    assistant_text: &str,
+    provider_unavailable_text: &str,
+) -> AssistantContextReplyKind {
+    if assistant_text.trim() == provider_unavailable_text.trim() {
+        return AssistantContextReplyKind::ProviderUnavailablePlaceholder;
+    }
+    let summary = parsed_result
+        .and_then(|value| value.get("task_journal"))
+        .and_then(|value| value.get("summary"));
+    let final_status = summary
+        .and_then(|value| value.get("final_status"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if final_status.eq_ignore_ascii_case("clarify") {
+        return AssistantContextReplyKind::ClarifyPlaceholder;
+    }
+    let routed_mode = summary
+        .and_then(|value| value.get("route_result"))
+        .and_then(|value| value.get("routed_mode"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let needs_clarify = summary
+        .and_then(|value| value.get("route_result"))
+        .and_then(|value| value.get("needs_clarify"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if routed_mode.eq_ignore_ascii_case("AskClarify") || needs_clarify {
+        return AssistantContextReplyKind::ClarifyPlaceholder;
+    }
+    AssistantContextReplyKind::Normal
+}
+
 fn extract_last_turn_assistant_text_from_task(
+    state: &AppState,
     status: &str,
     result_json: Option<&str>,
     error_text: Option<&str>,
@@ -568,22 +993,30 @@ fn extract_last_turn_assistant_text_from_task(
     }
     let result_json = result_json.map(str::trim).filter(|v| !v.is_empty())?;
     let parsed = serde_json::from_str::<Value>(result_json).ok();
-    if let Some(val) = parsed.as_ref() {
-        if let Some(text) = val.get("text").and_then(Value::as_str).map(str::trim) {
-            if !text.is_empty() {
-                return Some(text.to_string());
-            }
+    let assistant_text = if let Some(val) = parsed.as_ref() {
+        extract_result_text_for_recent_turns(val)
+    } else {
+        None
+    };
+    let assistant_text = assistant_text.unwrap_or_else(|| result_json.to_string());
+    let provider_unavailable_text = provider_unavailable_clarify_fallback_text(state);
+    match classify_assistant_context_reply_kind(
+        parsed.as_ref(),
+        &assistant_text,
+        &provider_unavailable_text,
+    ) {
+        AssistantContextReplyKind::Normal => Some(assistant_text),
+        AssistantContextReplyKind::ClarifyPlaceholder => {
+            Some(clarify_assistant_placeholder().to_string())
         }
-        if let Some(text) = val.as_str().map(str::trim) {
-            if !text.is_empty() {
-                return Some(text.to_string());
-            }
+        AssistantContextReplyKind::ProviderUnavailablePlaceholder => {
+            Some(provider_unavailable_assistant_placeholder().to_string())
         }
     }
-    Some(result_json.to_string())
 }
 
 fn query_recent_terminal_ask_turn_for_chat(
+    state: &AppState,
     db: &Connection,
     user_id: i64,
     chat_id: i64,
@@ -614,12 +1047,16 @@ fn query_recent_terminal_ask_turn_for_chat(
             continue;
         };
         let Some(assistant_text) = extract_last_turn_assistant_text_from_task(
+            state,
             &status,
             result_json.as_deref(),
             error_text.as_deref(),
         ) else {
             continue;
         };
+        if assistant_text == provider_unavailable_assistant_placeholder() {
+            continue;
+        }
         if assistant_text.trim().is_empty() {
             continue;
         }
@@ -629,6 +1066,7 @@ fn query_recent_terminal_ask_turn_for_chat(
 }
 
 fn query_recent_terminal_ask_turns_for_chat(
+    state: &AppState,
     db: &Connection,
     user_id: i64,
     chat_id: i64,
@@ -662,12 +1100,16 @@ fn query_recent_terminal_ask_turns_for_chat(
             continue;
         };
         let Some(assistant_text) = extract_last_turn_assistant_text_from_task(
+            state,
             &status,
             result_json.as_deref(),
             error_text.as_deref(),
         ) else {
             continue;
         };
+        if assistant_text == provider_unavailable_assistant_placeholder() {
+            continue;
+        }
         if assistant_text.trim().is_empty() {
             continue;
         }
@@ -735,21 +1177,10 @@ pub(crate) fn build_recent_turns_full_context(
     let max_turns = max_turns.max(1).min(10);
     let max_segment_chars = max_segment_chars.max(128);
     let max_total_chars = max_total_chars.max(512);
-    let mut turns =
-        query_recent_terminal_ask_turns_for_chat(&db, user_id, chat_id, &user_key, max_turns)
-            .unwrap_or_default();
-    if turns.is_empty() {
-        if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
-            turns = query_recent_terminal_ask_turns_for_chat(
-                &db,
-                user_id,
-                legacy_chat_id,
-                &user_key,
-                max_turns,
-            )
-            .unwrap_or_default();
-        }
-    }
+    let turns = query_recent_terminal_ask_turns_for_chat(
+        state, &db, user_id, chat_id, &user_key, max_turns,
+    )
+    .unwrap_or_default();
     if turns.is_empty() {
         return "<none>".to_string();
     }
@@ -805,7 +1236,7 @@ pub(crate) fn build_last_turn_full_context(
         Err(_) => return "<none>".to_string(),
     };
     if let Ok(Some((user_text, assistant_text))) =
-        query_recent_terminal_ask_turn_for_chat(&db, user_id, chat_id, &user_key)
+        query_recent_terminal_ask_turn_for_chat(state, &db, user_id, chat_id, &user_key)
     {
         return format_last_turn_full_context(
             state,
@@ -814,19 +1245,6 @@ pub(crate) fn build_last_turn_full_context(
             max_segment_chars,
             max_total_chars,
         );
-    }
-    if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
-        if let Ok(Some((user_text, assistant_text))) =
-            query_recent_terminal_ask_turn_for_chat(&db, user_id, legacy_chat_id, &user_key)
-        {
-            return format_last_turn_full_context(
-                state,
-                &user_text,
-                &assistant_text,
-                max_segment_chars,
-                max_total_chars,
-            );
-        }
     }
     // Query recent memories, ordered by id DESC (most recent first)
     let recent = match query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, 10) {
@@ -887,25 +1305,13 @@ pub(crate) fn build_recent_assistant_replies_context(
         Err(_) => return "<none>".to_string(),
     };
 
-    let mut rows =
-        query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, max_replies * 6)
-            .unwrap_or_default();
-    if rows.is_empty() {
-        if let Some(legacy_chat_id) = legacy_principal_chat_id(&user_key, chat_id) {
-            rows = query_recent_memories_for_chat(
-                &db,
-                user_id,
-                legacy_chat_id,
-                &user_key,
-                max_replies * 6,
-            )
-            .unwrap_or_default();
-        }
-    }
+    let rows = query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, max_replies * 6)
+        .unwrap_or_default();
     if rows.is_empty() {
         return "<none>".to_string();
     }
 
+    let provider_unavailable_text = provider_unavailable_clarify_fallback_text(state);
     let mut lines: Vec<String> = Vec::new();
     for (role, content, safety_flag) in rows {
         if role != MEMORY_ROLE_ASSISTANT {
@@ -914,9 +1320,16 @@ pub(crate) fn build_recent_assistant_replies_context(
         if state.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
             continue;
         }
+        let trimmed_content = content.trim();
+        if trimmed_content.is_empty()
+            || trimmed_content == provider_unavailable_text.trim()
+            || trimmed_content == provider_unavailable_assistant_placeholder()
+        {
+            continue;
+        }
         let reply_index = lines.len() + 1;
         let relative_index = -(reply_index as i64);
-        let preview = utf8_safe_prefix(content.trim(), preview_chars)
+        let preview = utf8_safe_prefix(trimmed_content, preview_chars)
             .replace('\n', " ")
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -929,10 +1342,15 @@ pub(crate) fn build_recent_assistant_replies_context(
         } else {
             "false"
         };
-        lines.push(format!(
+        let mut line = format!(
             "- turn_id=assistant[{}] relative_index={} short_preview={} has_code_block={}",
             relative_index, relative_index, preview, has_code_block
-        ));
+        );
+        if let Some(ordered_entries) = format_recent_assistant_ordered_entries(trimmed_content) {
+            line.push_str(" ordered_entries=");
+            line.push_str(&ordered_entries);
+        }
+        lines.push(line);
         if lines.len() >= max_replies {
             break;
         }
@@ -943,6 +1361,49 @@ pub(crate) fn build_recent_assistant_replies_context(
     } else {
         format!("### RECENT_ASSISTANT_REPLIES\n{}", lines.join("\n"))
     }
+}
+
+pub(crate) fn read_recent_assistant_reply_texts(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    max_replies: usize,
+) -> Vec<String> {
+    let max_replies = max_replies.max(1);
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let db = match state.db.lock() {
+        Ok(db) => db,
+        Err(_) => return Vec::new(),
+    };
+    let rows = query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, max_replies * 6)
+        .unwrap_or_default();
+    if rows.is_empty() {
+        return Vec::new();
+    }
+
+    let provider_unavailable_text = provider_unavailable_clarify_fallback_text(state);
+    let mut replies = Vec::new();
+    for (role, content, safety_flag) in rows {
+        if role != MEMORY_ROLE_ASSISTANT {
+            continue;
+        }
+        if state.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+            continue;
+        }
+        let trimmed = content.trim();
+        if trimmed.is_empty()
+            || trimmed == provider_unavailable_text.trim()
+            || trimmed == provider_unavailable_assistant_placeholder()
+        {
+            continue;
+        }
+        replies.push(trimmed.to_string());
+        if replies.len() >= max_replies {
+            break;
+        }
+    }
+    replies
 }
 
 pub(crate) fn read_long_term_source_memory_id(
@@ -1315,11 +1776,432 @@ fn score_memory_relevance(role: &str, content: &str, keywords: &[String]) -> f32
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        retrieval_source_ref_for_kb_chunk, retrieval_source_ref_for_memory,
-        retrieval_source_ref_for_preference, RETRIEVAL_PRODUCER_KB,
-        RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY,
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Arc, Mutex, RwLock};
+    use std::time::Instant;
+
+    use claw_core::config::{
+        AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
     };
+    use reqwest::Client;
+    use rusqlite::{params, Connection};
+    use tokio::sync::Semaphore;
+
+    use crate::runtime::policy::{RateLimiter, ToolsPolicy};
+    use crate::runtime::state::SkillViewsSnapshot;
+    use crate::runtime::types::{CommandIntentRuntime, ScheduleRuntime};
+    use crate::{AgentRuntimeConfig, AppState};
+
+    use super::{
+        build_last_turn_full_context, build_recent_assistant_replies_context,
+        clarify_assistant_placeholder, classify_assistant_context_reply_kind,
+        extract_result_text_for_recent_turns, insert_memory, legacy_principal_chat_id,
+        ordered_entries_from_assistant_reply, provider_unavailable_assistant_placeholder,
+        retrieval_source_ref_for_kb_chunk, retrieval_source_ref_for_memory,
+        retrieval_source_ref_for_preference, AssistantContextReplyKind, MemoryWriteKind,
+        MEMORY_ROLE_ASSISTANT, RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE,
+        RETRIEVAL_SOURCE_MEMORY,
+    };
+    use serde_json::json;
+
+    fn test_state() -> AppState {
+        let agents_by_id = HashMap::from([(
+            crate::DEFAULT_AGENT_ID.to_string(),
+            AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
+        )]);
+        AppState {
+            started_at: Instant::now(),
+            queue_limit: 1,
+            db: Arc::new(Mutex::new(Connection::open_in_memory().expect("open db"))),
+            llm_providers: Vec::new(),
+            agents_by_id: Arc::new(agents_by_id),
+            skill_timeout_seconds: 30,
+            skill_runner_path: std::path::PathBuf::new(),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                registry: None,
+                skills_list: Arc::new(HashSet::new()),
+            }))),
+            skill_semaphore: Arc::new(Semaphore::new(1)),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
+            llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
+            maintenance: MaintenanceConfig::default(),
+            memory: MemoryConfig::default(),
+            workspace_root: std::env::temp_dir(),
+            default_locator_search_dir: std::env::temp_dir(),
+            locator_scan_max_depth: 3,
+            locator_scan_max_files: 200,
+            tools_policy: Arc::new(
+                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+            ),
+            active_provider_type: None,
+            cmd_timeout_seconds: 30,
+            max_cmd_length: 4096,
+            allow_path_outside_workspace: false,
+            allow_sudo: false,
+            worker_task_timeout_seconds: 300,
+            worker_task_heartbeat_seconds: 10,
+            worker_running_no_progress_timeout_seconds: 300,
+            worker_running_recovery_check_interval_seconds: 30,
+            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            routing: RoutingConfig::default(),
+            persona_prompt: String::new(),
+            command_intent: CommandIntentRuntime {
+                all_result_suffixes: Vec::new(),
+                default_locale: "zh-CN".to_string(),
+                verify_enforce_enabled: false,
+            },
+            schedule: ScheduleRuntime {
+                timezone: "Asia/Shanghai".to_string(),
+                intent_prompt_template: String::new(),
+                intent_prompt_source: String::new(),
+                intent_rules_template: String::new(),
+                locale: "zh-CN".to_string(),
+                i18n_dict: HashMap::new(),
+            },
+            telegram_bot_token: String::new(),
+            telegram_configured_bot_names: Arc::new(Vec::new()),
+            whatsapp_cloud_enabled: false,
+            whatsapp_api_base: String::new(),
+            whatsapp_access_token: String::new(),
+            whatsapp_phone_number_id: String::new(),
+            whatsapp_web_enabled: false,
+            whatsapp_web_bridge_base_url: String::new(),
+            future_adapters_enabled: Arc::new(Vec::new()),
+            wechat_send_config: None,
+            feishu_send_config: None,
+            lark_send_config: None,
+            http_client: Client::new(),
+            database_sqlite_path: std::path::PathBuf::new(),
+            database_busy_timeout_ms: 5_000,
+            config_path_for_reload: String::new(),
+            registry_path_for_reload: None,
+            skill_switches_for_reload: Arc::new(HashMap::new()),
+            initial_skills_list_for_reload: Vec::new(),
+        }
+    }
+
+    fn create_tasks_table(db: &Connection) {
+        db.execute_batch(
+            "CREATE TABLE tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                user_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload_json TEXT,
+                result_json TEXT,
+                error_text TEXT,
+                status TEXT NOT NULL,
+                created_at TEXT,
+                updated_at TEXT
+            );",
+        )
+        .expect("create tasks table");
+    }
+
+    fn create_memories_table(db: &Connection) {
+        db.execute_batch(
+            "CREATE TABLE memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                user_key TEXT,
+                channel TEXT NOT NULL DEFAULT 'telegram',
+                external_chat_id TEXT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                created_at_ts INTEGER NOT NULL DEFAULT 0,
+                memory_type TEXT NOT NULL DEFAULT 'generic',
+                salience REAL NOT NULL DEFAULT 0.5,
+                is_instructional INTEGER NOT NULL DEFAULT 0,
+                safety_flag TEXT NOT NULL DEFAULT 'normal'
+            );",
+        )
+        .expect("create memories table");
+    }
+
+    #[test]
+    fn clarify_task_reply_is_replaced_with_placeholder_for_recent_turn_context() {
+        let parsed = json!({
+            "text": "请问你指的是哪个文件？例如 logs/act_plan.log",
+            "task_journal": {
+                "summary": {
+                    "final_status": "clarify",
+                    "route_result": {
+                        "routed_mode": "AskClarify",
+                        "needs_clarify": true
+                    }
+                }
+            }
+        });
+        assert_eq!(
+            classify_assistant_context_reply_kind(
+                Some(&parsed),
+                "请问你指的是哪个文件？例如 logs/act_plan.log",
+                "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。",
+            ),
+            AssistantContextReplyKind::ClarifyPlaceholder
+        );
+        assert_eq!(clarify_assistant_placeholder(), "[clarification_requested]");
+    }
+
+    #[test]
+    fn provider_unavailable_reply_is_replaced_with_placeholder_for_recent_turn_context() {
+        let parsed = json!({
+            "text": "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。"
+        });
+        assert_eq!(
+            classify_assistant_context_reply_kind(
+                Some(&parsed),
+                "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。",
+                "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。",
+            ),
+            AssistantContextReplyKind::ProviderUnavailablePlaceholder
+        );
+        assert_eq!(
+            provider_unavailable_assistant_placeholder(),
+            "[provider_unavailable_reply_omitted]"
+        );
+    }
+
+    #[test]
+    fn normal_assistant_task_reply_keeps_original_text_for_recent_turn_context() {
+        let parsed = json!({
+            "text": "README.md"
+        });
+        assert_eq!(
+            classify_assistant_context_reply_kind(
+                Some(&parsed),
+                "README.md",
+                "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。",
+            ),
+            AssistantContextReplyKind::Normal
+        );
+    }
+
+    #[test]
+    fn provider_unavailable_task_is_skipped_for_last_turn_context() {
+        let state = test_state();
+        let db = state.db.lock().expect("db");
+        create_tasks_table(&db);
+        let provider_unavailable = crate::i18n_t_with_default(
+            &state,
+            "clawd.msg.clarify_question_fallback",
+            "I need to clarify: what task is this message about? Please provide the target or context.",
+        );
+        db.execute(
+            "INSERT INTO tasks (user_id, chat_id, user_key, kind, payload_json, result_json, error_text, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'ask', ?4, ?5, NULL, 'succeeded', '100', '100')",
+            params![
+                1_i64,
+                2_i64,
+                "test-user",
+                r#"{"text":"先列出 logs 目录下前 5 个文件名"}"#,
+                r#"{"text":"act_plan.log, clawd.log, feishud.log, install_ops.log, logs_directory_listing.txt"}"#,
+            ],
+        )
+        .expect("insert older successful turn");
+        db.execute(
+            "INSERT INTO tasks (user_id, chat_id, user_key, kind, payload_json, result_json, error_text, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'ask', ?4, ?5, NULL, 'succeeded', '200', '200')",
+            params![
+                1_i64,
+                2_i64,
+                "test-user",
+                r#"{"text":"一句话说有没有异常"}"#,
+                json!({ "text": provider_unavailable }).to_string(),
+            ],
+        )
+        .expect("insert provider unavailable turn");
+        drop(db);
+
+        let last_turn = build_last_turn_full_context(&state, Some("test-user"), 1, 2, 400, 1200);
+        assert!(last_turn.contains("先列出 logs 目录下前 5 个文件名"));
+        assert!(last_turn.contains("act_plan.log, clawd.log"));
+        assert!(!last_turn.contains("一句话说有没有异常"));
+        assert!(!last_turn.contains(provider_unavailable_assistant_placeholder()));
+    }
+
+    #[test]
+    fn last_turn_full_context_does_not_fallback_to_legacy_chat() {
+        let state = test_state();
+        let db = state.db.lock().expect("db");
+        create_tasks_table(&db);
+        let legacy_chat_id = legacy_principal_chat_id("test-user", 2).expect("legacy chat id");
+        db.execute(
+            "INSERT INTO tasks (user_id, chat_id, user_key, kind, payload_json, result_json, error_text, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'ask', ?4, ?5, NULL, 'succeeded', '100', '100')",
+            params![
+                1_i64,
+                legacy_chat_id,
+                "test-user",
+                r#"{"text":"旧 chat 的问题"}"#,
+                r#"{"text":"旧 chat 的答案"}"#,
+            ],
+        )
+        .expect("insert legacy chat task");
+        drop(db);
+
+        let last_turn = build_last_turn_full_context(&state, Some("test-user"), 1, 2, 400, 1200);
+        assert_eq!(last_turn, "<none>");
+    }
+
+    #[test]
+    fn recent_assistant_replies_context_does_not_fallback_to_legacy_chat() {
+        let state = test_state();
+        {
+            let db = state.db.lock().expect("db");
+            create_memories_table(&db);
+        }
+        insert_memory(
+            &state,
+            1,
+            legacy_principal_chat_id("test-user", 2).expect("legacy chat id"),
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_ASSISTANT,
+            "FILE:/tmp/legacy.txt",
+            2000,
+            MemoryWriteKind::AssistantOutcome,
+        )
+        .expect("insert legacy assistant memory");
+
+        let recent =
+            build_recent_assistant_replies_context(&state, Some("test-user"), 1, 2, 3, 220);
+        assert_eq!(recent, "<none>");
+    }
+
+    #[test]
+    fn ordered_entries_from_candidate_confirmation_reply_extracts_in_order() {
+        let reply = "我找到 3 个最接近的候选，请确认要哪一个：scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt；scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md；scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt";
+        assert_eq!(
+            ordered_entries_from_assistant_reply(reply, 10),
+            vec![
+                "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt".to_string(),
+                "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md".to_string(),
+                "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn recent_assistant_replies_context_includes_ordered_entries_for_candidate_list() {
+        let state = test_state();
+        {
+            let db = state.db.lock().expect("db");
+            create_memories_table(&db);
+        }
+        insert_memory(
+            &state,
+            1,
+            2,
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_ASSISTANT,
+            "我找到 3 个最接近的候选，请确认要哪一个：scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt；scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md；scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt",
+            2000,
+            MemoryWriteKind::AssistantOutcome,
+        )
+        .expect("insert assistant memory");
+
+        let recent =
+            build_recent_assistant_replies_context(&state, Some("test-user"), 1, 2, 3, 220);
+        assert!(recent.contains(
+            "ordered_entries=1:scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"
+        ));
+        assert!(
+            recent.contains("2:scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md")
+        );
+        assert!(
+            recent.contains("3:scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt")
+        );
+    }
+
+    #[test]
+    fn result_text_prefers_read_range_excerpt_over_linewise_json_text() {
+        let parsed = json!({
+            "text": "{\"a\":1}\n{\"b\":2}",
+            "task_journal": {
+                "trace": {
+                    "step_results": [{
+                        "skill": "system_basic",
+                        "output_excerpt": "{\"action\":\"read_range\",\"resolved_path\":\"/tmp/logs/act_plan.log\",\"excerpt\":\"10|first line\\n11|second line\\n12|third line\"}"
+                    }]
+                }
+            }
+        });
+        assert_eq!(
+            extract_result_text_for_recent_turns(&parsed).as_deref(),
+            Some("read_range path=/tmp/logs/act_plan.log\nfirst line\nsecond line\nthird line")
+        );
+    }
+
+    #[test]
+    fn result_text_prefers_read_range_excerpt_when_messages_and_final_answer_are_machine_json() {
+        let machine_text = "{\"a\":1}\n{\"b\":2}";
+        let parsed = json!({
+            "text": machine_text,
+            "messages": [machine_text],
+            "task_journal": {
+                "summary": {
+                    "final_answer": machine_text
+                },
+                "trace": {
+                    "step_results": [{
+                        "skill": "system_basic",
+                        "output_excerpt": "{\"action\":\"read_range\",\"resolved_path\":\"/tmp/logs/act_plan.log\",\"excerpt\":\"2283|alpha\\n2284|beta\\n2285|gamma\"}"
+                    }]
+                }
+            }
+        });
+        assert_eq!(
+            extract_result_text_for_recent_turns(&parsed).as_deref(),
+            Some("read_range path=/tmp/logs/act_plan.log\nalpha\nbeta\ngamma")
+        );
+    }
+
+    #[test]
+    fn result_text_prefers_read_range_observed_excerpt_even_when_final_text_is_plain_summary() {
+        let parsed = json!({
+            "text": "共计 9 个日志文件、2 个 Markdown 文档和 9 个子目录。",
+            "task_journal": {
+                "trace": {
+                    "step_results": [{
+                        "skill": "system_basic",
+                        "output_excerpt": "{\"action\":\"read_range\",\"resolved_path\":\"/tmp/logs/logs_directory_listing.txt\",\"excerpt\":\"28|\\n29|共计 9 个日志文件、2 个 Markdown 文档和 9 个子目录。\"}"
+                    }]
+                }
+            }
+        });
+        assert_eq!(
+            extract_result_text_for_recent_turns(&parsed).as_deref(),
+            Some("read_range path=/tmp/logs/logs_directory_listing.txt\n\n共计 9 个日志文件、2 个 Markdown 文档和 9 个子目录。")
+        );
+    }
+
+    #[test]
+    fn result_text_prefers_observed_listing_over_wrapped_numbered_answer() {
+        let parsed = json!({
+            "text": "logs 目录下前 5 个文件名：\n1. act_plan.log\n2. clawd.log\n3. feishud.log\n4. install_ops.log\n5. logs_directory_listing.txt",
+            "task_journal": {
+                "trace": {
+                    "step_results": [{
+                        "skill": "run_cmd",
+                        "output_excerpt": "act_plan.log\nclawd.log\nfeishud.log\ninstall_ops.log\nlogs_directory_listing.txt"
+                    }]
+                }
+            }
+        });
+        assert_eq!(
+            extract_result_text_for_recent_turns(&parsed).as_deref(),
+            Some(
+                "act_plan.log\nclawd.log\nfeishud.log\ninstall_ops.log\nlogs_directory_listing.txt"
+            )
+        );
+    }
 
     #[test]
     fn retrieval_source_ref_for_memory_is_stable_id_string() {

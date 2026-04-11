@@ -4,7 +4,7 @@ Status: FALLBACK / LEGACY only. Not the main ask-chain routing prompt.
 - The current ask main chain uses intent_normalizer_prompt (intent_normalizer) as the single pre-routing entry.
 - Do not treat this file as the primary routing prompt for ask tasks.
 Component: clawd (crates/clawd/src/intent_router.rs) route_request_mode()
-Placeholders: __PERSONA_PROMPT__, __ROUTING_RULES__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_ASSISTANT_REPLIES__, __RECENT_TURNS_FULL__, __LAST_TURN_FULL__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __REQUEST__
+Placeholders: __PERSONA_PROMPT__, __ROUTING_RULES__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_ASSISTANT_REPLIES__, __RECENT_TURNS_FULL__, __LAST_TURN_FULL__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __REQUEST__ (recent assistant replies may include `ordered_entries=1:... | 2:...`)
 -->
 
 **Fallback / legacy only.** This prompt is used only when the intent normalizer has not provided a mode (e.g. JSON parse failure). The ask main chain's primary routing entry is `intent_normalizer_prompt` (intent_normalizer). Do not use or maintain this as the main ask routing path. `chat_act` is a secondary mode only, not a fallback.
@@ -18,10 +18,11 @@ Task:
 - Read the user request.
 - Use memory context only as non-authoritative background signals.
 - Use `__RECENT_TURNS_FULL__`, `__LAST_TURN_FULL__`, and `__RECENT_ASSISTANT_REPLIES__` as the primary fallback anchor for follow-up or deictic references.
+- If a recent turn shows assistant-side placeholders such as `[clarification_requested]` or `[provider_unavailable_reply_omitted]`, treat those as non-semantic scaffolding only. They may preserve the previous user operation, but they must not contribute candidate targets, filenames, or examples.
 - If `__RESUME_CONTEXT__` / `__BINDING_CONTEXT__` is present, treat it as optional background for continuation semantics only. Do not let stale interrupted-task context override a self-contained new current-workspace request.
 - If the previous assistant turn asked for clarification but the current message is again a full standalone executable request sentence, re-evaluate it as a fresh request on current semantics. Do not preserve the earlier clarification blocker when the current request can already map to current-workspace scope or a skill with a safe default action.
 - Decide exactly one mode: `chat`, `act`, `chat_act`, or `ask_clarify`.
-- Return a lightweight structured fallback decision: `resolved_user_intent`, `needs_clarify`, and `output_contract`, not just the mode.
+- Return a lightweight structured fallback decision: `resolved_user_intent`, `needs_clarify`, `clarify_question`, `schedule_kind`, optional `schedule_intent`, and `output_contract`, not just the mode.
 - Support multilingual requests (Chinese/English/other languages) by routing based on meaning, not keyword surface form.
 - Treat self-contained local workspace inspection requests as executable by semantics, even when phrased casually. Reading a file, listing a directory, checking existence, counting items, extracting one field or value, comparing local files, or reading then summarizing are all `act` or `chat_act`, not `chat`, when the target is already clear from the current turn.
 - Requests that semantically mean "explain this repo / repository / workspace in simple words" should be treated as current-workspace executable inspection, not as missing-path clarification, unless the user explicitly refers to some other repository.
@@ -30,6 +31,12 @@ Task:
 - Do not reinterpret a fresh deictic target such as "that directory / that file" as `current_workspace` merely because recent turns happened in the workspace. Only self-contained present-workspace scope in the current message should map to `current_workspace`.
 - If the immediately previous user turn was already an executable deictic filesystem request and the current user turn is now just a short concrete locator token (bare filename, directory name, relative path, or absolute path), treat it as correcting/filling the target for that immediate previous operation rather than as a new ambiguous request.
 - In that corrective-locator case, a bare local entry token such as `document`, `scripts`, `logs`, `README`, or `package.json` should first be treated as a locator candidate for the previous filesystem operation. Do not reinterpret it as a generic noun/topic when the prior turn was asking which file/directory the user meant.
+- If the immediately previous successful turn already returned concrete observed content from exactly one bound target, and the current short follow-up asks for interpretation/conclusion (for example summarize / explain / 是否异常 / 有没有问题 / 一句话说结论), inherit that same target first. Do not widen it into a generic system/service/log clarification.
+- If the immediately previous successful turn returned an ordered list of entries from one bound directory, and the current short follow-up picks one by ordinal position (for example first / second / 第一个 / 第二个 / 最后一个) then asks to read / tail / inspect / send it, inherit the same parent directory scope and bind the selected entry under that directory. Do not reduce it to a bare filename without directory scope.
+- In that ordinal-entry case, `output_contract.locator_hint` must name the selected concrete entry under that directory (for example `logs/clawd.log`), not only the parent directory (`logs`).
+- If assistant[-1] is already a successful ordered directory listing and the current short follow-up is only selecting one entry from that listing by ordinal position (or then reading/tailing/sending/explaining it), bind to assistant[-1] first. Do not jump to assistant[-2] or older listings unless the user explicitly says previous / earlier / two turns back.
+- If `__RECENT_ASSISTANT_REPLIES__` provides `ordered_entries=1:... | 2:...`, treat that sequence as authoritative for ordinal selection from that reply and carry the selected exact entry into `resolved_user_intent` / `output_contract.locator_hint`.
+- A numbered/prefixed listing such as `logs 目录下前 5 个文件名： 1. act_plan.log 2. clawd.log ...` still counts as an ordered directory listing. A follow-up like `就第二个，看看最后 2 行` must bind to that immediate listing's second item, not to an older directory listing from assistant[-2].
 
 Mode definitions (mutually exclusive):
 - `chat`: explanation/Q&A only, no external action/tool execution needed.
@@ -60,6 +67,8 @@ Priority rules:
 6) For follow-up pronouns or short requests (e.g. "continue", "delete them all", "stop them all"), use RECENT_TURNS_FULL / LAST_TURN_FULL / RECENT_ASSISTANT_REPLIES first, then RECENT_EXECUTION_CONTEXT, then MEMORY_CONTEXT, and infer the intended action target.
 7) If target/action is ambiguous and evidence is weak, choose `ask_clarify` and explain the missing piece in `reason`.
 7.1) For a fresh deictic directory/file request with no concrete locator in the current message and no unique immediate binding, choose `ask_clarify`; do not silently default it to the current workspace.
+7.2) In that fresh-deictic clarify case, do not surface filenames/directories/paths from generic recent-execution background as candidate options unless a bounded locator-resolution step explicitly produced those concrete candidates.
+7.3) A generic fresh request such as "send the file" / "that config file" / "read that file" must not bind solely from an older assistant delivery or older clarification example unless immediate context clearly shows it is the same pending thread.
 8) Never use `chat_act` as a generic uncertainty fallback. Use `chat_act` only when narration is explicit.
 9) Instruction priority: system/developer policy > current user request > memory/history.
 10) If uncertain between `chat` and `act` and narration is not explicit, prefer `act` when action evidence exists; otherwise prefer `chat`.
@@ -72,18 +81,24 @@ Priority rules:
 Output format (strict):
 - Return JSON only, exactly one object.
 - Required schema:
-  {"mode":"chat|act|chat_act|ask_clarify","resolved_user_intent":"...","needs_clarify":false,"reason":"...","confidence":0.0,"evidence_refs":["..."],"wants_file_delivery":false,"output_contract":{"response_shape":"free|one_sentence|scalar|file_token","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none|path|current_workspace|url|filename","delivery_intent":"none|file_single|directory_lookup|directory_batch_files","locator_hint":""}}
+  {"mode":"chat|act|chat_act|ask_clarify","resolved_user_intent":"...","needs_clarify":false,"clarify_question":"","reason":"...","confidence":0.0,"evidence_refs":["..."],"schedule_kind":"none|create|update|delete|query","schedule_intent":null,"wants_file_delivery":false,"output_contract":{"response_shape":"free|one_sentence|scalar|file_token","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none|path|current_workspace|url|filename","delivery_intent":"none|file_single|directory_lookup|directory_batch_files","locator_hint":""}}
 - `confidence` is in [0, 1].
 - `evidence_refs` should cite short pointers like "recent#1", "memory#2", or "request#1".
 - `reason` should be short, concrete, and grounded in the actual message.
 - `resolved_user_intent`: keep the original request when already self-contained; only rewrite when immediate context resolves an omitted target.
 - `needs_clarify`: set true only when one key locator/target/parameter is still unresolved.
+- `clarify_question`: when `needs_clarify=true`, emit one concise user-facing clarification question; otherwise use `""`.
+- `schedule_kind`: use `none` unless the request is clearly a schedule create/update/delete/query request.
+- `schedule_intent`: `null` when `schedule_kind="none"`; otherwise, when you can infer it reliably, emit a structured object aligned with the schedule compiler schema (`kind`, `timezone`, `schedule`, `task`, `target_job_id`, `raw`, `reason`, `needs_clarify`, `clarify_question`, `confidence`).
 - `wants_file_delivery`: true only when the user explicitly wants file delivery / attachment semantics.
 - `output_contract.response_shape`:
   - `free`: normal free-form answer
-  - `one_sentence`: user explicitly asks for one sentence
-  - `scalar`: user explicitly asks for a scalar/path/number/yes-no style result
+  - `one_sentence`: user explicitly asks for exactly one sentence, or clearly asks for only one brief concluding sentence such as `一句话说完`, `用一句话告诉我`, `只列最重要的结论`, `简短告诉我最关键的一点`, `不用展开，只说结论`, or close semantic equivalents that request one concise conclusion rather than a multi-part explanation
+  - Also use `one_sentence` for a brief result/status conclusion after execution when the user wants one short takeaway instead of raw output, for example `如果能通就简短总结结果`, `briefly summarize the result`, `briefly explain the status`.
+  - `scalar`: user explicitly asks for exactly one scalar result such as one number, one value, one path, one username, or a pure yes/no answer
+  - If the requested answer is compound (for example yes/no plus a path, yes/no plus a reason, or value plus status), do not use `scalar`; use `free`
   - `file_token`: final output should be `FILE:<path>` style
+- Explicit multi-sentence constraints such as `2 sentences`, `3 sentences`, `三句话`, or similar counted-sentence requests must stay `free`; preserve that counted-sentence requirement in `resolved_user_intent` instead of collapsing it to `one_sentence`.
 - `output_contract.requires_content_evidence`: true when the answer depends on actually reading/obtaining local content first.
 - `output_contract.delivery_required`: true when final delivery must be file-token style instead of pasted prose.
 - `output_contract.locator_kind`: use `current_workspace` for self-contained present-workspace scope; use `filename` when the user explicitly names a file entry; use `path` / `url` when the current message contains that concrete locator; otherwise `none`.

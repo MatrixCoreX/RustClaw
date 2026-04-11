@@ -8,6 +8,9 @@
 //! `INTENT_ROUTER_*` / `INTENT_ROUTER_RULES_*`, `ROUTING_POLICY_*`, `RouteDecision`/`RouteDecisionOut`,
 //! `parse_route_decision`, and `route_request_mode` itself.
 
+use std::sync::OnceLock;
+
+use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{info, warn};
@@ -42,9 +45,12 @@ struct RouteDecision {
     mode: RoutedMode,
     resolved_user_intent: String,
     needs_clarify: bool,
+    clarify_question: String,
     reason: String,
     confidence: Option<f64>,
     evidence_refs: Vec<String>,
+    schedule_kind: ScheduleKind,
+    schedule_intent: Option<crate::ScheduleIntentOutput>,
     wants_file_delivery: bool,
     output_contract: IntentOutputContract,
 }
@@ -57,11 +63,17 @@ struct RouteDecisionOut {
     #[serde(default)]
     needs_clarify: bool,
     #[serde(default)]
+    clarify_question: String,
+    #[serde(default)]
     reason: String,
     #[serde(default)]
     confidence: Option<f64>,
     #[serde(default)]
     evidence_refs: Vec<String>,
+    #[serde(default)]
+    schedule_kind: String,
+    #[serde(default)]
+    schedule_intent: Option<crate::ScheduleIntentOutput>,
     #[serde(default)]
     wants_file_delivery: bool,
     #[serde(default)]
@@ -82,8 +94,10 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) resolved_user_intent: String,
     pub(crate) resume_behavior: ResumeBehavior,
     pub(crate) schedule_kind: ScheduleKind,
+    pub(crate) schedule_intent: Option<crate::ScheduleIntentOutput>,
     pub(crate) wants_file_delivery: bool,
     pub(crate) needs_clarify: bool,
+    pub(crate) clarify_question: String,
     pub(crate) reason: String,
     pub(crate) confidence: f64,
     pub(crate) output_contract: IntentOutputContract,
@@ -100,12 +114,14 @@ pub(crate) fn route_result_from_normalizer(
         routed_mode: normalizer_out.routed_mode,
         resolved_intent: normalizer_out.resolved_user_intent.clone(),
         needs_clarify: normalizer_out.needs_clarify,
+        clarify_question: normalizer_out.clarify_question.clone(),
         route_reason: normalizer_out.reason.clone(),
         route_confidence: Some(normalizer_out.confidence),
         visible_skill_candidates: state.planner_visible_skills_for_task(task),
         risk_ceiling: RiskCeiling::Unknown,
         resume_behavior: normalizer_out.resume_behavior,
         schedule_kind: normalizer_out.schedule_kind,
+        schedule_intent: normalizer_out.schedule_intent.clone(),
         wants_file_delivery: normalizer_out.wants_file_delivery,
         output_contract: normalizer_out.output_contract.clone(),
     }
@@ -124,11 +140,15 @@ struct IntentNormalizerOut {
     #[serde(default)]
     needs_clarify: bool,
     #[serde(default)]
+    clarify_question: String,
+    #[serde(default)]
     reason: String,
     #[serde(default)]
     confidence: f64,
     #[serde(default)]
     mode: String,
+    #[serde(default)]
+    schedule_intent: Option<crate::ScheduleIntentOutput>,
     #[serde(default)]
     output_contract: Option<IntentOutputContractOut>,
 }
@@ -225,6 +245,87 @@ fn parse_output_contract(
     contract
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OrderedEntrySelector {
+    Index(usize),
+    Last,
+}
+
+fn parse_ordinal_entry_selector(text: &str) -> Option<OrderedEntrySelector> {
+    static NTH_RE: OnceLock<Regex> = OnceLock::new();
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains("最后一个")
+        || trimmed.contains("最后一项")
+        || trimmed.contains("最后那个")
+        || trimmed.to_ascii_lowercase().contains("last one")
+        || trimmed.to_ascii_lowercase().contains("the last")
+    {
+        return Some(OrderedEntrySelector::Last);
+    }
+    let nth_re = NTH_RE.get_or_init(|| {
+        Regex::new(r"第\s*(?P<num>[0-9]{1,2})\s*(?:个|项|条|份|篇)")
+            .expect("ordinal selector regex")
+    });
+    if let Some(caps) = nth_re.captures(trimmed) {
+        let value = caps
+            .name("num")
+            .and_then(|m| m.as_str().parse::<usize>().ok())
+            .filter(|v| *v >= 1)?;
+        return Some(OrderedEntrySelector::Index(value - 1));
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if trimmed.contains("第一个") || trimmed.contains("第一项") || lower.contains("first") {
+        return Some(OrderedEntrySelector::Index(0));
+    }
+    if trimmed.contains("第二个") || trimmed.contains("第二项") || lower.contains("second") {
+        return Some(OrderedEntrySelector::Index(1));
+    }
+    if trimmed.contains("第三个") || trimmed.contains("第三项") || lower.contains("third") {
+        return Some(OrderedEntrySelector::Index(2));
+    }
+    None
+}
+
+fn ordered_entries_from_recent_assistant_replies(context: &str) -> Vec<Vec<String>> {
+    context
+        .lines()
+        .filter_map(|line| line.split_once(" ordered_entries=").map(|(_, rest)| rest))
+        .map(|rest| {
+            rest.split(" | ")
+                .filter_map(|part| part.split_once(':').map(|(_, entry)| entry.trim()))
+                .filter(|entry| !entry.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|entries| entries.len() >= 2)
+        .collect()
+}
+
+fn selected_ordered_entry_from_recent_assistant_replies(
+    user_request: &str,
+    recent_assistant_replies: &str,
+) -> Option<String> {
+    let selector = parse_ordinal_entry_selector(user_request)?;
+    for entries in ordered_entries_from_recent_assistant_replies(recent_assistant_replies) {
+        match selector {
+            OrderedEntrySelector::Index(idx) => {
+                if let Some(entry) = entries.get(idx) {
+                    return Some(entry.clone());
+                }
+            }
+            OrderedEntrySelector::Last => {
+                if let Some(entry) = entries.last() {
+                    return Some(entry.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn wants_file_delivery_from_contract(
     contract: &IntentOutputContract,
     explicit_wants_file_delivery: bool,
@@ -264,14 +365,54 @@ fn normalizer_output_from_fallback(
     IntentNormalizerOutput {
         resolved_user_intent,
         resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
+        schedule_kind: decision.schedule_kind,
+        schedule_intent: decision.schedule_intent,
         wants_file_delivery: decision.wants_file_delivery,
         needs_clarify: decision.needs_clarify,
+        clarify_question: decision.clarify_question,
         reason,
         confidence: decision.confidence.unwrap_or(0.0),
         output_contract: decision.output_contract,
         routed_mode,
     }
+}
+
+fn normalize_schedule_intent_from_normalizer(
+    schedule_kind: ScheduleKind,
+    schedule_intent: Option<crate::ScheduleIntentOutput>,
+    resolved_user_intent: &str,
+    reason: &str,
+    needs_clarify: bool,
+    clarify_question: &str,
+    confidence: f64,
+) -> Option<crate::ScheduleIntentOutput> {
+    if matches!(schedule_kind, ScheduleKind::None) {
+        return None;
+    }
+    let mut intent = schedule_intent.unwrap_or_default();
+    let cleaned_kind = crate::schedule_service::clean_schedule_kind(&intent.kind);
+    if !cleaned_kind.is_empty() && cleaned_kind != schedule_kind.as_str() {
+        return None;
+    }
+    if cleaned_kind.is_empty() {
+        intent.kind = schedule_kind.as_str().to_string();
+    }
+    if intent.raw.trim().is_empty() {
+        intent.raw = resolved_user_intent.trim().to_string();
+    }
+    if intent.reason.trim().is_empty() {
+        intent.reason = reason.trim().to_string();
+    }
+    if needs_clarify {
+        intent.needs_clarify = true;
+        if intent.clarify_question.trim().is_empty() && !clarify_question.trim().is_empty() {
+            intent.clarify_question = clarify_question.trim().to_string();
+        }
+    }
+    if intent.confidence <= 0.0 {
+        intent.confidence = confidence;
+    }
+    Some(intent)
 }
 
 /// Unified intent normalizer: one LLM call for resume decision + intent completion + schedule classification + needs_clarify + routed_mode.
@@ -393,12 +534,28 @@ pub(crate) async fn run_intent_normalizer(
         let schedule_kind = parse_schedule_kind(&out.schedule_kind);
         let confidence = out.confidence.clamp(0.0, 1.0);
         let routed_mode_raw = parse_mode_text(&out.mode).unwrap_or(RoutedMode::AskClarify);
-        let output_contract =
+        let mut output_contract =
             parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
+        if let Some(selected_entry) = selected_ordered_entry_from_recent_assistant_replies(
+            req,
+            &route_view.recent_assistant_replies,
+        ) {
+            output_contract.locator_hint = selected_entry;
+        }
+        let clarify_question = out.clarify_question.trim().to_string();
         let routed_mode = crate::post_route_policy::enforce_content_evidence_execution_mode(
             routed_mode_raw,
             &output_contract,
             out.needs_clarify,
+        );
+        let schedule_intent = normalize_schedule_intent_from_normalizer(
+            schedule_kind,
+            out.schedule_intent.clone(),
+            if resolved.is_empty() { req } else { resolved },
+            &out.reason,
+            out.needs_clarify,
+            &clarify_question,
+            confidence,
         );
         if routed_mode != routed_mode_raw {
             info!(
@@ -437,8 +594,10 @@ pub(crate) async fn run_intent_normalizer(
             },
             resume_behavior,
             schedule_kind,
+            schedule_intent,
             wants_file_delivery: out.wants_file_delivery,
             needs_clarify: out.needs_clarify,
+            clarify_question,
             reason: out.reason,
             confidence,
             output_contract,
@@ -519,6 +678,48 @@ pub(crate) async fn generate_clarify_question(
             )
         }
     }
+}
+
+fn clarify_reason_implies_router_failure(resolver_reason: &str) -> bool {
+    let reason = resolver_reason.trim();
+    reason.contains("llm_failed_fallback_router")
+        || reason.contains("fallback_router_llm_failed")
+        || reason.contains("parse_failed_fallback_router")
+        || reason.contains("intent_normalizer llm failed")
+        || reason.contains("intent_normalizer parse failed")
+        || reason.contains("finalizer could not confirm a reliable final answer")
+}
+
+pub(crate) async fn generate_or_reuse_clarify_question(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_request: &str,
+    resolver_reason: &str,
+    candidate_context: Option<&str>,
+    preferred_question: Option<&str>,
+) -> String {
+    let preferred = preferred_question
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string);
+    if let Some(question) = preferred {
+        return question;
+    }
+    if clarify_reason_implies_router_failure(resolver_reason) {
+        return crate::i18n_t_with_default(
+            state,
+            "clawd.msg.clarify_question_fallback",
+            "I need to clarify: what task is this message about? Please provide the target or context.",
+        );
+    }
+    generate_clarify_question(
+        state,
+        task,
+        user_request,
+        resolver_reason,
+        candidate_context,
+    )
+    .await
 }
 
 /// **[FALLBACK]** Used only when normalizer did not provide a mode (e.g. JSON parse failure or legacy entry).
@@ -611,9 +812,12 @@ async fn route_request_fallback(
                 mode: RoutedMode::AskClarify,
                 resolved_user_intent: user_request.trim().to_string(),
                 needs_clarify: true,
+                clarify_question: String::new(),
                 reason: "fallback_router_llm_failed".to_string(),
                 confidence: None,
                 evidence_refs: Vec::new(),
+                schedule_kind: ScheduleKind::None,
+                schedule_intent: None,
                 wants_file_delivery: false,
                 output_contract: IntentOutputContract::default(),
             };
@@ -646,9 +850,12 @@ async fn route_request_fallback(
         mode: RoutedMode::AskClarify,
         resolved_user_intent: user_request.trim().to_string(),
         needs_clarify: true,
+        clarify_question: String::new(),
         reason: "fallback_router_parse_failed".to_string(),
         confidence: None,
         evidence_refs: Vec::new(),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
         wants_file_delivery: false,
         output_contract: IntentOutputContract::default(),
     }
@@ -672,13 +879,29 @@ fn parse_route_decision(raw: &str) -> Option<RouteDecision> {
             let mode = parse_mode_text(&out.mode)?;
             let output_contract =
                 parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
+            let schedule_kind = parse_schedule_kind(&out.schedule_kind);
+            let resolved_user_intent = out.resolved_user_intent.trim().to_string();
+            let clarify_question = out.clarify_question.trim().to_string();
+            let confidence = out.confidence.map(|c| c.clamp(0.0, 1.0));
+            let schedule_intent = normalize_schedule_intent_from_normalizer(
+                schedule_kind,
+                out.schedule_intent.clone(),
+                &resolved_user_intent,
+                &out.reason,
+                out.needs_clarify || matches!(mode, RoutedMode::AskClarify),
+                &clarify_question,
+                confidence.unwrap_or(0.0),
+            );
             return Some(RouteDecision {
                 mode,
-                resolved_user_intent: out.resolved_user_intent.trim().to_string(),
+                resolved_user_intent,
                 needs_clarify: out.needs_clarify || matches!(mode, RoutedMode::AskClarify),
+                clarify_question,
                 reason: out.reason,
-                confidence: out.confidence.map(|c| c.clamp(0.0, 1.0)),
+                confidence,
                 evidence_refs: out.evidence_refs.into_iter().take(8).collect(),
+                schedule_kind,
+                schedule_intent,
                 wants_file_delivery: wants_file_delivery_from_contract(
                     &output_contract,
                     out.wants_file_delivery,
@@ -692,9 +915,12 @@ fn parse_route_decision(raw: &str) -> Option<RouteDecision> {
                 mode,
                 resolved_user_intent: String::new(),
                 needs_clarify: matches!(mode, RoutedMode::AskClarify),
+                clarify_question: String::new(),
                 reason: String::new(),
                 confidence: None,
                 evidence_refs: Vec::new(),
+                schedule_kind: ScheduleKind::None,
+                schedule_intent: None,
                 wants_file_delivery: false,
                 output_contract: IntentOutputContract::default(),
             });
@@ -705,9 +931,12 @@ fn parse_route_decision(raw: &str) -> Option<RouteDecision> {
         mode,
         resolved_user_intent: String::new(),
         needs_clarify: matches!(mode, RoutedMode::AskClarify),
+        clarify_question: String::new(),
         reason: String::new(),
         confidence: None,
         evidence_refs: Vec::new(),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
         wants_file_delivery: false,
         output_contract: IntentOutputContract::default(),
     })
@@ -735,17 +964,66 @@ pub(crate) async fn try_handle_schedule_request(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
+    precompiled_intent: Option<&crate::ScheduleIntentOutput>,
 ) -> Result<Option<String>, String> {
-    schedule_service::try_handle_schedule_request(state, task, prompt).await
+    schedule_service::try_handle_schedule_request(state, task, prompt, precompiled_intent).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        normalizer_output_from_fallback, parse_route_decision, IntentOutputContract,
-        OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, RouteDecision,
+        clarify_reason_implies_router_failure, normalizer_output_from_fallback,
+        ordered_entries_from_recent_assistant_replies, parse_ordinal_entry_selector,
+        parse_route_decision, selected_ordered_entry_from_recent_assistant_replies,
+        IntentOutputContract, OrderedEntrySelector, OutputDeliveryIntent, OutputLocatorKind,
+        OutputResponseShape, RouteDecision,
     };
     use crate::RoutedMode;
+
+    #[test]
+    fn ordinal_selector_parses_common_followups() {
+        assert_eq!(
+            parse_ordinal_entry_selector("就第二个，只输出路径"),
+            Some(OrderedEntrySelector::Index(1))
+        );
+        assert_eq!(
+            parse_ordinal_entry_selector("那第一个呢"),
+            Some(OrderedEntrySelector::Index(0))
+        );
+        assert_eq!(
+            parse_ordinal_entry_selector("看最后一个"),
+            Some(OrderedEntrySelector::Last)
+        );
+    }
+
+    #[test]
+    fn recent_assistant_ordered_entries_prefer_latest_reply_with_entries() {
+        let context = "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] relative_index=-1 short_preview=候选 has_code_block=false ordered_entries=1:a.txt | 2:b.txt | 3:c.txt\n- turn_id=assistant[-2] relative_index=-2 short_preview=older has_code_block=false ordered_entries=1:old1.txt | 2:old2.txt";
+        assert_eq!(
+            ordered_entries_from_recent_assistant_replies(context),
+            vec![
+                vec![
+                    "a.txt".to_string(),
+                    "b.txt".to_string(),
+                    "c.txt".to_string()
+                ],
+                vec!["old1.txt".to_string(), "old2.txt".to_string()],
+            ]
+        );
+        assert_eq!(
+            selected_ordered_entry_from_recent_assistant_replies("就第二个", context),
+            Some("b.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn recent_assistant_ordered_entries_fall_back_to_older_reply_when_needed() {
+        let context = "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] relative_index=-1 short_preview=/tmp/current.txt has_code_block=false\n- turn_id=assistant[-2] relative_index=-2 short_preview=候选 has_code_block=false ordered_entries=1:first.txt | 2:second.txt";
+        assert_eq!(
+            selected_ordered_entry_from_recent_assistant_replies("那第一个呢", context),
+            Some("first.txt".to_string())
+        );
+    }
 
     #[test]
     fn fallback_route_parser_keeps_current_workspace_contract() {
@@ -820,9 +1098,12 @@ mod tests {
                 mode: RoutedMode::Chat,
                 resolved_user_intent: "看一下当前目录有没有隐藏文件".to_string(),
                 needs_clarify: false,
+                clarify_question: String::new(),
                 reason: "current workspace executable request".to_string(),
                 confidence: Some(0.72),
                 evidence_refs: Vec::new(),
+                schedule_kind: super::ScheduleKind::None,
+                schedule_intent: None,
                 wants_file_delivery: false,
                 output_contract: IntentOutputContract {
                     response_shape: OutputResponseShape::Scalar,
@@ -840,5 +1121,59 @@ mod tests {
             out.output_contract.locator_kind,
             OutputLocatorKind::CurrentWorkspace
         );
+    }
+
+    #[test]
+    fn fallback_route_parser_keeps_clarify_question_and_schedule_intent() {
+        let raw = r#"{
+            "mode":"ask_clarify",
+            "resolved_user_intent":"每天早上提醒我看邮件",
+            "needs_clarify":true,
+            "clarify_question":"你希望每天几点提醒？",
+            "reason":"missing schedule time",
+            "confidence":0.64,
+            "schedule_kind":"create",
+            "schedule_intent":{
+                "kind":"create",
+                "timezone":"Asia/Shanghai",
+                "schedule":{"type":"","run_at":"","time":"","weekday":0,"every_minutes":0,"cron":""},
+                "task":{"kind":"ask","payload":{"prompt":"提醒我看邮件"}},
+                "target_job_id":"",
+                "raw":"每天早上提醒我看邮件",
+                "reason":"missing schedule time",
+                "needs_clarify":true,
+                "clarify_question":"你希望每天几点提醒？",
+                "confidence":0.64
+            },
+            "output_contract":{
+                "response_shape":"free",
+                "requires_content_evidence":false,
+                "delivery_required":false,
+                "locator_kind":"none",
+                "delivery_intent":"none",
+                "locator_hint":""
+            }
+        }"#;
+        let parsed = parse_route_decision(raw).expect("fallback route clarify+schedule decision");
+        assert_eq!(parsed.mode, RoutedMode::AskClarify);
+        assert_eq!(parsed.clarify_question, "你希望每天几点提醒？");
+        assert_eq!(parsed.schedule_kind, super::ScheduleKind::Create);
+        let intent = parsed.schedule_intent.expect("schedule intent");
+        assert_eq!(intent.kind, "create");
+        assert!(intent.needs_clarify);
+        assert_eq!(intent.clarify_question, "你希望每天几点提醒？");
+    }
+
+    #[test]
+    fn router_failure_reasons_use_safe_clarify_fallback() {
+        assert!(clarify_reason_implies_router_failure(
+            "llm_failed_fallback_router; fallback_router_llm_failed"
+        ));
+        assert!(clarify_reason_implies_router_failure(
+            "parse_failed_fallback_router"
+        ));
+        assert!(!clarify_reason_implies_router_failure(
+            "missing_concrete_locator_for_path_scoped_content"
+        ));
     }
 }
