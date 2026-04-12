@@ -46,18 +46,23 @@ python3 --version
 推荐方式：
 
 ```bash
-# 本地安装且不部署 nginx/UI
+# 仅安装启动器，不部署 nginx/UI
 bash install-rustclaw-cmd.sh --user --no-deploy-ui
 
 # 从源码构建后再安装
 bash install-rustclaw-cmd.sh --build --user --no-deploy-ui
+
+# 安装启动器，并按脚本默认行为把 UI 部署到 nginx
+bash install-rustclaw-cmd.sh --build --user
 ```
 
 说明：
 
 - `install-rustclaw-cmd.sh` 会安装 `rustclaw` 启动器
 - 如果仓库里已经构建出 `clawcli`，安装脚本也会一并安装它
-- 默认情况下，安装脚本还会把 `UI/dist` 部署到 nginx，除非显式传入 `--no-deploy-ui`
+- 默认情况下，安装脚本会部署 `UI/dist` 到 nginx、写入 nginx 配置并尝试重载 nginx；如果只想装命令，不想碰 UI/nginx，请显式传 `--no-deploy-ui`
+- 支持 `--target <triple>`、`--dir <path>`、`--deploy-ui-nginx [path]`、`--pi-app`
+- 如果未传 `--build`，脚本会优先复用现有二进制；找不到时才提示你构建或同步 `release-bin`
 
 安装后检查：
 
@@ -95,32 +100,54 @@ rustclaw -status
 ### 4. 从源码构建
 
 ```bash
-# 完整 release 构建，包含技能文档同步和可选的 UI 构建
+# 完整 release 构建：先同步技能文档，再构建工作区，并在未跳过时执行 UI 构建/部署脚本
 ./build-all.sh
 
 # 跳过 UI 构建
 ./build-all.sh no-ui
 
-# 或直接使用 Cargo
-cargo build --workspace --release
+# 清理后重建
+./build-all.sh clean
+
+# 指定主 target
+./build-all.sh --target aarch64-unknown-linux-gnu
+
+# 一次构建多个 target
+./build-all.sh --target host --extra-target aarch64-unknown-linux-gnu
 ```
 
-`build-all.sh` 会在构建前先执行 `scripts/sync_skill_docs.py`。
+`build-all.sh` 的当前行为：
+
+- 开始前先执行 `scripts/sync_skill_docs.py`
+- 默认构建 `release`，并自动发现工作区里的二进制目标后校验产物是否齐全
+- 若存在 `UI/` 且未传 `no-ui`，会调用 `build-ui-nginx.sh`，也就是走“构建 UI + 部署到 nginx”的默认流程
+- `--target host` 输出到 `target/release`，交叉编译输出到 `target/<triple>/release`
+
+如果你只想临时本地编译某个 Rust 目标，仍然可以直接用 `cargo build --workspace --release`，但它不会覆盖 `build-all.sh` 里的同步、UI 构建和产物校验逻辑。
 
 ### 5. 启动 RustClaw
 
 使用启动器的示例：
 
 ```bash
-# 使用 release + all 的免配置快速启动
+# 最简启动：等价于 release + channels=all + quick 模式
 rustclaw start -q
 
-# 指定厂商和模型启动
+# 指定厂商/模型启动
 rustclaw -start --vendor openai --model gpt-5 --profile release --channels all --quick --skip-setup
 
-# 启动时附带 UI
+# 启动时要求检查并带上 UI
 rustclaw -start release all --with-ui
 ```
+
+当前启动链路与脚本语义：
+
+- `rustclaw -start ...` 最终调用的是 `start-all.sh`
+- `start-all.sh` 当前按 `configs/channels/*.toml` 里的 `enabled` 开关决定启动哪些服务
+- 如果传了 `telegram | whatsapp_web | both | whatsapp_cloud | all`，脚本会把 Telegram / WhatsApp 相关通道的 `enabled` 值写回配置文件
+- 这里的 `all` 是启动器里的快捷通道组合，不等于强制打开 `webd`、`wechat`、`feishu`、`lark` 等所有通道；这些仍以各自配置文件里的 `enabled` 为准
+- `--with-ui` 不会自动帮你开发模式起前端，而是要求 `UI/dist` 已存在且没有过期；缺失时会提示你先执行 `cd UI && npm install && npm run build`
+- `start-all.sh` 不再在启动阶段自动执行 `sync_skill_docs.py`
 
 脚本方式依然可用：
 
@@ -141,6 +168,12 @@ rustclaw -start release all --with-ui
 ./start-whatsapp-webd.sh
 ./start-clawd-ui.sh
 ```
+
+单独启动 `clawd` 时：
+
+- `./start-clawd.sh` 会检查 `target/release/clawd` 和 `target/release/skill-runner`
+- 如果 `configs/config.toml` 里还没有 `selected_vendor` / `selected_model`，会在首次启动时要求交互选择
+- 若当前厂商的 `api_key` 为空或还是 `REPLACE_ME...`，也会要求在终端里补齐后再启动
 
 ### 6. 日常运维命令
 
@@ -173,7 +206,13 @@ rustclaw -key disable rk-xxxx
 
 ## UI、API 与 `webd`
 
-主 API 由 `clawd` 提供。当前默认配置里，`configs/config.toml` 监听的是 `0.0.0.0:8787`。
+主 API 仍由 `clawd` 提供；而脚本当前默认更推荐的对外方式是：
+
+- `clawd` 提供内部 API
+- `webd` 作为浏览器访问层/反向代理桥接
+- nginx 托管 `UI/dist`，并把 `/v1`、`/webd` 反代到 `webd`
+
+在默认配置里，`configs/config.toml` 中的 `clawd` 监听通常是 `0.0.0.0:8787`，`webd` 默认监听常见为 `0.0.0.0:8788`；部署脚本会从 `configs/channels/webd.toml` 推导反代上游地址。
 
 常用接口：
 
@@ -200,7 +239,9 @@ UI 相关说明：
 
 - 源码位于 `UI/`
 - 构建产物位于 `UI/dist`
-- `install-rustclaw-cmd.sh` 可以把静态 UI 部署到 nginx
+- `build-ui-nginx.sh` 默认会执行“构建 UI + 复制到 nginx + 校验/写入 nginx 配置”
+- `deploy-ui-nginx.sh` 更偏向“部署已有 `UI/dist`”，可选 `--build`
+- `install-rustclaw-cmd.sh` 默认也会执行 UI/nginx 部署，除非传 `--no-deploy-ui`
 - `webd` 可以作为 `clawd` 前面的反向代理和登录会话桥接层
 
 ## 技能体系
@@ -252,10 +293,11 @@ cd pi_app && ./open-small-screen.sh
 
 ## 开发说明
 
-- 如果你是源码开发者，`build-all.sh` 是最贴近仓库现状的统一构建入口
-- 如果你是部署或体验使用者，`install-rustclaw-cmd.sh` 是更直接的安装入口
+- 如果你是源码开发者，`build-all.sh` 是最贴近当前仓库脚本行为的统一构建入口
+- 如果你是部署或体验使用者，`install-rustclaw-cmd.sh` 是更直接的入口，因为它会同时处理启动器安装和可选的 UI/nginx 部署
+- 如果你只想更新 UI 静态站点，优先看 `build-ui-nginx.sh` 和 `deploy-ui-nginx.sh`
+- 如果你在做技能接入，记得显式执行 `python3 scripts/sync_skill_docs.py`，不要依赖启动脚本帮你同步
 - 各类回归和辅助脚本主要集中在 `scripts/`
-- 如果你只想托管静态 UI，可以使用 `build-ui-nginx.sh` 或安装脚本自带的 nginx 部署流程
 
 ## 许可证
 
