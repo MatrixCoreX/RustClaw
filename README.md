@@ -46,18 +46,23 @@ python3 --version
 Recommended path:
 
 ```bash
-# Local install without nginx/UI deployment
+# Install launcher only, skip nginx/UI deployment
 bash install-rustclaw-cmd.sh --user --no-deploy-ui
 
-# Or build from source first, then install
+# Build from source first, then install
 bash install-rustclaw-cmd.sh --build --user --no-deploy-ui
+
+# Build, install launcher, and deploy UI to nginx using script defaults
+bash install-rustclaw-cmd.sh --build --user
 ```
 
 Notes:
 
 - `install-rustclaw-cmd.sh` installs the `rustclaw` launcher
 - if `clawcli` was built, it is installed too
-- by default the installer also deploys `UI/dist` to nginx unless you pass `--no-deploy-ui`
+- by default the installer deploys `UI/dist` to nginx, writes nginx config, and reloads nginx when needed; pass `--no-deploy-ui` if you only want the launcher
+- it also supports `--target <triple>`, `--dir <path>`, `--deploy-ui-nginx [path]`, and `--pi-app`
+- without `--build`, the script prefers existing binaries and only asks you to build/sync `release-bin` when they are missing
 
 Verify:
 
@@ -95,29 +100,54 @@ Current channel config files:
 ### 4. Build from source
 
 ```bash
-# Full release build, including skill doc sync and optional UI build
+# Full release build: sync skill docs, build the workspace, and run the UI build/deploy script unless skipped
 ./build-all.sh
 
 # Skip UI build
 ./build-all.sh no-ui
 
-# Or use Cargo directly
-cargo build --workspace --release
+# Clean then rebuild
+./build-all.sh clean
+
+# Set the primary target
+./build-all.sh --target aarch64-unknown-linux-gnu
+
+# Build multiple targets in one run
+./build-all.sh --target host --extra-target aarch64-unknown-linux-gnu
 ```
 
-`build-all.sh` also runs `scripts/sync_skill_docs.py` before building.
+Current `build-all.sh` behavior:
+
+- runs `scripts/sync_skill_docs.py` before the build starts
+- always builds `release`, auto-discovers workspace binaries, and verifies that the expected outputs exist
+- calls `build-ui-nginx.sh` when `UI/` exists and you did not pass `no-ui`, which means the default "build UI + deploy to nginx" path
+- writes host outputs to `target/release` and cross-target outputs to `target/<triple>/release`
+
+You can still use plain `cargo build --workspace --release` for ad hoc local builds, but it does not include the repo-level sync, UI build, or output verification done by `build-all.sh`.
 
 ### 5. Start RustClaw
 
 Examples with the launcher:
 
 ```bash
-# Start with release profile; configure launcher-managed channels in the terminal flow
-rustclaw -start release all
+# Smallest startup path: release + channels=all + quick mode
+rustclaw start -q
 
-# Start with UI enabled
+# Start with an explicit vendor/model
+rustclaw -start --vendor openai --model gpt-5 --profile release --channels all --quick --skip-setup
+
+# Start and require UI assets
 rustclaw -start release all --with-ui
 ```
+
+Current startup behavior:
+
+- `rustclaw -start ...` ultimately calls `start-all.sh`
+- `start-all.sh` starts services based on the `enabled` flags in `configs/channels/*.toml`
+- when you pass `telegram | whatsapp_web | both | whatsapp_cloud | all`, the script writes the related Telegram / WhatsApp channel `enabled` values back into config files
+- `all` here is a launcher preset, not "force-enable every daemon"; channels such as `webd`, `wechat`, `feishu`, and `lark` still follow their own config files
+- `--with-ui` does not launch a frontend dev server; it requires a valid `UI/dist` build and stops with a hint if the assets are missing or stale
+- `start-all.sh` no longer runs `sync_skill_docs.py` during startup
 
 Equivalent script-based flow is still available:
 
@@ -138,6 +168,12 @@ Single-service scripts are also available when you want finer control:
 ./start-whatsapp-webd.sh
 ./start-clawd-ui.sh
 ```
+
+When starting `clawd` alone:
+
+- `./start-clawd.sh` checks for both `target/release/clawd` and `target/release/skill-runner`
+- on first startup, if `selected_vendor` / `selected_model` are empty in `configs/config.toml`, it prompts for an interactive selection
+- if the current vendor `api_key` is empty or still uses a `REPLACE_ME...` placeholder, it asks for the key before launch
 
 ### 6. Daily operations
 
@@ -170,7 +206,13 @@ rustclaw -key disable rk-xxxx
 
 ## UI, API, And `webd`
 
-The main API is served by `clawd`. In the current default config, `configs/config.toml` uses `0.0.0.0:8787`.
+The main API still comes from `clawd`, but the current script flow prefers exposing the stack like this:
+
+- `clawd` serves the internal API
+- `webd` acts as the browser-facing bridge / reverse-proxy layer
+- nginx serves `UI/dist` and proxies `/v1` and `/webd` to `webd`
+
+In the current defaults, `clawd` commonly listens on `0.0.0.0:8787` and `webd` commonly listens on `0.0.0.0:8788`; the deploy scripts derive the nginx upstream from `configs/channels/webd.toml`.
 
 Useful endpoints:
 
@@ -197,7 +239,9 @@ UI notes:
 
 - source lives in `UI/`
 - built assets live in `UI/dist`
-- `install-rustclaw-cmd.sh` can deploy the static UI to nginx
+- `build-ui-nginx.sh` is the main "build UI + copy to nginx + refresh nginx config" path
+- `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
+- `install-rustclaw-cmd.sh` also deploys UI/nginx by default unless you pass `--no-deploy-ui`
 - `webd` can sit in front of `clawd` as a reverse proxy and login/session bridge
 
 ## Skills
@@ -249,10 +293,11 @@ It reads health status from `clawd`, so start the backend first.
 
 ## Developer Notes
 
-- `build-all.sh` is the most accurate repository-level build entry for source builds
-- `install-rustclaw-cmd.sh` is the most convenient operator-facing install entry
+- `build-all.sh` is the most accurate repo-level build entry if you are building from source
+- `install-rustclaw-cmd.sh` is the most convenient operator-facing entry because it can handle both launcher installation and optional UI/nginx deployment
+- if you only want to refresh the static UI site, use `build-ui-nginx.sh` or `deploy-ui-nginx.sh`
+- if you are integrating skills, run `python3 scripts/sync_skill_docs.py` explicitly; startup scripts no longer sync skill docs for you
 - many helper and regression scripts live in `scripts/`
-- if you only want static UI hosting, use `build-ui-nginx.sh` or the install script's nginx deployment path
 
 ## License
 
