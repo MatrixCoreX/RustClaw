@@ -539,6 +539,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "toml 0.8.23",
+ "tracing",
  "uuid",
 ]
 
@@ -943,6 +944,17 @@ name = "error-code"
 version = "3.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
+
+[[package]]
+name = "extension-manager-skill"
+version = "0.1.5"
+dependencies = [
+ "anyhow",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "fallible-iterator"
