@@ -1,4 +1,4 @@
-# External Skill Template (exampe)
+# External Skill Template (example)
 
 这个目录是给外部开发者的提交示例。
 
@@ -20,8 +20,17 @@
 5. 执行同步：
    - `python3 scripts/sync_skill_docs.py`
    - 如需校验：`python3 scripts/sync_skill_docs.py --check`
+6. 如需真正接入运行时，还需要按当前外部技能接入方式完成对应的导入/注册流程；仅执行 `sync_skill_docs.py` 不代表该技能已经可以被运行时直接调用。
 
 ## 注意
 
 - 对 `external_skills/*`，`INTERFACE.md` 是强制门禁，缺失会导致同步失败。
-- `prompts/skills/<skill>.md` 由同步脚本自动生成/维护，不建议手写。
+- `prompt_file = "prompts/skills/<skill>.md"` 只作为 registry 逻辑路径保存在配置里。
+- 同步脚本会生成/更新实际正文 `prompts/layers/generated/skills/<skill>.md`，不建议手写旧的 `prompts/skills/` 路径。
+- 当前仓库的技能协议建议显式兼容这些输入字段：
+  - `request_id`
+  - `args`
+  - `context`
+  - `user_id`
+  - `chat_id`
+- 当前仓库的技能响应除 `request_id`、`status`、`text`、`error_text` 外，也常见可选 `extra` 字段。
