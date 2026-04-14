@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
-use claw_core::config::{AgentConfig, AppConfig, MaintenanceConfig, MemoryConfig, RoutingConfig};
+use claw_core::config::{
+    AgentConfig, AppConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, SelfExtensionConfig,
+};
 use claw_core::skill_registry::{
     OutputKind, SkillKind, SkillManifest, SkillRiskLevel, SkillsRegistry,
 };
@@ -192,6 +194,7 @@ pub(crate) struct AppState {
     pub(crate) database_sqlite_path: PathBuf,
     pub(crate) database_busy_timeout_ms: u64,
     pub(crate) config_path_for_reload: String,
+    pub(crate) self_extension: SelfExtensionConfig,
     #[allow(dead_code)]
     pub(crate) registry_path_for_reload: Option<String>,
     #[allow(dead_code)]

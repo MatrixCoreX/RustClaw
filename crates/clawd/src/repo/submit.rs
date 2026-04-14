@@ -296,7 +296,7 @@ pub(crate) fn check_submit_task_limits(
         return Err(SubmitTaskLimitError::RateLimited(kind.to_string()));
     }
 
-    let queued_count = task_count_by_status(state, &main_flow_rules(state).task_status_queued)
+    let queued_count = task_count_by_status(state, crate::TASK_STATUS_QUEUED)
         .map_err(SubmitTaskLimitError::QueueCount)?;
     if queued_count >= state.queue_limit {
         return Err(SubmitTaskLimitError::QueueFull);

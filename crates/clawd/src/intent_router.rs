@@ -8,11 +8,8 @@
 //! `INTENT_ROUTER_*` / `INTENT_ROUTER_RULES_*`, `ROUTING_POLICY_*`, `RouteDecision`/`RouteDecisionOut`,
 //! `parse_route_decision`, and `route_request_mode` itself.
 
-use std::sync::OnceLock;
-
-use regex::Regex;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::{info, warn};
 
 use crate::{
@@ -21,7 +18,8 @@ use crate::{
 
 pub(crate) use crate::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    ResumeBehavior, ScheduleKind,
+    OutputSemanticKind, ResumeBehavior, ScheduleKind, SelfExtensionContract, SelfExtensionMode,
+    SelfExtensionTrigger,
 };
 
 // --- Fallback router only (not used when normalizer provides mode) ---
@@ -52,6 +50,8 @@ struct RouteDecision {
     schedule_kind: ScheduleKind,
     schedule_intent: Option<crate::ScheduleIntentOutput>,
     wants_file_delivery: bool,
+    should_refresh_long_term_memory: bool,
+    agent_display_name_hint: String,
     output_contract: IntentOutputContract,
 }
 
@@ -77,6 +77,10 @@ struct RouteDecisionOut {
     #[serde(default)]
     wants_file_delivery: bool,
     #[serde(default)]
+    should_refresh_long_term_memory: bool,
+    #[serde(default)]
+    agent_display_name_hint: String,
+    #[serde(default)]
     output_contract: Option<IntentOutputContractOut>,
 }
 
@@ -96,6 +100,8 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) schedule_kind: ScheduleKind,
     pub(crate) schedule_intent: Option<crate::ScheduleIntentOutput>,
     pub(crate) wants_file_delivery: bool,
+    pub(crate) should_refresh_long_term_memory: bool,
+    pub(crate) agent_display_name_hint: String,
     pub(crate) needs_clarify: bool,
     pub(crate) clarify_question: String,
     pub(crate) reason: String,
@@ -103,6 +109,13 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) output_contract: IntentOutputContract,
     /// Terminal mode: chat / act / ask_clarify / chat_act. Used to skip the separate router LLM.
     pub(crate) routed_mode: RoutedMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ClarifyQuestionPolicy {
+    #[default]
+    AllowModel,
+    SafeFallback,
 }
 
 pub(crate) fn route_result_from_normalizer(
@@ -123,6 +136,8 @@ pub(crate) fn route_result_from_normalizer(
         schedule_kind: normalizer_out.schedule_kind,
         schedule_intent: normalizer_out.schedule_intent.clone(),
         wants_file_delivery: normalizer_out.wants_file_delivery,
+        should_refresh_long_term_memory: normalizer_out.should_refresh_long_term_memory,
+        agent_display_name_hint: normalizer_out.agent_display_name_hint.clone(),
         output_contract: normalizer_out.output_contract.clone(),
     }
 }
@@ -137,6 +152,10 @@ struct IntentNormalizerOut {
     schedule_kind: String,
     #[serde(default)]
     wants_file_delivery: bool,
+    #[serde(default)]
+    should_refresh_long_term_memory: bool,
+    #[serde(default)]
+    agent_display_name_hint: String,
     #[serde(default)]
     needs_clarify: bool,
     #[serde(default)]
@@ -166,7 +185,21 @@ struct IntentOutputContractOut {
     #[serde(default)]
     delivery_intent: String,
     #[serde(default)]
+    semantic_kind: String,
+    #[serde(default)]
     locator_hint: String,
+    #[serde(default)]
+    self_extension: Option<SelfExtensionContractOut>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct SelfExtensionContractOut {
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    trigger: String,
+    #[serde(default)]
+    execute_now: bool,
 }
 
 fn parse_resume_behavior(s: &str) -> ResumeBehavior {
@@ -217,6 +250,52 @@ fn parse_output_delivery_intent(s: &str) -> OutputDeliveryIntent {
     }
 }
 
+fn parse_output_semantic_kind(s: &str) -> OutputSemanticKind {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "raw_command_output" | "raw_output" | "command_output" => {
+            OutputSemanticKind::RawCommandOutput
+        }
+        "service_status" => OutputSemanticKind::ServiceStatus,
+        "hidden_entries_check" => OutputSemanticKind::HiddenEntriesCheck,
+        "directory_purpose_summary" | "listing_purpose_summary" | "directory_listing_summary" => {
+            OutputSemanticKind::DirectoryPurposeSummary
+        }
+        "content_excerpt_summary" | "document_excerpt_summary" | "file_excerpt_summary" => {
+            OutputSemanticKind::ContentExcerptSummary
+        }
+        "recent_artifacts_judgment" | "artifact_style_classification" => {
+            OutputSemanticKind::RecentArtifactsJudgment
+        }
+        "workspace_project_summary" | "project_overview" | "workspace_overview_summary" => {
+            OutputSemanticKind::WorkspaceProjectSummary
+        }
+        "scalar_count" | "count" => OutputSemanticKind::ScalarCount,
+        "quantity_comparison" | "comparison" => OutputSemanticKind::QuantityComparison,
+        "scalar_path_only" | "path_only" => OutputSemanticKind::ScalarPathOnly,
+        "existence_with_path" | "exists_with_path" => OutputSemanticKind::ExistenceWithPath,
+        "recent_scalar_equality_check" | "same_or_different" | "equality_check" => {
+            OutputSemanticKind::RecentScalarEqualityCheck
+        }
+        _ => OutputSemanticKind::None,
+    }
+}
+
+fn parse_self_extension_mode(s: &str) -> SelfExtensionMode {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "temporary_fix" => SelfExtensionMode::TemporaryFix,
+        "permanent_extension" => SelfExtensionMode::PermanentExtension,
+        _ => SelfExtensionMode::None,
+    }
+}
+
+fn parse_self_extension_trigger(s: &str) -> SelfExtensionTrigger {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "explicit_user_request" => SelfExtensionTrigger::ExplicitUserRequest,
+        "capability_gap" => SelfExtensionTrigger::CapabilityGap,
+        _ => SelfExtensionTrigger::None,
+    }
+}
+
 fn parse_output_contract(
     out: Option<IntentOutputContractOut>,
     wants_file_delivery: bool,
@@ -228,7 +307,15 @@ fn parse_output_contract(
         contract.delivery_required = raw.delivery_required;
         contract.locator_kind = parse_output_locator_kind(&raw.locator_kind);
         contract.delivery_intent = parse_output_delivery_intent(&raw.delivery_intent);
+        contract.semantic_kind = parse_output_semantic_kind(&raw.semantic_kind);
         contract.locator_hint = raw.locator_hint.trim().to_string();
+        if let Some(self_extension) = raw.self_extension {
+            contract.self_extension = SelfExtensionContract {
+                mode: parse_self_extension_mode(&self_extension.mode),
+                trigger: parse_self_extension_trigger(&self_extension.trigger),
+                execute_now: self_extension.execute_now,
+            };
+        }
     }
     if wants_file_delivery {
         contract.delivery_required = true;
@@ -245,85 +332,17 @@ fn parse_output_contract(
     contract
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OrderedEntrySelector {
-    Index(usize),
-    Last,
-}
-
-fn parse_ordinal_entry_selector(text: &str) -> Option<OrderedEntrySelector> {
-    static NTH_RE: OnceLock<Regex> = OnceLock::new();
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.contains("最后一个")
-        || trimmed.contains("最后一项")
-        || trimmed.contains("最后那个")
-        || trimmed.to_ascii_lowercase().contains("last one")
-        || trimmed.to_ascii_lowercase().contains("the last")
-    {
-        return Some(OrderedEntrySelector::Last);
-    }
-    let nth_re = NTH_RE.get_or_init(|| {
-        Regex::new(r"第\s*(?P<num>[0-9]{1,2})\s*(?:个|项|条|份|篇)")
-            .expect("ordinal selector regex")
-    });
-    if let Some(caps) = nth_re.captures(trimmed) {
-        let value = caps
-            .name("num")
-            .and_then(|m| m.as_str().parse::<usize>().ok())
-            .filter(|v| *v >= 1)?;
-        return Some(OrderedEntrySelector::Index(value - 1));
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    if trimmed.contains("第一个") || trimmed.contains("第一项") || lower.contains("first") {
-        return Some(OrderedEntrySelector::Index(0));
-    }
-    if trimmed.contains("第二个") || trimmed.contains("第二项") || lower.contains("second") {
-        return Some(OrderedEntrySelector::Index(1));
-    }
-    if trimmed.contains("第三个") || trimmed.contains("第三项") || lower.contains("third") {
-        return Some(OrderedEntrySelector::Index(2));
-    }
-    None
-}
-
-fn ordered_entries_from_recent_assistant_replies(context: &str) -> Vec<Vec<String>> {
-    context
-        .lines()
-        .filter_map(|line| line.split_once(" ordered_entries=").map(|(_, rest)| rest))
-        .map(|rest| {
-            rest.split(" | ")
-                .filter_map(|part| part.split_once(':').map(|(_, entry)| entry.trim()))
-                .filter(|entry| !entry.is_empty())
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        })
-        .filter(|entries| entries.len() >= 2)
-        .collect()
-}
-
-fn selected_ordered_entry_from_recent_assistant_replies(
-    user_request: &str,
-    recent_assistant_replies: &str,
-) -> Option<String> {
-    let selector = parse_ordinal_entry_selector(user_request)?;
-    for entries in ordered_entries_from_recent_assistant_replies(recent_assistant_replies) {
-        match selector {
-            OrderedEntrySelector::Index(idx) => {
-                if let Some(entry) = entries.get(idx) {
-                    return Some(entry.clone());
-                }
-            }
-            OrderedEntrySelector::Last => {
-                if let Some(entry) = entries.last() {
-                    return Some(entry.clone());
-                }
-            }
-        }
-    }
-    None
+fn render_self_extension_runtime(state: &AppState) -> String {
+    serde_json::to_string_pretty(&json!({
+        "enabled": state.self_extension.enabled,
+        "auto_on_capability_gap": state.self_extension.auto_on_capability_gap,
+        "allow_execute": state.self_extension.allow_execute,
+        "allow_package_install": state.self_extension.allow_package_install,
+        "allow_permanent_extension": state.self_extension.allow_permanent_extension,
+        "allow_runtime_enable": state.self_extension.allow_runtime_enable,
+        "supported_modes": ["temporary_fix", "permanent_extension"],
+    }))
+    .unwrap_or_else(|_| "{}".to_string())
 }
 
 fn wants_file_delivery_from_contract(
@@ -339,11 +358,267 @@ fn wants_file_delivery_from_contract(
         )
 }
 
+fn trim_fallback_locator_token(token: &str) -> String {
+    token
+        .trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '"' | '\''
+                    | '`'
+                    | ','
+                    | '，'
+                    | '。'
+                    | ':'
+                    | '：'
+                    | ';'
+                    | '；'
+                    | '('
+                    | ')'
+                    | '（'
+                    | '）'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '<'
+                    | '>'
+                    | '《'
+                    | '》'
+            )
+        })
+        .to_string()
+}
+
+fn extract_explicit_path_token_for_fallback(user_request: &str) -> Option<String> {
+    user_request
+        .split_whitespace()
+        .filter_map(|token| {
+            let trimmed = trim_fallback_locator_token(token);
+            let candidate = trimmed
+                .split(|ch: char| {
+                    matches!(
+                        ch,
+                        ',' | '，'
+                            | '。'
+                            | ':'
+                            | '：'
+                            | ';'
+                            | '；'
+                            | ')'
+                            | '）'
+                            | ']'
+                            | '}'
+                            | '>'
+                            | '》'
+                    )
+                })
+                .next()
+                .unwrap_or_default()
+                .trim();
+            (!candidate.is_empty()).then(|| candidate.to_string())
+        })
+        .find(|token| crate::worker::has_explicit_path_or_url_locator_hint(token))
+}
+
+fn request_contains_inline_json_payload(user_request: &str) -> bool {
+    crate::extract_first_json_value_any(user_request).is_some()
+}
+
+fn request_looks_like_inline_structured_transform(user_request: &str) -> bool {
+    let lower = user_request.trim().to_ascii_lowercase();
+    request_contains_inline_json_payload(user_request)
+        && ["json", "sort", "markdown", "table", "render", "convert"]
+            .iter()
+            .any(|needle| lower.contains(needle))
+}
+
+fn request_wants_file_delivery(user_request: &str) -> bool {
+    let lower = user_request.trim().to_ascii_lowercase();
+    let zh = user_request.trim();
+    [
+        "send me",
+        "send it",
+        "deliver",
+        "attach",
+        "upload",
+        "as a file",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+        || ["发给我", "发我", "直接发文件", "别贴正文", "作为文件"]
+            .iter()
+            .any(|needle| zh.contains(needle))
+}
+
+fn request_prefers_one_sentence(user_request: &str) -> bool {
+    let lower = user_request.trim().to_ascii_lowercase();
+    let raw = user_request.trim();
+    [
+        "one sentence",
+        "single sentence",
+        "keep it brief",
+        "briefly",
+        "brief ",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+        || ["一句话", "一句大白话", "简短", "简要", "简洁", "brief"]
+            .iter()
+            .any(|needle| raw.contains(needle))
+}
+
+fn request_prefers_scalar(user_request: &str) -> bool {
+    let lower = user_request.trim().to_ascii_lowercase();
+    let raw = user_request.trim();
+    let list_or_table = ["markdown table", "table", "list", "列表", "表格"]
+        .iter()
+        .any(|needle| lower.contains(needle) || raw.contains(needle));
+    if list_or_table {
+        return false;
+    }
+    [
+        "output only",
+        "return only",
+        "only the name field",
+        "only the branch",
+        "only the result",
+        "just the value",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+        || ["只输出", "只返回", "只给结果", "只回答", "只回", "只输出值"]
+            .iter()
+            .any(|needle| raw.contains(needle))
+}
+
+fn fallback_response_shape(user_request: &str, delivery_required: bool) -> OutputResponseShape {
+    if delivery_required {
+        OutputResponseShape::FileToken
+    } else if request_prefers_scalar(user_request) {
+        OutputResponseShape::Scalar
+    } else if request_prefers_one_sentence(user_request) {
+        OutputResponseShape::OneSentence
+    } else {
+        OutputResponseShape::Free
+    }
+}
+
+fn deterministic_fallback_route_decision(user_request: &str) -> Option<RouteDecision> {
+    let trimmed = user_request.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if request_looks_like_inline_structured_transform(trimmed) {
+        return Some(RouteDecision {
+            mode: RoutedMode::Act,
+            resolved_user_intent: trimmed.to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            reason: "deterministic_inline_structured_transform".to_string(),
+            confidence: Some(0.4),
+            evidence_refs: Vec::new(),
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::None,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: String::new(),
+                self_extension: SelfExtensionContract::default(),
+            },
+        });
+    }
+
+    let explicit_path = extract_explicit_path_token_for_fallback(trimmed)?;
+    let delivery_required = request_wants_file_delivery(trimmed);
+    let response_shape = fallback_response_shape(trimmed, delivery_required);
+    let requires_content_evidence = !delivery_required;
+    let semantic_kind = if requires_content_evidence
+        && matches!(
+            response_shape,
+            OutputResponseShape::Free | OutputResponseShape::OneSentence
+        ) {
+        OutputSemanticKind::ContentExcerptSummary
+    } else {
+        OutputSemanticKind::None
+    };
+    let routed_mode = if delivery_required
+        || matches!(
+            response_shape,
+            OutputResponseShape::Scalar | OutputResponseShape::FileToken
+        ) {
+        RoutedMode::Act
+    } else {
+        RoutedMode::ChatAct
+    };
+    Some(RouteDecision {
+        mode: routed_mode,
+        resolved_user_intent: trimmed.to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "deterministic_explicit_locator_fallback".to_string(),
+        confidence: Some(0.45),
+        evidence_refs: Vec::new(),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: delivery_required,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape,
+            requires_content_evidence,
+            delivery_required,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: if delivery_required {
+                OutputDeliveryIntent::FileSingle
+            } else {
+                OutputDeliveryIntent::None
+            },
+            semantic_kind,
+            locator_hint: explicit_path,
+            self_extension: SelfExtensionContract::default(),
+        },
+    })
+}
+
 fn normalizer_output_from_fallback(
     user_request: &str,
     fallback_reason_prefix: &str,
     decision: RouteDecision,
 ) -> IntentNormalizerOutput {
+    let fallback_contract_is_empty = matches!(
+        decision.output_contract.response_shape,
+        OutputResponseShape::Free
+    ) && !decision.output_contract.requires_content_evidence
+        && !decision.output_contract.delivery_required
+        && matches!(
+            decision.output_contract.locator_kind,
+            OutputLocatorKind::None
+        )
+        && matches!(
+            decision.output_contract.delivery_intent,
+            OutputDeliveryIntent::None
+        )
+        && matches!(
+            decision.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        )
+        && decision.output_contract.locator_hint.trim().is_empty();
+    let decision = if decision.needs_clarify
+        && matches!(decision.mode, RoutedMode::AskClarify)
+        && fallback_contract_is_empty
+    {
+        deterministic_fallback_route_decision(user_request).unwrap_or(decision)
+    } else {
+        decision
+    };
     let routed_mode = crate::post_route_policy::enforce_content_evidence_execution_mode(
         decision.mode,
         &decision.output_contract,
@@ -368,6 +643,8 @@ fn normalizer_output_from_fallback(
         schedule_kind: decision.schedule_kind,
         schedule_intent: decision.schedule_intent,
         wants_file_delivery: decision.wants_file_delivery,
+        should_refresh_long_term_memory: decision.should_refresh_long_term_memory,
+        agent_display_name_hint: decision.agent_display_name_hint,
         needs_clarify: decision.needs_clarify,
         clarify_question: decision.clarify_question,
         reason,
@@ -452,6 +729,10 @@ pub(crate) async fn run_intent_normalizer(
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
             ("__CAPABILITY_MAP__", &route_view.capability_map),
             (
+                "__SELF_EXTENSION_RUNTIME__",
+                &render_self_extension_runtime(state),
+            ),
+            (
                 "__RESUME_CONTEXT__",
                 &context_bundle.raw_sources.resume_context,
             ),
@@ -534,14 +815,8 @@ pub(crate) async fn run_intent_normalizer(
         let schedule_kind = parse_schedule_kind(&out.schedule_kind);
         let confidence = out.confidence.clamp(0.0, 1.0);
         let routed_mode_raw = parse_mode_text(&out.mode).unwrap_or(RoutedMode::AskClarify);
-        let mut output_contract =
+        let output_contract =
             parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
-        if let Some(selected_entry) = selected_ordered_entry_from_recent_assistant_replies(
-            req,
-            &route_view.recent_assistant_replies,
-        ) {
-            output_contract.locator_hint = selected_entry;
-        }
         let clarify_question = out.clarify_question.trim().to_string();
         let routed_mode = crate::post_route_policy::enforce_content_evidence_execution_mode(
             routed_mode_raw,
@@ -596,6 +871,8 @@ pub(crate) async fn run_intent_normalizer(
             schedule_kind,
             schedule_intent,
             wants_file_delivery: out.wants_file_delivery,
+            should_refresh_long_term_memory: out.should_refresh_long_term_memory,
+            agent_display_name_hint: out.agent_display_name_hint.trim().to_string(),
             needs_clarify: out.needs_clarify,
             clarify_question,
             reason: out.reason,
@@ -680,16 +957,6 @@ pub(crate) async fn generate_clarify_question(
     }
 }
 
-fn clarify_reason_implies_router_failure(resolver_reason: &str) -> bool {
-    let reason = resolver_reason.trim();
-    reason.contains("llm_failed_fallback_router")
-        || reason.contains("fallback_router_llm_failed")
-        || reason.contains("parse_failed_fallback_router")
-        || reason.contains("intent_normalizer llm failed")
-        || reason.contains("intent_normalizer parse failed")
-        || reason.contains("finalizer could not confirm a reliable final answer")
-}
-
 pub(crate) async fn generate_or_reuse_clarify_question(
     state: &AppState,
     task: &ClaimedTask,
@@ -697,6 +964,7 @@ pub(crate) async fn generate_or_reuse_clarify_question(
     resolver_reason: &str,
     candidate_context: Option<&str>,
     preferred_question: Option<&str>,
+    policy: ClarifyQuestionPolicy,
 ) -> String {
     let preferred = preferred_question
         .map(str::trim)
@@ -705,7 +973,7 @@ pub(crate) async fn generate_or_reuse_clarify_question(
     if let Some(question) = preferred {
         return question;
     }
-    if clarify_reason_implies_router_failure(resolver_reason) {
+    if matches!(policy, ClarifyQuestionPolicy::SafeFallback) {
         return crate::i18n_t_with_default(
             state,
             "clawd.msg.clarify_question_fallback",
@@ -766,6 +1034,10 @@ async fn route_request_fallback(
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
             ("__ROUTING_RULES__", &rules_template),
             (
+                "__SELF_EXTENSION_RUNTIME__",
+                &render_self_extension_runtime(state),
+            ),
+            (
                 "__RESUME_CONTEXT__",
                 &context_bundle.raw_sources.resume_context,
             ),
@@ -819,6 +1091,8 @@ async fn route_request_fallback(
                 schedule_kind: ScheduleKind::None,
                 schedule_intent: None,
                 wants_file_delivery: false,
+                should_refresh_long_term_memory: false,
+                agent_display_name_hint: String::new(),
                 output_contract: IntentOutputContract::default(),
             };
         }
@@ -857,6 +1131,8 @@ async fn route_request_fallback(
         schedule_kind: ScheduleKind::None,
         schedule_intent: None,
         wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
         output_contract: IntentOutputContract::default(),
     }
 }
@@ -906,6 +1182,8 @@ fn parse_route_decision(raw: &str) -> Option<RouteDecision> {
                     &output_contract,
                     out.wants_file_delivery,
                 ),
+                should_refresh_long_term_memory: out.should_refresh_long_term_memory,
+                agent_display_name_hint: out.agent_display_name_hint.trim().to_string(),
                 output_contract,
             });
         }
@@ -922,6 +1200,8 @@ fn parse_route_decision(raw: &str) -> Option<RouteDecision> {
                 schedule_kind: ScheduleKind::None,
                 schedule_intent: None,
                 wants_file_delivery: false,
+                should_refresh_long_term_memory: false,
+                agent_display_name_hint: String::new(),
                 output_contract: IntentOutputContract::default(),
             });
         }
@@ -938,6 +1218,8 @@ fn parse_route_decision(raw: &str) -> Option<RouteDecision> {
         schedule_kind: ScheduleKind::None,
         schedule_intent: None,
         wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
         output_contract: IntentOutputContract::default(),
     })
 }
@@ -972,58 +1254,11 @@ pub(crate) async fn try_handle_schedule_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        clarify_reason_implies_router_failure, normalizer_output_from_fallback,
-        ordered_entries_from_recent_assistant_replies, parse_ordinal_entry_selector,
-        parse_route_decision, selected_ordered_entry_from_recent_assistant_replies,
-        IntentOutputContract, OrderedEntrySelector, OutputDeliveryIntent, OutputLocatorKind,
-        OutputResponseShape, RouteDecision,
+        normalizer_output_from_fallback, parse_route_decision, ClarifyQuestionPolicy,
+        IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+        OutputSemanticKind, RouteDecision,
     };
-    use crate::RoutedMode;
-
-    #[test]
-    fn ordinal_selector_parses_common_followups() {
-        assert_eq!(
-            parse_ordinal_entry_selector("就第二个，只输出路径"),
-            Some(OrderedEntrySelector::Index(1))
-        );
-        assert_eq!(
-            parse_ordinal_entry_selector("那第一个呢"),
-            Some(OrderedEntrySelector::Index(0))
-        );
-        assert_eq!(
-            parse_ordinal_entry_selector("看最后一个"),
-            Some(OrderedEntrySelector::Last)
-        );
-    }
-
-    #[test]
-    fn recent_assistant_ordered_entries_prefer_latest_reply_with_entries() {
-        let context = "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] relative_index=-1 short_preview=候选 has_code_block=false ordered_entries=1:a.txt | 2:b.txt | 3:c.txt\n- turn_id=assistant[-2] relative_index=-2 short_preview=older has_code_block=false ordered_entries=1:old1.txt | 2:old2.txt";
-        assert_eq!(
-            ordered_entries_from_recent_assistant_replies(context),
-            vec![
-                vec![
-                    "a.txt".to_string(),
-                    "b.txt".to_string(),
-                    "c.txt".to_string()
-                ],
-                vec!["old1.txt".to_string(), "old2.txt".to_string()],
-            ]
-        );
-        assert_eq!(
-            selected_ordered_entry_from_recent_assistant_replies("就第二个", context),
-            Some("b.txt".to_string())
-        );
-    }
-
-    #[test]
-    fn recent_assistant_ordered_entries_fall_back_to_older_reply_when_needed() {
-        let context = "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] relative_index=-1 short_preview=/tmp/current.txt has_code_block=false\n- turn_id=assistant[-2] relative_index=-2 short_preview=候选 has_code_block=false ordered_entries=1:first.txt | 2:second.txt";
-        assert_eq!(
-            selected_ordered_entry_from_recent_assistant_replies("那第一个呢", context),
-            Some("first.txt".to_string())
-        );
-    }
+    use crate::{RoutedMode, SelfExtensionMode, SelfExtensionTrigger};
 
     #[test]
     fn fallback_route_parser_keeps_current_workspace_contract() {
@@ -1090,6 +1325,159 @@ mod tests {
     }
 
     #[test]
+    fn fallback_route_parser_keeps_structured_semantic_hints() {
+        let raw = r#"{
+            "mode":"chat",
+            "resolved_user_intent":"记住以后默认中文，并比较前两个结果是否一样",
+            "should_refresh_long_term_memory":true,
+            "agent_display_name_hint":"小爪",
+            "output_contract":{
+                "response_shape":"scalar",
+                "requires_content_evidence":false,
+                "delivery_required":false,
+                "locator_kind":"none",
+                "delivery_intent":"none",
+                "semantic_kind":"recent_scalar_equality_check",
+                "locator_hint":""
+            }
+        }"#;
+        let parsed = parse_route_decision(raw).expect("fallback route semantic decision");
+        assert!(parsed.should_refresh_long_term_memory);
+        assert_eq!(parsed.agent_display_name_hint, "小爪");
+        assert_eq!(
+            parsed.output_contract.semantic_kind,
+            OutputSemanticKind::RecentScalarEqualityCheck
+        );
+    }
+
+    #[test]
+    fn fallback_route_parser_parses_recent_artifacts_judgment_semantic_hint() {
+        let raw = r#"{
+            "mode":"chat_act",
+            "resolved_user_intent":"列出 logs 目录最近修改的 3 个文件，并判断这些文件更像日志还是正式产物",
+            "output_contract":{
+                "response_shape":"free",
+                "requires_content_evidence":true,
+                "delivery_required":false,
+                "locator_kind":"path",
+                "delivery_intent":"none",
+                "semantic_kind":"recent_artifacts_judgment",
+                "locator_hint":"logs"
+            }
+        }"#;
+        let parsed = parse_route_decision(raw).expect("fallback route recent artifacts decision");
+        assert_eq!(parsed.mode, RoutedMode::ChatAct);
+        assert_eq!(
+            parsed.output_contract.semantic_kind,
+            OutputSemanticKind::RecentArtifactsJudgment
+        );
+    }
+
+    #[test]
+    fn fallback_route_parser_parses_directory_purpose_summary_semantic_hint() {
+        let raw = r#"{
+            "mode":"chat_act",
+            "resolved_user_intent":"列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的",
+            "output_contract":{
+                "response_shape":"free",
+                "requires_content_evidence":true,
+                "delivery_required":false,
+                "locator_kind":"path",
+                "delivery_intent":"none",
+                "semantic_kind":"directory_purpose_summary",
+                "locator_hint":"docs"
+            }
+        }"#;
+        let parsed =
+            parse_route_decision(raw).expect("fallback route directory purpose summary decision");
+        assert_eq!(parsed.mode, RoutedMode::ChatAct);
+        assert_eq!(
+            parsed.output_contract.semantic_kind,
+            OutputSemanticKind::DirectoryPurposeSummary
+        );
+    }
+
+    #[test]
+    fn fallback_route_parser_parses_content_excerpt_summary_semantic_hint() {
+        let raw = r#"{
+            "mode":"chat_act",
+            "resolved_user_intent":"读一下 README.md 开头，然后用一句话总结",
+            "output_contract":{
+                "response_shape":"one_sentence",
+                "requires_content_evidence":true,
+                "delivery_required":false,
+                "locator_kind":"filename",
+                "delivery_intent":"none",
+                "semantic_kind":"content_excerpt_summary",
+                "locator_hint":"README.md"
+            }
+        }"#;
+        let parsed =
+            parse_route_decision(raw).expect("fallback route content excerpt summary decision");
+        assert_eq!(parsed.mode, RoutedMode::ChatAct);
+        assert_eq!(
+            parsed.output_contract.semantic_kind,
+            OutputSemanticKind::ContentExcerptSummary
+        );
+    }
+
+    #[test]
+    fn fallback_route_parser_parses_workspace_project_summary_semantic_hint() {
+        let raw = r#"{
+            "mode":"chat_act",
+            "resolved_user_intent":"用非技术用户能听懂的话，简短解释当前仓库主要是干什么的",
+            "output_contract":{
+                "response_shape":"one_sentence",
+                "requires_content_evidence":true,
+                "delivery_required":false,
+                "locator_kind":"current_workspace",
+                "delivery_intent":"none",
+                "semantic_kind":"workspace_project_summary",
+                "locator_hint":""
+            }
+        }"#;
+        let parsed =
+            parse_route_decision(raw).expect("fallback route workspace project summary decision");
+        assert_eq!(parsed.mode, RoutedMode::ChatAct);
+        assert_eq!(
+            parsed.output_contract.semantic_kind,
+            OutputSemanticKind::WorkspaceProjectSummary
+        );
+    }
+
+    #[test]
+    fn fallback_route_parser_keeps_self_extension_contract() {
+        let raw = r#"{
+            "mode":"chat",
+            "resolved_user_intent":"不要用现有技能，直接写个临时脚本把这个 json 排序后转成 markdown 表格",
+            "output_contract":{
+                "response_shape":"free",
+                "requires_content_evidence":false,
+                "delivery_required":false,
+                "locator_kind":"none",
+                "delivery_intent":"none",
+                "semantic_kind":"none",
+                "locator_hint":"",
+                "self_extension":{
+                    "mode":"temporary_fix",
+                    "trigger":"explicit_user_request",
+                    "execute_now":true
+                }
+            }
+        }"#;
+        let parsed = parse_route_decision(raw).expect("fallback route self extension decision");
+        assert_eq!(
+            parsed.output_contract.self_extension.mode,
+            SelfExtensionMode::TemporaryFix
+        );
+        assert_eq!(
+            parsed.output_contract.self_extension.trigger,
+            SelfExtensionTrigger::ExplicitUserRequest
+        );
+        assert!(parsed.output_contract.self_extension.execute_now);
+    }
+
+    #[test]
     fn fallback_normalizer_output_still_enforces_content_evidence_execution_mode() {
         let out = normalizer_output_from_fallback(
             "把当前目录有没有隐藏文件看一下",
@@ -1105,13 +1493,17 @@ mod tests {
                 schedule_kind: super::ScheduleKind::None,
                 schedule_intent: None,
                 wants_file_delivery: false,
+                should_refresh_long_term_memory: false,
+                agent_display_name_hint: String::new(),
                 output_contract: IntentOutputContract {
                     response_shape: OutputResponseShape::Scalar,
                     requires_content_evidence: true,
                     delivery_required: false,
                     locator_kind: OutputLocatorKind::CurrentWorkspace,
                     delivery_intent: OutputDeliveryIntent::None,
+                    semantic_kind: Default::default(),
                     locator_hint: String::new(),
+                    self_extension: crate::SelfExtensionContract::default(),
                 },
             },
         );
@@ -1120,6 +1512,104 @@ mod tests {
         assert_eq!(
             out.output_contract.locator_kind,
             OutputLocatorKind::CurrentWorkspace
+        );
+    }
+
+    #[test]
+    fn fallback_normalizer_repairs_explicit_relative_path_scalar_read_after_router_failure() {
+        let out = normalizer_output_from_fallback(
+            "read scripts/nl_tests/fixtures/device_local/package.json and output only the name field",
+            "llm_failed_fallback_router",
+            RouteDecision {
+                mode: RoutedMode::AskClarify,
+                resolved_user_intent: String::new(),
+                needs_clarify: true,
+                clarify_question: String::new(),
+                reason: "fallback_router_llm_failed".to_string(),
+                confidence: None,
+                evidence_refs: Vec::new(),
+                schedule_kind: super::ScheduleKind::None,
+                schedule_intent: None,
+                wants_file_delivery: false,
+                should_refresh_long_term_memory: false,
+                agent_display_name_hint: String::new(),
+                output_contract: IntentOutputContract::default(),
+            },
+        );
+        assert_eq!(out.routed_mode, RoutedMode::Act);
+        assert!(!out.needs_clarify);
+        assert_eq!(
+            out.output_contract.response_shape,
+            OutputResponseShape::Scalar
+        );
+        assert_eq!(out.output_contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            out.output_contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/package.json"
+        );
+    }
+
+    #[test]
+    fn fallback_normalizer_repairs_explicit_relative_path_summary_after_router_failure() {
+        let out = normalizer_output_from_fallback(
+            "看一下 scripts/nl_tests/fixtures/device_local/configs/app_config.toml，然后用一句大白话说它主要配置了什么",
+            "llm_failed_fallback_router",
+            RouteDecision {
+                mode: RoutedMode::AskClarify,
+                resolved_user_intent: String::new(),
+                needs_clarify: true,
+                clarify_question: String::new(),
+                reason: "fallback_router_llm_failed".to_string(),
+                confidence: None,
+                evidence_refs: Vec::new(),
+                schedule_kind: super::ScheduleKind::None,
+                schedule_intent: None,
+                wants_file_delivery: false,
+                should_refresh_long_term_memory: false,
+                agent_display_name_hint: String::new(),
+                output_contract: IntentOutputContract::default(),
+            },
+        );
+        assert_eq!(out.routed_mode, RoutedMode::ChatAct);
+        assert!(!out.needs_clarify);
+        assert_eq!(
+            out.output_contract.response_shape,
+            OutputResponseShape::OneSentence
+        );
+        assert_eq!(
+            out.output_contract.semantic_kind,
+            OutputSemanticKind::ContentExcerptSummary
+        );
+        assert_eq!(out.output_contract.locator_kind, OutputLocatorKind::Path);
+    }
+
+    #[test]
+    fn fallback_normalizer_repairs_inline_json_transform_after_router_failure() {
+        let out = normalizer_output_from_fallback(
+            r#"sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12}]"#,
+            "llm_failed_fallback_router",
+            RouteDecision {
+                mode: RoutedMode::AskClarify,
+                resolved_user_intent: String::new(),
+                needs_clarify: true,
+                clarify_question: String::new(),
+                reason: "fallback_router_llm_failed".to_string(),
+                confidence: None,
+                evidence_refs: Vec::new(),
+                schedule_kind: super::ScheduleKind::None,
+                schedule_intent: None,
+                wants_file_delivery: false,
+                should_refresh_long_term_memory: false,
+                agent_display_name_hint: String::new(),
+                output_contract: IntentOutputContract::default(),
+            },
+        );
+        assert_eq!(out.routed_mode, RoutedMode::Act);
+        assert!(!out.needs_clarify);
+        assert_eq!(out.output_contract.locator_kind, OutputLocatorKind::None);
+        assert_eq!(
+            out.output_contract.response_shape,
+            OutputResponseShape::Free
         );
     }
 
@@ -1165,15 +1655,10 @@ mod tests {
     }
 
     #[test]
-    fn router_failure_reasons_use_safe_clarify_fallback() {
-        assert!(clarify_reason_implies_router_failure(
-            "llm_failed_fallback_router; fallback_router_llm_failed"
-        ));
-        assert!(clarify_reason_implies_router_failure(
-            "parse_failed_fallback_router"
-        ));
-        assert!(!clarify_reason_implies_router_failure(
-            "missing_concrete_locator_for_path_scoped_content"
-        ));
+    fn clarify_question_policy_defaults_to_allow_model() {
+        assert_eq!(
+            ClarifyQuestionPolicy::default(),
+            ClarifyQuestionPolicy::AllowModel
+        );
     }
 }

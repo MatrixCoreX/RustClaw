@@ -26,7 +26,6 @@ pub(crate) use self::path_helpers::{
     dedup_and_sort_paths, resolve_existing_dir_under_root, resolve_existing_file_under_root,
     resolve_existing_path_under_root_case_insensitive,
 };
-use self::types::localize_delivery_message;
 pub(crate) use self::types::FilenameScanResult;
 use self::types::{
     BatchDirectoryDeliveryResolution, CurrentLevelDeliveryEntries,

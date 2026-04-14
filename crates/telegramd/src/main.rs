@@ -12,10 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context};
 use claw_core::channel_chunk::{chunk_text_for_channel, SEGMENT_PREFIX_MAX_CHARS};
 use claw_core::config::{AppConfig, ResolvedTelegramBotConfig};
-use claw_core::hard_rules::types::VoiceModeIntentAliases;
-use claw_core::hard_rules::voice_mode::{
-    load_voice_mode_intent_aliases, parse_voice_mode_intent_decision,
-};
+use claw_core::hard_rules::voice_mode::parse_voice_mode_intent_decision;
 use claw_core::prompt_layers;
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, DirectClassifyRequest,
@@ -59,7 +56,6 @@ struct BotState {
     voice_reply_mode: String,
     voice_mode_nl_intent_enabled: bool,
     voice_reply_mode_by_chat: Arc<Mutex<HashMap<i64, String>>>,
-    voice_mode_intent_aliases: Arc<VoiceModeIntentAliases>,
     max_audio_input_bytes: usize,
     sendfile_admin_only: bool,
     sendfile_full_access: bool,
@@ -101,8 +97,6 @@ const DEFAULT_VOICE_MODE_INTENT_PROMPT_TEMPLATE: &str =
 const VOICE_CHAT_PROMPT_LOGICAL_PATH: &str = "prompts/voice_chat_prompt.md";
 const VOICE_MODE_INTENT_PROMPT_LOGICAL_PATH: &str = "prompts/voice_mode_intent_prompt.md";
 const RESUME_CONTEXT_TTL_SECONDS: u64 = 30 * 60;
-const VOICE_MODE_INTENT_ALIASES_PATH: &str =
-    "configs/command_intent/voice_mode_intent_aliases.toml";
 
 fn log_color_enabled() -> bool {
     match std::env::var("RUSTCLAW_LOG_COLOR") {
@@ -421,7 +415,7 @@ async fn detect_voice_mode_intent_with_llm(
             }
         }
     };
-    let decision = parse_voice_mode_intent_decision(&out, state.voice_mode_intent_aliases.as_ref());
+    let decision = parse_voice_mode_intent_decision(&out);
     if let Some(d) = decision {
         debug!(
             "voice mode llm detect parsed: chat_id={} user_id={} mode={} confidence={} parser_path={}",
@@ -645,9 +639,6 @@ async fn main() -> anyhow::Result<()> {
         .timeout(Duration::from_secs(config.server.request_timeout_seconds))
         .build()
         .context("build reqwest client failed")?;
-    let voice_mode_intent_aliases = Arc::new(load_voice_mode_intent_aliases(
-        VOICE_MODE_INTENT_ALIASES_PATH,
-    ));
     let workspace_root = workspace_root();
     let prompt_vendor =
         prompt_vendor_name_from_selected_vendor(config.llm.selected_vendor.as_deref());
@@ -687,7 +678,6 @@ async fn main() -> anyhow::Result<()> {
         &config,
         &selected_bot,
         client,
-        Arc::clone(&voice_mode_intent_aliases),
         &workspace_root,
         &voice_chat_prompt_template,
         &voice_mode_intent_prompt_template,
@@ -699,7 +689,6 @@ fn build_bot_state(
     config: &AppConfig,
     bot_config: &ResolvedTelegramBotConfig,
     client: Client,
-    voice_mode_intent_aliases: Arc<VoiceModeIntentAliases>,
     workspace_root: &Path,
     voice_chat_prompt_template: &str,
     voice_mode_intent_prompt_template: &str,
@@ -753,7 +742,6 @@ fn build_bot_state(
         voice_reply_mode: config.telegram.voice_reply_mode.clone(),
         voice_mode_nl_intent_enabled: config.telegram.voice_mode_nl_intent_enabled,
         voice_reply_mode_by_chat: Arc::new(Mutex::new(load_voice_reply_mode_by_chat(config))),
-        voice_mode_intent_aliases,
         max_audio_input_bytes: config.telegram.max_audio_input_bytes.max(1024),
         sendfile_admin_only: config.telegram.sendfile.admin_only,
         sendfile_full_access: config.telegram.sendfile.full_access,

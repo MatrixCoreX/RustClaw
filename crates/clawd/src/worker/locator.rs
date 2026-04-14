@@ -10,7 +10,9 @@ pub(crate) fn has_concrete_locator_hint(text: &str) -> bool {
     }
     text.split_whitespace()
         .map(trim_locator_token)
-        .any(|token| looks_like_filename_locator(&token))
+        .any(|token| {
+            looks_like_filename_locator(&token) || looks_like_bare_filename_stem_locator(&token)
+        })
 }
 
 pub(crate) fn has_explicit_path_or_url_locator_hint(text: &str) -> bool {
@@ -62,18 +64,11 @@ pub(crate) fn try_resolve_implicit_locator_path(
     ) {
         return Some(resolved);
     }
-    let mut roots = vec![state.default_locator_search_dir.clone()];
-    let system_root = PathBuf::from("/");
-    if state.default_locator_search_dir != system_root && system_root.is_dir() {
-        roots.push(system_root);
-    }
-    if let Some(context_root) = resolve_contextual_locator_root(
+    let roots = implicit_locator_search_roots(
         &state.workspace_root,
         &state.default_locator_search_dir,
         context_hint,
-    ) {
-        prepend_root_if_missing(&mut roots, context_root);
-    }
+    );
     try_resolve_implicit_locator_path_in_roots(
         &roots,
         &keywords,
@@ -114,10 +109,10 @@ fn resolve_explicit_workspace_child_target(
     keywords: &[String],
     filename_tokens: &[String],
 ) -> Option<LocatorAutoResolution> {
-    let direct =
-        try_resolve_direct_child_locator(default_locator_search_dir, keywords).or_else(|| {
+    let direct = try_resolve_implicit_direct_child_locator(default_locator_search_dir, keywords)
+        .or_else(|| {
             (workspace_root != default_locator_search_dir)
-                .then(|| try_resolve_direct_child_locator(workspace_root, keywords))
+                .then(|| try_resolve_implicit_direct_child_locator(workspace_root, keywords))
                 .flatten()
         })?;
     let direct_path = PathBuf::from(&direct);
@@ -135,11 +130,42 @@ fn resolve_workspace_root_path(workspace_root: &Path) -> String {
         .to_string()
 }
 
-fn prepend_root_if_missing(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
-    let canonical = candidate.canonicalize().unwrap_or(candidate);
+fn normalize_implicit_locator_root(candidate: &Path) -> Option<PathBuf> {
+    let normalized = candidate
+        .canonicalize()
+        .unwrap_or_else(|_| candidate.to_path_buf());
+    (!is_system_root(&normalized)).then_some(normalized)
+}
+
+fn is_system_root(path: &Path) -> bool {
+    path == Path::new("/")
+}
+
+fn find_matching_root_index(roots: &[PathBuf], candidate: &Path) -> Option<usize> {
+    let Some(normalized) = normalize_implicit_locator_root(candidate) else {
+        return None;
+    };
+    roots
+        .iter()
+        .position(|root| root.canonicalize().unwrap_or_else(|_| root.clone()) == normalized)
+}
+
+fn append_implicit_root_if_missing(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+    let Some(normalized) = normalize_implicit_locator_root(&candidate) else {
+        return;
+    };
+    if find_matching_root_index(roots, &normalized).is_none() {
+        roots.push(normalized);
+    }
+}
+
+fn prepend_implicit_root_if_missing(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+    let Some(normalized) = normalize_implicit_locator_root(&candidate) else {
+        return;
+    };
     if let Some(idx) = roots
         .iter()
-        .position(|root| root.canonicalize().unwrap_or_else(|_| root.clone()) == canonical)
+        .position(|root| root.canonicalize().unwrap_or_else(|_| root.clone()) == normalized)
     {
         if idx != 0 {
             let existing = roots.remove(idx);
@@ -147,7 +173,25 @@ fn prepend_root_if_missing(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
         }
         return;
     }
-    roots.insert(0, canonical);
+    roots.insert(0, normalized);
+}
+
+fn implicit_locator_search_roots(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    context_hint: Option<&str>,
+) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(context_root) =
+        resolve_contextual_locator_root(workspace_root, default_locator_search_dir, context_hint)
+    {
+        prepend_implicit_root_if_missing(&mut roots, context_root);
+    }
+    append_implicit_root_if_missing(&mut roots, default_locator_search_dir.to_path_buf());
+    if workspace_root != default_locator_search_dir {
+        append_implicit_root_if_missing(&mut roots, workspace_root.to_path_buf());
+    }
+    roots
 }
 
 fn resolve_contextual_locator_root(
@@ -174,8 +218,9 @@ fn resolve_contextual_locator_root(
     if keywords.is_empty() {
         return None;
     }
-    let direct = try_resolve_direct_child_locator(default_locator_search_dir, &keywords)
-        .or_else(|| try_resolve_direct_child_locator(workspace_root, &keywords))?;
+    let direct =
+        try_resolve_implicit_direct_child_locator(default_locator_search_dir, &keywords)
+            .or_else(|| try_resolve_implicit_direct_child_locator(workspace_root, &keywords))?;
     let path_buf = PathBuf::from(direct);
     if path_buf.is_dir() {
         Some(path_buf)
@@ -197,10 +242,7 @@ fn try_resolve_implicit_locator_path_in_roots(
         }
         for token in filename_tokens {
             match crate::delivery_utils::scan_filename_matches_with_limit(
-                root,
-                token,
-                max_depth,
-                max_files,
+                root, token, max_depth, max_files,
             ) {
                 crate::delivery_utils::FilenameScanResult::Found(path) => {
                     return Some(LocatorAutoResolution::Direct(path.display().to_string()));
@@ -225,7 +267,7 @@ fn try_resolve_implicit_locator_path_in_roots(
         }
         let files = collect_files_for_locator_scan(root, max_depth, max_files);
         if files.is_empty() {
-            if let Some(path) = try_resolve_direct_child_locator(root, keywords) {
+            if let Some(path) = try_resolve_implicit_direct_child_locator(root, keywords) {
                 return Some(LocatorAutoResolution::Direct(path));
             }
             continue;
@@ -255,7 +297,7 @@ fn try_resolve_implicit_locator_path_in_roots(
         if !filename_tokens.is_empty() {
             continue;
         }
-        if let Some(path) = try_resolve_direct_child_locator(root, keywords) {
+        if let Some(path) = try_resolve_implicit_direct_child_locator(root, keywords) {
             return Some(LocatorAutoResolution::Direct(path));
         }
     }
@@ -672,6 +714,16 @@ fn try_resolve_direct_child_locator(search_root: &Path, keywords: &[String]) -> 
     }
 }
 
+fn try_resolve_implicit_direct_child_locator(
+    search_root: &Path,
+    keywords: &[String],
+) -> Option<String> {
+    let Some(normalized_root) = normalize_implicit_locator_root(search_root) else {
+        return None;
+    };
+    try_resolve_direct_child_locator(&normalized_root, keywords)
+}
+
 fn extract_filename_like_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for raw in text.split_whitespace() {
@@ -713,7 +765,7 @@ fn collect_case_insensitive_filename_matches(files: &[PathBuf], token: &str) -> 
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempDirGuard {
@@ -878,12 +930,58 @@ mod tests {
     }
 
     #[test]
-    fn implicit_locator_falls_back_to_system_root_when_default_root_misses() {
-        let default_root = TempDirGuard::new("default_root_miss");
-        let system_root = TempDirGuard::new("system_root_hit");
-        let target = system_root.path.join("Cargo.toml");
+    fn implicit_locator_search_roots_use_context_then_default_then_workspace() {
+        let workspace = TempDirGuard::new("layered_roots_workspace");
+        let default_root = workspace.path.join("fixtures");
+        let logs = workspace.path.join("logs");
+        fs::create_dir_all(&default_root).expect("create default root");
+        fs::create_dir_all(&logs).expect("create logs");
+        fs::write(logs.join("act_plan.log"), "ok\n").expect("write act plan");
+
+        let roots = super::implicit_locator_search_roots(
+            &workspace.path,
+            &default_root,
+            Some("刚才列的是 logs/act_plan.log"),
+        );
+
+        assert_eq!(roots.len(), 3, "unexpected roots: {roots:?}");
+        assert_eq!(
+            roots[0],
+            logs.canonicalize().expect("canonical logs"),
+            "context root should come first"
+        );
+        assert_eq!(
+            roots[1],
+            default_root.canonicalize().expect("canonical default root"),
+            "default root should be second"
+        );
+        assert_eq!(
+            roots[2],
+            workspace.path.canonicalize().expect("canonical workspace"),
+            "workspace root should remain as last fallback"
+        );
+        assert!(roots.iter().all(|root| root != Path::new("/")));
+    }
+
+    #[test]
+    fn implicit_locator_search_roots_skip_system_root_default() {
+        let workspace = TempDirGuard::new("skip_system_root_default");
+        let roots = super::implicit_locator_search_roots(&workspace.path, Path::new("/"), None);
+        assert_eq!(roots.len(), 1, "unexpected roots: {roots:?}");
+        assert_eq!(
+            roots[0],
+            workspace.path.canonicalize().expect("canonical workspace"),
+        );
+    }
+
+    #[test]
+    fn implicit_locator_falls_back_to_workspace_root_when_default_root_misses() {
+        let workspace = TempDirGuard::new("workspace_root_hit");
+        let default_root = workspace.path.join("fixtures");
+        fs::create_dir_all(&default_root).expect("create default root");
+        let target = workspace.path.join("Cargo.toml");
         fs::write(&target, "[package]\nname='demo'\n").expect("write Cargo.toml");
-        let roots = vec![default_root.path.clone(), system_root.path.clone()];
+        let roots = super::implicit_locator_search_roots(&workspace.path, &default_root, None);
         let out = super::try_resolve_implicit_locator_path_in_roots(
             &roots,
             &["cargo.toml".to_string()],

@@ -416,3 +416,18 @@ requires_confirmation = true
 side_effect = true
 retryable = false
 
+[[skills]]
+name = "extension_manager"
+enabled = true
+kind = "runner"
+aliases = ["extension_scaffold", "capability_extension"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/extension_manager.md"
+output_kind = "text"
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["assess_gap", "enable_external_skill", "implement_external_skill", "register_external_skill", "validate_external_skill", "permanent_extension_plan", "temporary_fix_plan", "temporary_fix_execute", "scaffold_external_skill"] }, request = { type = "string" }, mode_hint = { type = "string", enum = ["auto", "temporary_fix", "permanent_extension", "manual_review"] }, confirm = { type = "boolean" }, allow_package_install = { type = "boolean" }, plan = { type = "object" }, skill_name = { type = "string" }, capability_summary = { type = "string" }, actions = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }

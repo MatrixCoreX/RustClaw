@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use crate::{AppState, IntentOutputContract, OutputResponseShape};
 
 use super::file_delivery::resolve_file_delivery_target_with_hint;
+use super::types::localize_delivery_message_for_request;
 use super::{
-    extract_delivery_file_tokens, extract_file_path_from_delivery_token, localize_delivery_message,
-    trim_path_token, FileDeliveryTargetResolution,
+    extract_delivery_file_tokens, extract_file_path_from_delivery_token, trim_path_token,
+    FileDeliveryTargetResolution,
 };
 
 fn existing_file_path_literal(text: &str) -> Option<PathBuf> {
@@ -69,6 +70,39 @@ fn looks_like_delivery_locator_literal(text: &str, locator_hint: &str) -> bool {
         .contains('.')
 }
 
+fn looks_like_markdown_table_row(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.matches('|').count() >= 3
+}
+
+fn looks_like_markdown_table_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !looks_like_markdown_table_row(trimmed) {
+        return false;
+    }
+    trimmed
+        .trim_matches('|')
+        .split('|')
+        .all(|cell| cell.trim().chars().all(|ch| matches!(ch, '-' | ':' | ' ')))
+}
+
+fn strip_preamble_before_markdown_table(text: &str) -> String {
+    let lines = text.lines().collect::<Vec<_>>();
+    let Some(table_start) = lines
+        .iter()
+        .position(|line| looks_like_markdown_table_row(line))
+    else {
+        return text.to_string();
+    };
+    let Some(separator) = lines.get(table_start + 1) else {
+        return text.to_string();
+    };
+    if !looks_like_markdown_table_separator(separator) {
+        return text.to_string();
+    }
+    lines[table_start..].join("\n").trim().to_string()
+}
+
 pub(super) fn enforce_output_contract(
     state: &AppState,
     user_request: &str,
@@ -76,9 +110,12 @@ pub(super) fn enforce_output_contract(
     normalized_text: &mut String,
     normalized_messages: &mut Vec<String>,
 ) {
+    *normalized_text = strip_preamble_before_markdown_table(normalized_text);
     match output_contract.response_shape {
         OutputResponseShape::OneSentence => {
-            *normalized_text = take_first_sentence(normalized_text);
+            if output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary {
+                *normalized_text = take_first_sentence(normalized_text);
+            }
         }
         OutputResponseShape::Scalar => {
             if let Some(scalar) = extract_scalar_literal(normalized_text) {
@@ -124,15 +161,17 @@ pub(super) fn enforce_output_contract(
                     }
                 }
                 Some(FileDeliveryTargetResolution::UserMessage(msg)) => {
-                    *normalized_text = localize_delivery_message(state, msg);
+                    *normalized_text =
+                        localize_delivery_message_for_request(state, msg, user_request);
                     normalized_messages
                         .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
                 }
                 Some(FileDeliveryTargetResolution::Candidates(paths)) => {
                     let mut lines = Vec::with_capacity(paths.len() + 1);
-                    lines.push(localize_delivery_message(
+                    lines.push(localize_delivery_message_for_request(
                         state,
                         super::DeliveryMessageKind::FilenameNotUnique,
+                        user_request,
                     ));
                     lines.extend(paths.into_iter().map(|path| path.display().to_string()));
                     let text = lines.join("\n");
@@ -200,6 +239,7 @@ pub(crate) fn sync_output_payload(
     normalized_messages: &mut Vec<String>,
 ) {
     let mut canonical = canonical_output_text(normalized_text, normalized_messages);
+    canonical = strip_preamble_before_markdown_table(&canonical);
     let file_contract = output_contract.delivery_required
         || matches!(
             output_contract.response_shape,

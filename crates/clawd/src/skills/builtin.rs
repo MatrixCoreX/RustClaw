@@ -95,7 +95,7 @@ pub(crate) async fn execute_builtin_skill(
             ))
         }
         "list_dir" => {
-            ensure_only_keys(map, &["path"])?;
+            ensure_only_keys(map, &["path", "names_only"])?;
             let path = optional_string(map, "path").unwrap_or(".");
             let requested_path = resolve_workspace_path(
                 &state.workspace_root,
@@ -512,4 +512,152 @@ async fn suggest_command_for_run_cmd(
         tracing::info!("run_cmd NL2CMD reason={}", crate::truncate_for_log(&reason));
     }
     Ok(command)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::execute_builtin_skill;
+    use crate::{
+        runtime::state::AppState, AgentRuntimeConfig, CommandIntentRuntime, RateLimiter,
+        ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+    };
+    use claw_core::config::{
+        AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
+    };
+    use rusqlite::Connection;
+    use serde_json::json;
+    use std::collections::{HashMap, HashSet};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex, RwLock};
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use tokio::sync::Semaphore;
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time before unix epoch")
+                .as_nanos();
+            path.push(format!(
+                "clawd_builtin_skill_{prefix}_{}_{}",
+                std::process::id(),
+                nanos
+            ));
+            fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn test_state(workspace_root: PathBuf) -> AppState {
+        let skills_list = Arc::new(
+            ["list_dir"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<HashSet<_>>(),
+        );
+        let agents_by_id = HashMap::from([(
+            DEFAULT_AGENT_ID.to_string(),
+            AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
+        )]);
+        AppState {
+            started_at: Instant::now(),
+            queue_limit: 1,
+            db: Arc::new(Mutex::new(Connection::open_in_memory().expect("open db"))),
+            llm_providers: Vec::new(),
+            agents_by_id: Arc::new(agents_by_id),
+            skill_timeout_seconds: 30,
+            skill_runner_path: PathBuf::new(),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                registry: None,
+                skills_list,
+            }))),
+            skill_semaphore: Arc::new(Semaphore::new(1)),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
+            llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
+            maintenance: MaintenanceConfig::default(),
+            memory: MemoryConfig::default(),
+            workspace_root: workspace_root.clone(),
+            default_locator_search_dir: workspace_root,
+            locator_scan_max_depth: 2,
+            locator_scan_max_files: 200,
+            tools_policy: Arc::new(
+                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+            ),
+            active_provider_type: None,
+            cmd_timeout_seconds: 30,
+            max_cmd_length: 4096,
+            allow_path_outside_workspace: false,
+            allow_sudo: false,
+            worker_task_timeout_seconds: 300,
+            worker_task_heartbeat_seconds: 10,
+            worker_running_no_progress_timeout_seconds: 300,
+            worker_running_recovery_check_interval_seconds: 30,
+            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            routing: RoutingConfig::default(),
+            persona_prompt: String::new(),
+            command_intent: CommandIntentRuntime {
+                all_result_suffixes: Vec::new(),
+                default_locale: "zh-CN".to_string(),
+                verify_enforce_enabled: false,
+            },
+            schedule: ScheduleRuntime {
+                timezone: "Asia/Shanghai".to_string(),
+                intent_prompt_template: String::new(),
+                intent_prompt_source: String::new(),
+                intent_rules_template: String::new(),
+                locale: "zh-CN".to_string(),
+                i18n_dict: HashMap::new(),
+            },
+            telegram_bot_token: String::new(),
+            telegram_configured_bot_names: Arc::new(Vec::new()),
+            whatsapp_cloud_enabled: false,
+            whatsapp_api_base: String::new(),
+            whatsapp_access_token: String::new(),
+            whatsapp_phone_number_id: String::new(),
+            whatsapp_web_enabled: false,
+            whatsapp_web_bridge_base_url: String::new(),
+            future_adapters_enabled: Arc::new(Vec::new()),
+            wechat_send_config: None,
+            feishu_send_config: None,
+            lark_send_config: None,
+            http_client: reqwest::Client::new(),
+            database_sqlite_path: PathBuf::new(),
+            database_busy_timeout_ms: 5_000,
+            config_path_for_reload: String::new(),
+            self_extension: claw_core::config::SelfExtensionConfig::default(),
+            registry_path_for_reload: None,
+            skill_switches_for_reload: Arc::new(HashMap::new()),
+            initial_skills_list_for_reload: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_dir_accepts_names_only_arg() {
+        let root = TempDirGuard::new("list_dir_names_only");
+        fs::write(root.path.join("b.txt"), "b").expect("write b");
+        fs::write(root.path.join("a.txt"), "a").expect("write a");
+
+        let state = test_state(root.path.clone());
+        let output = execute_builtin_skill(
+            &state,
+            "list_dir",
+            &json!({"path": ".", "names_only": true}),
+        )
+        .await
+        .expect("list_dir should succeed");
+
+        assert_eq!(output, "a.txt\nb.txt");
+    }
 }

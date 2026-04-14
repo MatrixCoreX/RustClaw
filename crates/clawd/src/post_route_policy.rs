@@ -1,6 +1,16 @@
 use crate::{
-    IntentOutputContract, OutputLocatorKind, OutputResponseShape, RouteResult, RoutedMode,
+    IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
+    RoutedMode,
 };
+use std::path::Path;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ClarifyReasonKind {
+    #[default]
+    RouteReasonText,
+    MissingPathScopedLocator,
+    FuzzyLocatorCandidates,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum LocatorResolution {
@@ -19,6 +29,7 @@ pub(crate) struct PostRoutePolicyResult {
     pub(crate) fuzzy_locator_suggestions: Vec<String>,
     pub(crate) missing_locator_for_path_scoped_content: bool,
     pub(crate) clarify_reason: String,
+    pub(crate) clarify_reason_kind: ClarifyReasonKind,
 }
 
 pub(crate) fn enforce_content_evidence_execution_mode(
@@ -52,6 +63,80 @@ fn locator_kind_requires_path_binding(kind: OutputLocatorKind) -> bool {
         kind,
         OutputLocatorKind::Path | OutputLocatorKind::CurrentWorkspace | OutputLocatorKind::Filename
     )
+}
+
+fn path_is_existing_file(path: &str) -> bool {
+    let trimmed = path.trim();
+    !trimmed.is_empty() && Path::new(trimmed).is_file()
+}
+
+fn path_is_existing_directory(path: &str) -> bool {
+    let trimmed = path.trim();
+    !trimmed.is_empty() && Path::new(trimmed).is_dir()
+}
+
+fn locator_hint_looks_file_like(locator_hint: &str) -> bool {
+    let trimmed = locator_hint.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let path = Path::new(trimmed);
+    path.extension().is_some()
+        || path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("readme"))
+}
+
+fn should_default_to_content_excerpt_summary(
+    route_result: &RouteResult,
+    direct_locator_path: Option<&str>,
+) -> bool {
+    if route_result.output_contract.semantic_kind != OutputSemanticKind::None
+        || route_result.output_contract.delivery_required
+        || !route_result.output_contract.requires_content_evidence
+        || !matches!(
+            route_result.output_contract.response_shape,
+            OutputResponseShape::Free | OutputResponseShape::OneSentence
+        )
+    {
+        return false;
+    }
+
+    match route_result.output_contract.locator_kind {
+        OutputLocatorKind::Filename => true,
+        OutputLocatorKind::CurrentWorkspace => {
+            direct_locator_path.is_some_and(path_is_existing_file)
+        }
+        OutputLocatorKind::Path => {
+            direct_locator_path.is_some_and(path_is_existing_file)
+                || locator_hint_looks_file_like(&route_result.output_contract.locator_hint)
+        }
+        _ => false,
+    }
+}
+
+fn should_default_to_directory_purpose_summary(
+    route_result: &RouteResult,
+    direct_locator_path: Option<&str>,
+) -> bool {
+    if route_result.output_contract.semantic_kind != OutputSemanticKind::None
+        || route_result.output_contract.delivery_required
+        || route_result.routed_mode != RoutedMode::ChatAct
+        || !matches!(
+            route_result.output_contract.response_shape,
+            OutputResponseShape::Free | OutputResponseShape::OneSentence
+        )
+    {
+        return false;
+    }
+
+    match route_result.output_contract.locator_kind {
+        OutputLocatorKind::Path | OutputLocatorKind::CurrentWorkspace => {
+            direct_locator_path.is_some_and(path_is_existing_directory)
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn apply_post_route_policy(
@@ -100,6 +185,23 @@ pub(crate) fn apply_post_route_policy(
             fuzzy_locator_suggestions = candidates;
         }
         LocatorResolution::None => {}
+    }
+
+    if should_default_to_content_excerpt_summary(
+        &execution_route_result,
+        auto_locator_path.as_deref(),
+    ) {
+        execution_route_result.output_contract.semantic_kind =
+            OutputSemanticKind::ContentExcerptSummary;
+    } else if should_default_to_directory_purpose_summary(
+        &execution_route_result,
+        auto_locator_path.as_deref(),
+    ) {
+        execution_route_result.output_contract.semantic_kind =
+            OutputSemanticKind::DirectoryPurposeSummary;
+        execution_route_result
+            .output_contract
+            .requires_content_evidence = true;
     }
 
     if auto_locator_resolved_direct && path_scoped_content_request {
@@ -194,27 +296,42 @@ pub(crate) fn apply_post_route_policy(
         execution_route_result.routed_mode = RoutedMode::AskClarify;
     }
 
-    let clarify_reason = if missing_locator_for_path_scoped_content {
+    let (clarify_reason, clarify_reason_kind) = if missing_locator_for_path_scoped_content {
         if execution_route_result.route_reason.trim().is_empty() {
-            "locator_required_for_path_scoped_content".to_string()
+            (
+                "locator_required_for_path_scoped_content".to_string(),
+                ClarifyReasonKind::MissingPathScopedLocator,
+            )
         } else {
-            format!(
-                "{}; locator_required_for_path_scoped_content",
-                execution_route_result.route_reason
+            (
+                format!(
+                    "{}; locator_required_for_path_scoped_content",
+                    execution_route_result.route_reason
+                ),
+                ClarifyReasonKind::MissingPathScopedLocator,
             )
         }
     } else if !fuzzy_locator_suggestions.is_empty() {
         let joined = fuzzy_locator_suggestions.join(" | ");
         if execution_route_result.route_reason.trim().is_empty() {
-            format!("fuzzy_locator_candidates={joined}")
+            (
+                format!("fuzzy_locator_candidates={joined}"),
+                ClarifyReasonKind::FuzzyLocatorCandidates,
+            )
         } else {
-            format!(
-                "{}; fuzzy_locator_candidates={joined}",
-                execution_route_result.route_reason
+            (
+                format!(
+                    "{}; fuzzy_locator_candidates={joined}",
+                    execution_route_result.route_reason
+                ),
+                ClarifyReasonKind::FuzzyLocatorCandidates,
             )
         }
     } else {
-        execution_route_result.route_reason.clone()
+        (
+            execution_route_result.route_reason.clone(),
+            ClarifyReasonKind::RouteReasonText,
+        )
     };
 
     PostRoutePolicyResult {
@@ -225,6 +342,7 @@ pub(crate) fn apply_post_route_policy(
         fuzzy_locator_suggestions,
         missing_locator_for_path_scoped_content,
         clarify_reason,
+        clarify_reason_kind,
     }
 }
 
@@ -250,13 +368,17 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::Path,
                 delivery_intent: Default::default(),
+                semantic_kind: Default::default(),
                 locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
             },
         }
     }
@@ -445,5 +567,220 @@ mod tests {
             result.execution_route_result.routed_mode,
             RoutedMode::AskClarify
         ));
+    }
+
+    #[test]
+    fn file_like_content_request_defaults_to_content_excerpt_summary_for_filename_locator() {
+        let mut route = route_result();
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "README.md".to_string();
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct("/tmp/README.md".to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::ContentExcerptSummary
+        );
+    }
+
+    #[test]
+    fn directory_like_content_request_does_not_default_to_content_excerpt_summary() {
+        let mut route = route_result();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "docs".to_string();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-post-route-policy-dir-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn directory_like_chat_act_request_defaults_to_directory_purpose_summary() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::ChatAct;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "docs".to_string();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-post-route-policy-dir-summary-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::DirectoryPurposeSummary
+        );
+        assert!(
+            result
+                .execution_route_result
+                .output_contract
+                .requires_content_evidence
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn act_directory_listing_does_not_default_to_directory_purpose_summary() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::Act;
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "document".to_string();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-post-route-policy-dir-act-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn explicit_file_path_hint_defaults_to_content_excerpt_summary_without_auto_locator() {
+        let mut route = route_result();
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "/tmp/device_local/docs/release_checklist.md".to_string();
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::ContentExcerptSummary
+        );
+    }
+
+    #[test]
+    fn current_workspace_file_resolution_defaults_to_content_excerpt_summary() {
+        let mut route = route_result();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-post-route-policy-workspace-file-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let readme_path = temp_dir.join("README.md");
+        std::fs::write(&readme_path, "# title\n").unwrap();
+        let resolved = readme_path
+            .canonicalize()
+            .unwrap_or_else(|_| readme_path.clone())
+            .display()
+            .to_string();
+
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct(resolved),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::ContentExcerptSummary
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn missing_path_scoped_locator_sets_structured_clarify_reason_kind() {
+        let result = apply_post_route_policy(
+            route_result(),
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert_eq!(
+            result.clarify_reason_kind,
+            ClarifyReasonKind::MissingPathScopedLocator
+        );
+    }
+
+    #[test]
+    fn fuzzy_locator_candidates_set_structured_clarify_reason_kind() {
+        let result = apply_post_route_policy(
+            route_result(),
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Fuzzy(vec!["/tmp/a".to_string(), "/tmp/b".to_string()]),
+        );
+        assert_eq!(
+            result.clarify_reason_kind,
+            ClarifyReasonKind::FuzzyLocatorCandidates
+        );
     }
 }
