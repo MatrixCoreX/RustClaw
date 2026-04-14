@@ -28,6 +28,9 @@ Request:
 ```json
 {
   "request_id": "demo-1",
+  "context": null,
+  "user_id": 1,
+  "chat_id": 1,
   "args": {
     "action": "action_a",
     "foo": "abc",
@@ -42,6 +45,7 @@ Response:
   "request_id": "demo-1",
   "status": "ok",
   "text": "done",
+  "extra": null,
   "error_text": null
 }
 ```
@@ -51,6 +55,9 @@ Request:
 ```json
 {
   "request_id": "demo-2",
+  "context": null,
+  "user_id": 1,
+  "chat_id": 1,
   "args": {
     "action": "action_a"
   }

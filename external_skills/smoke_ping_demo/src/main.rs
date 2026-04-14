@@ -1,7 +1,7 @@
 use std::io::{self, BufRead, Write};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -36,11 +36,11 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
-                    extra: None,
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
@@ -59,7 +59,6 @@ fn main() -> anyhow::Result<()> {
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
-
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
         stdout.flush()?;
     }
@@ -67,11 +66,17 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
-    let _obj = args
+fn execute(args: Value) -> Result<(String, Value), String> {
+    let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
+    let action = obj
+        .get("action")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "action is required".to_string())?;
 
-    // TODO: implement real logic
-    Ok("TODO: your skill output".to_string())
+    match action {
+        "ping" => Ok(("TODO: implement ping".to_string(), json!({"action":"ping"}))),
+        _ => Err(format!("unsupported action: {action}; use "ping"")),
+    }
 }
