@@ -8,8 +8,8 @@ set -euo pipefail
 #   bash scripts/regression_resume_continue.sh [--base-url URL] [--user-id ID] [--chat-id ID] [--wait-seconds N]
 
 BASE_URL="${BASE_URL:-}"
-USER_ID="${USER_ID:-11001}"
-CHAT_ID="${CHAT_ID:-11001}"
+USER_ID="${USER_ID:-}"
+CHAT_ID="${CHAT_ID:-}"
 WAIT_SECONDS="${WAIT_SECONDS:-120}"
 POLL_INTERVAL="${POLL_INTERVAL:-1}"
 
@@ -52,6 +52,20 @@ done
 need_cmd curl
 need_cmd jq
 need_cmd python3
+
+if [[ -z "$USER_ID" || -z "$CHAT_ID" ]]; then
+  read -r default_user_id default_chat_id < <(
+    python3 - <<'PY'
+import time
+
+seed = time.time_ns() % 9_000_000_000
+base = 1_000_000_000 + seed
+print(base, base + 1)
+PY
+  )
+  USER_ID="${USER_ID:-$default_user_id}"
+  CHAT_ID="${CHAT_ID:-$default_chat_id}"
+fi
 
 if [[ -z "$BASE_URL" ]]; then
   BASE_URL="$(
@@ -103,8 +117,53 @@ poll_terminal() {
   return 1
 }
 
+result_provider_unavailable() {
+  python3 - "$1" <<'PY'
+import json
+import re
+import sys
+
+obj = json.loads(sys.argv[1])
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+messages = result.get("messages") or []
+parts = [
+    str(data.get("error_text") or ""),
+    str(result.get("text") or ""),
+]
+for item in messages:
+    if isinstance(item, dict):
+        parts.append(str(item.get("text") or ""))
+    elif isinstance(item, str):
+        parts.append(item)
+text = "\n".join(part.strip().lower() for part in parts if str(part).strip())
+markers = [
+    "当前大模型服务暂时不可用",
+    "selected model is at capacity",
+    "usage limit exceeded",
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "http 429",
+    "http 529",
+    "529 overloaded",
+    "missing choices[0].message.content",
+]
+provider_like = any(marker in text for marker in markers)
+provider_like = provider_like or (
+    "provider=vendor-" in text
+    and (
+        re.search(r"http 5\d\d", text) is not None
+        or '"type":"server_error"' in text
+        or "unknown error, 520" in text
+    )
+)
+raise SystemExit(0 if provider_like else 1)
+PY
+}
+
 echo "[1/4] submit failing multi-step ask"
-first_submit="$(submit_ask '先查BTC价格，再执行一个明显会失败的系统命令，再查ETH价格')"
+first_submit="$(submit_ask '先查BTC价格，再执行一个不存在的命令 resume_fail_cmd_001_xyz，再查ETH价格')"
 first_task_id="$(echo "$first_submit" | jq -r '.data.task_id // empty')"
 [[ -n "$first_task_id" ]] || { echo "submit failed: $first_submit"; exit 1; }
 
@@ -112,6 +171,10 @@ echo "[2/4] wait first task terminal"
 first_row="$(poll_terminal "$first_task_id")"
 first_status="$(echo "$first_row" | jq -r '.data.status // ""')"
 if [[ "$first_status" != "failed" && "$first_status" != "timeout" ]]; then
+  if result_provider_unavailable "$first_row"; then
+    echo "provider unavailable during first task; skip resume regression"
+    exit 2
+  fi
   echo "expected first task failed/timeout, got: $first_status"
   exit 1
 fi

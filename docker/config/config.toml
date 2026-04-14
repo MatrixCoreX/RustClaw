@@ -130,7 +130,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: base_url 或鉴权不匹配会导致 401/404.
 [llm.qwen]
-api_key = "sk-edb55ffba9f44173922a1a96cc16f9c1"
+api_key = ""
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 max_concurrency = 1
 model = "qwen-max-latest"
@@ -143,11 +143,11 @@ timeout_seconds = 60
 
 # 用途/Purpose: MiniMax 提供商连接与模型池（OpenAI-compatible）.
 # 建议修改/Recommended change: 可改，建议按官方最新兼容模型名维护.
+# api_format：省略或空则默认 openai_compat（/chat/completions + Bearer）；设为 anthropic_claude 则 /messages + x-api-key（clawd 合成 vendor-minimax）.
 # 风险/Risk: 音频/图片相关能力与 OpenAI 兼容接口的覆盖范围可能有限，必要时需补原生适配.
 [llm.minimax]
-api_format = "anthropic_claude"
 api_key = ""
-base_url = "https://api.minimaxi.com/anthropic"
+base_url = "https://api.minimaxi.com/v1"
 max_concurrency = 1
 model = "MiniMax-M2.7"
 models = [
@@ -162,7 +162,7 @@ timeout_seconds = 60
 # 建议修改/Recommended change: 可改，适合接入私有网关.
 # 风险/Risk: 协议不兼容会出现模型列表可见但调用失败.
 [llm.custom]
-api_key = "REPLACE_ME_CUSTOM_API_KEY"
+api_key = ""
 base_url = "https://api.example.com/v1"
 max_concurrency = 1
 model = "custom-model"
@@ -171,31 +171,11 @@ models = [
 ]
 timeout_seconds = 60
 
-# 用途/Purpose: 图片生成全局参数（vendor/model/并发/输出路径）.
-# 建议修改/Recommended change: 可改.
-# 风险/Risk: 并发和 max_images 过高会放大成本与超时概率.
-[image_generation]
-default_vendor = "qwen"
-default_model = "wanx2.1-t2i-turbo"
-qwen_models = ["wanx2.1-t2i-turbo"]
-models = ["wanx2.1-t2i-turbo"]
-# 允许兼容适配层 / Allow compatibility adapters.
-allow_compat_adapters = true
-# 图片任务超时（秒） / Image generation timeout in seconds.
-timeout_seconds = 120
-max_concurrency = 1
-# 单请求最大出图数 / Maximum images per request.
-max_images = 4
-# 输入大小上限（字节） / Max input payload size in bytes.
-max_input_bytes = 10485760
-# 输出目录 / Output directory.
-default_output_dir = "image/download"
-
 # 用途/Purpose: OpenAI 提供商连接与模型池.
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: 模型名下线会报错；并发与超时需与上游配额匹配.
 [llm.openai]
-api_key = "REPLACE_ME"
+api_key = ""
 base_url = "https://api.openai.com/v1"
 max_concurrency = 1
 model = "gpt-4o-mini"
@@ -249,7 +229,7 @@ debug_log_prompt = true
 # 模糊指代文件时的默认检索目录（相对路径以 clawd 启动目录为基准；"." 表示启动当前目录）。
 # 当请求缺少明确路径时，会先在该目录下递归搜索子目录；命中唯一候选可直接执行。
 default_locator_search_dir = "."
-# 目录递归扫描最大深度（从根目录算 0 层）；0 表示只扫描根目录/当前层，不递归子目录。
+# 目录递归扫描最大深度（从根目录算 0 层）；用于默认目录定位与用户指定目录下的递归检索。
 locator_scan_max_depth = 0
 # 单次递归扫描最多纳入的文件数（命中上限后停止继续向下扫描）。
 locator_scan_max_files = 6000
@@ -279,7 +259,7 @@ request_timeout_seconds = 30
 [skills]
 # 技能注册表路径（启用后走 registry 主链：发现/启用/kind 分发）；未设则 fallback 到 skills_list + skill_switches
 registry_path = "configs/skills_registry.toml"
-skill_switches = { map_merchant = true, stock = true, task_control = true }
+skill_switches = { browser_web = true, doc_parse = true, extension_manager = true, kb = true, map_merchant = true, photo_organize = true, schedule = true, stock = true, task_control = true, transform = true, weather = true, web_search_extract = true }
 skill_max_concurrency = 1
 skill_timeout_seconds = 86400
 # 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):
@@ -289,7 +269,7 @@ skill_timeout_seconds = 86400
 # 例子/Example:
 # skill_switches = { image_generate = false, rss_fetch = true }
 # 技能基线列表（建议少改）/ Baseline enabled skills (avoid frequent edits).
-# A 方案：文件系统基础 skill 独立列出（run_cmd/read_file/write_file/list_dir/make_dir/remove_file）。
+# 与 configs/skills_registry.toml 中全部 [[skills]].name 一致（未启用 registry 时作 fallback 基线）。
 skills_list = [
     "run_cmd",
     "read_file",
@@ -297,6 +277,7 @@ skills_list = [
     "list_dir",
     "make_dir",
     "remove_file",
+    "schedule",
     "x",
     "system_basic",
     "http_basic",
@@ -322,7 +303,25 @@ skills_list = [
     "map_merchant",
     "crypto",
     "chat",
+    "stock",
+    "weather",
+    "doc_parse",
+    "transform",
+    "web_search_extract",
+    "kb",
+    "browser_web",
 ]
+
+# 用途/Purpose: 当现有技能不能覆盖需求时，是否允许走受控自扩展链（临时脚本/语言级依赖）.
+# 建议修改/Recommended change: 开启后会允许内部调用 extension_manager 进行临时补能力与可复用技能开发.
+# 风险/Risk: 开启后会允许内部执行临时脚本、安装语言级依赖，并在开发态下自动注册/启用新技能.
+[self_extension]
+enabled = true
+auto_on_capability_gap = true
+allow_execute = true
+allow_package_install = true
+allow_permanent_extension = true
+allow_runtime_enable = true
 
 # 渠道配置已拆分到以下文件 / Channel configs are split into:
 # - configs/channels/telegram.toml（Telegram）/ Telegram channel settings
@@ -387,5 +386,12 @@ concurrency = 3
 poll_interval_ms = 500
 # 队列上限 / Max queued tasks in memory.
 queue_limit = 128
+# 运行中心跳间隔（秒）：执行长任务时周期刷新 updated_at，避免误判“卡死”。
+task_heartbeat_seconds = 30
+# 运行中“无进展”超时（秒）：status=running 且 updated_at 长时间不变会自动收尾为 failed。
+running_no_progress_timeout_seconds = 1200
+# 无进展清理检查间隔（秒）。
+running_recovery_check_interval_seconds = 60
 # 单任务硬超时（秒） / Hard timeout per task in seconds.
+# 注意：这是 clawd 后台任务生命周期上限，不作为 Telegram/WhatsApp 的用户侧投递等待时长。
 task_timeout_seconds = 86400

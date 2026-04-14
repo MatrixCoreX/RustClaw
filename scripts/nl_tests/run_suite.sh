@@ -11,6 +11,7 @@ ALL_SUITES=(
   full
   trace
   resume
+  self_extension
   clarify
   clarify_hard
   context_chain
@@ -31,6 +32,7 @@ Suites:
   full
   trace
   resume
+  self_extension
   clarify
   clarify_hard
   context_chain
@@ -66,6 +68,7 @@ Available suites:
   - full
   - trace
   - resume
+  - self_extension
   - clarify
   - clarify_hard
   - context_chain
@@ -150,6 +153,13 @@ run_mode_resume() {
     "$@"
 }
 
+run_mode_self_extension() {
+  run_wrapped_suite \
+    "self_extension" \
+    bash "${ROOT_DIR}/scripts/regression_self_extension_suite.sh" \
+    "$@"
+}
+
 run_mode_clarify() {
   bash "${SCRIPT_DIR}/run_multi_turn_suite.sh" \
     --suite clarify \
@@ -204,39 +214,95 @@ run_mode_clarify_context_prompt() {
   fi
 }
 
+FILTERED_SUITE_ARGS=()
+
+filter_pass_through_for_suite() {
+  local suite="$1"
+  shift
+
+  FILTERED_SUITE_ARGS=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --base-url|--user-id|--chat-id|--wait-seconds)
+        FILTERED_SUITE_ARGS+=("$1")
+        if [[ $# -ge 2 ]]; then
+          FILTERED_SUITE_ARGS+=("$2")
+        fi
+        shift 2
+        ;;
+      --provider-retries|--provider-retry-sleep)
+        case "$suite" in
+          manual|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard)
+            FILTERED_SUITE_ARGS+=("$1")
+            if [[ $# -ge 2 ]]; then
+              FILTERED_SUITE_ARGS+=("$2")
+            fi
+            ;;
+        esac
+        shift 2
+        ;;
+      --no-llm-trace)
+        case "$suite" in
+          manual|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard)
+            FILTERED_SUITE_ARGS+=("$1")
+            ;;
+        esac
+        shift
+        ;;
+      --reuse-chat-id-base)
+        case "$suite" in
+          clarify|clarify_hard|context_chain|dynamic_guard)
+            FILTERED_SUITE_ARGS+=("$1")
+            ;;
+        esac
+        shift
+        ;;
+      *)
+        FILTERED_SUITE_ARGS+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
 run_one_suite() {
   local suite="$1"
   shift
+  filter_pass_through_for_suite "$suite" "$@"
   case "$suite" in
     manual)
-      run_mode_manual "$@"
+      run_mode_manual "${FILTERED_SUITE_ARGS[@]}"
       ;;
     text_match)
-      run_mode_text_match "$@"
+      run_mode_text_match "${FILTERED_SUITE_ARGS[@]}"
       ;;
     full)
-      run_mode_full "$@"
+      run_mode_full "${FILTERED_SUITE_ARGS[@]}"
       ;;
     trace)
-      run_mode_trace "$@"
+      run_mode_trace "${FILTERED_SUITE_ARGS[@]}"
       ;;
     resume)
-      run_mode_resume "$@"
+      run_mode_resume "${FILTERED_SUITE_ARGS[@]}"
+      ;;
+    self_extension)
+      run_mode_self_extension "${FILTERED_SUITE_ARGS[@]}"
       ;;
     clarify)
-      run_mode_clarify "$@"
+      run_mode_clarify "${FILTERED_SUITE_ARGS[@]}"
       ;;
     clarify_hard)
-      run_mode_clarify_hard "$@"
+      run_mode_clarify_hard "${FILTERED_SUITE_ARGS[@]}"
       ;;
     context_chain)
-      run_mode_context_chain "$@"
+      run_mode_context_chain "${FILTERED_SUITE_ARGS[@]}"
       ;;
     dynamic_guard)
-      run_mode_dynamic_guard "$@"
+      run_mode_dynamic_guard "${FILTERED_SUITE_ARGS[@]}"
       ;;
     clarify_context_prompt)
-      run_mode_clarify_context_prompt "$@"
+      run_mode_clarify_context_prompt "${FILTERED_SUITE_ARGS[@]}"
       ;;
     *)
       echo "Unknown suite: $suite" >&2
@@ -260,7 +326,7 @@ add_suite() {
 expand_selector() {
   local selector="$1"
   case "$selector" in
-    manual|text_match|full|trace|resume|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+    manual|text_match|full|trace|resume|self_extension|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
       add_suite "$selector"
       ;;
     smoke)
