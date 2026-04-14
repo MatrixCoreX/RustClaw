@@ -170,6 +170,12 @@ pub(crate) fn extract_json_object(text: &str) -> Option<String> {
 }
 
 pub(crate) fn extract_agent_action_objects(text: &str) -> Vec<String> {
+    fn push_candidate_if_action(out: &mut Vec<String>, candidate: String) {
+        if is_agent_action_candidate(&candidate) {
+            out.push(candidate);
+        }
+    }
+
     let bytes = text.as_bytes();
     let mut out: Vec<String> = Vec::new();
     let mut i = 0usize;
@@ -203,10 +209,18 @@ pub(crate) fn extract_agent_action_objects(text: &str) -> Vec<String> {
                     depth -= 1;
                     if depth == 0 {
                         closed = true;
-                        let candidate = &text[start..=j];
-                        if is_agent_action_candidate(candidate) {
-                            out.push(candidate.to_string());
-                        }
+                        push_candidate_if_action(&mut out, text[start..=j].to_string());
+                        break;
+                    }
+                } else if c == b']' && depth == 1 {
+                    // Recover the trailing inner object when a wrapper array closes before the
+                    // final action object emitted its own `}`.
+                    let mut repaired = text[start..j].to_string();
+                    repaired.push('}');
+                    if serde_json::from_str::<Value>(&repaired).is_ok() {
+                        closed = true;
+                        push_candidate_if_action(&mut out, repaired);
+                        break;
                     }
                 }
                 j += 1;

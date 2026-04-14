@@ -17,6 +17,7 @@ pub(super) struct PreparedAskFlow {
     pub(super) direct_resume_discussion: bool,
     pub(super) classifier_direct_mode: bool,
     pub(super) clarify_reason: String,
+    pub(super) clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     pub(super) fuzzy_locator_suggestions: Vec<String>,
     pub(super) should_route_schedule_direct: bool,
 }
@@ -27,6 +28,7 @@ struct AppliedAskPostRoute {
     resolved_prompt_for_execution: String,
     prompt_with_memory_for_execution: String,
     clarify_reason: String,
+    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     fuzzy_locator_suggestions: Vec<String>,
 }
 
@@ -41,12 +43,13 @@ fn normalize_brief_route_text(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn clarify_reason_matches_route_reason(
-    route_result: &crate::RouteResult,
-    clarify_reason: &str,
+fn clarify_reason_allows_route_question_reuse(
+    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
 ) -> bool {
-    normalize_brief_route_text(&route_result.route_reason)
-        == normalize_brief_route_text(clarify_reason)
+    matches!(
+        clarify_reason_kind,
+        crate::post_route_policy::ClarifyReasonKind::RouteReasonText
+    )
 }
 
 fn resolved_intent_inherits_prior_operation(prompt: &str, resolved_prompt: &str) -> bool {
@@ -134,7 +137,7 @@ fn should_suppress_recent_execution_in_clarify_context(
 fn should_reuse_route_clarify_question(
     prompt: &str,
     route_result: &crate::RouteResult,
-    clarify_reason: &str,
+    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     fuzzy_locator_suggestions: &[String],
 ) -> bool {
     !should_suppress_recent_execution_in_clarify_context(
@@ -142,7 +145,7 @@ fn should_reuse_route_clarify_question(
         route_result,
         fuzzy_locator_suggestions,
     ) && fuzzy_locator_suggestions.is_empty()
-        && clarify_reason_matches_route_reason(route_result, clarify_reason)
+        && clarify_reason_allows_route_question_reuse(clarify_reason_kind)
 }
 
 fn structured_missing_locator_clarify_question(
@@ -283,6 +286,7 @@ fn apply_ask_post_route(
         resolved_prompt_for_execution,
         prompt_with_memory_for_execution,
         clarify_reason: post_route.clarify_reason,
+        clarify_reason_kind: post_route.clarify_reason_kind,
         fuzzy_locator_suggestions: post_route.fuzzy_locator_suggestions,
     }
 }
@@ -340,6 +344,7 @@ pub(super) async fn prepare_ask_flow(
         direct_resume_discussion: prepared_routing.direct_resume_discussion,
         classifier_direct_mode: prepared_routing.classifier_direct_mode,
         clarify_reason: applied_post_route.clarify_reason,
+        clarify_reason_kind: applied_post_route.clarify_reason_kind,
         fuzzy_locator_suggestions: applied_post_route.fuzzy_locator_suggestions,
         should_route_schedule_direct,
     })
@@ -357,6 +362,7 @@ pub(super) async fn execute_ask_dispatch(
     route_result: &crate::RouteResult,
     agent_mode: bool,
     clarify_reason: &str,
+    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     fuzzy_locator_suggestions: &[String],
     classifier_direct_mode: bool,
     direct_resume_discussion: bool,
@@ -387,14 +393,25 @@ pub(super) async fn execute_ask_dispatch(
             if should_reuse_route_clarify_question(
                 prompt,
                 route_result,
-                clarify_reason,
+                clarify_reason_kind,
                 fuzzy_locator_suggestions,
             ) {
-                Some(route_result.clarify_question.as_str())
+                let route_question = route_result.clarify_question.trim();
+                (!route_question.is_empty()).then_some(route_question)
             } else {
                 None
             }
         });
+        let clarify_policy = if preferred_clarify_question.is_none()
+            && route_result.clarify_question.trim().is_empty()
+            && !matches!(
+                clarify_reason_kind,
+                crate::post_route_policy::ClarifyReasonKind::FuzzyLocatorCandidates
+            ) {
+            crate::intent_router::ClarifyQuestionPolicy::SafeFallback
+        } else {
+            crate::intent_router::ClarifyQuestionPolicy::AllowModel
+        };
         let clarify = crate::intent_router::generate_or_reuse_clarify_question(
             state,
             task,
@@ -402,6 +419,7 @@ pub(super) async fn execute_ask_dispatch(
             clarify_reason,
             Some(&clarify_context),
             preferred_clarify_question,
+            clarify_policy,
         )
         .await;
         return Ok(Some(Ok(crate::AskReply::non_llm(clarify))));
@@ -526,6 +544,8 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 locator_kind: crate::OutputLocatorKind::Path,
                 requires_content_evidence: false,
@@ -550,6 +570,8 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 locator_kind: crate::OutputLocatorKind::None,
                 requires_content_evidence: false,
@@ -574,6 +596,8 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
                 requires_content_evidence: false,
@@ -598,6 +622,8 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 locator_kind: crate::OutputLocatorKind::Filename,
                 requires_content_evidence: true,
@@ -622,6 +648,8 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
         };
         assert!(!should_allow_classifier_direct(&route));
@@ -642,6 +670,8 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
         };
         assert!(!should_allow_classifier_direct(&route));
@@ -662,6 +692,8 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
         };
         assert!(should_allow_classifier_direct(&route));
@@ -718,6 +750,8 @@ mod tests {
             clarify_question: "你是指哪个文件？".to_string(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 locator_kind,
                 requires_content_evidence: true,
@@ -749,7 +783,18 @@ mod tests {
         assert!(!should_reuse_route_clarify_question(
             "读一下那个文件里的名字字段，只输出值",
             &route,
-            "need concrete locator",
+            crate::post_route_policy::ClarifyReasonKind::MissingPathScopedLocator,
+            &[],
+        ));
+    }
+
+    #[test]
+    fn route_reason_text_can_reuse_router_question_when_no_structured_override_exists() {
+        let route = clarify_route(crate::OutputLocatorKind::Filename);
+        assert!(should_reuse_route_clarify_question(
+            "README.md",
+            &route,
+            crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
             &[],
         ));
     }

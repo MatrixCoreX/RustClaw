@@ -277,6 +277,7 @@ pub(crate) struct AgentRunContext {
     pub(crate) route_result: Option<crate::RouteResult>,
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) auto_locator_path: Option<String>,
+    pub(crate) user_request: Option<String>,
 }
 
 struct RespondActionOutcome {
@@ -517,6 +518,7 @@ fn plan_step_label(action: &AgentAction) -> String {
 }
 
 fn build_resume_context_error(
+    state: &AppState,
     actions: &[AgentAction],
     plan_steps: &[String],
     user_request: &str,
@@ -575,17 +577,43 @@ fn build_resume_context_error(
         "remaining_actions": remaining_actions,
         "hint": "LLM should infer continuation from resume context and user follow-up."
     });
+    let prefer_english = state
+        .command_intent
+        .default_locale
+        .to_ascii_lowercase()
+        .starts_with("en");
+    let failed_index_text = failed_index.to_string();
     let user_error = if resume_context
         .get("remaining_actions")
         .and_then(|v| v.as_array())
         .map(|v| !v.is_empty())
         .unwrap_or(false)
     {
-        format!(
-            "step {failed_index} failed ({failed_action}): {err}. Remaining steps are interrupted. 你可以回复“继续”来执行剩余步骤。"
+        crate::bilingual_t_with_default_vars(
+            state,
+            "clawd.msg.resume_step_failed_with_remaining",
+            "step {failed_index} failed ({failed_action}): {err}. Remaining steps are interrupted. 你可以回复“继续”来执行剩余步骤。",
+            "Step {failed_index} failed ({failed_action}): {err}. Remaining steps were interrupted. Reply \"continue\" to run the remaining steps.",
+            prefer_english,
+            &[
+                ("failed_index", &failed_index_text),
+                ("failed_action", failed_action),
+                ("err", err),
+            ],
         )
     } else {
-        format!("step {failed_index} failed ({failed_action}): {err}")
+        crate::bilingual_t_with_default_vars(
+            state,
+            "clawd.msg.resume_step_failed_no_remaining",
+            "step {failed_index} failed ({failed_action}): {err}",
+            "Step {failed_index} failed ({failed_action}): {err}",
+            prefer_english,
+            &[
+                ("failed_index", &failed_index_text),
+                ("failed_action", failed_action),
+                ("err", err),
+            ],
+        )
     };
     let payload = json!({
         "user_error": user_error,
@@ -607,13 +635,13 @@ fn confirmation_remaining_step_labels(steps: &[crate::PlanStep]) -> Vec<String> 
 }
 
 fn build_confirmation_required_resume_context(
+    state: &AppState,
     steps: &[crate::PlanStep],
     user_request: &str,
     goal: &str,
     subtask_results: &[String],
     delivery_messages: &[String],
     detail: &str,
-    locale: &str,
 ) -> (String, serde_json::Value) {
     let completed_messages_for_ctx: Vec<String> = if delivery_messages.is_empty() {
         subtask_results.to_vec()
@@ -641,17 +669,18 @@ fn build_confirmation_required_resume_context(
         "remaining_actions": remaining_actions,
         "hint": "User must explicitly confirm before executing the remaining actions."
     });
-    let user_error = if locale.to_ascii_lowercase().starts_with("zh") {
-        format!(
-            "这一步需要你先明确确认，我还不会直接执行。你可以回复“继续”来执行剩余步骤。\n原因：{}",
-            detail
-        )
-    } else {
-        format!(
-            "This step needs your explicit confirmation before I execute it. Reply \"continue\" to run the remaining steps.\nReason: {}",
-            detail
-        )
-    };
+    let user_error = crate::bilingual_t_with_default_vars(
+        state,
+        "clawd.msg.resume_confirmation_required",
+        "这一步需要你先明确确认，我还不会直接执行。你可以回复“继续”来执行剩余步骤。\n原因：{detail}",
+        "This step needs your explicit confirmation before I execute it. Reply \"continue\" to run the remaining steps.\nReason: {detail}",
+        state
+            .command_intent
+            .default_locale
+            .to_ascii_lowercase()
+            .starts_with("en"),
+        &[("detail", detail)],
+    );
     (user_error, resume_context)
 }
 

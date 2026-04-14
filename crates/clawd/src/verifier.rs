@@ -532,6 +532,7 @@ primary_fallback_role = "fallback"
             database_sqlite_path: std::path::PathBuf::new(),
             database_busy_timeout_ms: 5_000,
             config_path_for_reload: String::new(),
+            self_extension: claw_core::config::SelfExtensionConfig::default(),
             registry_path_for_reload: None,
             skill_switches_for_reload: Arc::new(HashMap::new()),
             initial_skills_list_for_reload: Vec::new(),
@@ -566,6 +567,8 @@ primary_fallback_role = "fallback"
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
         }
     }

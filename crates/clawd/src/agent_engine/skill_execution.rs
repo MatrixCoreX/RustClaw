@@ -330,6 +330,7 @@ fn handle_skill_step_failure(
         return Ok(Some(stop_reason.to_string()));
     }
     let resume_err = build_resume_context_error(
+        state,
         actions,
         round_steps,
         user_text,

@@ -628,9 +628,11 @@ pub(crate) async fn try_handle_schedule_request(
         if !reason.is_empty() {
             return Ok(Some(reason.to_string()));
         }
-        return Ok(Some(
-            "请补充必要信息后，我再帮你创建这个定时任务。".to_string(),
-        ));
+        return Ok(Some(crate::i18n_t_with_default(
+            state,
+            "schedule.msg.create_needs_more_info",
+            "请补充必要信息后，我再帮你创建这个定时任务。",
+        )));
     }
     if kind.is_empty() || kind == "none" {
         return Ok(None);

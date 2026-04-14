@@ -21,10 +21,10 @@ language = "en-US"
 # i18n 文件路径（当 language 对应文件不存在时回退到此路径）
 i18n_path = "configs/i18n/larkd.en-US.toml"
 # 入站媒体落盘根目录（相对 larkd 进程工作目录；实际路径为 <目录>/<chat_id>/<文件名>）
-# image_inbox_dir = "data/larkd/image"
-# video_inbox_dir = "data/larkd/video"
-# audio_inbox_dir = "data/larkd/audio"
-# file_inbox_dir = "data/larkd/file"
+image_inbox_dir = "data/larkd/image"
+video_inbox_dir = "data/larkd/video"
+audio_inbox_dir = "data/larkd/audio"
+file_inbox_dir = "data/larkd/file"
 # Lark 应用 App ID
 app_id = ""
 # Lark 应用 App Secret（日志不打印）

@@ -900,6 +900,7 @@ mod tests {
             database_sqlite_path: std::path::PathBuf::new(),
             database_busy_timeout_ms: 5_000,
             config_path_for_reload: String::new(),
+            self_extension: claw_core::config::SelfExtensionConfig::default(),
             registry_path_for_reload: None,
             skill_switches_for_reload: Arc::new(HashMap::new()),
             initial_skills_list_for_reload: Vec::new(),

@@ -51,10 +51,11 @@ fn has_executable_observation_or_action(actions: &[AgentAction]) -> bool {
 }
 
 fn should_stop_for_observed_finalize(
-    route_result: Option<&RouteResult>,
+    agent_run_context: Option<&AgentRunContext>,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
+    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     let Some(route_result) = route_result else {
         return false;
     };
@@ -64,16 +65,24 @@ fn should_stop_for_observed_finalize(
     {
         return false;
     }
-    if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && super::observed_output::extract_direct_scalar_from_generic_output_with_locator_hint(
+    if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+        if super::observed_output::extract_direct_scalar_from_generic_output(
             loop_state,
-            Some(route_result.output_contract.locator_hint.as_str()),
-            None,
-            false,
+            agent_run_context,
         )
         .is_some()
-    {
-        return true;
+        {
+            return true;
+        }
+        if super::observed_output::route_prefers_direct_observed_answer_for_scalar(route_result)
+            && super::observed_output::extract_direct_answer_from_generic_output(
+                loop_state,
+                agent_run_context,
+            )
+            .is_some()
+        {
+            return true;
+        }
     }
     has_executable_observation_or_action(actions)
         && !has_discussion_followup_action(actions)
@@ -182,11 +191,7 @@ async fn run_agent_round(
     let mut outcome =
         execute_actions_once(state, task, goal, user_text, &actions, loop_state, policy).await?;
     if outcome.stop_signal.is_none()
-        && should_stop_for_observed_finalize(
-            agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
-            loop_state,
-            &actions,
-        )
+        && should_stop_for_observed_finalize(agent_run_context, loop_state, &actions)
     {
         outcome.stop_signal = Some("observed_output_ready".to_string());
     }
@@ -236,10 +241,11 @@ pub(super) async fn run_agent_with_loop(
 mod tests {
     use super::should_stop_for_observed_finalize;
     use crate::{
-        agent_engine::LoopState,
+        agent_engine::{AgentRunContext, LoopState},
         executor::{StepExecutionResult, StepExecutionStatus},
         AgentAction, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-        OutputResponseShape, ResumeBehavior, RiskCeiling, RouteResult, RoutedMode, ScheduleKind,
+        OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult,
+        RoutedMode, ScheduleKind,
     };
     use serde_json::json;
 
@@ -257,13 +263,17 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
                 response_shape: shape,
                 requires_content_evidence: true,
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::Path,
                 delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
                 locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
             },
         }
     }
@@ -294,7 +304,10 @@ mod tests {
             args: json!({"action":"extract_field"}),
         }];
         assert!(should_stop_for_observed_finalize(
-            Some(&route_result(OutputResponseShape::Scalar)),
+            Some(&AgentRunContext {
+                route_result: Some(route_result(OutputResponseShape::Scalar)),
+                ..Default::default()
+            }),
             &loop_state,
             &actions,
         ));
@@ -314,7 +327,45 @@ mod tests {
             args: json!({"path":"."}),
         }];
         assert!(should_stop_for_observed_finalize(
-            Some(&route_result(OutputResponseShape::Free)),
+            Some(&AgentRunContext {
+                route_result: Some(route_result(OutputResponseShape::Free)),
+                ..Default::default()
+            }),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn hidden_entries_scalar_output_can_stop_before_chat_followup() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "list_dir",
+            ".git\nREADME.md\n.env\nsrc\n",
+        ));
+        let mut route = route_result(OutputResponseShape::Scalar);
+        route.resolved_intent =
+            "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子".to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
+        route.output_contract.locator_hint = ".".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: json!({"path":"."}),
+            },
+            AgentAction::CallSkill {
+                skill: "chat".to_string(),
+                args: json!({"text":"summarize hidden entries"}),
+            },
+        ];
+        assert!(should_stop_for_observed_finalize(
+            Some(&AgentRunContext {
+                route_result: Some(route),
+                ..Default::default()
+            }),
             &loop_state,
             &actions,
         ));

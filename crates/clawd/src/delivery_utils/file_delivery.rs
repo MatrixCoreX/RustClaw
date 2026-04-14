@@ -6,8 +6,9 @@ use super::locator::{
     classify_file_delivery_locator_input, extract_explicit_file_path_candidates,
     normalize_locator_text,
 };
+use super::types::localize_delivery_message_for_request;
 use super::{
-    localize_delivery_message, resolve_existing_dir_under_root, resolve_existing_file_under_root,
+    resolve_existing_dir_under_root, resolve_existing_file_under_root,
     response_has_same_file_token, trim_path_token, BatchDirectoryDeliveryResolution,
     CurrentLevelDeliveryEntries, CurrentLevelDeliveryEntriesResult, DeliveryMessageKind,
     DirectoryFileLookupResult, DirectoryLookupResolution, FileDeliveryLocatorInput,
@@ -41,13 +42,15 @@ pub(super) fn resolve_batch_directory_delivery(
         DirectoryLookupResolution::Resolved(directory) => {
             match list_current_level_files_for_delivery(&directory, state.locator_scan_max_files) {
                 CurrentLevelDeliveryEntriesResult::Ready(entries) => {
-                    let subdir_hint = localize_delivery_message(
+                    let subdir_hint = localize_delivery_message_for_request(
                         state,
                         DeliveryMessageKind::DirectoryHasChildDirsHint,
+                        user_request,
                     );
-                    let no_files_message = localize_delivery_message(
+                    let no_files_message = localize_delivery_message_for_request(
                         state,
                         DeliveryMessageKind::DirectoryNoSendableFilesInCurrentLevel,
+                        user_request,
                     );
                     Some(build_batch_directory_delivery_response(
                         entries,
@@ -57,16 +60,17 @@ pub(super) fn resolve_batch_directory_delivery(
                 }
                 CurrentLevelDeliveryEntriesResult::UserMessage(kind) => {
                     Some(BatchDirectoryDeliveryResolution::UserMessage(
-                        localize_delivery_message(state, kind),
+                        localize_delivery_message_for_request(state, kind, user_request),
                     ))
                 }
             }
         }
         DirectoryLookupResolution::MultipleCandidates(candidates) => {
             let mut lines = Vec::with_capacity(candidates.len() + 1);
-            lines.push(localize_delivery_message(
+            lines.push(localize_delivery_message_for_request(
                 state,
                 DeliveryMessageKind::DirectoryMultipleCandidates,
+                user_request,
             ));
             lines.extend(
                 candidates
@@ -77,9 +81,11 @@ pub(super) fn resolve_batch_directory_delivery(
                 lines.join("\n"),
             ))
         }
-        DirectoryLookupResolution::UserMessage(kind) => Some(
-            BatchDirectoryDeliveryResolution::UserMessage(localize_delivery_message(state, kind)),
-        ),
+        DirectoryLookupResolution::UserMessage(kind) => {
+            Some(BatchDirectoryDeliveryResolution::UserMessage(
+                localize_delivery_message_for_request(state, kind, user_request),
+            ))
+        }
     }
 }
 
@@ -236,9 +242,10 @@ pub(super) fn enforce_file_delivery_locator_contract(
         }
         FileDeliveryTargetResolution::Candidates(paths) => {
             let mut lines = Vec::with_capacity(paths.len() + 1);
-            lines.push(localize_delivery_message(
+            lines.push(localize_delivery_message_for_request(
                 state,
                 DeliveryMessageKind::FilenameNotUnique,
+                user_request,
             ));
             lines.extend(paths.into_iter().map(|path| path.display().to_string()));
             *normalized_text = lines.join("\n");
@@ -246,7 +253,7 @@ pub(super) fn enforce_file_delivery_locator_contract(
                 .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
         }
         FileDeliveryTargetResolution::UserMessage(msg) => {
-            *normalized_text = localize_delivery_message(state, msg);
+            *normalized_text = localize_delivery_message_for_request(state, msg, user_request);
             normalized_messages
                 .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
         }
@@ -384,6 +391,11 @@ pub(super) fn scan_filename_under_roots(
             FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule3ScanTooMany)
         }
         FilenameScanResult::NotFound => {
+            if system_root == Path::new("/") {
+                return FileDeliveryTargetResolution::UserMessage(
+                    DeliveryMessageKind::Rule3FileNotFound,
+                );
+            }
             match scan_filename_matches_with_limit_internal(
                 system_root,
                 file_name,

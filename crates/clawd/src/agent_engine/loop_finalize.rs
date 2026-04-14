@@ -67,6 +67,34 @@ fn route_requires_file_token(agent_run_context: Option<&AgentRunContext>) -> boo
         .unwrap_or(false)
 }
 
+fn has_missing_file_search_evidence(loop_state: &LoopState) -> bool {
+    loop_state.executed_step_results.iter().rev().any(|step| {
+        if !step.is_ok() || step.skill != "fs_search" {
+            return false;
+        }
+        let Some(output) = step.output.as_deref() else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            return false;
+        };
+        value.get("action").and_then(|v| v.as_str()) == Some("find_name")
+            && value.get("count").and_then(|v| v.as_i64()) == Some(0)
+            && value
+                .get("results")
+                .and_then(|v| v.as_array())
+                .is_some_and(|results| results.is_empty())
+    })
+}
+
+fn missing_file_delivery_answer_text(state: &AppState) -> String {
+    crate::i18n_t_with_default(
+        state,
+        "clawd.msg.delivery.rule3_file_not_found",
+        "File not found.",
+    )
+}
+
 fn resolve_file_token_from_auto_locator_answer(
     answer: &str,
     auto_locator_path: Option<&str>,
@@ -173,37 +201,153 @@ async fn discard_meta_respond_placeholder_for_content_evidence(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
     requires_content_evidence: bool,
+    agent_run_context: Option<&AgentRunContext>,
 ) {
-    if !requires_content_evidence {
-        return;
-    }
-    if !loop_state.has_tool_or_skill_output {
-        return;
-    }
-    if loop_state.delivery_messages.len() != 1 {
-        return;
-    }
     let Some(last_respond) = loop_state.last_user_visible_respond.as_deref() else {
         return;
     };
-    let delivery = loop_state.delivery_messages[0].trim();
     let respond = last_respond.trim();
-    if delivery.is_empty() || respond.is_empty() || delivery != respond {
+    let Some(raw_passthrough) = should_drop_passthrough_delivery_for_content_evidence(
+        loop_state,
+        requires_content_evidence,
+        agent_run_context,
+        respond,
+    ) else {
         return;
-    }
-    if !crate::semantic_judge::is_meta_respond_instruction(state, task, respond).await {
+    };
+    let meta_placeholder =
+        crate::semantic_judge::is_meta_respond_instruction(state, task, respond).await;
+    if !raw_passthrough && !meta_placeholder {
         return;
     }
     info!(
-        "content_evidence_drop_meta_respond task_id={} text={}",
+        "content_evidence_drop_passthrough_respond task_id={} raw_passthrough={} meta_placeholder={} text={}",
         task.task_id,
+        raw_passthrough,
+        meta_placeholder,
         crate::truncate_for_log(respond)
     );
     loop_state.delivery_messages.clear();
     loop_state.last_user_visible_respond = None;
 }
 
+fn should_drop_passthrough_delivery_for_content_evidence(
+    loop_state: &LoopState,
+    requires_content_evidence: bool,
+    agent_run_context: Option<&AgentRunContext>,
+    respond: &str,
+) -> Option<bool> {
+    if !requires_content_evidence {
+        return None;
+    }
+    if !loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    if loop_state.delivery_messages.len() != 1 {
+        return None;
+    }
+    let delivery = loop_state.delivery_messages[0].trim();
+    let respond = respond.trim();
+    if delivery.is_empty() || respond.is_empty() || delivery != respond {
+        return None;
+    }
+
+    let direct_observed_answer_matches =
+        direct_scalar_observed_answer(None, loop_state, agent_run_context)
+            .map(|(answer, _)| answer)
+            .into_iter()
+            .chain(
+                direct_structured_observed_answer(None, loop_state, agent_run_context)
+                    .map(|(answer, _)| answer),
+            )
+            .any(|answer| answer.trim() == respond);
+    if direct_observed_answer_matches {
+        return Some(false);
+    }
+
+    let raw_passthrough = loop_state
+        .executed_step_results
+        .iter()
+        .rfind(|step| step.is_ok() && !matches!(step.skill.as_str(), "chat" | "respond"))
+        .and_then(|step| {
+            let body = step.output.as_deref()?.trim();
+            if body.is_empty() {
+                return None;
+            }
+            if respond == body {
+                return Some(true);
+            }
+            (step.skill == "list_dir"
+                && super::observed_output::normalized_observed_listing(body, None).is_some_and(
+                    |listing| {
+                        listing.trim() == respond
+                            || listing
+                                .lines()
+                                .map(str::trim)
+                                .any(|entry| !entry.is_empty() && entry == respond)
+                    },
+                ))
+            .then_some(true)
+        })
+        .unwrap_or(false);
+    Some(raw_passthrough)
+}
+
+fn discard_raw_passthrough_delivery_when_structured_answer_available(
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) {
+    if loop_state.delivery_messages.len() != 1 {
+        return;
+    }
+    let Some(current_delivery) = loop_state.delivery_messages.last().map(|v| v.trim()) else {
+        return;
+    };
+    if current_delivery.is_empty() {
+        return;
+    }
+    let Some((structured_answer, _)) =
+        direct_structured_observed_answer(None, loop_state, agent_run_context)
+    else {
+        return;
+    };
+    if structured_answer.trim().is_empty() || structured_answer.trim() == current_delivery {
+        return;
+    }
+
+    let raw_passthrough = loop_state
+        .executed_step_results
+        .iter()
+        .rfind(|step| step.is_ok() && !matches!(step.skill.as_str(), "chat" | "respond"))
+        .and_then(|step| {
+            let body = step.output.as_deref()?.trim();
+            if body.is_empty() {
+                return None;
+            }
+            if current_delivery == body {
+                return Some(true);
+            }
+            let first_line = body.lines().map(str::trim).find(|line| !line.is_empty())?;
+            (current_delivery == first_line).then_some(true)
+        })
+        .unwrap_or(false);
+    if !raw_passthrough {
+        return;
+    }
+
+    info!(
+        "drop_raw_passthrough_delivery_for_structured_answer task_id={} raw={} structured={}",
+        task.task_id,
+        crate::truncate_for_log(current_delivery),
+        crate::truncate_for_log(structured_answer.trim())
+    );
+    loop_state.delivery_messages.clear();
+    loop_state.last_user_visible_respond = None;
+}
+
 fn direct_scalar_observed_answer(
+    state: Option<&AppState>,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
@@ -211,22 +355,51 @@ fn direct_scalar_observed_answer(
     if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
         return None;
     }
-    let answer = if route_prefers_existence_with_path_answer(route) {
-        super::observed_output::extract_direct_answer_from_generic_output(
-            loop_state,
-            agent_run_context,
-        )
-        .or_else(|| {
-            super::observed_output::extract_direct_scalar_from_generic_output(
-                loop_state,
-                agent_run_context,
-            )
-        })?
+    let answer = if super::observed_output::route_prefers_direct_observed_answer_for_scalar(route) {
+        state
+            .and_then(|state| {
+                super::observed_output::extract_direct_answer_from_generic_output_i18n(
+                    loop_state,
+                    state,
+                    agent_run_context,
+                )
+            })
+            .or_else(|| {
+                super::observed_output::extract_direct_answer_from_generic_output(
+                    loop_state,
+                    agent_run_context,
+                )
+            })
+            .or_else(|| {
+                state.and_then(|state| {
+                    super::observed_output::extract_direct_scalar_from_generic_output_i18n(
+                        loop_state,
+                        state,
+                        agent_run_context,
+                    )
+                })
+            })
+            .or_else(|| {
+                super::observed_output::extract_direct_scalar_from_generic_output(
+                    loop_state,
+                    agent_run_context,
+                )
+            })?
     } else {
-        super::observed_output::extract_direct_scalar_from_generic_output(
-            loop_state,
-            agent_run_context,
-        )?
+        state
+            .and_then(|state| {
+                super::observed_output::extract_direct_scalar_from_generic_output_i18n(
+                    loop_state,
+                    state,
+                    agent_run_context,
+                )
+            })
+            .or_else(|| {
+                super::observed_output::extract_direct_scalar_from_generic_output(
+                    loop_state,
+                    agent_run_context,
+                )
+            })?
     };
     if crate::finalizer::looks_like_planner_artifact(&answer)
         || crate::finalizer::looks_like_internal_trace_artifact(&answer)
@@ -244,22 +417,8 @@ fn direct_scalar_observed_answer(
     ))
 }
 
-fn route_prefers_existence_with_path_answer(route: &crate::RouteResult) -> bool {
-    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
-        return false;
-    }
-    let intent = route.resolved_intent.trim();
-    if intent.is_empty() {
-        return false;
-    }
-    let zh_exists =
-        intent.contains("有或没有") || (intent.contains("是否存在") && intent.contains("路径"));
-    let en_exists = intent.to_ascii_lowercase().contains("yes or no")
-        && intent.to_ascii_lowercase().contains("path");
-    zh_exists || en_exists
-}
-
 fn direct_structured_observed_answer(
+    state: Option<&AppState>,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
@@ -270,10 +429,20 @@ fn direct_structured_observed_answer(
     ) {
         return None;
     }
-    let answer = super::observed_output::extract_direct_answer_from_generic_output(
-        loop_state,
-        agent_run_context,
-    )?;
+    let answer = state
+        .and_then(|state| {
+            super::observed_output::extract_direct_answer_from_generic_output_i18n(
+                loop_state,
+                state,
+                agent_run_context,
+            )
+        })
+        .or_else(|| {
+            super::observed_output::extract_direct_answer_from_generic_output(
+                loop_state,
+                agent_run_context,
+            )
+        })?;
     if answer.trim().is_empty() {
         return None;
     }
@@ -352,17 +521,7 @@ fn looks_like_raw_command_snapshot(answer: &str) -> bool {
 }
 
 fn route_explicitly_requests_command_result(route: &crate::RouteResult) -> bool {
-    let intent = route.resolved_intent.trim().to_ascii_lowercase();
-    if intent.is_empty() {
-        return false;
-    }
-    (intent.contains("命令") && (intent.contains("执行") || intent.contains("运行")))
-        || intent.contains("直接回复执行结果")
-        || intent.contains("直接回执行结果")
-        || intent.contains("run command")
-        || intent.contains("execute command")
-        || intent.contains("show command output")
-        || intent.contains("raw output")
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
 }
 
 fn pending_confirmation_resume_payload(
@@ -383,13 +542,13 @@ fn pending_confirmation_resume_payload(
         .map(|issue| issue.detail.as_str())
         .unwrap_or("current plan requires explicit confirmation");
     Some(super::build_confirmation_required_resume_context(
+        state,
         &plan.steps,
         user_text,
         &round.goal,
         &loop_state.subtask_results,
         &loop_state.delivery_messages,
         detail,
-        &state.command_intent.default_locale,
     ))
 }
 
@@ -552,8 +711,14 @@ pub(super) async fn finalize_loop_reply(
         task,
         &mut loop_state,
         requires_content_evidence,
+        agent_run_context,
     )
     .await;
+    discard_raw_passthrough_delivery_when_structured_answer_available(
+        task,
+        &mut loop_state,
+        agent_run_context,
+    );
     let mut finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary> = None;
     let should_try_observed_scalar_fallback = crate::finalizer::should_attempt_observed_fallback(
         loop_state.has_tool_or_skill_output,
@@ -561,7 +726,7 @@ pub(super) async fn finalize_loop_reply(
     ) && loop_state.delivery_messages.is_empty();
     if should_try_observed_scalar_fallback {
         if let Some((answer, summary)) =
-            direct_scalar_observed_answer(&loop_state, agent_run_context)
+            direct_scalar_observed_answer(Some(state), &loop_state, agent_run_context)
         {
             finalizer_summary = Some(summary);
             loop_state.last_user_visible_respond = Some(answer.clone());
@@ -575,7 +740,7 @@ pub(super) async fn finalize_loop_reply(
 
     if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) =
-            direct_structured_observed_answer(&loop_state, agent_run_context)
+            direct_structured_observed_answer(Some(state), &loop_state, agent_run_context)
         {
             finalizer_summary = Some(summary);
             loop_state.last_user_visible_respond = Some(answer.clone());
@@ -647,6 +812,7 @@ pub(super) async fn finalize_loop_reply(
             &clarify_reason,
             None,
             preferred_route_clarify_question(agent_run_context),
+            crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
         )
         .await;
         let delivery_messages = vec![clarify.clone()];
@@ -673,6 +839,29 @@ pub(super) async fn finalize_loop_reply(
             loop_state.last_user_visible_respond.as_ref(),
         );
 
+    if delivery_deduped.is_empty()
+        && route_requires_file_token(agent_run_context)
+        && has_missing_file_search_evidence(&loop_state)
+    {
+        let message = missing_file_delivery_answer_text(state);
+        let delivery_messages = vec![message.clone()];
+        let delivery_consistent =
+            crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
+        let journal = build_loop_journal(
+            task,
+            user_text,
+            &loop_state,
+            agent_run_context,
+            finalizer_summary,
+            delivery_consistent,
+            &message,
+            crate::task_journal::TaskJournalFinalStatus::Success,
+        );
+        return Ok(AskReply::non_llm(message.clone())
+            .with_messages(delivery_messages)
+            .with_task_journal(journal));
+    }
+
     if delivery_deduped.is_empty() {
         let clarify_reason = build_missing_delivery_clarify_reason(finalizer_summary.as_ref());
         let clarify = crate::intent_router::generate_or_reuse_clarify_question(
@@ -682,6 +871,7 @@ pub(super) async fn finalize_loop_reply(
             &clarify_reason,
             None,
             preferred_route_clarify_question(agent_run_context),
+            crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
         )
         .await;
         let delivery_messages = vec![clarify.clone()];
@@ -756,14 +946,19 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        direct_scalar_observed_answer, finalizer_requires_clarify, looks_like_raw_command_snapshot,
-        looks_like_structured_machine_output, normalize_file_token_delivery_from_auto_locator,
-        resolve_file_token_from_auto_locator_answer, verify_summary_requires_resume_confirmation,
+        direct_scalar_observed_answer,
+        discard_raw_passthrough_delivery_when_structured_answer_available,
+        finalizer_requires_clarify, has_missing_file_search_evidence,
+        looks_like_raw_command_snapshot, looks_like_structured_machine_output,
+        normalize_file_token_delivery_from_auto_locator,
+        resolve_file_token_from_auto_locator_answer,
+        should_drop_passthrough_delivery_for_content_evidence,
+        verify_summary_requires_resume_confirmation,
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
-        IntentOutputContract, OutputLocatorKind, OutputResponseShape, ResumeBehavior, RiskCeiling,
-        RouteResult, RoutedMode, ScheduleKind,
+        ClaimedTask, IntentOutputContract, OutputLocatorKind, OutputResponseShape, ResumeBehavior,
+        RiskCeiling, RouteResult, RoutedMode, ScheduleKind,
     };
 
     struct TempDirGuard {
@@ -788,6 +983,20 @@ mod tests {
 
         fn path(&self) -> &Path {
             &self.path
+        }
+    }
+
+    fn claimed_task(task_id: &str) -> ClaimedTask {
+        ClaimedTask {
+            task_id: task_id.to_string(),
+            user_id: 1,
+            chat_id: 1,
+            user_key: None,
+            channel: "test".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: "{}".to_string(),
         }
     }
 
@@ -831,13 +1040,17 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::Filename,
                 delivery_intent: Default::default(),
+                semantic_kind: Default::default(),
                 locator_hint: "package.json".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
             },
         }
     }
@@ -921,12 +1134,260 @@ mod tests {
             ..Default::default()
         };
         let (answer, summary) =
-            direct_scalar_observed_answer(&loop_state, Some(&agent_run_context))
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
                 .expect("scalar fallback should succeed");
         assert_eq!(answer, "name 字段不存在");
         assert_eq!(
             summary.disposition,
             Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn direct_scalar_finalize_uses_hidden_entries_direct_answer() {
+        let mut loop_state = super::super::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "list_dir".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(".git\nREADME.md\n.env\nsrc\n".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = scalar_route_result();
+        route.resolved_intent =
+            "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子".to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = ".".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+        let agent_run_context = super::super::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let (answer, summary) =
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("hidden entries scalar fallback should succeed");
+        assert_eq!(answer, "有。示例：.git, .env");
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn direct_structured_finalize_uses_existence_with_path_answer_when_shape_drifted_free() {
+        let mut loop_state = super::super::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/tmp/rustclaw-workspace/rustclaw.service","size_bytes":1190},"path":"/tmp/rustclaw-workspace/rustclaw.service"}],"include_missing":true}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = scalar_route_result();
+        route.resolved_intent =
+            "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_hint = "rustclaw.service".to_string();
+        let agent_run_context = super::super::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let (answer, summary) =
+            super::direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("existence-with-path fallback should succeed");
+        assert_eq!(answer, "有，路径：/tmp/rustclaw-workspace/rustclaw.service");
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn raw_structured_passthrough_is_dropped_for_scalar_contract() {
+        let raw = r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#;
+        let mut loop_state = super::super::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.last_user_visible_respond = Some(raw.to_string());
+        loop_state.delivery_messages.push(raw.to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(raw.to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let agent_run_context = super::super::AgentRunContext {
+            route_result: Some(scalar_route_result()),
+            ..Default::default()
+        };
+        assert_eq!(
+            should_drop_passthrough_delivery_for_content_evidence(
+                &loop_state,
+                true,
+                Some(&agent_run_context),
+                raw
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn qualified_scalar_passthrough_is_not_dropped() {
+        let mut loop_state = super::super::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.last_user_visible_respond = Some("rustclaw".to_string());
+        loop_state.delivery_messages.push("rustclaw".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("rustclaw\n".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let agent_run_context = super::super::AgentRunContext {
+            route_result: Some(scalar_route_result()),
+            ..Default::default()
+        };
+        assert_eq!(
+            should_drop_passthrough_delivery_for_content_evidence(
+                &loop_state,
+                true,
+                Some(&agent_run_context),
+                "rustclaw"
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn raw_listing_passthrough_is_dropped_for_content_evidence_free_shape() {
+        let listing = "base_skill_response_contract.md\nskill_integration_guide.md";
+        let mut loop_state = super::super::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.last_user_visible_respond = Some(listing.to_string());
+        loop_state.delivery_messages.push(listing.to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "list_dir".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(format!("{listing}\n")),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "docs".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = super::super::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        assert_eq!(
+            should_drop_passthrough_delivery_for_content_evidence(
+                &loop_state,
+                true,
+                Some(&agent_run_context),
+                listing
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn single_listing_entry_passthrough_is_dropped_for_content_evidence() {
+        let listing = "base_skill_response_contract.md\nskill_integration_guide.md";
+        let mut loop_state = super::super::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.last_user_visible_respond = Some("base_skill_response_contract.md".to_string());
+        loop_state
+            .delivery_messages
+            .push("base_skill_response_contract.md".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "list_dir".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(format!("{listing}\n")),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
+                locator_hint: "docs".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = super::super::AgentRunContext {
+            route_result: Some(route),
+            auto_locator_path: Some("/tmp/docs".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            should_drop_passthrough_delivery_for_content_evidence(
+                &loop_state,
+                true,
+                Some(&agent_run_context),
+                "base_skill_response_contract.md"
+            ),
+            Some(true)
         );
     }
 
@@ -950,18 +1411,79 @@ mod tests {
             "检查仓库工作区中是否存在 rustclaw.service 文件，如果存在则返回路径，如果不存在则返回不存在。回答格式只输出有或没有以及路径。"
                 .to_string();
         route.output_contract.requires_content_evidence = false;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
         let agent_run_context = super::super::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
         };
         let (answer, summary) =
-            direct_scalar_observed_answer(&loop_state, Some(&agent_run_context))
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
                 .expect("presence+path fallback should succeed");
         assert_eq!(answer, "有，路径：rustclaw.service");
         assert_eq!(
             summary.disposition,
             Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
         );
+    }
+
+    #[test]
+    fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
+        let mut loop_state = super::super::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.last_user_visible_respond = Some("exit=0".to_string());
+        loop_state.delivery_messages.push("exit=0".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "archive_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                "exit=0\nupdating: tmp/rustclaw-workspace/scripts/skill_calls/\n".to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            resolved_intent:
+                "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::OneSentence,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
+                locator_hint: "scripts/skill_calls -> tmp/nl_archive_case.zip".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = super::super::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        discard_raw_passthrough_delivery_when_structured_answer_available(
+            &claimed_task("task-archive"),
+            &mut loop_state,
+            Some(&agent_run_context),
+        );
+
+        assert!(loop_state.delivery_messages.is_empty());
+        assert!(loop_state.last_user_visible_respond.is_none());
     }
 
     #[test]
@@ -1042,5 +1564,29 @@ mod tests {
             Some(expected.as_str())
         );
         assert_eq!(loop_state.delivery_messages, vec![expected]);
+    }
+
+    #[test]
+    fn missing_file_search_evidence_detects_zero_match_fs_search() {
+        let mut loop_state = super::super::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_search".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                serde_json::json!({
+                    "action": "find_name",
+                    "count": 0,
+                    "results": [],
+                    "root": ""
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        assert!(has_missing_file_search_evidence(&loop_state));
     }
 }
