@@ -9,19 +9,33 @@ use serde_json::Value;
 
 use crate::AppState;
 
-pub(crate) fn parse_task_status_with_rules(rules: &MainFlowRules, raw: &str) -> TaskStatus {
+pub(crate) const TASK_STATUS_QUEUED: &str = "queued";
+pub(crate) const TASK_STATUS_RUNNING: &str = "running";
+pub(crate) const TASK_STATUS_SUCCEEDED: &str = "succeeded";
+pub(crate) const TASK_STATUS_FAILED: &str = "failed";
+pub(crate) const TASK_STATUS_CANCELED: &str = "canceled";
+pub(crate) const TASK_STATUS_TIMEOUT: &str = "timeout";
+
+pub(crate) const CLASSIFIER_DIRECT_SOURCES: &[&str] = &[
+    "voice_mode_intent_detect",
+    "voice_mode_intent_detect_regression",
+];
+
+pub(crate) const RESUME_CONTINUE_SOURCES: &[&str] = &["resume_continue_execute"];
+
+pub(crate) fn parse_task_status(raw: &str) -> TaskStatus {
     let s = raw.trim().to_ascii_lowercase();
-    if s == rules.task_status_queued {
+    if s == TASK_STATUS_QUEUED {
         TaskStatus::Queued
-    } else if s == rules.task_status_running {
+    } else if s == TASK_STATUS_RUNNING {
         TaskStatus::Running
-    } else if s == rules.task_status_succeeded {
+    } else if s == TASK_STATUS_SUCCEEDED {
         TaskStatus::Succeeded
-    } else if s == rules.task_status_failed {
+    } else if s == TASK_STATUS_FAILED {
         TaskStatus::Failed
-    } else if s == rules.task_status_canceled {
+    } else if s == TASK_STATUS_CANCELED {
         TaskStatus::Canceled
-    } else if s == rules.task_status_timeout {
+    } else if s == TASK_STATUS_TIMEOUT {
         TaskStatus::Timeout
     } else {
         TaskStatus::Failed
@@ -49,6 +63,61 @@ pub(crate) fn i18n_t_with_default(state: &AppState, key: &str, default_text: &st
         .get(key)
         .cloned()
         .unwrap_or_else(|| default_text.to_string())
+}
+
+fn render_i18n_vars(mut text: String, vars: &[(&str, &str)]) -> String {
+    for (name, value) in vars {
+        text = text.replace(&format!("{{{name}}}"), value);
+    }
+    text
+}
+
+pub(crate) fn i18n_t_with_default_vars(
+    state: &AppState,
+    key: &str,
+    default_text: &str,
+    vars: &[(&str, &str)],
+) -> String {
+    render_i18n_vars(i18n_t_with_default(state, key, default_text), vars)
+}
+
+pub(crate) fn bilingual_t_with_default(
+    state: &AppState,
+    key: &str,
+    default_zh: &str,
+    default_en: &str,
+    prefer_english: bool,
+) -> String {
+    let configured_locale = state.schedule.locale.trim().to_ascii_lowercase();
+    let configured_matches_requested = if prefer_english {
+        configured_locale.starts_with("en")
+    } else {
+        configured_locale.starts_with("zh")
+    };
+    let default_text = if prefer_english {
+        default_en
+    } else {
+        default_zh
+    };
+    if configured_matches_requested {
+        i18n_t_with_default(state, key, default_text)
+    } else {
+        default_text.to_string()
+    }
+}
+
+pub(crate) fn bilingual_t_with_default_vars(
+    state: &AppState,
+    key: &str,
+    default_zh: &str,
+    default_en: &str,
+    prefer_english: bool,
+    vars: &[(&str, &str)],
+) -> String {
+    render_i18n_vars(
+        bilingual_t_with_default(state, key, default_zh, default_en, prefer_english),
+        vars,
+    )
 }
 
 pub(crate) fn ensure_column_exists(

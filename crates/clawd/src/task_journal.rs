@@ -191,8 +191,15 @@ fn route_result_json(route: &crate::RouteResult) -> Value {
     json!({
         "routed_mode": route.routed_mode.as_str(),
         "needs_clarify": route.needs_clarify,
+        "should_refresh_long_term_memory": route.should_refresh_long_term_memory,
+        "agent_display_name_hint": route.agent_display_name_hint,
         "route_reason": crate::truncate_for_log(&route.route_reason),
         "risk_ceiling": route.risk_ceiling.as_str(),
+        "self_extension": {
+            "mode": route.output_contract.self_extension.mode.as_str(),
+            "trigger": route.output_contract.self_extension.trigger.as_str(),
+            "execute_now": route.output_contract.self_extension.execute_now,
+        },
     })
 }
 
@@ -500,6 +507,30 @@ mod tests {
     #[test]
     fn summary_json_includes_finalizer_and_task_metrics() {
         let mut journal = TaskJournal::for_task("task-1", "ask", "总结 README");
+        journal.record_route_result(&crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            resolved_intent: "不要用现有技能，先规划一个新能力".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "structured self_extension contract".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                self_extension: crate::SelfExtensionContract {
+                    mode: crate::SelfExtensionMode::PermanentExtension,
+                    trigger: crate::SelfExtensionTrigger::ExplicitUserRequest,
+                    execute_now: true,
+                },
+                ..Default::default()
+            },
+        });
         journal.record_finalizer_summary(TaskJournalFinalizerSummary {
             stage: Some(TaskJournalFinalizerStage::General),
             disposition: Some(crate::finalizer::FinalizerDisposition::AllowFallback),
@@ -549,6 +580,30 @@ mod tests {
                 .and_then(|v| v.get("llm_calls_per_task"))
                 .and_then(Value::as_u64),
             Some(3)
+        );
+        assert_eq!(
+            summary
+                .get("route_result")
+                .and_then(|v| v.get("self_extension"))
+                .and_then(|v| v.get("mode"))
+                .and_then(Value::as_str),
+            Some("permanent_extension")
+        );
+        assert_eq!(
+            summary
+                .get("route_result")
+                .and_then(|v| v.get("self_extension"))
+                .and_then(|v| v.get("trigger"))
+                .and_then(Value::as_str),
+            Some("explicit_user_request")
+        );
+        assert_eq!(
+            summary
+                .get("route_result")
+                .and_then(|v| v.get("self_extension"))
+                .and_then(|v| v.get("execute_now"))
+                .and_then(Value::as_bool),
+            Some(true)
         );
     }
 

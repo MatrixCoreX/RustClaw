@@ -1,7 +1,7 @@
 <!--
 Purpose: unified front-door understanding layer. In one pass it handles resume binding, intent completion, schedule-intent detection, and clarification need.
 Component: clawd (`crates/clawd/src/intent_router.rs`) `run_intent_normalizer`
-Placeholders: __PERSONA_PROMPT__, __CAPABILITY_MAP__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __RECENT_TURNS_FULL__, __NOW__, __TIMEZONE__, __SCHEDULE_RULES__, __REQUEST__; optional: __RECENT_ASSISTANT_REPLIES__ (recent assistant-turn ordinal anchors for previous / two-turns-back reply references; entries may include `ordered_entries=1:... | 2:...`)
+Placeholders: __PERSONA_PROMPT__, __CAPABILITY_MAP__, __SELF_EXTENSION_RUNTIME__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __RECENT_TURNS_FULL__, __NOW__, __TIMEZONE__, __SCHEDULE_RULES__, __REQUEST__; optional: __RECENT_ASSISTANT_REPLIES__ (recent assistant-turn ordinal anchors for previous / two-turns-back reply references; entries may include `ordered_entries=1:... | 2:...`)
 -->
 
 You are a unified intent normalizer for a tool-using assistant. In a single pass you must:
@@ -98,14 +98,22 @@ You are a unified intent normalizer for a tool-using assistant. In a single pass
    - Generic baseline diagnostic requests such as `run a basic health check` / `帮我做一次基础健康检查` are executable by the existing `health_check` capability and should stay in `act` / `chat_act` unless the user explicitly narrows to a missing target that truly cannot be inferred.
    - Requests that semantically mean "explain this repo / this repository / this workspace in simple words" are current-workspace content-evidence requests, not missing-path clarification, unless the user explicitly points to some other repository.
    - **Execution-mode contract guard (hard):** If `output_contract.requires_content_evidence=true` and `output_contract.locator_kind` is `path|current_workspace|url|filename`, and `needs_clarify=false`, mode must be executable (`act` or `chat_act`) rather than `chat`. Prefer `act` for scalar/file-token outcomes; prefer `chat_act` for user-facing explanation/summarization outcomes.
+   - **Self-extension contract (hard):** `output_contract.self_extension` is the only place to request the internal self-extension chain. Set it only from whole-request semantics, not from brittle surface matching. Use it when `__SELF_EXTENSION_RUNTIME__` says the feature is enabled and either:
+     - the user explicitly wants a temporary script / package-install / custom code path instead of existing skills, or explicitly asks to extend/add a reusable capability; or
+     - no existing skill in `__CAPABILITY_MAP__` clearly covers the request, but the request is still a bounded local automation / transform / inspection task that could reasonably be solved by a temporary script or language-level dependency.
+   - **Self-extension non-trigger cases (hard):** Do not set `output_contract.self_extension` for missing-locator clarification, ordinary chat, provider/network/runtime transient failures, file-not-found, permission errors, or cases where an existing skill already fits.
+   - **Self-extension mode preference:** Prefer `temporary_fix` for one-off task completion. Use `permanent_extension` only when the user is clearly asking to add a reusable new capability/skill to the system, not just to solve this turn once.
+   - **Self-extension execute_now:** Set `execute_now=true` only when the user semantically wants the assistant to proceed now with the chosen self-extension mode, and `__SELF_EXTENSION_RUNTIME__` allows that mode to execute. Otherwise keep `execute_now=false` so the runtime can stop at planning.
 
 Output a single raw JSON object only (no markdown, no extra text, no code fences):
-{"resolved_user_intent":"...","resume_behavior":"none|resume_execute|resume_discuss","schedule_kind":"none|create|update|delete|query","schedule_intent":null,"wants_file_delivery":false,"needs_clarify":false,"clarify_question":"","reason":"...","confidence":0.0,"mode":"chat|act|ask_clarify|chat_act","output_contract":{"response_shape":"free|one_sentence|scalar|file_token","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none|path|current_workspace|url|filename","delivery_intent":"none|file_single|directory_lookup|directory_batch_files","locator_hint":""}}
+{"resolved_user_intent":"...","resume_behavior":"none|resume_execute|resume_discuss","schedule_kind":"none|create|update|delete|query","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"...","confidence":0.0,"mode":"chat|act|ask_clarify|chat_act","output_contract":{"response_shape":"free|one_sentence|scalar|file_token","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none|path|current_workspace|url|filename","delivery_intent":"none|file_single|directory_lookup|directory_batch_files","semantic_kind":"none|raw_command_output|service_status|hidden_entries_check|directory_purpose_summary|content_excerpt_summary|recent_artifacts_judgment|workspace_project_summary|scalar_count|quantity_comparison|scalar_path_only|existence_with_path|recent_scalar_equality_check","locator_hint":"","self_extension":{"mode":"none|temporary_fix|permanent_extension","trigger":"none|explicit_user_request|capability_gap","execute_now":false}}}
 
 - confidence in [0, 1]. reason must mention which anchor or rule was used.
 - `clarify_question`: when `needs_clarify=true`, provide exactly one concise user-facing clarification question in the configured response language; otherwise return `""`.
 - mode: prefer chat or act; use chat_act only when user explicitly wants both action and summary in one turn.
 - wants_file_delivery: set true only when the user is explicitly asking to receive/send/deliver a file attachment in this turn or as a direct locator handoff; otherwise false.
+- should_refresh_long_term_memory: set true when the user is explicitly asking the assistant to remember/persist a preference, rule, stable fact, or future default for later turns; otherwise false.
+- agent_display_name_hint: when the user is explicitly setting how the assistant should be addressed/named for future turns, emit the exact short chosen name; otherwise `""`.
 - `schedule_intent`: use `null` when `schedule_kind="none"`. Otherwise provide the best structured schedule intent object you can infer, using the same field contract as the schedule compiler:
   - `kind`, `timezone`, `schedule`, `task`, `target_job_id`, `raw`, `reason`, `needs_clarify`, `clarify_question`, `confidence`
   - Keep this object semantically aligned with top-level `schedule_kind`, `needs_clarify`, `clarify_question`, and `confidence`.
@@ -121,15 +129,35 @@ Output a single raw JSON object only (no markdown, no extra text, no code fences
 - output_contract.requires_content_evidence: true when later answer depends on actually reading/obtaining content (for example read-and-summarize / inspect-and-conclude), false otherwise.
 - output_contract.delivery_required: true when the final delivery contract requires file token style output rather than pasted prose.
 - output_contract.locator_kind: infer the primary locator semantics in this turn (`path` / `current_workspace` / `url` / `filename` / `none`). Use `current_workspace` when the request semantically targets the present workspace scope without naming another path.
+- output_contract.semantic_kind: use `directory_purpose_summary` when the user wants a directory/file listing and then one grounded explanation sentence about what that directory mainly contains, based on filenames/entry types rather than raw text quoting.
+- output_contract.semantic_kind: use `content_excerpt_summary` when the user wants you to read a file head/tail/excerpt or other short local content slice and then summarize, conclude, explain, or judge it from that observed content instead of returning the raw excerpt itself.
 - output_contract.delivery_intent:
   - none: not a delivery-directory special mode
   - file_single: normal single-file delivery flow
   - directory_lookup: user asks to find/locate/list a directory (not sending files)
   - directory_batch_files: user asks to send files under a directory in batch
+- output_contract.semantic_kind:
+  - none: no extra semantic post-processing hint needed
+  - raw_command_output: user explicitly wants command execution output / raw shell result itself
+  - service_status: user wants service/process running-status judgment rather than raw probe output
+  - scalar_count: scalar answer should be a count/number
+  - hidden_entries_check: final answer should say whether dot-prefixed hidden entries exist and name only those hidden entries when they exist; if the user also asked for a short explanation, keep that explanation concise and grounded in the listing
+  - content_excerpt_summary: the final answer should summarize or conclude from a successfully read local excerpt/head/tail/body rather than paste raw lines
+  - recent_artifacts_judgment: user wants a recent-file listing plus a grounded "more like logs/test artifacts vs formal deliverables" conclusion from filenames/timestamps alone
+  - workspace_project_summary: user wants a brief explanation of what the current repository/workspace is for from local project-structure evidence
+  - quantity_comparison: scalar answer should identify which compared candidate has more/less
+  - scalar_path_only: scalar answer should be the resolved path itself, not prose
+  - existence_with_path: answer should say whether something exists and include the path when found
+  - recent_scalar_equality_check: compare the latest two recent scalar-like assistant replies and answer whether they are the same/different
 - output_contract.locator_hint: provide the best concrete locator text (path / directory name / filename) extracted semantically from the user request. Keep original language/script (Chinese, English, mixed are all valid). Do not force English.
+- output_contract.self_extension:
+  - mode: `none` unless this request should go through the internal self-extension chain
+  - trigger: `explicit_user_request` when the user explicitly wants a script/package/custom-code/self-extension path or explicitly asks not to use existing skills; `capability_gap` when no existing skill clearly matches but the task is still a bounded local automation need; otherwise `none`
+  - execute_now: only true when the user wants the temporary solution executed now and runtime policy allows it
 - If user intent is "find/where/list this directory" (not sending files), set `delivery_intent=directory_lookup`.
 - If user intent is "send all files under this directory/folder", set `delivery_intent=directory_batch_files`.
 - In both cases, set `locator_hint` to the directory target text (explicit path when available; otherwise the directory name phrase).
+- Set `semantic_kind` from whole-request semantics and desired final answer shape, not from isolated wording fragments.
 - Set output_contract from semantic intent and task shape, not by brittle fixed keyword matching.
 - Do not depend on special-case code overrides for filesystem tasks. If the request is self-contained and executable from local workspace context, choose the correct mode directly from semantics.
 - Treat lightweight local environment queries such as current username, hostname, current working directory, or reading one scalar from a local file/config as self-contained executable requests when one local step can answer them.
@@ -170,6 +198,9 @@ __BINDING_CONTEXT__
 
 Capability map (optional; available executable capabilities, used to avoid inventing unsupported skills):
 __CAPABILITY_MAP__
+
+Self-extension runtime (authoritative; if disabled, keep output_contract.self_extension.mode=`none`):
+__SELF_EXTENSION_RUNTIME__
 
 Recent assistant replies (optional; use for ordinal reply anchoring — previous / two-turns-back / three-turns-back assistant reply). When present, each entry has: turn_id, relative_index (-1/-2/-3), short_preview (truncated), has_code_block (bool), and may include `ordered_entries=1:... | 2:...` for ordered candidate/listing replies. Prefer this over memory for these ordinal reply references.
 __RECENT_ASSISTANT_REPLIES__

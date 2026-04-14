@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use super::locator::{
     directory_lookup_input_from_hint, normalize_locator_text, parse_directory_lookup_input,
 };
+use super::types::localize_delivery_message_for_request;
 use super::{
-    dedup_and_sort_paths, localize_delivery_message, resolve_existing_dir_under_root,
-    DeliveryMessageKind, DirectoryEntriesListResult, DirectoryLookupInput,
-    DirectoryLookupResolution, IntentOutputContract,
+    dedup_and_sort_paths, resolve_existing_dir_under_root, DeliveryMessageKind,
+    DirectoryEntriesListResult, DirectoryLookupInput, DirectoryLookupResolution,
+    IntentOutputContract,
 };
 use crate::AppState;
 use crate::{OutputDeliveryIntent, OutputLocatorKind};
@@ -39,9 +40,10 @@ pub(super) fn try_handle_directory_lookup_request(
             match list_directory_entries_for_user(&directory, state.locator_scan_max_files) {
                 DirectoryEntriesListResult::FilePaths(paths) => {
                     if paths.is_empty() {
-                        Some(localize_delivery_message(
+                        Some(localize_delivery_message_for_request(
                             state,
                             DeliveryMessageKind::DirectoryNoFilesInCurrentLevel,
+                            user_request,
                         ))
                     } else {
                         Some(
@@ -53,16 +55,17 @@ pub(super) fn try_handle_directory_lookup_request(
                         )
                     }
                 }
-                DirectoryEntriesListResult::UserMessage(kind) => {
-                    Some(localize_delivery_message(state, kind))
-                }
+                DirectoryEntriesListResult::UserMessage(kind) => Some(
+                    localize_delivery_message_for_request(state, kind, user_request),
+                ),
             }
         }
         DirectoryLookupResolution::MultipleCandidates(candidates) => {
             let mut lines = Vec::with_capacity(candidates.len() + 1);
-            lines.push(localize_delivery_message(
+            lines.push(localize_delivery_message_for_request(
                 state,
                 DeliveryMessageKind::DirectoryMultipleCandidates,
+                user_request,
             ));
             lines.extend(
                 candidates
@@ -71,9 +74,9 @@ pub(super) fn try_handle_directory_lookup_request(
             );
             Some(lines.join("\n"))
         }
-        DirectoryLookupResolution::UserMessage(kind) => {
-            Some(localize_delivery_message(state, kind))
-        }
+        DirectoryLookupResolution::UserMessage(kind) => Some(
+            localize_delivery_message_for_request(state, kind, user_request),
+        ),
     }
 }
 

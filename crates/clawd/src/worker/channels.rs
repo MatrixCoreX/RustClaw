@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use crate::AppState;
+use claw_core::hard_rules::types::MainFlowRules;
 
 fn external_chat_id_from_payload(payload: &Value) -> Option<String> {
     payload
@@ -34,7 +35,7 @@ pub(crate) fn runtime_channel_from_payload(
     crate::RuntimeChannel::Telegram
 }
 
-fn is_whatsapp_channel_value(rules: &crate::MainFlowRules, raw: &str) -> bool {
+fn is_whatsapp_channel_value(rules: &MainFlowRules, raw: &str) -> bool {
     let channel = raw.trim().to_ascii_lowercase();
     rules
         .runtime_whatsapp_channel_aliases

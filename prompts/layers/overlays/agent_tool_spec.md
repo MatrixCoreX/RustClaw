@@ -485,6 +485,42 @@ Skill behavior notes (file/path):
 - Optional ecosystem/version controls.
 - Forbid empty module list and unsafe module tokens.
 
+### extension_manager
+- action: `assess_gap|enable_external_skill|implement_external_skill|register_external_skill|validate_external_skill|permanent_extension_plan|temporary_fix_plan|temporary_fix_execute|scaffold_external_skill`
+- required by action:
+  - `assess_gap`: `request`
+  - `enable_external_skill`: `skill_name`, `confirm=true`
+  - `implement_external_skill`: `request`, `skill_name`, `capability_summary`
+  - `register_external_skill`: `skill_name`, `confirm=true`
+  - `validate_external_skill`: `skill_name`
+  - `permanent_extension_plan`: `request`
+  - `temporary_fix_plan`: `request`
+  - `temporary_fix_execute`: `confirm=true` and either `plan` or `request`
+  - `scaffold_external_skill`: `skill_name`, `capability_summary`
+- optional:
+  - `assess_gap`: `mode_hint` (`auto|temporary_fix|permanent_extension|manual_review`)
+  - `implement_external_skill`: `actions` (string or string array)
+  - `validate_external_skill`: `actions` (string or string array)
+  - `temporary_fix_execute`: `allow_package_install` (default false)
+  - `scaffold_external_skill`: `actions` (string or string array)
+- default state:
+  - disabled by default; enable explicitly before use
+  - intended for developer-controlled extension scaffolding, not normal end-user tasks
+
+#### extension_manager JSON-schema style contract (strict)
+- Base shape: `{"type":"call_skill","skill":"extension_manager","args":{...}}`
+- `assess_gap` is advisory only; it must not change runtime state.
+- `enable_external_skill` may only flip `configs/config.toml` `skill_switches`, build the external skill release binary, and report that a reload/restart is still required.
+- `implement_external_skill` may call the configured LLM, but it may only overwrite scaffold-owned `README.md`, `INTERFACE.md`, and `src/main.rs` under an existing `external_skills/<skill_name>/`.
+- `register_external_skill` may only touch root `Cargo.toml`, `configs/skills_registry.toml`, and disabled `skill_switches` state for that skill.
+- `validate_external_skill` may only run `python3 scripts/sync_skill_docs.py`, `cargo check --manifest-path external_skills/<skill_name>/Cargo.toml`, and a bounded stdin/stdout smoke run for that same manifest.
+- `permanent_extension_plan` may call the configured LLM, but it must return only scaffold metadata (`skill_name`, `capability_summary`, `actions`, `rationale`).
+- `temporary_fix_plan` may call the configured LLM, but it must return a bounded structured plan only.
+- `temporary_fix_execute` may only write temporary files under `tmp/extension_manager/`, optionally install language-level packages, and execute generated scripts through `python3|bash|sh|node`.
+- `temporary_fix_execute` requires `confirm=true`; package installs additionally require `allow_package_install=true`.
+- `scaffold_external_skill` may only create files under `external_skills/<skill_name>`.
+- Forbid auto-enabling, registry mutation, package installation, or edits outside the scaffold directory.
+
 ### log_analyze
 - required: none
 - optional: `path`, `keywords`, `max_matches`

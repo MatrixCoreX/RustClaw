@@ -60,6 +60,62 @@ fn ensure_journal_task_metrics(
     }
 }
 
+fn journal_has_missing_file_search_evidence(
+    journal: Option<&crate::task_journal::TaskJournal>,
+) -> bool {
+    journal
+        .into_iter()
+        .flat_map(|journal| journal.step_results.iter().rev())
+        .any(|step| {
+            if step.skill != "fs_search" {
+                return false;
+            }
+            let Some(output) = step.output_excerpt.as_deref() else {
+                return false;
+            };
+            let Ok(value) = serde_json::from_str::<Value>(output) else {
+                return false;
+            };
+            value.get("action").and_then(|v| v.as_str()) == Some("find_name")
+                && value.get("count").and_then(|v| v.as_i64()) == Some(0)
+                && value
+                    .get("results")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|results| results.is_empty())
+        })
+}
+
+fn has_any_delivery_file_token(text: &str, messages: &[String]) -> bool {
+    !crate::extract_delivery_file_tokens(text).is_empty()
+        || messages
+            .iter()
+            .any(|message| !crate::extract_delivery_file_tokens(message).is_empty())
+}
+
+fn missing_file_delivery_reply_text(
+    state: &AppState,
+    route_result: &crate::RouteResult,
+    answer: &crate::AskReply,
+) -> Option<String> {
+    let file_delivery_contract = route_result.wants_file_delivery
+        || route_result.output_contract.delivery_required
+        || matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        );
+    (file_delivery_contract
+        && !answer.should_fail_task
+        && !has_any_delivery_file_token(&answer.text, &answer.messages)
+        && journal_has_missing_file_search_evidence(answer.task_journal.as_ref()))
+    .then(|| {
+        crate::i18n_t_with_default(
+            state,
+            "clawd.msg.delivery.rule3_file_not_found",
+            "File not found.",
+        )
+    })
+}
+
 fn insert_ask_memory_pair(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -67,7 +123,15 @@ fn insert_ask_memory_pair(
     answer_text: &str,
     answer_messages: &[String],
     is_llm_reply: bool,
+    agent_display_name_hint: &str,
 ) {
+    let _ = crate::memory::upsert_user_preferences_from_route_hint(
+        state,
+        task.user_id,
+        task.chat_id,
+        task.user_key.as_deref(),
+        agent_display_name_hint,
+    );
     if should_skip_ask_memory_pair(state, answer_text, answer_messages) {
         return;
     }
@@ -110,28 +174,6 @@ fn insert_ask_memory_pair(
     );
 }
 
-fn should_force_long_term_refresh(prompt: &str) -> bool {
-    let trimmed = prompt.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let norm = trimmed.to_ascii_lowercase();
-    [
-        "记住",
-        "记下来",
-        "帮我记住",
-        "以后默认",
-        "设为默认",
-        "remember",
-        "remember this",
-        "keep this in mind",
-        "set as default",
-        "default to",
-    ]
-    .iter()
-    .any(|marker| norm.contains(marker))
-}
-
 fn build_unfinished_goal_memory_text(prompt: &str, blocker: &str) -> String {
     format!(
         "Unfinished goal\nUser request: {}\nCurrent blocker: {}",
@@ -169,6 +211,8 @@ async fn finalize_ask_success(
     answer_text: &str,
     answer_messages: &[String],
     is_llm_reply: bool,
+    should_refresh_long_term_memory: bool,
+    agent_display_name_hint: &str,
     journal: &crate::task_journal::TaskJournal,
 ) -> Result<()> {
     let result = ask_result_payload(answer_text, answer_messages, Some(journal));
@@ -181,11 +225,12 @@ async fn finalize_ask_success(
         answer_text,
         answer_messages,
         is_llm_reply,
+        agent_display_name_hint,
     );
     super::spawn_long_term_summary_refresh(
         state.clone(),
         task.clone(),
-        should_force_long_term_refresh(prompt),
+        should_refresh_long_term_memory,
     );
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
@@ -256,6 +301,8 @@ pub(crate) async fn finalize_ask_direct_success(
     prompt: &str,
     answer_text: &str,
     path_label: &str,
+    should_refresh_long_term_memory: bool,
+    agent_display_name_hint: &str,
 ) -> Result<()> {
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", prompt);
     journal.record_context_bundle_summary(format!("path={path_label}"));
@@ -270,11 +317,19 @@ pub(crate) async fn finalize_ask_direct_success(
     let result = journal.attach_to_result(json!({ "text": answer_text }));
     repo::update_task_success(state, &task.task_id, &result.to_string())?;
     super::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
-    insert_ask_memory_pair(state, task, prompt, answer_text, &[], false);
+    insert_ask_memory_pair(
+        state,
+        task,
+        prompt,
+        answer_text,
+        &[],
+        false,
+        agent_display_name_hint,
+    );
     super::spawn_long_term_summary_refresh(
         state.clone(),
         task.clone(),
-        should_force_long_term_refresh(prompt),
+        should_refresh_long_term_memory,
     );
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
@@ -341,30 +396,13 @@ pub(crate) async fn try_finalize_schedule_direct_success(
             prompt,
             &schedule_reply,
             "schedule_direct",
+            route_result.should_refresh_long_term_memory,
+            &route_result.agent_display_name_hint,
         )
         .await?;
         return Ok(true);
     }
     Ok(false)
-}
-
-#[cfg(test)]
-mod knowledge_tests {
-    #[test]
-    fn knowledge_persistence_is_handled_in_summary_refresh_layer() {
-        assert!(true);
-    }
-
-    #[test]
-    fn explicit_memory_requests_force_early_summary_refresh() {
-        assert!(super::should_force_long_term_refresh(
-            "记住这个规则，以后默认中文回复"
-        ));
-        assert!(super::should_force_long_term_refresh(
-            "Please remember this and default to zh-CN"
-        ));
-        assert!(!super::should_force_long_term_refresh("帮我看下这个报错"));
-    }
 }
 
 pub(crate) async fn finalize_ask_result(
@@ -408,6 +446,8 @@ pub(crate) async fn finalize_ask_result(
                             matches!(status, crate::task_journal::TaskJournalFinalStatus::Clarify)
                         });
             let failure_reply = answer.should_fail_task;
+            let missing_file_delivery_reply =
+                missing_file_delivery_reply_text(state, route_result, &answer);
             let (answer_text, answer_messages) = if failure_reply
                 || matches!(route_result.routed_mode, crate::RoutedMode::AskClarify)
             {
@@ -420,6 +460,8 @@ pub(crate) async fn finalize_ask_result(
                         .filter(|message| !message.is_empty())
                         .collect(),
                 )
+            } else if let Some(reply_text) = missing_file_delivery_reply {
+                (reply_text.clone(), vec![reply_text])
             } else {
                 crate::intercept_response_payload_for_delivery(
                     state,
@@ -480,6 +522,8 @@ pub(crate) async fn finalize_ask_result(
                     &answer_text,
                     &answer_messages,
                     answer.is_llm_reply,
+                    route_result.should_refresh_long_term_memory,
+                    &route_result.agent_display_name_hint,
                     &journal,
                 )
                 .await?;
@@ -555,7 +599,100 @@ pub(crate) async fn finalize_ask_result(
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_journal_task_metrics;
+    use super::{ensure_journal_task_metrics, journal_has_missing_file_search_evidence};
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Arc, Mutex, RwLock};
+    use std::time::Instant;
+
+    use reqwest::Client;
+    use rusqlite::Connection;
+    use serde_json::json;
+    use tokio::sync::Semaphore;
+
+    use crate::{
+        runtime::{AgentRuntimeConfig, RateLimiter, SkillViewsSnapshot},
+        AppState, CommandIntentRuntime, ScheduleRuntime, ToolsPolicy,
+    };
+    use claw_core::config::{
+        AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
+    };
+
+    fn test_state() -> AppState {
+        let agents_by_id = HashMap::from([(
+            crate::DEFAULT_AGENT_ID.to_string(),
+            AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
+        )]);
+        AppState {
+            started_at: Instant::now(),
+            queue_limit: 1,
+            db: Arc::new(Mutex::new(Connection::open_in_memory().expect("open db"))),
+            llm_providers: Vec::new(),
+            agents_by_id: Arc::new(agents_by_id),
+            skill_timeout_seconds: 30,
+            skill_runner_path: std::path::PathBuf::new(),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                registry: None,
+                skills_list: Arc::new(HashSet::new()),
+            }))),
+            skill_semaphore: Arc::new(Semaphore::new(1)),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
+            llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
+            maintenance: MaintenanceConfig::default(),
+            memory: MemoryConfig::default(),
+            workspace_root: std::env::temp_dir(),
+            default_locator_search_dir: std::env::temp_dir(),
+            locator_scan_max_depth: 3,
+            locator_scan_max_files: 200,
+            tools_policy: Arc::new(
+                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+            ),
+            active_provider_type: None,
+            cmd_timeout_seconds: 30,
+            max_cmd_length: 4096,
+            allow_path_outside_workspace: false,
+            allow_sudo: false,
+            worker_task_timeout_seconds: 300,
+            worker_task_heartbeat_seconds: 10,
+            worker_running_no_progress_timeout_seconds: 300,
+            worker_running_recovery_check_interval_seconds: 30,
+            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            routing: RoutingConfig::default(),
+            persona_prompt: String::new(),
+            command_intent: CommandIntentRuntime {
+                all_result_suffixes: Vec::new(),
+                default_locale: "en".to_string(),
+                verify_enforce_enabled: false,
+            },
+            schedule: ScheduleRuntime {
+                timezone: "Asia/Shanghai".to_string(),
+                intent_prompt_template: String::new(),
+                intent_prompt_source: String::new(),
+                intent_rules_template: String::new(),
+                locale: "en".to_string(),
+                i18n_dict: HashMap::new(),
+            },
+            telegram_bot_token: String::new(),
+            telegram_configured_bot_names: Arc::new(Vec::new()),
+            whatsapp_cloud_enabled: false,
+            whatsapp_api_base: String::new(),
+            whatsapp_access_token: String::new(),
+            whatsapp_phone_number_id: String::new(),
+            whatsapp_web_enabled: false,
+            whatsapp_web_bridge_base_url: String::new(),
+            future_adapters_enabled: Arc::new(Vec::new()),
+            wechat_send_config: None,
+            feishu_send_config: None,
+            lark_send_config: None,
+            http_client: Client::new(),
+            database_sqlite_path: std::path::PathBuf::new(),
+            database_busy_timeout_ms: 5_000,
+            config_path_for_reload: String::new(),
+            self_extension: claw_core::config::SelfExtensionConfig::default(),
+            registry_path_for_reload: None,
+            skill_switches_for_reload: Arc::new(HashMap::new()),
+            initial_skills_list_for_reload: Vec::new(),
+        }
+    }
 
     #[test]
     fn ensure_journal_task_metrics_backfills_missing_v1_fields() {
@@ -581,5 +718,118 @@ mod tests {
 
         assert_eq!(journal.task_metrics.used_evidence_ids_count, Some(3));
         assert_eq!(journal.task_metrics.delivery_consistent, Some(true));
+    }
+
+    #[test]
+    fn journal_missing_file_search_evidence_detects_zero_match_fs_search() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                skill: "fs_search".to_string(),
+                output_excerpt: Some(
+                    json!({
+                        "action": "find_name",
+                        "count": 0,
+                        "results": [],
+                        "root": ""
+                    })
+                    .to_string(),
+                ),
+                ..Default::default()
+            });
+        assert!(journal_has_missing_file_search_evidence(Some(&journal)));
+    }
+
+    #[test]
+    fn missing_file_delivery_reply_uses_structured_search_evidence() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                skill: "fs_search".to_string(),
+                output_excerpt: Some(
+                    json!({
+                        "action": "find_name",
+                        "count": 0,
+                        "results": [],
+                        "root": ""
+                    })
+                    .to_string(),
+                ),
+                ..Default::default()
+            });
+        let answer = crate::AskReply::llm(
+            "文件 `definitely_missing_named_file_rustclaw_001.txt` 未找到。".to_string(),
+        )
+        .with_task_journal(journal);
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            resolved_intent: "send definitely_missing_named_file_rustclaw_001.txt".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "explicit filename".to_string(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        assert!(route.wants_file_delivery);
+        assert!(journal_has_missing_file_search_evidence(
+            answer.task_journal.as_ref()
+        ));
+    }
+
+    #[test]
+    fn missing_file_delivery_reply_uses_output_contract_file_token_even_without_wants_flag() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                skill: "fs_search".to_string(),
+                output_excerpt: Some(
+                    json!({
+                        "action": "find_name",
+                        "count": 0,
+                        "results": [],
+                        "root": ""
+                    })
+                    .to_string(),
+                ),
+                ..Default::default()
+            });
+        let answer = crate::AskReply::llm(
+            "找不到文件 `definitely_missing_named_file_rustclaw_001.txt`。".to_string(),
+        )
+        .with_task_journal(journal);
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_required = true;
+
+        let state = test_state();
+        let reply = super::missing_file_delivery_reply_text(&state, &route, &answer);
+        assert_eq!(reply.as_deref(), Some("File not found."));
     }
 }

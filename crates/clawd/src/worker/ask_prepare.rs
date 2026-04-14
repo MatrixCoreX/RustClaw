@@ -54,6 +54,42 @@ fn immediate_last_turn_was_clarify(text: &str) -> bool {
     text.contains("[clarification_requested]")
 }
 
+fn extract_last_turn_user_text(text: &str) -> Option<String> {
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix("User: "))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+}
+
+fn prompt_is_inline_json_value(prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    !trimmed.is_empty()
+        && crate::extract_first_json_value_any(trimmed).is_some_and(|value| value.trim() == trimmed)
+}
+
+fn prompt_looks_like_clarify_target_only(prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    !trimmed.is_empty()
+        && (prompt_is_inline_json_value(trimmed)
+            || super::has_concrete_locator_hint(trimmed)
+            || super::has_explicit_path_or_url_locator_hint(trimmed))
+}
+
+fn clarify_followup_routing_prompt(prompt: &str, last_turn_full: &str) -> Option<String> {
+    if !immediate_last_turn_was_clarify(last_turn_full)
+        || !prompt_looks_like_clarify_target_only(prompt)
+    {
+        return None;
+    }
+    let previous_user_request = extract_last_turn_user_text(last_turn_full)?;
+    Some(format!(
+        "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
+        previous_user_request.trim(),
+        prompt.trim()
+    ))
+}
+
 fn should_force_clarify_for_fresh_delivery_deictic(
     route_result: &crate::RouteResult,
     prompt: &str,
@@ -62,7 +98,7 @@ fn should_force_clarify_for_fresh_delivery_deictic(
 ) -> bool {
     route_result.wants_file_delivery
         && !route_result.needs_clarify
-        && !crate::delivery_utils::has_concrete_locator_input(prompt)
+        && !super::has_concrete_locator_hint(prompt)
         && !context_contains_immediate_locator_anchor(last_turn_full)
         && !context_contains_immediate_locator_anchor(recent_assistant_replies)
 }
@@ -85,7 +121,30 @@ fn should_force_clarify_for_fresh_scalar_deictic(
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::Url
         )
-        && !crate::delivery_utils::has_concrete_locator_input(prompt)
+        && !super::has_concrete_locator_hint(prompt)
+        && !context_contains_immediate_locator_anchor(last_turn_full)
+        && !context_contains_immediate_locator_anchor(recent_assistant_replies)
+}
+
+fn should_force_clarify_for_fresh_content_deictic(
+    route_result: &crate::RouteResult,
+    prompt: &str,
+    last_turn_full: &str,
+    recent_assistant_replies: &str,
+) -> bool {
+    !route_result.needs_clarify
+        && route_result.output_contract.requires_content_evidence
+        && matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+        )
+        && matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::Url
+        )
+        && !super::has_concrete_locator_hint(prompt)
         && !context_contains_immediate_locator_anchor(last_turn_full)
         && !context_contains_immediate_locator_anchor(recent_assistant_replies)
 }
@@ -164,6 +223,43 @@ fn apply_fresh_scalar_deictic_clarify_guard(
     }
 }
 
+fn apply_fresh_content_deictic_clarify_guard(
+    state: &AppState,
+    prompt: &str,
+    route_result: &mut crate::RouteResult,
+    last_turn_full: &str,
+    recent_assistant_replies: &str,
+) {
+    if !should_force_clarify_for_fresh_content_deictic(
+        route_result,
+        prompt,
+        last_turn_full,
+        recent_assistant_replies,
+    ) {
+        return;
+    }
+    route_result.routed_mode = crate::RoutedMode::AskClarify;
+    route_result.needs_clarify = true;
+    route_result.resolved_intent = prompt.trim().to_string();
+    route_result.clarify_question = crate::i18n_t_with_default(
+        state,
+        "clawd.msg.clarify_missing_read_target",
+        "Please provide the specific file name or path to read.",
+    );
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.locator_hint.clear();
+    if route_result.route_reason.trim().is_empty() {
+        route_result.route_reason = "fresh_content_deictic_requires_locator".to_string();
+    } else if !route_result
+        .route_reason
+        .contains("fresh_content_deictic_requires_locator")
+    {
+        route_result
+            .route_reason
+            .push_str(";fresh_content_deictic_requires_locator");
+    }
+}
+
 fn direct_classifier_route_result(prompt: &str) -> crate::RouteResult {
     crate::RouteResult {
         routed_mode: crate::RoutedMode::Chat,
@@ -178,6 +274,8 @@ fn direct_classifier_route_result(prompt: &str) -> crate::RouteResult {
         schedule_kind: crate::ScheduleKind::None,
         schedule_intent: None,
         wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
         output_contract: crate::IntentOutputContract::default(),
     }
 }
@@ -480,6 +578,8 @@ pub(super) async fn maybe_finalize_schedule_direct_text_success(
         prompt,
         &answer_text,
         "schedule_direct_text",
+        false,
+        "",
     )
     .await?;
     Ok(true)
@@ -492,11 +592,10 @@ pub(super) async fn prepare_ask_routing(
     prompt: &str,
     source: &str,
 ) -> PreparedAskRouting {
-    let main_rules = crate::main_flow_rules(state);
-    let classifier_direct_mode = main_rules
-        .classifier_direct_sources
+    let normalized_source = source.trim().to_ascii_lowercase();
+    let classifier_direct_mode = crate::CLASSIFIER_DIRECT_SOURCES
         .iter()
-        .any(|s| s == &source.to_ascii_lowercase());
+        .any(|value| *value == normalized_source);
     let agent_mode = payload
         .get("agent_mode")
         .and_then(|v| v.as_bool())
@@ -518,32 +617,9 @@ pub(super) async fn prepare_ask_routing(
             immediate_prior_turn_was_clarify: false,
         };
     }
-    let is_resume_continue = super::is_resume_continue_source(main_rules, source);
+    let is_resume_continue = super::is_resume_continue_source(source);
     let (now_iso, timezone_str, schedule_rules) =
         schedule_service::schedule_context_for_normalizer(state);
-    let explicit_resume_binding = explicit_resume_context_binding(payload, is_resume_continue);
-    let recent_failed_resume_binding =
-        recent_failed_resume_candidate(state, task, explicit_resume_binding.is_some());
-    let resume_binding = explicit_resume_binding
-        .clone()
-        .or_else(|| recent_failed_resume_binding.clone());
-    let binding_context_value =
-        binding_context_json(source, is_resume_continue, resume_binding.as_ref());
-    let normalizer_out = crate::intent_router::run_intent_normalizer(
-        state,
-        task,
-        prompt,
-        resume_binding
-            .as_ref()
-            .map(|binding| &binding.resume_context),
-        Some(&binding_context_value),
-        &now_iso,
-        &timezone_str,
-        &schedule_rules,
-    )
-    .await;
-    let mut route_result =
-        crate::intent_router::route_result_from_normalizer(state, task, &normalizer_out);
     let last_turn_full = crate::memory::build_last_turn_full_context(
         state,
         task.user_key.as_deref(),
@@ -561,6 +637,31 @@ pub(super) async fn prepare_ask_routing(
         220,
     );
     let immediate_prior_turn_was_clarify = immediate_last_turn_was_clarify(&last_turn_full);
+    let normalizer_prompt = clarify_followup_routing_prompt(prompt, &last_turn_full)
+        .unwrap_or_else(|| prompt.to_string());
+    let explicit_resume_binding = explicit_resume_context_binding(payload, is_resume_continue);
+    let recent_failed_resume_binding =
+        recent_failed_resume_candidate(state, task, explicit_resume_binding.is_some());
+    let resume_binding = explicit_resume_binding
+        .clone()
+        .or_else(|| recent_failed_resume_binding.clone());
+    let binding_context_value =
+        binding_context_json(source, is_resume_continue, resume_binding.as_ref());
+    let normalizer_out = crate::intent_router::run_intent_normalizer(
+        state,
+        task,
+        &normalizer_prompt,
+        resume_binding
+            .as_ref()
+            .map(|binding| &binding.resume_context),
+        Some(&binding_context_value),
+        &now_iso,
+        &timezone_str,
+        &schedule_rules,
+    )
+    .await;
+    let mut route_result =
+        crate::intent_router::route_result_from_normalizer(state, task, &normalizer_out);
     apply_fresh_delivery_deictic_clarify_guard(
         state,
         prompt,
@@ -569,6 +670,13 @@ pub(super) async fn prepare_ask_routing(
         &recent_assistant_replies,
     );
     apply_fresh_scalar_deictic_clarify_guard(
+        state,
+        prompt,
+        &mut route_result,
+        &last_turn_full,
+        &recent_assistant_replies,
+    );
+    apply_fresh_content_deictic_clarify_guard(
         state,
         prompt,
         &mut route_result,
@@ -656,9 +764,11 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        binding_context_json, context_contains_immediate_locator_anchor,
-        direct_classifier_route_result, immediate_last_turn_was_clarify,
-        select_resume_runtime_binding, should_force_clarify_for_fresh_delivery_deictic,
+        binding_context_json, clarify_followup_routing_prompt,
+        context_contains_immediate_locator_anchor, direct_classifier_route_result,
+        immediate_last_turn_was_clarify, select_resume_runtime_binding,
+        should_force_clarify_for_fresh_content_deictic,
+        should_force_clarify_for_fresh_delivery_deictic,
         should_force_clarify_for_fresh_scalar_deictic, ResumeContextBinding, ResumeContextSource,
     };
 
@@ -704,6 +814,8 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
         };
         let binding = ResumeContextBinding {
@@ -739,13 +851,17 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 response_shape: crate::OutputResponseShape::FileToken,
                 requires_content_evidence: false,
                 delivery_required: true,
                 locator_kind: crate::OutputLocatorKind::Filename,
                 delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: Default::default(),
                 locator_hint: "config.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
             },
         };
         assert!(should_force_clarify_for_fresh_delivery_deictic(
@@ -771,13 +887,17 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 response_shape: crate::OutputResponseShape::FileToken,
                 requires_content_evidence: false,
                 delivery_required: true,
                 locator_kind: crate::OutputLocatorKind::Filename,
                 delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: Default::default(),
                 locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
             },
         };
         assert!(context_contains_immediate_locator_anchor(
@@ -816,13 +936,17 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 response_shape: crate::OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
                 locator_kind: crate::OutputLocatorKind::Filename,
                 delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
                 locator_hint: "package.json".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
             },
         };
         assert!(should_force_clarify_for_fresh_scalar_deictic(
@@ -848,13 +972,17 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 response_shape: crate::OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
                 locator_kind: crate::OutputLocatorKind::Filename,
                 delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
                 locator_hint: "package.json".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
             },
         };
         assert!(!should_force_clarify_for_fresh_scalar_deictic(
@@ -862,6 +990,78 @@ mod tests {
             "读一下那个文件里的名字字段，只输出值",
             "<none>",
             "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=package.json has_code_block=false\n- turn_id=assistant[-2] short_preview=README.md has_code_block=false",
+        ));
+    }
+
+    #[test]
+    fn fresh_content_deictic_without_immediate_anchor_forces_clarify() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            resolved_intent: "读取 model_io.log 最后 5 行".to_string(),
+            needs_clarify: false,
+            route_reason: "memory_established_path_binding".to_string(),
+            route_confidence: Some(0.88),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Filename,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
+                locator_hint: "model_io.log".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        assert!(should_force_clarify_for_fresh_content_deictic(
+            &route,
+            "看看那个模型日志最后 5 行",
+            "<none>",
+            "<none>",
+        ));
+    }
+
+    #[test]
+    fn fresh_content_deictic_with_immediate_file_anchor_does_not_force_clarify() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            resolved_intent: "读取 model_io.log 最后 5 行".to_string(),
+            needs_clarify: false,
+            route_reason: "memory_established_path_binding".to_string(),
+            route_confidence: Some(0.88),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Filename,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
+                locator_hint: "model_io.log".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        assert!(!should_force_clarify_for_fresh_content_deictic(
+            &route,
+            "看看那个模型日志最后 5 行",
+            "<none>",
+            "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=model_io.log has_code_block=false",
         ));
     }
 
@@ -880,18 +1080,130 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 response_shape: crate::OutputResponseShape::FileToken,
                 requires_content_evidence: false,
                 delivery_required: true,
                 locator_kind: crate::OutputLocatorKind::Filename,
                 delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: Default::default(),
                 locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
             },
         };
         assert!(!should_force_clarify_for_fresh_delivery_deictic(
             &route,
             "README.md",
+            "<none>",
+            "<none>",
+        ));
+    }
+
+    #[test]
+    fn explicit_bare_filename_delivery_does_not_force_clarify() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            resolved_intent: "send README".to_string(),
+            needs_clarify: false,
+            route_reason: "explicit_filename".to_string(),
+            route_confidence: Some(0.95),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::FileToken,
+                requires_content_evidence: false,
+                delivery_required: true,
+                locator_kind: crate::OutputLocatorKind::Filename,
+                delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: Default::default(),
+                locator_hint: "README".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        assert!(!should_force_clarify_for_fresh_delivery_deictic(
+            &route,
+            "把 README 发给我",
+            "<none>",
+            "<none>",
+        ));
+    }
+
+    #[test]
+    fn fresh_content_with_explicit_bare_filename_does_not_force_clarify() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            resolved_intent: "读取 README 前 20 行并总结".to_string(),
+            needs_clarify: false,
+            route_reason: "explicit_filename".to_string(),
+            route_confidence: Some(0.92),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Filename,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
+                locator_hint: "README".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        assert!(!should_force_clarify_for_fresh_content_deictic(
+            &route,
+            "扫一眼 README 前 20 行，再提炼成 3 句话",
+            "<none>",
+            "<none>",
+        ));
+    }
+
+    #[test]
+    fn fresh_content_with_multiple_explicit_filenames_does_not_force_clarify() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大".to_string(),
+            needs_clarify: false,
+            route_reason: "explicit_compare_targets".to_string(),
+            route_confidence: Some(0.93),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        assert!(!should_force_clarify_for_fresh_content_deictic(
+            &route,
+            "比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因",
             "<none>",
             "<none>",
         ));
@@ -905,5 +1217,25 @@ mod tests {
         assert!(!immediate_last_turn_was_clarify(
             "### LAST_TURN_FULL\n[TURN -1]\nUser: 看看那个重启脚本在不在\nAssistant: 有，路径：scripts/restart_clawd_latest.sh\n[/TURN]"
         ));
+    }
+
+    #[test]
+    fn clarify_followup_routing_prompt_merges_previous_operation_for_json_payload() {
+        let merged = clarify_followup_routing_prompt(
+            "[{\"name\":\"alpha\",\"score\":7}]",
+            "[LAST_TURN_FULL]\nUser: 把那个 JSON 数组按 score 排一下并转成表格\nAssistant: [clarification_requested]\n[/LAST_TURN_FULL]",
+        )
+        .expect("merged clarify follow-up prompt");
+        assert!(merged.contains("把那个 JSON 数组按 score 排一下并转成表格"));
+        assert!(merged.contains("[{\"name\":\"alpha\",\"score\":7}]"));
+    }
+
+    #[test]
+    fn clarify_followup_routing_prompt_skips_unrelated_new_request() {
+        assert!(clarify_followup_routing_prompt(
+            "今天天气怎么样",
+            "[LAST_TURN_FULL]\nUser: 把那个 JSON 数组按 score 排一下并转成表格\nAssistant: [clarification_requested]\n[/LAST_TURN_FULL]",
+        )
+        .is_none());
     }
 }

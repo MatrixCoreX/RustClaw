@@ -7,7 +7,6 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::{get, get_service, post};
 use axum::{Json, Router};
 use claw_core::config::AppConfig;
-use claw_core::hard_rules::types::MainFlowRules;
 use claw_core::types::{
     ApiResponse, AuthIdentity, ChannelKind, DirectClassifyRequest, DirectClassifyResponse,
     HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse,
@@ -47,6 +46,7 @@ mod repo;
 mod routing_context;
 mod runtime;
 mod schedule_service;
+mod self_extension;
 mod semantic_judge;
 mod skills;
 mod system_health;
@@ -56,9 +56,11 @@ mod verifier;
 mod worker;
 
 pub(crate) use app_helpers::{
-    ensure_column_exists, i18n_t_with_default, is_affirmation_click_text, main_flow_rules,
-    mask_secret, normalize_affirmation_text, normalize_exchange_name, normalize_external_id_opt,
-    now_ts, now_ts_u64, parse_resume_context_error, parse_task_status_with_rules,
+    bilingual_t_with_default_vars, ensure_column_exists, i18n_t_with_default,
+    i18n_t_with_default_vars, is_affirmation_click_text, main_flow_rules, mask_secret,
+    normalize_affirmation_text, normalize_exchange_name, normalize_external_id_opt, now_ts,
+    now_ts_u64, parse_resume_context_error, parse_task_status, CLASSIFIER_DIRECT_SOURCES,
+    RESUME_CONTINUE_SOURCES, TASK_STATUS_QUEUED,
 };
 pub(crate) use ask_flow::{
     analyze_attached_images_for_ask, build_resume_continue_execute_prompt,
@@ -85,8 +87,9 @@ pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
 pub(crate) use pipeline_types::{
     plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-    OutputResponseShape, PlanKind, PlanResult, PlanStep, ResumeBehavior, RiskCeiling, RouteResult,
-    ScheduleKind,
+    OutputResponseShape, OutputSemanticKind, PlanKind, PlanResult, PlanStep, ResumeBehavior,
+    RiskCeiling, RouteResult, ScheduleKind, SelfExtensionContract, SelfExtensionMode,
+    SelfExtensionTrigger,
 };
 pub(crate) use prompt_utils::{
     extract_first_json_object_any, extract_first_json_value_any, log_prompt_render,
@@ -511,6 +514,7 @@ async fn main() -> anyhow::Result<()> {
         database_sqlite_path,
         database_busy_timeout_ms: config.database.busy_timeout_ms,
         config_path_for_reload: "configs/config.toml".to_string(),
+        self_extension: config.self_extension.clone(),
         registry_path_for_reload: config.skills.registry_path.clone(),
         skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
         initial_skills_list_for_reload: config.skills.skills_list.clone(),
@@ -819,13 +823,12 @@ async fn get_task(
     }
 }
 
-fn classifier_source_allowed(rules: &MainFlowRules, source: &str) -> bool {
+fn classifier_source_allowed(source: &str) -> bool {
     let normalized = source.trim().to_ascii_lowercase();
     !normalized.is_empty()
-        && rules
-            .classifier_direct_sources
+        && CLASSIFIER_DIRECT_SOURCES
             .iter()
-            .any(|v| v == &normalized)
+            .any(|value| *value == normalized)
 }
 
 fn channel_kind_label(kind: ChannelKind) -> &'static str {
@@ -877,7 +880,7 @@ async fn classify_direct(
         Err(resp) => return resp,
     };
     let source = req.source.trim().to_ascii_lowercase();
-    if !classifier_source_allowed(main_flow_rules(&state), &source) {
+    if !classifier_source_allowed(&source) {
         return api_err::<DirectClassifyResponse>(
             StatusCode::BAD_REQUEST,
             "source is not enabled for direct classifier",
@@ -1068,7 +1071,14 @@ async fn cancel_one_task(
         Err(resp) => return resp,
     };
     if req.index == 0 {
-        return api_err::<serde_json::Value>(StatusCode::BAD_REQUEST, "index must be >= 1");
+        return api_err::<serde_json::Value>(
+            StatusCode::BAD_REQUEST,
+            i18n_t_with_default(
+                &state,
+                "clawd.msg.cancel_one_index_invalid",
+                "index must be >= 1",
+            ),
+        );
     }
     let tasks = match list_active_tasks_internal(
         &state,
@@ -1081,14 +1091,23 @@ async fn cancel_one_task(
             error!("Cancel one task list failed: {}", err);
             return api_err::<serde_json::Value>(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Cancel one task failed",
+                i18n_t_with_default(
+                    &state,
+                    "clawd.msg.cancel_one_failed",
+                    "Cancel one task failed",
+                ),
             );
         }
     };
     let Some(target) = tasks.into_iter().find(|t| t.index == req.index) else {
         return api_err::<serde_json::Value>(
             StatusCode::NOT_FOUND,
-            format!("Active task index {} not found", req.index),
+            i18n_t_with_default_vars(
+                &state,
+                "clawd.msg.active_task_index_not_found",
+                "Active task index {index} not found",
+                &[("index", &req.index.to_string())],
+            ),
         );
     };
     let result =
@@ -1098,14 +1117,23 @@ async fn cancel_one_task(
             "canceled": count,
             "task": target,
         })),
-        Ok(_) => {
-            api_err::<serde_json::Value>(StatusCode::NOT_FOUND, "Target task is no longer active")
-        }
+        Ok(_) => api_err::<serde_json::Value>(
+            StatusCode::NOT_FOUND,
+            i18n_t_with_default(
+                &state,
+                "clawd.msg.target_task_no_longer_active",
+                "Target task is no longer active",
+            ),
+        ),
         Err(err) => {
             error!("Cancel one task failed: {}", err);
             api_err::<serde_json::Value>(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Cancel one task failed",
+                i18n_t_with_default(
+                    &state,
+                    "clawd.msg.cancel_one_failed",
+                    "Cancel one task failed",
+                ),
             )
         }
     }
@@ -1125,7 +1153,12 @@ async fn reload_skills_handler(
             warn!("reload_skill_views failed: {}", e);
             api_err::<serde_json::Value>(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("reload failed: {}", e),
+                i18n_t_with_default_vars(
+                    &state,
+                    "clawd.msg.reload_failed",
+                    "reload failed: {err}",
+                    &[("err", &e.to_string())],
+                ),
             )
         }
     }

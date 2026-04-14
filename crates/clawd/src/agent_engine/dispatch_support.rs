@@ -134,7 +134,9 @@ pub(super) fn classify_skill_failure_recovery(
         }
         return Some("recoverable_failure_finalize");
     }
-    if state.skill_is_retryable(normalized_skill) {
+    if state.skill_is_retryable(normalized_skill)
+        && !state.skill_requires_confirmation_policy(normalized_skill)
+    {
         if has_remaining_action_after(actions, current_idx, max_steps) {
             return Some("recoverable_failure_continue_in_round");
         }
@@ -153,6 +155,133 @@ pub(super) fn classify_skill_failure_recovery(
         return Some("recoverable_failure_continue_in_round");
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+    use std::path::Path;
+    use std::sync::{Arc, Mutex, RwLock};
+    use std::time::Instant;
+
+    use super::classify_skill_failure_recovery;
+    use crate::{
+        AgentAction, AgentRuntimeConfig, AppState, CommandIntentRuntime, RateLimiter,
+        ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+    };
+    use claw_core::config::{
+        AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
+    };
+    use claw_core::skill_registry::SkillsRegistry;
+    use rusqlite::Connection;
+    use tokio::sync::Semaphore;
+
+    fn test_state_with_registry() -> AppState {
+        let agents_by_id = HashMap::from([(
+            DEFAULT_AGENT_ID.to_string(),
+            AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
+        )]);
+        let registry = SkillsRegistry::load_from_path(Path::new("configs/skills_registry.toml"))
+            .expect("load registry");
+        AppState {
+            started_at: Instant::now(),
+            queue_limit: 1,
+            db: Arc::new(Mutex::new(Connection::open_in_memory().expect("open db"))),
+            llm_providers: Vec::new(),
+            agents_by_id: Arc::new(agents_by_id),
+            skill_timeout_seconds: 30,
+            skill_runner_path: std::path::PathBuf::new(),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                registry: Some(Arc::new(registry)),
+                skills_list: Arc::new(HashSet::new()),
+            }))),
+            skill_semaphore: Arc::new(Semaphore::new(1)),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
+            llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
+            maintenance: MaintenanceConfig::default(),
+            memory: MemoryConfig::default(),
+            workspace_root: std::env::temp_dir(),
+            default_locator_search_dir: std::env::temp_dir(),
+            locator_scan_max_depth: 2,
+            locator_scan_max_files: 200,
+            tools_policy: Arc::new(
+                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+            ),
+            active_provider_type: None,
+            cmd_timeout_seconds: 30,
+            max_cmd_length: 4096,
+            allow_path_outside_workspace: false,
+            allow_sudo: false,
+            worker_task_timeout_seconds: 300,
+            worker_task_heartbeat_seconds: 10,
+            worker_running_no_progress_timeout_seconds: 300,
+            worker_running_recovery_check_interval_seconds: 30,
+            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            routing: RoutingConfig::default(),
+            persona_prompt: String::new(),
+            command_intent: CommandIntentRuntime {
+                all_result_suffixes: Vec::new(),
+                default_locale: "zh-CN".to_string(),
+                verify_enforce_enabled: false,
+            },
+            schedule: ScheduleRuntime {
+                timezone: "Asia/Shanghai".to_string(),
+                intent_prompt_template: String::new(),
+                intent_prompt_source: String::new(),
+                intent_rules_template: String::new(),
+                locale: "zh-CN".to_string(),
+                i18n_dict: HashMap::new(),
+            },
+            telegram_bot_token: String::new(),
+            telegram_configured_bot_names: Arc::new(Vec::new()),
+            whatsapp_cloud_enabled: false,
+            whatsapp_api_base: String::new(),
+            whatsapp_access_token: String::new(),
+            whatsapp_phone_number_id: String::new(),
+            whatsapp_web_enabled: false,
+            whatsapp_web_bridge_base_url: String::new(),
+            future_adapters_enabled: Arc::new(Vec::new()),
+            wechat_send_config: None,
+            feishu_send_config: None,
+            lark_send_config: None,
+            http_client: reqwest::Client::new(),
+            database_sqlite_path: std::path::PathBuf::new(),
+            database_busy_timeout_ms: 5_000,
+            config_path_for_reload: String::new(),
+            self_extension: claw_core::config::SelfExtensionConfig::default(),
+            registry_path_for_reload: None,
+            skill_switches_for_reload: Arc::new(HashMap::new()),
+            initial_skills_list_for_reload: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn retryable_run_cmd_failure_does_not_auto_continue_when_confirmation_policy_applies() {
+        let state = test_state_with_registry();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({"command":"resume_fail_cmd_001_xyz"}),
+            },
+            AgentAction::CallSkill {
+                skill: "stock".to_string(),
+                args: serde_json::json!({"symbol":"ETH"}),
+            },
+        ];
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                8,
+                "run_cmd",
+                Some(&serde_json::json!({"command":"resume_fail_cmd_001_xyz"})),
+                "command not found",
+            ),
+            None
+        );
+    }
 }
 
 fn is_read_only_skill_invocation(state: &AppState, normalized_skill: &str, args: &Value) -> bool {

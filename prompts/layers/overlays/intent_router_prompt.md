@@ -4,7 +4,7 @@ Status: FALLBACK / LEGACY only. Not the main ask-chain routing prompt.
 - The current ask main chain uses intent_normalizer_prompt (intent_normalizer) as the single pre-routing entry.
 - Do not treat this file as the primary routing prompt for ask tasks.
 Component: clawd (crates/clawd/src/intent_router.rs) route_request_mode()
-Placeholders: __PERSONA_PROMPT__, __ROUTING_RULES__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_ASSISTANT_REPLIES__, __RECENT_TURNS_FULL__, __LAST_TURN_FULL__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __REQUEST__ (recent assistant replies may include `ordered_entries=1:... | 2:...`)
+Placeholders: __PERSONA_PROMPT__, __ROUTING_RULES__, __SELF_EXTENSION_RUNTIME__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_ASSISTANT_REPLIES__, __RECENT_TURNS_FULL__, __LAST_TURN_FULL__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __REQUEST__ (recent assistant replies may include `ordered_entries=1:... | 2:...`)
 -->
 
 **Fallback / legacy only.** This prompt is used only when the intent normalizer has not provided a mode (e.g. JSON parse failure). The ask main chain's primary routing entry is `intent_normalizer_prompt` (intent_normalizer). Do not use or maintain this as the main ask routing path. `chat_act` is a secondary mode only, not a fallback.
@@ -23,6 +23,7 @@ Task:
 - If the previous assistant turn asked for clarification but the current message is again a full standalone executable request sentence, re-evaluate it as a fresh request on current semantics. Do not preserve the earlier clarification blocker when the current request can already map to current-workspace scope or a skill with a safe default action.
 - Decide exactly one mode: `chat`, `act`, `chat_act`, or `ask_clarify`.
 - Return a lightweight structured fallback decision: `resolved_user_intent`, `needs_clarify`, `clarify_question`, `schedule_kind`, optional `schedule_intent`, and `output_contract`, not just the mode.
+- Use `output_contract.self_extension` only when `__SELF_EXTENSION_RUNTIME__` says the feature is enabled and the request semantically needs the internal self-extension chain. Do not set it from brittle phrase matching.
 - Support multilingual requests (Chinese/English/other languages) by routing based on meaning, not keyword surface form.
 - Treat self-contained local workspace inspection requests as executable by semantics, even when phrased casually. Reading a file, listing a directory, checking existence, counting items, extracting one field or value, comparing local files, or reading then summarizing are all `act` or `chat_act`, not `chat`, when the target is already clear from the current turn.
 - Requests that semantically mean "explain this repo / repository / workspace in simple words" should be treated as current-workspace executable inspection, not as missing-path clarification, unless the user explicitly refers to some other repository.
@@ -81,7 +82,7 @@ Priority rules:
 Output format (strict):
 - Return JSON only, exactly one object.
 - Required schema:
-  {"mode":"chat|act|chat_act|ask_clarify","resolved_user_intent":"...","needs_clarify":false,"clarify_question":"","reason":"...","confidence":0.0,"evidence_refs":["..."],"schedule_kind":"none|create|update|delete|query","schedule_intent":null,"wants_file_delivery":false,"output_contract":{"response_shape":"free|one_sentence|scalar|file_token","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none|path|current_workspace|url|filename","delivery_intent":"none|file_single|directory_lookup|directory_batch_files","locator_hint":""}}
+  {"mode":"chat|act|chat_act|ask_clarify","resolved_user_intent":"...","needs_clarify":false,"clarify_question":"","reason":"...","confidence":0.0,"evidence_refs":["..."],"schedule_kind":"none|create|update|delete|query","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","output_contract":{"response_shape":"free|one_sentence|scalar|file_token","requires_content_evidence":false,"delivery_required":false,"locator_kind":"none|path|current_workspace|url|filename","delivery_intent":"none|file_single|directory_lookup|directory_batch_files","semantic_kind":"none|raw_command_output|service_status|hidden_entries_check|directory_purpose_summary|content_excerpt_summary|recent_artifacts_judgment|workspace_project_summary|scalar_count|quantity_comparison|scalar_path_only|existence_with_path|recent_scalar_equality_check","locator_hint":"","self_extension":{"mode":"none|temporary_fix|permanent_extension","trigger":"none|explicit_user_request|capability_gap","execute_now":false}}}
 - `confidence` is in [0, 1].
 - `evidence_refs` should cite short pointers like "recent#1", "memory#2", or "request#1".
 - `reason` should be short, concrete, and grounded in the actual message.
@@ -91,6 +92,8 @@ Output format (strict):
 - `schedule_kind`: use `none` unless the request is clearly a schedule create/update/delete/query request.
 - `schedule_intent`: `null` when `schedule_kind="none"`; otherwise, when you can infer it reliably, emit a structured object aligned with the schedule compiler schema (`kind`, `timezone`, `schedule`, `task`, `target_job_id`, `raw`, `reason`, `needs_clarify`, `clarify_question`, `confidence`).
 - `wants_file_delivery`: true only when the user explicitly wants file delivery / attachment semantics.
+- `should_refresh_long_term_memory`: true only when the user is explicitly asking to remember/persist a preference, rule, stable fact, or default for future turns.
+- `agent_display_name_hint`: when the user explicitly sets the assistant's future display name / how to address it, emit the exact short name; otherwise `""`.
 - `output_contract.response_shape`:
   - `free`: normal free-form answer
   - `one_sentence`: user explicitly asks for exactly one sentence, or clearly asks for only one brief concluding sentence such as `一句话说完`, `用一句话告诉我`, `只列最重要的结论`, `简短告诉我最关键的一点`, `不用展开，只说结论`, or close semantic equivalents that request one concise conclusion rather than a multi-part explanation
@@ -103,10 +106,15 @@ Output format (strict):
 - `output_contract.delivery_required`: true when final delivery must be file-token style instead of pasted prose.
 - `output_contract.locator_kind`: use `current_workspace` for self-contained present-workspace scope; use `filename` when the user explicitly names a file entry; use `path` / `url` when the current message contains that concrete locator; otherwise `none`.
 - `output_contract.delivery_intent`: use `directory_lookup` for "find/list this directory", `directory_batch_files` for "send the files under this directory", `file_single` for single-file delivery, else `none`.
+- `output_contract.semantic_kind`: use `raw_command_output` only when the user explicitly wants command execution output itself; use `service_status` for semantic service/process status checks; use `hidden_entries_check` when the answer should say whether dot-prefixed hidden entries exist (and optionally name only those hidden entries); use `directory_purpose_summary` when the user wants a directory/file listing and then a grounded one-line explanation of what that directory mainly contains based on filenames/entry types alone; use `content_excerpt_summary` when the user wants you to read a local excerpt, head, tail, or short content slice and then summarize / conclude / explain it from that excerpt rather than return raw lines; use `recent_artifacts_judgment` when the user wants a recent-file listing plus a grounded "more like logs/test artifacts vs formal deliverables" conclusion from filenames/timestamps alone; use `workspace_project_summary` when the user wants a brief explanation of what the current repository/workspace is for from local project structure evidence; use `scalar_count` / `quantity_comparison` / `scalar_path_only` / `existence_with_path` / `recent_scalar_equality_check` when the final answer needs that specific post-processing semantics; otherwise `none`.
 - `output_contract.locator_hint`: preserve the best concrete locator text from the current request or immediate binding context; keep original language/script.
+- `output_contract.self_extension`: use `temporary_fix` for one-off script/package based completion, especially when the user explicitly asks not to use existing skills or when no existing skill clearly matches a bounded local automation task; use `permanent_extension` only for explicit reusable capability-building requests; otherwise keep `none`.
 - Do not output markdown, code fences, or comments. Never output <think> tags or any prose outside the JSON object.
 
 __ROUTING_RULES__
+
+Self-extension runtime (authoritative; if disabled, keep output_contract.self_extension.mode=`none`):
+__SELF_EXTENSION_RUNTIME__
 
 Interrupted task context (optional; background only, do not force stale resume):
 __RESUME_CONTEXT__

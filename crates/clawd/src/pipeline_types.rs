@@ -64,6 +64,87 @@ impl OutputDeliveryIntent {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum OutputSemanticKind {
+    #[default]
+    None,
+    RawCommandOutput,
+    ServiceStatus,
+    HiddenEntriesCheck,
+    DirectoryPurposeSummary,
+    ContentExcerptSummary,
+    RecentArtifactsJudgment,
+    WorkspaceProjectSummary,
+    ScalarCount,
+    QuantityComparison,
+    ScalarPathOnly,
+    ExistenceWithPath,
+    RecentScalarEqualityCheck,
+}
+
+impl OutputSemanticKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::RawCommandOutput => "raw_command_output",
+            Self::ServiceStatus => "service_status",
+            Self::HiddenEntriesCheck => "hidden_entries_check",
+            Self::DirectoryPurposeSummary => "directory_purpose_summary",
+            Self::ContentExcerptSummary => "content_excerpt_summary",
+            Self::RecentArtifactsJudgment => "recent_artifacts_judgment",
+            Self::WorkspaceProjectSummary => "workspace_project_summary",
+            Self::ScalarCount => "scalar_count",
+            Self::QuantityComparison => "quantity_comparison",
+            Self::ScalarPathOnly => "scalar_path_only",
+            Self::ExistenceWithPath => "existence_with_path",
+            Self::RecentScalarEqualityCheck => "recent_scalar_equality_check",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SelfExtensionMode {
+    #[default]
+    None,
+    TemporaryFix,
+    PermanentExtension,
+}
+
+impl SelfExtensionMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::TemporaryFix => "temporary_fix",
+            Self::PermanentExtension => "permanent_extension",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SelfExtensionTrigger {
+    #[default]
+    None,
+    ExplicitUserRequest,
+    CapabilityGap,
+}
+
+impl SelfExtensionTrigger {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ExplicitUserRequest => "explicit_user_request",
+            Self::CapabilityGap => "capability_gap",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SelfExtensionContract {
+    pub(crate) mode: SelfExtensionMode,
+    pub(crate) trigger: SelfExtensionTrigger,
+    pub(crate) execute_now: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct IntentOutputContract {
     pub(crate) response_shape: OutputResponseShape,
@@ -71,7 +152,9 @@ pub(crate) struct IntentOutputContract {
     pub(crate) delivery_required: bool,
     pub(crate) locator_kind: OutputLocatorKind,
     pub(crate) delivery_intent: OutputDeliveryIntent,
+    pub(crate) semantic_kind: OutputSemanticKind,
     pub(crate) locator_hint: String,
+    pub(crate) self_extension: SelfExtensionContract,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +214,8 @@ pub(crate) struct RouteResult {
     pub(crate) schedule_kind: ScheduleKind,
     pub(crate) schedule_intent: Option<ScheduleIntentOutput>,
     pub(crate) wants_file_delivery: bool,
+    pub(crate) should_refresh_long_term_memory: bool,
+    pub(crate) agent_display_name_hint: String,
     pub(crate) output_contract: IntentOutputContract,
 }
 

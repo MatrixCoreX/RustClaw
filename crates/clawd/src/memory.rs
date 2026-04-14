@@ -56,6 +56,14 @@ pub(crate) const MEMORY_SCOPE_USER: &str = "user";
 // `tool_or_skill_name` is a best-effort producer label for debugging/analytics.
 pub(crate) const RETRIEVAL_PRODUCER_KB: &str = "kb";
 pub(crate) const RETRIEVAL_PRODUCER_MEMORY_PIPELINE: &str = RETRIEVAL_SOURCE_MEMORY;
+const AGENT_DISPLAY_NAME_INVALID_VALUES: &[&str] = &[
+    "executor",
+    "assistant",
+    "agent",
+    "系统",
+    "身份",
+    "formal identity",
+];
 
 pub(crate) fn retrieval_source_is_knowledge(source_kind: &str) -> bool {
     matches!(
@@ -231,7 +239,7 @@ pub(crate) fn insert_memory(
     }
     let trimmed = utf8_safe_prefix(&normalized, keep).to_string();
     let extracted_prefs = if role == MEMORY_ROLE_USER && state.memory.enable_preference_extraction {
-        extract_user_preferences(content, &state.memory, crate::main_flow_rules(state))
+        extract_user_preferences(content, &state.memory)
     } else {
         Vec::new()
     };
@@ -260,35 +268,16 @@ pub(crate) fn insert_memory(
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
     let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
-    for (pref_key, pref_value, confidence, source) in &extracted_prefs {
-        db.execute(
-            "INSERT INTO user_preferences (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(user_id, chat_id, user_key, pref_key)
-             DO UPDATE SET user_key=excluded.user_key, pref_value=excluded.pref_value, confidence=excluded.confidence, source=excluded.source, updated_at=excluded.updated_at, updated_at_ts=excluded.updated_at_ts",
-            params![
-                user_id,
-                chat_id,
-                &user_key,
-                pref_key,
-                pref_value,
-                *confidence,
-                source,
-                now_text,
-                now_ts_i64
-            ],
-        )?;
-    }
-    if state.memory.hybrid_recall_enabled && !extracted_prefs.is_empty() {
-        let _ = indexing::index_preference_entries(
-            &db,
-            user_id,
-            chat_id,
-            &user_key,
-            &extracted_prefs,
-            now_ts_i64,
-        );
-    }
+    upsert_user_preferences(
+        state,
+        &db,
+        user_id,
+        chat_id,
+        &user_key,
+        &extracted_prefs,
+        &now_text,
+        now_ts_i64,
+    )?;
     if should_skip {
         return Ok(());
     }
@@ -1627,7 +1616,6 @@ fn estimate_memory_salience(
 fn extract_user_preferences(
     content: &str,
     cfg: &MemoryConfig,
-    rules: &claw_core::hard_rules::types::MainFlowRules,
 ) -> Vec<(String, String, f32, String)> {
     let mut out = Vec::new();
     let norm = content.to_ascii_lowercase();
@@ -1675,64 +1663,111 @@ fn extract_user_preferences(
             "rule_extract".to_string(),
         ));
     }
-    if let Some(name) = extract_agent_display_name(content, rules) {
-        out.push((
-            "agent_display_name".to_string(),
-            name,
-            0.78,
-            "assistant_name_extract".to_string(),
-        ));
-    }
     out
 }
 
-fn extract_agent_display_name(
-    content: &str,
-    rules: &claw_core::hard_rules::types::MainFlowRules,
-) -> Option<String> {
-    let text = content.trim();
-    if text.is_empty() {
+fn normalize_agent_display_name(raw: &str) -> Option<String> {
+    let candidate = raw
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'' || c == '“' || c == '”' || c == '‘' || c == '’')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if candidate.is_empty() {
         return None;
     }
-    let lower = text.to_ascii_lowercase();
-    for marker in &rules.assistant_name_extract_markers {
-        let pos = if marker.is_ascii() {
-            lower.find(&marker.to_ascii_lowercase())
-        } else {
-            text.find(marker)
-        };
-        let Some(pos) = pos else {
-            continue;
-        };
-        let start = pos + marker.len();
-        let tail = &text[start..];
-        let candidate = tail
-            .split([
-                '\n', '\r', '，', ',', '。', '.', '！', '!', '？', '?', '；', ';', '（', '）', '(',
-                ')',
-            ])
-            .next()
-            .unwrap_or("")
-            .trim()
-            .trim_matches(|c| c == '"' || c == '\'' || c == '“' || c == '”' || c == '‘' || c == '’')
-            .trim();
-        if candidate.is_empty() {
-            continue;
-        }
-        let candidate = candidate.split_whitespace().collect::<Vec<_>>().join(" ");
-        if rules
-            .assistant_name_invalid_values
-            .iter()
-            .any(|v| candidate.eq_ignore_ascii_case(v) || candidate.contains(v))
-        {
-            continue;
-        }
-        let char_count = candidate.chars().count();
-        if (1..=24).contains(&char_count) {
-            return Some(candidate);
-        }
+    if AGENT_DISPLAY_NAME_INVALID_VALUES
+        .iter()
+        .any(|value| candidate.eq_ignore_ascii_case(value) || candidate.contains(value))
+    {
+        return None;
     }
-    None
+    let char_count = candidate.chars().count();
+    ((1..=24).contains(&char_count)).then_some(candidate)
+}
+
+fn structured_user_preferences_from_route_hint(
+    agent_display_name_hint: &str,
+) -> Vec<(String, String, f32, String)> {
+    let mut prefs = Vec::new();
+    if let Some(name) = normalize_agent_display_name(agent_display_name_hint) {
+        prefs.push((
+            "agent_display_name".to_string(),
+            name,
+            0.92,
+            "route_semantic_extract".to_string(),
+        ));
+    }
+    prefs
+}
+
+fn upsert_user_preferences(
+    state: &AppState,
+    db: &Connection,
+    user_id: i64,
+    chat_id: i64,
+    user_key: &str,
+    extracted_prefs: &[(String, String, f32, String)],
+    now_text: &str,
+    now_ts_i64: i64,
+) -> anyhow::Result<()> {
+    for (pref_key, pref_value, confidence, source) in extracted_prefs {
+        db.execute(
+            "INSERT INTO user_preferences (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(user_id, chat_id, user_key, pref_key)
+             DO UPDATE SET user_key=excluded.user_key, pref_value=excluded.pref_value, confidence=excluded.confidence, source=excluded.source, updated_at=excluded.updated_at, updated_at_ts=excluded.updated_at_ts",
+            params![
+                user_id,
+                chat_id,
+                user_key,
+                pref_key,
+                pref_value,
+                *confidence,
+                source,
+                now_text,
+                now_ts_i64
+            ],
+        )?;
+    }
+    if state.memory.hybrid_recall_enabled && !extracted_prefs.is_empty() {
+        let _ = indexing::index_preference_entries(
+            db,
+            user_id,
+            chat_id,
+            user_key,
+            extracted_prefs,
+            now_ts_i64,
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn upsert_user_preferences_from_route_hint(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    user_key: Option<&str>,
+    agent_display_name_hint: &str,
+) -> anyhow::Result<()> {
+    let extracted_prefs = structured_user_preferences_from_route_hint(agent_display_name_hint);
+    if extracted_prefs.is_empty() {
+        return Ok(());
+    }
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let now_text = now_ts();
+    let now_ts_i64 = now_ts_u64() as i64;
+    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    upsert_user_preferences(
+        state,
+        &db,
+        user_id,
+        chat_id,
+        &user_key,
+        &extracted_prefs,
+        &now_text,
+        now_ts_i64,
+    )
 }
 
 fn extract_recall_keywords(prompt: &str) -> Vec<String> {
@@ -1797,8 +1832,9 @@ mod tests {
         clarify_assistant_placeholder, classify_assistant_context_reply_kind,
         extract_result_text_for_recent_turns, insert_memory, legacy_principal_chat_id,
         ordered_entries_from_assistant_reply, provider_unavailable_assistant_placeholder,
-        retrieval_source_ref_for_kb_chunk, retrieval_source_ref_for_memory,
-        retrieval_source_ref_for_preference, AssistantContextReplyKind, MemoryWriteKind,
+        recall_user_preferences, retrieval_source_ref_for_kb_chunk,
+        retrieval_source_ref_for_memory, retrieval_source_ref_for_preference,
+        upsert_user_preferences_from_route_hint, AssistantContextReplyKind, MemoryWriteKind,
         MEMORY_ROLE_ASSISTANT, RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE,
         RETRIEVAL_SOURCE_MEMORY,
     };
@@ -1874,6 +1910,7 @@ mod tests {
             database_sqlite_path: std::path::PathBuf::new(),
             database_busy_timeout_ms: 5_000,
             config_path_for_reload: String::new(),
+            self_extension: claw_core::config::SelfExtensionConfig::default(),
             registry_path_for_reload: None,
             skill_switches_for_reload: Arc::new(HashMap::new()),
             initial_skills_list_for_reload: Vec::new(),
@@ -1919,6 +1956,24 @@ mod tests {
             );",
         )
         .expect("create memories table");
+    }
+
+    fn create_user_preferences_table(db: &Connection) {
+        db.execute_batch(
+            "CREATE TABLE user_preferences (
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                user_key TEXT NOT NULL,
+                pref_key TEXT NOT NULL,
+                pref_value TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0,
+                source TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT '',
+                updated_at_ts INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, chat_id, user_key, pref_key)
+            );",
+        )
+        .expect("create user_preferences table");
     }
 
     #[test]
@@ -2214,6 +2269,40 @@ mod tests {
             retrieval_source_ref_for_preference(" response_language "),
             "response_language"
         );
+    }
+
+    #[test]
+    fn route_hint_upserts_agent_display_name_preference() {
+        let state = test_state();
+        {
+            let db = state.db.lock().expect("db");
+            create_user_preferences_table(&db);
+        }
+
+        upsert_user_preferences_from_route_hint(&state, 1, 2, Some("test-user"), "小爪")
+            .expect("upsert route hint preference");
+
+        let prefs =
+            recall_user_preferences(&state, Some("test-user"), 1, 2, 8).expect("recall prefs");
+        assert!(prefs
+            .iter()
+            .any(|(key, value)| key == "agent_display_name" && value == "小爪"));
+    }
+
+    #[test]
+    fn route_hint_rejects_invalid_agent_display_name() {
+        let state = test_state();
+        {
+            let db = state.db.lock().expect("db");
+            create_user_preferences_table(&db);
+        }
+
+        upsert_user_preferences_from_route_hint(&state, 1, 2, Some("test-user"), "assistant")
+            .expect("reject invalid route hint");
+
+        let prefs =
+            recall_user_preferences(&state, Some("test-user"), 1, 2, 8).expect("recall prefs");
+        assert!(!prefs.iter().any(|(key, _)| key == "agent_display_name"));
     }
 
     #[test]

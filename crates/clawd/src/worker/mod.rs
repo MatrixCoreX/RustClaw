@@ -34,9 +34,11 @@ pub(crate) use runtime_support::{
     spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, start_task_heartbeat,
 };
 
-pub(crate) fn is_resume_continue_source(rules: &crate::MainFlowRules, raw: &str) -> bool {
+pub(crate) fn is_resume_continue_source(raw: &str) -> bool {
     let source = raw.trim().to_ascii_lowercase();
-    rules.resume_continue_sources.iter().any(|v| v == &source)
+    crate::RESUME_CONTINUE_SOURCES
+        .iter()
+        .any(|value| *value == source)
 }
 
 pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
@@ -240,6 +242,7 @@ pub(crate) async fn process_ask_task(
         route_result: Some(prepared_flow.route_result.clone()),
         context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
         auto_locator_path: prepared_flow.auto_locator_path.clone(),
+        user_request: Some(prompt.clone()),
     });
 
     let Some(result) = ask_pipeline::execute_ask_dispatch(
@@ -254,6 +257,7 @@ pub(crate) async fn process_ask_task(
         &prepared_flow.route_result,
         prepared_flow.agent_mode,
         &prepared_flow.clarify_reason,
+        prepared_flow.clarify_reason_kind,
         &prepared_flow.fuzzy_locator_suggestions,
         prepared_flow.classifier_direct_mode,
         prepared_flow.direct_resume_discussion,

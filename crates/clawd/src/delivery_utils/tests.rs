@@ -1,6 +1,13 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use claw_core::config::{AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig};
+use reqwest::Client;
+use rusqlite::Connection;
+use tokio::sync::Semaphore;
 
 use super::directory_lookup::{
     collect_directory_candidates, list_directory_entries_for_user, resolve_directory_locator_input,
@@ -19,13 +26,17 @@ use super::locator::{
 use super::output_contract::{sync_output_payload, take_first_sentence};
 use super::{
     classify_batch_directory_delivery_input, classify_directory_lookup_input,
-    resolve_directory_locator_for_execution, resolve_file_delivery_target,
-    BatchDirectoryDeliveryResolution, CurrentLevelDeliveryEntries,
+    intercept_response_payload_for_delivery, resolve_directory_locator_for_execution,
+    resolve_file_delivery_target, BatchDirectoryDeliveryResolution, CurrentLevelDeliveryEntries,
     CurrentLevelDeliveryEntriesResult, DeliveryMessageKind, DirectoryEntriesListResult,
     DirectoryFileLookupResult, DirectoryLocatorExecutionResolution, DirectoryLookupInput,
     DirectoryLookupResolution, FileDeliveryTargetResolution, FilenameScanResult,
 };
-use crate::{IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape};
+use crate::{
+    runtime::{AgentRuntimeConfig, RateLimiter, SkillViewsSnapshot},
+    AppState, CommandIntentRuntime, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, ScheduleRuntime, ToolsPolicy,
+};
 
 struct TempDirGuard {
     path: PathBuf,
@@ -71,8 +82,90 @@ fn contract_with_delivery_intent(
 ) -> IntentOutputContract {
     IntentOutputContract {
         delivery_intent,
+        semantic_kind: Default::default(),
         locator_hint: locator_hint.to_string(),
         ..IntentOutputContract::default()
+    }
+}
+
+fn test_state_with_i18n(translations: &[(&str, &str)]) -> AppState {
+    let agents_by_id = HashMap::from([(
+        crate::DEFAULT_AGENT_ID.to_string(),
+        AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
+    )]);
+    let i18n_dict = translations
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect::<HashMap<_, _>>();
+    AppState {
+        started_at: std::time::Instant::now(),
+        queue_limit: 1,
+        db: Arc::new(Mutex::new(Connection::open_in_memory().expect("open db"))),
+        llm_providers: Vec::new(),
+        agents_by_id: Arc::new(agents_by_id),
+        skill_timeout_seconds: 30,
+        skill_runner_path: std::path::PathBuf::new(),
+        skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+            registry: None,
+            skills_list: Arc::new(HashSet::new()),
+        }))),
+        skill_semaphore: Arc::new(Semaphore::new(1)),
+        rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
+        llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
+        maintenance: MaintenanceConfig::default(),
+        memory: MemoryConfig::default(),
+        workspace_root: std::env::temp_dir(),
+        default_locator_search_dir: std::env::temp_dir(),
+        locator_scan_max_depth: 2,
+        locator_scan_max_files: 100,
+        tools_policy: Arc::new(
+            ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+        ),
+        active_provider_type: None,
+        cmd_timeout_seconds: 30,
+        max_cmd_length: 4096,
+        allow_path_outside_workspace: false,
+        allow_sudo: false,
+        worker_task_timeout_seconds: 300,
+        worker_task_heartbeat_seconds: 10,
+        worker_running_no_progress_timeout_seconds: 300,
+        worker_running_recovery_check_interval_seconds: 30,
+        last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+        routing: RoutingConfig::default(),
+        persona_prompt: String::new(),
+        command_intent: CommandIntentRuntime {
+            all_result_suffixes: Vec::new(),
+            default_locale: "zh-CN".to_string(),
+            verify_enforce_enabled: false,
+        },
+        schedule: ScheduleRuntime {
+            timezone: "Asia/Shanghai".to_string(),
+            intent_prompt_template: String::new(),
+            intent_prompt_source: String::new(),
+            intent_rules_template: String::new(),
+            locale: "zh-CN".to_string(),
+            i18n_dict,
+        },
+        telegram_bot_token: String::new(),
+        telegram_configured_bot_names: Arc::new(Vec::new()),
+        whatsapp_cloud_enabled: false,
+        whatsapp_api_base: String::new(),
+        whatsapp_access_token: String::new(),
+        whatsapp_phone_number_id: String::new(),
+        whatsapp_web_enabled: false,
+        whatsapp_web_bridge_base_url: String::new(),
+        future_adapters_enabled: Arc::new(Vec::new()),
+        wechat_send_config: None,
+        feishu_send_config: None,
+        lark_send_config: None,
+        http_client: Client::new(),
+        database_sqlite_path: std::path::PathBuf::new(),
+        database_busy_timeout_ms: 5_000,
+        config_path_for_reload: String::new(),
+        self_extension: claw_core::config::SelfExtensionConfig::default(),
+        registry_path_for_reload: None,
+        skill_switches_for_reload: Arc::new(HashMap::new()),
+        initial_skills_list_for_reload: Vec::new(),
     }
 }
 
@@ -183,6 +276,101 @@ fn sync_output_payload_collapses_one_sentence_contract_to_single_message() {
 
     assert_eq!(text, "一句话结论。");
     assert_eq!(messages, vec!["一句话结论。".to_string()]);
+}
+
+#[test]
+fn directory_purpose_summary_one_sentence_contract_preserves_multiline_listing() {
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::OneSentence,
+        semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
+        ..IntentOutputContract::default()
+    };
+    let mut text =
+        "base_skill_response_contract.md\nskill_integration_guide.md\n\n这个目录主要放说明文档、操作指引和检查清单。"
+            .to_string();
+    let mut messages = vec![text.clone()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    assert_eq!(
+        text,
+        "base_skill_response_contract.md\nskill_integration_guide.md\n\n这个目录主要放说明文档、操作指引和检查清单。"
+    );
+    assert_eq!(messages, vec![text]);
+}
+
+#[test]
+fn sync_output_payload_strips_preamble_before_markdown_table() {
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        ..IntentOutputContract::default()
+    };
+    let mut text = "Sorted descending by score:\n\n| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |".to_string();
+    let mut messages = vec![text.clone()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    let expected =
+        "| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |".to_string();
+    assert_eq!(text, expected);
+    assert_eq!(messages, vec![expected]);
+}
+
+#[test]
+fn intercept_response_payload_localizes_missing_file_message_to_english_request() {
+    let state = test_state_with_i18n(&[(
+        "clawd.msg.delivery.rule1_both_roots_miss",
+        "在系统根目录和项目根目录都没有找到该文件",
+    )]);
+    let contract = IntentOutputContract {
+        delivery_required: true,
+        response_shape: OutputResponseShape::FileToken,
+        ..IntentOutputContract::default()
+    };
+
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "send me document/definitely_missing_runtime_case_002.txt and do not paste the content",
+        true,
+        &contract,
+        String::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(text, "File not found at the provided path.");
+    assert_eq!(
+        messages,
+        vec!["File not found at the provided path.".to_string()]
+    );
+}
+
+#[test]
+fn intercept_response_payload_localizes_missing_directory_message_to_english_request() {
+    let state = test_state_with_i18n(&[(
+        "clawd.msg.directory.not_found_dual_root",
+        "在系统根目录和项目根目录都没有找到该目录",
+    )]);
+    let contract = IntentOutputContract {
+        delivery_intent: OutputDeliveryIntent::DirectoryLookup,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "missing-directory".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "list files in missing-directory",
+        false,
+        &contract,
+        String::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(text, "Directory not found at the provided path.");
+    assert_eq!(
+        messages,
+        vec!["Directory not found at the provided path.".to_string()]
+    );
 }
 
 // Single-file delivery resolution rules.
@@ -608,6 +796,28 @@ fn rule3_filename_only_long_missing_name_does_not_match_short_substrings() {
     let resolved = resolve_file_delivery_target(
         "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
         system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::UserMessage(
+            DeliveryMessageKind::Rule3FileNotFound
+        ))
+    );
+}
+
+#[test]
+fn rule3_filename_only_missing_name_does_not_fallback_to_real_system_root_scan() {
+    let project_root = TempDirGuard::new("rule3_project_missing_real_system_root");
+    write_text_file(&project_root.path().join("rustclaw.service"));
+    write_text_file(&project_root.path().join("README_file.txt"));
+
+    let resolved = resolve_file_delivery_target(
+        "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
+        std::path::Path::new("/"),
         project_root.path(),
         3,
         200,

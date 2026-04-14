@@ -4,8 +4,8 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    main_flow_rules, now_ts, parse_task_status_with_rules, truncate_for_log, ActiveTaskItem,
-    AppState, ClaimedTask, TaskQueryResponse,
+    now_ts, parse_task_status, truncate_for_log, ActiveTaskItem, AppState, ClaimedTask,
+    TaskQueryResponse,
 };
 
 pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<ClaimedTask>> {
@@ -375,7 +375,7 @@ pub(crate) fn get_task_query_record(
             let task_user_key: Option<String> = row.get(3)?;
             let channel: String = row.get(4)?;
 
-            let status = parse_task_status_with_rules(main_flow_rules(state), &status_str);
+            let status = parse_task_status(&status_str);
 
             let result_json = result_json_str
                 .as_deref()

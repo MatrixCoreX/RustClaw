@@ -410,30 +410,10 @@ fn should_rewrite_service_status_run_cmd_probe(
     if target.is_empty() {
         return false;
     }
-    let intent = route_result.resolved_intent.trim();
-    if intent.is_empty() {
+    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput {
         return false;
     }
-    let intent_lower = intent.to_ascii_lowercase();
-    if intent.contains("执行命令")
-        || intent.contains("执行结果")
-        || intent_lower.contains("run command")
-        || intent_lower.contains("execute command")
-        || intent_lower.contains("show command output")
-        || intent_lower.contains("raw output")
-        || intent_lower.contains("grep ")
-        || intent_lower.contains("pgrep")
-    {
-        return false;
-    }
-    let status_like = intent.contains("正在运行")
-        || intent.contains("还活着")
-        || intent.contains("活着没")
-        || intent.contains("状态")
-        || intent_lower.contains("running")
-        || intent_lower.contains("alive")
-        || intent_lower.contains("status");
-    if !status_like {
+    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus {
         return false;
     }
     let Some(AgentAction::CallSkill { skill, args }) = actions.first() else {
@@ -446,14 +426,14 @@ fn should_rewrite_service_status_run_cmd_probe(
         .get("command")
         .and_then(|value| value.as_str())
         .map(str::trim)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+        .unwrap_or_default();
+    let command_lower = command.to_ascii_lowercase();
     let target_lower = target.to_ascii_lowercase();
-    (command.contains("ps aux")
-        || command.contains("ps -")
-        || command.contains("pgrep")
-        || command.contains("grep -i"))
-        && command.contains(&target_lower)
+    (command_lower.contains("ps aux")
+        || command_lower.contains("ps -")
+        || command_lower.contains("pgrep")
+        || command_lower.contains("grep -i"))
+        && command_lower.contains(&target_lower)
 }
 
 fn rewrite_service_status_probe_actions(
@@ -869,8 +849,8 @@ mod tests {
         strip_terminal_discussion_for_observed_finalize, LoopState,
     };
     use crate::{
-        AgentAction, IntentOutputContract, OutputLocatorKind, OutputResponseShape, ResumeBehavior,
-        RiskCeiling, RouteResult, RoutedMode, ScheduleKind,
+        AgentAction, IntentOutputContract, OutputLocatorKind, OutputResponseShape,
+        OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult, RoutedMode, ScheduleKind,
     };
     use serde_json::json;
 
@@ -892,13 +872,17 @@ mod tests {
             clarify_question: String::new(),
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
                 response_shape,
                 requires_content_evidence,
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::Path,
                 delivery_intent: Default::default(),
+                semantic_kind: OutputSemanticKind::None,
                 locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
             },
         }
     }
@@ -913,6 +897,7 @@ mod tests {
     fn service_status_probe_rewrites_run_cmd_grep_to_service_control() {
         let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
         route.resolved_intent = "检查 telegramd 进程是否正在运行，并用一句话解释状态".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
         route.output_contract.locator_hint = "telegramd".to_string();
         let actions = vec![AgentAction::CallSkill {
             skill: "run_cmd".to_string(),
@@ -934,6 +919,7 @@ mod tests {
         let mut route = route_result(RoutedMode::Act, false, OutputResponseShape::Free);
         route.resolved_intent =
             "执行命令 ps aux | grep -i telegramd | grep -v grep，并直接回复执行结果".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
         route.output_contract.locator_hint = "telegramd".to_string();
         let actions = vec![AgentAction::CallSkill {
             skill: "run_cmd".to_string(),
@@ -944,6 +930,28 @@ mod tests {
         assert!(matches!(
             &rewritten[0],
             AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
+        ));
+    }
+
+    #[test]
+    fn english_status_probe_rewrites_run_cmd_to_service_control() {
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.resolved_intent =
+            "Check whether telegramd is running and briefly explain the status".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+        route.output_contract.locator_hint = "telegramd".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({ "command": "pgrep -fa telegramd" }),
+        }];
+
+        let rewritten = rewrite_service_status_probe_actions(Some(&route), actions);
+        assert!(matches!(
+            &rewritten[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "service_control"
+                    && args.get("action").and_then(|v| v.as_str()) == Some("status")
+                    && args.get("target").and_then(|v| v.as_str()) == Some("telegramd")
         ));
     }
 

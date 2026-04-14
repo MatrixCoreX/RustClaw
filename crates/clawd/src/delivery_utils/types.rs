@@ -40,7 +40,7 @@ impl DeliveryMessageKind {
 
     fn default_text(self) -> &'static str {
         match self {
-            Self::Rule1BothRootsMiss => "File not found under system root and project root.",
+            Self::Rule1BothRootsMiss => "File not found at the provided path.",
             Self::Rule2DirNotFound => "Directory does not exist. Please provide a correct path.",
             Self::Rule2FileNotFound => "The file was not found in that directory.",
             Self::Rule3ScanTooMany => "Too many files. Please provide an exact path.",
@@ -48,9 +48,7 @@ impl DeliveryMessageKind {
             Self::FilenameNotUnique => {
                 "Multiple files with the same name were found. Please provide an exact path."
             }
-            Self::DirectoryBothRootsMiss => {
-                "Directory not found under system root and project root."
-            }
+            Self::DirectoryBothRootsMiss => "Directory not found at the provided path.",
             Self::DirectoryEntriesTooMany => {
                 "Too many files/directories in this directory. Please provide a more specific path or a smaller scope."
             }
@@ -72,6 +70,30 @@ impl DeliveryMessageKind {
 
 pub(super) fn localize_delivery_message(state: &AppState, kind: DeliveryMessageKind) -> String {
     crate::i18n_t_with_default(state, kind.i18n_key(), kind.default_text())
+}
+
+fn request_prefers_english(user_request: &str) -> bool {
+    let trimmed = user_request.trim();
+    !trimmed.is_empty()
+        && trimmed.chars().any(|ch| ch.is_ascii_alphabetic())
+        && !trimmed.chars().any(|ch| {
+            matches!(
+                ch as u32,
+                0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
+            )
+        })
+}
+
+pub(super) fn localize_delivery_message_for_request(
+    state: &AppState,
+    kind: DeliveryMessageKind,
+    user_request: &str,
+) -> String {
+    if request_prefers_english(user_request) {
+        kind.default_text().to_string()
+    } else {
+        localize_delivery_message(state, kind)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use tracing::warn;
 
 use crate::hard_rules::loader::read_toml_text;
 use crate::hard_rules::types::MainFlowRules;
@@ -13,18 +14,6 @@ struct MainFlowRulesToml {
     duplicate_affirmation: DuplicateAffirmationSection,
     #[serde(default)]
     runtime_channel: RuntimeChannelSection,
-    #[serde(default)]
-    classifier: ClassifierSection,
-    #[serde(default)]
-    resume: ResumeSection,
-    #[serde(default)]
-    task_status: TaskStatusSection,
-    #[serde(default)]
-    context: ContextSection,
-    #[serde(default)]
-    assistant_name: AssistantNameSection,
-    #[serde(default)]
-    summary: SummarySection,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -57,53 +46,6 @@ struct RuntimeChannelSection {
     whatsapp_aliases: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-struct ClassifierSection {
-    #[serde(default)]
-    direct_sources: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-struct ResumeSection {
-    #[serde(default)]
-    continue_sources: Vec<String>,
-    #[serde(default)]
-    exact_continue_markers: Vec<String>,
-    #[serde(default)]
-    discussion_markers: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-struct TaskStatusSection {
-    queued: Option<String>,
-    running: Option<String>,
-    succeeded: Option<String>,
-    failed: Option<String>,
-    canceled: Option<String>,
-    timeout: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-struct ContextSection {
-    low_confidence_threshold: Option<f64>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-struct AssistantNameSection {
-    #[serde(default)]
-    extract_markers: Vec<String>,
-    #[serde(default)]
-    invalid_values: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-struct SummarySection {
-    #[serde(default)]
-    explicit_markers: Vec<String>,
-    #[serde(default)]
-    response_like_markers: Vec<String>,
-}
-
 fn normalize_list(items: Vec<String>) -> Vec<String> {
     items
         .into_iter()
@@ -112,21 +54,27 @@ fn normalize_list(items: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn normalize_preserve_list(items: Vec<String>) -> Vec<String> {
-    items
-        .into_iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
 pub fn load_main_flow_rules(path: &str) -> MainFlowRules {
     let mut merged = MainFlowRules::defaults();
-    let Some(raw) = read_toml_text(path) else {
-        return merged;
+    let raw = match read_toml_text(path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            warn!(
+                "hard_rules.main_flow read failed path={} error={}",
+                path, err
+            );
+            return merged;
+        }
     };
-    let Ok(parsed) = toml::from_str::<MainFlowRulesToml>(&raw) else {
-        return merged;
+    let parsed = match toml::from_str::<MainFlowRulesToml>(&raw) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            warn!(
+                "hard_rules.main_flow parse failed path={} error={}",
+                path, err
+            );
+            return merged;
+        }
     };
 
     let web_adapters = normalize_list(parsed.whatsapp.web_adapters);
@@ -184,80 +132,82 @@ pub fn load_main_flow_rules(path: &str) -> MainFlowRules {
     if !whatsapp_aliases.is_empty() {
         merged.runtime_whatsapp_channel_aliases = whatsapp_aliases;
     }
-    let classifier_sources = normalize_list(parsed.classifier.direct_sources);
-    if !classifier_sources.is_empty() {
-        merged.classifier_direct_sources = classifier_sources;
-    }
-    let resume_sources = normalize_list(parsed.resume.continue_sources);
-    if !resume_sources.is_empty() {
-        merged.resume_continue_sources = resume_sources;
-    }
-    let exact_continue_markers = normalize_preserve_list(parsed.resume.exact_continue_markers);
-    if !exact_continue_markers.is_empty() {
-        merged.resume_exact_continue_markers = exact_continue_markers;
-    }
-    let discussion_markers = normalize_preserve_list(parsed.resume.discussion_markers);
-    if !discussion_markers.is_empty() {
-        merged.resume_discussion_markers = discussion_markers;
-    }
-    if let Some(v) = parsed.task_status.queued {
-        let s = v.trim().to_ascii_lowercase();
-        if !s.is_empty() {
-            merged.task_status_queued = s;
-        }
-    }
-    if let Some(v) = parsed.task_status.running {
-        let s = v.trim().to_ascii_lowercase();
-        if !s.is_empty() {
-            merged.task_status_running = s;
-        }
-    }
-    if let Some(v) = parsed.task_status.succeeded {
-        let s = v.trim().to_ascii_lowercase();
-        if !s.is_empty() {
-            merged.task_status_succeeded = s;
-        }
-    }
-    if let Some(v) = parsed.task_status.failed {
-        let s = v.trim().to_ascii_lowercase();
-        if !s.is_empty() {
-            merged.task_status_failed = s;
-        }
-    }
-    if let Some(v) = parsed.task_status.canceled {
-        let s = v.trim().to_ascii_lowercase();
-        if !s.is_empty() {
-            merged.task_status_canceled = s;
-        }
-    }
-    if let Some(v) = parsed.task_status.timeout {
-        let s = v.trim().to_ascii_lowercase();
-        if !s.is_empty() {
-            merged.task_status_timeout = s;
-        }
-    }
-    if let Some(v) = parsed.context.low_confidence_threshold {
-        if v.is_finite() {
-            merged.context_low_confidence_threshold = v.clamp(0.0, 1.0);
-        }
-    }
-    let assistant_name_markers = normalize_preserve_list(parsed.assistant_name.extract_markers);
-    if !assistant_name_markers.is_empty() {
-        merged.assistant_name_extract_markers = assistant_name_markers;
-    }
-    let assistant_name_invalid_values =
-        normalize_preserve_list(parsed.assistant_name.invalid_values);
-    if !assistant_name_invalid_values.is_empty() {
-        merged.assistant_name_invalid_values = assistant_name_invalid_values;
-    }
-    let summary_markers = normalize_preserve_list(parsed.summary.explicit_markers);
-    if !summary_markers.is_empty() {
-        merged.explicit_summary_markers = summary_markers;
-    }
-    let summary_like_markers = normalize_preserve_list(parsed.summary.response_like_markers);
-    if !summary_like_markers.is_empty() {
-        merged.summary_like_response_markers = summary_like_markers;
-    }
 
     merged
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    use uuid::Uuid;
+
+    use super::*;
+
+    fn temp_rules_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "rustclaw_main_flow_rules_{label}_{}.toml",
+            Uuid::new_v4()
+        ))
+    }
+
+    #[test]
+    fn missing_file_falls_back_to_defaults() {
+        let path = temp_rules_path("missing");
+        let defaults = MainFlowRules::defaults();
+        let loaded = load_main_flow_rules(path.to_string_lossy().as_ref());
+        assert_eq!(
+            loaded.runtime_whatsapp_channel_aliases,
+            defaults.runtime_whatsapp_channel_aliases
+        );
+        assert_eq!(
+            loaded.duplicate_affirmation_scan_limit,
+            defaults.duplicate_affirmation_scan_limit
+        );
+    }
+
+    #[test]
+    fn invalid_toml_falls_back_to_defaults() {
+        let path = temp_rules_path("invalid");
+        fs::write(&path, "[duplicate_affirmation\nwindow_secs = 30").expect("write invalid toml");
+        let defaults = MainFlowRules::defaults();
+        let loaded = load_main_flow_rules(path.to_string_lossy().as_ref());
+        let _ = fs::remove_file(&path);
+        assert_eq!(loaded.whatsapp_web_adapters, defaults.whatsapp_web_adapters);
+        assert_eq!(
+            loaded.runtime_whatsapp_channel_aliases,
+            defaults.runtime_whatsapp_channel_aliases
+        );
+    }
+
+    #[test]
+    fn partially_invalid_values_keep_defaults_for_bad_fields() {
+        let path = temp_rules_path("partial");
+        fs::write(
+            &path,
+            r#"[whatsapp]
+web_adapters = ["custom_web"]
+
+[duplicate_affirmation]
+window_secs = 0
+scan_limit = 8
+statuses = ["queued", "running"]
+"#,
+        )
+        .expect("write partial toml");
+        let defaults = MainFlowRules::defaults();
+        let loaded = load_main_flow_rules(path.to_string_lossy().as_ref());
+        let _ = fs::remove_file(&path);
+        assert_eq!(loaded.whatsapp_web_adapters, vec!["custom_web".to_string()]);
+        assert_eq!(
+            loaded.duplicate_affirmation_window_secs,
+            defaults.duplicate_affirmation_window_secs
+        );
+        assert_eq!(loaded.duplicate_affirmation_scan_limit, 8);
+        assert_eq!(
+            loaded.duplicate_affirmation_statuses,
+            vec!["queued".to_string(), "running".to_string()]
+        );
+    }
 }

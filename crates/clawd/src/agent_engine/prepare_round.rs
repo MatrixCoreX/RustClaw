@@ -42,7 +42,11 @@ fn build_verifier_gate_response(
     state: &AppState,
     verify_result: &crate::verifier::VerifyResult,
 ) -> String {
-    let locale = state.command_intent.default_locale.to_ascii_lowercase();
+    let prefer_english = state
+        .command_intent
+        .default_locale
+        .to_ascii_lowercase()
+        .starts_with("en");
     let first_detail = verify_result
         .issues
         .first()
@@ -61,37 +65,32 @@ fn build_verifier_gate_response(
             crate::verifier::VerifyIssueKind::RouteClarifyRequired
         )
     });
-    if locale.starts_with("zh") {
-        if needs_confirmation {
-            format!(
-                "这一步需要你先明确确认，我还不会直接执行。\n原因：{}",
-                first_detail
-            )
-        } else if needs_clarify {
-            format!(
-                "你的需求还需要先补充澄清，我先不执行。\n原因：{}",
-                first_detail
-            )
-        } else {
-            format!(
-                "当前计划未通过执行前校验，已停止执行。\n原因：{}",
-                first_detail
-            )
-        }
-    } else if needs_confirmation {
-        format!(
-            "This step needs your explicit confirmation before I execute it.\nReason: {}",
-            first_detail
+    if needs_confirmation {
+        crate::bilingual_t_with_default_vars(
+            state,
+            "clawd.msg.verify_gate_confirmation_required",
+            "这一步需要你先明确确认，我还不会直接执行。\n原因：{detail}",
+            "This step needs your explicit confirmation before I execute it.\nReason: {detail}",
+            prefer_english,
+            &[("detail", &first_detail)],
         )
     } else if needs_clarify {
-        format!(
-            "I need a clarification before executing this plan.\nReason: {}",
-            first_detail
+        crate::bilingual_t_with_default_vars(
+            state,
+            "clawd.msg.verify_gate_clarify_required",
+            "你的需求还需要先补充澄清，我先不执行。\n原因：{detail}",
+            "I need a clarification before executing this plan.\nReason: {detail}",
+            prefer_english,
+            &[("detail", &first_detail)],
         )
     } else {
-        format!(
-            "The current plan did not pass pre-execution verification, so execution was stopped.\nReason: {}",
-            first_detail
+        crate::bilingual_t_with_default_vars(
+            state,
+            "clawd.msg.verify_gate_blocked",
+            "当前计划未通过执行前校验，已停止执行。\n原因：{detail}",
+            "The current plan did not pass pre-execution verification, so execution was stopped.\nReason: {detail}",
+            prefer_english,
+            &[("detail", &first_detail)],
         )
     }
 }

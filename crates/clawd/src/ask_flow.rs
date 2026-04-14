@@ -2,25 +2,33 @@ use serde_json::{json, Value};
 
 use crate::{AppState, AskReply, ClaimedTask, RoutedMode};
 
-fn looks_like_same_or_different_request(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    trimmed.contains("一样")
-        || trimmed.contains("相同")
-        || trimmed.contains("不同")
-        || lower.contains("same")
-        || lower.contains("different")
-        || lower.contains("equal")
-        || lower.contains("match")
+fn text_contains_cjk(text: &str) -> bool {
+    text.chars().any(|ch| {
+        matches!(
+            ch as u32,
+            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
+        )
+    })
 }
 
-fn prefers_chinese_reply(text: &str) -> bool {
-    text.chars().any(|ch| {
-        ('\u{4e00}'..='\u{9fff}').contains(&ch) || ('\u{3400}'..='\u{4dbf}').contains(&ch)
-    })
+fn text_contains_ascii_alpha(text: &str) -> bool {
+    text.chars().any(|ch| ch.is_ascii_alphabetic())
+}
+
+fn chat_request_language_hint(user_text: &str) -> &'static str {
+    let trimmed = user_text.trim();
+    if trimmed.is_empty() {
+        return "config_default";
+    }
+    match (
+        text_contains_cjk(trimmed),
+        text_contains_ascii_alpha(trimmed),
+    ) {
+        (true, false) => "zh-CN",
+        (false, true) => "en",
+        (true, true) => "mixed",
+        (false, false) => "config_default",
+    }
 }
 
 fn canonicalize_recent_scalar_reply(text: &str) -> String {
@@ -28,39 +36,14 @@ fn canonicalize_recent_scalar_reply(text: &str) -> String {
     if collapsed.is_empty() {
         return String::new();
     }
-    let lower = collapsed.to_ascii_lowercase();
-    if collapsed.ends_with("字段不存在")
-        || lower.contains("missing field")
-        || lower.contains("field not found")
-        || lower.contains("field does not exist")
-    {
-        return "__field_missing__".to_string();
-    }
-    if collapsed.contains("未找到该文件")
-        || collapsed.contains("文件不存在")
-        || collapsed.contains("没有找到该文件")
-        || lower.contains("file not found")
-        || lower.contains("not found")
-    {
-        return "__not_found__".to_string();
-    }
-    lower
+    collapsed.to_ascii_lowercase()
 }
 
 fn direct_same_or_different_answer_from_recent_replies(
-    user_text: &str,
-    resolved_intent: &str,
+    prefer_english: bool,
     recent_assistant_replies: &[String],
 ) -> Option<String> {
     if recent_assistant_replies.len() < 2 {
-        return None;
-    }
-    let semantic_request = if resolved_intent.trim().is_empty() {
-        user_text
-    } else {
-        resolved_intent
-    };
-    if !looks_like_same_or_different_request(semantic_request) {
         return None;
     }
     let latest = canonicalize_recent_scalar_reply(&recent_assistant_replies[0]);
@@ -68,28 +51,19 @@ fn direct_same_or_different_answer_from_recent_replies(
     if latest.is_empty() || previous.is_empty() {
         return None;
     }
-    let same = latest == previous;
-    Some(
-        if prefers_chinese_reply(semantic_request) {
-            if same { "一样" } else { "不一样" }
-        } else if same {
-            "same"
-        } else {
-            "different"
-        }
-        .to_string(),
-    )
+    (latest == previous).then(|| if prefer_english { "same" } else { "一样" }.to_string())
 }
 
 fn direct_chat_answer_from_recent_replies(
     state: &AppState,
     task: &ClaimedTask,
-    resolved_prompt: &str,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
     if route.needs_clarify
         || route.output_contract.requires_content_evidence
+        || route.output_contract.semantic_kind
+            != crate::OutputSemanticKind::RecentScalarEqualityCheck
         || !matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
@@ -104,11 +78,12 @@ fn direct_chat_answer_from_recent_replies(
         task.chat_id,
         2,
     );
-    direct_same_or_different_answer_from_recent_replies(
-        resolved_prompt,
-        &route.resolved_intent,
-        &recent_assistant_replies,
-    )
+    let prefer_english = state
+        .command_intent
+        .default_locale
+        .to_ascii_lowercase()
+        .starts_with("en");
+    direct_same_or_different_answer_from_recent_replies(prefer_english, &recent_assistant_replies)
 }
 
 fn build_resume_continue_execute_prompt_from_parts(
@@ -322,6 +297,14 @@ fn chat_prompt_context_with_route_resolution(
     }
 }
 
+fn chat_user_request<'a>(resolved_prompt: &'a str, execution_user_request: &'a str) -> &'a str {
+    if execution_user_request.trim() != resolved_prompt.trim() {
+        execution_user_request
+    } else {
+        resolved_prompt
+    }
+}
+
 pub(crate) async fn execute_ask_routed(
     state: &AppState,
     task: &ClaimedTask,
@@ -358,14 +341,22 @@ pub(crate) async fn execute_ask_routed(
         used_fallback_router,
         override_reason.unwrap_or("")
     );
+    if let Some(reply) = crate::self_extension::maybe_handle_ask_self_extension(
+        state,
+        task,
+        resolved_prompt,
+        execution_user_request,
+        agent_run_context.as_ref(),
+    )
+    .await?
+    {
+        return Ok(reply);
+    }
     match routed_mode {
         RoutedMode::Chat => {
-            if let Some(direct_answer) = direct_chat_answer_from_recent_replies(
-                state,
-                task,
-                resolved_prompt,
-                agent_run_context.as_ref(),
-            ) {
+            if let Some(direct_answer) =
+                direct_chat_answer_from_recent_replies(state, task, agent_run_context.as_ref())
+            {
                 return Ok(AskReply::non_llm(direct_answer));
             }
             let chat_prompt_context = chat_prompt_context_with_route_resolution(
@@ -386,6 +377,7 @@ pub(crate) async fn execute_ask_routed(
                 None,
             );
             let task_persona_prompt = state.task_persona_prompt(task);
+            let chat_user_request = chat_user_request(resolved_prompt, execution_user_request);
             let chat_prompt = crate::render_prompt_template(
                 &chat_prompt_template,
                 &[
@@ -395,7 +387,11 @@ pub(crate) async fn execute_ask_routed(
                         "__CONFIG_RESPONSE_LANGUAGE__",
                         &state.command_intent.default_locale,
                     ),
-                    ("__REQUEST__", resolved_prompt),
+                    (
+                        "__REQUEST_LANGUAGE_HINT__",
+                        chat_request_language_hint(chat_user_request),
+                    ),
+                    ("__REQUEST__", chat_user_request),
                 ],
             );
             crate::llm_gateway::run_with_fallback_with_prompt_source(
@@ -436,6 +432,16 @@ pub(crate) async fn execute_ask_routed(
                 .unwrap_or("router_selected_ask_clarify");
             let preferred_clarify =
                 preferred_route_clarify_question(state, agent_run_context.as_ref());
+            let clarify_policy = if preferred_clarify.is_none()
+                && agent_run_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.route_result.as_ref())
+                    .is_some_and(|route| route.clarify_question.trim().is_empty())
+            {
+                crate::intent_router::ClarifyQuestionPolicy::SafeFallback
+            } else {
+                crate::intent_router::ClarifyQuestionPolicy::AllowModel
+            };
             let clarify = crate::intent_router::generate_or_reuse_clarify_question(
                 state,
                 task,
@@ -443,6 +449,7 @@ pub(crate) async fn execute_ask_routed(
                 clarify_reason,
                 None,
                 preferred_clarify.as_deref(),
+                clarify_policy,
             )
             .await;
             Ok(AskReply::non_llm(clarify))
@@ -496,7 +503,8 @@ pub(crate) async fn analyze_attached_images_for_ask(
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_prompt_context_with_route_resolution, direct_same_or_different_answer_from_recent_replies,
+        chat_prompt_context_with_route_resolution, chat_request_language_hint, chat_user_request,
+        direct_same_or_different_answer_from_recent_replies,
     };
 
     #[test]
@@ -514,6 +522,8 @@ mod tests {
             schedule_kind: crate::ScheduleKind::None,
             schedule_intent: None,
             wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 locator_hint: "scripts".to_string(),
                 ..Default::default()
@@ -534,16 +544,30 @@ mod tests {
     }
 
     #[test]
-    fn same_or_different_direct_answer_normalizes_missing_field_outcomes() {
-        let replies = vec![
-            "package.name 字段不存在".to_string(),
-            "name 字段不存在".to_string(),
-        ];
-        let answer = direct_same_or_different_answer_from_recent_replies(
-            "这两个一样吗，只回答一样或不一样",
-            "比较前两个助手回复是否相同，只回答一样或不一样",
-            &replies,
-        );
+    fn same_or_different_direct_answer_normalizes_exact_scalar_matches() {
+        let replies = vec!["  Value \n".to_string(), "value".to_string()];
+        let answer = direct_same_or_different_answer_from_recent_replies(false, &replies);
         assert_eq!(answer.as_deref(), Some("一样"));
+    }
+
+    #[test]
+    fn chat_user_request_preserves_inline_structured_prompt_when_resolution_dropped_payload() {
+        let prompt = r#"sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+        let resolved = "Sort the provided JSON array by score in descending order and output as a markdown table";
+        assert_eq!(chat_user_request(resolved, prompt), prompt);
+    }
+
+    #[test]
+    fn chat_request_language_hint_prefers_current_request_language() {
+        assert_eq!(chat_request_language_hint("写个两句短诗"), "zh-CN");
+        assert_eq!(
+            chat_request_language_hint("do not run anything, just tell me a very short joke"),
+            "en"
+        );
+        assert_eq!(
+            chat_request_language_hint("用 English 解释 README"),
+            "mixed"
+        );
+        assert_eq!(chat_request_language_hint("12345"), "config_default");
     }
 }

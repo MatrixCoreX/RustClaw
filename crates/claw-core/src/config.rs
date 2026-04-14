@@ -50,6 +50,8 @@ pub struct AppConfig {
     pub schedule: ScheduleConfig,
     #[serde(default)]
     pub webd: WebdConfig,
+    #[serde(default)]
+    pub self_extension: SelfExtensionConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -606,6 +608,35 @@ impl Default for SkillsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct SelfExtensionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub auto_on_capability_gap: bool,
+    #[serde(default)]
+    pub allow_execute: bool,
+    #[serde(default)]
+    pub allow_package_install: bool,
+    #[serde(default)]
+    pub allow_permanent_extension: bool,
+    #[serde(default)]
+    pub allow_runtime_enable: bool,
+}
+
+impl Default for SelfExtensionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_on_capability_gap: true,
+            allow_execute: true,
+            allow_package_install: true,
+            allow_permanent_extension: true,
+            allow_runtime_enable: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct LimitsConfig {
     #[serde(default = "default_global_rpm")]
     pub global_rpm: usize,
@@ -1149,6 +1180,7 @@ fn default_skills_list() -> Vec<String> {
         "web_search_extract".to_string(),
         "kb".to_string(),
         "browser_web".to_string(),
+        "extension_manager".to_string(),
     ]
 }
 
@@ -1675,11 +1707,11 @@ fn default_routing_default_locator_search_dir() -> String {
 }
 
 fn default_routing_locator_scan_max_depth() -> usize {
-    6
+    2
 }
 
 fn default_routing_locator_scan_max_files() -> usize {
-    6000
+    800
 }
 
 fn default_persona_profile() -> String {
