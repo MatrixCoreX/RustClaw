@@ -21,6 +21,7 @@ members = [
     "crates/skills/crypto",
     "crates/skills/db_basic",
     "crates/skills/docker_basic",
+    "crates/skills/extension_manager",
     "crates/skills/fs_search",
     "crates/skills/git_basic",
     "crates/skills/health_check",

@@ -9,6 +9,7 @@ Primary entry point:
 - `bash scripts/nl_tests/run_suite.sh --list`
 - `bash scripts/nl_tests/run_suite.sh manual`
 - `bash scripts/nl_tests/run_suite.sh manual trace clarify`
+- `bash scripts/nl_tests/run_suite.sh self_extension`
 - `bash scripts/nl_tests/run_suite.sh --category multi_turn`
 - `bash scripts/nl_tests/run_suite.sh --category regression --category guard`
 - `bash scripts/nl_tests/run_suite.sh all`
@@ -29,12 +30,25 @@ Shared options are passed through to the underlying runners, for example:
 - `bash scripts/nl_tests/run_suite.sh manual --base-url http://127.0.0.1:8787`
 - `bash scripts/nl_tests/run_suite.sh --category multi_turn --chat-id 3000000`
 
+Self-extension regressions:
+
+- `bash scripts/nl_tests/run_suite.sh self_extension`
+- `bash scripts/nl_tests/run_full_suite.sh --with-self-extension`
+- `bash scripts/nl_tests/run_suite.sh full --with-self-extension`
+
+Notes for `self_extension`:
+
+- Stage 1 is deterministic and does not depend on provider availability.
+- Stage 2 verifies natural-language `ask -> self_extension` handoff.
+- If the provider is unavailable, stage 2 is reported as `SKIP` instead of a product failure.
+
 ## Core runners
 
 - `run_suite.sh` is now the preferred user-facing tool script.
 - `bash scripts/nl_tests/run_manual_test.sh`
 - `bash scripts/nl_tests/run_full_suite.sh`
 - `bash scripts/nl_tests/run_multi_turn_suite.sh`
+- `bash scripts/regression_self_extension_suite.sh`
 
 ## Cases
 
@@ -63,6 +77,7 @@ Shared options are passed through to the underlying runners, for example:
 - `scripts/nl_suite_logs/full/<timestamp>/`
 - `scripts/nl_suite_logs/trace/<timestamp>/`
 - `scripts/nl_suite_logs/resume/<timestamp>/`
+- `scripts/nl_suite_logs/self_extension/<timestamp>/`
 - `scripts/nl_suite_logs/text_match/<timestamp>/`
 - `scripts/nl_suite_logs/clarify/<timestamp>/`
 - `scripts/nl_suite_logs/context_chain/<timestamp>/`
