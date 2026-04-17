@@ -99,7 +99,7 @@ fn resolve_whatsapp_delivery_route(
     if rules.whatsapp_cloud_adapters.iter().any(|a| a == &adapter) {
         return crate::WhatsappDeliveryRoute::Cloud;
     }
-    if state.whatsapp_web_enabled && !state.whatsapp_cloud_enabled {
+    if state.channels.whatsapp_web_enabled && !state.channels.whatsapp_cloud_enabled {
         return crate::WhatsappDeliveryRoute::WebBridge;
     }
     crate::WhatsappDeliveryRoute::Cloud

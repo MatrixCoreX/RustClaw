@@ -1,7 +1,44 @@
 # P2.1 + P2.2 大颗粒拆分方案（AppState 拆分 + DB pool）
 
-> 状态：**proposal / await review** — 不动手实施，等用户评审后单独立项。
+> 状态：**P2.1 阶段 1 已落地（实用主义版）**；P2.2 await。
 > 编辑日期：2026-04-17
+
+## 实施进度（2026-04-17 更新）
+
+### P2.1 阶段 1 — 实用主义版已落地
+
+下面 7 簇方案是**完整版**，本次只先落了**最低频、最污染主体的两簇**：
+
+| 簇 | 字段数 | 实测访问频次 | 状态 |
+| --- | --- | --- | --- |
+| `ChannelConfig`（telegram / whatsapp / wechat / feishu / lark / future_adapters） | 12 | 18 处 | **已落地**（本次） |
+| `ReloadContext`（config / registry / skill_switches / initial_skills_list） | 4 | 2 处 | **已落地**（本次） |
+| CoreServices（db / llm_providers / agents_by_id / http_client / skill_views_snapshot） | 5 | ~140 | 留待 |
+| SkillRuntime（skill_* / locator_* / workspace_root / cmd_*） | 10 | ~140 | 留待 |
+| PolicyConfig（maintenance / memory / routing / self_extension / rate_limiter / allow_*） | 7 | ~110 | 留待 |
+| WorkerConfig（started_at / queue_limit / worker_* / database_*） | 9 | ~10 | 留待 |
+| TaskMetricsRegistry（llm_*_per_task / task_schedule_intent_cache） | 4 | ~13 | 留待 |
+
+**为何只先做 channel + reload**：实测显示 top-15 高频字段（workspace_root 84 次、
+memory 75 次、db 39 次…）占 348 处调用面里的 309 处，剩余 40 个字段才占 39 处。
+最低频两簇拿掉以后，AppState 主体从 55 字段降到 ~41，"加一个新通道字段动 13 处"
+的痛点直接解决；其余 5 簇拿到的边际收益小、改动面 348 → 30 风险跨数量级。
+
+**实测改动量**：
+
+* AppState 字段 55 → 41 + 2 个子 struct 字段
+* 调用面：18 处（channel）+ 2 处（reload）改成 `state.channels.x` / `state.reload_ctx.x`
+* 12 个 test fixture：每个减 16 行，加 2 行 `crate::ChannelConfig::default()` /
+  `crate::ReloadContext::default()`（靠 `#[derive(Default)]`）
+* 0 行 `.rs` 行为逻辑变更
+* 验证：`cargo test -p clawd --bin clawd` 572 / 572 通过；
+  `_b1_regression` 5 / 5 succeeded；`_golden` baseline（pre-P2.1）8 / 8 succeeded
+
+**剩余 5 簇何时做**：等到加新字段时如果需要、或下次想做 DB pool 时一起做
+（DB pool 是要单独把 `db` 字段抽出来，正好顺势做 CoreServices 簇）。
+本对话不上，避免"5-8 小时单 PR + 348 处 sed + 41 文件"的容量风险。
+
+---
 
 ---
 

@@ -100,7 +100,7 @@ pub(crate) async fn send_telegram_message(
     chat_id: i64,
     text: &str,
 ) -> Result<(), String> {
-    let token = state.telegram_bot_token.trim();
+    let token = state.channels.telegram_bot_token.trim();
     if token.is_empty() {
         return Err("telegram bot token is empty".to_string());
     }
@@ -156,15 +156,15 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
     to: &str,
     text: &str,
 ) -> Result<(), String> {
-    let token = state.whatsapp_access_token.trim();
+    let token = state.channels.whatsapp_access_token.trim();
     if token.is_empty() {
         return Err("whatsapp access_token is empty".to_string());
     }
-    let phone_number_id = state.whatsapp_phone_number_id.trim();
+    let phone_number_id = state.channels.whatsapp_phone_number_id.trim();
     if phone_number_id.is_empty() {
         return Err("whatsapp phone_number_id is empty".to_string());
     }
-    let base = state.whatsapp_api_base.trim().trim_end_matches('/');
+    let base = state.channels.whatsapp_api_base.trim().trim_end_matches('/');
     if base.is_empty() {
         return Err("whatsapp api_base is empty".to_string());
     }
@@ -226,6 +226,7 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
     text: &str,
 ) -> Result<(), String> {
     let base = state
+        .channels
         .whatsapp_web_bridge_base_url
         .trim()
         .trim_end_matches('/');
@@ -446,7 +447,7 @@ pub(crate) async fn send_wechat_text_message(
 }
 
 fn resolve_wechat_send_config(state: &AppState) -> Option<WechatSendConfig> {
-    let fallback = state.wechat_send_config.clone();
+    let fallback = state.channels.wechat_send_config.clone();
     let loaded = load_wechat_send_config_from_workspace(&state.workspace_root);
     match (loaded, fallback) {
         (Some(loaded), Some(mut fallback)) => {
@@ -587,7 +588,7 @@ pub(crate) async fn send_feishu_text_message(
     receive_id: &str,
     text: &str,
 ) -> Result<(), String> {
-    let config = state.feishu_send_config.as_ref().ok_or_else(|| {
+    let config = state.channels.feishu_send_config.as_ref().ok_or_else(|| {
         "feishu send not configured (configs/channels/feishu.toml app_id/app_secret)".to_string()
     })?;
     let token = get_tenant_access_token(
@@ -644,7 +645,7 @@ pub(crate) async fn send_lark_text_message(
     receive_id: &str,
     text: &str,
 ) -> Result<(), String> {
-    let config = state.lark_send_config.as_ref().ok_or_else(|| {
+    let config = state.channels.lark_send_config.as_ref().ok_or_else(|| {
         "lark send not configured (configs/channels/lark.toml app_id/app_secret)".to_string()
     })?;
     let token = get_tenant_access_token(

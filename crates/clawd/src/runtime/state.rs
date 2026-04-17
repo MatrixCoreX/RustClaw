@@ -43,6 +43,49 @@ pub(crate) struct SkillViewsSnapshot {
     pub(crate) skills_list: Arc<HashSet<String>>,
 }
 
+/// P2.1 — 把"对外通道适配器配置"从 [`AppState`] 主体中剥出来，放进独立子 struct。
+///
+/// 设计决定：
+/// - 这一组字段在主流程（dispatch / planner / skill / db）几乎用不到，只在
+///   `channel_send.rs` / `worker/channels.rs` / `http/ui_routes.rs` 三个文件被读。
+/// - 把它们隔离掉之后，AppState 主体从 55 字段降到 ~41，未来加新通道（Discord /
+///   Slack / 企微）只动这一个子 struct，不再"加一个字段动 13 个 test fixture"。
+/// - 完整 7 簇方案（CoreServices / SkillRuntime / PolicyConfig / WorkerConfig /
+///   TaskMetricsRegistry / ReloadContext / ChannelConfig）见
+///   `docs/p21_p22_appstate_db_split_proposal.md`，本次只先落实 ChannelConfig +
+///   ReloadContext 这两个低频低耦合簇。
+#[derive(Clone, Default)]
+pub(crate) struct ChannelConfig {
+    pub(crate) telegram_bot_token: String,
+    pub(crate) telegram_configured_bot_names: Arc<Vec<String>>,
+    pub(crate) whatsapp_cloud_enabled: bool,
+    pub(crate) whatsapp_api_base: String,
+    pub(crate) whatsapp_access_token: String,
+    pub(crate) whatsapp_phone_number_id: String,
+    pub(crate) whatsapp_web_enabled: bool,
+    pub(crate) whatsapp_web_bridge_base_url: String,
+    pub(crate) future_adapters_enabled: Arc<Vec<String>>,
+    pub(crate) wechat_send_config: Option<crate::channel_send::WechatSendConfig>,
+    pub(crate) feishu_send_config: Option<crate::channel_send::FeishuSendConfig>,
+    pub(crate) lark_send_config: Option<crate::channel_send::LarkSendConfig>,
+}
+
+/// P2.1 — 把"配置 / 注册表 reload 时需要查的元信息"从 [`AppState`] 主体中剥出来。
+///
+/// 这一组字段除了 `config_path_for_reload` 在 `reload_skill_views` 用到，其他
+/// 三个目前实际只在 reload 时被读（`#[allow(dead_code)]` 在历史版本里就标着）。
+/// 隔离到子 struct 后，AppState 主体上不再需要 `#[allow(dead_code)]` 噪音。
+#[derive(Clone, Default)]
+pub(crate) struct ReloadContext {
+    pub(crate) config_path_for_reload: String,
+    #[allow(dead_code)]
+    pub(crate) registry_path_for_reload: Option<String>,
+    #[allow(dead_code)]
+    pub(crate) skill_switches_for_reload: Arc<HashMap<String, bool>>,
+    #[allow(dead_code)]
+    pub(crate) initial_skills_list_for_reload: Vec<String>,
+}
+
 pub(crate) fn build_skill_views(
     workspace_root: &Path,
     registry_path: Option<&str>,
@@ -112,9 +155,9 @@ pub(crate) fn build_skill_views(
 pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsResult, String> {
     tracing::info!(
         "reload_skill_views: started config_path={}",
-        state.config_path_for_reload
+        state.reload_ctx.config_path_for_reload
     );
-    let config = AppConfig::load(&state.config_path_for_reload)
+    let config = AppConfig::load(&state.reload_ctx.config_path_for_reload)
         .map_err(|e| format!("reload_skill_views: load config failed: {}", e))?;
     let registry_path = config.skills.registry_path.as_deref();
     let path_display = registry_path.unwrap_or("(none)");
@@ -233,29 +276,16 @@ pub(crate) struct AppState {
     pub(crate) persona_prompt: String,
     pub(crate) command_intent: CommandIntentRuntime,
     pub(crate) schedule: ScheduleRuntime,
-    pub(crate) telegram_bot_token: String,
-    pub(crate) telegram_configured_bot_names: Arc<Vec<String>>,
-    pub(crate) whatsapp_cloud_enabled: bool,
-    pub(crate) whatsapp_api_base: String,
-    pub(crate) whatsapp_access_token: String,
-    pub(crate) whatsapp_phone_number_id: String,
-    pub(crate) whatsapp_web_enabled: bool,
-    pub(crate) whatsapp_web_bridge_base_url: String,
-    pub(crate) future_adapters_enabled: Arc<Vec<String>>,
-    pub(crate) wechat_send_config: Option<crate::channel_send::WechatSendConfig>,
-    pub(crate) feishu_send_config: Option<crate::channel_send::FeishuSendConfig>,
-    pub(crate) lark_send_config: Option<crate::channel_send::LarkSendConfig>,
+    /// P2.1 — 通道配置子 struct（telegram / whatsapp / wechat / feishu / lark /
+    /// future_adapters）。详见 [`ChannelConfig`] 头部 doc。
+    pub(crate) channels: ChannelConfig,
     pub(crate) http_client: Client,
     pub(crate) database_sqlite_path: PathBuf,
     pub(crate) database_busy_timeout_ms: u64,
-    pub(crate) config_path_for_reload: String,
     pub(crate) self_extension: SelfExtensionConfig,
-    #[allow(dead_code)]
-    pub(crate) registry_path_for_reload: Option<String>,
-    #[allow(dead_code)]
-    pub(crate) skill_switches_for_reload: Arc<HashMap<String, bool>>,
-    #[allow(dead_code)]
-    pub(crate) initial_skills_list_for_reload: Vec<String>,
+    /// P2.1 — reload 元信息子 struct（config 路径、registry 路径、skill_switches、
+    /// 初始 skills_list）。详见 [`ReloadContext`] 头部 doc。
+    pub(crate) reload_ctx: ReloadContext,
 }
 
 impl AppState {

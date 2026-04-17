@@ -124,10 +124,11 @@ pub(crate) use repo::{
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, reload_skill_views, AgentAction,
-    AgentRuntimeConfig, AppState, AskReply, ClaimedTask, CommandIntentRules, CommandIntentRuntime,
-    LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
-    RateLimiter, RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
-    SkillViewsSnapshot, ToolsPolicy, WhatsappDeliveryRoute,
+    AgentRuntimeConfig, AppState, AskReply, ChannelConfig, ClaimedTask, CommandIntentRules,
+    CommandIntentRuntime, LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext,
+    MemoryConfigFileWrapper, RateLimiter, ReloadContext, RoutedMode, RuntimeChannel,
+    ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue, SkillViewsSnapshot, ToolsPolicy,
+    WhatsappDeliveryRoute,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
@@ -497,32 +498,36 @@ async fn main() -> anyhow::Result<()> {
         persona_prompt,
         command_intent,
         schedule,
-        telegram_bot_token,
-        telegram_configured_bot_names,
-        whatsapp_cloud_enabled,
-        whatsapp_api_base,
-        whatsapp_access_token,
-        whatsapp_phone_number_id,
-        whatsapp_web_enabled: config.whatsapp_web.enabled,
-        whatsapp_web_bridge_base_url: config.whatsapp_web.bridge_base_url.clone(),
-        future_adapters_enabled: Arc::new(
-            config
-                .adapters
-                .iter()
-                .filter_map(|(k, v)| if v.enabled { Some(k.clone()) } else { None })
-                .collect(),
-        ),
-        wechat_send_config,
-        feishu_send_config,
-        lark_send_config,
+        channels: ChannelConfig {
+            telegram_bot_token,
+            telegram_configured_bot_names,
+            whatsapp_cloud_enabled,
+            whatsapp_api_base,
+            whatsapp_access_token,
+            whatsapp_phone_number_id,
+            whatsapp_web_enabled: config.whatsapp_web.enabled,
+            whatsapp_web_bridge_base_url: config.whatsapp_web.bridge_base_url.clone(),
+            future_adapters_enabled: Arc::new(
+                config
+                    .adapters
+                    .iter()
+                    .filter_map(|(k, v)| if v.enabled { Some(k.clone()) } else { None })
+                    .collect(),
+            ),
+            wechat_send_config,
+            feishu_send_config,
+            lark_send_config,
+        },
         http_client: Client::new(),
         database_sqlite_path,
         database_busy_timeout_ms: config.database.busy_timeout_ms,
-        config_path_for_reload: "configs/config.toml".to_string(),
         self_extension: config.self_extension.clone(),
-        registry_path_for_reload: config.skills.registry_path.clone(),
-        skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
-        initial_skills_list_for_reload: config.skills.skills_list.clone(),
+        reload_ctx: ReloadContext {
+            config_path_for_reload: "configs/config.toml".to_string(),
+            registry_path_for_reload: config.skills.registry_path.clone(),
+            skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
+            initial_skills_list_for_reload: config.skills.skills_list.clone(),
+        },
     };
 
     spawn_worker(

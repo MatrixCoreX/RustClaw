@@ -4629,7 +4629,8 @@ async fn health(
     let larkd_memory_rss_bytes_raw = larkd_stats.map(|(_, rss_bytes)| rss_bytes);
     let (user_count, bound_channel_count, bound_channels) =
         auth_user_summary_counts(&state).unwrap_or_default();
-    let telegram_configured_bot_names = state.telegram_configured_bot_names.as_ref().clone();
+    let telegram_configured_bot_names =
+        state.channels.telegram_configured_bot_names.as_ref().clone();
     let telegram_bot_statuses =
         read_telegram_bot_statuses(&state.workspace_root, &telegram_configured_bot_names);
     let mut gateway_instance_statuses_by_scope =
@@ -4730,7 +4731,7 @@ async fn health(
                 }),
         );
     }
-    if state.whatsapp_cloud_enabled {
+    if state.channels.whatsapp_cloud_enabled {
         let scope = "whatsapp_cloud:primary".to_string();
         gateway_instance_statuses.push(
             gateway_instance_statuses_by_scope
@@ -4750,7 +4751,7 @@ async fn health(
                 }),
         );
     }
-    if state.whatsapp_web_enabled {
+    if state.channels.whatsapp_web_enabled {
         let scope = "whatsapp_web:primary".to_string();
         gateway_instance_statuses.push(
             gateway_instance_statuses_by_scope
@@ -4770,7 +4771,7 @@ async fn health(
                 }),
         );
     }
-    if state.wechat_send_config.is_some() {
+    if state.channels.wechat_send_config.is_some() {
         let scope = "wechat:primary".to_string();
         gateway_instance_statuses.push(
             gateway_instance_statuses_by_scope
@@ -4790,7 +4791,7 @@ async fn health(
                 }),
         );
     }
-    if state.feishu_send_config.is_some() {
+    if state.channels.feishu_send_config.is_some() {
         let scope = "feishu:primary".to_string();
         gateway_instance_statuses.push(
             gateway_instance_statuses_by_scope
@@ -4810,7 +4811,7 @@ async fn health(
                 }),
         );
     }
-    if state.lark_send_config.is_some() {
+    if state.channels.lark_send_config.is_some() {
         let scope = "lark:primary".to_string();
         gateway_instance_statuses.push(
             gateway_instance_statuses_by_scope
@@ -4877,7 +4878,7 @@ async fn health(
         user_count,
         bound_channel_count,
         bound_channels,
-        future_adapters_enabled: state.future_adapters_enabled.as_ref().clone(),
+        future_adapters_enabled: state.channels.future_adapters_enabled.as_ref().clone(),
     };
 
     (
@@ -7903,6 +7904,7 @@ async fn whatsapp_web_login_status(
         return resp;
     }
     let base = state
+        .channels
         .whatsapp_web_bridge_base_url
         .trim()
         .trim_end_matches('/');
@@ -8220,6 +8222,7 @@ async fn whatsapp_web_logout(
         return resp;
     }
     let base = state
+        .channels
         .whatsapp_web_bridge_base_url
         .trim()
         .trim_end_matches('/');
