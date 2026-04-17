@@ -43,8 +43,10 @@
 已接入分层加载：
 
 - `prompts/intent_normalizer_prompt.md`
-- `prompts/intent_router_prompt.md`
-- `prompts/intent_router_rules.md`
+
+> Phase 2.7：legacy `prompts/intent_router_prompt.md` 与 `prompts/intent_router_rules.md`
+> 已删除。normalizer 失败/解析失败时直接走 `deterministic_fallback_route_decision`
+> （仓库内硬规则降级），不再发起第二次 LLM 调用。
 
 共通规则包括：
 

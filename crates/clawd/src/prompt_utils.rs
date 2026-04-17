@@ -44,12 +44,6 @@ pub(crate) fn log_prompt_render(
     }
 }
 
-pub(crate) fn parse_llm_json_extract_then_raw<T: DeserializeOwned>(raw: &str) -> Option<T> {
-    extract_json_object(raw)
-        .and_then(|s| serde_json::from_str::<T>(&s).ok())
-        .or_else(|| serde_json::from_str::<T>(raw.trim()).ok())
-}
-
 pub(crate) fn parse_llm_json_extract_or_any<T: DeserializeOwned>(raw: &str) -> Option<T> {
     extract_json_object(raw)
         .or_else(|| extract_first_json_object_any(raw))

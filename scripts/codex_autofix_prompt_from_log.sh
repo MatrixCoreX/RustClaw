@@ -41,7 +41,7 @@ Options:
 
 Examples:
   scripts/codex_autofix_prompt_from_log.sh --dry-run
-  scripts/codex_autofix_prompt_from_log.sh --tasks 20 --prompt intent_router_prompt --vendor qwen
+  scripts/codex_autofix_prompt_from_log.sh --tasks 20 --prompt intent_normalizer_prompt --vendor qwen
   scripts/codex_autofix_prompt_from_log.sh --dangerous --extra "Tighten JSON output rules"
 EOF
 }

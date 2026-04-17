@@ -3,10 +3,12 @@
 //! **Ask main path:** Only `run_intent_normalizer` is used (resolved intent, resume_behavior,
 //! schedule_kind, needs_clarify, routed_mode in one LLM call).
 //!
-//! **Fallback only (do not wire to main path):** When normalizer did not provide a mode (e.g. parse
-//! failure), `route_request_mode` runs a legacy router LLM. Assets used solely by that path:
-//! `INTENT_ROUTER_*` / `INTENT_ROUTER_RULES_*`, `ROUTING_POLICY_*`, `RouteDecision`/`RouteDecisionOut`,
-//! `parse_route_decision`, and `route_request_mode` itself.
+//! **Fallback when normalizer LLM fails / parse fails:** Build an empty `RouteDecision`
+//! (mode = AskClarify, empty contract) and feed it to `normalizer_output_from_fallback`,
+//! which internally consults `deterministic_fallback_route_decision` to recover a routed mode
+//! from the user request without making another LLM call. The legacy `intent_router_prompt`
+//! second-LLM path was removed in Phase 2.7 (Phase 1.5 telemetry: legacy router rescued only
+//! ~3% of normalizer failures while doubling latency on the unhappy path).
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -22,13 +24,6 @@ pub(crate) use crate::{
     SelfExtensionTrigger,
 };
 
-// --- Fallback router only (not used when normalizer provides mode) ---
-const INTENT_ROUTER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/intent_router_prompt.md");
-const INTENT_ROUTER_PROMPT_LOGICAL_PATH: &str = "prompts/intent_router_prompt.md";
-const INTENT_ROUTER_RULES_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/intent_router_rules.md");
-const INTENT_ROUTER_RULES_LOGICAL_PATH: &str = "prompts/intent_router_rules.md";
 const CLARIFY_QUESTION_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/layers/overlays/clarify_question_prompt.md");
 const CLARIFY_QUESTION_PROMPT_LOGICAL_PATH: &str = "prompts/clarify_question_prompt.md";
@@ -36,7 +31,6 @@ const INTENT_NORMALIZER_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/layers/overlays/intent_normalizer_prompt.md");
 const INTENT_NORMALIZER_PROMPT_LOGICAL_PATH: &str = "prompts/intent_normalizer_prompt.md";
 const ROUTING_POLICY_PERSONA_PROMPT: &str = "Neutral routing policy classifier. Ignore style/persona preferences and optimize for correct intent resolution, clarification, and guard decisions.";
-// --- End fallback-only constants ---
 
 #[derive(Debug)]
 struct RouteDecision {
@@ -46,6 +40,11 @@ struct RouteDecision {
     clarify_question: String,
     reason: String,
     confidence: Option<f64>,
+    /// Phase 2.7: legacy router parser populated this; main path no longer reads it,
+    /// but fallback constructors still set it to `Vec::new()` for symmetry. Kept as a
+    /// field so future telemetry / sanity-check layers (see hard-match plan stage 3)
+    /// can re-enable it without an API change.
+    #[allow(dead_code)]
     evidence_refs: Vec<String>,
     schedule_kind: ScheduleKind,
     schedule_intent: Option<crate::ScheduleIntentOutput>,
@@ -53,35 +52,6 @@ struct RouteDecision {
     should_refresh_long_term_memory: bool,
     agent_display_name_hint: String,
     output_contract: IntentOutputContract,
-}
-
-#[derive(Debug, Deserialize)]
-struct RouteDecisionOut {
-    mode: String,
-    #[serde(default)]
-    resolved_user_intent: String,
-    #[serde(default)]
-    needs_clarify: bool,
-    #[serde(default)]
-    clarify_question: String,
-    #[serde(default)]
-    reason: String,
-    #[serde(default)]
-    confidence: Option<f64>,
-    #[serde(default)]
-    evidence_refs: Vec<String>,
-    #[serde(default)]
-    schedule_kind: String,
-    #[serde(default)]
-    schedule_intent: Option<crate::ScheduleIntentOutput>,
-    #[serde(default)]
-    wants_file_delivery: bool,
-    #[serde(default)]
-    should_refresh_long_term_memory: bool,
-    #[serde(default)]
-    agent_display_name_hint: String,
-    #[serde(default)]
-    output_contract: Option<IntentOutputContractOut>,
 }
 
 #[derive(Debug, Clone)]
@@ -394,19 +364,6 @@ fn render_self_extension_runtime(state: &AppState) -> String {
         "supported_modes": ["temporary_fix", "permanent_extension"],
     }))
     .unwrap_or_else(|_| "{}".to_string())
-}
-
-fn wants_file_delivery_from_contract(
-    contract: &IntentOutputContract,
-    explicit_wants_file_delivery: bool,
-) -> bool {
-    explicit_wants_file_delivery
-        || contract.delivery_required
-        || matches!(contract.response_shape, OutputResponseShape::FileToken)
-        || matches!(
-            contract.delivery_intent,
-            OutputDeliveryIntent::FileSingle | OutputDeliveryIntent::DirectoryBatchFiles
-        )
 }
 
 fn trim_fallback_locator_token(token: &str) -> String {
@@ -831,17 +788,15 @@ pub(crate) async fn run_intent_normalizer(
     {
         Ok(v) => v,
         Err(err) => {
-            let fallback =
-                route_request_fallback(state, task, req, resume_context, binding_context).await;
+            // Phase 2.7: legacy router second-LLM path removed. Build an empty AskClarify
+            // RouteDecision and let `normalizer_output_from_fallback` consult
+            // `deterministic_fallback_route_decision` for a no-LLM recovery path.
             warn!(
-                    "intent_normalizer llm failed, fallback to legacy router: task_id={} err={} mode={:?} locator_kind={:?} shape={:?}",
-                    task.task_id,
-                    err,
-                    fallback.mode,
-                    fallback.output_contract.locator_kind,
-                    fallback.output_contract.response_shape
-                );
-            return normalizer_output_from_fallback(req, "llm_failed_fallback_router", fallback);
+                "intent_normalizer llm failed, falling back to deterministic recovery: task_id={} err={}",
+                task.task_id, err
+            );
+            let fallback = empty_ask_clarify_decision(req, "normalizer_llm_failed");
+            return normalizer_output_from_fallback(req, "llm_failed_deterministic", fallback);
         }
     };
     let trimmed = llm_out.trim();
@@ -948,12 +903,37 @@ pub(crate) async fn run_intent_normalizer(
         };
     }
     warn!(
-        "intent_normalizer parse failed, fallback pass-through: task_id={} raw={}",
+        "intent_normalizer parse failed, falling back to deterministic recovery: task_id={} raw={}",
         task.task_id,
         crate::truncate_for_log(&llm_out)
     );
-    let fallback = route_request_fallback(state, task, req, resume_context, binding_context).await;
-    normalizer_output_from_fallback(req, "parse_failed_fallback_router", fallback)
+    // Phase 2.7: legacy router second-LLM removed; rely on deterministic fallback inside
+    // `normalizer_output_from_fallback`.
+    let _ = (resume_context, binding_context);
+    let fallback = empty_ask_clarify_decision(req, "normalizer_parse_failed");
+    normalizer_output_from_fallback(req, "parse_failed_deterministic", fallback)
+}
+
+/// Fallback `RouteDecision` used when normalizer LLM fails or its output cannot be parsed.
+/// Marked `AskClarify` + empty contract so that `normalizer_output_from_fallback` will
+/// invoke `deterministic_fallback_route_decision(user_request)` to recover a usable
+/// routed mode without making a second LLM call.
+fn empty_ask_clarify_decision(user_request: &str, reason: &str) -> RouteDecision {
+    RouteDecision {
+        mode: RoutedMode::AskClarify,
+        resolved_user_intent: user_request.trim().to_string(),
+        needs_clarify: true,
+        clarify_question: String::new(),
+        reason: reason.to_string(),
+        confidence: None,
+        evidence_refs: Vec::new(),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract::default(),
+    }
 }
 
 pub(crate) async fn generate_clarify_question(
@@ -1056,241 +1036,7 @@ pub(crate) async fn generate_or_reuse_clarify_question(
     .await
 }
 
-/// **[FALLBACK]** Used only when normalizer did not provide a mode (e.g. JSON parse failure or legacy entry).
-/// Ask main path always passes `Some(normalizer_out.routed_mode)`; this must not be called when normalizer
-/// has already run. Do not expand usage; do not wire as primary path.
-async fn route_request_fallback(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_request: &str,
-    resume_context: Option<&Value>,
-    binding_context: Option<&Value>,
-) -> RouteDecision {
-    info!(
-        "route_request_mode fallback path: normalizer did not provide mode, using legacy router LLM task_id={}",
-        task.task_id
-    );
-    let context_bundle = crate::task_context_builder::build_route_task_context_bundle(
-        state,
-        task,
-        user_request,
-        resume_context,
-        binding_context,
-        "",
-        "",
-        "",
-    );
-    let route_view = context_bundle
-        .route_view
-        .as_ref()
-        .expect("route context bundle should include route_view");
-    let (prompt_template, prompt_source) = crate::load_prompt_template_for_state(
-        state,
-        INTENT_ROUTER_PROMPT_LOGICAL_PATH,
-        INTENT_ROUTER_PROMPT_TEMPLATE,
-    );
-    let (rules_template, _) = crate::load_prompt_template_for_state(
-        state,
-        INTENT_ROUTER_RULES_LOGICAL_PATH,
-        INTENT_ROUTER_RULES_TEMPLATE,
-    );
-    let prompt = crate::render_prompt_template(
-        &prompt_template,
-        &[
-            ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
-            ("__ROUTING_RULES__", &rules_template),
-            (
-                "__SELF_EXTENSION_RUNTIME__",
-                &render_self_extension_runtime(state),
-            ),
-            (
-                "__RESUME_CONTEXT__",
-                &context_bundle.raw_sources.resume_context,
-            ),
-            (
-                "__BINDING_CONTEXT__",
-                &context_bundle.raw_sources.binding_context,
-            ),
-            ("__RECENT_TURNS_FULL__", &route_view.recent_turns_full),
-            ("__LAST_TURN_FULL__", &route_view.last_turn_full),
-            (
-                "__RECENT_ASSISTANT_REPLIES__",
-                &route_view.recent_assistant_replies,
-            ),
-            (
-                "__RECENT_EXECUTION_CONTEXT__",
-                &route_view.recent_execution_context,
-            ),
-            ("__MEMORY_CONTEXT__", &route_view.memory_context),
-            ("__REQUEST__", user_request.trim()),
-        ],
-    );
-    crate::log_prompt_render(
-        state,
-        &task.task_id,
-        "intent_router_prompt",
-        &prompt_source,
-        None,
-    );
-    let llm_out = match llm_gateway::run_with_fallback_with_prompt_source(
-        state,
-        task,
-        &prompt,
-        &prompt_source,
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(err) => {
-            warn!(
-                "route_request_mode llm failed, fallback to ask_clarify: task_id={} err={}",
-                task.task_id, err
-            );
-            return RouteDecision {
-                mode: RoutedMode::AskClarify,
-                resolved_user_intent: user_request.trim().to_string(),
-                needs_clarify: true,
-                clarify_question: String::new(),
-                reason: "fallback_router_llm_failed".to_string(),
-                confidence: None,
-                evidence_refs: Vec::new(),
-                schedule_kind: ScheduleKind::None,
-                schedule_intent: None,
-                wants_file_delivery: false,
-                should_refresh_long_term_memory: false,
-                agent_display_name_hint: String::new(),
-                output_contract: IntentOutputContract::default(),
-            };
-        }
-    };
-
-    if let Some(decision) = parse_route_decision(&llm_out) {
-        info!(
-            "{} route_request_mode llm task_id={} mode={:?} needs_clarify={} confidence={} reason={} locator_kind={:?} shape={:?} delivery_intent={:?} evidence_refs={:?} llm_out={}",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            decision.mode,
-            decision.needs_clarify,
-            decision.confidence.unwrap_or(-1.0),
-            crate::truncate_for_log(&decision.reason),
-            decision.output_contract.locator_kind,
-            decision.output_contract.response_shape,
-            decision.output_contract.delivery_intent,
-            decision.evidence_refs,
-            crate::truncate_for_log(&llm_out)
-        );
-        return decision;
-    }
-    warn!(
-        "route_request_mode parse failed, fallback to ask_clarify: task_id={} llm_out={}",
-        task.task_id,
-        crate::truncate_for_log(&llm_out)
-    );
-    RouteDecision {
-        mode: RoutedMode::AskClarify,
-        resolved_user_intent: user_request.trim().to_string(),
-        needs_clarify: true,
-        clarify_question: String::new(),
-        reason: "fallback_router_parse_failed".to_string(),
-        confidence: None,
-        evidence_refs: Vec::new(),
-        schedule_kind: ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract::default(),
-    }
-}
-
-pub(crate) async fn route_request_mode(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_request: &str,
-) -> RoutedMode {
-    route_request_fallback(state, task, user_request, None, None)
-        .await
-        .mode
-}
-
-/// Used only by fallback `route_request_mode` to parse legacy router LLM output.
-fn parse_route_decision(raw: &str) -> Option<RouteDecision> {
-    let value = crate::parse_llm_json_extract_then_raw::<Value>(raw);
-    if let Some(v) = value {
-        if let Ok(out) = serde_json::from_value::<RouteDecisionOut>(v.clone()) {
-            let mode = parse_mode_text(&out.mode)?;
-            let output_contract =
-                parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
-            let schedule_kind = parse_schedule_kind(&out.schedule_kind);
-            let resolved_user_intent = out.resolved_user_intent.trim().to_string();
-            let clarify_question = out.clarify_question.trim().to_string();
-            let confidence = out.confidence.map(|c| c.clamp(0.0, 1.0));
-            let schedule_intent = normalize_schedule_intent_from_normalizer(
-                schedule_kind,
-                out.schedule_intent.clone(),
-                &resolved_user_intent,
-                &out.reason,
-                out.needs_clarify || matches!(mode, RoutedMode::AskClarify),
-                &clarify_question,
-                confidence.unwrap_or(0.0),
-            );
-            return Some(RouteDecision {
-                mode,
-                resolved_user_intent,
-                needs_clarify: out.needs_clarify || matches!(mode, RoutedMode::AskClarify),
-                clarify_question,
-                reason: out.reason,
-                confidence,
-                evidence_refs: out.evidence_refs.into_iter().take(8).collect(),
-                schedule_kind,
-                schedule_intent,
-                wants_file_delivery: wants_file_delivery_from_contract(
-                    &output_contract,
-                    out.wants_file_delivery,
-                ),
-                should_refresh_long_term_memory: out.should_refresh_long_term_memory,
-                agent_display_name_hint: out.agent_display_name_hint.trim().to_string(),
-                output_contract,
-            });
-        }
-        if let Some(mode_text) = v.get("mode").and_then(|m| m.as_str()) {
-            let mode = parse_mode_text(mode_text)?;
-            return Some(RouteDecision {
-                mode,
-                resolved_user_intent: String::new(),
-                needs_clarify: matches!(mode, RoutedMode::AskClarify),
-                clarify_question: String::new(),
-                reason: String::new(),
-                confidence: None,
-                evidence_refs: Vec::new(),
-                schedule_kind: ScheduleKind::None,
-                schedule_intent: None,
-                wants_file_delivery: false,
-                should_refresh_long_term_memory: false,
-                agent_display_name_hint: String::new(),
-                output_contract: IntentOutputContract::default(),
-            });
-        }
-    }
-
-    parse_mode_text(raw).map(|mode| RouteDecision {
-        mode,
-        resolved_user_intent: String::new(),
-        needs_clarify: matches!(mode, RoutedMode::AskClarify),
-        clarify_question: String::new(),
-        reason: String::new(),
-        confidence: None,
-        evidence_refs: Vec::new(),
-        schedule_kind: ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract::default(),
-    })
-}
-
-/// Parses normalizer/legacy router mode string. chat_act is secondary: only when user explicitly asked for action + narrated summary.
+/// Parses normalizer mode string. chat_act is secondary: only when user explicitly asked for action + narrated summary.
 fn parse_mode_text(raw: &str) -> Option<RoutedMode> {
     let mode_text = raw.trim().to_ascii_lowercase();
     if mode_text.contains("ask_clarify") {
@@ -1320,232 +1066,14 @@ pub(crate) async fn try_handle_schedule_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        normalizer_output_from_fallback, parse_execution_recipe_hint, parse_route_decision,
-        ClarifyQuestionPolicy, IntentExecutionRecipeOut, IntentOutputContract,
-        OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
-        RouteDecision,
+        normalizer_output_from_fallback, parse_execution_recipe_hint, ClarifyQuestionPolicy,
+        IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+        OutputResponseShape, OutputSemanticKind, RouteDecision,
     };
     use crate::{
         execution_recipe::{ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeTargetScope},
-        RoutedMode, SelfExtensionMode, SelfExtensionTrigger,
+        RoutedMode,
     };
-
-    #[test]
-    fn fallback_route_parser_keeps_current_workspace_contract() {
-        let raw = r#"{
-            "mode":"chat_act",
-            "resolved_user_intent":"把当前仓库顶层目录和文件列出来，简单分组就行",
-            "needs_clarify":false,
-            "reason":"self-contained current workspace inspection with grouped narration",
-            "confidence":0.82,
-            "output_contract":{
-                "response_shape":"free",
-                "requires_content_evidence":true,
-                "delivery_required":false,
-                "locator_kind":"current_workspace",
-                "delivery_intent":"directory_lookup",
-                "locator_hint":""
-            }
-        }"#;
-        let parsed = parse_route_decision(raw).expect("fallback route decision");
-        assert_eq!(parsed.mode, RoutedMode::ChatAct);
-        assert!(!parsed.needs_clarify);
-        assert_eq!(
-            parsed.output_contract.locator_kind,
-            OutputLocatorKind::CurrentWorkspace
-        );
-        assert_eq!(
-            parsed.output_contract.delivery_intent,
-            OutputDeliveryIntent::DirectoryLookup
-        );
-        assert_eq!(
-            parsed.output_contract.response_shape,
-            OutputResponseShape::Free
-        );
-    }
-
-    #[test]
-    fn fallback_route_parser_derives_file_delivery_from_contract() {
-        let raw = r#"{
-            "mode":"act",
-            "output_contract":{
-                "response_shape":"file_token",
-                "requires_content_evidence":false,
-                "delivery_required":true,
-                "locator_kind":"filename",
-                "delivery_intent":"file_single",
-                "locator_hint":"README.md"
-            }
-        }"#;
-        let parsed = parse_route_decision(raw).expect("fallback route delivery decision");
-        assert_eq!(parsed.mode, RoutedMode::Act);
-        assert!(parsed.wants_file_delivery);
-        assert_eq!(
-            parsed.output_contract.locator_kind,
-            OutputLocatorKind::Filename
-        );
-        assert_eq!(
-            parsed.output_contract.delivery_intent,
-            OutputDeliveryIntent::FileSingle
-        );
-        assert_eq!(
-            parsed.output_contract.response_shape,
-            OutputResponseShape::FileToken
-        );
-    }
-
-    #[test]
-    fn fallback_route_parser_keeps_structured_semantic_hints() {
-        let raw = r#"{
-            "mode":"chat",
-            "resolved_user_intent":"记住以后默认中文，并比较前两个结果是否一样",
-            "should_refresh_long_term_memory":true,
-            "agent_display_name_hint":"小爪",
-            "output_contract":{
-                "response_shape":"scalar",
-                "requires_content_evidence":false,
-                "delivery_required":false,
-                "locator_kind":"none",
-                "delivery_intent":"none",
-                "semantic_kind":"recent_scalar_equality_check",
-                "locator_hint":""
-            }
-        }"#;
-        let parsed = parse_route_decision(raw).expect("fallback route semantic decision");
-        assert!(parsed.should_refresh_long_term_memory);
-        assert_eq!(parsed.agent_display_name_hint, "小爪");
-        assert_eq!(
-            parsed.output_contract.semantic_kind,
-            OutputSemanticKind::RecentScalarEqualityCheck
-        );
-    }
-
-    #[test]
-    fn fallback_route_parser_parses_recent_artifacts_judgment_semantic_hint() {
-        let raw = r#"{
-            "mode":"chat_act",
-            "resolved_user_intent":"列出 logs 目录最近修改的 3 个文件，并判断这些文件更像日志还是正式产物",
-            "output_contract":{
-                "response_shape":"free",
-                "requires_content_evidence":true,
-                "delivery_required":false,
-                "locator_kind":"path",
-                "delivery_intent":"none",
-                "semantic_kind":"recent_artifacts_judgment",
-                "locator_hint":"logs"
-            }
-        }"#;
-        let parsed = parse_route_decision(raw).expect("fallback route recent artifacts decision");
-        assert_eq!(parsed.mode, RoutedMode::ChatAct);
-        assert_eq!(
-            parsed.output_contract.semantic_kind,
-            OutputSemanticKind::RecentArtifactsJudgment
-        );
-    }
-
-    #[test]
-    fn fallback_route_parser_parses_directory_purpose_summary_semantic_hint() {
-        let raw = r#"{
-            "mode":"chat_act",
-            "resolved_user_intent":"列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的",
-            "output_contract":{
-                "response_shape":"free",
-                "requires_content_evidence":true,
-                "delivery_required":false,
-                "locator_kind":"path",
-                "delivery_intent":"none",
-                "semantic_kind":"directory_purpose_summary",
-                "locator_hint":"docs"
-            }
-        }"#;
-        let parsed =
-            parse_route_decision(raw).expect("fallback route directory purpose summary decision");
-        assert_eq!(parsed.mode, RoutedMode::ChatAct);
-        assert_eq!(
-            parsed.output_contract.semantic_kind,
-            OutputSemanticKind::DirectoryPurposeSummary
-        );
-    }
-
-    #[test]
-    fn fallback_route_parser_parses_content_excerpt_summary_semantic_hint() {
-        let raw = r#"{
-            "mode":"chat_act",
-            "resolved_user_intent":"读一下 README.md 开头，然后用一句话总结",
-            "output_contract":{
-                "response_shape":"one_sentence",
-                "requires_content_evidence":true,
-                "delivery_required":false,
-                "locator_kind":"filename",
-                "delivery_intent":"none",
-                "semantic_kind":"content_excerpt_summary",
-                "locator_hint":"README.md"
-            }
-        }"#;
-        let parsed =
-            parse_route_decision(raw).expect("fallback route content excerpt summary decision");
-        assert_eq!(parsed.mode, RoutedMode::ChatAct);
-        assert_eq!(
-            parsed.output_contract.semantic_kind,
-            OutputSemanticKind::ContentExcerptSummary
-        );
-    }
-
-    #[test]
-    fn fallback_route_parser_parses_workspace_project_summary_semantic_hint() {
-        let raw = r#"{
-            "mode":"chat_act",
-            "resolved_user_intent":"用非技术用户能听懂的话，简短解释当前仓库主要是干什么的",
-            "output_contract":{
-                "response_shape":"one_sentence",
-                "requires_content_evidence":true,
-                "delivery_required":false,
-                "locator_kind":"current_workspace",
-                "delivery_intent":"none",
-                "semantic_kind":"workspace_project_summary",
-                "locator_hint":""
-            }
-        }"#;
-        let parsed =
-            parse_route_decision(raw).expect("fallback route workspace project summary decision");
-        assert_eq!(parsed.mode, RoutedMode::ChatAct);
-        assert_eq!(
-            parsed.output_contract.semantic_kind,
-            OutputSemanticKind::WorkspaceProjectSummary
-        );
-    }
-
-    #[test]
-    fn fallback_route_parser_keeps_self_extension_contract() {
-        let raw = r#"{
-            "mode":"chat",
-            "resolved_user_intent":"不要用现有技能，直接写个临时脚本把这个 json 排序后转成 markdown 表格",
-            "output_contract":{
-                "response_shape":"free",
-                "requires_content_evidence":false,
-                "delivery_required":false,
-                "locator_kind":"none",
-                "delivery_intent":"none",
-                "semantic_kind":"none",
-                "locator_hint":"",
-                "self_extension":{
-                    "mode":"temporary_fix",
-                    "trigger":"explicit_user_request",
-                    "execute_now":true
-                }
-            }
-        }"#;
-        let parsed = parse_route_decision(raw).expect("fallback route self extension decision");
-        assert_eq!(
-            parsed.output_contract.self_extension.mode,
-            SelfExtensionMode::TemporaryFix
-        );
-        assert_eq!(
-            parsed.output_contract.self_extension.trigger,
-            SelfExtensionTrigger::ExplicitUserRequest
-        );
-        assert!(parsed.output_contract.self_extension.execute_now);
-    }
 
     #[test]
     fn parse_execution_recipe_hint_accepts_explicit_ops_service_contract() {
@@ -1740,47 +1268,6 @@ mod tests {
             out.output_contract.response_shape,
             OutputResponseShape::Free
         );
-    }
-
-    #[test]
-    fn fallback_route_parser_keeps_clarify_question_and_schedule_intent() {
-        let raw = r#"{
-            "mode":"ask_clarify",
-            "resolved_user_intent":"每天早上提醒我看邮件",
-            "needs_clarify":true,
-            "clarify_question":"你希望每天几点提醒？",
-            "reason":"missing schedule time",
-            "confidence":0.64,
-            "schedule_kind":"create",
-            "schedule_intent":{
-                "kind":"create",
-                "timezone":"Asia/Shanghai",
-                "schedule":{"type":"","run_at":"","time":"","weekday":0,"every_minutes":0,"cron":""},
-                "task":{"kind":"ask","payload":{"prompt":"提醒我看邮件"}},
-                "target_job_id":"",
-                "raw":"每天早上提醒我看邮件",
-                "reason":"missing schedule time",
-                "needs_clarify":true,
-                "clarify_question":"你希望每天几点提醒？",
-                "confidence":0.64
-            },
-            "output_contract":{
-                "response_shape":"free",
-                "requires_content_evidence":false,
-                "delivery_required":false,
-                "locator_kind":"none",
-                "delivery_intent":"none",
-                "locator_hint":""
-            }
-        }"#;
-        let parsed = parse_route_decision(raw).expect("fallback route clarify+schedule decision");
-        assert_eq!(parsed.mode, RoutedMode::AskClarify);
-        assert_eq!(parsed.clarify_question, "你希望每天几点提醒？");
-        assert_eq!(parsed.schedule_kind, super::ScheduleKind::Create);
-        let intent = parsed.schedule_intent.expect("schedule intent");
-        assert_eq!(intent.kind, "create");
-        assert!(intent.needs_clarify);
-        assert_eq!(intent.clarify_question, "你希望每天几点提醒？");
     }
 
     #[test]

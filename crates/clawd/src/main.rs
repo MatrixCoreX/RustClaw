@@ -94,8 +94,8 @@ pub(crate) use pipeline_types::{
 };
 pub(crate) use prompt_utils::{
     extract_first_json_object_any, extract_first_json_value_any, log_prompt_render,
-    parse_agent_action_json_with_repair, parse_llm_json_extract_or_any,
-    parse_llm_json_extract_then_raw, parse_llm_json_raw_or_any, render_prompt_template,
+    parse_agent_action_json_with_repair, parse_llm_json_extract_or_any, parse_llm_json_raw_or_any,
+    render_prompt_template,
 };
 use providers::{
     append_model_io_log, call_provider_with_retry, call_provider_with_retry_with_hints,
