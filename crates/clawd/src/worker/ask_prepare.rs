@@ -16,15 +16,12 @@ pub(super) struct PreparedAskRouting {
     pub(super) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(super) resolved_prompt: String,
     pub(super) agent_mode: bool,
-    pub(super) direct_resume_execution: bool,
-    pub(super) direct_resume_discussion: bool,
-    pub(super) classifier_direct_mode: bool,
     pub(super) immediate_prior_turn_was_clarify: bool,
-    /// Phase 3.2 Stage B：合并 routed_mode + classifier_direct_mode +
-    /// direct_resume_discussion + direct_resume_execution 后得到的最终模式，
-    /// 与上面 4 个旧字段双轨并存。Stage C 起 worker / agent_engine 切换到
-    /// 读这个字段，Stage D 删除旧字段。
-    #[allow(dead_code)]
+    /// Phase 3.2：合并 routed_mode + classifier_direct + direct_resume_*
+    /// 后的最终模式。Stage D 已删除原 3 个 bool 字段（classifier_direct_mode /
+    /// direct_resume_discussion / direct_resume_execution），全部判断走
+    /// ask_mode 谓词方法（is_classifier_direct / is_resume_discussion /
+    /// resume_execution）。
     pub(super) ask_mode: crate::AskMode,
 }
 
@@ -630,9 +627,6 @@ pub(super) async fn prepare_ask_routing(
             execution_recipe_hint: None,
             resolved_prompt: prompt.trim().to_string(),
             agent_mode,
-            direct_resume_execution: false,
-            direct_resume_discussion: false,
-            classifier_direct_mode: true,
             immediate_prior_turn_was_clarify: false,
             ask_mode,
         };
@@ -809,9 +803,6 @@ pub(super) async fn prepare_ask_routing(
         execution_recipe_hint,
         resolved_prompt,
         agent_mode,
-        direct_resume_execution: resume_should_apply_context,
-        direct_resume_discussion: resume_should_discuss_context,
-        classifier_direct_mode,
         immediate_prior_turn_was_clarify,
         ask_mode,
     }
