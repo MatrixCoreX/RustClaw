@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     llm_gateway, plan_step_from_agent_action, AgentAction, AppState, ClaimedTask, PlanKind,
-    PlanResult, RouteResult, RoutedMode,
+    PlanResult, RouteResult,
 };
 
 fn build_incremental_plan_prompt(
@@ -486,10 +486,7 @@ fn should_rewrite_service_status_run_cmd_probe(
     };
     if route_result.needs_clarify
         || route_result.output_contract.delivery_required
-        || !matches!(
-            route_result.routed_mode,
-            RoutedMode::Act | RoutedMode::ChatAct
-        )
+        || !route_result.ask_mode.is_act()
     {
         return false;
     }
@@ -1033,11 +1030,8 @@ fn should_force_actionable_plan_repair(
     if has_discussion_followup_action(actions) && loop_state.has_tool_or_skill_output {
         return false;
     }
-    let requires_action_before_reply = !loop_state.has_tool_or_skill_output
-        && matches!(
-            route_result.routed_mode,
-            RoutedMode::Act | RoutedMode::ChatAct
-        );
+    let requires_action_before_reply =
+        !loop_state.has_tool_or_skill_output && route_result.ask_mode.is_act();
     route_result.output_contract.requires_content_evidence || requires_action_before_reply
 }
 
