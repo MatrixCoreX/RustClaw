@@ -173,23 +173,142 @@ pub(crate) async fn call_provider_with_retry_with_hints(
     }
 }
 
-/// Provider 协议 dispatcher：仅做协议匹配，每个分支调到独立模块。
+/// Phase 2.3 完整版：LLM provider 抽象。
 ///
-/// 加新协议时：在 `providers/` 下新建模块 + 在这里加一行分支。
+/// 每种线上协议实现这个 trait 一次，注册到 [`PROVIDER_IMPLS`] 静态数组里，
+/// dispatcher [`call_provider`] 通过 `name()` 匹配分发。新接入一种协议时：
+///   1. 在 `providers/` 下新建模块 `xxx.rs`，写 `pub(super) async fn call_xxx(..)`。
+///   2. 加一个零字段 unit struct + impl `LlmProvider`。
+///   3. 在 [`PROVIDER_IMPLS`] 数组追加引用。
+///
+/// 与之前纯 `match` 写法相比，这里多了一层 trait object 间接调用，但换来
+/// 三个好处：
+///   * 测试里可以 mock provider 实现而不用动 dispatcher。
+///   * 协议列表 [`PROVIDER_IMPLS`] 一处可见，避免散在 dispatcher 内部。
+///   * 未来要做"按协议聚合指标 / 按协议级别熔断策略"等横向逻辑时，可以在
+///     trait 里加新方法集中实现，而不必改各个具体 fn。
+///
+/// 不引入 `async-trait` crate（避免新 crate 依赖），用 returning-boxed-future
+/// 模式实现 trait object 安全的 async 方法。
+pub(crate) type ProviderCallFuture = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<LlmProviderResponse, ProviderError>> + Send>,
+>;
+
+pub(crate) trait LlmProvider: Send + Sync + 'static {
+    /// 与 toml 里 `[[llm_providers]].type` / 内部 `LlmProviderConfig::provider_type`
+    /// 完全一致的协议短名。dispatcher 用它做选择。
+    fn name(&self) -> &'static str;
+
+    /// 单次请求实现。`prompt` 与 `hints` 拷贝进 future 以满足 `'static` 约束
+    /// （保留 `Arc<LlmProviderRuntime>` 走零拷贝）。
+    fn call(
+        &self,
+        provider: Arc<LlmProviderRuntime>,
+        prompt: String,
+        hints: ChatRequestHints,
+    ) -> ProviderCallFuture;
+}
+
+pub(crate) struct OpenAiCompatProvider;
+pub(crate) struct GoogleGeminiProvider;
+pub(crate) struct AnthropicClaudeProvider;
+
+impl LlmProvider for OpenAiCompatProvider {
+    fn name(&self) -> &'static str {
+        "openai_compat"
+    }
+    fn call(
+        &self,
+        provider: Arc<LlmProviderRuntime>,
+        prompt: String,
+        hints: ChatRequestHints,
+    ) -> ProviderCallFuture {
+        Box::pin(async move {
+            super::openai_compat::call_openai_compat(provider, &prompt, &hints).await
+        })
+    }
+}
+
+impl LlmProvider for GoogleGeminiProvider {
+    fn name(&self) -> &'static str {
+        "google_gemini"
+    }
+    fn call(
+        &self,
+        provider: Arc<LlmProviderRuntime>,
+        prompt: String,
+        hints: ChatRequestHints,
+    ) -> ProviderCallFuture {
+        Box::pin(async move {
+            super::google_gemini::call_google_gemini(provider, &prompt, &hints).await
+        })
+    }
+}
+
+impl LlmProvider for AnthropicClaudeProvider {
+    fn name(&self) -> &'static str {
+        "anthropic_claude"
+    }
+    fn call(
+        &self,
+        provider: Arc<LlmProviderRuntime>,
+        prompt: String,
+        hints: ChatRequestHints,
+    ) -> ProviderCallFuture {
+        Box::pin(async move {
+            super::anthropic_claude::call_anthropic_claude(provider, &prompt, &hints).await
+        })
+    }
+}
+
+/// 注册的 provider 列表。dispatcher 按顺序遍历找 `name()` 匹配项。
+/// 加新协议时往这里追加一项。
+pub(crate) static PROVIDER_IMPLS: &[&dyn LlmProvider] = &[
+    &OpenAiCompatProvider,
+    &GoogleGeminiProvider,
+    &AnthropicClaudeProvider,
+];
+
+/// Provider 协议 dispatcher：通过 [`LlmProvider::name`] 匹配 trait object 实现。
 async fn call_provider(
     provider: Arc<LlmProviderRuntime>,
     prompt: &str,
     hints: &ChatRequestHints,
 ) -> Result<LlmProviderResponse, ProviderError> {
-    match provider.config.provider_type.as_str() {
-        "openai_compat" => super::openai_compat::call_openai_compat(provider, prompt, hints).await,
-        "google_gemini" => super::google_gemini::call_google_gemini(provider, prompt, hints).await,
-        "anthropic_claude" => {
-            super::anthropic_claude::call_anthropic_claude(provider, prompt, hints).await
+    let provider_type = provider.config.provider_type.as_str();
+    for impl_ref in PROVIDER_IMPLS {
+        if impl_ref.name() == provider_type {
+            return impl_ref
+                .call(provider.clone(), prompt.to_string(), hints.clone())
+                .await;
         }
-        other => Err(ProviderError::non_retryable(
-            format!("unsupported provider type: {other}"),
-            Value::Null,
-        )),
+    }
+    Err(ProviderError::non_retryable(
+        format!("unsupported provider type: {provider_type}"),
+        Value::Null,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::PROVIDER_IMPLS;
+
+    #[test]
+    fn provider_impls_names_are_unique_and_cover_known_protocols() {
+        let names: Vec<&'static str> = PROVIDER_IMPLS.iter().map(|p| p.name()).collect();
+        let unique: HashSet<&'static str> = names.iter().copied().collect();
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "duplicate provider names in PROVIDER_IMPLS: {names:?}"
+        );
+        for required in ["openai_compat", "google_gemini", "anthropic_claude"] {
+            assert!(
+                unique.contains(required),
+                "PROVIDER_IMPLS missing required protocol {required}; got {names:?}"
+            );
+        }
     }
 }
