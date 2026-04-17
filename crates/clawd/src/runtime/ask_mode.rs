@@ -150,6 +150,17 @@ impl AskMode {
         matches!(self, AskMode::Act { .. })
     }
 
+    /// 等价于历史 `route.routed_mode == RoutedMode::Act`：
+    /// 仅命中 `Act { Plain }`，不包括 `ChatWrapped` / `ResumeContinue`。
+    pub(crate) fn is_plain_act(&self) -> bool {
+        matches!(
+            self,
+            AskMode::Act {
+                finalize: ActFinalizeStyle::Plain,
+            }
+        )
+    }
+
     pub(crate) fn is_clarify_only(&self) -> bool {
         matches!(
             self,
@@ -407,6 +418,17 @@ mod tests {
         assert_eq!(rd.as_str(), "clarify_or_chat:resume_followup_discussion");
         let re = AskMode::from_legacy(RoutedMode::Chat, false, false, true, None);
         assert_eq!(re.as_str(), "act:resume_continue");
+    }
+
+    #[test]
+    fn is_plain_act_only_for_plain_finalize() {
+        assert!(AskMode::from_routed_mode(RoutedMode::Act).is_plain_act());
+        assert!(!AskMode::from_routed_mode(RoutedMode::ChatAct).is_plain_act());
+        assert!(!AskMode::from_routed_mode(RoutedMode::Chat).is_plain_act());
+        assert!(!AskMode::from_routed_mode(RoutedMode::AskClarify).is_plain_act());
+        let resume = AskMode::from_legacy(RoutedMode::Act, false, false, true, None);
+        assert!(!resume.is_plain_act(), "ResumeContinue must not be plain");
+        assert!(resume.is_act());
     }
 
     #[test]

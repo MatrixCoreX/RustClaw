@@ -675,7 +675,7 @@ fn hidden_entries_direct_answer(
         .cloned()
         .collect::<Vec<_>>()
         .join(", ");
-    if matches!(route.routed_mode, crate::RoutedMode::Act)
+    if route.ask_mode.is_plain_act()
         || matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar
@@ -3041,7 +3041,7 @@ fn extract_direct_answer_from_generic_output_impl(
 ) -> Option<String> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     let response_shape = route.map(|route| route.output_contract.response_shape);
-    let routed_mode = route.map(|route| route.routed_mode);
+    let is_plain_act = route.is_some_and(|route| route.ask_mode.is_plain_act());
     let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route);
     let requested_listing_limit = requested_listing_limit(route);
     let locator_hint = route
@@ -3062,7 +3062,7 @@ fn extract_direct_answer_from_generic_output_impl(
         route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
             && prefers_english_free_text
     });
-    let health_check_prefers_raw_payload = matches!(routed_mode, Some(crate::RoutedMode::Act))
+    let health_check_prefers_raw_payload = is_plain_act
         && !matches!(
             response_shape,
             Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
@@ -3225,7 +3225,7 @@ fn extract_direct_answer_from_generic_output_impl(
                         })?;
                     let action = value.get("action").and_then(|v| v.as_str());
                     if action == Some("read_range")
-                        && matches!(routed_mode, Some(crate::RoutedMode::Act))
+                        && is_plain_act
                         && !matches!(
                             response_shape,
                             Some(crate::OutputResponseShape::OneSentence)
@@ -3236,7 +3236,7 @@ fn extract_direct_answer_from_generic_output_impl(
                             .and_then(|v| v.as_str())
                             .and_then(normalize_read_range_excerpt)
                     } else if action == Some("inventory_dir")
-                        && matches!(routed_mode, Some(crate::RoutedMode::Act))
+                        && is_plain_act
                         && allow_raw_listing_direct_answer
                     {
                         inventory_dir_direct_answer_candidate(&value, requested_listing_limit)
