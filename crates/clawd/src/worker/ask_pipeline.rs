@@ -535,6 +535,7 @@ mod tests {
     fn auto_locator_attempts_for_path_locators_even_without_content_evidence() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 Cargo.toml".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -563,6 +564,7 @@ mod tests {
     fn auto_locator_skips_non_path_locators() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "今天天气".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -591,6 +593,7 @@ mod tests {
     fn auto_locator_attempts_for_current_workspace_locator() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查当前目录是否存在隐藏文件".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -619,6 +622,7 @@ mod tests {
     fn auto_locator_attempts_for_filename_locators() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "读取 README 前 20 行".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -647,6 +651,7 @@ mod tests {
     fn classifier_direct_disabled_for_act_mode() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 Cargo.toml".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -671,6 +676,7 @@ mod tests {
     fn classifier_direct_disabled_for_chat_act_mode() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "比较 Cargo.toml 和 Cargo.lock".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -695,6 +701,7 @@ mod tests {
     fn classifier_direct_kept_for_chat_mode() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
             resolved_intent: "解释一下这个概念".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -755,6 +762,7 @@ mod tests {
     fn clarify_route(locator_kind: crate::OutputLocatorKind) -> crate::RouteResult {
         crate::RouteResult {
             routed_mode: crate::RoutedMode::AskClarify,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
             resolved_intent: "读取那个文件".to_string(),
             needs_clarify: true,
             route_reason: "need concrete locator".to_string(),

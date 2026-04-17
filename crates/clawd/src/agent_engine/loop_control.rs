@@ -348,6 +348,7 @@ mod tests {
     fn route_result(shape: OutputResponseShape) -> RouteResult {
         RouteResult {
             routed_mode: RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(RoutedMode::ChatAct),
             resolved_intent: "test".to_string(),
             needs_clarify: false,
             route_reason: String::new(),

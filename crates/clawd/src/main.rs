@@ -122,14 +122,17 @@ pub(crate) use repo::{
     SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
+// Phase 3.2 Stage B：AskMode 已经被 RouteResult/PreparedAskRouting 消费；
+// ChatEntryStrategy/ActFinalizeStyle 在 Stage C 切换 match 时才会被显式 import。
+#[allow(unused_imports)]
 pub(crate) use runtime::{
-    build_skill_views, llm_model_kind, llm_vendor_name, reload_skill_views, AgentAction,
-    AgentRuntimeConfig, AppState, AskReply, ChannelConfig, ClaimedTask, CommandIntentRules,
-    CommandIntentRuntime, CoreServices, LlmPromptBucket, LlmProviderRuntime,
-    LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
-    RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
-    SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy, WhatsappDeliveryRoute,
-    WorkerConfig,
+    build_skill_views, llm_model_kind, llm_vendor_name, reload_skill_views, ActFinalizeStyle,
+    AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, ChannelConfig,
+    ChatEntryStrategy, ClaimedTask, CommandIntentRules, CommandIntentRuntime, CoreServices,
+    LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
+    PolicyConfig, RateLimiter, ReloadContext, RoutedMode, RuntimeChannel, ScheduleIntentOutput,
+    ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry,
+    ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};

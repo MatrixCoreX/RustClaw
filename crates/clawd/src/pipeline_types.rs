@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 
+use crate::runtime::ask_mode::AskMode;
 use crate::runtime::types::{AgentAction, RoutedMode, ScheduleIntentOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -203,6 +204,11 @@ impl RiskCeiling {
 #[derive(Debug, Clone)]
 pub(crate) struct RouteResult {
     pub(crate) routed_mode: RoutedMode,
+    /// Phase 3.2 Stage B：与 `routed_mode` 双轨并存。
+    /// 此字段只反映 `RoutedMode` 维度的折叠，不携带
+    /// `classifier_direct_mode` / `direct_resume_*` 这些 worker 层 flag；
+    /// 那些信息在 `worker::ask_prepare::PreparedAskRouting::ask_mode` 里合并。
+    pub(crate) ask_mode: AskMode,
     pub(crate) resolved_intent: String,
     pub(crate) needs_clarify: bool,
     pub(crate) clarify_question: String,

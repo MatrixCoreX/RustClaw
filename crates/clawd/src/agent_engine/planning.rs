@@ -1697,6 +1697,7 @@ mod tests {
     ) -> RouteResult {
         RouteResult {
             routed_mode: mode,
+            ask_mode: crate::AskMode::from_routed_mode(mode),
             resolved_intent: "test".to_string(),
             needs_clarify: false,
             route_reason: String::new(),

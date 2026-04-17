@@ -101,6 +101,7 @@ pub(crate) fn route_result_from_normalizer(
 ) -> RouteResult {
     RouteResult {
         routed_mode: normalizer_out.routed_mode,
+        ask_mode: crate::AskMode::from_routed_mode(normalizer_out.routed_mode),
         resolved_intent: normalizer_out.resolved_user_intent.clone(),
         needs_clarify: normalizer_out.needs_clarify,
         clarify_question: normalizer_out.clarify_question.clone(),

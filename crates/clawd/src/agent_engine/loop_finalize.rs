@@ -1486,6 +1486,7 @@ mod tests {
     fn scalar_route_result() -> RouteResult {
         RouteResult {
             routed_mode: RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(RoutedMode::Act),
             resolved_intent: "extract scalar".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -2258,6 +2259,7 @@ mod tests {
         });
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -2320,6 +2322,7 @@ mod tests {
         });
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -2417,6 +2420,7 @@ mod tests {
         });
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent:
                 "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                     .to_string(),

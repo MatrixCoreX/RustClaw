@@ -574,6 +574,7 @@ mod tests {
         let mut journal = TaskJournal::for_task("task-1", "ask", "总结 README");
         journal.record_route_result(&crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "不要用现有技能，先规划一个新能力".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
