@@ -41,7 +41,7 @@ act|act_hostname_only||只输出当前机器 hostname
 act|act_list_top_dirs||把当前仓库顶层目录和文件列出来，简单分组就行|expect=Cargo.toml
 act|act_hidden_files||看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
 act|act_read_readme_head||扫一眼 README 前 20 行，再提炼成 3 句话
-act|act_show_cargo_package_name||读取 Cargo.toml 的 package.name，只输出值|expect=clawd
+act|act_show_cargo_package_name||读取 crates/clawd/Cargo.toml 的 package.name，只输出值|expect=clawd
 act|act_list_logs||列出 logs 目录下的前 10 个文件名，不要读内容
 act|act_find_service_file||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径|expect=rustclaw.service
 act|act_check_document_dir||列出 document 目录下有哪些文件，只输出文件名列表
