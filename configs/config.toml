@@ -291,7 +291,10 @@ request_timeout_seconds = 30
 registry_path = "configs/skills_registry.toml"
 skill_switches = { browser_web = true, doc_parse = true, extension_manager = true, kb = true, map_merchant = true, photo_organize = true, schedule = true, stock = true, task_control = true, transform = true, weather = true, web_search_extract = true }
 skill_max_concurrency = 2
-skill_timeout_seconds = 86400
+# Phase 0.1 收敛：86400 (24h, demo 演示值) → 600 (10 min)
+# 影响：单次 skill 执行超时；image_generate / browser_web 等慢技能若超过 10 min
+# 请在 [skills.timeout_overrides] 单独提高，不要把全局调回大值。
+skill_timeout_seconds = 600
 # 可选开关覆盖（优先级高于 skills_list，且可覆盖 core-floor 默认启用）/ Optional switch overrides (higher than skills_list; false can override core-floor):
 # - 设为 false: 强制关闭该技能（含 core-floor，不会进入二层路由提示词，也不可执行）/ Set false: force disable this skill (including core-floor).
 # - 设为 true : 强制开启该技能（会进入二层路由提示词，且可执行）/ Set true: force enable this skill.
@@ -346,18 +349,18 @@ skills_list = [
 # 建议修改/Recommended change: 默认关闭；仅在开发/受控环境开启.
 # 风险/Risk: 开启后会允许内部调用 extension_manager 生成临时方案，若 allow_execute=true 还会执行临时脚本.
 #
-# [WARNING - Phase 0.1 安全提醒]
-# 代码里 `SelfExtensionConfig::default()` 现在默认全部 false，
-# 只有下面这个当前配置文件里显式写成 true 才会打开。
-# 生产环境强烈建议把本 section 整节删掉或全部设为 false，
-# 让 agent 永远不会临时生成/安装/执行脚本。
+# [Phase 0.1 默认安全配置收敛 - 2026-04-17]
+# 已收敛：本节六项全部 true → false，与代码里 `SelfExtensionConfig::default()` 对齐。
+# 这意味着 agent 不能临时生成/安装/执行脚本（除非显式重开）。
+# 生产环境强烈建议**把本 section 整节删掉**，依赖代码默认值（全 false）即可。
+# 仅在受控开发环境若需要恢复自扩展能力，把对应字段单独改回 true。
 [self_extension]
-enabled = true
-auto_on_capability_gap = true
-allow_execute = true
-allow_package_install = true
-allow_permanent_extension = true
-allow_runtime_enable = true
+enabled = false
+auto_on_capability_gap = false
+allow_execute = false
+allow_package_install = false
+allow_permanent_extension = false
+allow_runtime_enable = false
 
 # 渠道配置已拆分到以下文件 / Channel configs are split into:
 # - configs/channels/telegram.toml（Telegram）/ Telegram channel settings
@@ -385,19 +388,22 @@ note = "placeholder"
 # 建议修改/Recommended change: 生产环境建议收紧 allow/deny 与 sudo.
 # 风险/Risk: 当前 `allow=*` + `allow_sudo=true` 权限非常高，误调用风险显著.
 #
-# [WARNING - Phase 0.1 安全提醒]
-# - `allow = ["*"]`：放开所有技能白名单，LLM 若出错可能调用意外技能。
-#   建议改为显式列出需要的技能（与 skills_list 对齐），或至少在高风险环境
-#   改成 `["run_cmd", "read_file", "write_file", ...]` 明确小集合。
-# - `allow_sudo = true`：允许技能执行 sudo 指令。若机器直接连公网，建议关闭。
-# - `allow_path_outside_workspace = true`：允许技能读写 workspace 之外路径。
-#   建议关闭，只有在用户真的需要"帮我改 /etc 配置"这类场景时再开。
-# 如果不确定，默认值 profile=full + allow=[] + allow_sudo=false 是更安全的起点。
+# [Phase 0.1 默认安全配置收敛 - 2026-04-17]
+# 已收敛项：
+# - `allow_sudo`               true → false  （需要 sudo 的场景请按渠道/任务显式打开）
+# - `allow_path_outside_workspace` true → false  （只读写当前 workspace 内路径）
+# - `cmd_timeout_seconds`      60 → 30        （单次 shell 命令墙钟上限）
+# 暂未收敛：
+# - `allow = ["*"]`：保持全开。改成白名单需要枚举所有 skills_list 中的工具
+#   名（约 38 项），并与 NL 回归套对齐验证；该工作单独排期。
+# 生产环境请把 `allow` 改为显式小集合，例如：
+#   `["run_cmd", "read_file", "write_file", "list_dir", "fs_search",
+#     "service_control", "health_check", "log_analyze"]`
 [tools]
 allow = ["*"]
-allow_path_outside_workspace = true
-allow_sudo = true
-cmd_timeout_seconds = 60
+allow_path_outside_workspace = false
+allow_sudo = false
+cmd_timeout_seconds = 30
 deny = []
 max_cmd_length = 2400
 profile = "full"
@@ -439,4 +445,7 @@ running_no_progress_timeout_seconds = 1200
 running_recovery_check_interval_seconds = 60
 # 单任务硬超时（秒） / Hard timeout per task in seconds.
 # 注意：这是 clawd 后台任务生命周期上限，不作为 Telegram/WhatsApp 的用户侧投递等待时长。
-task_timeout_seconds = 86400
+# Phase 0.1 收敛：86400 (24h, demo 演示值) → 3600 (1h)。
+# 多轮 agent 任务一般 5–15 min；超过 1h 通常是循环卡死，应当被 hard timeout 切断。
+# 真有"长跑批处理"需求请按 task 级别在创建时单独提 timeout，不要把全局调回大值。
+task_timeout_seconds = 3600
