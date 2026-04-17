@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::{AppState, RouteResult, RoutedMode};
+use crate::{AppState, RouteResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ExecutionRecipeKind {
@@ -688,7 +688,7 @@ pub(crate) fn detect_execution_recipe(
     let Some(route) = route_result else {
         return ExecutionRecipeSpec::default();
     };
-    if route.needs_clarify || !matches!(route.routed_mode, RoutedMode::Act | RoutedMode::ChatAct) {
+    if route.needs_clarify || !route.ask_mode.is_act() {
         return ExecutionRecipeSpec::default();
     }
 
