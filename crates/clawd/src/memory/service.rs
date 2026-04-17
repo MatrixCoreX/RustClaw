@@ -70,7 +70,7 @@ pub(crate) fn prepare_prompt_with_memory(
         task.user_id,
         task.chat_id,
         prompt,
-        state.memory.prompt_recall_limit.max(1),
+        state.policy.memory.prompt_recall_limit.max(1),
         true,
         true,
     );
@@ -78,17 +78,17 @@ pub(crate) fn prepare_prompt_with_memory(
         &structured,
         MemoryContextMode::Planner,
         state
-            .memory
+            .policy.memory
             .agent_memory_budget_chars
             .max(512)
-            .min(state.memory.prompt_max_chars.max(512)),
+            .min(state.policy.memory.prompt_max_chars.max(512)),
     );
     let chat_prompt_context = structured_memory_context_block(
         &structured,
         MemoryContextMode::Chat,
         chat_memory_budget_chars
             .max(384)
-            .min(state.memory.prompt_max_chars.max(384)),
+            .min(state.policy.memory.prompt_max_chars.max(384)),
     );
     PromptMemoryContext {
         chat_prompt_context,
@@ -112,10 +112,10 @@ pub(crate) fn recall_structured_memory_context(
     include_long_term: bool,
     include_preferences: bool,
 ) -> StructuredMemoryContext {
-    let long_term_summary = if include_long_term && state.memory.long_term_enabled {
+    let long_term_summary = if include_long_term && state.policy.memory.long_term_enabled {
         crate::memory::recall_long_term_summary(state, user_key, user_id, chat_id)
             .unwrap_or(None)
-            .map(|s| crate::truncate_text(&s, state.memory.long_term_recall_max_chars.max(256)))
+            .map(|s| crate::truncate_text(&s, state.policy.memory.long_term_recall_max_chars.max(256)))
     } else {
         None
     };
@@ -125,7 +125,7 @@ pub(crate) fn recall_structured_memory_context(
             user_key,
             user_id,
             chat_id,
-            state.memory.preference_recall_limit.max(1),
+            state.policy.memory.preference_recall_limit.max(1),
         )
         .unwrap_or_default()
     } else {
@@ -136,19 +136,19 @@ pub(crate) fn recall_structured_memory_context(
             .unwrap_or_default();
     let recalled_recent = crate::memory::filter_memories_for_prompt_recall(
         recalled_recent,
-        state.memory.prefer_llm_assistant_memory,
+        state.policy.memory.prefer_llm_assistant_memory,
     );
-    let recalled_recent = if state.memory.recent_relevance_enabled {
+    let recalled_recent = if state.policy.memory.recent_relevance_enabled {
         crate::memory::select_relevant_memories_for_prompt(
             recalled_recent,
             anchor_prompt,
-            state.memory.recent_relevance_min_score.clamp(0.0, 1.0),
+            state.policy.memory.recent_relevance_min_score.clamp(0.0, 1.0),
         )
     } else {
         recalled_recent
     };
 
-    let indexed = if state.memory.hybrid_recall_enabled {
+    let indexed = if state.policy.memory.hybrid_recall_enabled {
         crate::memory::retrieval::retrieve_indexed_memories(
             state,
             user_key,
@@ -187,8 +187,8 @@ pub(crate) fn dynamic_chat_memory_budget_chars(
     task: &ClaimedTask,
     request_text: &str,
 ) -> usize {
-    let configured_budget = state.memory.chat_memory_budget_chars.max(384);
-    let prompt_budget_cap = state.memory.prompt_max_chars.max(384);
+    let configured_budget = state.policy.memory.chat_memory_budget_chars.max(384);
+    let prompt_budget_cap = state.policy.memory.prompt_max_chars.max(384);
     let providers = state.task_llm_providers(task);
     if providers.is_empty() {
         return configured_budget.min(prompt_budget_cap);
@@ -301,7 +301,7 @@ pub(crate) async fn maybe_refresh_long_term_summary(
     task: &ClaimedTask,
     force_refresh: bool,
 ) -> Result<(), String> {
-    if !state.memory.long_term_enabled {
+    if !state.policy.memory.long_term_enabled {
         return Ok(());
     }
     if task
@@ -323,7 +323,7 @@ pub(crate) async fn maybe_refresh_long_term_summary(
     if rounds == 0 {
         return Ok(());
     }
-    if !force_refresh && rounds % state.memory.long_term_every_rounds.max(1) != 0 {
+    if !force_refresh && rounds % state.policy.memory.long_term_every_rounds.max(1) != 0 {
         return Ok(());
     }
     let source_id = crate::memory::read_long_term_source_memory_id(
@@ -333,7 +333,7 @@ pub(crate) async fn maybe_refresh_long_term_summary(
         task.chat_id,
     )
     .map_err(|err| format!("read long-term source id failed: {err}"))?;
-    let fetch_limit = state.memory.long_term_source_rounds.max(1) * 2;
+    let fetch_limit = state.policy.memory.long_term_source_rounds.max(1) * 2;
     let entries = crate::memory::recall_memories_since_id(
         state,
         task.user_key.as_deref(),
@@ -346,7 +346,7 @@ pub(crate) async fn maybe_refresh_long_term_summary(
     let min_entries = if force_refresh {
         2
     } else {
-        state.memory.long_term_every_rounds.max(1) * 2
+        state.policy.memory.long_term_every_rounds.max(1) * 2
     };
     if entries.len() < min_entries {
         return Ok(());
@@ -356,15 +356,15 @@ pub(crate) async fn maybe_refresh_long_term_summary(
         .map(|(_, _, content, _)| content.trim().chars().count())
         .sum::<usize>();
     let min_new_chars = if force_refresh {
-        (state.memory.long_term_refresh_min_new_chars / 3).max(24)
+        (state.policy.memory.long_term_refresh_min_new_chars / 3).max(24)
     } else {
-        state.memory.long_term_refresh_min_new_chars.max(1)
+        state.policy.memory.long_term_refresh_min_new_chars.max(1)
     };
     if new_chars < min_new_chars {
         return Ok(());
     }
     if crate::memory::repeated_entries_ratio(&entries)
-        > state.memory.long_term_refresh_max_repeat_ratio
+        > state.policy.memory.long_term_refresh_max_repeat_ratio
     {
         return Ok(());
     }
@@ -385,7 +385,7 @@ pub(crate) async fn maybe_refresh_long_term_summary(
 
     let mut convo_lines = Vec::new();
     for (_, role, content, safety_flag) in &entries {
-        if state.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        if state.policy.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
             convo_lines.push(format!("{role}: [safety_signal content omitted]"));
             continue;
         }
@@ -424,7 +424,7 @@ pub(crate) async fn maybe_refresh_long_term_summary(
     let parsed = parse_long_term_refresh_llm_out(&summary);
     let trimmed = crate::truncate_text(
         &parsed.summary,
-        state.memory.long_term_summary_max_chars.max(512),
+        state.policy.memory.long_term_summary_max_chars.max(512),
     );
     crate::memory::upsert_long_term_summary(
         state,
@@ -472,7 +472,7 @@ fn persist_valid_knowledge_candidates(
         return Ok(());
     }
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     for candidate in candidates {

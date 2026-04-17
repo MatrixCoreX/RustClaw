@@ -85,7 +85,7 @@ async fn materialize_wechat_outbound_media(
         WechatOutboundSource::LocalPath(path) => Ok(path.clone()),
         WechatOutboundSource::RemoteUrl(url) => {
             download_remote_media_to_temp(
-                &state.http_client,
+                &state.core.http_client,
                 url,
                 Path::new(WECHAT_MEDIA_OUTBOUND_TEMP_DIR),
                 "clawd-wechat",
@@ -133,7 +133,7 @@ pub(crate) async fn send_telegram_message(
             );
         }
         let resp = state
-            .http_client
+            .core.http_client
             .post(&url)
             .json(&json!({
                 "chat_id": chat_id,
@@ -197,7 +197,7 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
             );
         }
         let resp = state
-            .http_client
+            .core.http_client
             .post(&url)
             .bearer_auth(token)
             .json(&json!({
@@ -262,7 +262,7 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
             );
         }
         let resp = state
-            .http_client
+            .core.http_client
             .post(&url)
             .json(&json!({
                 "to": to,
@@ -314,7 +314,7 @@ pub(crate) async fn send_wechat_text_message(
         sk_route_tag: config.sk_route_tag.as_deref().unwrap_or(""),
         wechat_uin_base64: config.wechat_uin_base64.as_deref().unwrap_or(""),
     };
-    let media = extract_wechat_outbound_media(text, &state.workspace_root);
+    let media = extract_wechat_outbound_media(text, &state.skill_rt.workspace_root);
     let stripped = strip_wechat_delivery_lines(text);
     let send_text = if stripped.trim().is_empty() && media.is_empty() && !text.trim().is_empty() {
         text
@@ -344,7 +344,7 @@ pub(crate) async fn send_wechat_text_message(
             chunk
         };
         let mut req = state
-            .http_client
+            .core.http_client
             .post(&url)
             .header("Content-Type", "application/json")
             .header("AuthorizationType", "ilink_bot_token")
@@ -393,7 +393,7 @@ pub(crate) async fn send_wechat_text_message(
         match media.kind {
             WechatOutboundKind::Image => {
                 send_weixin_image_from_file(
-                    &state.http_client,
+                    &state.core.http_client,
                     base,
                     token,
                     auth,
@@ -408,7 +408,7 @@ pub(crate) async fn send_wechat_text_message(
             }
             WechatOutboundKind::Video => {
                 send_weixin_video_from_file(
-                    &state.http_client,
+                    &state.core.http_client,
                     base,
                     token,
                     auth,
@@ -427,7 +427,7 @@ pub(crate) async fn send_wechat_text_message(
                     .and_then(|s| s.to_str())
                     .unwrap_or("file");
                 send_weixin_file_from_file(
-                    &state.http_client,
+                    &state.core.http_client,
                     base,
                     token,
                     auth,
@@ -448,7 +448,7 @@ pub(crate) async fn send_wechat_text_message(
 
 fn resolve_wechat_send_config(state: &AppState) -> Option<WechatSendConfig> {
     let fallback = state.channels.wechat_send_config.clone();
-    let loaded = load_wechat_send_config_from_workspace(&state.workspace_root);
+    let loaded = load_wechat_send_config_from_workspace(&state.skill_rt.workspace_root);
     match (loaded, fallback) {
         (Some(loaded), Some(mut fallback)) => {
             if !loaded.api_base_url.trim().is_empty() {
@@ -592,7 +592,7 @@ pub(crate) async fn send_feishu_text_message(
         "feishu send not configured (configs/channels/feishu.toml app_id/app_secret)".to_string()
     })?;
     let token = get_tenant_access_token(
-        &state.http_client,
+        &state.core.http_client,
         &config.api_base_url,
         &config.app_id,
         &config.app_secret,
@@ -620,7 +620,7 @@ pub(crate) async fn send_feishu_text_message(
             chunk
         };
         let resp = state
-            .http_client
+            .core.http_client
             .post(&url)
             .header("Authorization", format!("Bearer {}", token))
             .json(&json!({
@@ -649,7 +649,7 @@ pub(crate) async fn send_lark_text_message(
         "lark send not configured (configs/channels/lark.toml app_id/app_secret)".to_string()
     })?;
     let token = get_tenant_access_token(
-        &state.http_client,
+        &state.core.http_client,
         &config.api_base_url,
         &config.app_id,
         &config.app_secret,
@@ -677,7 +677,7 @@ pub(crate) async fn send_lark_text_message(
             chunk
         };
         let resp = state
-            .http_client
+            .core.http_client
             .post(&url)
             .header("Authorization", format!("Bearer {}", token))
             .json(&json!({

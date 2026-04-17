@@ -89,7 +89,7 @@ pub(crate) fn submit_task_audit_detail(
 
 pub(crate) fn task_count_by_status(state: &AppState, status: &str) -> anyhow::Result<usize> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
@@ -219,7 +219,7 @@ pub(crate) fn build_conversation_chat_id(
 }
 
 pub(crate) fn is_user_allowed(state: &AppState, user_id: i64) -> bool {
-    let Ok(db) = state.db.get() else {
+    let Ok(db) = state.core.db.get() else {
         return false;
     };
 
@@ -248,7 +248,7 @@ pub(crate) fn channel_allows_public_access(channel: ChannelKind) -> bool {
 pub(crate) fn upsert_public_channel_user(state: &AppState, user_id: i64) -> anyhow::Result<()> {
     let now = now_ts();
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.execute(
@@ -287,7 +287,7 @@ pub(crate) fn check_submit_task_limits(
 ) -> Result<(), SubmitTaskLimitError> {
     let limit_result = {
         let mut limiter = state
-            .rate_limiter
+            .policy.rate_limiter
             .lock()
             .map_err(|_| SubmitTaskLimitError::RateLimiterPoisoned)?;
         limiter.check_and_record(effective_user_id)
@@ -298,7 +298,7 @@ pub(crate) fn check_submit_task_limits(
 
     let queued_count = task_count_by_status(state, crate::TASK_STATUS_QUEUED)
         .map_err(SubmitTaskLimitError::QueueCount)?;
-    if queued_count >= state.queue_limit {
+    if queued_count >= state.worker.queue_limit {
         return Err(SubmitTaskLimitError::QueueFull);
     }
     Ok(())
@@ -317,7 +317,7 @@ pub(crate) fn find_recent_duplicate_affirmation_task(
     }
     let normalized = normalize_affirmation_text(ask_text);
     let now = now_ts().parse::<i64>().unwrap_or_default();
-    let db = state.db.get().ok()?;
+    let db = state.core.db.get().ok()?;
     let mut stmt = db
         .prepare(
             "SELECT task_id, payload_json, status, CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) AS ts
@@ -379,7 +379,7 @@ pub(crate) fn find_recent_failed_resume_context(
     user_id: i64,
     chat_id: i64,
 ) -> Option<RecentFailedResumeContext> {
-    let db = state.db.get().ok()?;
+    let db = state.core.db.get().ok()?;
     let mut stmt = db
         .prepare(
             "SELECT result_json,
@@ -492,7 +492,7 @@ pub(crate) fn insert_submitted_task(
 ) -> anyhow::Result<()> {
     let now = now_ts();
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 

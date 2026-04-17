@@ -428,7 +428,7 @@ pub(super) async fn execute_ask_dispatch(
     }
     if direct_resume_discussion {
         let resume_prompt_source = crate::resolve_prompt_rel_path_for_vendor(
-            &state.workspace_root,
+            &state.skill_rt.workspace_root,
             &crate::active_prompt_vendor_name(state),
             crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_LOGICAL_PATH,
         );

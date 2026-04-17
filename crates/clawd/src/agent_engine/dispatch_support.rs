@@ -161,19 +161,18 @@ pub(super) fn classify_skill_failure_recovery(
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::path::Path;
-    use std::sync::{Arc, Mutex, RwLock};
-    use std::time::Instant;
+    use std::sync::{Arc, RwLock};
+    
 
     use super::classify_skill_failure_recovery;
     use crate::{
-        AgentAction, AgentRuntimeConfig, AppState, CommandIntentRuntime, RateLimiter,
-        ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+        AgentAction, AgentRuntimeConfig, AppState, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
     };
     use claw_core::config::{
-        AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
+        AgentConfig, ToolsConfig,
     };
     use claw_core::skill_registry::SkillsRegistry;
-    use tokio::sync::Semaphore;
+    
 
     fn test_state_with_registry() -> AppState {
         let agents_by_id = HashMap::from([(
@@ -183,63 +182,25 @@ mod tests {
         let registry = SkillsRegistry::load_from_path(Path::new("configs/skills_registry.toml"))
             .expect("load registry");
         AppState {
-            started_at: Instant::now(),
-            queue_limit: 1,
-            db: crate::db_init::test_pool(),
-            audit_db: crate::db_init::test_audit_pool(),
-            llm_providers: Vec::new(),
-            agents_by_id: Arc::new(agents_by_id),
-            skill_timeout_seconds: 30,
-            skill_runner_path: std::path::PathBuf::new(),
-            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                registry: Some(Arc::new(registry)),
-                skills_list: Arc::new(HashSet::new()),
-            }))),
-            skill_semaphore: Arc::new(Semaphore::new(1)),
-            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
-            llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_elapsed_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_by_prompt_per_task: Arc::new(Mutex::new(HashMap::new())),
-            task_schedule_intent_cache: Arc::new(Mutex::new(HashMap::new())),
-            maintenance: MaintenanceConfig::default(),
-            memory: MemoryConfig::default(),
-            workspace_root: std::env::temp_dir(),
-            default_locator_search_dir: std::env::temp_dir(),
-            locator_scan_max_depth: 2,
-            locator_scan_max_files: 200,
-            tools_policy: Arc::new(
-                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-            ),
-            active_provider_type: None,
-            cmd_timeout_seconds: 30,
-            max_cmd_length: 4096,
-            allow_path_outside_workspace: false,
-            allow_sudo: false,
-            worker_task_timeout_seconds: 300,
-            worker_task_heartbeat_seconds: 10,
-            worker_running_no_progress_timeout_seconds: 300,
-            worker_running_recovery_check_interval_seconds: 30,
-            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
-            routing: RoutingConfig::default(),
-            persona_prompt: String::new(),
-            command_intent: CommandIntentRuntime {
-                all_result_suffixes: Vec::new(),
-                default_locale: "zh-CN".to_string(),
-                verify_enforce_enabled: false,
+            core: crate::CoreServices {
+                agents_by_id: Arc::new(agents_by_id),
+                skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                                registry: Some(Arc::new(registry)),
+                                skills_list: Arc::new(HashSet::new()),
+                            }))),
+                ..crate::CoreServices::test_default()
             },
-            schedule: ScheduleRuntime {
-                timezone: "Asia/Shanghai".to_string(),
-                intent_prompt_template: String::new(),
-                intent_prompt_source: String::new(),
-                intent_rules_template: String::new(),
-                locale: "zh-CN".to_string(),
-                i18n_dict: HashMap::new(),
+            skill_rt: crate::SkillRuntime {
+                locator_scan_max_files: 200,
+                tools_policy: Arc::new(
+                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                            ),
+                ..crate::SkillRuntime::test_default()
             },
+            policy: crate::PolicyConfig::test_default(),
+            worker: crate::WorkerConfig::test_default(),
+            metrics: crate::TaskMetricsRegistry::default(),
             channels: crate::ChannelConfig::default(),
-            http_client: reqwest::Client::new(),
-            database_sqlite_path: std::path::PathBuf::new(),
-            database_busy_timeout_ms: 5_000,
-            self_extension: claw_core::config::SelfExtensionConfig::default(),
             reload_ctx: crate::ReloadContext::default(),
         }
     }
@@ -423,11 +384,11 @@ fn write_file_effective_path(
         return None;
     }
     args.get("path").and_then(|v| v.as_str()).map(|path| {
-        let effective = crate::ensure_default_file_path(&state.workspace_root, path);
+        let effective = crate::ensure_default_file_path(&state.skill_rt.workspace_root, path);
         let user_visible = if Path::new(&effective).is_absolute() {
             effective.clone()
         } else {
-            state.workspace_root.join(&effective).display().to_string()
+            state.skill_rt.workspace_root.join(&effective).display().to_string()
         };
         (path.to_string(), effective, user_visible)
     })

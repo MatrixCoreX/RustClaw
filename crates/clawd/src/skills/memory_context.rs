@@ -8,7 +8,7 @@ pub(crate) fn inject_skill_memory_context(
     skill_name: &str,
     args: Value,
 ) -> Value {
-    if !state.memory.skill_memory_enabled {
+    if !state.policy.memory.skill_memory_enabled {
         return args;
     }
     let mut obj = match args {
@@ -28,14 +28,14 @@ pub(crate) fn inject_skill_memory_context(
         task.user_id,
         task.chat_id,
         &anchor,
-        state.memory.recall_limit.max(1),
+        state.policy.memory.recall_limit.max(1),
         true,
         true,
     );
     let memory_context = crate::memory::service::structured_memory_context_block(
         &structured,
         crate::memory::retrieval::MemoryContextMode::Skill,
-        state.memory.skill_memory_max_chars.max(384),
+        state.policy.memory.skill_memory_max_chars.max(384),
     );
     let mut pref_map = serde_json::Map::new();
     for (k, v) in &structured.preferences {
@@ -52,7 +52,7 @@ pub(crate) fn inject_skill_memory_context(
             })
         })
         .collect::<Vec<_>>();
-    let lang_hint = state.command_intent.default_locale.clone();
+    let lang_hint = state.policy.command_intent.default_locale.clone();
     obj.insert(
         "_memory".to_string(),
         serde_json::json!({

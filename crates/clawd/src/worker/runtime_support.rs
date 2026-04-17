@@ -65,14 +65,14 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
 }
 
 fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Result<Vec<String>> {
-    let timeout_secs = state.worker_running_no_progress_timeout_seconds.max(60);
+    let timeout_secs = state.worker.worker_running_no_progress_timeout_seconds.max(60);
     let now = now_ts_u64() as i64;
     let stale_before = now.saturating_sub(timeout_secs as i64);
     let stale_note = format!(
         "auto timeout: no progress heartbeat for {}s while status=running",
         timeout_secs
     );
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
 
     let mut task_ids = Vec::new();
     {
@@ -119,10 +119,10 @@ fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Resul
 
 pub(crate) fn maybe_recover_stale_running_tasks_runtime(state: &AppState) -> anyhow::Result<()> {
     let now = now_ts_u64();
-    let interval = state.worker_running_recovery_check_interval_seconds.max(10);
+    let interval = state.worker.worker_running_recovery_check_interval_seconds.max(10);
     {
         let mut guard = state
-            .last_running_recovery_check_ts
+            .worker.last_running_recovery_check_ts
             .lock()
             .map_err(|_| anyhow!("running recovery lock poisoned"))?;
         if now.saturating_sub(*guard) < interval {
@@ -135,14 +135,14 @@ pub(crate) fn maybe_recover_stale_running_tasks_runtime(state: &AppState) -> any
         warn!(
             "runtime stale-running recovery applied: converted {} running tasks to timeout (no_progress_timeout={}s)",
             recovered.len(),
-            state.worker_running_no_progress_timeout_seconds
+            state.worker.worker_running_no_progress_timeout_seconds
         );
     }
     Ok(())
 }
 
 pub(crate) fn start_task_heartbeat(state: AppState, task_id: String) -> oneshot::Sender<()> {
-    let interval_secs = state.worker_task_heartbeat_seconds.max(5);
+    let interval_secs = state.worker.worker_task_heartbeat_seconds.max(5);
     let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
     tokio::spawn(async move {
         loop {
@@ -203,7 +203,7 @@ pub(crate) fn spawn_cleanup_worker(state: AppState) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(
-                state.maintenance.cleanup_interval_seconds.max(30),
+                state.policy.maintenance.cleanup_interval_seconds.max(30),
             ))
             .await;
 
@@ -230,7 +230,7 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
     let mut due_jobs: Vec<ScheduledJobDue> = Vec::new();
 
     {
-        let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+        let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
         let mut stmt = db.prepare(
             "SELECT job_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, task_kind, task_payload_json, next_run_at,
                     schedule_type, time_of_day, weekday, every_minutes, timezone
@@ -267,7 +267,7 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
 
     for job in due_jobs {
         let next_run = schedule_service::compute_next_run_for_schedule(
@@ -337,11 +337,11 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
 }
 
 fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
 
     let now = now_ts_u64() as i64;
 
-    let task_cutoff = now - (state.maintenance.tasks_retention_days as i64 * 86400);
+    let task_cutoff = now - (state.policy.maintenance.tasks_retention_days as i64 * 86400);
     db.execute(
         "DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1",
         rusqlite::params![task_cutoff],
@@ -353,17 +353,17 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
              ORDER BY CAST(created_at AS INTEGER) DESC
              LIMIT -1 OFFSET ?1
          )",
-        rusqlite::params![state.maintenance.tasks_max_rows as i64],
+        rusqlite::params![state.policy.maintenance.tasks_max_rows as i64],
     )?;
 
     // Phase 2.2 Stage 2: audit_logs 已经搬到独立 audit pool（见 db_init::init_audit_db）。
     // 这里清理也走 audit_db，避免在主库 writer 锁上和任务回收争抢。
     {
         let audit_db = state
-            .audit_db
+            .core.audit_db
             .get()
             .map_err(|e| anyhow!("audit db pool: {e}"))?;
-        let audit_cutoff = now - (state.maintenance.audit_retention_days as i64 * 86400);
+        let audit_cutoff = now - (state.policy.maintenance.audit_retention_days as i64 * 86400);
         audit_db.execute(
             "DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1",
             rusqlite::params![audit_cutoff],
@@ -375,11 +375,11 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
                  ORDER BY id DESC
                  LIMIT -1 OFFSET ?1
              )",
-            rusqlite::params![state.maintenance.audit_max_rows as i64],
+            rusqlite::params![state.policy.maintenance.audit_max_rows as i64],
         )?;
     }
 
-    let memory_cutoff = now - (state.memory.retention_days as i64 * 86400);
+    let memory_cutoff = now - (state.policy.memory.retention_days as i64 * 86400);
     db.execute(
         "DELETE FROM memories
          WHERE COALESCE(created_at_ts, CAST(created_at AS INTEGER)) < ?1",
@@ -392,14 +392,14 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
              ORDER BY id DESC
              LIMIT -1 OFFSET ?1
          )",
-        rusqlite::params![state.memory.max_rows as i64],
+        rusqlite::params![state.policy.memory.max_rows as i64],
     )?;
-    if state.memory.hybrid_recall_enabled {
-        let index_max_rows = state.memory.max_rows.saturating_mul(3).max(2000);
+    if state.policy.memory.hybrid_recall_enabled {
+        let index_max_rows = state.policy.memory.max_rows.saturating_mul(3).max(2000);
         crate::memory::indexing::cleanup_retrieval_index(&db, memory_cutoff, index_max_rows)?;
     }
 
-    let long_term_cutoff = now - (state.memory.long_term_retention_days as i64 * 86400);
+    let long_term_cutoff = now - (state.policy.memory.long_term_retention_days as i64 * 86400);
     db.execute(
         "DELETE FROM long_term_memories
          WHERE COALESCE(updated_at_ts, CAST(updated_at AS INTEGER)) < ?1",
@@ -412,14 +412,14 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
              ORDER BY id DESC
              LIMIT -1 OFFSET ?1
          )",
-        rusqlite::params![state.memory.long_term_max_rows as i64],
+        rusqlite::params![state.policy.memory.long_term_max_rows as i64],
     )?;
     drop(db);
 
     // model_io.log：不再每次 append 后做全量 prune（会 O(N²) 磁盘）。
     // 改由这里按 cleanup 节拍把跨天的行迁到 `model_io.log.YYYY-MM-DD` 归档，
     // 主文件只保留当天；同时清理超过 keep_days 的旧归档。
-    let model_io_path = state.workspace_root.join("logs").join("model_io.log");
+    let model_io_path = state.skill_rt.workspace_root.join("logs").join("model_io.log");
     if let Err(err) = crate::providers::rotate_model_io_log_daily(
         &model_io_path,
         crate::providers::MODEL_IO_LOG_KEEP_DAYS,

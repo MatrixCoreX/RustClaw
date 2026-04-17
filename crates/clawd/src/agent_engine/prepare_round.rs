@@ -31,7 +31,7 @@ fn build_round_verify_summary(
 }
 
 fn verify_mode_for_state(state: &AppState) -> crate::verifier::VerifyMode {
-    if state.command_intent.verify_enforce_enabled {
+    if state.policy.command_intent.verify_enforce_enabled {
         crate::verifier::VerifyMode::Enforce
     } else {
         crate::verifier::VerifyMode::ObserveOnly
@@ -43,7 +43,7 @@ fn build_verifier_gate_response(
     verify_result: &crate::verifier::VerifyResult,
 ) -> String {
     let prefer_english = state
-        .command_intent
+        .policy.command_intent
         .default_locale
         .to_ascii_lowercase()
         .starts_with("en");

@@ -30,17 +30,17 @@ pub(super) fn resolve_batch_directory_delivery(
         return None;
     }
     let locator =
-        resolve_directory_locator_input(output_contract, user_request, &state.workspace_root)?;
+        resolve_directory_locator_input(output_contract, user_request, &state.skill_rt.workspace_root)?;
     let resolved = resolve_directory_target(
         locator,
         Path::new("/"),
-        &state.default_locator_search_dir,
-        state.locator_scan_max_depth,
-        state.locator_scan_max_files,
+        &state.skill_rt.default_locator_search_dir,
+        state.skill_rt.locator_scan_max_depth,
+        state.skill_rt.locator_scan_max_files,
     );
     match resolved {
         DirectoryLookupResolution::Resolved(directory) => {
-            match list_current_level_files_for_delivery(&directory, state.locator_scan_max_files) {
+            match list_current_level_files_for_delivery(&directory, state.skill_rt.locator_scan_max_files) {
                 CurrentLevelDeliveryEntriesResult::Ready(entries) => {
                     let subdir_hint = localize_delivery_message_for_request(
                         state,
@@ -223,9 +223,9 @@ pub(super) fn enforce_file_delivery_locator_contract(
     let Some(resolved) = resolve_file_delivery_target_with_hint(
         user_request,
         Path::new("/"),
-        &state.default_locator_search_dir,
-        state.locator_scan_max_depth,
-        state.locator_scan_max_files,
+        &state.skill_rt.default_locator_search_dir,
+        state.skill_rt.locator_scan_max_depth,
+        state.skill_rt.locator_scan_max_files,
         Some(output_contract.locator_hint.as_str()),
     ) else {
         return;

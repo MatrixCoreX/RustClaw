@@ -72,10 +72,10 @@ pub(crate) fn prompt_vendor_name_from_selected_vendor(selected_vendor: Option<&s
 }
 
 pub(crate) fn active_prompt_vendor_name(state: &AppState) -> String {
-    if let Some(provider) = state.llm_providers.first() {
+    if let Some(provider) = state.core.llm_providers.first() {
         return prompt_layers::normalize_prompt_vendor_name(llm_vendor_name(provider));
     }
-    if let Some(active) = state.active_provider_type.as_deref() {
+    if let Some(active) = state.core.active_provider_type.as_deref() {
         return prompt_layers::normalize_prompt_vendor_name(active);
     }
     "default".to_string()
@@ -111,7 +111,7 @@ pub(crate) fn load_prompt_template_for_state(
 ) -> (String, String) {
     let vendor = active_prompt_vendor_name(state);
     prompt_layers::load_prompt_template_for_vendor(
-        &state.workspace_root,
+        &state.skill_rt.workspace_root,
         &vendor,
         rel_path,
         default_template,

@@ -75,7 +75,7 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             .map_err(|err| anyhow!("invalid payload_json for task {}: {err}", task.task_id))?;
 
         let task_kind_for_timeout_log = task.kind.clone();
-        let worker_timeout_secs = state.worker_task_timeout_seconds.max(1);
+        let worker_timeout_secs = state.worker.worker_task_timeout_seconds.max(1);
         let heartbeat_stop = start_task_heartbeat(state.clone(), task.task_id.clone());
         let task_result = tokio::time::timeout(Duration::from_secs(worker_timeout_secs), async {
             process_claimed_task_by_kind(state, &task, &mut payload).await?;

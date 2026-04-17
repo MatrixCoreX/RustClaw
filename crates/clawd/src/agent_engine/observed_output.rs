@@ -1808,12 +1808,12 @@ fn normalized_output_path_hint(state: Option<&AppState>, raw: &str) -> String {
     let Some(state) = state else {
         return trimmed.to_string();
     };
-    let effective = crate::ensure_default_file_path(&state.workspace_root, trimmed);
+    let effective = crate::ensure_default_file_path(&state.skill_rt.workspace_root, trimmed);
     let path = Path::new(&effective);
     if path.is_absolute() {
         return canonical_existing_path(path);
     }
-    let joined = state.workspace_root.join(path);
+    let joined = state.skill_rt.workspace_root.join(path);
     canonical_existing_path(&joined)
 }
 
@@ -3421,7 +3421,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             ("__OBSERVED_OUTPUTS__", &observed_block),
             (
                 "__CONFIG_RESPONSE_LANGUAGE__",
-                &state.command_intent.default_locale,
+                &state.policy.command_intent.default_locale,
             ),
             (
                 "__REQUEST_LANGUAGE_HINT__",

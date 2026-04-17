@@ -116,16 +116,16 @@ pub(crate) fn retrieve_indexed_memories(
     anchor_prompt: &str,
 ) -> anyhow::Result<IndexedRecall> {
     let scope_user_key = super::effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let mut candidates = fetch_recent_candidates(
         &db,
         user_id,
         chat_id,
         &scope_user_key,
         state
-            .memory
+            .policy.memory
             .vector_candidate_limit
-            .max(state.memory.fts_candidate_limit)
+            .max(state.policy.memory.fts_candidate_limit)
             .max(12)
             * 4,
     )?;
@@ -137,9 +137,9 @@ pub(crate) fn retrieve_indexed_memories(
                 legacy_chat_id,
                 &scope_user_key,
                 state
-                    .memory
+                    .policy.memory
                     .vector_candidate_limit
-                    .max(state.memory.fts_candidate_limit)
+                    .max(state.policy.memory.fts_candidate_limit)
                     .max(12)
                     * 4,
             )?;
@@ -152,7 +152,7 @@ pub(crate) fn retrieve_indexed_memories(
         chat_id,
         &scope_user_key,
         anchor_prompt,
-        state.memory.fts_candidate_limit.max(6) * 2,
+        state.policy.memory.fts_candidate_limit.max(6) * 2,
     )?;
     let mut by_id: HashMap<i64, RetrievalRow> =
         candidates.into_iter().map(|row| (row.id, row)).collect();
@@ -239,23 +239,23 @@ pub(crate) fn retrieve_indexed_memories(
         }
         match kind.as_str() {
             RETRIEVAL_KIND_TRIGGER_ANCHOR
-                if similar_triggers.len() < state.memory.trigger_anchor_limit.max(1) =>
+                if similar_triggers.len() < state.policy.memory.trigger_anchor_limit.max(1) =>
             {
                 similar_triggers.push(item);
             }
             _ if retrieval_kind_is_fact_bucket(kind.as_str())
-                && relevant_facts.len() < state.memory.fact_card_limit.max(1) =>
+                && relevant_facts.len() < state.policy.memory.fact_card_limit.max(1) =>
             {
                 relevant_facts.push(item);
             }
             _ if retrieval_kind_is_knowledge_doc_bucket(kind.as_str())
-                && knowledge_docs.len() < state.memory.fact_card_limit.max(1) =>
+                && knowledge_docs.len() < state.policy.memory.fact_card_limit.max(1) =>
             {
                 knowledge_docs.push(item);
             }
             RETRIEVAL_KIND_EPISODIC_EVENT
                 if item.role.as_deref() != Some(MEMORY_ROLE_ASSISTANT)
-                    && recent_related_events.len() < state.memory.prompt_recall_limit.max(2) =>
+                    && recent_related_events.len() < state.policy.memory.prompt_recall_limit.max(2) =>
             {
                 recent_related_events.push(item);
             }
@@ -267,10 +267,10 @@ pub(crate) fn retrieve_indexed_memories(
             }
             _ => {}
         }
-        if similar_triggers.len() >= state.memory.trigger_anchor_limit.max(1)
-            && relevant_facts.len() >= state.memory.fact_card_limit.max(1)
-            && knowledge_docs.len() >= state.memory.fact_card_limit.max(1)
-            && recent_related_events.len() >= state.memory.prompt_recall_limit.max(2)
+        if similar_triggers.len() >= state.policy.memory.trigger_anchor_limit.max(1)
+            && relevant_facts.len() >= state.policy.memory.fact_card_limit.max(1)
+            && knowledge_docs.len() >= state.policy.memory.fact_card_limit.max(1)
+            && recent_related_events.len() >= state.policy.memory.prompt_recall_limit.max(2)
             && assistant_results.len() >= 2
             && unfinished_goals.len() >= 2
         {
@@ -800,14 +800,14 @@ fn truncate_block(block: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use std::sync::{Arc, Mutex, RwLock};
-    use std::time::Instant;
+    use std::sync::{Arc, RwLock};
+    
 
     use claw_core::config::{
-        AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
+        AgentConfig, ToolsConfig,
     };
-    use reqwest::Client;
-    use tokio::sync::Semaphore;
+    
+    
 
     use super::{
         build_structured_memory_context_block, retrieve_indexed_memories, source_label_for_row,
@@ -816,7 +816,7 @@ mod tests {
     use crate::db_init::ensure_memory_schema;
     use crate::memory::indexing::{ensure_retrieval_schema, upsert_knowledge_fact};
     use crate::runtime::{
-        AgentRuntimeConfig, AppState, CommandIntentRuntime, RateLimiter, ScheduleRuntime,
+        AgentRuntimeConfig, AppState,
         SkillViewsSnapshot, ToolsPolicy,
     };
 
@@ -835,63 +835,26 @@ mod tests {
             AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
         )]);
         AppState {
-            started_at: Instant::now(),
-            queue_limit: 1,
-            db: crate::db_init::test_pool(),
-            audit_db: crate::db_init::test_audit_pool(),
-            llm_providers: Vec::new(),
-            agents_by_id: Arc::new(agents_by_id),
-            skill_timeout_seconds: 30,
-            skill_runner_path: std::path::PathBuf::new(),
-            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                registry: None,
-                skills_list: Arc::new(HashSet::new()),
-            }))),
-            skill_semaphore: Arc::new(Semaphore::new(1)),
-            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
-            llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_elapsed_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_by_prompt_per_task: Arc::new(Mutex::new(HashMap::new())),
-            task_schedule_intent_cache: Arc::new(Mutex::new(HashMap::new())),
-            maintenance: MaintenanceConfig::default(),
-            memory: MemoryConfig::default(),
-            workspace_root: std::env::temp_dir(),
-            default_locator_search_dir: std::env::temp_dir(),
-            locator_scan_max_depth: 3,
-            locator_scan_max_files: 200,
-            tools_policy: Arc::new(
-                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-            ),
-            active_provider_type: None,
-            cmd_timeout_seconds: 30,
-            max_cmd_length: 4096,
-            allow_path_outside_workspace: false,
-            allow_sudo: false,
-            worker_task_timeout_seconds: 300,
-            worker_task_heartbeat_seconds: 10,
-            worker_running_no_progress_timeout_seconds: 300,
-            worker_running_recovery_check_interval_seconds: 30,
-            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
-            routing: RoutingConfig::default(),
-            persona_prompt: String::new(),
-            command_intent: CommandIntentRuntime {
-                all_result_suffixes: Vec::new(),
-                default_locale: "zh-CN".to_string(),
-                verify_enforce_enabled: false,
+            core: crate::CoreServices {
+                agents_by_id: Arc::new(agents_by_id),
+                skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                                registry: None,
+                                skills_list: Arc::new(HashSet::new()),
+                            }))),
+                ..crate::CoreServices::test_default()
             },
-            schedule: ScheduleRuntime {
-                timezone: "Asia/Shanghai".to_string(),
-                intent_prompt_template: String::new(),
-                intent_prompt_source: String::new(),
-                intent_rules_template: String::new(),
-                locale: "zh-CN".to_string(),
-                i18n_dict: HashMap::new(),
+            skill_rt: crate::SkillRuntime {
+                locator_scan_max_depth: 3,
+                locator_scan_max_files: 200,
+                tools_policy: Arc::new(
+                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                            ),
+                ..crate::SkillRuntime::test_default()
             },
+            policy: crate::PolicyConfig::test_default(),
+            worker: crate::WorkerConfig::test_default(),
+            metrics: crate::TaskMetricsRegistry::default(),
             channels: crate::ChannelConfig::default(),
-            http_client: Client::new(),
-            database_sqlite_path: std::path::PathBuf::new(),
-            database_busy_timeout_ms: 5_000,
-            self_extension: claw_core::config::SelfExtensionConfig::default(),
             reload_ctx: crate::ReloadContext::default(),
         }
     }
@@ -979,7 +942,7 @@ mod tests {
         let chat_id = 2002;
         let user_key = "user:test";
         {
-            let db = state.db.get().expect("db lock");
+            let db = state.core.db.get().expect("db lock");
             db.execute_batch(crate::INIT_SQL).expect("init base schema");
             ensure_memory_schema(&db).expect("ensure memory schema");
             ensure_retrieval_schema(&db).expect("ensure retrieval schema");
@@ -1042,7 +1005,7 @@ mod tests {
     fn kb_docs_are_scoped_by_user_key() {
         let state = test_state();
         {
-            let db = state.db.get().expect("db lock");
+            let db = state.core.db.get().expect("db lock");
             db.execute_batch(crate::INIT_SQL).expect("init base schema");
             ensure_memory_schema(&db).expect("ensure memory schema");
             ensure_retrieval_schema(&db).expect("ensure retrieval schema");

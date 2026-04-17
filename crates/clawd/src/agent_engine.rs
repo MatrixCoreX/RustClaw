@@ -598,7 +598,7 @@ fn build_resume_context_error(
         "hint": "LLM should infer continuation from resume context and user follow-up."
     });
     let prefer_english = state
-        .command_intent
+        .policy.command_intent
         .default_locale
         .to_ascii_lowercase()
         .starts_with("en");
@@ -695,7 +695,7 @@ fn build_confirmation_required_resume_context(
         "这一步需要你先明确确认，我还不会直接执行。你可以回复“继续”来执行剩余步骤。\n原因：{detail}",
         "This step needs your explicit confirmation before I execute it. Reply \"continue\" to run the remaining steps.\nReason: {detail}",
         state
-            .command_intent
+            .policy.command_intent
             .default_locale
             .to_ascii_lowercase()
             .starts_with("en"),

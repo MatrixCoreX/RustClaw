@@ -129,11 +129,11 @@ fn resolve_external_bundle_dir(state: &AppState, bundle_rel: &str) -> Result<Pat
     if bundle_rel.trim().is_empty() {
         return Err("external skill missing external_bundle_dir".to_string());
     }
-    let joined = state.workspace_root.join(bundle_rel);
+    let joined = state.skill_rt.workspace_root.join(bundle_rel);
     let canonical = joined
         .canonicalize()
         .map_err(|err| format!("external bundle directory not found: {err}"))?;
-    if !canonical.starts_with(&state.workspace_root) {
+    if !canonical.starts_with(&state.skill_rt.workspace_root) {
         return Err("external bundle directory must stay inside workspace_root".to_string());
     }
     Ok(canonical)
@@ -271,7 +271,7 @@ async fn execute_external_local_script(
 
     let timeout_secs = config
         .timeout_seconds
-        .unwrap_or(state.skill_timeout_seconds)
+        .unwrap_or(state.skill_rt.skill_timeout_seconds)
         .max(1);
     let entry_arg = entry_path
         .strip_prefix(&bundle_dir)
@@ -285,7 +285,7 @@ async fn execute_external_local_script(
         cmd.arg(arg);
     }
     cmd.current_dir(&bundle_dir)
-        .env("WORKSPACE_ROOT", state.workspace_root.display().to_string())
+        .env("WORKSPACE_ROOT", state.skill_rt.workspace_root.display().to_string())
         .env("RUSTCLAW_IMPORTED_SKILL", canonical_skill_name)
         .env("RUSTCLAW_TASK_ID", task.task_id.clone())
         .stdin(std::process::Stdio::null())
@@ -411,7 +411,7 @@ async fn execute_external_local_shell_recipe(
     let command = extract_external_shell_command(args)?;
     let timeout_secs = config
         .timeout_seconds
-        .unwrap_or(state.cmd_timeout_seconds)
+        .unwrap_or(state.skill_rt.cmd_timeout_seconds)
         .max(1);
 
     tracing::info!(
@@ -424,9 +424,9 @@ async fn execute_external_local_shell_recipe(
     match super::run_safe_command(
         &bundle_dir,
         &command,
-        state.max_cmd_length,
+        state.skill_rt.max_cmd_length,
         timeout_secs,
-        state.allow_sudo,
+        state.policy.allow_sudo,
     )
     .await
     {
@@ -544,7 +544,7 @@ async fn execute_external_http_json(
     }
     let timeout_secs = config
         .timeout_seconds
-        .unwrap_or(state.skill_timeout_seconds)
+        .unwrap_or(state.skill_rt.skill_timeout_seconds)
         .max(1);
     let endpoint = config
         .endpoint
@@ -591,7 +591,7 @@ async fn execute_external_http_json(
 
     let timeout = Duration::from_secs(timeout_secs);
     let mut req = state
-        .http_client
+        .core.http_client
         .post(endpoint)
         .json(&body)
         .timeout(timeout);

@@ -10,7 +10,7 @@ use crate::{
 
 pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<ClaimedTask>> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
@@ -68,7 +68,7 @@ pub(crate) fn update_task_success(
     result_json: &str,
 ) -> anyhow::Result<()> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
@@ -88,7 +88,7 @@ pub(crate) fn update_task_success(
 
 pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
@@ -100,7 +100,7 @@ pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Res
 
 pub(crate) fn is_task_still_running(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let status = db
@@ -119,7 +119,7 @@ pub(crate) fn update_task_progress_result(
     result_json: &str,
 ) -> anyhow::Result<()> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.execute(
@@ -135,7 +135,7 @@ pub(crate) fn update_task_failure(
     error_text: &str,
 ) -> anyhow::Result<()> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
@@ -160,7 +160,7 @@ pub(crate) fn update_task_failure_with_result(
     error_text: &str,
 ) -> anyhow::Result<()> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
@@ -184,7 +184,7 @@ pub(crate) fn update_task_timeout(
     error_text: &str,
 ) -> anyhow::Result<()> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
@@ -249,7 +249,7 @@ pub(crate) fn list_active_tasks_internal(
     let exclude_task_id = normalized_optional_task_id(exclude_task_id);
     let now = now_ts().parse::<i64>().unwrap_or_default();
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
@@ -307,7 +307,7 @@ pub(crate) fn cancel_tasks_for_user_chat(
 ) -> anyhow::Result<i64> {
     let now = now_ts();
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
@@ -334,7 +334,7 @@ pub(crate) fn cancel_one_task_for_user_chat(
 ) -> anyhow::Result<i64> {
     let now = now_ts();
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
@@ -356,7 +356,7 @@ pub(crate) fn get_task_query_record(
     task_id: Uuid,
 ) -> anyhow::Result<Option<(TaskQueryResponse, Option<String>, String)>> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 

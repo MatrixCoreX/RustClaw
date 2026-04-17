@@ -27,17 +27,17 @@ pub(super) fn try_handle_directory_lookup_request(
         return None;
     }
     let request =
-        resolve_directory_locator_input(output_contract, user_request, &state.workspace_root)?;
+        resolve_directory_locator_input(output_contract, user_request, &state.skill_rt.workspace_root)?;
     let resolved = resolve_directory_target(
         request,
         Path::new("/"),
-        &state.default_locator_search_dir,
-        state.locator_scan_max_depth,
-        state.locator_scan_max_files,
+        &state.skill_rt.default_locator_search_dir,
+        state.skill_rt.locator_scan_max_depth,
+        state.skill_rt.locator_scan_max_files,
     );
     match resolved {
         DirectoryLookupResolution::Resolved(directory) => {
-            match list_directory_entries_for_user(&directory, state.locator_scan_max_files) {
+            match list_directory_entries_for_user(&directory, state.skill_rt.locator_scan_max_files) {
                 DirectoryEntriesListResult::FilePaths(paths) => {
                     if paths.is_empty() {
                         Some(localize_delivery_message_for_request(

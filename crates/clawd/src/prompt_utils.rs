@@ -18,7 +18,7 @@ pub(crate) fn log_prompt_render(
     prompt_source: &str,
     round: Option<usize>,
 ) {
-    if !state.routing.debug_log_prompt {
+    if !state.policy.routing.debug_log_prompt {
         return;
     }
     match round {
