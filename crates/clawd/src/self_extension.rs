@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 use crate::{
     runtime::state::reload_skill_views, worker::task_runtime_channel, AppState, AskReply,
-    ClaimedTask, RoutedMode, SelfExtensionMode, SelfExtensionTrigger,
+    ClaimedTask, SelfExtensionMode, SelfExtensionTrigger,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,7 +147,7 @@ fn self_extension_enabled_for_route(
     if !enabled || route.needs_clarify {
         return false;
     }
-    if matches!(route.routed_mode, RoutedMode::AskClarify) {
+    if route.ask_mode.is_clarify_only() {
         return false;
     }
     let directive = &route.output_contract.self_extension;

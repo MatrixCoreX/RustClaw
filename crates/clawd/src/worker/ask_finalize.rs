@@ -422,7 +422,7 @@ pub(crate) async fn finalize_ask_result(
     journal.record_context_bundle_summary(format!(
         "{} needs_clarify={} resolved_prompt={}",
         context_bundle_summary,
-        matches!(route_result.routed_mode, crate::RoutedMode::AskClarify),
+        route_result.ask_mode.is_clarify_only(),
         crate::truncate_for_log(resolved_prompt_for_execution)
     ));
     match result {
@@ -438,20 +438,19 @@ pub(crate) async fn finalize_ask_result(
             if let Some(answer_journal) = answer.task_journal.as_ref() {
                 journal.merge_from(answer_journal);
             }
-            let semantic_clarify =
-                matches!(route_result.routed_mode, crate::RoutedMode::AskClarify)
-                    || answer
-                        .task_journal
-                        .as_ref()
-                        .and_then(|journal| journal.final_status)
-                        .is_some_and(|status| {
-                            matches!(status, crate::task_journal::TaskJournalFinalStatus::Clarify)
-                        });
+            let semantic_clarify = route_result.ask_mode.is_clarify_only()
+                || answer
+                    .task_journal
+                    .as_ref()
+                    .and_then(|journal| journal.final_status)
+                    .is_some_and(|status| {
+                        matches!(status, crate::task_journal::TaskJournalFinalStatus::Clarify)
+                    });
             let failure_reply = answer.should_fail_task;
             let missing_file_delivery_reply =
                 missing_file_delivery_reply_text(state, route_result, &answer);
             let (answer_text, answer_messages) = if failure_reply
-                || matches!(route_result.routed_mode, crate::RoutedMode::AskClarify)
+                || route_result.ask_mode.is_clarify_only()
             {
                 (
                     crate::intercept_response_text_for_delivery(&answer.text),
