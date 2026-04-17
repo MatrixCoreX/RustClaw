@@ -343,6 +343,20 @@ pub(crate) fn is_high_risk_action(action: &str) -> bool {
     matches!(action, "stop" | "restart")
 }
 
+/// Read-only actions never mutate system state. When discovery returns
+/// multiple matching candidates (e.g. `ssh` resolves to `ssh.service` and
+/// `sshd.service`) it is safe to auto-pick the first candidate and proceed,
+/// because at worst we report status of a slightly-different-but-equivalent
+/// service unit. Refusing with `ambiguous: multiple matching services` for
+/// these actions made plans dead-end without a recovery path; the LLM rarely
+/// retries with a more specific name from the `next_step` candidate list.
+pub(crate) fn is_read_only_action(action: &str) -> bool {
+    matches!(
+        action,
+        "status" | "logs" | "verify" | "diagnose_start_failure" | "diagnose_unhealthy_state"
+    )
+}
+
 // ---------- Request / Response (skill-runner protocol) ----------
 
 #[derive(Debug, Deserialize)]
@@ -690,6 +704,9 @@ fn execute(
     // Service discovery (non-rustclaw): normalize alias -> 0 candidates fail, >1 ambiguous, 1 proceed. Skip discovery when manager_type is explicit (caller trusts the name).
     let mut suggestion_used = false;
     let mut suggestion_target = String::new();
+    // When read-only action auto-picks a candidate from a multi-match,
+    // record the full candidate list so we can emit it as evidence below.
+    let mut auto_picked_from_candidates: Option<Vec<String>> = None;
     let effective_target_opt: Option<String> = if let Some(t) = target_opt {
         if RUSTCLAW_SERVICES.contains(&t.as_ref()) {
             Some(t.to_string())
@@ -721,16 +738,25 @@ fn execute(
                 return Ok(out);
             }
             if candidates.len() > 1 {
-                let mut out = OutputContract::default();
-                out.service_name = t.to_string();
-                out.manager_type = "unknown".to_string();
-                out.requested_action = input.action.clone();
-                out.fail("ambiguous: multiple matching services");
-                out.next_step = format!(
-                    "Select one concrete service name and retry. candidates: {}",
-                    candidates.join(", ")
-                );
-                return Ok(out);
+                if is_read_only_action(&input.action) {
+                    // Read-only actions (status / logs / verify / diagnose_*): never
+                    // mutate system state, so it is safe to auto-pick the first
+                    // discovery candidate instead of failing the whole task.
+                    // Closes a frequent dead-end where `status ssh` failed because
+                    // the host has both `ssh.service` and `sshd.service`.
+                    auto_picked_from_candidates = Some(candidates.clone());
+                } else {
+                    let mut out = OutputContract::default();
+                    out.service_name = t.to_string();
+                    out.manager_type = "unknown".to_string();
+                    out.requested_action = input.action.clone();
+                    out.fail("ambiguous: multiple matching services");
+                    out.next_step = format!(
+                        "Select one concrete service name and retry. candidates: {}",
+                        candidates.join(", ")
+                    );
+                    return Ok(out);
+                }
             }
             Some(candidates[0].clone())
         }
@@ -752,6 +778,15 @@ fn execute(
         out.add_evidence(format!(
             "used suggested_params fallback: {}",
             suggestion_target
+        ));
+    }
+    if let Some(candidates) = auto_picked_from_candidates.as_ref() {
+        out.add_evidence(format!(
+            "discovery returned {} candidates for read-only action `{}`; auto-picked `{}` (full list: {})",
+            candidates.len(),
+            input.action,
+            effective_target.unwrap_or(""),
+            candidates.join(", ")
         ));
     }
 
@@ -1911,6 +1946,21 @@ mod tests {
         assert!(is_high_risk_action("restart"));
         assert!(!is_high_risk_action("start"));
         assert!(!is_high_risk_action("status"));
+    }
+
+    #[test]
+    fn read_only_action_classification() {
+        // Read-only: the multi-match auto-pick path applies to these.
+        assert!(is_read_only_action("status"));
+        assert!(is_read_only_action("logs"));
+        assert!(is_read_only_action("verify"));
+        assert!(is_read_only_action("diagnose_start_failure"));
+        assert!(is_read_only_action("diagnose_unhealthy_state"));
+        // Mutating: multi-match must still hard-fail.
+        assert!(!is_read_only_action("start"));
+        assert!(!is_read_only_action("stop"));
+        assert!(!is_read_only_action("restart"));
+        assert!(!is_read_only_action("reload"));
     }
 
     #[test]
