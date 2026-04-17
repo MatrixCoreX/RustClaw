@@ -1,0 +1,5 @@
+followup_logs_send_then_prev|先列出 logs 目录下前 4 个文件名|把第二个发给我|不是这个，发上一个
+followup_switch_dir_then_send_last|先列出 logs 目录下前 4 个文件名|那 document 目录下前 4 个文件名呢|把最后一个发给我
+followup_read_compare_correction|先读一下 README.md 前 5 行|再读一下 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 前 4 行|不是上一个，说上上个更像什么，只用一句话
+followup_count_repeat_last|先数一下 scripts 目录直接有多少个子项|再数一下 document 目录直接有多少个子项|把上一个结果重复一遍，只输出数字
+followup_logs_tail_then_send_same|先列出 logs 目录下前 4 个文件名|看第二个最后 2 行|把这个文件发给我

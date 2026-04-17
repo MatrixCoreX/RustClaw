@@ -1,0 +1,19 @@
+locale = "zh-CN"
+
+execute_prefixes = [
+  "你执行",
+  "请执行",
+  "帮我执行",
+  "执行命令",
+  "执行",
+]
+
+# Natural-language result tails are handled semantically by the planner/LLM.
+result_suffixes = []
+
+negative_markers = [
+  "是什么命令",
+  "什么意思",
+  "怎么用",
+  "如何使用",
+]

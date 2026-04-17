@@ -1,0 +1,57 @@
+RustClaw Non-Commercial Source-Available License v1.0
+
+Copyright (c) 2026 RustClaw Contributors
+
+1. Definitions
+
+"Software" means this repository and all source code, scripts, configuration templates,
+documentation, and related materials included in it.
+
+"Commercial Use" means any use intended for or directed toward commercial advantage or
+monetary compensation, including but not limited to:
+- selling, licensing, or sublicensing the Software;
+- offering paid hosting/SaaS/API services using the Software;
+- integrating the Software into paid products or services;
+- using the Software internally in a for-profit business to provide services to customers.
+
+2. License Grant (Non-Commercial)
+
+Subject to the terms of this License, you are granted a worldwide, non-exclusive,
+non-transferable, revocable, royalty-free license to:
+- use the Software for personal, educational, research, evaluation, and other non-commercial purposes;
+- copy and modify the Software for non-commercial purposes;
+- distribute the original or modified Software for non-commercial purposes, provided this
+  License and copyright notice are retained.
+
+3. Restrictions
+
+You may not:
+- use the Software for any Commercial Use without prior written permission from the copyright holder(s);
+- remove or alter copyright, license, or attribution notices;
+- represent this License as an OSI-approved open source license.
+
+4. Contributions
+
+Unless otherwise explicitly agreed in writing, any contribution intentionally submitted for
+inclusion in the Software is licensed under this same License.
+
+5. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, AND NON-INFRINGEMENT.
+
+6. Limitation of Liability
+
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF,
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+7. Termination
+
+Any rights granted under this License terminate automatically if you violate any term of this
+License. Upon termination, you must cease all use and distribution of the Software.
+
+8. Commercial Licensing
+
+For commercial licensing inquiries, contact the project maintainers/copyright holders.

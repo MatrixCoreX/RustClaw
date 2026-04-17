@@ -1,0 +1,9 @@
+{
+  "domains": {
+    "github.com": "load",
+    "www.nytimes.com": "networkidle",
+    "www.bbc.com": "load",
+    "*.wikipedia.org": "domcontentloaded",
+    "news.ycombinator.com": "domcontentloaded"
+  }
+}

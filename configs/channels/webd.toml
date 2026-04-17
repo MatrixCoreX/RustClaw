@@ -1,0 +1,19 @@
+# 用途/Purpose: webd — 对外 HTTP 反向代理到本机 clawd；可选 `/webd/login` 会话并注入 `X-RustClaw-Key`。
+# 建议修改/Recommended change: 启用 webd 时把主配置 `configs/config.toml` 里 `[server].listen` 改为 127.0.0.1:8787，由 webd 独占对外端口。
+# 风险/Risk: `[webd].listen` 勿与 clawd、本目录其他渠道守护进程监听冲突。
+#
+# 本文件由 `AppConfig::load` 与主配置合并加载（后加载覆盖先加载的同名键）。
+
+[webd]
+enabled = true
+listen = "0.0.0.0:8788"
+upstream = "http://127.0.0.1:8787"
+connect_timeout_seconds = 10
+# 0 = 使用主配置 [server].request_timeout_seconds
+request_timeout_seconds = 0
+forward_x_forwarded = true
+max_incoming_body_bytes = 104857600
+# HttpOnly 会话 Cookie 名；浏览器须与 webd 对外地址同源访问 UI，Cookie 才能随 `/v1/*` 代理请求发送。
+#session_cookie_name = "webd_sid"
+# 会话秒数；进程内存储，重启后需重新登录。
+#session_ttl_seconds = 86400

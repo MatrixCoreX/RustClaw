@@ -1,0 +1,19 @@
+[package]
+name = "whatsappd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+claw-core = { path = "../claw-core" }
+hex = "0.4.3"
+hmac = "0.12.1"
+reqwest = { workspace = true, features = ["multipart"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10.9"
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

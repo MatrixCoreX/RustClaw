@@ -1,0 +1,308 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiResponse<T> {
+    pub ok: bool,
+    pub data: Option<T>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskKind {
+    Ask,
+    RunSkill,
+    Admin,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelKind {
+    Telegram,
+    Whatsapp,
+    Ui,
+    Wechat,
+    Feishu,
+    /// 国际版 Lark（与 Feishu 中国站分开）
+    Lark,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmitTaskRequest {
+    #[serde(default)]
+    pub user_id: Option<i64>,
+    #[serde(default)]
+    pub chat_id: Option<i64>,
+    #[serde(default)]
+    pub user_key: Option<String>,
+    #[serde(default)]
+    pub channel: Option<ChannelKind>,
+    #[serde(default)]
+    pub external_user_id: Option<String>,
+    #[serde(default)]
+    pub external_chat_id: Option<String>,
+    pub kind: TaskKind,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmitTaskResponse {
+    pub task_id: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectClassifyRequest {
+    pub source: String,
+    pub text: String,
+    #[serde(default)]
+    pub chat_id: Option<i64>,
+    #[serde(default)]
+    pub channel: Option<ChannelKind>,
+    #[serde(default)]
+    pub external_user_id: Option<String>,
+    #[serde(default)]
+    pub external_chat_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectClassifyResponse {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthIdentity {
+    pub user_key: String,
+    pub role: String,
+    pub user_id: i64,
+    pub chat_id: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiKeyVerifyRequest {
+    pub user_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolveChannelBindingRequest {
+    pub channel: ChannelKind,
+    #[serde(default)]
+    pub telegram_bot_name: Option<String>,
+    #[serde(default)]
+    pub external_user_id: Option<String>,
+    #[serde(default)]
+    pub external_chat_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolveChannelBindingResponse {
+    pub bound: bool,
+    #[serde(default)]
+    pub identity: Option<AuthIdentity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BindChannelKeyRequest {
+    pub channel: ChannelKind,
+    #[serde(default)]
+    pub telegram_bot_name: Option<String>,
+    #[serde(default)]
+    pub external_user_id: Option<String>,
+    #[serde(default)]
+    pub external_chat_id: Option<String>,
+    pub user_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StartFeishuBindSessionRequest {
+    #[serde(default)]
+    pub expires_in_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeishuBindSessionStatusResponse {
+    pub session_id: i64,
+    pub channel: String,
+    pub bind_token: String,
+    pub status: String,
+    #[serde(default)]
+    pub external_user_id: Option<String>,
+    #[serde(default)]
+    pub external_chat_id: Option<String>,
+    #[serde(default)]
+    pub error_text: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub expires_at: String,
+    #[serde(default)]
+    pub entry_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DetectFeishuBindSessionRequest {
+    #[serde(default)]
+    pub bind_token: Option<String>,
+    pub external_user_id: String,
+    pub external_chat_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectFeishuBindSessionResponse {
+    pub matched: bool,
+    #[serde(default)]
+    pub session: Option<FeishuBindSessionStatusResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelegramBotRuntimeStatus {
+    pub name: String,
+    pub healthy: bool,
+    pub status: String,
+    #[serde(default)]
+    pub last_heartbeat_ts: Option<i64>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayInstanceRuntimeStatus {
+    pub kind: String,
+    pub name: String,
+    pub scope: String,
+    pub healthy: bool,
+    pub status: String,
+    #[serde(default)]
+    pub last_heartbeat_ts: Option<i64>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertExchangeCredentialRequest {
+    pub exchange: String,
+    pub api_key: String,
+    pub api_secret: String,
+    #[serde(default)]
+    pub passphrase: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExchangeCredentialStatus {
+    pub exchange: String,
+    pub configured: bool,
+    #[serde(default)]
+    pub api_key_masked: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Queued,
+    Running,
+    Succeeded,
+    Failed,
+    Canceled,
+    Timeout,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskQueryResponse {
+    pub task_id: Uuid,
+    pub status: TaskStatus,
+    pub result_json: Option<Value>,
+    pub error_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthResponse {
+    pub version: String,
+    pub queue_length: usize,
+    pub worker_state: String,
+    pub uptime_seconds: u64,
+    pub memory_rss_bytes: Option<u64>,
+    /// 当前处于 running 状态的任务数量
+    pub running_length: usize,
+    /// worker 级别的任务超时时间（秒）
+    pub task_timeout_seconds: u64,
+    /// 最久运行中的任务已运行时长（秒），没有 running 任务时为 0
+    pub running_oldest_age_seconds: u64,
+    /// telegramd 进程健康状态（None 表示无法检测）
+    pub telegramd_healthy: Option<bool>,
+    /// 检测到的 telegramd 进程数量（None 表示无法检测）
+    pub telegramd_process_count: Option<usize>,
+    /// telegramd 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub telegramd_memory_rss_bytes: Option<u64>,
+    /// channel-gateway 进程健康状态（None 表示无法检测）
+    pub channel_gateway_healthy: Option<bool>,
+    /// 检测到的 channel-gateway 进程数量（None 表示无法检测）
+    pub channel_gateway_process_count: Option<usize>,
+    /// channel-gateway 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub channel_gateway_memory_rss_bytes: Option<u64>,
+    /// whatsappd 进程健康状态（None 表示无法检测）
+    pub whatsappd_healthy: Option<bool>,
+    /// 检测到的 whatsappd 进程数量（None 表示无法检测）
+    pub whatsappd_process_count: Option<usize>,
+    /// whatsappd 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub whatsappd_memory_rss_bytes: Option<u64>,
+    /// telegram bot adapter 健康状态（None 表示无法检测）
+    pub telegram_bot_healthy: Option<bool>,
+    /// telegram bot adapter 进程数量（None 表示无法检测）
+    pub telegram_bot_process_count: Option<usize>,
+    /// telegram bot adapter RSS 内存总和（字节，None 表示无法检测）
+    pub telegram_bot_memory_rss_bytes: Option<u64>,
+    /// Telegram 当前配置的 bot 数量
+    pub telegram_configured_bot_count: usize,
+    /// Telegram 当前配置的 bot 名称列表
+    pub telegram_configured_bot_names: Vec<String>,
+    /// Telegram 每个 bot 的运行状态
+    pub telegram_bot_statuses: Vec<TelegramBotRuntimeStatus>,
+    /// Gateway 统一视角下的渠道实例运行状态
+    pub gateway_instance_statuses: Vec<GatewayInstanceRuntimeStatus>,
+    /// whatsapp cloud adapter 健康状态（None 表示无法检测）
+    pub whatsapp_cloud_healthy: Option<bool>,
+    /// whatsapp cloud adapter 进程数量（None 表示无法检测）
+    pub whatsapp_cloud_process_count: Option<usize>,
+    /// whatsapp cloud adapter RSS 内存总和（字节，None 表示无法检测）
+    pub whatsapp_cloud_memory_rss_bytes: Option<u64>,
+    /// whatsapp web adapter 健康状态（None 表示无法检测）
+    pub whatsapp_web_healthy: Option<bool>,
+    /// whatsapp web adapter 进程数量（None 表示无法检测）
+    pub whatsapp_web_process_count: Option<usize>,
+    /// whatsapp web adapter RSS 内存总和（字节，None 表示无法检测）
+    pub whatsapp_web_memory_rss_bytes: Option<u64>,
+    /// webd 进程健康状态（None 表示无法检测）
+    pub webd_healthy: Option<bool>,
+    /// 检测到的 webd 进程数量（None 表示无法检测）
+    pub webd_process_count: Option<usize>,
+    /// webd 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub webd_memory_rss_bytes: Option<u64>,
+    /// wechatd 进程健康状态（None 表示无法检测）
+    pub wechatd_healthy: Option<bool>,
+    /// 检测到的 wechatd 进程数量（None 表示无法检测）
+    pub wechatd_process_count: Option<usize>,
+    /// wechatd 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub wechatd_memory_rss_bytes: Option<u64>,
+    /// feishud 进程健康状态（None 表示无法检测）
+    pub feishud_healthy: Option<bool>,
+    /// 检测到的 feishud 进程数量（None 表示无法检测）
+    pub feishud_process_count: Option<usize>,
+    /// feishud 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub feishud_memory_rss_bytes: Option<u64>,
+    /// larkd 进程健康状态（None 表示无法检测，国际版 Lark）
+    pub larkd_healthy: Option<bool>,
+    /// 检测到的 larkd 进程数量（None 表示无法检测）
+    pub larkd_process_count: Option<usize>,
+    /// larkd 进程 RSS 内存总和（字节，None 表示无法检测）
+    pub larkd_memory_rss_bytes: Option<u64>,
+    /// 当前启用中的用户 key 数量
+    pub user_count: usize,
+    /// 当前已绑定的渠道种类数量（去重后）
+    pub bound_channel_count: usize,
+    /// 当前已绑定的渠道种类列表（如 telegram / wechat）
+    pub bound_channels: Vec<String>,
+    /// 配置中启用但尚未实现的 future adapters
+    pub future_adapters_enabled: Vec<String>,
+}

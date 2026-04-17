@@ -1,0 +1,5 @@
+locale = "zh-CN"
+
+[dict]
+"whatsapp_web.msg.bridge_process_exited" = "bridge 进程已退出"
+"whatsapp_web.msg.bridge_wait_failed" = "bridge 等待失败：{error}"

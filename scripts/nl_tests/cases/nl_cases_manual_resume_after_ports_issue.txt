@@ -1,0 +1,5 @@
+chat_act|natural_log_analyze_brief_cn|natural,cn|帮我快速翻一下 logs 里最近有没有明显异常，如果有，只挑最值得注意的一点告诉我
+chat_act|natural_service_status_brief_cn|natural,cn|我想确认 telegramd 现在还活着没，你帮我看一下，顺便用一句话解释状态
+chat_act|natural_workspace_glance_cn|natural,cn|别细看，先整体扫一眼当前工作区，然后用一句适合新手的话告诉我这里像是什么项目
+failure|natural_missing_file_graceful_cn|natural,cn,missing_file_graceful|把 document/definitely_missing_natural_case_001.txt 发给我，别自己编内容
+file|natural_write_and_deliver_note_cn|natural,cn,write_and_deliver|帮我在 document 下面新建一个文本文件 natural_manual_note.txt，内容写：manual natural cases ready，然后把这个文件发给我

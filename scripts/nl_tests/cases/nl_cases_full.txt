@@ -1,0 +1,55 @@
+# Canonical alias for the comprehensive natural-language suite.
+# Keep this file name stable for future full-suite NL runs.
+# Curated list: keep broad coverage, remove near-duplicate wording variants.
+
+# suite|name|tags|prompt
+chat|chat_weather_joke||今天天气先别查，给我讲一个简短冷笑话
+chat|chat_poem_short||写一首两句的打工人短诗
+chat|plain_chat_no_execution_en||do not run anything, just tell me a very short joke
+act|act_pwd_only||只输出当前工作目录的绝对路径，不要解释
+act|act_hidden_files||检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+act|act_list_logs||列出 logs 目录下的前 10 个文件名，不要读内容
+act|act_find_service_file||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+act|act_check_document_dir||列出 document 目录下有哪些文件，只输出文件名列表
+act|act_show_package_json_name||读取 package.json 里的 name 字段，只输出值
+act|act_show_cargo_package_name||读取 Cargo.toml 的 package.name，只输出值
+act|act_whoami_only||只输出当前用户名，不要解释
+act|act_hostname_only_en||output only the current machine hostname, no explanation
+act|act_read_readme_head||读取 README 的前 20 行并做 3 句话总结
+act|act_read_agents_head||读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
+chat_act|chat_act_show_readme_then_summary||读取 README 开头内容，再用非技术用户能听懂的话做一句总结
+chat_act|chat_act_list_then_explain_docs||列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+chat_act|chat_explain_repo_briefly||用非技术用户能听懂的话，简短解释这个仓库主要是干什么的
+chat_act|chat_act_compare_sizes||比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+chat_act|chat_act_disk_usage_brief||查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
+chat_act|followup_logs_then_conclusion||列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物
+chat_act|chat_act_hidden_files_brief||检查当前目录隐藏文件是否存在，再用一句话解释隐藏文件通常是干什么的
+file|write_and_deliver_hello|write_and_deliver|写一个 hello world shell 脚本，保存成 document/hello_from_manual_test.sh，然后把文件发给我
+file|write_and_deliver_note|write_and_deliver|写一个文本文件到 document/manual_note.txt，内容是 RustClaw manual test note，然后把文件发给我
+file|write_and_deliver_json_variant_en|write_and_deliver|create a json file at document/manual_meta_variant.json with app=RustClaw and suite=full, then send me the file
+failure|missing_file_graceful|missing_file_graceful|把 definitely_missing_named_file_rustclaw_001.txt 发给我
+failure|missing_file_graceful_en_followup||send me document/definitely_missing_runtime_case_002.txt and do not paste the content
+chat_act|run_cmd_pwd_with_result_tail||执行 pwd，然后告诉我结果
+chat_act|run_cmd_ls_then_explain||执行 ls scripts，然后用一句话告诉我这个目录大概放的是什么
+chat_act|run_cmd_df_then_brief||执行 df -h，然后用大白话告诉我最需要关注哪一项
+chat_act|run_cmd_whoami_scalar||执行 whoami，只输出结果，不要解释
+chat_act|act_git_branch_scalar_en||tell me the current git branch name and return only the branch
+chat_act|act_git_status_brief_en||check whether this repo has any uncommitted changes and tell me in one short sentence
+chat_act|act_health_check_brief_en||run a basic health check here and summarize only the most important findings
+chat_act|act_ports_brief_en||list the listening ports on this machine and briefly tell me which ones matter most
+chat_act|act_service_status_brief_en||check whether telegramd is running right now and briefly explain the status
+chat_act|act_transform_json_table_en||sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+chat_act|act_package_manager_detect_cn||帮我看看这台机器现在识别到的包管理器是什么，简短告诉我结果
+chat_act|act_process_top_brief_cn||看一下当前最占 CPU 的几个进程，然后用一句话告诉我最值得注意的是哪个
+chat_act|act_db_schema_version_en||check the schema version in data/db-basic-contract.sqlite and tell me the result briefly
+chat_act|act_http_local_health_en||call http://127.0.0.1:8787/v1/health and briefly summarize the result if it is reachable
+chat_act|act_archive_pack_brief_cn||把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功
+chat_act|act_system_info_brief_en||show me the basic machine info here like hostname and system, keep it brief
+chat_act|act_workspace_glance_cn||快速看一下当前工作区，简短告诉我这里大概是什么项目
+chat_act|act_fs_find_toml_en||find toml files in this repo and briefly mention a few representative ones
+chat_act|act_git_recent_commit_cn||看一下最近一次 git 提交是什么，简短告诉我标题就行
+chat_act|act_db_tables_en||list the tables in data/db-basic-contract.sqlite briefly
+chat_act|act_fixture_release_checklist_cn||读一下 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md，然后一句话告诉我最先该做什么
+chat_act|act_fixture_model_io_en||look at scripts/nl_tests/fixtures/device_local/logs/model_io.log and briefly tell me whether there was any recovery after failure
+act|act_fixture_package_name_en||read scripts/nl_tests/fixtures/device_local/package.json and output only the name field
+chat_act|act_fixture_config_purpose_cn||看一下 scripts/nl_tests/fixtures/device_local/configs/app_config.toml，然后用一句大白话说它主要配置了什么

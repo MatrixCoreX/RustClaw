@@ -1,0 +1,28 @@
+[map_merchant]
+# 默认地图 provider：amap / google
+default_provider = "amap"
+# 默认搜索半径（米）
+default_radius_meters = 3000
+# 默认返回推荐条数
+default_top_k = 5
+# 上游一次最多拉取多少候选，用于本地二次排序
+max_fetch_candidates = 12
+# 默认排序：balanced / distance / rating / price
+default_sort_by = "balanced"
+# 综合排序权重
+distance_weight = 0.40
+rating_weight = 0.30
+price_weight = 0.15
+keyword_weight = 0.15
+# 当用户没有提供关键词/品类时，用这个默认词做一次兜底搜索
+default_keyword = "商户"
+
+[map_merchant.amap]
+enabled = true
+# 高德 Web 服务 API key（在高德开放平台申请）
+api_key = "REPLACE_ME_AMAP_WEB_API_KEY"
+
+[map_merchant.google]
+enabled = false
+# Google Maps Places API key（在 Google Cloud Console 申请）
+api_key = ""

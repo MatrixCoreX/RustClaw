@@ -1,0 +1,32 @@
+[whatsapp]
+# 用途/Purpose: WhatsApp 适配器别名，用于主流程投递路由判断.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 别名不匹配会导致消息走错通道（web/cloud）或回退默认路由.
+web_adapters = ["whatsapp_web", "wa_web"]
+# 用途/Purpose: WhatsApp Cloud 适配器别名.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 误配会让 cloud 消息路由失效或回退到错误通道.
+cloud_adapters = ["whatsapp_cloud", "wa_cloud"]
+
+[duplicate_affirmation]
+# 用途/Purpose: 重复确认文本去重窗口（秒）.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 太小去重失效；太大可能误去重用户真实二次确认.
+window_secs = 120
+# 用途/Purpose: 重复确认去重时的最近任务扫描上限.
+# 建议修改/Recommended change: 可改 / Editable.
+# 风险/Risk: 太小漏判；太大增加耗时并可能误判.
+scan_limit = 30
+# 用途/Purpose: 参与“重复确认去重”的任务状态白名单.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 缺少关键状态会降低去重效果；加入过多状态会误去重.
+statuses = ["queued", "running", "succeeded"]
+
+# Price-alert action aliases (price_monitor / monitor_price / price_alert / volatility_alert -> price_alert_check)
+# are normalized inside the `crypto` skill; clawd does not retry with alternate actions.
+
+[runtime_channel]
+# 用途/Purpose: 被视为 WhatsApp 的 channel 别名.
+# 建议修改/Recommended change: 谨慎修改 / Change cautiously.
+# 风险/Risk: 别名不完整会路由失败；别名过宽会误路由到 WhatsApp.
+whatsapp_aliases = ["whatsapp"]

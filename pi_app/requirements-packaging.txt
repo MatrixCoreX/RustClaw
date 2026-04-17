@@ -1,0 +1,3 @@
+# 仅用于 pi_app 打包（package-small-screen.sh），不参与 clawd 运行时依赖
+pyinstaller>=6.0,<8
+pillow>=10.0

@@ -1,0 +1,5 @@
+manual|followup_logs_then_conclusion_fix_en|regression|List the 3 most recently modified files in the logs directory, then tell me whether this looks more like runtime logs or formal deliverables.
+manual|transform_inline_json_table_fix_en|regression|Sort this JSON array by score descending and output only a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+manual|archive_pack_brief_fix_en|regression|Zip scripts/skill_calls into tmp/nl_archive_case_en.zip, then tell me briefly whether it succeeded.
+manual|fixture_package_name_fix_en|regression|Read scripts/nl_tests/fixtures/device_local/package.json and output only the value of the name field.
+manual|fixture_config_purpose_fix_en|regression|Read scripts/nl_tests/fixtures/device_local/configs/app_config.toml, then explain in one plain English sentence what it mainly configures.

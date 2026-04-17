@@ -1,0 +1,10 @@
+# name|auth|assertion|expected|prompt
+# `expected` uses `;;` as delimiter for required substrings.
+# Within one expected item, `__OR__` means any one of the alternatives is acceptable.
+
+health_check_os_only_zh|user|text|macOS 宿主机;;clawd_process_count=;;clawd_health_port_open=|做一次基础健康检查，只总结操作系统；RustClaw 自身不要总结，直接给我关键字段。
+health_check_os_only_en|user|text|macOS host;;clawd_process_count=;;clawd_health_port_open=|Run a basic health check. Summarize only the host operating system, and for RustClaw itself just list the key fields.
+ops_http_closed_loop_zh|admin|ops_http|VALIDATION_PASSED;;当前仓库__OR__系统范围|在 {{HTTP_DIR}} 目录后台启动一个本地静态 HTTP 服务，监听 127.0.0.1:{{HTTP_PORT}}，然后用 curl 验证首页包含 {{HTTP_MARKER}}；验证通过时请明确输出 VALIDATION_PASSED，然后直接结束。
+ops_http_closed_loop_en|admin|ops_http|VALIDATION_PASSED;;current repository__OR__system scope|Start a static HTTP server in the background from {{HTTP_DIR}} on 127.0.0.1:{{HTTP_PORT}}, then use curl to verify that the homepage contains {{HTTP_MARKER}}; when validation passes, explicitly output VALIDATION_PASSED and finish immediately.
+ops_http_repair_then_validate_zh|admin|ops_http_repair|VALIDATION_PASSED;;当前仓库__OR__系统范围|先不要改文件或进程，先直接验证当前已经在 127.0.0.1:{{REPAIR_HTTP_PORT}} 运行的本地静态 HTTP 服务首页是否包含 {{REPAIR_HTTP_MARKER}}。如果第一次验证失败，再修复 {{REPAIR_HTTP_DIR}}/index.html 的内容，使首页包含 {{REPAIR_HTTP_MARKER}}，然后重新验证直到通过；通过时明确输出 VALIDATION_PASSED 后直接结束。
+ops_http_repair_then_validate_en|admin|ops_http_repair|VALIDATION_PASSED;;current repository__OR__system scope|Do not modify any file or process before the first verification attempt. First verify whether the local static HTTP service already running on 127.0.0.1:{{REPAIR_HTTP_PORT}} serves a homepage containing {{REPAIR_HTTP_MARKER}}. If that first verification fails, repair {{REPAIR_HTTP_DIR}}/index.html so the homepage contains {{REPAIR_HTTP_MARKER}}, then verify again until it passes; when it passes, explicitly output VALIDATION_PASSED and stop immediately.

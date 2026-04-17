@@ -1,0 +1,5 @@
+# Targeted deictic / clarify regression cases saved for replay.
+# Format: case_name|turn1|turn2
+
+clarify_send_file_by_path|把那个配置文件发给我|configs/config.toml
+clarify_read_scalar_from_which_file|读一下那个文件里的名字字段，只输出值|package.json

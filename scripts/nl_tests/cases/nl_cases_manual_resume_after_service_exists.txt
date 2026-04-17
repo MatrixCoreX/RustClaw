@@ -1,0 +1,41 @@
+act|act_check_document_dir||列出 document 目录下有哪些文件，只输出文件名列表
+act|act_read_agents_head||读取 AGENTS.md 前 30 行，提炼 3 条最重要规则
+act|act_show_package_json_name||读取 package.json 里的 name 字段，只输出值
+act|act_show_cargo_package_name||读取 Cargo.toml 的 package.name，只输出值
+chat_act|chat_act_disk_usage_brief||查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
+chat_act|chat_act_list_then_explain_docs||列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的
+file|write_and_deliver_json|write_and_deliver|生成一个 JSON 文件 document/manual_meta.json，内容包含 app=RustClaw 和 test=nl，然后把文件发给我
+chat_act|act_git_branch_scalar||看看当前 git 分支叫什么，只给我分支名
+chat_act|act_git_status_brief||看看这个仓库现在有没有未提交改动，用一句话告诉我
+chat_act|act_health_check_brief||帮我做一次基础健康检查，只列最重要的结论
+chat_act|act_ports_brief||看一下现在机器上有哪些监听端口，再简短说最值得注意的几个
+chat_act|act_log_analyze_brief||快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
+chat_act|act_service_status_brief||帮我检查 telegramd 现在是不是在运行，顺手简短解释状态
+chat_act|act_task_list_brief||看看我这个会话里现在有没有未完成任务，简短告诉我结果
+chat_act|act_transform_json_table||把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+chat_act|act_package_manager_detect_cn||帮我看看这台机器识别到的包管理器是什么，简短告诉我
+chat_act|act_process_top_brief_cn||看一下当前最占 CPU 的几个进程，然后用一句话告诉我最值得注意的是哪个
+chat_act|act_db_schema_version_cn||查一下 data/db-basic-contract.sqlite 的 schema version 是多少，简短告诉我
+chat_act|act_http_local_health_cn||请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
+chat_act|act_workspace_glance_cn||快速看一下当前工作区，简短告诉我这里大概是什么项目
+chat_act|act_release_note_brief||读一下 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md，然后用一句话说它更像提醒什么
+act|act_fixture_package_name_scalar||去 scripts/nl_tests/fixtures/device_local/package.json 里找 name，只输出值
+chat_act|act_fixture_model_log_tail_brief||看一下 scripts/nl_tests/fixtures/device_local/logs/model_io.log 最后 4 行，再一句话说有没有失败后恢复
+file|write_and_deliver_fixture_note|write_and_deliver|生成一个文本文件 document/manual_fixture_note.txt，内容是 local fixture ready，然后把文件发给我
+act|natural_pwd_only_cn|natural,cn|我有点分不清现在在哪个目录了，你直接把当前目录的完整路径发我就行，不用解释
+act|natural_list_top_dirs_cn|natural,cn|先帮我看一眼这个仓库最外层都有哪些东西，按文件和文件夹简单分一下类
+act|natural_hidden_files_cn|natural,cn|顺手帮我确认一下这里有没有隐藏文件，如果有的话举 3 个例子就行
+act|natural_read_readme_head_cn|natural,cn|你先翻一下 README 开头那一小段，然后用 3 句话告诉我这个项目大概是干什么的
+chat_act|natural_compare_sizes_cn|natural,cn|帮我比一下 Cargo.toml 和 Cargo.lock 谁更大，再顺口说一句为什么通常会这样
+chat_act|natural_repo_explain_beginner_cn|natural,cn|别讲太技术，像跟第一次接触的人介绍一样，简单说说这个仓库主要是做什么的
+act|natural_whoami_only_cn|natural,cn|我想确认现在是哪个用户在跑，直接回用户名，不要带别的话
+act|natural_hostname_only_cn|natural,cn|帮我看一下这台机器的名字，直接给 hostname 就好
+chat_act|natural_git_branch_scalar_cn|natural,cn|我想确认一下现在切在哪个分支上，你只回分支名就行
+chat_act|natural_git_status_brief_cn|natural,cn|帮我看看这个仓库现在干不干净，用一句人话告诉我有没有没提交的改动
+chat_act|natural_health_check_brief_cn|natural,cn|麻烦帮我做个最基础的健康检查，不用展开，只说最需要我注意的结论
+chat_act|natural_ports_brief_cn|natural,cn|看看这台机器现在有哪些端口在监听，然后挑最值得注意的几个简单说一下
+chat_act|natural_log_analyze_brief_cn|natural,cn|帮我快速翻一下 logs 里最近有没有明显异常，如果有，只挑最值得注意的一点告诉我
+chat_act|natural_service_status_brief_cn|natural,cn|我想确认 telegramd 现在还活着没，你帮我看一下，顺便用一句话解释状态
+chat_act|natural_workspace_glance_cn|natural,cn|别细看，先整体扫一眼当前工作区，然后用一句适合新手的话告诉我这里像是什么项目
+failure|natural_missing_file_graceful_cn|natural,cn,missing_file_graceful|把 document/definitely_missing_natural_case_001.txt 发给我，别自己编内容
+file|natural_write_and_deliver_note_cn|natural,cn,write_and_deliver|帮我在 document 下面新建一个文本文件 natural_manual_note.txt，内容写：manual natural cases ready，然后把这个文件发给我

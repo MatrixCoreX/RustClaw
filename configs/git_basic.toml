@@ -1,0 +1,5 @@
+[git_basic]
+# language for git_basic skill messages: zh-CN / en-US
+language = "zh-CN"
+# optional custom dictionary path (relative to workspace root)
+# i18n_path = "configs/i18n/git_basic.zh-CN.toml"

@@ -1,0 +1,20 @@
+[Unit]
+Description=RustClaw Small Screen (headless boot mode)
+After=network-online.target
+Wants=network-online.target
+Conflicts=display-manager.service
+
+[Service]
+Type=simple
+User=guagua
+Group=guagua
+WorkingDirectory=/home/guagua/RustClaw/pi_app
+Environment=HOME=/home/guagua
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/guagua/.Xauthority
+ExecStart=/usr/bin/xinit /home/guagua/RustClaw/pi_app/run-small-screen.sh -- :0 -nocursor -nolisten tcp vt7
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

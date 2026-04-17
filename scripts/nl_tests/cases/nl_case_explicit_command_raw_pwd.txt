@@ -1,0 +1,9 @@
+# DEPRECATED: this single-case file has been consolidated into
+# scripts/nl_tests/cases/nl_cases_singletons.txt
+# It is kept for backward compatibility with anyone who has the old path
+# bookmarked. Prefer running the consolidated file:
+#   ./scripts/nl_tests/run_manual_test.sh \
+#     --case-file scripts/nl_tests/cases/nl_cases_singletons.txt
+# This stub file may be removed in a future cleanup.
+#
+执行命令 pwd，直接回复执行结果，不要解释

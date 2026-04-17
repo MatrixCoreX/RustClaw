@@ -1,0 +1,41 @@
+# Feishu（中国站）应用机器人通道配置 - 与 lark.toml（国际版）独立，勿混用
+# 飞书中国站使用 open.feishu.cn；国际版 Lark 使用 open.larksuite.com，由 lark.toml 配置
+# 支持文本与入站媒体（图片/文件/音视频）落盘后再提交 clawd ask
+# 使用方式（二选一）：
+#   - webhook：应用机器人 → 事件订阅 → 请求地址配置为本服务 callback URL（需公网可达）
+#   - long_connection：应用机器人 → 事件订阅 → 使用长连接接收事件（无需公网，内网优先）
+
+[feishu]
+# 是否启用
+enabled = true
+# 入站模式：webhook | long_connection
+mode = "long_connection"
+# 本服务监听地址（webhook 模式时用于接收回调；long_connection 模式可选用于健康检查等）
+listen = "0.0.0.0:8789"
+# clawd 基地址，用于提交任务与轮询结果
+clawd_base_url = "http://127.0.0.1:8787"
+# 飞书中国站 API 根地址（与 lark.toml 的国际版分开，勿改为 open.larksuite.com）
+api_base_url = "https://open.feishu.cn"
+# i18n 语言（优先尝试 configs/i18n/feishud.<language>.toml）
+language = "zh-CN"
+# i18n 文件路径（当 language 对应文件不存在时回退到此路径）
+i18n_path = "configs/i18n/feishud.zh-CN.toml"
+# 入站媒体落盘根目录（相对 feishud 进程工作目录；实际路径为 <目录>/<chat_id>/<文件名>）
+image_inbox_dir = "data/feishud/image"
+video_inbox_dir = "data/feishud/video"
+audio_inbox_dir = "data/feishud/audio"
+file_inbox_dir = "data/feishud/file"
+# 飞书应用 App ID（在开放平台 → 应用 → 凭证与基础信息 获取）
+app_id = "REPLACE_ME_FEISHU_APP_ID"
+# 飞书应用 App Secret（日志不打印；同上路径获取，复制时不要泄露）
+app_secret = "REPLACE_ME_FEISHU_APP_SECRET"
+# 事件订阅 Verification Token（webhook 时校验请求来自飞书）
+verification_token = ""
+# 事件加密密钥（webhook 时用于消息解密/签名校验）
+encrypt_key = ""
+# 单次 HTTP 请求超时秒数（submit / poll / 发消息等单次请求）
+request_timeout_seconds = 30
+# 任务投递软超时阈值（秒）：达到后会提示“任务仍在执行，完成后回复”，并继续轮询，不会中断投递
+task_delivery_timeout_seconds = 600
+# 长文本分段发送时每段最大字符数（按 UTF-8 安全截断）
+text_chunk_chars = 4000

@@ -1,0 +1,4 @@
+# Smart filename follow-up / candidate disambiguation cases.
+# Format: case_name|turn1|turn2|turn3
+
+followup_fuzzy_pick_by_ordinal|去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd|就第二个，只输出路径|那第一个呢，只输出路径

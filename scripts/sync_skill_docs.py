@@ -1,0 +1,342 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+from pathlib import Path
+import re
+import sys
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SKILLS_DIR = REPO_ROOT / "crates" / "skills"
+EXTERNAL_SKILLS_DIR = REPO_ROOT / "external_skills"
+# Canonical generated skill prompt body. Vendor-specific behavior should stay in
+# prompts/layers/vendor_patches/<vendor>/skills/<name>.md instead of forking this file tree.
+PROMPTS_DIR = REPO_ROOT / "prompts" / "layers" / "generated" / "skills"
+REGISTRY_PATH = REPO_ROOT / "configs" / "skills_registry.toml"
+PROMPT_MANAGED_MARKER = "<!-- AUTO-GENERATED: sync_skill_docs.py -->"
+MULTILINGUAL_REINFORCEMENT_BLOCK = """## Multilingual Reinforcement
+<!-- Reserved for language-specific reinforcement.
+Use subheadings such as:
+### zh-CN
+- ...
+### en
+- ...
+Keep only language-specific nuances here; keep general rules in the main prompt body.
+-->
+### zh-CN
+- Chinese colloquial requests such as `帮我看下`、`瞄一眼`、`顺手查一下`、`帮我确认下` should still be interpreted by capability semantics rather than downgraded to pure chat.
+- Chinese delivery wording such as `发我`、`甩给我`、`直接给我`、`别贴正文` usually indicates file/result delivery intent instead of inline pasted content.
+- Chinese brevity/format wording such as `只回数字`、`只给结果`、`只回路径`、`一句话说完` should constrain the planner's final expected output shape when that skill can support it.
+- Chinese style wording such as `用人话说`、`通俗点`、`给新手讲` means keep the eventual explanation low-jargon and user-friendly.
+- Chinese deictic wording such as `那个`、`它`、`上面那个` should rely on immediate concrete context only; do not guess unsupported targets or invent missing args just to force a skill call.
+"""
+RESERVED_PROMPT_STEMS = {"README"}
+
+
+@dataclass
+class SkillEntry:
+    name: str
+    path: Path
+    source: str  # built_in | external
+
+
+def discover_skill_dirs() -> dict[str, SkillEntry]:
+    # Order matters: prefer built-in crates/skills when name conflicts.
+    roots = [
+        (SKILLS_DIR, "built_in"),
+        (EXTERNAL_SKILLS_DIR, "external"),
+    ]
+    out: dict[str, SkillEntry] = {}
+    for root, source in roots:
+        if not root.exists():
+            continue
+        for child in sorted(root.iterdir()):
+            if not child.is_dir():
+                continue
+            if source == "built_in":
+                if not (child / "Cargo.toml").exists():
+                    continue
+            else:
+                if not (child / "INTERFACE.md").exists():
+                    continue
+            name = child.name.strip()
+            if not re.fullmatch(r"[a-z0-9_]+", name):
+                continue
+            if name not in out:
+                out[name] = SkillEntry(name=name, path=child, source=source)
+    return out
+
+
+def discover_builtin_registry_skills() -> set[str]:
+    if not REGISTRY_PATH.exists():
+        return set()
+    text = REGISTRY_PATH.read_text(encoding="utf-8")
+    names: set[str] = set()
+    for block in re.split(r"(?m)^\[\[skills\]\]\s*$", text):
+        if not block.strip():
+            continue
+        name_m = re.search(r'^\s*name\s*=\s*"([^"]+)"', block, re.M)
+        kind_m = re.search(r'^\s*kind\s*=\s*"([^"]+)"', block, re.M)
+        if not name_m or not kind_m:
+            continue
+        if kind_m.group(1).strip().lower() != "builtin":
+            continue
+        name = name_m.group(1).strip()
+        if re.fullmatch(r"[a-z0-9_]+", name):
+            names.add(name)
+    return names
+
+
+def interface_template(skill: str) -> str:
+    return f"""# {skill} Interface Spec
+
+> This file is managed by `scripts/sync_skill_docs.py`.
+> Fill in the details before using this skill in production.
+
+## Capability Summary
+- TODO: one-paragraph summary for `{skill}`.
+
+## Config Entry Points
+- TODO: list real config entry points for `{skill}` if it has any (config file, environment variable, local database/API, login/session state, local dependency).
+- If this skill does not need dedicated setup, say that explicitly.
+
+## Actions
+- TODO: list supported `action` values.
+
+## Parameter Contract
+| Action | Param | Required | Type | Default | Description |
+|---|---|---|---|---|---|
+| TODO | TODO | TODO | TODO | TODO | TODO |
+
+## Error Contract
+- TODO: list error cases and corresponding `error_text` conventions.
+
+## Request/Response Examples
+### Example 1
+Request:
+```json
+{{"request_id":"demo-1","args":{{}}}}
+```
+Response:
+```json
+{{"request_id":"demo-1","status":"ok","text":"TODO","error_text":null}}
+```
+"""
+
+
+def _extract_section(md: str, title: str) -> str:
+    pattern = re.compile(
+        rf"(?ms)^##\s+{re.escape(title)}\s*\n(.*?)(?=^##\s+|\Z)"
+    )
+    match = pattern.search(md)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def prompt_template(skill: str, interface_md: str) -> str:
+    capability = _extract_section(interface_md, "Capability Summary")
+    config_entry_points = _extract_section(interface_md, "Config Entry Points")
+    actions = _extract_section(interface_md, "Actions")
+    params = _extract_section(interface_md, "Parameter Contract")
+    errors = _extract_section(interface_md, "Error Contract")
+    examples = _extract_section(interface_md, "Request/Response Examples")
+    capability = capability or f"- TODO: summarize `{skill}` capability."
+    config_entry_points = config_entry_points or "- No dedicated config entry points declared."
+    actions = actions or "- TODO: list supported `action` values."
+    params = params or "| Action | Param | Required | Type | Default | Description |\n|---|---|---|---|---|---|\n| TODO | TODO | TODO | TODO | TODO | TODO |"
+    errors = errors or "- TODO: list error conventions."
+    examples = examples or "- TODO: add request/response examples."
+
+    return f"""{PROMPT_MANAGED_MARKER}
+## Role & Boundaries
+- You are the `{skill}` skill planner.
+- Follow this skill's `INTERFACE.md` strictly when selecting actions and parameters.
+
+## Interface Source
+- Primary source: `crates/skills/{skill}/INTERFACE.md`
+- If the request exceeds interface scope, ask a concise clarification instead of guessing.
+
+## Capability Summary (from interface)
+{capability}
+
+## Config Entry Points (from interface)
+{config_entry_points}
+
+## Actions (from interface)
+{actions}
+
+## Parameter Contract (from interface)
+{params}
+
+## Error Contract (from interface)
+{errors}
+
+## Request/Response Examples (from interface)
+{examples}
+
+## Output Contract
+- Use only actions and params declared in the interface spec.
+- Keep args minimal and explicit.
+- On uncertainty, prefer safe/readonly behavior first.
+- For setup or configuration questions about this skill, treat the config entry points section as the grounding source for where changes actually live.
+
+{MULTILINGUAL_REINFORCEMENT_BLOCK}
+"""
+
+
+def write_if_missing(path: Path, content: str, apply: bool) -> bool:
+    if path.exists():
+        return False
+    print(f"[create] {path.relative_to(REPO_ROOT)}")
+    if apply:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return True
+
+
+def write_if_missing_or_managed(path: Path, content: str, apply: bool) -> bool:
+    if not path.exists():
+        print(f"[create] {path.relative_to(REPO_ROOT)}")
+        if apply:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        return True
+    old = path.read_text(encoding="utf-8")
+    if PROMPT_MANAGED_MARKER not in old:
+        return False
+    if old == content:
+        return False
+    print(f"[update] {path.relative_to(REPO_ROOT)}")
+    if apply:
+        path.write_text(content, encoding="utf-8")
+    return True
+
+
+def write_adopted(path: Path, content: str, apply: bool) -> bool:
+    old = path.read_text(encoding="utf-8") if path.exists() else ""
+    if old == content:
+        return False
+    action = "adopt-create" if not path.exists() else "adopt-update"
+    print(f"[{action}] {path.relative_to(REPO_ROOT)}")
+    if apply:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return True
+
+
+def remove_file(path: Path, apply: bool) -> bool:
+    if not path.exists():
+        return False
+    print(f"[remove] {path.relative_to(REPO_ROOT)}")
+    if apply:
+        path.unlink()
+    return True
+
+
+def sync(apply: bool, adopt_skills: set[str] | None = None) -> int:
+    skill_dirs = discover_skill_dirs()
+    skills = sorted(skill_dirs.keys())
+    skill_set = set(skills)
+    preserved_prompt_stems = RESERVED_PROMPT_STEMS | discover_builtin_registry_skills()
+    changed = 0
+    adopt_skills = adopt_skills or set()
+
+    missing_external_interface: list[Path] = []
+
+    for skill in skills:
+        entry = skill_dirs[skill]
+        skill_dir = entry.path
+        interface_path = skill_dir / "INTERFACE.md"
+        prompt_path = PROMPTS_DIR / f"{skill}.md"
+        if entry.source == "external":
+            if not interface_path.exists():
+                missing_external_interface.append(interface_path)
+                continue
+        else:
+            if write_if_missing(interface_path, interface_template(skill), apply):
+                changed += 1
+        interface_md = (
+            interface_path.read_text(encoding="utf-8")
+            if interface_path.exists()
+            else interface_template(skill)
+        )
+        prompt_md = prompt_template(skill, interface_md)
+        if skill in adopt_skills:
+            if write_adopted(prompt_path, prompt_md, apply):
+                changed += 1
+        else:
+            if write_if_missing_or_managed(prompt_path, prompt_md, apply):
+                changed += 1
+
+    if missing_external_interface:
+        print("[error] missing INTERFACE.md for external skills:", file=sys.stderr)
+        for p in missing_external_interface:
+            print(f"  - {p.relative_to(REPO_ROOT)}", file=sys.stderr)
+        print(
+            "[hint] each external skill must provide INTERFACE.md before sync/build/start",
+            file=sys.stderr,
+        )
+        return -1
+
+    if PROMPTS_DIR.exists():
+        for md in sorted(PROMPTS_DIR.glob("*.md")):
+            stem = md.stem
+            if stem.startswith("_") or stem in preserved_prompt_stems:
+                continue
+            if stem not in skill_set:
+                if remove_file(md, apply):
+                    changed += 1
+
+    action = "applied" if apply else "planned"
+    print(f"[summary] skills={len(skills)} changes_{action}={changed}")
+    return changed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Sync skill INTERFACE.md and prompt md files.")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check-only mode (do not write files). Exits with code 2 if changes are needed.",
+    )
+    parser.add_argument(
+        "--adopt",
+        default="",
+        help="Adopt one skill prompt into managed mode (overwrite prompts/layers/generated/skills/<skill>.md).",
+    )
+    parser.add_argument(
+        "--adopt-all",
+        action="store_true",
+        help="Adopt all skill prompts into managed mode (overwrite all prompts/layers/generated/skills/<skill>.md).",
+    )
+    args = parser.parse_args()
+
+    skills = sorted(discover_skill_dirs().keys())
+    skill_set = set(skills)
+    adopt_skills: set[str] = set()
+    if args.adopt_all:
+        adopt_skills = set(skills)
+    elif args.adopt:
+        skill = args.adopt.strip()
+        if not skill:
+            print("--adopt requires a non-empty skill name", file=sys.stderr)
+            return 1
+        if skill not in skill_set:
+            print(f"--adopt skill not found under crates/skills: {skill}", file=sys.stderr)
+            return 1
+        adopt_skills = {skill}
+
+    apply = not args.check
+    changed = sync(apply=apply, adopt_skills=adopt_skills)
+    if changed < 0:
+        return 3
+    if args.check and changed > 0:
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

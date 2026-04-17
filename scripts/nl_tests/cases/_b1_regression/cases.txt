@@ -1,0 +1,10 @@
+# Regression test for B1 fix: act-class read-only tasks should NOT be
+# upgraded to OpsClosedLoop config_change by detect_execution_recipe due to
+# STABLE_FACTS / memory keyword pollution. These 5 cases were the exact ones
+# that all timed out in scripts/nl_suite_logs/manual/20260417_091943.
+
+act|act_pwd_only||只输出当前工作目录的绝对路径，不要解释|expect=/
+act|act_whoami_only||只输出当前用户名，不要解释|expect=guagua
+act|act_hostname_only||只输出当前机器 hostname
+act|act_list_top_dirs||把当前仓库顶层目录和文件列出来，简单分组就行|expect=Cargo.toml
+act|act_hidden_files||看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子

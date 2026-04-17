@@ -1,0 +1,410 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+resolve_self_path() {
+  local src="${BASH_SOURCE[0]}"
+  while [[ -h "$src" ]]; do
+    local dir
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  local dir
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  echo "$dir/$(basename "$src")"
+}
+
+SELF_PATH="$(resolve_self_path)"
+ROOT_DIR="$(cd "$(dirname "$SELF_PATH")" && pwd)"
+
+START_SCRIPT="$ROOT_DIR/start-all.sh"
+STOP_SCRIPT="$ROOT_DIR/stop-rustclaw.sh"
+BUILD_SCRIPT="$ROOT_DIR/build-all.sh"
+
+print_rustclaw_banner() {
+  cat <<'EOF'
+######################################################################################
+                __!---===[[[  @@@@  ]]]===---!__
+           _!@#￥%……&*()_/      <<<<>>>>      \_!@#￥%……&*()_
+        _!@#￥%……&*()_/      <<<<  @@  >>>>      \_!@#￥%……&*()_
+      !@#￥%……&*()_+       <<<<  @@@@@@  >>>>       +_)(*&……%￥#@!
+      !@#￥%……&*()_+=======<<<<==@@@==@@@==>>>>=======+_)(*&……%￥#@!
+      !@#￥%……&*()_+       >>>>  @@@@@@  <<<<       +_)(*&……%￥#@!
+        !_)(*&……%￥#@!\      >>>>  @@  <<<<      /!@#￥%……&*()_
+           !@#￥%……&*()_\      >>>><<<<      /_)(*&……%￥#@!
+                --===!!![[[  @@@@  ]]]!!!===--
+
+########   ##    ##   #######   ########      #######   ##         ######    ##      ##
+##    ##   ##    ##   ##           ##         ##        ##        ##    ##   ##  ##  ##
+########   ##    ##   #######      ##         ##        ##        ########   ##  ##  ##
+##   ##    ##    ##        ##      ##         ##        ##        ##    ##   ##  ##  ##
+##    ##    ######    #######      ##         #######   ########  ##    ##    ###  ###
+
+########################################################################################
+EOF
+}
+
+usage() {
+  cat <<'EOF'
+Usage / 用法:
+  rustclaw -start [release] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--with-ui]
+    # Start services / 启动服务（可选配置与通道）
+  rustclaw -start [vendor] [model] [release] [channels]
+    # Start with vendor/model / 按厂商与模型启动
+  rustclaw -start --vendor <openai|google|anthropic|grok|qwen|custom> [--model <name>] [--profile release] [--channels <...>] [--quick] [--skip-setup] [--with-ui] [--force-ui-rebuild]
+    # Full start options / 完整启动参数
+  rustclaw -stop
+    # Stop all RustClaw processes / 停止所有 RustClaw 进程
+  rustclaw -restart [release] [telegram|whatsapp_web|both|whatsapp_cloud|all] [--quick] [--skip-setup] [--with-ui]
+    # Stop then start / 先停后启
+  rustclaw start -q
+    # Shortcut: quick start without setup / 简化：免配置直接启动
+  rustclaw restart -q
+    # Shortcut: quick restart / 简化：免配置直接重启
+  rustclaw -status
+    # Show process status / 查看进程状态
+  rustclaw -build [release]
+    # Build workspace / 构建工作区
+  rustclaw -logs [all|clawd|telegramd|whatsappd|whatsapp_webd|feishud] [lines] [--follow]
+    # Tail logs / 查看日志（可选行数与持续跟随）
+  rustclaw -health
+    # HTTP health check / 健康检查
+  rustclaw -key list
+    # List API keys / 列出 API 密钥
+  rustclaw -key generate [admin|user]
+    # Generate new key / 生成新密钥（角色 admin 或 user）
+  rustclaw -key add <user_key> [admin|user]
+    # Add existing key / 添加已有密钥并设角色
+  rustclaw -key disable <user_key>
+    # Disable key / 禁用指定密钥
+  rustclaw -key enable <user_key>
+    # Enable key / 启用指定密钥
+  rustclaw -h | --help | help
+    # Show this help / 显示本帮助
+
+Quick start / 免配置快速启动:
+  start -q    Use release profile + all channels, no interactive setup. / 使用 release、all 通道，跳过交互，直接启动。
+  restart -q  Stop then start as above. Same as -restart release all --quick --skip-setup. / 先停止再按上述方式启动。
+
+Parameters / 参数说明:
+  -start / -restart (or start / restart):
+    vendor     : openai | google | anthropic | grok | qwen | custom  (LLM vendor / 模型厂商)
+    model      : model override string  (模型名覆盖)
+    profile    : release  (构建配置 / 当前仅支持 release)
+    channels   : telegram | whatsapp_web | both | whatsapp_cloud | all  (通道)
+    -q         : short for --quick --skip-setup, default release all  / 简写，免配置
+    --quick    : quick start  / 快速启动
+    --skip-setup : skip interactive setup  / 跳过交互式配置
+    --with-ui  : enable UI build/start  / 启用 UI 构建与启动
+    --force-ui-rebuild : force rebuild UI when --with-ui  / 启用 UI 时强制重建前端
+
+  -build:
+    profile    : release (default: release)  / 构建类型
+
+  -logs:
+    service    : all | clawd | telegramd | whatsappd | whatsapp_webd | feishud (default: all)  / 服务名
+    lines      : tail line count (default: 80)  / 显示行数
+    --follow   : follow log stream  / 持续输出新日志
+
+  -key:
+    list               : List user_key in DB  / 列出当前数据库中的 user_key
+    generate <role>    : Generate new key; role admin or user  / 生成新 key，角色 admin 或 user
+    add <key> <role>   : Add existing key with role  / 添加现有 key 并设置角色
+    disable <key>      : Disable key  / 禁用指定 key
+    enable <key>       : Enable key  / 启用指定 key
+
+Examples / 示例:
+  rustclaw start -q                                    # Quick start / 免配置直接启动（最简）
+  rustclaw restart -q                                  # Quick restart / 免配置直接重启
+  rustclaw -start release all --quick --skip-setup     # Start without prompts / 免配置直接启动（无交互）
+  rustclaw -start release all --with-ui               # Start with UI / 启动并带 UI
+  rustclaw -restart release all --quick --skip-setup   # Quick restart (no setup) / 免配置直接重启
+  rustclaw -logs clawd 200 --follow                    # Tail clawd log 200 lines, follow / 跟随 clawd 日志 200 行
+  rustclaw -key list
+  rustclaw -key generate user
+  rustclaw -key generate admin
+  rustclaw -status
+  rustclaw -stop
+EOF
+}
+
+require_file() {
+  local f="$1"
+  if [[ ! -f "$f" ]]; then
+    echo "Missing file: $f"
+    exit 1
+  fi
+}
+
+print_proc_status() {
+  local name="$1"
+  local pattern="$2"
+  local pids
+  pids="$(pgrep -f "$pattern" || true)"
+  if [[ -n "${pids// }" ]]; then
+    echo "$name: running (pid: $(echo "$pids" | tr '\n' ' ' | xargs))"
+  else
+    echo "$name: stopped"
+  fi
+}
+
+# 是否有 RustClaw 相关进程在运行（clawd/telegramd/whatsappd/whatsapp_webd/feishud）
+is_rustclaw_running() {
+  pgrep -f 'target/release/clawd|cargo run -p clawd' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/release/telegramd|cargo run -p telegramd' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/release/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/release/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge' >/dev/null 2>&1 && return 0
+  pgrep -f 'target/release/feishud|cargo run -p feishud' >/dev/null 2>&1 && return 0
+  return 1
+}
+
+cmd_start() {
+  local vendor=""
+  local model=""
+  local profile=""
+  local channels=""
+  local quick_arg=""
+  local skip_setup="0"
+  local with_ui="0"
+  local ui_force_rebuild="0"
+
+  local args=("$@")
+  local i=0
+  while [[ $i -lt ${#args[@]} ]]; do
+    local arg="${args[$i]}"
+    case "$arg" in
+      --vendor)
+        ((i+=1))
+        [[ $i -lt ${#args[@]} ]] || { echo "Missing value for --vendor"; exit 1; }
+        vendor="${args[$i]}"
+        ;;
+      --model)
+        ((i+=1))
+        [[ $i -lt ${#args[@]} ]] || { echo "Missing value for --model"; exit 1; }
+        model="${args[$i]}"
+        ;;
+      --profile)
+        ((i+=1))
+        [[ $i -lt ${#args[@]} ]] || { echo "Missing value for --profile"; exit 1; }
+        profile="${args[$i]}"
+        ;;
+      --channels)
+        ((i+=1))
+        [[ $i -lt ${#args[@]} ]] || { echo "Missing value for --channels"; exit 1; }
+        channels="${args[$i]}"
+        ;;
+      release)
+        profile="$arg"
+        ;;
+      telegram|whatsapp_web|both|whatsapp_cloud|all)
+        channels="$arg"
+        ;;
+      openai|google|anthropic|grok|qwen|custom)
+        vendor="$arg"
+        ;;
+      -q)
+        quick_arg="quick"
+        skip_setup="1"
+        [[ -z "$profile" ]] && profile="release"
+        [[ -z "$channels" ]] && channels="all"
+        ;;
+      --quick)
+        quick_arg="quick"
+        ;;
+      --skip-setup)
+        skip_setup="1"
+        ;;
+      --with-ui)
+        with_ui="1"
+        ;;
+      --force-ui-rebuild)
+        ui_force_rebuild="1"
+        ;;
+      *)
+        if [[ -z "$model" ]]; then
+          model="$arg"
+        else
+          echo "Invalid -start argument: $arg"
+          usage
+          exit 1
+        fi
+        ;;
+    esac
+    ((i+=1))
+  done
+
+  require_file "$START_SCRIPT"
+  if [[ -n "$profile" && "$profile" != "release" ]]; then
+    echo "Invalid profile: $profile"
+    exit 1
+  fi
+  if [[ -n "$vendor" && ! "$vendor" =~ ^(openai|google|anthropic|grok|qwen|custom)$ ]]; then
+    echo "Invalid vendor: $vendor"
+    exit 1
+  fi
+  if [[ -n "$channels" && ! "$channels" =~ ^(telegram|whatsapp_web|both|whatsapp_cloud|all)$ ]]; then
+    echo "Invalid channels: $channels"
+    exit 1
+  fi
+
+  if [[ -z "$profile" ]]; then
+    profile="release"
+  fi
+
+  if is_rustclaw_running; then
+    echo "RustClaw is already running."
+    echo "Use: rustclaw -status  (to see processes), or  rustclaw -stop  then  rustclaw -start"
+    exit 1
+  fi
+
+  print_rustclaw_banner
+
+  if [[ "$skip_setup" == "1" ]]; then
+    export RUSTCLAW_SKIP_SETUP=1
+  fi
+  export RUSTCLAW_SKIP_BANNER=1
+  export RUSTCLAW_ENABLE_UI="$with_ui"
+  export RUSTCLAW_UI_FORCE_REBUILD="$ui_force_rebuild"
+  "$START_SCRIPT" "$vendor" "$model" "$profile" "$channels" "$quick_arg"
+}
+
+cmd_stop() {
+  require_file "$STOP_SCRIPT"
+  "$STOP_SCRIPT"
+}
+
+cmd_status() {
+  print_proc_status "clawd" "target/release/clawd|cargo run -p clawd"
+  print_proc_status "telegramd" "target/release/telegramd|cargo run -p telegramd"
+  print_proc_status "whatsappd" "target/release/whatsappd|cargo run -p whatsappd"
+  print_proc_status "whatsapp_webd" "target/release/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge/index.js"
+  print_proc_status "feishud" "target/release/feishud|cargo run -p feishud"
+}
+
+cmd_build() {
+  local profile="${1:-release}"
+  if [[ "$profile" != "release" ]]; then
+    echo "Invalid build profile: $profile"
+    echo "Only release is supported."
+    exit 1
+  fi
+  require_file "$BUILD_SCRIPT"
+  "$BUILD_SCRIPT" "$profile"
+}
+
+cmd_logs() {
+  local service="all"
+  local lines="80"
+  local do_follow=0
+  for arg in "$@"; do
+    case "$arg" in
+      all|clawd|telegramd|whatsappd|whatsapp_webd|feishud)
+        service="$arg"
+        ;;
+      --follow)
+        do_follow=1
+        ;;
+      *)
+        if [[ "$arg" =~ ^[0-9]+$ ]]; then
+          lines="$arg"
+        else
+          echo "Invalid -logs argument: $arg"
+          usage
+          exit 1
+        fi
+        ;;
+    esac
+  done
+  if [[ ! "$lines" =~ ^[0-9]+$ ]]; then
+    echo "Invalid lines value: $lines"
+    exit 1
+  fi
+  local log_dir="$ROOT_DIR/logs"
+  local files=()
+  case "$service" in
+    all)
+      files=("$log_dir/clawd.log" "$log_dir/telegramd.log" "$log_dir/whatsappd.log" "$log_dir/whatsapp_webd.log" "$log_dir/feishud.log")
+      ;;
+    clawd|telegramd|whatsappd|whatsapp_webd|feishud)
+      files=("$log_dir/$service.log")
+      ;;
+    *)
+      echo "Invalid service: $service"
+      exit 1
+      ;;
+  esac
+  if [[ "$do_follow" == "1" ]]; then
+    tail -n "$lines" -f "${files[@]}"
+  else
+    tail -n "$lines" "${files[@]}"
+  fi
+}
+
+cmd_health() {
+  local url listen
+  listen="$(
+python3 - <<'PY'
+import tomllib
+from pathlib import Path
+cfg = tomllib.loads(Path("configs/config.toml").read_text(encoding="utf-8"))
+print((cfg.get("server", {}) or {}).get("listen", "127.0.0.1:8787"))
+PY
+  )"
+  url="http://${listen}/v1/health"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl not found."
+    exit 1
+  fi
+  echo "GET $url"
+  curl -fsS "$url"
+  echo
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+case "$1" in
+  -start|start)
+    shift
+    cmd_start "$@"
+    ;;
+  -stop)
+    cmd_stop
+    ;;
+  -restart|restart)
+    shift
+    cmd_stop
+    cmd_start "$@"
+    ;;
+  -status)
+    cmd_status
+    ;;
+  -build)
+    cmd_build "${2:-release}"
+    ;;
+  -logs)
+    shift
+    cmd_logs "$@"
+    ;;
+  -health)
+    cmd_health
+    ;;
+  -key)
+    shift
+    require_file "$ROOT_DIR/scripts/auth-key.sh"
+    if [[ $# -lt 1 ]]; then
+      "$ROOT_DIR/scripts/auth-key.sh" list
+    else
+      "$ROOT_DIR/scripts/auth-key.sh" "$@"
+    fi
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac

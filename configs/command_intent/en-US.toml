@@ -1,0 +1,19 @@
+locale = "en-US"
+
+execute_prefixes = [
+  "run ",
+  "please run ",
+  "execute ",
+  "please execute ",
+  "execute command ",
+]
+
+# Natural-language result tails are handled semantically by the planner/LLM.
+result_suffixes = []
+
+negative_markers = [
+  "what does this command do",
+  "what is this command",
+  "how to use",
+  "meaning of",
+]
