@@ -161,9 +161,13 @@ async fn handle_skill_step_success(
             crate::truncate_for_agent_trace(&contract_err)
         ));
     }
+    // §3.4: skill_execution 阶段不再调 semantic_judge LLM；改用本地 deterministic
+    // guard 决定 "这份 chat 输出值不值得缓存为 finalize 兜底"。误缓存的会被
+    // finalize 层 (loop_finalize::observed_generic_finalize) 用 is_publishable_raw
+    // 二次过滤，不会出现"误投递"。
     if cache_publishable_chat_output
         && normalized_skill == "chat"
-        && crate::semantic_judge::is_publishable_raw(state, task, out).await
+        && crate::semantic_judge::is_publishable_raw_local(out)
     {
         loop_state.last_publishable_chat_output = Some(out.to_string());
         publishable_chat_output = true;

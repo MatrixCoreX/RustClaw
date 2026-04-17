@@ -1,6 +1,7 @@
 <!--
 Purpose: unified front-door understanding layer. In one pass it handles resume binding, intent completion, schedule-intent detection, and clarification need.
 Component: clawd (`crates/clawd/src/intent_router.rs`) `run_intent_normalizer`
+Version: 2026-04-17.1
 Placeholders: __PERSONA_PROMPT__, __CAPABILITY_MAP__, __SELF_EXTENSION_RUNTIME__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __RECENT_TURNS_FULL__, __NOW__, __TIMEZONE__, __SCHEDULE_RULES__, __REQUEST__; optional: __RECENT_ASSISTANT_REPLIES__ (recent assistant-turn ordinal anchors for previous / two-turns-back reply references; entries may include `ordered_entries=1:... | 2:...`)
 -->
 

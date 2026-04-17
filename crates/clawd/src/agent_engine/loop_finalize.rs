@@ -215,6 +215,7 @@ async fn discard_meta_respond_placeholder_for_content_evidence(
     ) else {
         return;
     };
+    // §3.4 finalize-tier: drop_passthrough_delivery 是 finalize 决策层。
     let meta_placeholder =
         crate::semantic_judge::is_meta_respond_instruction(state, task, respond).await;
     if !raw_passthrough && !meta_placeholder {
@@ -817,6 +818,7 @@ async fn direct_publishable_observed_answer(
     {
         return None;
     }
+    // §3.4 finalize-tier: observed_generic_finalize 是 finalize 决策层。
     if !crate::semantic_judge::is_publishable_raw(state, task, &answer).await {
         return None;
     }

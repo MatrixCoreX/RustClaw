@@ -1,6 +1,7 @@
 <!--
 Purpose: action-decision prompt for the agent execution stage (tool/skill invocation and final-reply format constraints)
 Component: `clawd` (`crates/clawd/src/main.rs`) constant `AGENT_RUNTIME_PROMPT_TEMPLATE`
+Version: 2026-04-17.1
 Placeholders: __PERSONA_PROMPT__, __TOOL_SPEC__, __SKILL_PROMPTS__, __GOAL__, __STEP__, __HISTORY__; optional: __RECENT_ASSISTANT_REPLIES__ (recent assistant-turn ordinal anchors)
 -->
 

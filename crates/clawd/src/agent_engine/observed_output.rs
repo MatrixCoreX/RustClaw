@@ -3450,6 +3450,8 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             .and_then(|json| serde_json::from_str::<ObservedAnswerFallbackOut>(&json).ok())
     })?;
     let answer = parsed.answer.trim().to_string();
+    // §3.4 finalize-tier: 这里属于 observed_answer_fallback 兜底路径（finalize 层
+    // 的 fallback 分支），是 semantic_judge LLM 入口的允许调用方之一。
     // Phase 0.2: 复用同一次 LLM 调用已经返回的 `publishable` + `is_meta_instruction`，
     // 高置信度时直接信任，避免再发一次 `semantic_judge::is_meta_respond_instruction`
     // 二次判定调用。低置信度（<0.55）时才回退到 semantic_judge 做安全兜底，

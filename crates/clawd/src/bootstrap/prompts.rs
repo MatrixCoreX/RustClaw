@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use claw_core::{config::PersonaConfig, prompt_layers};
+use claw_core::{
+    config::PersonaConfig,
+    prompt_layers::{self, ResolvedPromptTemplate},
+};
 use tracing::warn;
 
 use crate::{llm_vendor_name, AppState};
@@ -111,6 +114,24 @@ pub(crate) fn load_prompt_template_for_state(
 ) -> (String, String) {
     let vendor = active_prompt_vendor_name(state);
     prompt_layers::load_prompt_template_for_vendor(
+        &state.skill_rt.workspace_root,
+        &vendor,
+        rel_path,
+        default_template,
+    )
+}
+
+/// §3.5a: 带 prompt version 元数据的加载入口。
+///
+/// 与 [`load_prompt_template_for_state`] 行为一致，额外返回 `Option<String>` 版本号，
+/// 便于审计日志记录。逐步把关键审计点从 `load_prompt_template_for_state` 迁移到这里。
+pub(crate) fn load_prompt_template_for_state_with_meta(
+    state: &AppState,
+    rel_path: &str,
+    default_template: &str,
+) -> ResolvedPromptTemplate {
+    let vendor = active_prompt_vendor_name(state);
+    prompt_layers::load_prompt_template_for_vendor_with_meta(
         &state.skill_rt.workspace_root,
         &vendor,
         rel_path,

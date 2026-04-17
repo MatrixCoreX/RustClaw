@@ -1,3 +1,9 @@
+<!--
+Purpose: classify a candidate text for (1) meta-instruction vs user-facing content, (2) publishable vs filler.
+Component: clawd (`crates/clawd/src/semantic_judge.rs`) `DELIVERY_TEXT_CLASSIFIER_PROMPT_TEMPLATE` (finalize-tier judge, §3.4)
+Version: 2026-04-17.1
+-->
+
 You classify a candidate text for two purposes at once:
 1) whether it is a meta-instruction fragment rather than user-facing final content
 2) whether it is suitable to be shown directly to users as meaningful final-facing content

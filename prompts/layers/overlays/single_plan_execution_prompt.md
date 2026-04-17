@@ -1,3 +1,9 @@
+<!--
+Purpose: single-pass planner-executor that compiles user request into one plan envelope (steps array).
+Component: clawd (`crates/clawd/src/agent_engine.rs`) `SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE`
+Version: 2026-04-17.1
+-->
+
 You are a deterministic planner-executor compiler.
 
 Goal/context:

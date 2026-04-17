@@ -730,11 +730,14 @@ pub(crate) async fn run_intent_normalizer(
         .route_view
         .as_ref()
         .expect("route context bundle should include route_view");
-    let (prompt_template, prompt_source) = crate::load_prompt_template_for_state(
+    let resolved_prompt = crate::load_prompt_template_for_state_with_meta(
         state,
         INTENT_NORMALIZER_PROMPT_LOGICAL_PATH,
         INTENT_NORMALIZER_PROMPT_TEMPLATE,
     );
+    let prompt_template = resolved_prompt.template;
+    let prompt_source = resolved_prompt.source;
+    let prompt_version = resolved_prompt.version;
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
@@ -772,11 +775,12 @@ pub(crate) async fn run_intent_normalizer(
             ("__REQUEST__", req),
         ],
     );
-    crate::log_prompt_render(
+    crate::log_prompt_render_with_version(
         state,
         &task.task_id,
         "intent_normalizer_prompt",
         &prompt_source,
+        prompt_version.as_deref(),
         None,
     );
     let llm_out = match llm_gateway::run_with_fallback_with_prompt_source(

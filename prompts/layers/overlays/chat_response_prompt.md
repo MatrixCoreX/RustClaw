@@ -1,6 +1,7 @@
 <!--
 Purpose: chat-only reply prompt (no tool/skill execution)
 Component: clawd (crates/clawd/src/main.rs) constant CHAT_RESPONSE_PROMPT_TEMPLATE
+Version: 2026-04-17.1
 Placeholders: __PERSONA_PROMPT__, __CONTEXT__, __CONFIG_RESPONSE_LANGUAGE__, __REQUEST_LANGUAGE_HINT__, __REQUEST__
 -->
 

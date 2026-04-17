@@ -451,17 +451,20 @@ pub(crate) async fn execute_ask_routed(
                 chat_prompt_context,
                 agent_run_context.as_ref(),
             );
-            let (chat_prompt_template, chat_prompt_source) =
-                crate::bootstrap::load_prompt_template_for_state(
-                    state,
-                    crate::CHAT_RESPONSE_PROMPT_LOGICAL_PATH,
-                    crate::CHAT_RESPONSE_PROMPT_TEMPLATE,
-                );
-            crate::log_prompt_render(
+            let resolved_chat_prompt = crate::bootstrap::load_prompt_template_for_state_with_meta(
+                state,
+                crate::CHAT_RESPONSE_PROMPT_LOGICAL_PATH,
+                crate::CHAT_RESPONSE_PROMPT_TEMPLATE,
+            );
+            let chat_prompt_template = resolved_chat_prompt.template;
+            let chat_prompt_source = resolved_chat_prompt.source;
+            let chat_prompt_version = resolved_chat_prompt.version;
+            crate::log_prompt_render_with_version(
                 state,
                 &task.task_id,
                 "chat_response_prompt",
                 &chat_prompt_source,
+                chat_prompt_version.as_deref(),
                 None,
             );
             let task_persona_prompt = state.task_persona_prompt(task);
