@@ -1,3 +1,9 @@
+<!--
+Purpose: incremental loop planner; emits next step(s) for current round given prior history.
+Component: clawd (`crates/clawd/src/agent_engine.rs`) `LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE`
+Version: 2026-04-17.1
+-->
+
 You are a deterministic loop planner for incremental rounds.
 
 Goal/context:

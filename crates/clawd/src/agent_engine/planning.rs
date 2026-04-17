@@ -230,9 +230,12 @@ async fn parse_single_plan_actions(
         match action {
             AgentAction::Think { .. } => {}
             AgentAction::Respond { content } => {
+                // §3.4: planning 阶段不再调 semantic_judge LLM；改用本地启发式
+                // looks_like_meta_respond_directive_local 过滤明显的 meta 占位
+                // Respond 步骤。漏判会在 finalize 层 (loop_finalize::drop_passthrough_*)
+                // 被 LLM 二次剔除，业务无损。
                 if !actions.is_empty()
-                    && crate::semantic_judge::is_meta_respond_instruction(state, task, &content)
-                        .await
+                    && crate::semantic_judge::looks_like_meta_respond_directive_local(&content)
                 {
                     debug!(
                         "plan_meta_respond_suppressed task_id={} content={}",
@@ -1049,11 +1052,14 @@ async fn repair_plan_actions(
     let runtime_os = runtime_os_label();
     let runtime_shell = runtime_shell_label();
     let workspace_root = state.skill_rt.workspace_root.display().to_string();
-    let (prompt_template, prompt_source) = crate::load_prompt_template_for_state(
+    let resolved_prompt = crate::load_prompt_template_for_state_with_meta(
         state,
         PLAN_REPAIR_PROMPT_LOGICAL_PATH,
         PLAN_REPAIR_PROMPT_TEMPLATE,
     );
+    let prompt_template = resolved_prompt.template;
+    let prompt_source = resolved_prompt.source;
+    let prompt_version = resolved_prompt.version;
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
@@ -1072,11 +1078,12 @@ async fn repair_plan_actions(
             ("__RAW_PLAN__", raw_plan),
         ],
     );
-    crate::log_prompt_render(
+    crate::log_prompt_render_with_version(
         state,
         &task.task_id,
         "plan_repair_prompt",
         &prompt_source,
+        prompt_version.as_deref(),
         Some(round_no),
     );
     let repaired =
@@ -1277,19 +1284,20 @@ pub(super) async fn plan_round_actions(
         AGENT_TOOL_SPEC_PATH,
         AGENT_TOOL_SPEC_TEMPLATE,
     );
-    let (prompt_name, prompt_source, prompt_text) = if loop_state.round_no <= 1 {
-        let (prompt_template, prompt_source) = crate::load_prompt_template_for_state(
+    let (prompt_name, prompt_source, prompt_version, prompt_text) = if loop_state.round_no <= 1 {
+        let resolved = crate::load_prompt_template_for_state_with_meta(
             state,
             SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
             SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE,
         );
         (
             "single_plan_execution_prompt",
-            prompt_source,
+            resolved.source,
+            resolved.version,
             format!(
                 "{}\n\n## Skill Quick Index (first-round routing hint)\nGoal: reduce misclassification while minimizing avoidable extra rounds.\n- Do NOT end round-1 with a generic chat-style final answer when a skill might be relevant.\n- In round-1, prioritize intent classification + missing-slot check, but finish immediately when one bounded resolution/current-runtime step can already complete the request safely.\n- Ask one concise clarification only when safe completion is truly blocked after current-turn text, immediate context, and bounded resolution/default inference have been used.\n- Use immediate `call_skill` in round-1 whenever intent is clear or can be completed by one bounded resolution/current-runtime step.\n{}\n",
                 build_single_plan_prompt(
-                    &prompt_template,
+                    &resolved.template,
                     user_text,
                     goal,
                     &tool_spec_template,
@@ -1310,16 +1318,17 @@ pub(super) async fn plan_round_actions(
             .last()
             .cloned()
             .unwrap_or_else(|| "(none)".to_string());
-        let (prompt_template, prompt_source) = crate::load_prompt_template_for_state(
+        let resolved = crate::load_prompt_template_for_state_with_meta(
             state,
             LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH,
             LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE,
         );
         (
             "loop_incremental_plan_prompt",
-            prompt_source,
+            resolved.source,
+            resolved.version,
             build_incremental_plan_prompt(
-                &prompt_template,
+                &resolved.template,
                 user_text,
                 goal,
                 &tool_spec_template,
@@ -1335,11 +1344,12 @@ pub(super) async fn plan_round_actions(
             ),
         )
     };
-    crate::log_prompt_render(
+    crate::log_prompt_render_with_version(
         state,
         &task.task_id,
         prompt_name,
         &prompt_source,
+        prompt_version.as_deref(),
         Some(loop_state.round_no),
     );
     info!(

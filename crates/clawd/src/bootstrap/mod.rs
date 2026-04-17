@@ -11,5 +11,6 @@ pub(crate) use config_loaders::{
 };
 pub(crate) use prompts::{
     active_prompt_vendor_name, load_persona_prompt, load_prompt_template_for_state,
-    load_prompt_template_for_vendor, resolve_prompt_rel_path_for_vendor,
+    load_prompt_template_for_state_with_meta, load_prompt_template_for_vendor,
+    resolve_prompt_rel_path_for_vendor,
 };

@@ -18,27 +18,45 @@ pub(crate) fn log_prompt_render(
     prompt_source: &str,
     round: Option<usize>,
 ) {
+    log_prompt_render_with_version(state, task_id, prompt_name, prompt_source, None, round);
+}
+
+/// §3.5a: 带 prompt_version 字段的版本，给已迁移到 with_meta API 的关键审计点用。
+///
+/// `prompt_version` 缺失时记 `prompt_version=none`；存在时记 `prompt_version=...`。
+/// 该字段会进 model_io / task_journal payload，为 prompt 改动追溯提供锚点。
+pub(crate) fn log_prompt_render_with_version(
+    state: &AppState,
+    task_id: &str,
+    prompt_name: &str,
+    prompt_source: &str,
+    prompt_version: Option<&str>,
+    round: Option<usize>,
+) {
     if !state.policy.routing.debug_log_prompt {
         return;
     }
+    let version = prompt_version.unwrap_or("none");
     match round {
         Some(round) => {
             tracing::info!(
-                "{} prompt_invocation task_id={} prompt_name={} prompt_source={} prompt_dynamic=true note=dynamic_built_prompt round={}",
+                "{} prompt_invocation task_id={} prompt_name={} prompt_source={} prompt_version={} prompt_dynamic=true note=dynamic_built_prompt round={}",
                 crate::highlight_tag("prompt"),
                 task_id,
                 prompt_name,
                 prompt_source,
+                version,
                 round
             );
         }
         None => {
             tracing::info!(
-                "{} prompt_invocation task_id={} prompt_name={} prompt_source={} prompt_dynamic=true note=dynamic_built_prompt",
+                "{} prompt_invocation task_id={} prompt_name={} prompt_source={} prompt_version={} prompt_dynamic=true note=dynamic_built_prompt",
                 crate::highlight_tag("prompt"),
                 task_id,
                 prompt_name,
-                prompt_source
+                prompt_source,
+                version
             );
         }
     }

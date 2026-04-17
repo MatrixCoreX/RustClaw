@@ -70,8 +70,9 @@ pub(crate) use ask_flow::{
 use bootstrap::{
     active_prompt_vendor_name, load_command_intent_runtime, load_feishu_send_config,
     load_lark_send_config, load_memory_runtime_config, load_persona_prompt,
-    load_prompt_template_for_state, load_prompt_template_for_vendor, load_schedule_runtime,
-    load_wechat_send_config, resolve_prompt_rel_path_for_vendor, resolve_ui_dist_dir,
+    load_prompt_template_for_state, load_prompt_template_for_state_with_meta,
+    load_prompt_template_for_vendor, load_schedule_runtime, load_wechat_send_config,
+    resolve_prompt_rel_path_for_vendor, resolve_ui_dist_dir,
 };
 use db_init::{
     ensure_channel_schema, ensure_memory_schema, ensure_schedule_schema, init_db, seed_users,
@@ -94,8 +95,8 @@ pub(crate) use pipeline_types::{
 };
 pub(crate) use prompt_utils::{
     extract_first_json_object_any, extract_first_json_value_any, log_prompt_render,
-    parse_agent_action_json_with_repair, parse_llm_json_extract_or_any, parse_llm_json_raw_or_any,
-    render_prompt_template,
+    log_prompt_render_with_version, parse_agent_action_json_with_repair,
+    parse_llm_json_extract_or_any, parse_llm_json_raw_or_any, render_prompt_template,
 };
 use providers::{
     append_model_io_log, call_provider_with_retry, call_provider_with_retry_with_hints,
