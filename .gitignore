@@ -56,6 +56,14 @@ docker/config/channels/telegram.toml
 runtime_env*.sh
 
 # =============================================================================
+# Per-session probes / scratch test sets that shouldn't bake into the repo.
+# Underscore-prefixed dirs under nl_tests/cases are reserved for ad-hoc probes
+# (one-off probe_chat, ephemeral micro-suites). Curated regression sets live
+# under scripts/nl_tests/cases/ without an underscore prefix.
+# =============================================================================
+scripts/nl_tests/cases/_probe/
+
+# =============================================================================
 # Cursor / agent transcripts
 # =============================================================================
 .cursor/
