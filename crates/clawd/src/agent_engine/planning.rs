@@ -1313,10 +1313,22 @@ pub(super) async fn plan_round_actions(
         )
     } else {
         let history_compact = build_loop_history_compact(loop_state);
+        // Phase 3.3 / minimax-fs_search regression fix:
+        // 之前这里只读 delivery_messages.last()。delivery_messages 仅承载最终 respond/交付
+        // 文本，observation-only 步骤（fs_search/list_dir/read_file/run_cmd 等）的输出从不
+        // 写入这里。结果是 round N+1 的 loop planner 看到 "Last round output: (none)"，
+        // 完全看不到 round N 的工具输出，于是会重复同一观察步骤，最终触发 plan_unactionable
+        // 兜底（i18n 模板被误用作 "provider unavailable" 文案）。
+        // 真正记录每步输出的字段是 LoopState.last_output（agent_engine.rs 中
+        // register_step_output / register_failed_step_output 都会维护）。优先使用它，
+        // 仅在确无 step output 时回退到 delivery_messages，最后退化到占位符。
         let last_output = loop_state
-            .delivery_messages
-            .last()
-            .cloned()
+            .last_output
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| crate::truncate_for_log(s))
+            .or_else(|| loop_state.delivery_messages.last().cloned())
             .unwrap_or_else(|| "(none)".to_string());
         let resolved = crate::load_prompt_template_for_state_with_meta(
             state,
