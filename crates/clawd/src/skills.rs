@@ -37,7 +37,20 @@ pub(crate) struct SkillRunOutcome {
 }
 
 pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
-    skill_name.eq_ignore_ascii_case("read_file") && err.starts_with(READ_FILE_NOT_FOUND_PREFIX)
+    if skill_name.eq_ignore_ascii_case("read_file") && err.starts_with(READ_FILE_NOT_FOUND_PREFIX) {
+        return true;
+    }
+    // system_basic 的 read 类 action 拿到 OS error（permission denied / not a directory / ...）
+    // 时，把任务整体标 failed 不利于用户体验：本质是"读不到"语义，应该让 finalizer
+    // 把错误 wrap 成自然语言对话回复（observed scalar fallback 路径），而不是丢出
+    // raw OS error。判别基于 system_basic 的 read 错误前缀（见 system_basic/src/main.rs
+    // 与 builtin.rs read_file 分支），不依赖 path / args。
+    if skill_name.eq_ignore_ascii_case("system_basic")
+        && (err.starts_with("read file failed:") || err.starts_with("read_file failed:"))
+    {
+        return true;
+    }
+    false
 }
 
 pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> String {
@@ -48,6 +61,23 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
                 return format!("file not found: {trimmed}");
             }
             return "file not found".to_string();
+        }
+    }
+    if skill_name.eq_ignore_ascii_case("system_basic") {
+        if let Some(rest) = err
+            .strip_prefix("read file failed: ")
+            .or_else(|| err.strip_prefix("read_file failed: "))
+        {
+            let trimmed = rest.trim();
+            if trimmed.contains("Permission denied") {
+                return "read file failed: permission denied (operating-system level)".to_string();
+            }
+            if trimmed.contains("Is a directory") {
+                return "read file failed: target is a directory, not a regular file".to_string();
+            }
+            if trimmed.contains("No such file") || trimmed.contains("(os error 2)") {
+                return "read file failed: file not found".to_string();
+            }
         }
     }
     err.trim().to_string()
@@ -628,8 +658,9 @@ pub(crate) async fn run_skill_with_runner_outcome(
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_task_request_text, request_reply_language, task_request_locale_tag,
-        RequestReplyLanguage,
+        extract_task_request_text, is_recoverable_skill_error, normalize_skill_error_for_user,
+        request_reply_language, task_request_locale_tag, RequestReplyLanguage,
+        READ_FILE_NOT_FOUND_PREFIX,
     };
     use crate::{
         runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime,
@@ -790,6 +821,42 @@ mod tests {
             "text": "12345"
         }));
         assert_eq!(task_request_locale_tag(&state, &task), "en-US");
+    }
+
+    #[test]
+    fn read_file_not_found_is_recoverable() {
+        let err = format!("{}/etc/missing", READ_FILE_NOT_FOUND_PREFIX);
+        assert!(is_recoverable_skill_error("read_file", &err));
+        assert!(is_recoverable_skill_error("READ_FILE", &err));
+        let normalized = normalize_skill_error_for_user("read_file", &err);
+        assert!(normalized.contains("file not found"));
+        assert!(normalized.contains("/etc/missing"));
+    }
+
+    #[test]
+    fn system_basic_read_failures_are_recoverable() {
+        let perm_err = "read file failed: Permission denied (os error 13)";
+        let dir_err = "read file failed: Is a directory (os error 21)";
+        let nf_err = "read file failed: No such file or directory (os error 2)";
+
+        assert!(is_recoverable_skill_error("system_basic", perm_err));
+        assert!(is_recoverable_skill_error("system_basic", dir_err));
+        assert!(is_recoverable_skill_error("system_basic", nf_err));
+        assert!(is_recoverable_skill_error("SYSTEM_BASIC", perm_err));
+
+        let n1 = normalize_skill_error_for_user("system_basic", perm_err);
+        assert!(n1.contains("permission denied"), "got: {n1}");
+        let n2 = normalize_skill_error_for_user("system_basic", dir_err);
+        assert!(n2.contains("directory"), "got: {n2}");
+        let n3 = normalize_skill_error_for_user("system_basic", nf_err);
+        assert!(n3.contains("file not found"), "got: {n3}");
+    }
+
+    #[test]
+    fn other_skill_errors_are_not_recoverable() {
+        assert!(!is_recoverable_skill_error("git_basic", "fatal: not a git repository"));
+        assert!(!is_recoverable_skill_error("system_basic", "command not found"));
+        assert!(!is_recoverable_skill_error("read_file", "some random error"));
     }
 }
 
