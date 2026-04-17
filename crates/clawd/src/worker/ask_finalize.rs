@@ -308,6 +308,7 @@ pub(crate) async fn finalize_ask_direct_success(
     journal.record_context_bundle_summary(format!("path={path_label}"));
     journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
     journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
+    journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
     journal.record_used_evidence_ids_count(0);
     journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
         answer_text,
@@ -480,6 +481,7 @@ pub(crate) async fn finalize_ask_result(
             };
             journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
+            journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
             journal.record_final_answer(&answer_text);
             ensure_journal_task_metrics(&mut journal, &answer_text, &answer_messages);
             if failure_reply {
@@ -563,6 +565,7 @@ pub(crate) async fn finalize_ask_result(
                     .unwrap_or(resume_ctx);
                 journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
                 journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
+                journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
                 journal.record_final_answer(&user_error);
                 ensure_journal_task_metrics(&mut journal, &user_error, &[]);
                 journal.record_final_status(
@@ -584,6 +587,7 @@ pub(crate) async fn finalize_ask_result(
             }
             journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
+            journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
             journal.record_final_answer(&err_text);
             ensure_journal_task_metrics(&mut journal, &err_text, &[]);
             journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
@@ -642,6 +646,7 @@ mod tests {
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
             llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
             llm_elapsed_per_task: Arc::new(Mutex::new(HashMap::new())),
+            llm_by_prompt_per_task: Arc::new(Mutex::new(HashMap::new())),
             task_schedule_intent_cache: Arc::new(Mutex::new(HashMap::new())),
             maintenance: MaintenanceConfig::default(),
             memory: MemoryConfig::default(),

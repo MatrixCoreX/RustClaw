@@ -23,6 +23,21 @@ pub(crate) struct SkillViews {
     pub(crate) planner_visible: Vec<String>,
 }
 
+/// Phase 1.5: per-(task, prompt-label) LLM 调用统计桶。
+///
+/// `count` = 该 label 下 [`crate::llm_gateway::run_with_fallback_with_prompt_source`]
+/// 入口被命中的次数（与全局预算的"逻辑调用次数"语义一致）。
+/// `elapsed_ms` = 这些调用的累计 wall-clock 耗时（成功/失败都计入）。
+///
+/// 用于在 `task_journal_summary.task_metrics.by_prompt` 暴露细分维度，
+/// 让"哪个 prompt 把单任务预算烧光了"一眼可见，作为后续 prompt-level
+/// 优化与告警的诊断基础。
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct LlmPromptBucket {
+    pub(crate) count: u64,
+    pub(crate) elapsed_ms: u64,
+}
+
 pub(crate) struct SkillViewsSnapshot {
     pub(crate) registry: Option<Arc<SkillsRegistry>>,
     pub(crate) skills_list: Arc<HashSet<String>>,
@@ -183,6 +198,14 @@ pub(crate) struct AppState {
     /// `MAX_LLM_TOTAL_MS_PER_TASK` 就直接短路返回错误，防止单个任务
     /// 无限扩张 LLM 预算（例如 plan_repair 抖动、fallback 雪崩）。
     pub(crate) llm_elapsed_per_task: Arc<Mutex<HashMap<String, u64>>>,
+    /// Phase 1.5: per-task 的 LLM 调用按 prompt label 分桶累计（次数 + 耗时）。
+    /// 与 `llm_calls_per_task` / `llm_elapsed_per_task` 是同一份数据的不同维度：
+    /// 总量用前两个表，而"哪个 prompt 把额度烧光了"用这个表。诊断用。
+    /// 外层 key = task_id；内层 key = label（如 `normalizer` / `plan` /
+    /// `plan_repair` / `chat` / `classifier_direct` / `observed` / `nl2cmd`...）。
+    /// 标签由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
+    pub(crate) llm_by_prompt_per_task:
+        Arc<Mutex<HashMap<String, HashMap<String, LlmPromptBucket>>>>,
     /// Phase 0.4: 缓存 `run_intent_normalizer` 产出的 `schedule_intent`，
     /// 让后续 `schedule.compile` 技能在 `text` 与归一化后的原始输入一致时
     /// 直接复用，不再重跑一次 `schedule_intent_prompt` LLM 调用。
@@ -240,10 +263,28 @@ impl AppState {
         self.skill_views_snapshot.read().unwrap().clone()
     }
 
+    /// 兼容入口：不带 label 的累计。新代码请优先调用 [`Self::note_task_llm_call_with_label`]
+    /// 把 `label` 也传进来，否则 `by_prompt` 维度会缺失。
+    #[allow(dead_code)]
     pub(crate) fn note_task_llm_call(&self, task_id: &str) {
-        let mut guard = self.llm_calls_per_task.lock().unwrap();
-        let counter = guard.entry(task_id.to_string()).or_insert(0);
-        *counter = counter.saturating_add(1);
+        self.note_task_llm_call_with_label(task_id, "unspecified");
+    }
+
+    /// Phase 1.5: 累计一次 LLM 调用，并按 prompt label 分桶记录。
+    /// `label` 由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
+    pub(crate) fn note_task_llm_call_with_label(&self, task_id: &str, label: &str) {
+        {
+            let mut guard = self.llm_calls_per_task.lock().unwrap();
+            let counter = guard.entry(task_id.to_string()).or_insert(0);
+            *counter = counter.saturating_add(1);
+        }
+        let mut guard = self.llm_by_prompt_per_task.lock().unwrap();
+        let bucket = guard
+            .entry(task_id.to_string())
+            .or_default()
+            .entry(label.to_string())
+            .or_default();
+        bucket.count = bucket.count.saturating_add(1);
     }
 
     pub(crate) fn task_llm_call_count(&self, task_id: &str) -> u64 {
@@ -256,10 +297,31 @@ impl AppState {
     }
 
     /// Phase 1.3: 追加一次 LLM 调用的耗时（成功/失败都记，保证预算真实反映压力）。
+    /// 兼容入口：不带 label。新代码请优先调用 [`Self::note_task_llm_elapsed_with_label`]。
+    #[allow(dead_code)]
     pub(crate) fn note_task_llm_elapsed(&self, task_id: &str, elapsed_ms: u64) {
-        let mut guard = self.llm_elapsed_per_task.lock().unwrap();
-        let counter = guard.entry(task_id.to_string()).or_insert(0);
-        *counter = counter.saturating_add(elapsed_ms);
+        self.note_task_llm_elapsed_with_label(task_id, "unspecified", elapsed_ms);
+    }
+
+    /// Phase 1.5: 按 prompt label 分桶记录耗时。会同时累加全局耗时表。
+    pub(crate) fn note_task_llm_elapsed_with_label(
+        &self,
+        task_id: &str,
+        label: &str,
+        elapsed_ms: u64,
+    ) {
+        {
+            let mut guard = self.llm_elapsed_per_task.lock().unwrap();
+            let counter = guard.entry(task_id.to_string()).or_insert(0);
+            *counter = counter.saturating_add(elapsed_ms);
+        }
+        let mut guard = self.llm_by_prompt_per_task.lock().unwrap();
+        let bucket = guard
+            .entry(task_id.to_string())
+            .or_default()
+            .entry(label.to_string())
+            .or_default();
+        bucket.elapsed_ms = bucket.elapsed_ms.saturating_add(elapsed_ms);
     }
 
     pub(crate) fn task_llm_elapsed_ms(&self, task_id: &str) -> u64 {
@@ -269,6 +331,17 @@ impl AppState {
             .get(task_id)
             .copied()
             .unwrap_or(0)
+    }
+
+    /// Phase 1.5: 取出 per-task 的 by-prompt 分桶快照。返回 owned map 避免锁外延。
+    /// 用于在 task journal 收口时调用 `record_llm_by_prompt` 写入 metrics。
+    pub(crate) fn task_llm_by_prompt(&self, task_id: &str) -> HashMap<String, LlmPromptBucket> {
+        self.llm_by_prompt_per_task
+            .lock()
+            .unwrap()
+            .get(task_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Phase 1.3: 在每次真正发起 LLM 调用前做预算检查。
@@ -295,6 +368,7 @@ impl AppState {
     pub(crate) fn clear_task_llm_call_count(&self, task_id: &str) {
         self.llm_calls_per_task.lock().unwrap().remove(task_id);
         self.llm_elapsed_per_task.lock().unwrap().remove(task_id);
+        self.llm_by_prompt_per_task.lock().unwrap().remove(task_id);
         self.task_schedule_intent_cache
             .lock()
             .unwrap()

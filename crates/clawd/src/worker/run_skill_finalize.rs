@@ -45,6 +45,7 @@ async fn finalize_run_skill_success(
     );
     journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
     journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
+    journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
     journal.record_used_evidence_ids_count(0);
     journal.record_context_bundle_summary(format!(
         "args={}",
@@ -138,6 +139,7 @@ async fn finalize_run_skill_failure(
     );
     journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
     journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
+    journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
     journal.record_used_evidence_ids_count(0);
     journal.record_context_bundle_summary(format!(
         "args={}",

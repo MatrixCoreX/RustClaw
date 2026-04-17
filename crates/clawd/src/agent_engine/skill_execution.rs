@@ -656,6 +656,7 @@ mod tests {
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
             llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
             llm_elapsed_per_task: Arc::new(Mutex::new(HashMap::new())),
+            llm_by_prompt_per_task: Arc::new(Mutex::new(HashMap::new())),
             task_schedule_intent_cache: Arc::new(Mutex::new(HashMap::new())),
             maintenance: MaintenanceConfig::default(),
             memory: MemoryConfig::default(),
