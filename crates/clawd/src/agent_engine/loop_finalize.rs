@@ -102,7 +102,7 @@ fn resolve_file_token_from_auto_locator_answer(
     let trimmed = answer.trim();
     if trimmed.is_empty()
         || trimmed.contains('\n')
-        || crate::finalizer::parse_delivery_file_token(trimmed).is_some()
+        || crate::finalize::parse_delivery_file_token(trimmed).is_some()
     {
         return None;
     }
@@ -404,8 +404,8 @@ fn direct_scalar_observed_answer(
                 )
             })?
     };
-    if crate::finalizer::looks_like_planner_artifact(&answer)
-        || crate::finalizer::looks_like_internal_trace_artifact(&answer)
+    if crate::finalize::looks_like_planner_artifact(&answer)
+        || crate::finalize::looks_like_internal_trace_artifact(&answer)
     {
         return None;
     }
@@ -413,7 +413,7 @@ fn direct_scalar_observed_answer(
         answer,
         crate::task_journal::TaskJournalFinalizerSummary {
             stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
             contract_ok: true,
             ..Default::default()
         },
@@ -608,7 +608,7 @@ fn can_attach_execution_recipe_closeout(
 ) -> bool {
     let trimmed = final_text.trim();
     if trimmed.is_empty()
-        || crate::finalizer::parse_delivery_token(trimmed).is_some()
+        || crate::finalize::parse_delivery_token(trimmed).is_some()
         || looks_like_structured_machine_output(trimmed)
         || looks_like_raw_command_snapshot(trimmed)
     {
@@ -660,7 +660,7 @@ fn ensure_requested_success_marker_visible(
 
     if let Some(last) = delivery_messages.last_mut() {
         let trimmed = last.trim();
-        if !trimmed.is_empty() && crate::finalizer::parse_delivery_token(trimmed).is_none() {
+        if !trimmed.is_empty() && crate::finalize::parse_delivery_token(trimmed).is_none() {
             *last = format!("{trimmed}\n\n{marker}");
             return;
         }
@@ -736,7 +736,7 @@ fn direct_structured_observed_answer(
         answer,
         crate::task_journal::TaskJournalFinalizerSummary {
             stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
             contract_ok: true,
             used_evidence_ids_count: 1,
             ..Default::default()
@@ -765,8 +765,8 @@ fn direct_non_builtin_skill_raw_answer(
         .map(str::trim)
         .filter(|text| !text.is_empty())?
         .to_string();
-    if crate::finalizer::looks_like_planner_artifact(&answer)
-        || crate::finalizer::looks_like_internal_trace_artifact(&answer)
+    if crate::finalize::looks_like_planner_artifact(&answer)
+        || crate::finalize::looks_like_internal_trace_artifact(&answer)
         || (looks_like_structured_machine_output(&answer)
             && !matches!(
                 route.map(|route| route.output_contract.semantic_kind),
@@ -779,7 +779,7 @@ fn direct_non_builtin_skill_raw_answer(
         answer,
         crate::task_journal::TaskJournalFinalizerSummary {
             stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
             contract_ok: true,
             used_evidence_ids_count: 1,
             ..Default::default()
@@ -807,8 +807,8 @@ async fn direct_publishable_observed_answer(
     let observed = super::observed_output::extract_latest_generic_successful_output(loop_state)?;
     let answer = observed.body.trim().to_string();
     if answer.is_empty()
-        || crate::finalizer::looks_like_planner_artifact(&answer)
-        || crate::finalizer::looks_like_internal_trace_artifact(&answer)
+        || crate::finalize::looks_like_planner_artifact(&answer)
+        || crate::finalize::looks_like_internal_trace_artifact(&answer)
         || looks_like_structured_machine_output(&answer)
     {
         return None;
@@ -826,7 +826,7 @@ async fn direct_publishable_observed_answer(
         answer,
         crate::task_journal::TaskJournalFinalizerSummary {
             stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
             contract_ok: true,
             used_evidence_ids_count: 1,
             ..Default::default()
@@ -901,7 +901,7 @@ fn finalizer_requires_clarify(
         }
         return !matches!(
             summary.and_then(|summary| summary.disposition),
-            Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
     }
     false
@@ -923,7 +923,7 @@ fn build_finalizer_clarify_reason(
     }
     if let Some(disposition) = summary
         .disposition
-        .map(crate::finalizer::FinalizerDisposition::as_str)
+        .map(crate::finalize::FinalizerDisposition::as_str)
         .filter(|v| !v.trim().is_empty())
     {
         parts.push(format!("disposition={disposition}"));
@@ -1003,7 +1003,7 @@ fn build_loop_journal(
     journal
 }
 
-pub(super) async fn finalize_loop_reply(
+pub(crate) async fn finalize_loop_reply(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
@@ -1071,7 +1071,7 @@ pub(super) async fn finalize_loop_reply(
         agent_run_context,
     );
     let mut finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary> = None;
-    let should_try_observed_scalar_fallback = crate::finalizer::should_attempt_observed_fallback(
+    let should_try_observed_scalar_fallback = crate::finalize::should_attempt_observed_fallback(
         loop_state.has_tool_or_skill_output,
         loop_state.has_recoverable_failure_context,
     ) && loop_state.delivery_messages.is_empty();
@@ -1119,7 +1119,7 @@ pub(super) async fn finalize_loop_reply(
 
     if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) =
-            super::observed_output::synthesize_answer_from_observed_output(
+            crate::finalize::synthesize_answer_from_observed_output(
                 state,
                 task,
                 user_text,
@@ -1130,7 +1130,7 @@ pub(super) async fn finalize_loop_reply(
         {
             if matches!(
                 summary.disposition,
-                Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+                Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
             ) && !answer.trim().is_empty()
             {
                 finalizer_summary = Some(summary);
@@ -1217,7 +1217,7 @@ pub(super) async fn finalize_loop_reply(
     }
 
     let (mut delivery_deduped, _, used_last_respond) =
-        crate::finalizer::build_final_delivery_with_priority(
+        crate::finalize::build_final_delivery_with_priority(
             &loop_state.delivery_messages,
             loop_state.last_user_visible_respond.as_ref(),
         );
@@ -1477,7 +1477,7 @@ mod tests {
     }
 
     fn finalizer_summary(
-        disposition: crate::finalizer::FinalizerDisposition,
+        disposition: crate::finalize::FinalizerDisposition,
     ) -> crate::task_journal::TaskJournalFinalizerSummary {
         crate::task_journal::TaskJournalFinalizerSummary {
             disposition: Some(disposition),
@@ -1565,7 +1565,7 @@ mod tests {
         assert!(!finalizer_requires_clarify(None, true, true));
 
         let allow_fallback =
-            finalizer_summary(crate::finalizer::FinalizerDisposition::AllowFallback);
+            finalizer_summary(crate::finalize::FinalizerDisposition::AllowFallback);
         assert!(finalizer_requires_clarify(
             Some(&allow_fallback),
             true,
@@ -1578,7 +1578,7 @@ mod tests {
         ));
 
         let qualified =
-            finalizer_summary(crate::finalizer::FinalizerDisposition::QualifiedCompletion);
+            finalizer_summary(crate::finalize::FinalizerDisposition::QualifiedCompletion);
         assert!(!finalizer_requires_clarify(Some(&qualified), true, false));
         assert!(!finalizer_requires_clarify(None, false, false));
     }
@@ -2015,7 +2015,7 @@ mod tests {
         assert_eq!(answer, "name 字段不存在");
         assert_eq!(
             summary.disposition,
-            Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
     }
 
@@ -2047,7 +2047,7 @@ mod tests {
         assert_eq!(answer, "有。示例：.git, .env");
         assert_eq!(
             summary.disposition,
-            Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
     }
 
@@ -2114,7 +2114,7 @@ mod tests {
         assert_eq!(answer, "有，路径：/tmp/rustclaw-workspace/rustclaw.service");
         assert_eq!(
             summary.disposition,
-            Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
     }
 
@@ -2151,7 +2151,7 @@ mod tests {
         );
         assert_eq!(
             summary.disposition,
-            Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
     }
 
@@ -2399,7 +2399,7 @@ mod tests {
         assert_eq!(answer, "有，路径：rustclaw.service");
         assert_eq!(
             summary.disposition,
-            Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion)
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
     }
 

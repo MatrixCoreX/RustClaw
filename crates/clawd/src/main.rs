@@ -32,6 +32,7 @@ mod delivery_utils;
 mod execution_adapters;
 mod execution_recipe;
 mod executor;
+mod finalize;
 mod finalizer;
 mod http;
 mod intent_router;
@@ -953,7 +954,7 @@ async fn classify_direct(
         "direct_classifier_request task_id={} source={} user_id={} chat_id={}",
         task.task_id, source, task.user_id, task.chat_id
     );
-    let result = worker::run_classifier_direct_reply(&state, &task, text).await;
+    let result = finalize::run_classifier_direct_reply(&state, &task, text).await;
     state.clear_task_llm_call_count(&task.task_id);
     match result {
         Ok(reply) => api_ok(DirectClassifyResponse {

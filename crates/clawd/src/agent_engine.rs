@@ -23,8 +23,13 @@ use self::arg_resolver::{
 use self::dispatch_support::{classify_skill_failure_recovery, dispatch_round_action};
 use self::execution_loop::execute_actions_once;
 use self::loop_control::run_agent_with_loop;
-use self::loop_finalize::finalize_loop_reply;
 use self::prepare_round::{prepare_round_actions, push_round_trace};
+
+// Phase 3.3 Stage 1：暴露给 `crate::finalize` facade 使用。
+// 同时也满足 agent_engine 内部对 `finalize_loop_reply` 的引用（原本是 `use self::...`）。
+// 调用方应优先使用 `crate::finalize::*`，本路径仅供 facade 与 agent_engine 内部消费。
+pub(crate) use self::loop_finalize::finalize_loop_reply;
+pub(crate) use self::observed_output::synthesize_answer_from_observed_output;
 use self::skill_execution::execute_prepared_skill_action;
 use self::support::{
     action_fingerprint, append_delivery_message, append_progress_hint,
@@ -199,8 +204,11 @@ fn build_single_plan_prompt(
 /// Progress: short hints only (e.g. "Step 1/3", "Skill X completed"). For "in progress" UI. Not final content.
 /// Delivery: final user-facing content only. Only respond and fallback finalizer append here. Channel consumes this.
 /// Trace: step output / subtask_results / history_compact for logs and resume; not sent as final delivery.
+// Phase 3.3 Stage 1：LoopState 升 pub(crate) 以便 finalize facade 暴露
+// `finalize_loop_reply` / `synthesize_answer_from_observed_output` 时类型可达。
+// 字段保持原始私有性，外部不允许直接构造或读写。
 #[derive(Debug, Default)]
-struct LoopState {
+pub(crate) struct LoopState {
     round_no: usize,
     max_rounds: usize,
     tool_calls_total: usize,
@@ -343,8 +351,8 @@ fn register_step_output(
         key_prefix, global_step, round_step
     );
     let value = trimmed.to_string();
-    let output_kind = crate::finalizer::classify_observed_output_kind(trimmed);
-    let content_status = crate::finalizer::classify_observed_content_status(trimmed);
+    let output_kind = crate::finalize::classify_observed_output_kind(trimmed);
+    let content_status = crate::finalize::classify_observed_content_status(trimmed);
     loop_state.last_output = Some(value.clone());
     loop_state
         .output_vars
@@ -446,7 +454,7 @@ fn register_file_path_output(
         .insert(format!("{key_prefix}.path"), value);
     loop_state.output_vars.insert(
         "last_file_kind".to_string(),
-        crate::finalizer::infer_file_target_kind(trimmed)
+        crate::finalize::infer_file_target_kind(trimmed)
             .as_str()
             .to_string(),
     );
@@ -462,7 +470,7 @@ fn register_failed_step_output(
 ) {
     loop_state.has_recoverable_failure_context = true;
     let trimmed = err.trim();
-    let failed_status = crate::finalizer::ObservedContentStatus::Failed
+    let failed_status = crate::finalize::ObservedContentStatus::Failed
         .as_str()
         .to_string();
     if !trimmed.is_empty() {
@@ -472,13 +480,13 @@ fn register_failed_step_output(
             .insert("last_output".to_string(), trimmed.to_string());
         loop_state.output_vars.insert(
             "last_output_kind".to_string(),
-            crate::finalizer::ObservedOutputKind::Error
+            crate::finalize::ObservedOutputKind::Error
                 .as_str()
                 .to_string(),
         );
         loop_state.output_vars.insert(
             "last_content_status".to_string(),
-            crate::finalizer::ObservedContentStatus::Failed
+            crate::finalize::ObservedContentStatus::Failed
                 .as_str()
                 .to_string(),
         );
@@ -786,7 +794,7 @@ mod tests {
         let delivery = vec!["early answer".to_string()];
         let last_respond = "final answer".to_string();
         let (deduped, final_text, used) =
-            crate::finalizer::build_final_delivery_with_priority(&delivery, Some(&last_respond));
+            crate::finalize::build_final_delivery_with_priority(&delivery, Some(&last_respond));
         assert!(used);
         assert_eq!(deduped.len(), 2);
         assert_eq!(deduped[0], "early answer");
@@ -799,7 +807,7 @@ mod tests {
         let delivery = vec!["same text".to_string()];
         let last_respond = "same text".to_string();
         let (deduped, final_text, used) =
-            crate::finalizer::build_final_delivery_with_priority(&delivery, Some(&last_respond));
+            crate::finalize::build_final_delivery_with_priority(&delivery, Some(&last_respond));
         assert!(used);
         assert_eq!(deduped.len(), 1);
         assert_eq!(deduped[0], "same text");
@@ -810,7 +818,7 @@ mod tests {
     fn test_final_delivery_no_last_respond_uses_delivery() {
         let delivery = vec!["only delivery".to_string()];
         let (deduped, final_text, used) =
-            crate::finalizer::build_final_delivery_with_priority(&delivery, None);
+            crate::finalize::build_final_delivery_with_priority(&delivery, None);
         assert!(!used);
         assert_eq!(deduped.len(), 1);
         assert_eq!(final_text, "only delivery");
@@ -820,7 +828,7 @@ mod tests {
     fn test_final_delivery_both_empty() {
         let delivery: Vec<String> = vec![];
         let (deduped, final_text, used) =
-            crate::finalizer::build_final_delivery_with_priority(&delivery, None);
+            crate::finalize::build_final_delivery_with_priority(&delivery, None);
         assert!(!used);
         assert!(deduped.is_empty());
         assert!(final_text.is_empty());
@@ -830,7 +838,7 @@ mod tests {
     fn test_final_delivery_strips_subtask_prefix_from_user_visible_messages() {
         let delivery = vec!["subtask#1 skill(run_cmd): success\ntestuser".to_string()];
         let (deduped, final_text, used) =
-            crate::finalizer::build_final_delivery_with_priority(&delivery, None);
+            crate::finalize::build_final_delivery_with_priority(&delivery, None);
         assert!(!used);
         assert_eq!(deduped, vec!["testuser".to_string()]);
         assert_eq!(final_text, "testuser");
@@ -839,7 +847,7 @@ mod tests {
     #[test]
     fn test_normalize_user_visible_text_strips_inline_subtask_prefix() {
         assert_eq!(
-            crate::finalizer::normalize_user_visible_text(
+            crate::finalize::normalize_user_visible_text(
                 "subtask#1 skill(run_cmd): success testuser"
             ),
             "testuser"
@@ -850,7 +858,7 @@ mod tests {
     fn test_final_delivery_preserves_failed_message_body() {
         let delivery = vec!["subtask#1 skill(run_cmd): failed\npermission denied".to_string()];
         let (deduped, final_text, used) =
-            crate::finalizer::build_final_delivery_with_priority(&delivery, None);
+            crate::finalize::build_final_delivery_with_priority(&delivery, None);
         assert!(!used);
         assert_eq!(deduped, vec!["permission denied".to_string()]);
         assert_eq!(final_text, "permission denied");
@@ -859,7 +867,7 @@ mod tests {
     #[test]
     fn test_normalize_user_visible_text_strips_inline_failed_prefix() {
         assert_eq!(
-            crate::finalizer::normalize_user_visible_text(
+            crate::finalize::normalize_user_visible_text(
                 "subtask#1 skill(run_cmd): failed permission denied"
             ),
             "permission denied"
@@ -969,25 +977,25 @@ mod tests {
     fn test_finalizer_schema_answer_parse_ok() {
         let raw = r#"{"answer":"hello","completion_ok":true,"grounded_ok":true,"format_ok":true,"needs_clarify":false,"confidence":0.9,"used_evidence_ids":["E1"]}"#;
         let (answer, schema) =
-            crate::finalizer::finalizer_schema_answer(raw).expect("schema parse");
+            crate::finalize::finalizer_schema_answer(raw).expect("schema parse");
         assert_eq!(answer, "hello");
-        assert!(crate::finalizer::finalizer_contract_ok(&schema));
+        assert!(crate::finalize::finalizer_contract_ok(&schema));
     }
 
     #[test]
     fn test_finalizer_schema_answer_parse_fail_non_json() {
-        assert!(crate::finalizer::finalizer_schema_answer("plain text").is_none());
+        assert!(crate::finalize::finalizer_schema_answer("plain text").is_none());
     }
 
     #[test]
     fn test_finalizer_contract_not_ok_when_grounding_false() {
         let raw = r#"{"answer":"hello","completion_ok":true,"grounded_ok":false,"format_ok":true}"#;
         let (_answer, schema) =
-            crate::finalizer::finalizer_schema_answer(raw).expect("schema parse");
-        assert!(!crate::finalizer::finalizer_contract_ok(&schema));
+            crate::finalize::finalizer_schema_answer(raw).expect("schema parse");
+        assert!(!crate::finalize::finalizer_contract_ok(&schema));
         assert!(matches!(
-            crate::finalizer::finalizer_contract_disposition(&schema),
-            crate::finalizer::FinalizerDisposition::MustFail
+            crate::finalize::finalizer_contract_disposition(&schema),
+            crate::finalize::FinalizerDisposition::MustFail
         ));
     }
 
@@ -995,10 +1003,10 @@ mod tests {
     fn test_finalizer_contract_disposition_allows_fallback_on_format_only_failure() {
         let raw = r#"{"answer":"hello","completion_ok":true,"grounded_ok":true,"format_ok":false}"#;
         let (_answer, schema) =
-            crate::finalizer::finalizer_schema_answer(raw).expect("schema parse");
+            crate::finalize::finalizer_schema_answer(raw).expect("schema parse");
         assert!(matches!(
-            crate::finalizer::finalizer_contract_disposition(&schema),
-            crate::finalizer::FinalizerDisposition::AllowFallback
+            crate::finalize::finalizer_contract_disposition(&schema),
+            crate::finalize::FinalizerDisposition::AllowFallback
         ));
     }
 
@@ -1006,85 +1014,85 @@ mod tests {
     fn test_finalizer_contract_disposition_must_fail_on_needs_clarify() {
         let raw = r#"{"answer":"need info","completion_ok":false,"grounded_ok":true,"format_ok":true,"needs_clarify":true}"#;
         let (_answer, schema) =
-            crate::finalizer::finalizer_schema_answer(raw).expect("schema parse");
+            crate::finalize::finalizer_schema_answer(raw).expect("schema parse");
         assert!(matches!(
-            crate::finalizer::finalizer_contract_disposition(&schema),
-            crate::finalizer::FinalizerDisposition::MustFail
+            crate::finalize::finalizer_contract_disposition(&schema),
+            crate::finalize::FinalizerDisposition::MustFail
         ));
     }
 
     #[test]
     fn test_internal_trace_artifact_detected() {
-        assert!(crate::finalizer::looks_like_internal_trace_artifact(
+        assert!(crate::finalize::looks_like_internal_trace_artifact(
             "subtask#1 skill(run_cmd): success"
         ));
     }
 
     #[test]
     fn test_structured_blob_detected() {
-        assert!(crate::finalizer::looks_like_structured_blob(
+        assert!(crate::finalize::looks_like_structured_blob(
             "{\"answer\":\"x\"}"
         ));
-        assert!(crate::finalizer::looks_like_structured_blob("[1,2,3]"));
-        assert!(!crate::finalizer::looks_like_structured_blob("plain text"));
+        assert!(crate::finalize::looks_like_structured_blob("[1,2,3]"));
+        assert!(!crate::finalize::looks_like_structured_blob("plain text"));
     }
 
     #[test]
     fn test_infer_file_target_kind_classifies_extension_backed_files() {
         assert_eq!(
-            crate::finalizer::infer_file_target_kind("/tmp/app.log"),
-            crate::finalizer::FileTargetKind::LogFile
+            crate::finalize::infer_file_target_kind("/tmp/app.log"),
+            crate::finalize::FileTargetKind::LogFile
         );
         assert_eq!(
-            crate::finalizer::infer_file_target_kind("/tmp/data.json"),
-            crate::finalizer::FileTargetKind::JsonFile
+            crate::finalize::infer_file_target_kind("/tmp/data.json"),
+            crate::finalize::FileTargetKind::JsonFile
         );
         assert_eq!(
-            crate::finalizer::infer_file_target_kind("/tmp/archive.tar.gz"),
-            crate::finalizer::FileTargetKind::ArchiveFile
+            crate::finalize::infer_file_target_kind("/tmp/archive.tar.gz"),
+            crate::finalize::FileTargetKind::ArchiveFile
         );
     }
 
     #[test]
     fn test_infer_file_target_kind_distinguishes_directory_from_plain_file() {
         assert_eq!(
-            crate::finalizer::infer_file_target_kind("/tmp/output"),
-            crate::finalizer::FileTargetKind::Directory
+            crate::finalize::infer_file_target_kind("/tmp/output"),
+            crate::finalize::FileTargetKind::Directory
         );
         assert_eq!(
-            crate::finalizer::infer_file_target_kind("/tmp/output.txt"),
-            crate::finalizer::FileTargetKind::File
+            crate::finalize::infer_file_target_kind("/tmp/output.txt"),
+            crate::finalize::FileTargetKind::File
         );
     }
 
     #[test]
     fn test_parse_delivery_token_normalizes_supported_prefixes() {
         let (kind, payload) =
-            crate::finalizer::parse_delivery_token(" IMAGE_FILE:/tmp/demo.png ").expect("token");
-        assert_eq!(kind, crate::finalizer::DeliveryTokenKind::ImageFile);
+            crate::finalize::parse_delivery_token(" IMAGE_FILE:/tmp/demo.png ").expect("token");
+        assert_eq!(kind, crate::finalize::DeliveryTokenKind::ImageFile);
         assert_eq!(payload.trim(), "/tmp/demo.png");
         assert_eq!(kind.canonical_prefix(), "FILE:");
 
         let (kind, payload) =
-            crate::finalizer::parse_delivery_token("MEDIA_URL:https://example.com/a.mp4")
+            crate::finalize::parse_delivery_token("MEDIA_URL:https://example.com/a.mp4")
                 .expect("token");
-        assert_eq!(kind, crate::finalizer::DeliveryTokenKind::MediaUrl);
+        assert_eq!(kind, crate::finalize::DeliveryTokenKind::MediaUrl);
         assert_eq!(payload.trim(), "https://example.com/a.mp4");
     }
 
     #[test]
     fn test_classify_planner_artifact_detects_tool_call_and_action_json() {
         assert!(matches!(
-            crate::finalizer::classify_planner_artifact("[TOOL_CALL]run_cmd[/TOOL_CALL]"),
-            Some(crate::finalizer::PlannerArtifactKind::ToolCallTag)
+            crate::finalize::classify_planner_artifact("[TOOL_CALL]run_cmd[/TOOL_CALL]"),
+            Some(crate::finalize::PlannerArtifactKind::ToolCallTag)
         ));
         assert!(matches!(
-            crate::finalizer::classify_planner_artifact(
+            crate::finalize::classify_planner_artifact(
                 r#"{"type":"call_tool","tool":"read_file"}"#
             ),
             Some(
-                crate::finalizer::PlannerArtifactKind::ActionObject
-                    | crate::finalizer::PlannerArtifactKind::PlannerObject
+                crate::finalize::PlannerArtifactKind::ActionObject
+                    | crate::finalize::PlannerArtifactKind::PlannerObject
             )
         ));
     }
@@ -1093,7 +1101,7 @@ mod tests {
     fn test_extract_single_explicit_path_from_request_ok() {
         let text = "先读 /home/guagua/test/README.md 开头，再用一句话总结";
         assert_eq!(
-            crate::finalizer::extract_single_explicit_path_from_request(text).as_deref(),
+            crate::finalize::extract_single_explicit_path_from_request(text).as_deref(),
             Some("/home/guagua/test/README.md")
         );
     }
@@ -1102,7 +1110,7 @@ mod tests {
     fn test_observed_quotes_grounded_requires_exact_match() {
         let observed =
             "# Test Workspace\nThis directory is reserved for NL regression test artifacts.";
-        let schema = crate::finalizer::FinalizerSchemaOut {
+        let schema = crate::finalize::FinalizerSchemaOut {
             answer: "summary".to_string(),
             completion_ok: true,
             grounded_ok: true,
@@ -1112,27 +1120,27 @@ mod tests {
             used_evidence_ids: vec!["E1".to_string()],
             evidence_quotes: vec!["NL regression test artifacts".to_string()],
         };
-        assert!(crate::finalizer::observed_quotes_grounded(
+        assert!(crate::finalize::observed_quotes_grounded(
             &schema, observed
         ));
 
-        let bad = crate::finalizer::FinalizerSchemaOut {
+        let bad = crate::finalize::FinalizerSchemaOut {
             evidence_quotes: vec!["high-performance distributed scheduler".to_string()],
             ..schema
         };
-        assert!(!crate::finalizer::observed_quotes_grounded(&bad, observed));
+        assert!(!crate::finalize::observed_quotes_grounded(&bad, observed));
     }
 
     #[test]
     fn test_observed_read_path_matches_request() {
         let ws = Path::new("/tmp/workspace");
         let user_text = "Read /home/guagua/test/README.md and summarize.";
-        assert!(crate::finalizer::observed_read_path_matches_request(
+        assert!(crate::finalize::observed_read_path_matches_request(
             ws,
             user_text,
             Some("/home/guagua/test/README.md")
         ));
-        assert!(!crate::finalizer::observed_read_path_matches_request(
+        assert!(!crate::finalize::observed_read_path_matches_request(
             ws,
             user_text,
             Some("/home/guagua/git_upload/README.md")

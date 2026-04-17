@@ -725,7 +725,7 @@ mod tests {
     fn ensure_journal_task_metrics_preserves_finalizer_evidence_count() {
         let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
         journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
-            disposition: Some(crate::finalizer::FinalizerDisposition::QualifiedCompletion),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
             used_evidence_ids_count: 3,
             ..Default::default()
         });

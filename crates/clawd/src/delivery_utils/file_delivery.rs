@@ -196,8 +196,8 @@ pub(super) fn enforce_file_delivery_locator_contract(
                     .map(str::trim)
                     .filter(|line| {
                         matches!(
-                            crate::finalizer::parse_delivery_token(line),
-                            Some((crate::finalizer::DeliveryTokenKind::File, _))
+                            crate::finalize::parse_delivery_token(line),
+                            Some((crate::finalize::DeliveryTokenKind::File, _))
                         )
                     })
                     .map(|line| line.to_string())
@@ -250,12 +250,12 @@ pub(super) fn enforce_file_delivery_locator_contract(
             lines.extend(paths.into_iter().map(|path| path.display().to_string()));
             *normalized_text = lines.join("\n");
             normalized_messages
-                .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
+                .retain(|msg| crate::finalize::parse_delivery_file_token(msg).is_none());
         }
         FileDeliveryTargetResolution::UserMessage(msg) => {
             *normalized_text = localize_delivery_message_for_request(state, msg, user_request);
             normalized_messages
-                .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
+                .retain(|msg| crate::finalize::parse_delivery_file_token(msg).is_none());
         }
     }
 }

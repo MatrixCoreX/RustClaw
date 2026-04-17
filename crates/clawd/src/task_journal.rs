@@ -102,7 +102,7 @@ pub(crate) struct TaskJournalStepTrace {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalFinalizerSummary {
     pub(crate) stage: Option<TaskJournalFinalizerStage>,
-    pub(crate) disposition: Option<crate::finalizer::FinalizerDisposition>,
+    pub(crate) disposition: Option<crate::finalize::FinalizerDisposition>,
     pub(crate) fallback: Option<TaskJournalFinalizerFallback>,
     pub(crate) parsed: bool,
     pub(crate) contract_ok: bool,
@@ -146,7 +146,7 @@ fn verify_trace_json(verify: &TaskJournalVerifySummary) -> Value {
 fn finalizer_summary_json(summary: &TaskJournalFinalizerSummary) -> Value {
     json!({
         "stage": summary.stage.map(TaskJournalFinalizerStage::as_str),
-        "disposition": summary.disposition.map(crate::finalizer::FinalizerDisposition::as_str),
+        "disposition": summary.disposition.map(crate::finalize::FinalizerDisposition::as_str),
         "fallback": summary.fallback.map(TaskJournalFinalizerFallback::as_str),
         "parsed": summary.parsed,
         "contract_ok": summary.contract_ok,
@@ -616,7 +616,7 @@ mod tests {
         });
         journal.record_finalizer_summary(TaskJournalFinalizerSummary {
             stage: Some(TaskJournalFinalizerStage::General),
-            disposition: Some(crate::finalizer::FinalizerDisposition::AllowFallback),
+            disposition: Some(crate::finalize::FinalizerDisposition::AllowFallback),
             fallback: Some(TaskJournalFinalizerFallback::RawText),
             parsed: false,
             contract_ok: false,

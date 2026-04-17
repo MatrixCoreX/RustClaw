@@ -180,7 +180,7 @@ fn is_publishable_raw_deterministic_guard(s: &str) -> bool {
     if t.is_empty() || t.len() <= 2 {
         return false;
     }
-    if crate::finalizer::looks_like_planner_artifact(t) {
+    if crate::finalize::looks_like_planner_artifact(t) {
         return false;
     }
     if t.chars()

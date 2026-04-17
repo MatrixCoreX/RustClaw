@@ -25,8 +25,8 @@ fn looks_like_delivery_locator_literal(text: &str, locator_hint: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty()
         || trimmed.contains('\n')
-        || crate::finalizer::looks_like_planner_artifact(trimmed)
-        || crate::finalizer::parse_delivery_file_token(trimmed).is_some()
+        || crate::finalize::looks_like_planner_artifact(trimmed)
+        || crate::finalize::parse_delivery_file_token(trimmed).is_some()
     {
         return false;
     }
@@ -164,7 +164,7 @@ pub(super) fn enforce_output_contract(
                     *normalized_text =
                         localize_delivery_message_for_request(state, msg, user_request);
                     normalized_messages
-                        .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
+                        .retain(|msg| crate::finalize::parse_delivery_file_token(msg).is_none());
                 }
                 Some(FileDeliveryTargetResolution::Candidates(paths)) => {
                     let mut lines = Vec::with_capacity(paths.len() + 1);
@@ -177,7 +177,7 @@ pub(super) fn enforce_output_contract(
                     let text = lines.join("\n");
                     *normalized_text = text.clone();
                     normalized_messages
-                        .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
+                        .retain(|msg| crate::finalize::parse_delivery_file_token(msg).is_none());
                     normalized_messages.clear();
                     normalized_messages.push(text);
                 }

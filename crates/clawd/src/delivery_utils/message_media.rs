@@ -12,14 +12,14 @@ pub(crate) fn normalize_delivery_message(state: &AppState, text: &str) -> Option
         return None;
     }
     let trimmed = normalized.trim();
-    if crate::finalizer::looks_like_tool_call_artifact(trimmed) {
+    if crate::finalize::looks_like_tool_call_artifact(trimmed) {
         return None;
     }
-    if let Some((_kind, path)) = crate::finalizer::parse_delivery_file_token(trimmed) {
+    if let Some((_kind, path)) = crate::finalize::parse_delivery_file_token(trimmed) {
         let resolved = resolve_existing_delivery_path(state, path)?;
         return Some(format!("FILE:{}", resolved.display()));
     }
-    if let Some((kind, url)) = crate::finalizer::parse_delivery_token(trimmed) {
+    if let Some((kind, url)) = crate::finalize::parse_delivery_token(trimmed) {
         if kind.is_file_path() {
             return None;
         }
@@ -138,7 +138,7 @@ pub(crate) fn collect_recent_image_candidates(
 }
 
 pub(crate) fn extract_file_path_from_delivery_token(token: &str) -> Option<String> {
-    crate::finalizer::parse_delivery_file_token(token)
+    crate::finalize::parse_delivery_file_token(token)
         .map(|(_kind, path)| trim_path_token(path))
         .filter(|s| !s.is_empty())
 }
@@ -149,8 +149,8 @@ fn extract_image_reference_from_delivery_token(token: &str) -> Option<String> {
             return Some(path);
         }
     }
-    match crate::finalizer::parse_delivery_token(token) {
-        Some((crate::finalizer::DeliveryTokenKind::ImageUrl, url)) => {
+    match crate::finalize::parse_delivery_token(token) {
+        Some((crate::finalize::DeliveryTokenKind::ImageUrl, url)) => {
             let url = trim_path_token(url);
             is_remote_image_url(&url).then_some(url)
         }
