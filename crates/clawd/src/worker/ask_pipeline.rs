@@ -368,6 +368,14 @@ pub(super) async fn execute_ask_dispatch(
 ) -> Result<Option<Result<crate::AskReply, String>>> {
     let execution_user_request = execution_user_request(prompt, resolved_prompt_for_execution);
     if route_result.ask_mode.is_clarify_only() {
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Routing),
+            crate::AskState::Clarifying,
+            "ask_mode_is_clarify_only",
+            None,
+        );
         let suppress_recent_execution_context = should_suppress_recent_execution_in_clarify_context(
             prompt,
             route_result,
@@ -421,6 +429,14 @@ pub(super) async fn execute_ask_dispatch(
         return Ok(Some(Ok(crate::AskReply::non_llm(clarify))));
     }
     if ask_mode.is_resume_discussion() {
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Routing),
+            crate::AskState::ResumeDiscussing,
+            "ask_mode_resume_discussion",
+            None,
+        );
         let resume_prompt_source = crate::resolve_prompt_rel_path_for_vendor(
             &state.skill_rt.workspace_root,
             &crate::active_prompt_vendor_name(state),
@@ -444,6 +460,14 @@ pub(super) async fn execute_ask_dispatch(
         return Ok(Some(reply));
     }
     if ask_mode.resume_execution() {
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Routing),
+            crate::AskState::ResumeExecuting,
+            "ask_mode_resume_execution",
+            None,
+        );
         return Ok(Some(
             crate::agent_engine::run_agent_with_tools(
                 state,
@@ -456,6 +480,14 @@ pub(super) async fn execute_ask_dispatch(
         ));
     }
     if should_route_schedule_direct {
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Routing),
+            crate::AskState::ScheduleDirect,
+            "schedule_direct_route",
+            None,
+        );
         if super::try_finalize_schedule_direct_success(
             state,
             task,
@@ -472,11 +504,33 @@ pub(super) async fn execute_ask_dispatch(
             && !ask_mode.is_resume_discussion()
             && should_allow_classifier_direct(route_result)
         {
+            crate::log_ask_transition(
+                state,
+                &task.task_id,
+                Some(crate::AskState::Routing),
+                crate::AskState::Chatting,
+                "classifier_direct_in_schedule_branch",
+                None,
+            );
             return Ok(Some(
                 super::run_classifier_direct_reply(state, task, resolved_prompt_for_execution)
                     .await,
             ));
         }
+        let routed_to_act = route_result.ask_mode.is_act();
+        let target_state = if routed_to_act {
+            crate::AskState::Executing
+        } else {
+            crate::AskState::Chatting
+        };
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Routing),
+            target_state,
+            "execute_ask_routed_in_schedule_branch",
+            None,
+        );
         return Ok(Some(
             crate::execute_ask_routed(
                 state,
@@ -494,10 +548,36 @@ pub(super) async fn execute_ask_dispatch(
         ));
     }
     if ask_mode.is_classifier_direct() && should_allow_classifier_direct(route_result) {
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Routing),
+            crate::AskState::Chatting,
+            "classifier_direct",
+            None,
+        );
         return Ok(Some(
             super::run_classifier_direct_reply(state, task, resolved_prompt_for_execution).await,
         ));
     }
+    let routed_to_act = route_result.ask_mode.is_act();
+    let target_state = if routed_to_act {
+        crate::AskState::Executing
+    } else {
+        crate::AskState::Chatting
+    };
+    crate::log_ask_transition(
+        state,
+        &task.task_id,
+        Some(crate::AskState::Routing),
+        target_state,
+        if routed_to_act {
+            "execute_ask_routed_act"
+        } else {
+            "execute_ask_routed_chat"
+        },
+        None,
+    );
     Ok(Some(
         crate::execute_ask_routed(
             state,

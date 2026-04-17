@@ -1122,6 +1122,10 @@ impl Default for ImageSkillConfig {
 pub struct RoutingConfig {
     #[serde(default)]
     pub debug_log_prompt: bool,
+    /// §3.1: 是否打开 ask 状态机 transition 日志（`[ask_state]`）。
+    /// 默认开（生命周期可观测性建议常驻）；如果嫌噪音可关。
+    #[serde(default = "default_routing_debug_log_ask_state")]
+    pub debug_log_ask_state: bool,
     #[serde(default = "default_routing_default_locator_search_dir")]
     pub default_locator_search_dir: String,
     #[serde(default = "default_routing_locator_scan_max_depth")]
@@ -1130,10 +1134,15 @@ pub struct RoutingConfig {
     pub locator_scan_max_files: usize,
 }
 
+fn default_routing_debug_log_ask_state() -> bool {
+    true
+}
+
 impl Default for RoutingConfig {
     fn default() -> Self {
         Self {
             debug_log_prompt: false,
+            debug_log_ask_state: default_routing_debug_log_ask_state(),
             default_locator_search_dir: default_routing_default_locator_search_dir(),
             locator_scan_max_depth: default_routing_locator_scan_max_depth(),
             locator_scan_max_files: default_routing_locator_scan_max_files(),

@@ -229,6 +229,14 @@ pub(crate) async fn process_ask_task(
     task: &crate::ClaimedTask,
     payload: &mut Value,
 ) -> anyhow::Result<()> {
+    crate::log_ask_transition(
+        state,
+        &task.task_id,
+        None,
+        crate::AskState::Received,
+        "ask_task_claimed",
+        None,
+    );
     let prepared_input = prepare_ask_input(state, task, payload).await;
     let prompt = prepared_input.prompt;
     let source = prepared_input.source;
@@ -236,6 +244,14 @@ pub(crate) async fn process_ask_task(
         return Ok(());
     }
 
+    crate::log_ask_transition(
+        state,
+        &task.task_id,
+        Some(crate::AskState::Received),
+        crate::AskState::Routing,
+        "prepare_ask_flow",
+        None,
+    );
     let prepared_flow =
         ask_pipeline::prepare_ask_flow(state, task, payload, &prompt, &source).await?;
     let agent_run_context = Some(crate::agent_engine::AgentRunContext {

@@ -216,6 +216,17 @@ fn step_trace_json(step: &TaskJournalStepTrace) -> Value {
     })
 }
 
+/// §3.1: 单条 ask 状态机 transition 的 JSON 序列化。
+fn ask_transition_json(t: &crate::AskTransition) -> Value {
+    json!({
+        "from": t.from.map(crate::AskState::as_str),
+        "to": t.to.as_str(),
+        "reason": crate::truncate_for_log(&t.reason),
+        "at_ms": t.at_ms,
+        "round_no": t.round_no,
+    })
+}
+
 fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
     let by_prompt_value = metrics.by_prompt.as_ref().map(|map| {
         let mut entries: Vec<(&String, &crate::LlmPromptBucket)> = map.iter().collect();
@@ -540,6 +551,7 @@ impl TaskJournal {
             "step_results": self.step_results.iter().map(step_trace_json).collect::<Vec<_>>(),
             "finalizer_summary": self.finalizer_summary.as_ref().map(finalizer_summary_json),
             "task_metrics": task_metrics_json(&self.task_metrics),
+            "ask_state_transitions": self.transitions.iter().map(ask_transition_json).collect::<Vec<_>>(),
         })
     }
 
