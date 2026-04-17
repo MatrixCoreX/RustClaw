@@ -8,14 +8,20 @@
 //! - ✅ Stage 2.1: finalizer.rs → finalize/helpers.rs
 //! - ✅ Stage 2.2: worker/ask_finalize.rs → finalize/task.rs
 //! - ✅ Stage 2.3: agent_engine/loop_finalize.rs → finalize/loop_reply.rs
-//! - ⏳ Stage 2.4: agent_engine/observed_output.rs 中 finalize 部分 → finalize/observed.rs
-//! - ⏳ Stage 3: journal builder 合并 + AskState 强契约
+//! - ⏸ Stage 2.4: observed_output 物理拆分（DEFERRED，详见 docs/p33_finalize_merge_proposal.md §4）
+//! - ✅ Stage 3.1: journal builder 合并到 finalize/journal.rs
+//! - ✅ Stage 3.2: AskState 强契约（AppState::current_ask_state + debug_assert）
 //!
 //! 详见 docs/p33_finalize_merge_proposal.md。
 
 mod helpers;
+mod journal;
 mod loop_reply;
 mod task;
+
+// === JOURNAL BUILDER（Stage 3.1）===
+// finalize 子层共享的 journal 构建入口（行为零变化，仅抽离物理位置）。
+pub(crate) use journal::{build_from_loop_state, ensure_task_metrics};
 
 // === HELPER 层（已物理位于 finalize/helpers.rs，Stage 2.1）===
 // 纯函数工具（planner artifact / delivery token 分类 / FinalizerDisposition 等）

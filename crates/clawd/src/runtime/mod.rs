@@ -8,9 +8,9 @@ pub(crate) use ask_mode::{ActFinalizeStyle, AskMode, ChatEntryStrategy};
 pub(crate) use ask_state::{log_ask_transition, AskState, AskTransition};
 pub(crate) use policy::{llm_model_kind, llm_vendor_name, RateLimiter, ToolsPolicy};
 pub(crate) use state::{
-    build_skill_views, reload_skill_views, AgentRuntimeConfig, AppState, ChannelConfig,
-    ClaimedTask, CoreServices, LlmPromptBucket, LlmProviderRuntime, PolicyConfig, ReloadContext,
-    SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, WorkerConfig,
+    build_skill_views, reload_skill_views, AgentRuntimeConfig, AppState, AskStateRegistry,
+    ChannelConfig, ClaimedTask, CoreServices, LlmPromptBucket, LlmProviderRuntime, PolicyConfig,
+    ReloadContext, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, WorkerConfig,
 };
 pub(crate) use types::{
     AgentAction, AskReply, CommandIntentRules, CommandIntentRuntime, LocalInteractionContext,

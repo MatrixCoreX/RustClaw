@@ -1840,6 +1840,7 @@ mod tests {
             metrics: crate::TaskMetricsRegistry::default(),
             channels: crate::ChannelConfig::default(),
             reload_ctx: crate::ReloadContext::default(),
+            ask_states: crate::AskStateRegistry::default(),
         }
     }
 

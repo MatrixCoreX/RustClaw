@@ -969,39 +969,9 @@ fn build_missing_delivery_clarify_reason(
     }
 }
 
-fn build_loop_journal(
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
-    delivery_consistent: bool,
-    final_text: &str,
-    final_status: crate::task_journal::TaskJournalFinalStatus,
-) -> crate::task_journal::TaskJournal {
-    let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", user_text);
-    if let Some(ctx) = agent_run_context {
-        if let Some(route_result) = ctx.route_result.as_ref() {
-            journal.record_route_result(route_result);
-        }
-        if let Some(context_summary) = ctx.context_bundle_summary.as_deref() {
-            journal.record_context_bundle_summary(context_summary.to_string());
-        }
-    }
-    journal.rounds = loop_state.round_traces.clone();
-    for step in &loop_state.executed_step_results {
-        journal.push_step_result(step);
-    }
-    if let Some(summary) = finalizer_summary {
-        journal.record_finalizer_summary(summary);
-    } else {
-        journal.record_used_evidence_ids_count(0);
-    }
-    journal.record_delivery_consistent(delivery_consistent);
-    journal.record_final_answer(final_text.to_string());
-    journal.record_final_status(final_status);
-    journal
-}
+// Stage 3.1：build_loop_journal 已搬移到 `crate::finalize::build_from_loop_state`，
+// 行为零变化。本文件保留 thin alias 以最小化 diff。
+use crate::finalize::build_from_loop_state as build_loop_journal;
 
 pub(crate) async fn finalize_loop_reply(
     state: &AppState,
@@ -1010,6 +980,22 @@ pub(crate) async fn finalize_loop_reply(
     mut loop_state: LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<AskReply, String> {
+    // §3.3 Stage 3.2 invariant：进入 LOOP REPLY finalize 子层时，
+    // ask_state 必须处于 Executing 或 Finalizing 之一。Executing 表示
+    // agent loop 刚跑完一轮、本函数即将做最后归约；Finalizing 表示
+    // 主路径已经在 ResumeExecuting 分支预先标记过 finalize 阶段。
+    // 注：测试环境与未启用 §3.1 注册（registry 未 set）时返回 None，
+    // 此时不触发 panic（相当于运行期 noop），release build 完全无开销。
+    debug_assert!(
+        matches!(
+            state.current_ask_state(&task.task_id),
+            None | Some(crate::AskState::Executing) | Some(crate::AskState::Finalizing)
+        ),
+        "finalize_loop_reply invariant: ask_state must be Executing|Finalizing, got {:?} (task_id={})",
+        state.current_ask_state(&task.task_id),
+        task.task_id,
+    );
+
     backfill_delivery_from_last_outputs(task, &mut loop_state);
 
     if let Some((user_error, resume_context)) =
@@ -1456,6 +1442,7 @@ mod tests {
             metrics: crate::TaskMetricsRegistry::default(),
             channels: crate::ChannelConfig::default(),
             reload_ctx: crate::ReloadContext::default(),
+            ask_states: crate::AskStateRegistry::default(),
         }
     }
 

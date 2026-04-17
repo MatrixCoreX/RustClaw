@@ -43,23 +43,6 @@ fn should_skip_ask_memory_pair(
         .any(|message| !message.is_empty() && message == provider_unavailable.trim())
 }
 
-fn ensure_journal_task_metrics(
-    journal: &mut crate::task_journal::TaskJournal,
-    answer_text: &str,
-    answer_messages: &[String],
-) {
-    if journal.finalizer_summary.is_none() && journal.task_metrics.used_evidence_ids_count.is_none()
-    {
-        journal.record_used_evidence_ids_count(0);
-    }
-    if journal.task_metrics.delivery_consistent.is_none() {
-        journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
-            answer_text,
-            answer_messages,
-        ));
-    }
-}
-
 fn journal_has_missing_file_search_evidence(
     journal: Option<&crate::task_journal::TaskJournal>,
 ) -> bool {
@@ -494,7 +477,7 @@ pub(crate) async fn finalize_ask_result(
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
             journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
             journal.record_final_answer(&answer_text);
-            ensure_journal_task_metrics(&mut journal, &answer_text, &answer_messages);
+            crate::finalize::ensure_task_metrics(&mut journal, &answer_text, &answer_messages);
             if failure_reply {
                 let err_text = answer.error_text.unwrap_or_else(|| answer_text.clone());
                 if let Some(resume_payload) = answer.resume_context {
@@ -590,7 +573,7 @@ pub(crate) async fn finalize_ask_result(
                 journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
                 journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
                 journal.record_final_answer(&user_error);
-                ensure_journal_task_metrics(&mut journal, &user_error, &[]);
+                crate::finalize::ensure_task_metrics(&mut journal, &user_error, &[]);
                 journal.record_final_status(
                     crate::task_journal::TaskJournalFinalStatus::ResumeFailure,
                 );
@@ -621,7 +604,7 @@ pub(crate) async fn finalize_ask_result(
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
             journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
             journal.record_final_answer(&err_text);
-            ensure_journal_task_metrics(&mut journal, &err_text, &[]);
+            crate::finalize::ensure_task_metrics(&mut journal, &err_text, &[]);
             journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
             finalize_ask_failure(state, task, payload, &err_text, &[], &err_text, &journal).await?;
             insert_unfinished_goal_memory(state, task, prompt, &err_text);
@@ -648,7 +631,7 @@ pub(crate) async fn finalize_ask_result(
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_journal_task_metrics, journal_has_missing_file_search_evidence};
+    use super::journal_has_missing_file_search_evidence;
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
     
@@ -707,34 +690,11 @@ mod tests {
             metrics: crate::TaskMetricsRegistry::default(),
             channels: crate::ChannelConfig::default(),
             reload_ctx: crate::ReloadContext::default(),
+            ask_states: crate::AskStateRegistry::default(),
         }
     }
 
-    #[test]
-    fn ensure_journal_task_metrics_backfills_missing_v1_fields() {
-        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        let messages = vec!["final answer".to_string()];
-
-        ensure_journal_task_metrics(&mut journal, "final answer", &messages);
-
-        assert_eq!(journal.task_metrics.used_evidence_ids_count, Some(0));
-        assert_eq!(journal.task_metrics.delivery_consistent, Some(true));
-    }
-
-    #[test]
-    fn ensure_journal_task_metrics_preserves_finalizer_evidence_count() {
-        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
-            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-            used_evidence_ids_count: 3,
-            ..Default::default()
-        });
-
-        ensure_journal_task_metrics(&mut journal, "answer", &[]);
-
-        assert_eq!(journal.task_metrics.used_evidence_ids_count, Some(3));
-        assert_eq!(journal.task_metrics.delivery_consistent, Some(true));
-    }
+    // ensure_journal_task_metrics_* tests 已搬移到 finalize/journal.rs（Stage 3.1）。
 
     #[test]
     fn journal_missing_file_search_evidence_detects_zero_match_fs_search() {

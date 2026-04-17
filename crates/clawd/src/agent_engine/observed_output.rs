@@ -3398,6 +3398,20 @@ pub(crate) async fn synthesize_answer_from_observed_output(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    // §3.3 Stage 3.2 invariant：observed-tier LLM 兜底属于 finalize 子层，
+    // 进入时 ask_state 必须是 Executing 或 Finalizing。Executing 是因为
+    // 该兜底由 finalize_loop_reply 里调用、ask_state 还没 transition 到
+    // Finalizing；Finalizing 兼容 §3.1 后续把 transition 提前的可能。
+    debug_assert!(
+        matches!(
+            state.current_ask_state(&task.task_id),
+            None | Some(crate::AskState::Executing) | Some(crate::AskState::Finalizing)
+        ),
+        "synthesize_answer_from_observed_output invariant: ask_state must be Executing|Finalizing, got {:?} (task_id={})",
+        state.current_ask_state(&task.task_id),
+        task.task_id,
+    );
+
     let observed_entries = observed_output_entries(loop_state);
     if observed_entries.is_empty() {
         return None;
