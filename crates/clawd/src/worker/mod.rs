@@ -263,6 +263,7 @@ pub(crate) async fn process_ask_task(
         prepared_flow.classifier_direct_mode,
         prepared_flow.direct_resume_discussion,
         prepared_flow.direct_resume_execution,
+        &prepared_flow.ask_mode,
         prepared_flow.should_route_schedule_direct,
         agent_run_context,
     )
