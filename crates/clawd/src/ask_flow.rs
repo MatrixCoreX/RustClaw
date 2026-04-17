@@ -101,7 +101,9 @@ fn direct_chat_reply_from_normalizer(
     const MAX_LEN: usize = 800;
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
     // G1: 只在 chat 主路径启用；act / chat_act / ask_clarify 不走这里。
-    if route.routed_mode != RoutedMode::Chat || route.needs_clarify {
+    // is_normalizer_chat() 严格等价旧 routed_mode == Chat（不接受 classifier_direct
+    // / resume_followup_discussion 这两个"形式上也算 Chat"的 entry，它们走单独入口）。
+    if !route.ask_mode.is_normalizer_chat() || route.needs_clarify {
         return None;
     }
     // G2
@@ -399,6 +401,11 @@ pub(crate) async fn execute_ask_routed(
             Some("normalizer_mode=None and agent_mode=false"),
         )
     };
+    // Phase 3.2 Stage C5：本地推导 ask_mode 用于分发；execute_ask_routed 入参
+    // normalizer_mode 是纯 RoutedMode（不带 classifier_direct/resume_* 这种 worker
+    // 层 flag），因此 from_routed_mode 严格等价 routed_mode。日志仍打 routed_mode
+    // 字段以保持与已有 dashboard / grep 模式兼容；ask_mode 在 Stage D 替换。
+    let ask_mode = crate::AskMode::from_routed_mode(routed_mode);
     tracing::info!(
         "{} worker_once: ask task_id={} normalizer_mode={:?} routed_mode={:?} agent_mode={} override={}",
         crate::highlight_tag("routing"),
@@ -419,8 +426,10 @@ pub(crate) async fn execute_ask_routed(
     {
         return Ok(reply);
     }
-    match routed_mode {
-        RoutedMode::Chat => {
+    match &ask_mode {
+        crate::AskMode::ClarifyOrChat {
+            entry: crate::ChatEntryStrategy::NormalizerThenChat,
+        } => {
             if let Some(direct_answer) =
                 direct_chat_answer_from_recent_replies(state, task, agent_run_context.as_ref())
             {
@@ -483,7 +492,9 @@ pub(crate) async fn execute_ask_routed(
             .map(crate::AskReply::llm)
             .map_err(|e| e.to_string())
         }
-        RoutedMode::Act => {
+        crate::AskMode::Act {
+            finalize: crate::ActFinalizeStyle::Plain,
+        } => {
             crate::agent_engine::run_agent_with_tools(
                 state,
                 task,
@@ -493,7 +504,9 @@ pub(crate) async fn execute_ask_routed(
             )
             .await
         }
-        RoutedMode::ChatAct => {
+        crate::AskMode::Act {
+            finalize: crate::ActFinalizeStyle::ChatWrapped,
+        } => {
             crate::agent_engine::run_agent_with_tools(
                 state,
                 task,
@@ -503,7 +516,9 @@ pub(crate) async fn execute_ask_routed(
             )
             .await
         }
-        RoutedMode::AskClarify => {
+        crate::AskMode::ClarifyOrChat {
+            entry: crate::ChatEntryStrategy::NormalizerThenClarify,
+        } => {
             let clarify_reason = agent_run_context
                 .as_ref()
                 .and_then(|ctx| ctx.route_result.as_ref())
@@ -532,6 +547,23 @@ pub(crate) async fn execute_ask_routed(
             )
             .await;
             Ok(AskReply::non_llm(clarify))
+        }
+        // Phase 3.2 Stage C5：execute_ask_routed 入参 normalizer_mode 是 RoutedMode
+        // （4 个变体），经 from_routed_mode 派生只会得到上面 4 个 entry，
+        // ClassifierDirect / ResumeFollowupDiscussion / ResumeContinue 不在此入口。
+        // 防御性地兜底回 chat 路径（与历史 fallback 一致：normalizer_mode 缺失也会
+        // 走 Chat），同时打 warn 便于发现误用。
+        other => {
+            tracing::warn!(
+                "{} worker_once: ask execute_ask_routed unexpected_ask_mode task_id={} ask_mode={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                other.as_str()
+            );
+            Err(format!(
+                "execute_ask_routed unexpected ask_mode {}",
+                other.as_str()
+            ))
         }
     }
 }

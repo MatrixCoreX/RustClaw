@@ -170,6 +170,18 @@ impl AskMode {
         )
     }
 
+    /// 等价于历史 `route.routed_mode == RoutedMode::Chat`：
+    /// 仅命中 `ClarifyOrChat { NormalizerThenChat }`，不命中 ClassifierDirect /
+    /// ResumeFollowupDiscussion 这些"形式上也算 Chat 但语义不同"的 entry。
+    pub(crate) fn is_normalizer_chat(&self) -> bool {
+        matches!(
+            self,
+            AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::NormalizerThenChat,
+            }
+        )
+    }
+
     pub(crate) fn is_classifier_direct(&self) -> bool {
         matches!(
             self,
