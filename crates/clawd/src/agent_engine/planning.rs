@@ -1173,6 +1173,7 @@ fn normalize_planned_actions(
     state: &AppState,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
+    user_text: &str,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
     let actions =
@@ -1180,7 +1181,78 @@ fn normalize_planned_actions(
     let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = rewrite_service_status_probe_actions(route_result, actions);
-    rewrite_http_probe_actions(route_result, actions)
+    let actions = rewrite_http_probe_actions(route_result, actions);
+    inject_chat_transform_for_bare_placeholder_respond(actions, user_text)
+}
+
+/// 检测 `respond.content` 是否是裸的 `{{last_output}}` / `{{last_output.xxx}}` /
+/// `{{last_output[xxx]}}` 之类纯模板占位符。
+///
+/// 这种形态会被 `delivery_text_classifier` 判为 `non_informative_placeholder`，
+/// 触发 `plan_missing_terminal_user_answer` 重修，进而陷入 vendor patch 都救不回来的死循环
+/// （MiniMax 在 short-answer 类 act 任务里会反复踩这个坑，prompt 指令忠实度不够）。
+fn is_bare_last_output_placeholder(content: &str) -> bool {
+    let trimmed = content.trim();
+    if !trimmed.starts_with("{{") || !trimmed.ends_with("}}") {
+        return false;
+    }
+    let inner = trimmed[2..trimmed.len() - 2].trim();
+    let lower = inner.to_ascii_lowercase();
+    lower == "last_output"
+        || lower.starts_with("last_output.")
+        || lower.starts_with("last_output[")
+}
+
+/// 当 plan 末尾是 `respond.content="{{last_output}}"` 这种裸 placeholder 时，
+/// runtime 主动在 `respond` 之前注入一个 `call_skill(chat)` 转换步骤，
+/// 把原始观察输出（命令 stdout / 文件内容 / 列表 / JSON / 错误信息）转成
+/// 自然语言再交给 respond。这样 respond 拿到的 `{{last_output}}` 已经是
+/// chat 步骤产出的自然语言，能通过 `delivery_text_classifier` 的 publishable 检查。
+///
+/// 设计动机（v2 patch + runtime guard 双保险）：
+/// * v2 vendor patch 已经在 prompt 层告诉 minimax "MUST insert call_skill(chat)"，
+///   但实测 minimax 服从率不是 100%，仍偶发回退到裸 placeholder。
+/// * Runtime 这一道兜底不依赖 LLM 是否听话，能 100% 关掉 placeholder 死循环。
+/// * 不破坏正确 plan：仅当末尾是裸 placeholder Respond 且其前一步不是 chat 时才注入。
+fn inject_chat_transform_for_bare_placeholder_respond(
+    actions: Vec<AgentAction>,
+    user_text: &str,
+) -> Vec<AgentAction> {
+    if actions.len() < 2 {
+        // 只有一个 Respond 时，前面没有 observation 可供 chat 消化，不动。
+        return actions;
+    }
+    let last_idx = actions.len() - 1;
+    let needs_inject = match &actions[last_idx] {
+        AgentAction::Respond { content } => is_bare_last_output_placeholder(content),
+        _ => false,
+    };
+    if !needs_inject {
+        return actions;
+    }
+    if let AgentAction::CallSkill { skill, .. } = &actions[last_idx - 1] {
+        if skill.eq_ignore_ascii_case("chat") {
+            // 已经有 chat 转换步在前面，placeholder 是合法的（指 chat 的输出），不重复注入。
+            return actions;
+        }
+    }
+    let mut rewritten = actions;
+    let chat_text = format!(
+        "请用一句简短自然的话回答用户问题：「{}」\n\
+         依据下面这条观察输出（可能是命令输出 / 文件内容 / 列表 / JSON / 错误信息），\
+         用用户的语言（中文优先）直接给出最终回答本身，不要解释推理过程：\n\
+         {{{{last_output}}}}",
+        user_text.trim()
+    );
+    let chat_step = AgentAction::CallSkill {
+        skill: "chat".to_string(),
+        args: serde_json::json!({ "text": chat_text }),
+    };
+    let respond = rewritten.pop().expect("non-empty checked above");
+    rewritten.push(chat_step);
+    rewritten.push(respond);
+    info!("plan_inject_chat_transform_for_bare_placeholder_respond user_text_len={}", user_text.len());
+    rewritten
 }
 
 pub(super) async fn plan_round_actions(
@@ -1306,7 +1378,7 @@ pub(super) async fn plan_round_actions(
     );
     let initial_actions = parse_single_plan_actions(&plan_raw, state, task)
         .await
-        .map(|actions| normalize_planned_actions(state, route_result, loop_state, actions));
+        .map(|actions| normalize_planned_actions(state, route_result, loop_state, user_text, actions));
     let needs_repair = match initial_actions.as_ref() {
         Some(actions) => {
             should_force_actionable_plan_repair(state, route_result, loop_state, actions)
@@ -1333,7 +1405,7 @@ pub(super) async fn plan_round_actions(
         )
         .map(|(actions, raw_plan)| {
             (
-                normalize_planned_actions(state, route_result, loop_state, actions),
+                normalize_planned_actions(state, route_result, loop_state, user_text, actions),
                 raw_plan,
             )
         })
@@ -1365,7 +1437,7 @@ pub(super) async fn plan_round_actions(
                     parse_single_plan_actions(&repaired, state, task)
                         .await
                         .map(|actions| {
-                            normalize_planned_actions(state, route_result, loop_state, actions)
+                            normalize_planned_actions(state, route_result, loop_state, user_text, actions)
                         });
                 match repaired_actions {
                     Some(actions)
@@ -1405,6 +1477,7 @@ pub(super) async fn plan_round_actions(
                                         state,
                                         route_result,
                                         loop_state,
+                                        user_text,
                                         actions,
                                     )
                                 });
@@ -1558,6 +1631,7 @@ mod tests {
     use tokio::sync::Semaphore;
 
     use super::{
+        inject_chat_transform_for_bare_placeholder_respond, is_bare_last_output_placeholder,
         looks_health_check_request, plan_repair_reason, rewrite_http_probe_actions,
         rewrite_service_status_probe_actions, should_force_actionable_plan_repair,
         strip_terminal_discussion_for_direct_skill_passthrough,
@@ -2741,5 +2815,137 @@ mod tests {
                 "args": { "action": "find_name", "pattern": "README" }
             })]
         );
+    }
+
+    // ---------- inject_chat_transform_for_bare_placeholder_respond ----------
+    // 见函数 doc：runtime 兜底，把 minimax 偶发吐出的裸 placeholder respond 注入
+    // 一个 chat 转换步，关掉 v2 prompt patch 仍然救不回来的死循环。
+
+    #[test]
+    fn detects_bare_last_output_placeholder_variants() {
+        assert!(is_bare_last_output_placeholder("{{last_output}}"));
+        assert!(is_bare_last_output_placeholder("  {{ last_output }}  "));
+        assert!(is_bare_last_output_placeholder("{{last_output.hostname}}"));
+        assert!(is_bare_last_output_placeholder("{{last_output.foo.bar}}"));
+        assert!(is_bare_last_output_placeholder("{{LAST_OUTPUT}}"));
+        assert!(is_bare_last_output_placeholder("{{last_output[\"x\"]}}"));
+    }
+
+    #[test]
+    fn rejects_non_bare_placeholder_content() {
+        assert!(!is_bare_last_output_placeholder("hostname is {{last_output}}"));
+        assert!(!is_bare_last_output_placeholder("当前用户是 root"));
+        assert!(!is_bare_last_output_placeholder(""));
+        assert!(!is_bare_last_output_placeholder("{{other}}"));
+        assert!(!is_bare_last_output_placeholder("{{lastoutput}}"));
+        // last_output 后接非 . / [ 的字符不算同一占位
+        assert!(!is_bare_last_output_placeholder("{{last_output_extra}}"));
+    }
+
+    #[test]
+    fn injects_chat_transform_when_respond_is_bare_placeholder() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: json!({ "command": "whoami" }),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let out = inject_chat_transform_for_bare_placeholder_respond(
+            actions,
+            "只输出当前用户名，不要解释",
+        );
+        assert_eq!(out.len(), 3, "should insert exactly one chat step");
+        assert!(matches!(
+            &out[0],
+            AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
+        ));
+        match &out[1] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "chat");
+                let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                assert!(
+                    text.contains("{{last_output}}"),
+                    "chat text must reference last_output: {text}"
+                );
+                assert!(text.contains("只输出当前用户名"), "chat text should restate user request");
+            }
+            _ => panic!("expected chat call_skill at index 1, got {:?}", out[1]),
+        }
+        assert!(matches!(
+            &out[2],
+            AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
+    fn actions_as_json(actions: &[AgentAction]) -> serde_json::Value {
+        serde_json::to_value(actions).expect("serialize")
+    }
+
+    #[test]
+    fn injection_is_idempotent_when_chat_already_precedes_respond() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: json!({ "command": "whoami" }),
+            },
+            AgentAction::CallSkill {
+                skill: "chat".to_string(),
+                args: json!({ "text": "...prior chat transform..." }),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let before = actions_as_json(&actions);
+        let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
+        assert_eq!(
+            actions_as_json(&out),
+            before,
+            "should not re-inject when chat already precedes respond"
+        );
+    }
+
+    #[test]
+    fn injection_no_op_when_respond_content_is_concrete() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: json!({ "command": "whoami" }),
+            },
+            AgentAction::Respond {
+                content: "guagua".to_string(),
+            },
+        ];
+        let before = actions_as_json(&actions);
+        let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
+        assert_eq!(actions_as_json(&out), before);
+    }
+
+    #[test]
+    fn injection_no_op_when_only_one_action() {
+        let actions = vec![AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        }];
+        let before = actions_as_json(&actions);
+        let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
+        assert_eq!(
+            actions_as_json(&out),
+            before,
+            "no observation step before respond → cannot meaningfully inject"
+        );
+    }
+
+    #[test]
+    fn injection_no_op_when_last_action_is_not_respond() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({ "command": "ls" }),
+        }];
+        let before = actions_as_json(&actions);
+        let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
+        assert_eq!(actions_as_json(&out), before);
     }
 }
