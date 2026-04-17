@@ -90,8 +90,8 @@ pub(crate) fn submit_task_audit_detail(
 pub(crate) fn task_count_by_status(state: &AppState, status: &str) -> anyhow::Result<usize> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let count: i64 = db.query_row(
         "SELECT COUNT(1) FROM tasks WHERE status = ?1",
@@ -219,7 +219,7 @@ pub(crate) fn build_conversation_chat_id(
 }
 
 pub(crate) fn is_user_allowed(state: &AppState, user_id: i64) -> bool {
-    let Ok(db) = state.db.lock() else {
+    let Ok(db) = state.db.get() else {
         return false;
     };
 
@@ -249,8 +249,8 @@ pub(crate) fn upsert_public_channel_user(state: &AppState, user_id: i64) -> anyh
     let now = now_ts();
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.execute(
         "INSERT INTO users (user_id, role, is_allowed, created_at, last_seen)
          VALUES (?1, 'user', 1, ?2, ?2)
@@ -317,7 +317,7 @@ pub(crate) fn find_recent_duplicate_affirmation_task(
     }
     let normalized = normalize_affirmation_text(ask_text);
     let now = now_ts().parse::<i64>().unwrap_or_default();
-    let db = state.db.lock().ok()?;
+    let db = state.db.get().ok()?;
     let mut stmt = db
         .prepare(
             "SELECT task_id, payload_json, status, CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) AS ts
@@ -379,7 +379,7 @@ pub(crate) fn find_recent_failed_resume_context(
     user_id: i64,
     chat_id: i64,
 ) -> Option<RecentFailedResumeContext> {
-    let db = state.db.lock().ok()?;
+    let db = state.db.get().ok()?;
     let mut stmt = db
         .prepare(
             "SELECT result_json,
@@ -493,8 +493,8 @@ pub(crate) fn insert_submitted_task(
     let now = now_ts();
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     db.execute(
         "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)

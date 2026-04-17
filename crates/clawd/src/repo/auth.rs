@@ -434,8 +434,8 @@ pub(crate) struct AuthKeyListRow {
 pub(crate) fn list_auth_keys(state: &AppState) -> anyhow::Result<Vec<AuthKeyListRow>> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
         "SELECT rowid,
                 user_key,
@@ -577,8 +577,8 @@ pub(crate) fn get_auth_key_value_by_id(
 ) -> anyhow::Result<Option<String>> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     get_auth_key_value_by_id_from_db(&db, key_id)
 }
 
@@ -587,8 +587,8 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
     let user_key = generate_user_key();
     let mut db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     if role == "admin" {
         let existing_admins = {
             let mut stmt = db.prepare(
@@ -1455,8 +1455,8 @@ pub(crate) fn update_auth_key_by_id(
 
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let target = db.query_row(
         "SELECT user_key, role, enabled FROM auth_keys WHERE rowid = ?1",
         params![key_id],
@@ -1521,8 +1521,8 @@ pub(crate) fn delete_auth_key_by_id(
 ) -> anyhow::Result<bool> {
     let mut db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let target = db.query_row(
         "SELECT user_key, role FROM auth_keys WHERE rowid = ?1",
         params![key_id],
@@ -1613,8 +1613,8 @@ pub(crate) fn exchange_credential_status_for_user_key(
     }
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut out = Vec::new();
     for exchange in ["binance", "okx"] {
         let row = db
@@ -1671,8 +1671,8 @@ pub(crate) fn upsert_exchange_credential_for_user_key(
     let now = now_ts();
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.execute(
         "INSERT INTO exchange_api_credentials (user_key, exchange, api_key, api_secret, passphrase, enabled, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)
@@ -1719,8 +1719,8 @@ pub(crate) fn resolve_auth_identity_by_key(
     }
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let row = db
         .query_row(
             "SELECT role FROM auth_keys WHERE user_key = ?1 AND enabled = 1 LIMIT 1",
@@ -1753,8 +1753,8 @@ pub(crate) fn resolve_channel_binding_identity(
     }
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let row = if external_user_id.is_some() && external_chat_id.is_some() {
         db.query_row(
             "SELECT k.user_key, k.role
@@ -1824,8 +1824,8 @@ pub(crate) fn has_channel_binding_for_user_key(
     }
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let count: i64 = db.query_row(
         "SELECT COUNT(*)
          FROM channel_bindings
@@ -1849,8 +1849,8 @@ pub(crate) fn reset_channel_binding_state_for_user_key(
     }
     let mut db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let tx = db.transaction()?;
     tx.execute(
         "DELETE FROM channel_bindings
@@ -1886,8 +1886,8 @@ pub(crate) fn bind_channel_identity(
     }
     let mut db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     upsert_channel_binding_row(
         &db,
         channel,

@@ -66,7 +66,7 @@ pub(crate) fn collect_recent_image_candidates(
     let Some(user_key) = user_key.map(str::trim).filter(|v| !v.is_empty()) else {
         return Vec::new();
     };
-    let db = match state.db.lock() {
+    let db = match state.db.get() {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };

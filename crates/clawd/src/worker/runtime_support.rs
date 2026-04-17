@@ -72,7 +72,7 @@ fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Resul
         "auto timeout: no progress heartbeat for {}s while status=running",
         timeout_secs
     );
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
 
     let mut task_ids = Vec::new();
     {
@@ -230,7 +230,7 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
     let mut due_jobs: Vec<ScheduledJobDue> = Vec::new();
 
     {
-        let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+        let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
         let mut stmt = db.prepare(
             "SELECT job_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, task_kind, task_payload_json, next_run_at,
                     schedule_type, time_of_day, weekday, every_minutes, timezone
@@ -267,7 +267,7 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
 
     for job in due_jobs {
         let next_run = schedule_service::compute_next_run_for_schedule(
@@ -337,7 +337,7 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
 }
 
 fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
 
     let now = now_ts_u64() as i64;
 

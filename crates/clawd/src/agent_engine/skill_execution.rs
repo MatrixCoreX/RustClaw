@@ -618,24 +618,26 @@ mod tests {
         AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
     };
     use reqwest::Client;
-    use rusqlite::Connection;
     use tokio::sync::Semaphore;
 
     fn test_state() -> AppState {
-        let db = Connection::open_in_memory().expect("open db");
-        db.execute_batch(
-            r#"
-            CREATE TABLE tasks (
-                task_id TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                result_json TEXT,
-                updated_at INTEGER
-            );
-            INSERT INTO tasks (task_id, status, result_json, updated_at)
-            VALUES ('task-skill-exec', 'running', NULL, 0);
-            "#,
-        )
-        .expect("seed tasks");
+        let db_pool = crate::db_init::test_pool();
+        {
+            let db = db_pool.get().expect("get db conn");
+            db.execute_batch(
+                r#"
+                CREATE TABLE tasks (
+                    task_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    result_json TEXT,
+                    updated_at INTEGER
+                );
+                INSERT INTO tasks (task_id, status, result_json, updated_at)
+                VALUES ('task-skill-exec', 'running', NULL, 0);
+                "#,
+            )
+            .expect("seed tasks");
+        }
         let agents_by_id = HashMap::from([(
             DEFAULT_AGENT_ID.to_string(),
             AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
@@ -643,7 +645,7 @@ mod tests {
         AppState {
             started_at: Instant::now(),
             queue_limit: 1,
-            db: Arc::new(Mutex::new(db)),
+            db: db_pool,
             llm_providers: Vec::new(),
             agents_by_id: Arc::new(agents_by_id),
             skill_timeout_seconds: 30,

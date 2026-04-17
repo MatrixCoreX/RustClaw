@@ -311,8 +311,8 @@ mod tests {
 pub(crate) fn oldest_running_task_age_seconds(state: &AppState) -> anyhow::Result<u64> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let min_created_at: Option<i64> = db
         .query_row(

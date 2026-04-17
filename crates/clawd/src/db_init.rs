@@ -2,20 +2,51 @@ use std::path::Path;
 use std::time::Duration;
 
 use claw_core::config::AppConfig;
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection};
 use tracing::debug;
 
-pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<Connection> {
+pub(crate) type DbPool = Pool<SqliteConnectionManager>;
+
+/// 给单元测试 fixture 用的轻量 pool：内存数据库，单连接。
+/// 替代了原来 fixture 里的 `Arc::new(Mutex::new(Connection::open_in_memory()))`。
+#[cfg(test)]
+pub(crate) fn test_pool() -> DbPool {
+    let manager = SqliteConnectionManager::memory();
+    Pool::builder()
+        .max_size(1)
+        .build(manager)
+        .expect("build test db pool")
+}
+
+pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<DbPool> {
     if let Some(parent) = Path::new(&config.database.sqlite_path).parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)?;
         }
     }
 
-    let db = Connection::open(&config.database.sqlite_path)?;
-    db.busy_timeout(Duration::from_millis(config.database.busy_timeout_ms))?;
-    db.execute_batch(crate::INIT_SQL)?;
-    Ok(db)
+    let busy_ms = config.database.busy_timeout_ms;
+    let manager = SqliteConnectionManager::file(&config.database.sqlite_path).with_init(
+        move |conn: &mut Connection| {
+            conn.busy_timeout(Duration::from_millis(busy_ms))?;
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+            conn.pragma_update(None, "synchronous", "NORMAL")?;
+            conn.pragma_update(None, "foreign_keys", "ON")?;
+            Ok(())
+        },
+    );
+
+    let max_size = config.database.pool_max_size.max(2);
+    let pool = Pool::builder()
+        .max_size(max_size)
+        .build(manager)
+        .map_err(|e| anyhow::anyhow!("init db pool: {e}"))?;
+
+    let conn = pool.get().map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
+    conn.execute_batch(crate::INIT_SQL)?;
+    Ok(pool)
 }
 
 pub(crate) fn seed_users(db: &Connection, config: &AppConfig) -> anyhow::Result<()> {

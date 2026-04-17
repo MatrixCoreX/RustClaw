@@ -645,8 +645,8 @@ pub(crate) async fn try_handle_schedule_request(
         "list" => {
             let db = state
                 .db
-                .lock()
-                .map_err(|_| "db lock poisoned".to_string())?;
+                .get()
+                .map_err(|e| format!("db pool: {e}"))?;
             let mut stmt = db
                 .prepare(
                     "SELECT job_id, schedule_type, time_of_day, weekday, every_minutes, timezone, enabled, next_run_at, task_kind, task_payload_json
@@ -718,8 +718,8 @@ pub(crate) async fn try_handle_schedule_request(
         "delete" => {
             let db = state
                 .db
-                .lock()
-                .map_err(|_| "db lock poisoned".to_string())?;
+                .get()
+                .map_err(|e| format!("db pool: {e}"))?;
             let target = intent.target_job_id.trim();
             let (affected, bulk_mode) = if target.is_empty() {
                 (
@@ -768,8 +768,8 @@ pub(crate) async fn try_handle_schedule_request(
             let enabled = if kind == "resume" { 1 } else { 0 };
             let db = state
                 .db
-                .lock()
-                .map_err(|_| "db lock poisoned".to_string())?;
+                .get()
+                .map_err(|e| format!("db pool: {e}"))?;
             let target = intent.target_job_id.trim();
             let (affected, bulk_mode) = if target.is_empty() {
                 (
@@ -958,8 +958,8 @@ pub(crate) async fn try_handle_schedule_request(
             let created_at = crate::now_ts();
             let db = state
                 .db
-                .lock()
-                .map_err(|_| "db lock poisoned".to_string())?;
+                .get()
+                .map_err(|e| format!("db pool: {e}"))?;
             db.execute(
                 "INSERT INTO scheduled_jobs (
                     job_id, user_id, chat_id, channel, external_user_id, external_chat_id, user_key, schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr,

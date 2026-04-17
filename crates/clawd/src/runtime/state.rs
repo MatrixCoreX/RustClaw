@@ -10,7 +10,6 @@ use claw_core::skill_registry::{
     OutputKind, SkillKind, SkillManifest, SkillRiskLevel, SkillsRegistry,
 };
 use reqwest::Client;
-use rusqlite::Connection;
 use serde::Serialize;
 use tokio::sync::Semaphore;
 
@@ -226,7 +225,7 @@ pub(crate) struct ReloadSkillViewsResult {
 pub(crate) struct AppState {
     pub(crate) started_at: Instant,
     pub(crate) queue_limit: usize,
-    pub(crate) db: Arc<Mutex<Connection>>,
+    pub(crate) db: crate::db_init::DbPool,
     pub(crate) llm_providers: Vec<Arc<LlmProviderRuntime>>,
     pub(crate) agents_by_id: Arc<HashMap<String, AgentRuntimeConfig>>,
     pub(crate) skill_timeout_seconds: u64,
