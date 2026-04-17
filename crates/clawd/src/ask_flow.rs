@@ -590,6 +590,7 @@ mod tests {
     fn chat_prompt_context_appends_authoritative_route_resolution() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
             resolved_intent: "上一个和上上个哪个更多，只回答目录名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),

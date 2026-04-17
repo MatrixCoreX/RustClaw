@@ -740,6 +740,7 @@ mod tests {
         .with_task_journal(journal);
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "send definitely_missing_named_file_rustclaw_001.txt".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -787,6 +788,7 @@ mod tests {
         .with_task_journal(journal);
         let mut route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: String::new(),
             needs_clarify: false,
             clarify_question: String::new(),

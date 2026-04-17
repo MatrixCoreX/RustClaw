@@ -1846,6 +1846,7 @@ mod tests {
     fn route_result(mode: RoutedMode, resolved_intent: &str) -> RouteResult {
         RouteResult {
             routed_mode: mode,
+            ask_mode: crate::AskMode::from_routed_mode(mode),
             resolved_intent: resolved_intent.to_string(),
             needs_clarify: false,
             clarify_question: String::new(),

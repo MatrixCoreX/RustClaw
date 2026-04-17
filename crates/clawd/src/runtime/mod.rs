@@ -3,8 +3,6 @@ pub(crate) mod policy;
 pub(crate) mod state;
 pub(crate) mod types;
 
-// Phase 3.2 Stage A：抽象先就位、消费方在 Stage B/C 才接进来。
-#[allow(unused_imports)]
 pub(crate) use ask_mode::{ActFinalizeStyle, AskMode, ChatEntryStrategy};
 pub(crate) use policy::{llm_model_kind, llm_vendor_name, RateLimiter, ToolsPolicy};
 pub(crate) use state::{

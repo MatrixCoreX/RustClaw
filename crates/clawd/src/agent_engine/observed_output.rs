@@ -3755,6 +3755,7 @@ mod tests {
     fn observed_contract_json_includes_semantic_kind_and_locator_hint() {
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -3808,6 +3809,7 @@ mod tests {
     fn observed_response_style_hint_reflects_output_contract_shape() {
         let mut route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -3893,6 +3895,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -3940,6 +3943,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "列出 logs 目录下前 2 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -3987,6 +3991,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "列出 archive 目录下有什么".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -4032,6 +4037,7 @@ mod tests {
             .push(ok_step("step_1", "list_dir", "a\nb\nc\nd\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "列出 logs 目录下前 2 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -4079,6 +4085,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "检查当前目录是否存在隐藏文件，然后用一句话解释隐藏文件的常见用途"
                 .to_string(),
             needs_clarify: false,
@@ -4127,6 +4134,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子"
                 .to_string(),
             needs_clarify: false,
@@ -4175,6 +4183,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子"
                 .to_string(),
             needs_clarify: false,
@@ -4223,6 +4232,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子"
                 .to_string(),
             needs_clarify: false,
@@ -4272,6 +4282,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -4332,6 +4343,7 @@ mod tests {
             .push(ok_step("step_1", "run_cmd", "yes\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -4395,6 +4407,7 @@ mod tests {
             .push(ok_step("step_1", "run_cmd", "exists\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -4460,6 +4473,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -4511,6 +4525,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -4558,6 +4573,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -4610,6 +4626,7 @@ mod tests {
             .push(ok_step("step_1", "run_cmd", "a.md\nb.md\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -4658,6 +4675,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -4708,6 +4726,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -4765,6 +4784,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "执行 ls scripts，然后用一句话告诉我这个目录大概放的是什么"
                 .to_string(),
             needs_clarify: false,
@@ -4824,6 +4844,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "执行 ls scripts，然后用一句话告诉我这个目录大概放的是什么"
                 .to_string(),
             needs_clarify: false,
@@ -4876,6 +4897,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物"
                     .to_string(),
@@ -4959,6 +4981,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "List the three most recently modified files in docs and say whether they look more like logs or formal deliverables."
                     .to_string(),
@@ -5008,6 +5031,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "List the 3 most recently modified files in the logs directory, then tell me whether this looks more like runtime logs or formal deliverables."
                     .to_string(),
@@ -5057,6 +5081,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent:
                 "show me the basic machine info here like hostname and system, keep it brief"
                     .to_string(),
@@ -5106,6 +5131,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                     .to_string(),
@@ -5155,6 +5181,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                     .to_string(),
@@ -5204,6 +5231,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent:
                 "show me the basic machine info here like hostname and system, keep it brief"
                     .to_string(),
@@ -5253,6 +5281,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "用非技术用户能听懂的话，简短解释这个仓库主要是干什么的".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5300,6 +5329,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "用非技术用户能听懂的话，简短解释这个仓库主要是干什么的".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5354,6 +5384,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "Inspect the current workspace and briefly explain in one sentence what this project is for."
                     .to_string(),
@@ -5405,6 +5436,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "Inspect the current workspace to identify the project type and briefly summarize what it is in one sentence."
                 .to_string(),
             needs_clarify: false,
@@ -5472,6 +5504,7 @@ mod tests {
             .push(ok_step("step_1", "list_dir", "Report.MD\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "去 case_only 找 report.md，只输出路径".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5538,6 +5571,7 @@ mod tests {
             .push(ok_step("step_1", "list_dir", "a\nb\nc\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "数一下 scripts 目录直接有多少个子项".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5586,6 +5620,7 @@ mod tests {
             .push(ok_step("step_2", "list_dir", "a\nb\nc\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "上一个和上上个哪个更多，只回答目录名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5634,6 +5669,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查当前仓库是否存在未提交的改动，用一句话返回结果".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5686,6 +5722,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5738,6 +5775,7 @@ mod tests {
             .push(ok_step("step_1", "run_cmd", "a\nb\nc\nd\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "列出 logs 目录下前 2 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5797,6 +5835,7 @@ mod tests {
             .push(ok_step("step_1", "run_cmd", "EXISTS\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -5845,6 +5884,7 @@ mod tests {
             .push(ok_step("step_1", "run_cmd", "NOT_FOUND\n"));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -5892,6 +5932,7 @@ mod tests {
             .push(ok_step("step_1", "health_check", body));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "做一次 health check".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5939,6 +5980,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent:
                 "对系统做一次基础健康检查，只总结操作系统信息，RustClaw 自身不展开总结，仅返回其关键字段"
                     .to_string(),
@@ -5995,6 +6037,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "Run a basic health check. Summarize only the host operating system, and for RustClaw itself just list the key fields.".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6044,6 +6087,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "帮我做一次基础健康检查，只列最重要的结论".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6093,6 +6137,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "run a basic health check here and summarize only the most important findings"
                     .to_string(),
@@ -6144,6 +6189,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "帮我做一次基础健康检查，只列最重要的结论".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6193,6 +6239,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "帮我做一次基础健康检查，只列最重要的结论".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6246,6 +6293,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "做一次基础健康检查，只返回操作系统层面的关键字段，不要包含 RustClaw 自身的状态摘要"
                     .to_string(),
@@ -6301,6 +6349,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "run a basic health check here and summarize only the most important findings"
                     .to_string(),
@@ -6356,6 +6405,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "看看这台机器现在有哪些端口在监听，然后挑最值得注意的几个简单说一下"
                 .to_string(),
             needs_clarify: false,
@@ -6405,6 +6455,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果"
                 .to_string(),
             needs_clarify: false,
@@ -6452,6 +6503,7 @@ mod tests {
             .push(ok_step("step_1", "http_basic", body));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "请求接口并返回原始结果".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6499,6 +6551,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "帮我检查 telegramd 现在是不是在运行，顺手简短解释状态".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6546,6 +6599,7 @@ mod tests {
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent:
                 "check whether telegramd is running right now and briefly explain the status"
                     .to_string(),

@@ -978,6 +978,7 @@ primary_fallback_role = "fallback"
     fn route_result(needs_clarify: bool) -> RouteResult {
         RouteResult {
             routed_mode: RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(RoutedMode::ChatAct),
             resolved_intent: "test".to_string(),
             needs_clarify,
             route_reason: "test".to_string(),

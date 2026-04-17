@@ -926,6 +926,7 @@ mod tests {
     fn self_extension_gating_requires_enabled_runtime_and_non_none_mode() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
             resolved_intent: "do it with a temporary script".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -958,6 +959,7 @@ mod tests {
     fn capability_gap_trigger_requires_auto_flag() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
             resolved_intent: "handle this by extending the system".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -990,6 +992,7 @@ mod tests {
     fn ops_closed_loop_request_bypasses_self_extension() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "verify local http service; if verification fails, repair config and re-verify until passing".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1025,6 +1028,7 @@ mod tests {
     fn plain_temporary_fix_request_does_not_bypass_self_extension() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "solve this with a temporary script".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1312,6 +1316,7 @@ mod tests {
     fn effective_request_prefers_resolved_intent() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
             resolved_intent: "Use a temporary script instead of built-in skills.".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),

@@ -20,6 +20,12 @@ pub(super) struct PreparedAskRouting {
     pub(super) direct_resume_discussion: bool,
     pub(super) classifier_direct_mode: bool,
     pub(super) immediate_prior_turn_was_clarify: bool,
+    /// Phase 3.2 Stage B：合并 routed_mode + classifier_direct_mode +
+    /// direct_resume_discussion + direct_resume_execution 后得到的最终模式，
+    /// 与上面 4 个旧字段双轨并存。Stage C 起 worker / agent_engine 切换到
+    /// 读这个字段，Stage D 删除旧字段。
+    #[allow(dead_code)]
+    pub(super) ask_mode: crate::AskMode,
 }
 
 pub(super) struct PreparedAskInput {
@@ -264,6 +270,7 @@ fn apply_fresh_content_deictic_clarify_guard(
 fn direct_classifier_route_result(prompt: &str) -> crate::RouteResult {
     crate::RouteResult {
         routed_mode: crate::RoutedMode::Chat,
+        ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
         resolved_intent: prompt.trim().to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -610,8 +617,16 @@ pub(super) async fn prepare_ask_routing(
             task.task_id,
             source
         );
+        let direct_route = direct_classifier_route_result(prompt);
+        let ask_mode = crate::AskMode::from_legacy(
+            direct_route.routed_mode,
+            true,
+            false,
+            false,
+            Some(&normalized_source),
+        );
         return PreparedAskRouting {
-            route_result: direct_classifier_route_result(prompt),
+            route_result: direct_route,
             execution_recipe_hint: None,
             resolved_prompt: prompt.trim().to_string(),
             agent_mode,
@@ -619,6 +634,7 @@ pub(super) async fn prepare_ask_routing(
             direct_resume_discussion: false,
             classifier_direct_mode: true,
             immediate_prior_turn_was_clarify: false,
+            ask_mode,
         };
     }
     let is_resume_continue = super::is_resume_continue_source(source);
@@ -767,6 +783,27 @@ pub(super) async fn prepare_ask_routing(
         crate::truncate_for_log(&context_resolution.reason),
         crate::truncate_for_log(&resolved_prompt)
     );
+    let ask_mode = crate::AskMode::from_legacy(
+        route_result.routed_mode,
+        classifier_direct_mode,
+        resume_should_discuss_context,
+        resume_should_apply_context,
+        if classifier_direct_mode {
+            Some(normalized_source.as_str())
+        } else {
+            None
+        },
+    );
+    // 仅在没有任何 flag 主导时校验反向 round-trip；resume_continue/discussion/
+    // classifier_direct 命中时 to_routed_mode 会做"语义等价但取值不同"的折叠
+    // （比如 ResumeContinue → Act 即便原 routed_mode 是 ChatAct），不等于即合理。
+    if !classifier_direct_mode && !resume_should_discuss_context && !resume_should_apply_context {
+        debug_assert_eq!(
+            ask_mode.to_routed_mode(),
+            route_result.routed_mode,
+            "ask_mode <-> routed_mode invariant broken when no flag dominates"
+        );
+    }
     PreparedAskRouting {
         route_result,
         execution_recipe_hint,
@@ -776,6 +813,7 @@ pub(super) async fn prepare_ask_routing(
         direct_resume_discussion: resume_should_discuss_context,
         classifier_direct_mode,
         immediate_prior_turn_was_clarify,
+        ask_mode,
     }
 }
 
@@ -823,6 +861,7 @@ mod tests {
     fn runtime_resume_binding_is_disabled_when_normalizer_rejects_resume() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "list current workspace".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -862,6 +901,7 @@ mod tests {
     fn fresh_delivery_deictic_without_immediate_anchor_forces_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "send the referenced file".to_string(),
             needs_clarify: false,
             route_reason: "recent_context_delivery_binding".to_string(),
@@ -900,6 +940,7 @@ mod tests {
     fn fresh_delivery_deictic_with_immediate_file_anchor_does_not_force_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "send the referenced file".to_string(),
             needs_clarify: false,
             route_reason: "recent_context_delivery_binding".to_string(),
@@ -951,6 +992,7 @@ mod tests {
     fn fresh_scalar_deictic_without_immediate_anchor_forces_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 package.json 文件中的 name 字段，只输出该字段的值".to_string(),
             needs_clarify: false,
             route_reason: "recent_context_scalar_binding".to_string(),
@@ -989,6 +1031,7 @@ mod tests {
     fn fresh_scalar_deictic_with_immediate_file_anchor_does_not_force_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 package.json 文件中的 name 字段，只输出该字段的值".to_string(),
             needs_clarify: false,
             route_reason: "recent_context_scalar_binding".to_string(),
@@ -1027,6 +1070,7 @@ mod tests {
     fn fresh_content_deictic_without_immediate_anchor_forces_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 model_io.log 最后 5 行".to_string(),
             needs_clarify: false,
             route_reason: "memory_established_path_binding".to_string(),
@@ -1065,6 +1109,7 @@ mod tests {
     fn fresh_content_deictic_with_immediate_file_anchor_does_not_force_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 model_io.log 最后 5 行".to_string(),
             needs_clarify: false,
             route_reason: "memory_established_path_binding".to_string(),
@@ -1103,6 +1148,7 @@ mod tests {
     fn explicit_file_locator_never_forces_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "send README".to_string(),
             needs_clarify: false,
             route_reason: "explicit_filename".to_string(),
@@ -1141,6 +1187,7 @@ mod tests {
     fn explicit_bare_filename_delivery_does_not_force_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "send README".to_string(),
             needs_clarify: false,
             route_reason: "explicit_filename".to_string(),
@@ -1179,6 +1226,7 @@ mod tests {
     fn fresh_content_with_explicit_bare_filename_does_not_force_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "读取 README 前 20 行并总结".to_string(),
             needs_clarify: false,
             route_reason: "explicit_filename".to_string(),
@@ -1217,6 +1265,7 @@ mod tests {
     fn fresh_content_with_multiple_explicit_filenames_does_not_force_clarify() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大".to_string(),
             needs_clarify: false,
             route_reason: "explicit_compare_targets".to_string(),

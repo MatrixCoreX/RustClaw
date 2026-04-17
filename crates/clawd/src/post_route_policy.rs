@@ -357,6 +357,7 @@ mod tests {
     fn route_result() -> RouteResult {
         RouteResult {
             routed_mode: RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(RoutedMode::Act),
             resolved_intent: "test".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
