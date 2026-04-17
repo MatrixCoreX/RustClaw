@@ -14,12 +14,9 @@ pub(super) struct PreparedAskFlow {
     pub(super) prompt_with_memory_for_execution: String,
     pub(super) recent_execution_context: String,
     pub(super) agent_mode: bool,
-    pub(super) direct_resume_execution: bool,
-    pub(super) direct_resume_discussion: bool,
-    pub(super) classifier_direct_mode: bool,
-    /// Phase 3.2 Stage C4：从 PreparedAskRouting.ask_mode 复制而来，
-    /// 与上面 3 个 bool flag 双轨。dispatch 内部读这个字段做分支决策，
-    /// Stage D 删除旧 bool。
+    /// Phase 3.2：合并 routed_mode + classifier_direct + direct_resume_*
+    /// 后的最终模式，从 PreparedAskRouting.ask_mode 复制而来。
+    /// dispatch 内部所有分支决策走 ask_mode 谓词方法。
     pub(super) ask_mode: crate::AskMode,
     pub(super) clarify_reason: String,
     pub(super) clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
@@ -331,8 +328,8 @@ pub(super) async fn prepare_ask_flow(
     let has_schedule_intent =
         applied_post_route.execution_route_result.schedule_kind != crate::ScheduleKind::None;
     let should_route_schedule_direct = has_schedule_intent
-        && !prepared_routing.direct_resume_execution
-        && !prepared_routing.direct_resume_discussion;
+        && !prepared_routing.ask_mode.resume_execution()
+        && !prepared_routing.ask_mode.is_resume_discussion();
     Ok(PreparedAskFlow {
         context_bundle_summary: prepared_execution.context_bundle.summary(),
         route_result: applied_post_route.execution_route_result,
@@ -343,9 +340,6 @@ pub(super) async fn prepare_ask_flow(
         prompt_with_memory_for_execution: applied_post_route.prompt_with_memory_for_execution,
         recent_execution_context: prepared_execution.recent_execution_context,
         agent_mode: prepared_routing.agent_mode,
-        direct_resume_execution: prepared_routing.direct_resume_execution,
-        direct_resume_discussion: prepared_routing.direct_resume_discussion,
-        classifier_direct_mode: prepared_routing.classifier_direct_mode,
         ask_mode: prepared_routing.ask_mode.clone(),
         clarify_reason: applied_post_route.clarify_reason,
         clarify_reason_kind: applied_post_route.clarify_reason_kind,
@@ -368,29 +362,11 @@ pub(super) async fn execute_ask_dispatch(
     clarify_reason: &str,
     clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     fuzzy_locator_suggestions: &[String],
-    classifier_direct_mode: bool,
-    direct_resume_discussion: bool,
-    direct_resume_execution: bool,
     ask_mode: &crate::AskMode,
     should_route_schedule_direct: bool,
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Result<Option<Result<crate::AskReply, String>>> {
     let execution_user_request = execution_user_request(prompt, resolved_prompt_for_execution);
-    debug_assert_eq!(
-        ask_mode.is_resume_discussion(),
-        direct_resume_discussion,
-        "ask_mode/resume_discussion drift"
-    );
-    debug_assert_eq!(
-        ask_mode.resume_execution(),
-        direct_resume_execution,
-        "ask_mode/resume_execution drift"
-    );
-    debug_assert_eq!(
-        ask_mode.is_classifier_direct(),
-        classifier_direct_mode,
-        "ask_mode/classifier_direct drift"
-    );
     if route_result.ask_mode.is_clarify_only() {
         let suppress_recent_execution_context = should_suppress_recent_execution_in_clarify_context(
             prompt,
@@ -510,7 +486,7 @@ pub(super) async fn execute_ask_dispatch(
                 resolved_prompt_for_execution,
                 execution_user_request,
                 agent_mode,
-                direct_resume_discussion,
+                ask_mode.is_resume_discussion(),
                 Some(route_result.routed_mode),
                 agent_run_context.clone(),
             )
