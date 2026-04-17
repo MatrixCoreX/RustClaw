@@ -241,15 +241,31 @@ pub(crate) async fn finalize_ask(
 
 | PR | Stage | 改动范围 | 工作量 | 风险 |
 |---|---|---|---|---|
-| #1 | Stage 1 | `crate::finalize` facade 创建 + 调用面 import 替换 | 1-2 天 | 极低 |
-| #2 | Stage 2.1 | `worker/ask_finalize.rs` → `finalize/task.rs` 物理搬移 | 0.5 天 | 低 |
-| #3 | Stage 2.2 | `agent_engine/observed_output.rs` 中 finalize 部分 → `finalize/observed.rs` | 1 天 | 中（observed_output 文件大，私有依赖多） |
-| #4 | Stage 2.3 | `agent_engine/loop_finalize.rs` → `finalize/loop_reply.rs`（含 1000+ 行 tests） | 1-2 天 | 中 |
-| #5 | Stage 2.4 | `finalizer.rs` → `finalize/helpers.rs` + classifier_direct 拆出 | 0.5 天 | 极低 |
-| #6 | Stage 3.1 | `finalize/journal.rs` builder 合并 | 1-2 天 | 中（涉及行为对比） |
-| #7 | Stage 3.2 | `AppState` 注入 ask_state + finalize 子层 invariant | 1-2 天 | 低 |
+| PR | Stage | 改动范围 | 工作量 | 风险 | 状态 |
+|---|---|---|---|---|---|
+| #1 | Stage 1 | `crate::finalize` facade 创建 + 调用面 import 替换 | 1-2 天 | 极低 | ✅ 已合并 |
+| #2 | Stage 2.1 | `finalizer.rs` → `finalize/helpers.rs` | 0.5 天 | 极低 | ✅ 已合并 |
+| #3 | Stage 2.2 | `worker/ask_finalize.rs` → `finalize/task.rs` 物理搬移 | 0.5 天 | 低 | ✅ 已合并 |
+| #4 | Stage 2.3 | `agent_engine/loop_finalize.rs` → `finalize/loop_reply.rs`（含 1000+ 行 tests） | 1-2 天 | 中 | ✅ 已合并 |
+| #5 | Stage 2.4 | `agent_engine/observed_output.rs` 中 finalize 部分 → `finalize/observed.rs` | 1 天 | 中 | ⏸ DEFERRED |
+| #6 | Stage 3.1 | `finalize/journal.rs` builder 合并 | 1-2 天 | 中（涉及行为对比） | ✅ 已合并 |
+| #7 | Stage 3.2 | `AppState` 注入 ask_state + finalize 子层 invariant | 1-2 天 | 低 | ✅ 已合并 |
 
-合计 6-10 个工作日，最优路径 5 个 PR 即可（PR #2/#3/#4/#5 可酌情合并）。
+**Stage 2.4 deferred 说明**：observed_output.rs 共 6659 行，其中
+`synthesize_answer_from_observed_output` 真正属于 finalize 的只有 ~100 行，
+但其私有依赖（`observed_output_entries` / `resolved_user_intent` /
+`observed_contract_json` / `observed_request_language_hint` /
+`observed_response_style_hint` / `ObservedAnswerFallbackOut` /
+`OBSERVED_ANSWER_FALLBACK_PROMPT_*` 等 8 项）又依赖大量更深层的 extractors。
+真正搬干净需要拉走 ~500-1000 行，且 observed_output 模块内部 cohesion
+强（finalize 与 extractor 共享同一套 entry / route / scope 判断逻辑），
+拆分后 cross-mod 调用反而更乱。Facade 已提供 `crate::finalize::synthesize_answer_from_observed_output`
+逻辑入口，物理位置 indirection 仅 1 跳，认知成本可接受。
+后续若 observed_output 整体重构（§3.5+）可顺势拆分，
+独立 PR 不在本系列范围。
+
+合计 6-10 个工作日，最优路径 5 个 PR 即可（实际执行：4 个 commit 完成 Stage 1+2，
+Stage 3 后续）。
 
 ## 5. 风险与缓解
 

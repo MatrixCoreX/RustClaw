@@ -433,6 +433,38 @@ pub(crate) struct AppState {
     /// P2.1 — reload 元信息子 struct（config 路径、registry 路径、skill_switches、
     /// 初始 skills_list）。详见 [`ReloadContext`] 头部 doc。
     pub(crate) reload_ctx: ReloadContext,
+    /// Phase 3.3 Stage 3.2 — per-task 当前 ask_state 注册表。
+    /// 由 [`crate::log_ask_transition`] 同步更新；finalize 子层可通过
+    /// [`Self::current_ask_state`] 查询，配合 `debug_assert` 保证 invariant。
+    /// 终态（Completed/Failed）的 entry 会被立即清理，避免长跑泄漏。
+    pub(crate) ask_states: AskStateRegistry,
+}
+
+/// Phase 3.3 Stage 3.2 — per-task ask_state 注册表。
+///
+/// 简单的 `Arc<Mutex<HashMap>>` 实现，与 `TaskMetricsRegistry` 形态一致；
+/// 写入路径仅在 [`crate::log_ask_transition`]，读取路径仅在 finalize 子层
+/// invariant `debug_assert`，并发竞争极低。
+///
+/// 终态（Completed/Failed）写入后会立刻 remove，避免长跑残留。
+#[derive(Clone, Default)]
+pub(crate) struct AskStateRegistry {
+    inner: Arc<Mutex<HashMap<String, crate::AskState>>>,
+}
+
+impl AskStateRegistry {
+    pub(crate) fn set(&self, task_id: &str, state: crate::AskState) {
+        let mut guard = self.inner.lock().unwrap();
+        if state.is_terminal() {
+            guard.remove(task_id);
+        } else {
+            guard.insert(task_id.to_string(), state);
+        }
+    }
+
+    pub(crate) fn get(&self, task_id: &str) -> Option<crate::AskState> {
+        self.inner.lock().unwrap().get(task_id).copied()
+    }
 }
 
 impl AppState {
@@ -462,6 +494,15 @@ impl AppState {
             .entry(label.to_string())
             .or_default();
         bucket.count = bucket.count.saturating_add(1);
+    }
+
+    /// Phase 3.3 Stage 3.2 — 查询某任务当前 ask_state。
+    /// 终态进入后 entry 已 remove，因此返回 `None` 表示要么任务未启动，
+    /// 要么已完成；finalize 子层 invariant `debug_assert` 须区分这两种情况，
+    /// 通常只允许"任务还在 Executing/Finalizing"——None 视为"测试环境或资源
+    /// 已回收"，不触发 panic（仅 warn）。
+    pub(crate) fn current_ask_state(&self, task_id: &str) -> Option<crate::AskState> {
+        self.ask_states.get(task_id)
     }
 
     pub(crate) fn task_llm_call_count(&self, task_id: &str) -> u64 {

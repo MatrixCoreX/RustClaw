@@ -129,8 +129,8 @@ use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bind
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, log_ask_transition, reload_skill_views,
     ActFinalizeStyle, AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, AskState,
-    AskTransition, ChannelConfig, ChatEntryStrategy, ClaimedTask, CommandIntentRules,
-    CommandIntentRuntime, CoreServices, LlmPromptBucket, LlmProviderRuntime,
+    AskStateRegistry, AskTransition, ChannelConfig, ChatEntryStrategy, ClaimedTask,
+    CommandIntentRules, CommandIntentRuntime, CoreServices, LlmPromptBucket, LlmProviderRuntime,
     LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
     RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
     SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy, WhatsappDeliveryRoute,
@@ -560,6 +560,7 @@ async fn main() -> anyhow::Result<()> {
             skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
             initial_skills_list_for_reload: config.skills.skills_list.clone(),
         },
+        ask_states: AskStateRegistry::default(),
     };
 
     spawn_worker(

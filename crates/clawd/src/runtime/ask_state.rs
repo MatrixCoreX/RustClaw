@@ -195,6 +195,12 @@ pub(crate) fn log_ask_transition(
     }
     let at_ms = now_unix_ms();
     let transition = AskTransition::new(from, to, reason.to_string(), at_ms, round_no);
+
+    // §3.3 Stage 3.2：每次 transition 同步更新 AppState::ask_states 注册表，
+    // 让 finalize 子层 invariant `debug_assert!(state.current_ask_state(...))`
+    // 能拿到最新值；终态会自动 remove。
+    state.ask_states.set(task_id, to);
+
     if !state.policy.routing.debug_log_ask_state {
         return transition;
     }
