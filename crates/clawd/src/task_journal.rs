@@ -281,6 +281,9 @@ pub(crate) struct TaskJournal {
     pub(crate) task_metrics: TaskJournalTaskMetrics,
     pub(crate) final_answer: Option<String>,
     pub(crate) final_status: Option<TaskJournalFinalStatus>,
+    /// §3.1: ask 状态机 transition 序列。由 `log_ask_transition` 在每次状态切换时
+    /// 追加。Stage A 仅占位，Stage B 起 logger 接入，Stage D 进 journal JSON 输出。
+    pub(crate) transitions: Vec<crate::AskTransition>,
 }
 
 fn summarize_verify_result(
