@@ -356,20 +356,28 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
         rusqlite::params![state.maintenance.tasks_max_rows as i64],
     )?;
 
-    let audit_cutoff = now - (state.maintenance.audit_retention_days as i64 * 86400);
-    db.execute(
-        "DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1",
-        rusqlite::params![audit_cutoff],
-    )?;
+    // Phase 2.2 Stage 2: audit_logs 已经搬到独立 audit pool（见 db_init::init_audit_db）。
+    // 这里清理也走 audit_db，避免在主库 writer 锁上和任务回收争抢。
+    {
+        let audit_db = state
+            .audit_db
+            .get()
+            .map_err(|e| anyhow!("audit db pool: {e}"))?;
+        let audit_cutoff = now - (state.maintenance.audit_retention_days as i64 * 86400);
+        audit_db.execute(
+            "DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1",
+            rusqlite::params![audit_cutoff],
+        )?;
 
-    db.execute(
-        "DELETE FROM audit_logs WHERE id IN (
-             SELECT id FROM audit_logs
-             ORDER BY id DESC
-             LIMIT -1 OFFSET ?1
-         )",
-        rusqlite::params![state.maintenance.audit_max_rows as i64],
-    )?;
+        audit_db.execute(
+            "DELETE FROM audit_logs WHERE id IN (
+                 SELECT id FROM audit_logs
+                 ORDER BY id DESC
+                 LIMIT -1 OFFSET ?1
+             )",
+            rusqlite::params![state.maintenance.audit_max_rows as i64],
+        )?;
+    }
 
     let memory_cutoff = now - (state.memory.retention_days as i64 * 86400);
     db.execute(

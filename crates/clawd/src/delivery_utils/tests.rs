@@ -100,6 +100,7 @@ fn test_state_with_i18n(translations: &[(&str, &str)]) -> AppState {
         started_at: std::time::Instant::now(),
         queue_limit: 1,
         db: crate::db_init::test_pool(),
+        audit_db: crate::db_init::test_audit_pool(),
         llm_providers: Vec::new(),
         agents_by_id: Arc::new(agents_by_id),
         skill_timeout_seconds: 30,

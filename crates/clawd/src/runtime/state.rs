@@ -226,6 +226,9 @@ pub(crate) struct AppState {
     pub(crate) started_at: Instant,
     pub(crate) queue_limit: usize,
     pub(crate) db: crate::db_init::DbPool,
+    /// Phase 2.2 Stage 2: 独立 audit pool（独立 SQLite 文件）。
+    /// audit_logs 走这个池，主 pool 只承载任务/调度/记忆等热路径。
+    pub(crate) audit_db: crate::db_init::DbPool,
     pub(crate) llm_providers: Vec<Arc<LlmProviderRuntime>>,
     pub(crate) agents_by_id: Arc<HashMap<String, AgentRuntimeConfig>>,
     pub(crate) skill_timeout_seconds: u64,
