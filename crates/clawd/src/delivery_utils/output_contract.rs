@@ -1,0 +1,471 @@
+use std::path::{Path, PathBuf};
+
+use crate::{AppState, IntentOutputContract, OutputResponseShape};
+
+use super::file_delivery::resolve_file_delivery_target_with_hint;
+use super::types::localize_delivery_message_for_request;
+use super::{
+    extract_delivery_file_tokens, extract_file_path_from_delivery_token, trim_path_token,
+    FileDeliveryTargetResolution,
+};
+
+fn existing_file_path_literal(text: &str) -> Option<PathBuf> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.contains('\n') {
+        return None;
+    }
+    let path = Path::new(trimmed);
+    if !path.is_file() {
+        return None;
+    }
+    Some(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
+}
+
+fn looks_like_delivery_locator_literal(text: &str, locator_hint: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || trimmed.contains('\n')
+        || crate::finalizer::looks_like_planner_artifact(trimmed)
+        || crate::finalizer::parse_delivery_file_token(trimmed).is_some()
+    {
+        return false;
+    }
+
+    let normalized = trim_path_token(trimmed);
+    if normalized.is_empty() {
+        return false;
+    }
+
+    let hint = trim_path_token(locator_hint);
+    if !hint.is_empty() {
+        if normalized == hint {
+            return true;
+        }
+        if Path::new(&hint)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| normalized == name)
+        {
+            return true;
+        }
+    }
+
+    if normalized.starts_with('/')
+        || normalized.starts_with("./")
+        || normalized.starts_with("../")
+        || normalized.contains('/')
+        || normalized.contains('\\')
+    {
+        return true;
+    }
+
+    if normalized.chars().any(char::is_whitespace) {
+        return false;
+    }
+
+    normalized
+        .rsplit('/')
+        .next()
+        .unwrap_or(&normalized)
+        .contains('.')
+}
+
+fn looks_like_markdown_table_row(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.matches('|').count() >= 3
+}
+
+fn looks_like_markdown_table_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !looks_like_markdown_table_row(trimmed) {
+        return false;
+    }
+    trimmed
+        .trim_matches('|')
+        .split('|')
+        .all(|cell| cell.trim().chars().all(|ch| matches!(ch, '-' | ':' | ' ')))
+}
+
+fn strip_preamble_before_markdown_table(text: &str) -> String {
+    let lines = text.lines().collect::<Vec<_>>();
+    let Some(table_start) = lines
+        .iter()
+        .position(|line| looks_like_markdown_table_row(line))
+    else {
+        return text.to_string();
+    };
+    let Some(separator) = lines.get(table_start + 1) else {
+        return text.to_string();
+    };
+    if !looks_like_markdown_table_separator(separator) {
+        return text.to_string();
+    }
+    lines[table_start..].join("\n").trim().to_string()
+}
+
+pub(super) fn enforce_output_contract(
+    state: &AppState,
+    user_request: &str,
+    output_contract: &IntentOutputContract,
+    normalized_text: &mut String,
+    normalized_messages: &mut Vec<String>,
+) {
+    *normalized_text = strip_preamble_before_markdown_table(normalized_text);
+    match output_contract.response_shape {
+        OutputResponseShape::OneSentence => {
+            if output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary {
+                *normalized_text = take_first_sentence(normalized_text);
+            }
+        }
+        OutputResponseShape::Scalar => {
+            if let Some(scalar) = extract_scalar_literal(normalized_text) {
+                *normalized_text = scalar;
+            }
+        }
+        _ => {}
+    }
+
+    let file_contract = output_contract.delivery_required
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::FileToken
+        );
+    if file_contract && !response_has_any_delivery_token(normalized_text, normalized_messages) {
+        let current_output = canonical_output_text(normalized_text, normalized_messages);
+        if let Some(path) = existing_file_path_literal(normalized_text).or_else(|| {
+            normalized_messages
+                .iter()
+                .rev()
+                .find_map(|message| existing_file_path_literal(message))
+        }) {
+            let token = format!("FILE:{}", path.display());
+            *normalized_text = token.clone();
+            normalized_messages.clear();
+            normalized_messages.push(token);
+        } else if current_output.trim().is_empty()
+            || looks_like_delivery_locator_literal(&current_output, &output_contract.locator_hint)
+        {
+            match resolve_file_delivery_target_with_hint(
+                user_request,
+                Path::new("/"),
+                &state.default_locator_search_dir,
+                state.locator_scan_max_depth,
+                state.locator_scan_max_files,
+                Some(output_contract.locator_hint.as_str()),
+            ) {
+                Some(FileDeliveryTargetResolution::Resolved(path)) => {
+                    let token = format!("FILE:{}", path.display());
+                    *normalized_text = token.clone();
+                    if !normalized_messages.iter().any(|m| m == &token) {
+                        normalized_messages.push(token);
+                    }
+                }
+                Some(FileDeliveryTargetResolution::UserMessage(msg)) => {
+                    *normalized_text =
+                        localize_delivery_message_for_request(state, msg, user_request);
+                    normalized_messages
+                        .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
+                }
+                Some(FileDeliveryTargetResolution::Candidates(paths)) => {
+                    let mut lines = Vec::with_capacity(paths.len() + 1);
+                    lines.push(localize_delivery_message_for_request(
+                        state,
+                        super::DeliveryMessageKind::FilenameNotUnique,
+                        user_request,
+                    ));
+                    lines.extend(paths.into_iter().map(|path| path.display().to_string()));
+                    let text = lines.join("\n");
+                    *normalized_text = text.clone();
+                    normalized_messages
+                        .retain(|msg| crate::finalizer::parse_delivery_file_token(msg).is_none());
+                    normalized_messages.clear();
+                    normalized_messages.push(text);
+                }
+                None => {}
+            }
+        }
+    }
+    sync_output_payload(output_contract, normalized_text, normalized_messages);
+}
+
+fn response_has_any_delivery_token(text: &str, messages: &[String]) -> bool {
+    !extract_delivery_file_tokens(text).is_empty()
+        || messages
+            .iter()
+            .any(|m| !extract_delivery_file_tokens(m).is_empty())
+}
+
+fn canonical_output_text(text: &str, messages: &[String]) -> String {
+    let text = text.trim();
+    if !extract_delivery_file_tokens(text).is_empty() {
+        return text.to_string();
+    }
+    if let Some(message) = messages
+        .iter()
+        .rev()
+        .find(|msg| !extract_delivery_file_tokens(msg).is_empty())
+    {
+        return message.trim().to_string();
+    }
+    if !text.is_empty() {
+        return text.to_string();
+    }
+    messages
+        .iter()
+        .rev()
+        .find_map(|message| {
+            let trimmed = message.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
+        })
+        .unwrap_or_default()
+}
+
+fn should_collapse_to_single_output(
+    output_contract: &IntentOutputContract,
+    text: &str,
+    messages: &[String],
+) -> bool {
+    matches!(
+        output_contract.response_shape,
+        OutputResponseShape::OneSentence
+            | OutputResponseShape::Scalar
+            | OutputResponseShape::FileToken
+    ) || response_has_any_delivery_token(text, messages)
+}
+
+pub(crate) fn sync_output_payload(
+    output_contract: &IntentOutputContract,
+    normalized_text: &mut String,
+    normalized_messages: &mut Vec<String>,
+) {
+    let mut canonical = canonical_output_text(normalized_text, normalized_messages);
+    canonical = strip_preamble_before_markdown_table(&canonical);
+    let file_contract = output_contract.delivery_required
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::FileToken
+        );
+    if file_contract {
+        if let Some(path) = existing_file_path_literal(&canonical) {
+            canonical = format!("FILE:{}", path.display());
+        }
+    }
+    *normalized_text = canonical.clone();
+    normalized_messages.retain(|message| !message.trim().is_empty());
+    if canonical.is_empty() {
+        normalized_messages.clear();
+        return;
+    }
+    if should_collapse_to_single_output(output_contract, normalized_text, normalized_messages) {
+        normalized_messages.clear();
+        normalized_messages.push(canonical);
+        return;
+    }
+    match normalized_messages.last_mut() {
+        Some(last) => *last = canonical,
+        None => normalized_messages.push(canonical),
+    }
+}
+
+fn looks_like_leading_label_line(line: &str) -> bool {
+    let mut trimmed = line.trim();
+    loop {
+        let next = if let Some(inner) = trimmed
+            .strip_prefix("**")
+            .and_then(|v| v.strip_suffix("**"))
+        {
+            Some(inner.trim())
+        } else if let Some(inner) = trimmed
+            .strip_prefix("__")
+            .and_then(|v| v.strip_suffix("__"))
+        {
+            Some(inner.trim())
+        } else if let Some(inner) = trimmed.strip_prefix('*').and_then(|v| v.strip_suffix('*')) {
+            Some(inner.trim())
+        } else {
+            trimmed
+                .strip_prefix('_')
+                .and_then(|v| v.strip_suffix('_'))
+                .map(str::trim)
+        };
+        if let Some(next_trimmed) = next {
+            if next_trimmed == trimmed || next_trimmed.is_empty() {
+                break;
+            }
+            trimmed = next_trimmed;
+            continue;
+        }
+        break;
+    }
+    if trimmed.is_empty() {
+        return false;
+    }
+    let has_label_suffix = trimmed.ends_with(':') || trimmed.ends_with('：');
+    if !has_label_suffix {
+        return false;
+    }
+    let core = trimmed
+        .strip_suffix(':')
+        .or_else(|| trimmed.strip_suffix('：'))
+        .unwrap_or(trimmed)
+        .trim();
+    if core.is_empty() {
+        return false;
+    }
+    let core_chars = core.chars().count();
+    core_chars <= 64
+        && !core
+            .chars()
+            .any(|ch| matches!(ch, '.' | '。' | '!' | '?' | '！' | '？'))
+}
+
+pub(crate) fn take_first_sentence(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let lines = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut source_idx = 0usize;
+    if lines[source_idx].starts_with('#') {
+        if let Some((idx, _)) = lines
+            .iter()
+            .enumerate()
+            .find(|(_, line)| !line.starts_with('#'))
+        {
+            source_idx = idx;
+        }
+    }
+    if looks_like_leading_label_line(lines[source_idx]) {
+        if let Some((idx, _)) = lines
+            .iter()
+            .enumerate()
+            .skip(source_idx + 1)
+            .find(|(_, line)| !line.starts_with('#'))
+        {
+            source_idx = idx;
+        }
+    }
+    let source = lines[source_idx];
+    let chars: Vec<char> = source.chars().collect();
+    let mut buf = String::new();
+    for (idx, ch) in chars.iter().copied().enumerate() {
+        buf.push(ch);
+        if matches!(ch, '。' | '!' | '?' | '！' | '？') {
+            break;
+        }
+        if ch == '.' {
+            let prev = idx.checked_sub(1).and_then(|i| chars.get(i)).copied();
+            let next = chars.get(idx + 1).copied();
+            let in_token = prev.map(|c| c.is_ascii_alphanumeric()).unwrap_or(false)
+                && next.map(|c| c.is_ascii_alphanumeric()).unwrap_or(false);
+            if in_token {
+                continue;
+            }
+            if next.map(|c| c.is_whitespace()).unwrap_or(true) {
+                break;
+            }
+        }
+    }
+    let out = buf.trim();
+    if out.is_empty() {
+        source.to_string()
+    } else {
+        out.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::looks_like_delivery_locator_literal;
+
+    #[test]
+    fn delivery_locator_literal_accepts_hint_and_path_shapes() {
+        assert!(looks_like_delivery_locator_literal(
+            "README.md",
+            "README.md"
+        ));
+        assert!(looks_like_delivery_locator_literal(
+            "/tmp/report.md",
+            "README.md"
+        ));
+        assert!(looks_like_delivery_locator_literal(
+            "configs/config.toml",
+            "configs/config.toml"
+        ));
+        assert!(looks_like_delivery_locator_literal("LICENSE", "LICENSE"));
+    }
+
+    #[test]
+    fn delivery_locator_literal_rejects_user_facing_sentences() {
+        assert!(!looks_like_delivery_locator_literal(
+            "未找到该文件。文件 `definitely_missing_named_file_rustclaw_001.txt` 在工作区中不存在。",
+            "definitely_missing_named_file_rustclaw_001.txt"
+        ));
+        assert!(!looks_like_delivery_locator_literal(
+            "请提供具体的文件名或路径。",
+            "README.md"
+        ));
+    }
+}
+
+fn extract_scalar_literal(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if is_scalar_literal(trimmed) {
+        return Some(trimmed.to_string());
+    }
+    for token in trimmed.split_whitespace() {
+        if is_scalar_literal(token) {
+            return Some(token.to_string());
+        }
+    }
+    None
+}
+
+fn is_scalar_literal(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let s = s.trim();
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    s.parse::<f64>().is_ok()
+}
+
+pub(crate) fn response_has_same_file_token(
+    text: &str,
+    messages: &[String],
+    expected: &Path,
+) -> bool {
+    let expected_str = expected.to_string_lossy().to_string();
+    let mut candidates = Vec::with_capacity(messages.len() + 1);
+    candidates.push(text.to_string());
+    candidates.extend_from_slice(messages);
+    candidates.iter().any(|msg| {
+        extract_delivery_file_tokens(msg).iter().any(|token| {
+            extract_file_path_from_delivery_token(token)
+                .map(|path| {
+                    let p = if Path::new(&path).is_absolute() {
+                        PathBuf::from(&path)
+                    } else {
+                        expected
+                            .parent()
+                            .map(|parent| parent.join(&path))
+                            .unwrap_or_else(|| PathBuf::from(&path))
+                    };
+                    p.canonicalize()
+                        .ok()
+                        .map(|cp| cp == expected)
+                        .unwrap_or_else(|| path == expected_str)
+                })
+                .unwrap_or(false)
+        })
+    })
+}

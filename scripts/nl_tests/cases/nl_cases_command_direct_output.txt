@@ -1,0 +1,4 @@
+请执行 pwd，只输出命令结果
+请执行 whoami，只输出命令结果
+请执行 hostname，只输出命令结果
+请执行 git rev-parse --abbrev-ref HEAD，只输出命令结果

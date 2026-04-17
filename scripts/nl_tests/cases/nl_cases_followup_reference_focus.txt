@@ -1,0 +1,5 @@
+# Focused reference-resolution regressions.
+# Format: case_name|turn1|turn2|turn3
+
+followup_logs_last_tail_shape|先列出 logs 目录下前 5 个文件名|看最后一个最后 2 行|一句话说它更像日志还是清单
+followup_switch_dir_then_ordinal|先列出 document 目录下前 5 个文件名|那 logs 目录下前 5 个文件名呢|就第二个，看看最后 2 行

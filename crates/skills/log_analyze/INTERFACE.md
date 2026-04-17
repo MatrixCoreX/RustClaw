@@ -1,0 +1,47 @@
+# log_analyze Interface Spec
+
+> This file is managed by `scripts/sync_skill_docs.py`.
+> Keep this spec aligned with the log_analyze implementation.
+
+## Capability Summary
+- `log_analyze` scans logs for notable errors/events and summarizes key findings.
+- It can target a specific log file, or a directory path whose newest log-like file will be analyzed automatically.
+- It can narrow results with keyword filters.
+
+## Actions
+- No action field is required for baseline analysis.
+- Optional behavior is controlled by filter parameters.
+
+## Parameter Contract
+| Action | Param | Required | Type | Default | Description |
+|---|---|---|---|---|---|
+| analyze | `path` | no | string(path) | impl default | Log file path, or a directory path whose newest log-like file will be analyzed. |
+| analyze | `keywords` | no | array/string | - | Keyword filters for matching lines. |
+| analyze | `max_matches` | no | number | impl default | Cap for returned evidence rows. |
+
+## Error Contract
+- Invalid/missing log path when path is provided.
+- Directory path with no readable files should return a clear error.
+- Read/parse errors should return clear filesystem/runtime details.
+- Oversized/unbounded scans should be summarized safely.
+
+## Request/Response Examples
+### Example 1
+Request:
+```json
+{"request_id":"demo-1","args":{"path":"logs/app.log","keywords":["error","timeout"],"max_matches":50}}
+```
+Response:
+```json
+{"request_id":"demo-1","status":"ok","text":"Top findings: ...","error_text":null}
+```
+
+### Example 2
+Request:
+```json
+{"request_id":"demo-2","args":{"path":"logs","keywords":["panic","timeout"]}}
+```
+Response:
+```json
+{"request_id":"demo-2","status":"ok","text":"{\"requested_path\":\"logs\",\"path\":\"logs/clawd.log\",...}","error_text":null}
+```

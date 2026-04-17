@@ -1,0 +1,4 @@
+去 scripts/nl_tests/fixtures/locator_smart/case_only 找 report.md，只输出路径
+去 scripts/nl_tests/fixtures/locator_smart/stem_unique 找 abcd，只输出路径
+去 scripts/nl_tests/fixtures/locator_smart/stem_multi 找 abcd
+去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd

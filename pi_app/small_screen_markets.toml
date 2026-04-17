@@ -1,0 +1,239 @@
+[crypto]
+# 小屏加密货币页自动刷新间隔（秒）
+refresh_seconds = 15
+
+[weather]
+# 小屏天气页默认城市；留空时按当前网络出口自动定位
+city = "Nanjing"
+
+[us_stocks]
+# 小屏美股页自动刷新间隔（秒）
+refresh_seconds = 15
+
+[[crypto.items]]
+name = "BTC"
+symbol = "BTCUSDT"
+
+[[crypto.items]]
+name = "ETH"
+symbol = "ETHUSDT"
+
+[[crypto.items]]
+name = "BCH"
+symbol = "BCHUSDT"
+
+[[crypto.items]]
+name = "LTC"
+symbol = "LTCUSDT"
+
+[[crypto.items]]
+name = "SOL"
+symbol = "SOLUSDT"
+
+[[crypto.items]]
+name = "BNB"
+symbol = "BNBUSDT"
+
+[[crypto.items]]
+name = "XRP"
+symbol = "XRPUSDT"
+
+[[crypto.items]]
+name = "DOGE"
+symbol = "DOGEUSDT"
+
+[[crypto.items]]
+name = "PEPE"
+symbol = "PEPEUSDT"
+
+[[crypto.items]]
+name = "SHIB"
+symbol = "SHIBUSDT"
+
+[[us_stocks.items]]
+name = "Apple"
+symbol = "AAPL"
+
+[[us_stocks.items]]
+name = "NVIDIA"
+symbol = "NVDA"
+
+[[us_stocks.items]]
+name = "Microsoft"
+symbol = "MSFT"
+
+[[us_stocks.items]]
+name = "Tesla"
+symbol = "TSLA"
+
+[[us_stocks.items]]
+name = "Amazon"
+symbol = "AMZN"
+
+[[us_stocks.items]]
+name = "Meta"
+symbol = "META"
+
+[[us_stocks.items]]
+name = "Alphabet"
+symbol = "GOOGL"
+
+[[us_stocks.items]]
+name = "Broadcom"
+symbol = "AVGO"
+
+[[us_stocks.items]]
+name = "AMD"
+symbol = "AMD"
+
+[[us_stocks.items]]
+name = "Netflix"
+symbol = "NFLX"
+
+[[us_stocks.items]]
+name = "Palantir"
+symbol = "PLTR"
+
+[[us_stocks.items]]
+name = "Coinbase"
+symbol = "COIN"
+
+[[us_stocks.items]]
+name = "Berkshire"
+symbol = "BRK-B"
+
+[[us_stocks.items]]
+name = "JPMorgan"
+symbol = "JPM"
+
+[stocks]
+# 小屏 A 股页自动刷新间隔（秒）
+refresh_seconds = 15
+
+[[stocks.items]]
+name = "中国移动"
+code = "600941"
+
+[[stocks.items]]
+name = "贵州茅台"
+code = "600519"
+
+[[stocks.items]]
+name = "宁德时代"
+code = "300750"
+
+[[stocks.items]]
+name = "比亚迪"
+code = "002594"
+
+[[stocks.items]]
+name = "五粮液"
+code = "000858"
+
+[[stocks.items]]
+name = "招商银行"
+code = "600036"
+
+[[stocks.items]]
+name = "中国平安"
+code = "601318"
+
+[[stocks.items]]
+name = "美的集团"
+code = "000333"
+
+[[stocks.items]]
+name = "东方财富"
+code = "300059"
+
+[[stocks.items]]
+name = "中国中免"
+code = "601888"
+
+[[stocks.items]]
+name = "药明康德"
+code = "603259"
+
+[[stocks.items]]
+name = "紫金矿业"
+code = "601899"
+
+[[stocks.items]]
+name = "长江电力"
+code = "600900"
+
+[[stocks.items]]
+name = "海康威视"
+code = "002415"
+
+[[stocks.items]]
+name = "泸州老窖"
+code = "000568"
+
+[[stocks.items]]
+name = "工商银行"
+code = "601398"
+
+[[stocks.items]]
+name = "中信证券"
+code = "600030"
+
+[[stocks.items]]
+name = "立讯精密"
+code = "002475"
+
+[[stocks.items]]
+name = "迈瑞医疗"
+code = "300760"
+
+[[stocks.items]]
+name = "隆基绿能"
+code = "601012"
+
+[[stocks.items]]
+name = "中国石油"
+code = "601857"
+
+[[stocks.items]]
+name = "中国石化"
+code = "600028"
+
+[[stocks.items]]
+name = "农业银行"
+code = "601288"
+
+[[stocks.items]]
+name = "建设银行"
+code = "601939"
+
+[[stocks.items]]
+name = "中国银行"
+code = "601988"
+
+[[stocks.items]]
+name = "兴业银行"
+code = "601166"
+
+[[stocks.items]]
+name = "万华化学"
+code = "600309"
+
+[[stocks.items]]
+name = "恒瑞医药"
+code = "600276"
+
+[[stocks.items]]
+name = "京东方A"
+code = "000725"
+
+[[stocks.items]]
+name = "中际旭创"
+code = "300308"
+
+[[stocks.items]]
+name = "工业富联"
+code = "601138"
+
+[[stocks.items]]
+name = "寒武纪"
+code = "688256"

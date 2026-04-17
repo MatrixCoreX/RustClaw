@@ -1,0 +1,276 @@
+[[prompts]]
+logical_path = "prompts/agent_tool_spec.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/agent_tool_spec.md"]
+
+[[prompts]]
+logical_path = "prompts/single_plan_execution_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/execution/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/single_plan_execution_prompt.md"]
+vendor_patch = "execution/common.md"
+
+[[prompts]]
+logical_path = "prompts/loop_incremental_plan_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/execution/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/loop_incremental_plan_prompt.md"]
+vendor_patch = "execution/common.md"
+
+[[prompts]]
+logical_path = "prompts/plan_repair_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/execution/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/plan_repair_prompt.md"]
+vendor_patch = "execution/common.md"
+
+[[prompts]]
+logical_path = "prompts/intent_normalizer_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/routing/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/intent_normalizer_prompt.md"]
+vendor_patch = "routing/common.md"
+
+[[prompts]]
+logical_path = "prompts/intent_router_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/intent_router_prompt.md"]
+vendor_patch = "routing/common.md"
+
+[[prompts]]
+logical_path = "prompts/intent_router_rules.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/routing/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/intent_router_rules.md"]
+
+[[prompts]]
+logical_path = "prompts/clarify_question_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/recovery/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/clarify_question_prompt.md"]
+vendor_patch = "recovery/common.md"
+
+[[prompts]]
+logical_path = "prompts/resume_followup_discussion_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/recovery/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/resume_followup_discussion_prompt.md"]
+vendor_patch = "recovery/common.md"
+
+[[prompts]]
+logical_path = "prompts/resume_continue_execute_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/recovery/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/resume_continue_execute_prompt.md"]
+vendor_patch = "recovery/common.md"
+
+[[prompts]]
+logical_path = "prompts/resume_followup_intent_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/recovery/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/resume_followup_intent_prompt.md"]
+vendor_patch = "recovery/common.md"
+
+[[prompts]]
+logical_path = "prompts/chat_response_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/chat_response_prompt.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/long_term_summary_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/long_term_summary_prompt.md"]
+vendor_patch = "summary/common.md"
+
+[[prompts]]
+logical_path = "prompts/schedule_intent_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/routing/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/schedule_intent_prompt.md"]
+vendor_patch = "routing/common.md"
+
+[[prompts]]
+logical_path = "prompts/schedule_intent_rules.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/routing/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/schedule_intent_rules.md"]
+vendor_patch = "routing/common.md"
+
+[[prompts]]
+logical_path = "prompts/voice_chat_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/voice_chat_prompt.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/voice_mode_intent_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/routing/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/voice_mode_intent_prompt.md"]
+vendor_patch = "routing/common.md"
+
+[[prompts]]
+logical_path = "prompts/chat_skill_system_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/chat_skill_system_prompt.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/chat_skill_joke_system_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/chat_skill_joke_system_prompt.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/audio_transcribe_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/audio_transcribe_prompt.md"]
+vendor_patch = "summary/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_reference_resolver_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_reference_resolver_prompt.md"]
+vendor_patch = "vision/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_output_rewrite_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_output_rewrite_prompt.md"]
+vendor_patch = "summary/common.md"
+
+[[prompts]]
+logical_path = "prompts/language_infer_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/language_infer_prompt.md"]
+vendor_patch = "summary/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_prompt.md"]
+vendor_patch = "vision/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_language_hint_with_target.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_language_hint_with_target.md"]
+vendor_patch = "summary/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_language_hint_default.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_language_hint_default.md"]
+vendor_patch = "summary/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_action_describe.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_action_describe.md"]
+vendor_patch = "vision/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_action_compare.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_action_compare.md"]
+vendor_patch = "vision/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_action_screenshot_summary.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_action_screenshot_summary.md"]
+vendor_patch = "vision/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_action_extract_with_schema.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_action_extract_with_schema.md"]
+vendor_patch = "vision/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_action_extract_default.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_action_extract_default.md"]
+vendor_patch = "vision/common.md"
+
+[[prompts]]
+logical_path = "prompts/image_vision_action_fallback.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/image_vision_action_fallback.md"]
+vendor_patch = "vision/common.md"
+
+[[prompts]]
+logical_path = "prompts/personas/executor.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/personas/executor.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/personas/companion.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/personas/companion.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/personas/expert.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/personas/expert.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/personas/teacher.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/personas/teacher.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/personas/advisor.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/personas/advisor.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/personas/reviewer.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/personas/reviewer.md"]
+vendor_patch = "text/common.md"
+
+[[prompts]]
+logical_path = "prompts/meta_respond_classifier_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/meta_respond_classifier_prompt.md"]
+
+[[prompts]]
+logical_path = "prompts/publishable_raw_classifier_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/publishable_raw_classifier_prompt.md"]
+
+[[prompts]]
+logical_path = "prompts/delivery_text_classifier_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/delivery_text_classifier_prompt.md"]

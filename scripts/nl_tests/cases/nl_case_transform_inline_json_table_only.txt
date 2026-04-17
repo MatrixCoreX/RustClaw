@@ -1,0 +1,9 @@
+# DEPRECATED: this single-case file has been consolidated into
+# scripts/nl_tests/cases/nl_cases_singletons.txt
+# It is kept for backward compatibility with anyone who has the old path
+# bookmarked. Prefer running the consolidated file:
+#   ./scripts/nl_tests/run_manual_test.sh \
+#     --case-file scripts/nl_tests/cases/nl_cases_singletons.txt
+# This stub file may be removed in a future cleanup.
+#
+把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]

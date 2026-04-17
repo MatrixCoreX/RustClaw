@@ -1,0 +1,2089 @@
+use std::collections::HashMap;
+use std::env;
+use std::path::Path;
+
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AppConfig {
+    pub server: ServerConfig,
+    pub telegram: TelegramConfig,
+    #[serde(default)]
+    pub telegram_bot: TelegramBotConfig,
+    #[serde(default)]
+    pub whatsapp: WhatsappConfig,
+    #[serde(default)]
+    pub whatsapp_cloud: WhatsappCloudConfig,
+    #[serde(default)]
+    pub whatsapp_web: WhatsappWebConfig,
+    #[serde(default)]
+    pub adapters: HashMap<String, AdapterPlaceholderConfig>,
+    pub database: DatabaseConfig,
+    pub worker: WorkerConfig,
+    #[serde(default)]
+    pub llm: LlmConfig,
+    #[serde(default)]
+    pub skills: SkillsConfig,
+    #[serde(default)]
+    pub limits: LimitsConfig,
+    #[serde(default)]
+    pub maintenance: MaintenanceConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
+    #[serde(default)]
+    pub tools: ToolsConfig,
+    #[serde(default)]
+    pub image_vision: ImageSkillConfig,
+    #[serde(default)]
+    pub image_generation: ImageSkillConfig,
+    #[serde(default)]
+    pub image_edit: ImageSkillConfig,
+    #[serde(default)]
+    pub routing: RoutingConfig,
+    #[serde(default)]
+    pub command_intent: CommandIntentConfig,
+    #[serde(default)]
+    pub persona: PersonaConfig,
+    #[serde(default)]
+    pub agents: Vec<AgentConfig>,
+    #[serde(default)]
+    pub schedule: ScheduleConfig,
+    #[serde(default)]
+    pub webd: WebdConfig,
+    #[serde(default)]
+    pub self_extension: SelfExtensionConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerConfig {
+    pub listen: String,
+    pub request_timeout_seconds: u64,
+    /// 可选。telegramd 等连 clawd 的地址；未设则用 http://{listen}（listen 为 0.0.0.0 时自动改为 127.0.0.1）。
+    #[serde(default)]
+    pub clawd_base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramConfig {
+    #[serde(default)]
+    pub bot_token: String,
+    #[serde(default = "default_agent_id")]
+    pub agent_id: String,
+    #[serde(default)]
+    pub allowlist: Vec<i64>,
+    #[serde(default = "default_telegram_access_mode")]
+    pub access_mode: String,
+    #[serde(default)]
+    pub allowed_usernames: Vec<String>,
+    #[serde(default)]
+    pub bots: Vec<TelegramRuntimeBotConfig>,
+    #[serde(default)]
+    pub bindings: Vec<ChannelBindingConfig>,
+    #[serde(default = "default_telegram_language")]
+    pub language: String,
+    #[serde(default = "default_telegram_i18n_path")]
+    pub i18n_path: String,
+    #[serde(default = "default_telegram_quick_result_wait_seconds")]
+    pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_telegram_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
+    #[serde(default = "default_telegram_auto_vision_on_image_only")]
+    pub auto_vision_on_image_only: bool,
+    #[serde(default = "default_telegram_image_inbox_dir")]
+    pub image_inbox_dir: String,
+    #[serde(default = "default_telegram_video_inbox_dir")]
+    pub video_inbox_dir: String,
+    #[serde(default = "default_telegram_file_inbox_dir")]
+    pub file_inbox_dir: String,
+    #[serde(default = "default_telegram_audio_inbox_dir")]
+    pub audio_inbox_dir: String,
+    #[serde(default = "default_telegram_voice_reply_mode")]
+    pub voice_reply_mode: String,
+    #[serde(default = "default_telegram_voice_mode_nl_intent_enabled")]
+    pub voice_mode_nl_intent_enabled: bool,
+    #[serde(default)]
+    pub voice_reply_mode_by_chat: HashMap<String, String>,
+    #[serde(default = "default_telegram_max_audio_input_bytes")]
+    pub max_audio_input_bytes: usize,
+    #[serde(default = "default_telegram_ephemeral_image_saved_seconds")]
+    pub ephemeral_image_saved_seconds: u64,
+    #[serde(default)]
+    pub sendfile: SendfileConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramBotConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub bot_token: String,
+    #[serde(default)]
+    pub allowlist: Vec<i64>,
+    #[serde(default = "default_telegram_access_mode")]
+    pub access_mode: String,
+    #[serde(default)]
+    pub allowed_usernames: Vec<String>,
+    #[serde(default = "default_telegram_language")]
+    pub language: String,
+    #[serde(default = "default_telegram_i18n_path")]
+    pub i18n_path: String,
+    #[serde(default = "default_telegram_quick_result_wait_seconds")]
+    pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_telegram_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct TelegramRuntimeBotConfig {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub bot_token: String,
+    #[serde(default = "default_agent_id")]
+    pub agent_id: String,
+    #[serde(default)]
+    pub allowlist: Vec<i64>,
+    #[serde(default = "default_telegram_access_mode")]
+    pub access_mode: String,
+    #[serde(default)]
+    pub allowed_usernames: Vec<String>,
+    #[serde(default = "default_telegram_language")]
+    pub language: String,
+    #[serde(default = "default_telegram_i18n_path")]
+    pub i18n_path: String,
+    #[serde(default = "default_telegram_quick_result_wait_seconds")]
+    pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_telegram_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedTelegramBotConfig {
+    pub name: String,
+    pub bot_token: String,
+    pub agent_id: String,
+    pub allowlist: Vec<i64>,
+    pub access_mode: String,
+    pub allowed_usernames: Vec<String>,
+    pub language: String,
+    pub i18n_path: String,
+    pub quick_result_wait_seconds: u64,
+    pub task_delivery_timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentConfig {
+    #[serde(default = "default_agent_id")]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub persona_prompt: String,
+    #[serde(default)]
+    pub preferred_vendor: Option<String>,
+    #[serde(default)]
+    pub preferred_model: Option<String>,
+    #[serde(default)]
+    pub allowed_skills: Vec<String>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            id: default_agent_id(),
+            name: "Main".to_string(),
+            description: String::new(),
+            persona_prompt: String::new(),
+            preferred_vendor: None,
+            preferred_model: None,
+            allowed_skills: Vec::new(),
+        }
+    }
+}
+
+impl Default for TelegramBotConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bot_token: String::new(),
+            allowlist: Vec::new(),
+            access_mode: default_telegram_access_mode(),
+            allowed_usernames: Vec::new(),
+            language: default_telegram_language(),
+            i18n_path: default_telegram_i18n_path(),
+            quick_result_wait_seconds: default_telegram_quick_result_wait_seconds(),
+            task_delivery_timeout_seconds: default_telegram_task_delivery_timeout_seconds(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WhatsappConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_whatsapp_api_base")]
+    pub api_base: String,
+    #[serde(default)]
+    pub access_token: String,
+    #[serde(default)]
+    pub app_secret: String,
+    #[serde(default)]
+    pub verify_token: String,
+    #[serde(default)]
+    pub phone_number_id: String,
+    #[serde(default = "default_whatsapp_webhook_listen")]
+    pub webhook_listen: String,
+    #[serde(default = "default_whatsapp_webhook_path")]
+    pub webhook_path: String,
+    #[serde(default)]
+    pub admins: Vec<String>,
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    #[serde(default)]
+    pub bindings: Vec<ChannelBindingConfig>,
+    #[serde(default = "default_whatsapp_language")]
+    pub language: String,
+    #[serde(default = "default_whatsapp_i18n_path")]
+    pub i18n_path: String,
+    #[serde(default = "default_whatsapp_quick_result_wait_seconds")]
+    pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_whatsapp_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
+    #[serde(default = "default_whatsapp_image_inbox_dir")]
+    pub image_inbox_dir: String,
+    #[serde(default = "default_whatsapp_audio_inbox_dir")]
+    pub audio_inbox_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WhatsappCloudConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_whatsapp_api_base")]
+    pub api_base: String,
+    #[serde(default)]
+    pub access_token: String,
+    #[serde(default)]
+    pub app_secret: String,
+    #[serde(default)]
+    pub verify_token: String,
+    #[serde(default)]
+    pub phone_number_id: String,
+    #[serde(default = "default_whatsapp_webhook_listen")]
+    pub webhook_listen: String,
+    #[serde(default = "default_whatsapp_webhook_path")]
+    pub webhook_path: String,
+    #[serde(default)]
+    pub admins: Vec<String>,
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    #[serde(default)]
+    pub bindings: Vec<ChannelBindingConfig>,
+    #[serde(default = "default_whatsapp_quick_result_wait_seconds")]
+    pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_whatsapp_task_delivery_timeout_seconds")]
+    pub task_delivery_timeout_seconds: u64,
+    #[serde(default = "default_whatsapp_image_inbox_dir")]
+    pub image_inbox_dir: String,
+    #[serde(default = "default_whatsapp_audio_inbox_dir")]
+    pub audio_inbox_dir: String,
+}
+
+impl Default for WhatsappCloudConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_base: default_whatsapp_api_base(),
+            access_token: String::new(),
+            app_secret: String::new(),
+            verify_token: String::new(),
+            phone_number_id: String::new(),
+            webhook_listen: default_whatsapp_webhook_listen(),
+            webhook_path: default_whatsapp_webhook_path(),
+            admins: Vec::new(),
+            allowlist: Vec::new(),
+            bindings: Vec::new(),
+            quick_result_wait_seconds: default_whatsapp_quick_result_wait_seconds(),
+            task_delivery_timeout_seconds: default_whatsapp_task_delivery_timeout_seconds(),
+            image_inbox_dir: default_whatsapp_image_inbox_dir(),
+            audio_inbox_dir: default_whatsapp_audio_inbox_dir(),
+        }
+    }
+}
+
+impl Default for WhatsappConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_base: default_whatsapp_api_base(),
+            access_token: String::new(),
+            app_secret: String::new(),
+            verify_token: String::new(),
+            phone_number_id: String::new(),
+            webhook_listen: default_whatsapp_webhook_listen(),
+            webhook_path: default_whatsapp_webhook_path(),
+            admins: Vec::new(),
+            allowlist: Vec::new(),
+            bindings: Vec::new(),
+            language: default_whatsapp_language(),
+            i18n_path: default_whatsapp_i18n_path(),
+            quick_result_wait_seconds: default_whatsapp_quick_result_wait_seconds(),
+            task_delivery_timeout_seconds: default_whatsapp_task_delivery_timeout_seconds(),
+            image_inbox_dir: default_whatsapp_image_inbox_dir(),
+            audio_inbox_dir: default_whatsapp_audio_inbox_dir(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WhatsappWebConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_whatsapp_web_bridge_listen")]
+    pub bridge_listen: String,
+    #[serde(default = "default_whatsapp_web_wrapper_listen")]
+    pub wrapper_listen: String,
+    #[serde(default = "default_whatsapp_web_bridge_base_url")]
+    pub bridge_base_url: String,
+    #[serde(default = "default_whatsapp_web_auth_dir")]
+    pub auth_dir: String,
+    #[serde(default = "default_whatsapp_web_quick_result_wait_seconds")]
+    pub quick_result_wait_seconds: u64,
+    #[serde(default = "default_whatsapp_web_language")]
+    pub language: String,
+    #[serde(default = "default_whatsapp_web_i18n_path")]
+    pub i18n_path: String,
+    #[serde(default)]
+    pub admins: Vec<String>,
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    #[serde(default)]
+    pub bindings: Vec<ChannelBindingConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ChannelBindingConfig {
+    #[serde(default)]
+    pub external_user_id: String,
+    #[serde(default)]
+    pub external_chat_id: String,
+    #[serde(default)]
+    pub telegram_bot_name: String,
+    pub user_key: String,
+}
+
+impl Default for WhatsappWebConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bridge_listen: default_whatsapp_web_bridge_listen(),
+            wrapper_listen: default_whatsapp_web_wrapper_listen(),
+            bridge_base_url: default_whatsapp_web_bridge_base_url(),
+            auth_dir: default_whatsapp_web_auth_dir(),
+            quick_result_wait_seconds: default_whatsapp_web_quick_result_wait_seconds(),
+            language: default_whatsapp_web_language(),
+            i18n_path: default_whatsapp_web_i18n_path(),
+            admins: Vec::new(),
+            allowlist: Vec::new(),
+            bindings: Vec::new(),
+        }
+    }
+}
+
+/// 面向公网的 HTTP 反向代理（转发至本机 `clawd`），见 `webd` 二进制。
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebdConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_webd_listen")]
+    pub listen: String,
+    #[serde(default = "default_webd_upstream")]
+    pub upstream: String,
+    #[serde(default = "default_webd_connect_timeout_seconds")]
+    pub connect_timeout_seconds: u64,
+    /// 0 表示使用 `[server].request_timeout_seconds`。
+    #[serde(default)]
+    pub request_timeout_seconds: u64,
+    #[serde(default = "default_webd_forward_x_forwarded")]
+    pub forward_x_forwarded: bool,
+    /// 入站请求体最大字节数（缓冲后转发给 clawd）；过大返回 413。
+    #[serde(default = "default_webd_max_incoming_body_bytes")]
+    pub max_incoming_body_bytes: usize,
+    /// HttpOnly 会话 Cookie 名。
+    #[serde(default = "default_webd_session_cookie_name")]
+    pub session_cookie_name: String,
+    /// 会话有效期（秒）。
+    #[serde(default = "default_webd_session_ttl_seconds")]
+    pub session_ttl_seconds: u64,
+}
+
+impl Default for WebdConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen: default_webd_listen(),
+            upstream: default_webd_upstream(),
+            connect_timeout_seconds: default_webd_connect_timeout_seconds(),
+            request_timeout_seconds: 0,
+            forward_x_forwarded: default_webd_forward_x_forwarded(),
+            max_incoming_body_bytes: default_webd_max_incoming_body_bytes(),
+            session_cookie_name: default_webd_session_cookie_name(),
+            session_ttl_seconds: default_webd_session_ttl_seconds(),
+        }
+    }
+}
+
+fn default_webd_session_cookie_name() -> String {
+    "webd_sid".to_string()
+}
+
+fn default_webd_session_ttl_seconds() -> u64 {
+    86400
+}
+
+fn default_webd_max_incoming_body_bytes() -> usize {
+    100 * 1024 * 1024
+}
+
+fn default_webd_listen() -> String {
+    "0.0.0.0:8788".to_string()
+}
+
+fn default_webd_upstream() -> String {
+    "http://127.0.0.1:8787".to_string()
+}
+
+fn default_webd_connect_timeout_seconds() -> u64 {
+    10
+}
+
+fn default_webd_forward_x_forwarded() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AdapterPlaceholderConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+impl Default for AdapterPlaceholderConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: String::new(),
+            note: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SendfileConfig {
+    #[serde(default = "default_sendfile_admin_only")]
+    pub admin_only: bool,
+    #[serde(default = "default_sendfile_full_access")]
+    pub full_access: bool,
+    #[serde(default = "default_sendfile_allowed_dirs")]
+    pub allowed_dirs: Vec<String>,
+}
+
+impl Default for SendfileConfig {
+    fn default() -> Self {
+        Self {
+            admin_only: default_sendfile_admin_only(),
+            full_access: default_sendfile_full_access(),
+            allowed_dirs: default_sendfile_allowed_dirs(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatabaseConfig {
+    pub sqlite_path: String,
+    pub busy_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkerConfig {
+    // Phase 0.1 / L4: 缺省值收敛为安全基线。
+    // 历史上这四个字段在 struct 上没有 `#[serde(default)]`，部署模板里硬编码
+    // `task_timeout_seconds = 86400`（24h），任何继承该模板的环境都会把单任务
+    // 硬超时拉到一天。补上 serde default 后，未在 toml 中显式声明就走安全值：
+    // - concurrency=1（单 worker，避免抢资源）
+    // - poll_interval_ms=500
+    // - queue_limit=64
+    // - task_timeout_seconds=3600（1 小时硬上限，远小于原 24h）
+    // 现存 demo 模板会显式设大值，行为不变；新部署默认即安全。
+    #[serde(default = "default_worker_concurrency")]
+    pub concurrency: usize,
+    #[serde(default = "default_worker_task_timeout_seconds")]
+    pub task_timeout_seconds: u64,
+    #[serde(default = "default_worker_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    #[serde(default = "default_worker_queue_limit")]
+    pub queue_limit: usize,
+    #[serde(default = "default_worker_task_heartbeat_seconds")]
+    pub task_heartbeat_seconds: u64,
+    #[serde(default = "default_worker_running_no_progress_timeout_seconds")]
+    pub running_no_progress_timeout_seconds: u64,
+    #[serde(default = "default_worker_running_recovery_check_interval_seconds")]
+    pub running_recovery_check_interval_seconds: u64,
+}
+
+impl Default for WorkerConfig {
+    fn default() -> Self {
+        Self {
+            concurrency: default_worker_concurrency(),
+            task_timeout_seconds: default_worker_task_timeout_seconds(),
+            poll_interval_ms: default_worker_poll_interval_ms(),
+            queue_limit: default_worker_queue_limit(),
+            task_heartbeat_seconds: default_worker_task_heartbeat_seconds(),
+            running_no_progress_timeout_seconds:
+                default_worker_running_no_progress_timeout_seconds(),
+            running_recovery_check_interval_seconds:
+                default_worker_running_recovery_check_interval_seconds(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct LlmConfig {
+    #[serde(default)]
+    pub selected_vendor: Option<String>,
+    #[serde(default)]
+    pub selected_model: Option<String>,
+    #[serde(default)]
+    pub openai: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub google: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub anthropic: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub grok: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub deepseek: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub qwen: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub minimax: Option<LlmVendorConfig>,
+    #[serde(default)]
+    pub custom: Option<LlmVendorConfig>,
+    // Legacy flat provider list, kept for backward compatibility.
+    #[serde(default)]
+    pub providers: Vec<LlmProviderConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LlmVendorConfig {
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    pub model: String,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default = "default_llm_timeout_seconds")]
+    pub timeout_seconds: u64,
+    #[serde(default = "default_llm_max_concurrency")]
+    pub max_concurrency: usize,
+    /// 仅 `[llm.minimax]` 使用：clawd 合成 `vendor-minimax` 时的协议。未填或空字符串默认 `openai_compat`；`anthropic_claude`（及别名）走 Anthropic Messages。其它厂商忽略。
+    #[serde(default)]
+    pub api_format: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LlmProviderConfig {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub provider_type: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub priority: i32,
+    pub timeout_seconds: u64,
+    pub max_concurrency: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SkillsConfig {
+    #[serde(default = "default_skill_timeout_seconds")]
+    pub skill_timeout_seconds: u64,
+    #[serde(default = "default_skill_max_concurrency")]
+    pub skill_max_concurrency: usize,
+    #[serde(default = "default_skills_list")]
+    pub skills_list: Vec<String>,
+    #[serde(default)]
+    pub skill_switches: HashMap<String, bool>,
+    /// 技能注册表文件路径（相对 workspace 或绝对）。设则启用 registry 驱动发现/启用/别名/超时。
+    #[serde(default)]
+    pub registry_path: Option<String>,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            skill_timeout_seconds: default_skill_timeout_seconds(),
+            skill_max_concurrency: default_skill_max_concurrency(),
+            skills_list: default_skills_list(),
+            skill_switches: HashMap::new(),
+            registry_path: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SelfExtensionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub auto_on_capability_gap: bool,
+    #[serde(default)]
+    pub allow_execute: bool,
+    #[serde(default)]
+    pub allow_package_install: bool,
+    #[serde(default)]
+    pub allow_permanent_extension: bool,
+    #[serde(default)]
+    pub allow_runtime_enable: bool,
+}
+
+impl Default for SelfExtensionConfig {
+    fn default() -> Self {
+        // Phase 0.1: 默认安全收敛。self_extension 会允许 agent 临时生成/安装/
+        // 执行脚本，属高权力能力。默认一律关闭，只有当用户在 config.toml 里
+        // 显式设为 true 时才启用，避免"未配置即默认全开"的权限面过大问题。
+        Self {
+            enabled: false,
+            auto_on_capability_gap: false,
+            allow_execute: false,
+            allow_package_install: false,
+            allow_permanent_extension: false,
+            allow_runtime_enable: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LimitsConfig {
+    #[serde(default = "default_global_rpm")]
+    pub global_rpm: usize,
+    #[serde(default = "default_user_rpm")]
+    pub user_rpm: usize,
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self {
+            global_rpm: default_global_rpm(),
+            user_rpm: default_user_rpm(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MaintenanceConfig {
+    #[serde(default = "default_cleanup_interval_seconds")]
+    pub cleanup_interval_seconds: u64,
+    #[serde(default = "default_tasks_retention_days")]
+    pub tasks_retention_days: u64,
+    #[serde(default = "default_tasks_max_rows")]
+    pub tasks_max_rows: usize,
+    #[serde(default = "default_audit_retention_days")]
+    pub audit_retention_days: u64,
+    #[serde(default = "default_audit_max_rows")]
+    pub audit_max_rows: usize,
+}
+
+impl Default for MaintenanceConfig {
+    fn default() -> Self {
+        Self {
+            cleanup_interval_seconds: default_cleanup_interval_seconds(),
+            tasks_retention_days: default_tasks_retention_days(),
+            tasks_max_rows: default_tasks_max_rows(),
+            audit_retention_days: default_audit_retention_days(),
+            audit_max_rows: default_audit_max_rows(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryConfig {
+    #[serde(default = "default_memory_config_path")]
+    pub config_path: String,
+    #[serde(default = "default_memory_mark_llm_reply_in_short_term")]
+    pub mark_llm_reply_in_short_term: bool,
+    #[serde(default = "default_memory_prefer_llm_assistant_memory")]
+    pub prefer_llm_assistant_memory: bool,
+    #[serde(default = "default_memory_prompt_recall_limit")]
+    pub prompt_recall_limit: usize,
+    #[serde(default = "default_memory_recall_limit")]
+    pub recall_limit: usize,
+    #[serde(default = "default_memory_item_max_chars")]
+    pub item_max_chars: usize,
+    #[serde(default = "default_memory_prompt_max_chars")]
+    pub prompt_max_chars: usize,
+    #[serde(default = "default_memory_retention_days")]
+    pub retention_days: u64,
+    #[serde(default = "default_memory_max_rows")]
+    pub max_rows: usize,
+    #[serde(default = "default_memory_long_term_enabled")]
+    pub long_term_enabled: bool,
+    #[serde(default = "default_memory_long_term_every_rounds")]
+    pub long_term_every_rounds: usize,
+    #[serde(default = "default_memory_long_term_source_rounds")]
+    pub long_term_source_rounds: usize,
+    #[serde(default = "default_memory_long_term_summary_max_chars")]
+    pub long_term_summary_max_chars: usize,
+    #[serde(default = "default_memory_long_term_recall_max_chars")]
+    pub long_term_recall_max_chars: usize,
+    #[serde(default = "default_memory_long_term_retention_days")]
+    pub long_term_retention_days: u64,
+    #[serde(default = "default_memory_long_term_max_rows")]
+    pub long_term_max_rows: usize,
+    #[serde(default = "default_memory_write_filter_enabled")]
+    pub write_filter_enabled: bool,
+    #[serde(default = "default_memory_write_min_chars")]
+    pub write_min_chars: usize,
+    #[serde(default = "default_memory_enable_preference_extraction")]
+    pub enable_preference_extraction: bool,
+    #[serde(default = "default_memory_preference_recall_limit")]
+    pub preference_recall_limit: usize,
+    #[serde(default = "default_memory_recent_relevance_enabled")]
+    pub recent_relevance_enabled: bool,
+    #[serde(default = "default_memory_recent_relevance_min_score")]
+    pub recent_relevance_min_score: f32,
+    #[serde(default = "default_memory_safety_filter_enabled")]
+    pub safety_filter_enabled: bool,
+    #[serde(default = "default_memory_long_term_refresh_min_new_chars")]
+    pub long_term_refresh_min_new_chars: usize,
+    #[serde(default = "default_memory_long_term_refresh_max_repeat_ratio")]
+    pub long_term_refresh_max_repeat_ratio: f32,
+    #[serde(default = "default_memory_route_memory_enabled")]
+    pub route_memory_enabled: bool,
+    #[serde(default = "default_memory_route_memory_max_chars")]
+    pub route_memory_max_chars: usize,
+    #[serde(default = "default_memory_skill_memory_enabled")]
+    pub skill_memory_enabled: bool,
+    #[serde(default = "default_memory_skill_memory_max_chars")]
+    pub skill_memory_max_chars: usize,
+    #[serde(default = "default_memory_schedule_memory_include_long_term")]
+    pub schedule_memory_include_long_term: bool,
+    #[serde(default = "default_memory_schedule_memory_include_preferences")]
+    pub schedule_memory_include_preferences: bool,
+    #[serde(default = "default_memory_schedule_memory_max_chars")]
+    pub schedule_memory_max_chars: usize,
+    #[serde(default = "default_memory_image_memory_include_long_term")]
+    pub image_memory_include_long_term: bool,
+    #[serde(default = "default_memory_image_memory_include_preferences")]
+    pub image_memory_include_preferences: bool,
+    #[serde(default = "default_memory_image_memory_max_chars")]
+    pub image_memory_max_chars: usize,
+    #[serde(default = "default_memory_hybrid_recall_enabled")]
+    pub hybrid_recall_enabled: bool,
+    #[serde(default = "default_memory_fts_candidate_limit")]
+    pub fts_candidate_limit: usize,
+    #[serde(default = "default_memory_vector_candidate_limit")]
+    pub vector_candidate_limit: usize,
+    #[serde(default = "default_memory_trigger_anchor_limit")]
+    pub trigger_anchor_limit: usize,
+    #[serde(default = "default_memory_fact_card_limit")]
+    pub fact_card_limit: usize,
+    #[serde(default = "default_memory_chat_memory_budget_chars")]
+    pub chat_memory_budget_chars: usize,
+    #[serde(default = "default_memory_agent_memory_budget_chars")]
+    pub agent_memory_budget_chars: usize,
+    #[serde(default = "default_memory_route_trigger_budget_chars")]
+    pub route_trigger_budget_chars: usize,
+    #[serde(default = "default_memory_embedding_model")]
+    pub embedding_model: String,
+    #[serde(default = "default_memory_embedding_batch_size")]
+    pub embedding_batch_size: usize,
+    #[serde(default = "default_memory_reindex_on_startup")]
+    pub reindex_on_startup: bool,
+    #[serde(default)]
+    pub rules: MemoryRulesConfig,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            config_path: default_memory_config_path(),
+            mark_llm_reply_in_short_term: default_memory_mark_llm_reply_in_short_term(),
+            prefer_llm_assistant_memory: default_memory_prefer_llm_assistant_memory(),
+            prompt_recall_limit: default_memory_prompt_recall_limit(),
+            recall_limit: default_memory_recall_limit(),
+            item_max_chars: default_memory_item_max_chars(),
+            prompt_max_chars: default_memory_prompt_max_chars(),
+            retention_days: default_memory_retention_days(),
+            max_rows: default_memory_max_rows(),
+            long_term_enabled: default_memory_long_term_enabled(),
+            long_term_every_rounds: default_memory_long_term_every_rounds(),
+            long_term_source_rounds: default_memory_long_term_source_rounds(),
+            long_term_summary_max_chars: default_memory_long_term_summary_max_chars(),
+            long_term_recall_max_chars: default_memory_long_term_recall_max_chars(),
+            long_term_retention_days: default_memory_long_term_retention_days(),
+            long_term_max_rows: default_memory_long_term_max_rows(),
+            write_filter_enabled: default_memory_write_filter_enabled(),
+            write_min_chars: default_memory_write_min_chars(),
+            enable_preference_extraction: default_memory_enable_preference_extraction(),
+            preference_recall_limit: default_memory_preference_recall_limit(),
+            recent_relevance_enabled: default_memory_recent_relevance_enabled(),
+            recent_relevance_min_score: default_memory_recent_relevance_min_score(),
+            safety_filter_enabled: default_memory_safety_filter_enabled(),
+            long_term_refresh_min_new_chars: default_memory_long_term_refresh_min_new_chars(),
+            long_term_refresh_max_repeat_ratio: default_memory_long_term_refresh_max_repeat_ratio(),
+            route_memory_enabled: default_memory_route_memory_enabled(),
+            route_memory_max_chars: default_memory_route_memory_max_chars(),
+            skill_memory_enabled: default_memory_skill_memory_enabled(),
+            skill_memory_max_chars: default_memory_skill_memory_max_chars(),
+            schedule_memory_include_long_term: default_memory_schedule_memory_include_long_term(),
+            schedule_memory_include_preferences: default_memory_schedule_memory_include_preferences(
+            ),
+            schedule_memory_max_chars: default_memory_schedule_memory_max_chars(),
+            image_memory_include_long_term: default_memory_image_memory_include_long_term(),
+            image_memory_include_preferences: default_memory_image_memory_include_preferences(),
+            image_memory_max_chars: default_memory_image_memory_max_chars(),
+            hybrid_recall_enabled: default_memory_hybrid_recall_enabled(),
+            fts_candidate_limit: default_memory_fts_candidate_limit(),
+            vector_candidate_limit: default_memory_vector_candidate_limit(),
+            trigger_anchor_limit: default_memory_trigger_anchor_limit(),
+            fact_card_limit: default_memory_fact_card_limit(),
+            chat_memory_budget_chars: default_memory_chat_memory_budget_chars(),
+            agent_memory_budget_chars: default_memory_agent_memory_budget_chars(),
+            route_trigger_budget_chars: default_memory_route_trigger_budget_chars(),
+            embedding_model: default_memory_embedding_model(),
+            embedding_batch_size: default_memory_embedding_batch_size(),
+            reindex_on_startup: default_memory_reindex_on_startup(),
+            rules: MemoryRulesConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryRulesConfig {
+    #[serde(default = "default_memory_rule_assistant_ack_skip")]
+    pub assistant_ack_skip: Vec<String>,
+    #[serde(default = "default_memory_rule_instruction_markers")]
+    pub instruction_markers: Vec<String>,
+    #[serde(default = "default_memory_rule_injection_markers")]
+    pub injection_markers: Vec<String>,
+    #[serde(default = "default_memory_rule_salience_boost_markers")]
+    pub salience_boost_markers: Vec<String>,
+    #[serde(default)]
+    pub preferences: MemoryPreferenceRulesConfig,
+}
+
+impl Default for MemoryRulesConfig {
+    fn default() -> Self {
+        Self {
+            assistant_ack_skip: default_memory_rule_assistant_ack_skip(),
+            instruction_markers: default_memory_rule_instruction_markers(),
+            injection_markers: default_memory_rule_injection_markers(),
+            salience_boost_markers: default_memory_rule_salience_boost_markers(),
+            preferences: MemoryPreferenceRulesConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryPreferenceRulesConfig {
+    #[serde(default = "default_memory_rule_pref_language_zh")]
+    pub language_zh: Vec<String>,
+    #[serde(default = "default_memory_rule_pref_language_en")]
+    pub language_en: Vec<String>,
+    #[serde(default = "default_memory_rule_pref_style_concise")]
+    pub style_concise: Vec<String>,
+    #[serde(default = "default_memory_rule_pref_style_detailed")]
+    pub style_detailed: Vec<String>,
+    #[serde(default = "default_memory_rule_pref_format_plain_text")]
+    pub format_plain_text: Vec<String>,
+}
+
+impl Default for MemoryPreferenceRulesConfig {
+    fn default() -> Self {
+        Self {
+            language_zh: default_memory_rule_pref_language_zh(),
+            language_en: default_memory_rule_pref_language_en(),
+            style_concise: default_memory_rule_pref_style_concise(),
+            style_detailed: default_memory_rule_pref_style_detailed(),
+            format_plain_text: default_memory_rule_pref_format_plain_text(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToolsConfig {
+    #[serde(default = "default_tools_profile")]
+    pub profile: String,
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<String>,
+    #[serde(default = "default_tool_cmd_timeout_seconds")]
+    pub cmd_timeout_seconds: u64,
+    #[serde(default = "default_tool_max_cmd_length")]
+    pub max_cmd_length: usize,
+    #[serde(default)]
+    pub allow_path_outside_workspace: bool,
+    #[serde(default)]
+    pub allow_sudo: bool,
+    #[serde(default)]
+    pub by_provider: HashMap<String, ProviderToolsConfig>,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            profile: default_tools_profile(),
+            allow: Vec::new(),
+            deny: Vec::new(),
+            cmd_timeout_seconds: default_tool_cmd_timeout_seconds(),
+            max_cmd_length: default_tool_max_cmd_length(),
+            allow_path_outside_workspace: false,
+            allow_sudo: false,
+            by_provider: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ProviderToolsConfig {
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ImageSkillConfig {
+    #[serde(default = "default_image_default_output_dir")]
+    pub default_output_dir: String,
+    #[serde(default)]
+    pub default_vendor: Option<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub openai_models: Vec<String>,
+    #[serde(default)]
+    pub google_models: Vec<String>,
+    #[serde(default)]
+    pub anthropic_models: Vec<String>,
+    #[serde(default)]
+    pub grok_models: Vec<String>,
+    #[serde(default)]
+    pub deepseek_models: Vec<String>,
+    #[serde(default)]
+    pub qwen_models: Vec<String>,
+    #[serde(default)]
+    pub native_models: Vec<String>,
+    #[serde(default)]
+    pub custom_models: Vec<String>,
+    #[serde(default = "default_image_timeout_seconds")]
+    pub timeout_seconds: u64,
+    #[serde(default = "default_image_max_concurrency")]
+    pub max_concurrency: usize,
+    #[serde(default = "default_image_max_images")]
+    pub max_images: usize,
+    #[serde(default = "default_image_max_input_bytes")]
+    pub max_input_bytes: usize,
+    #[serde(default)]
+    pub local_auto_upload_enabled: bool,
+    #[serde(default)]
+    pub oss_access_key_id: Option<String>,
+    #[serde(default)]
+    pub oss_access_key_secret: Option<String>,
+    #[serde(default)]
+    pub oss_bucket: Option<String>,
+    #[serde(default)]
+    pub oss_endpoint: Option<String>,
+    #[serde(default)]
+    pub oss_object_prefix: Option<String>,
+    #[serde(default)]
+    pub oss_url_ttl_seconds: Option<u64>,
+}
+
+impl Default for ImageSkillConfig {
+    fn default() -> Self {
+        Self {
+            default_output_dir: default_image_default_output_dir(),
+            default_vendor: None,
+            default_model: None,
+            models: Vec::new(),
+            openai_models: Vec::new(),
+            google_models: Vec::new(),
+            anthropic_models: Vec::new(),
+            grok_models: Vec::new(),
+            deepseek_models: Vec::new(),
+            qwen_models: Vec::new(),
+            native_models: Vec::new(),
+            custom_models: Vec::new(),
+            timeout_seconds: default_image_timeout_seconds(),
+            max_concurrency: default_image_max_concurrency(),
+            max_images: default_image_max_images(),
+            max_input_bytes: default_image_max_input_bytes(),
+            local_auto_upload_enabled: false,
+            oss_access_key_id: None,
+            oss_access_key_secret: None,
+            oss_bucket: None,
+            oss_endpoint: None,
+            oss_object_prefix: None,
+            oss_url_ttl_seconds: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoutingConfig {
+    #[serde(default)]
+    pub debug_log_prompt: bool,
+    #[serde(default = "default_routing_default_locator_search_dir")]
+    pub default_locator_search_dir: String,
+    #[serde(default = "default_routing_locator_scan_max_depth")]
+    pub locator_scan_max_depth: usize,
+    #[serde(default = "default_routing_locator_scan_max_files")]
+    pub locator_scan_max_files: usize,
+}
+
+impl Default for RoutingConfig {
+    fn default() -> Self {
+        Self {
+            debug_log_prompt: false,
+            default_locator_search_dir: default_routing_default_locator_search_dir(),
+            locator_scan_max_depth: default_routing_locator_scan_max_depth(),
+            locator_scan_max_files: default_routing_locator_scan_max_files(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PersonaConfig {
+    #[serde(default = "default_persona_profile")]
+    pub profile: String,
+    #[serde(default = "default_persona_dir")]
+    pub dir: String,
+}
+
+impl Default for PersonaConfig {
+    fn default() -> Self {
+        Self {
+            profile: default_persona_profile(),
+            dir: default_persona_dir(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommandIntentConfig {
+    #[serde(default = "default_command_intent_default_locale")]
+    pub default_locale: String,
+    #[serde(default = "default_command_intent_rules_dir")]
+    pub rules_dir: String,
+    #[serde(default = "default_command_intent_llm_fallback_enabled")]
+    pub llm_fallback_enabled: bool,
+    #[serde(default = "default_command_intent_verify_enforce_enabled")]
+    pub verify_enforce_enabled: bool,
+}
+
+impl Default for CommandIntentConfig {
+    fn default() -> Self {
+        Self {
+            default_locale: default_command_intent_default_locale(),
+            rules_dir: default_command_intent_rules_dir(),
+            llm_fallback_enabled: default_command_intent_llm_fallback_enabled(),
+            verify_enforce_enabled: default_command_intent_verify_enforce_enabled(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleConfig {
+    #[serde(default = "default_schedule_timezone")]
+    pub timezone: String,
+    #[serde(default = "default_schedule_intent_prompt_path")]
+    pub intent_prompt_path: String,
+    #[serde(default = "default_schedule_intent_rules_path")]
+    pub intent_rules_path: String,
+    #[serde(default = "default_schedule_locale")]
+    pub locale: String,
+    #[serde(default = "default_schedule_i18n_dir")]
+    pub i18n_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct SplitImageConfig {
+    #[serde(default)]
+    image_vision: ImageSkillConfig,
+    #[serde(default)]
+    image_generation: ImageSkillConfig,
+    #[serde(default)]
+    image_edit: ImageSkillConfig,
+}
+
+impl Default for ScheduleConfig {
+    fn default() -> Self {
+        Self {
+            timezone: default_schedule_timezone(),
+            intent_prompt_path: default_schedule_intent_prompt_path(),
+            intent_rules_path: default_schedule_intent_rules_path(),
+            locale: default_schedule_locale(),
+            i18n_dir: default_schedule_i18n_dir(),
+        }
+    }
+}
+
+fn default_skill_timeout_seconds() -> u64 {
+    30
+}
+
+fn default_skill_max_concurrency() -> usize {
+    1
+}
+
+/// 文件系统基础技能（run_cmd/read_file/write_file/list_dir/make_dir/remove_file）。UI 中归类为「基础技能」，不建议关闭。
+pub fn base_skill_names() -> &'static [&'static str] {
+    &[
+        "run_cmd",
+        "read_file",
+        "write_file",
+        "list_dir",
+        "make_dir",
+        "remove_file",
+    ]
+}
+
+/// 默认保底启用的技能；显式 skill_switches=false 可覆盖（与「false = 强制关闭」契约一致）。
+/// 不含 run_cmd/read_file/write_file/list_dir/make_dir/remove_file：这六项为可关闭的 builtin skill，遵守 skills_list + skill_switches。
+pub fn core_skills_always_enabled() -> &'static [&'static str] {
+    &[
+        "chat",
+        "system_basic",
+        "process_basic",
+        "config_guard",
+        "archive_basic",
+    ]
+}
+
+fn default_skills_list() -> Vec<String> {
+    // Keep in sync with `configs/skills_registry.toml` [[skills]] names (no-registry fallback baseline).
+    vec![
+        "run_cmd".to_string(),
+        "read_file".to_string(),
+        "write_file".to_string(),
+        "list_dir".to_string(),
+        "make_dir".to_string(),
+        "remove_file".to_string(),
+        "schedule".to_string(),
+        "x".to_string(),
+        "system_basic".to_string(),
+        "http_basic".to_string(),
+        "git_basic".to_string(),
+        "install_module".to_string(),
+        "process_basic".to_string(),
+        "package_manager".to_string(),
+        "archive_basic".to_string(),
+        "db_basic".to_string(),
+        "docker_basic".to_string(),
+        "fs_search".to_string(),
+        "rss_fetch".to_string(),
+        "image_vision".to_string(),
+        "image_generate".to_string(),
+        "image_edit".to_string(),
+        "audio_transcribe".to_string(),
+        "audio_synthesize".to_string(),
+        "health_check".to_string(),
+        "log_analyze".to_string(),
+        "service_control".to_string(),
+        "task_control".to_string(),
+        "config_guard".to_string(),
+        "map_merchant".to_string(),
+        "crypto".to_string(),
+        "chat".to_string(),
+        "stock".to_string(),
+        "weather".to_string(),
+        "doc_parse".to_string(),
+        "transform".to_string(),
+        "web_search_extract".to_string(),
+        "kb".to_string(),
+        "browser_web".to_string(),
+        "extension_manager".to_string(),
+    ]
+}
+
+fn default_global_rpm() -> usize {
+    60
+}
+
+fn default_user_rpm() -> usize {
+    20
+}
+
+fn default_cleanup_interval_seconds() -> u64 {
+    300
+}
+
+fn default_tasks_retention_days() -> u64 {
+    7
+}
+
+fn default_tasks_max_rows() -> usize {
+    2000
+}
+
+fn default_audit_retention_days() -> u64 {
+    14
+}
+
+fn default_audit_max_rows() -> usize {
+    10000
+}
+
+fn default_memory_mark_llm_reply_in_short_term() -> bool {
+    true
+}
+
+fn default_memory_config_path() -> String {
+    "configs/memory.toml".to_string()
+}
+
+fn default_memory_prefer_llm_assistant_memory() -> bool {
+    false
+}
+
+fn default_memory_prompt_recall_limit() -> usize {
+    3
+}
+
+fn default_memory_recall_limit() -> usize {
+    8
+}
+
+fn default_memory_item_max_chars() -> usize {
+    2000
+}
+
+fn default_memory_prompt_max_chars() -> usize {
+    8000
+}
+
+fn default_memory_retention_days() -> u64 {
+    30
+}
+
+fn default_memory_max_rows() -> usize {
+    50000
+}
+
+fn default_memory_long_term_enabled() -> bool {
+    true
+}
+
+fn default_memory_long_term_every_rounds() -> usize {
+    6
+}
+
+fn default_memory_long_term_source_rounds() -> usize {
+    20
+}
+
+fn default_memory_long_term_summary_max_chars() -> usize {
+    3000
+}
+
+fn default_memory_long_term_recall_max_chars() -> usize {
+    1200
+}
+
+fn default_memory_long_term_retention_days() -> u64 {
+    180
+}
+
+fn default_memory_long_term_max_rows() -> usize {
+    10000
+}
+
+fn default_memory_write_filter_enabled() -> bool {
+    true
+}
+
+fn default_memory_write_min_chars() -> usize {
+    12
+}
+
+fn default_memory_enable_preference_extraction() -> bool {
+    true
+}
+
+fn default_memory_preference_recall_limit() -> usize {
+    8
+}
+
+fn default_memory_recent_relevance_enabled() -> bool {
+    true
+}
+
+fn default_memory_recent_relevance_min_score() -> f32 {
+    0.16
+}
+
+fn default_memory_safety_filter_enabled() -> bool {
+    true
+}
+
+fn default_memory_long_term_refresh_min_new_chars() -> usize {
+    80
+}
+
+fn default_memory_long_term_refresh_max_repeat_ratio() -> f32 {
+    0.7
+}
+
+fn default_memory_route_memory_enabled() -> bool {
+    true
+}
+
+fn default_memory_route_memory_max_chars() -> usize {
+    1400
+}
+
+fn default_memory_skill_memory_enabled() -> bool {
+    true
+}
+
+fn default_memory_skill_memory_max_chars() -> usize {
+    1800
+}
+
+fn default_memory_schedule_memory_include_long_term() -> bool {
+    true
+}
+
+fn default_memory_schedule_memory_include_preferences() -> bool {
+    true
+}
+
+fn default_memory_schedule_memory_max_chars() -> usize {
+    1600
+}
+
+fn default_memory_image_memory_include_long_term() -> bool {
+    true
+}
+
+fn default_memory_image_memory_include_preferences() -> bool {
+    true
+}
+
+fn default_memory_image_memory_max_chars() -> usize {
+    1400
+}
+
+fn default_memory_hybrid_recall_enabled() -> bool {
+    true
+}
+
+fn default_memory_fts_candidate_limit() -> usize {
+    24
+}
+
+fn default_memory_vector_candidate_limit() -> usize {
+    24
+}
+
+fn default_memory_trigger_anchor_limit() -> usize {
+    2
+}
+
+fn default_memory_fact_card_limit() -> usize {
+    3
+}
+
+fn default_memory_chat_memory_budget_chars() -> usize {
+    1200
+}
+
+fn default_memory_agent_memory_budget_chars() -> usize {
+    2200
+}
+
+fn default_memory_route_trigger_budget_chars() -> usize {
+    900
+}
+
+fn default_memory_embedding_model() -> String {
+    "local-hash-v1".to_string()
+}
+
+fn default_memory_embedding_batch_size() -> usize {
+    16
+}
+
+fn default_memory_reindex_on_startup() -> bool {
+    false
+}
+
+fn default_worker_concurrency() -> usize {
+    1
+}
+
+fn default_worker_task_timeout_seconds() -> u64 {
+    // 1 小时单任务硬上限。比 demo 模板里的 86400 (24h) 安全得多。
+    // 真的需要长任务（视频处理、大批量同步）就在 toml 中显式覆盖。
+    3600
+}
+
+fn default_worker_poll_interval_ms() -> u64 {
+    500
+}
+
+fn default_worker_queue_limit() -> usize {
+    64
+}
+
+fn default_worker_task_heartbeat_seconds() -> u64 {
+    30
+}
+
+fn default_worker_running_no_progress_timeout_seconds() -> u64 {
+    20 * 60
+}
+
+fn default_worker_running_recovery_check_interval_seconds() -> u64 {
+    60
+}
+
+fn default_memory_rule_assistant_ack_skip() -> Vec<String> {
+    vec![
+        "ok".to_string(),
+        "okay".to_string(),
+        "done".to_string(),
+        "received".to_string(),
+        "收到".to_string(),
+        "好的".to_string(),
+        "明白了".to_string(),
+    ]
+}
+
+fn default_memory_rule_instruction_markers() -> Vec<String> {
+    vec![
+        "请".to_string(),
+        "执行".to_string(),
+        "run ".to_string(),
+        "please ".to_string(),
+    ]
+}
+
+fn default_memory_rule_injection_markers() -> Vec<String> {
+    vec![
+        "ignore previous instructions".to_string(),
+        "ignore all previous rules".to_string(),
+        "system prompt".to_string(),
+        "泄露提示词".to_string(),
+        "忽略之前所有规则".to_string(),
+        "忽略系统规则".to_string(),
+    ]
+}
+
+fn default_memory_rule_salience_boost_markers() -> Vec<String> {
+    vec!["以后".to_string(), "always".to_string(), "默认".to_string()]
+}
+
+fn default_memory_rule_pref_language_zh() -> Vec<String> {
+    vec![
+        "以后都用中文".to_string(),
+        "请用中文".to_string(),
+        "中文回复".to_string(),
+        "默认中文".to_string(),
+        "都说中文".to_string(),
+    ]
+}
+
+fn default_memory_rule_pref_language_en() -> Vec<String> {
+    vec![
+        "以后都用英文".to_string(),
+        "请用英文".to_string(),
+        "英文回复".to_string(),
+        "reply in english".to_string(),
+        "speak english".to_string(),
+    ]
+}
+
+fn default_memory_rule_pref_style_concise() -> Vec<String> {
+    vec![
+        "简洁".to_string(),
+        "简短".to_string(),
+        "精简".to_string(),
+        "concise".to_string(),
+        "brief".to_string(),
+    ]
+}
+
+fn default_memory_rule_pref_style_detailed() -> Vec<String> {
+    vec![
+        "详细".to_string(),
+        "展开".to_string(),
+        "细一点".to_string(),
+        "detailed".to_string(),
+        "step by step".to_string(),
+    ]
+}
+
+fn default_memory_rule_pref_format_plain_text() -> Vec<String> {
+    vec![
+        "不要markdown".to_string(),
+        "别用markdown".to_string(),
+        "纯文本".to_string(),
+        "plain text".to_string(),
+        "no markdown".to_string(),
+    ]
+}
+
+fn default_tools_profile() -> String {
+    "full".to_string()
+}
+
+fn default_telegram_quick_result_wait_seconds() -> u64 {
+    3
+}
+
+fn default_telegram_task_delivery_timeout_seconds() -> u64 {
+    600
+}
+
+fn default_whatsapp_api_base() -> String {
+    "https://graph.facebook.com".to_string()
+}
+
+fn default_whatsapp_webhook_listen() -> String {
+    "127.0.0.1:8091".to_string()
+}
+
+fn default_whatsapp_webhook_path() -> String {
+    "/webhook".to_string()
+}
+
+fn default_whatsapp_quick_result_wait_seconds() -> u64 {
+    3
+}
+
+fn default_whatsapp_task_delivery_timeout_seconds() -> u64 {
+    600
+}
+
+fn default_whatsapp_i18n_path() -> String {
+    "configs/i18n/whatsapp-cloud.en-US.toml".to_string()
+}
+
+fn default_whatsapp_language() -> String {
+    "en-US".to_string()
+}
+
+fn default_whatsapp_image_inbox_dir() -> String {
+    "image/upload".to_string()
+}
+
+fn default_whatsapp_audio_inbox_dir() -> String {
+    "audio/upload".to_string()
+}
+
+fn default_whatsapp_web_bridge_listen() -> String {
+    "127.0.0.1:8092".to_string()
+}
+
+fn default_whatsapp_web_bridge_base_url() -> String {
+    "http://127.0.0.1:8092".to_string()
+}
+
+fn default_whatsapp_web_wrapper_listen() -> String {
+    "127.0.0.1:8094".to_string()
+}
+
+fn default_whatsapp_web_auth_dir() -> String {
+    "data/wa-web-auth".to_string()
+}
+
+fn default_whatsapp_web_quick_result_wait_seconds() -> u64 {
+    3
+}
+
+fn default_whatsapp_web_i18n_path() -> String {
+    "configs/i18n/whatsapp-webd.en-US.toml".to_string()
+}
+
+fn default_whatsapp_web_language() -> String {
+    "en-US".to_string()
+}
+
+fn default_telegram_i18n_path() -> String {
+    "configs/i18n/telegramd.zh-CN.toml".to_string()
+}
+
+fn default_telegram_access_mode() -> String {
+    "public".to_string()
+}
+
+fn default_telegram_language() -> String {
+    "zh-CN".to_string()
+}
+
+fn default_telegram_auto_vision_on_image_only() -> bool {
+    true
+}
+
+fn default_telegram_image_inbox_dir() -> String {
+    "data/telegramd/image".to_string()
+}
+
+fn default_telegram_video_inbox_dir() -> String {
+    "data/telegramd/video".to_string()
+}
+
+fn default_telegram_file_inbox_dir() -> String {
+    "data/telegramd/file".to_string()
+}
+
+fn default_telegram_audio_inbox_dir() -> String {
+    "data/telegramd/audio".to_string()
+}
+
+fn default_telegram_voice_reply_mode() -> String {
+    "voice".to_string()
+}
+
+fn default_telegram_voice_mode_nl_intent_enabled() -> bool {
+    true
+}
+
+fn default_telegram_max_audio_input_bytes() -> usize {
+    25 * 1024 * 1024
+}
+
+fn default_telegram_ephemeral_image_saved_seconds() -> u64 {
+    15
+}
+
+fn default_sendfile_admin_only() -> bool {
+    false
+}
+
+fn default_sendfile_full_access() -> bool {
+    true
+}
+
+fn default_sendfile_allowed_dirs() -> Vec<String> {
+    vec!["image/download".to_string(), "document".to_string()]
+}
+
+fn default_tool_cmd_timeout_seconds() -> u64 {
+    10
+}
+
+fn default_tool_max_cmd_length() -> usize {
+    240
+}
+
+fn default_llm_timeout_seconds() -> u64 {
+    30
+}
+
+fn default_llm_max_concurrency() -> usize {
+    1
+}
+
+fn default_image_default_output_dir() -> String {
+    "image".to_string()
+}
+
+fn default_image_timeout_seconds() -> u64 {
+    90
+}
+
+fn default_image_max_concurrency() -> usize {
+    1
+}
+
+fn default_image_max_images() -> usize {
+    6
+}
+
+fn default_image_max_input_bytes() -> usize {
+    10 * 1024 * 1024
+}
+
+fn default_command_intent_default_locale() -> String {
+    "zh-CN".to_string()
+}
+
+fn default_command_intent_rules_dir() -> String {
+    "configs/command_intent".to_string()
+}
+
+fn default_command_intent_llm_fallback_enabled() -> bool {
+    true
+}
+
+fn default_command_intent_verify_enforce_enabled() -> bool {
+    false
+}
+
+fn default_schedule_timezone() -> String {
+    "Asia/Shanghai".to_string()
+}
+
+fn default_schedule_intent_prompt_path() -> String {
+    "prompts/schedule_intent_prompt.md".to_string()
+}
+
+fn default_schedule_intent_rules_path() -> String {
+    "prompts/schedule_intent_rules.md".to_string()
+}
+
+fn default_schedule_locale() -> String {
+    "zh-CN".to_string()
+}
+
+fn default_schedule_i18n_dir() -> String {
+    "configs/i18n".to_string()
+}
+
+fn default_routing_default_locator_search_dir() -> String {
+    ".".to_string()
+}
+
+fn default_routing_locator_scan_max_depth() -> usize {
+    2
+}
+
+fn default_routing_locator_scan_max_files() -> usize {
+    800
+}
+
+fn default_persona_profile() -> String {
+    "executor".to_string()
+}
+
+fn default_persona_dir() -> String {
+    "prompts/personas".to_string()
+}
+
+impl AppConfig {
+    pub fn load(path: &str) -> Result<Self, config::ConfigError> {
+        let base_path = Path::new(path);
+        let base_dir = base_path.parent().unwrap_or_else(|| Path::new("."));
+        let cfg = config::Config::builder()
+            .add_source(config::File::with_name(path))
+            // Optional split channel configs.
+            .add_source(config::File::from(base_dir.join("channels/telegram.toml")).required(false))
+            // Legacy mixed WhatsApp config (kept for backward compatibility).
+            .add_source(config::File::from(base_dir.join("channels/whatsapp.toml")).required(false))
+            // Split WhatsApp configs.
+            .add_source(
+                config::File::from(base_dir.join("channels/whatsapp-cloud.toml")).required(false),
+            )
+            .add_source(
+                config::File::from(base_dir.join("channels/whatsapp-web.toml")).required(false),
+            )
+            .add_source(config::File::from(base_dir.join("channels/webd.toml")).required(false))
+            .build()?;
+        let mut app: AppConfig = cfg.try_deserialize()?;
+
+        // Image skill config must come only from configs/image.toml, never from configs/config.toml.
+        app.image_vision = ImageSkillConfig::default();
+        app.image_generation = ImageSkillConfig::default();
+        app.image_edit = ImageSkillConfig::default();
+
+        let image_cfg: SplitImageConfig = config::Config::builder()
+            .add_source(config::File::from(base_dir.join("image.toml")).required(false))
+            .build()?
+            .try_deserialize()?;
+        app.image_vision = image_cfg.image_vision;
+        app.image_generation = image_cfg.image_generation;
+        app.image_edit = image_cfg.image_edit;
+        apply_env_overrides(&mut app);
+
+        Ok(app)
+    }
+
+    pub fn telegram_runtime_bots(&self) -> Vec<ResolvedTelegramBotConfig> {
+        let mut bots = Vec::new();
+
+        if !self.telegram.bot_token.trim().is_empty() {
+            bots.push(ResolvedTelegramBotConfig {
+                name: "primary".to_string(),
+                bot_token: self.telegram.bot_token.trim().to_string(),
+                agent_id: if self.telegram.agent_id.trim().is_empty() {
+                    default_agent_id().to_string()
+                } else {
+                    self.telegram.agent_id.trim().to_string()
+                },
+                allowlist: self.telegram.allowlist.clone(),
+                access_mode: if self.telegram.access_mode.trim().is_empty() {
+                    default_telegram_access_mode()
+                } else {
+                    self.telegram.access_mode.trim().to_string()
+                },
+                allowed_usernames: self.telegram.allowed_usernames.clone(),
+                language: self.telegram.language.clone(),
+                i18n_path: self.telegram.i18n_path.clone(),
+                quick_result_wait_seconds: self.telegram.quick_result_wait_seconds,
+                task_delivery_timeout_seconds: self.telegram.task_delivery_timeout_seconds,
+            });
+        }
+
+        for (index, bot) in self.telegram.bots.iter().enumerate() {
+            let token = bot.bot_token.trim();
+            if token.is_empty() {
+                continue;
+            }
+            let preferred_name = if bot.name.trim().is_empty() {
+                format!("bot-{}", index + 1)
+            } else {
+                bot.name.trim().to_string()
+            };
+            let name = unique_telegram_bot_name(&bots, &preferred_name, index + 1);
+            let preferred_agent_id = bot.agent_id.trim();
+            bots.push(ResolvedTelegramBotConfig {
+                name,
+                bot_token: token.to_string(),
+                agent_id: if preferred_agent_id.is_empty() {
+                    default_agent_id().to_string()
+                } else {
+                    preferred_agent_id.to_string()
+                },
+                allowlist: if bot.allowlist.is_empty() {
+                    self.telegram.allowlist.clone()
+                } else {
+                    bot.allowlist.clone()
+                },
+                access_mode: if bot.access_mode.trim().is_empty() {
+                    if self.telegram.access_mode.trim().is_empty() {
+                        default_telegram_access_mode()
+                    } else {
+                        self.telegram.access_mode.trim().to_string()
+                    }
+                } else {
+                    bot.access_mode.trim().to_string()
+                },
+                allowed_usernames: if bot.allowed_usernames.is_empty() {
+                    self.telegram.allowed_usernames.clone()
+                } else {
+                    bot.allowed_usernames.clone()
+                },
+                language: if bot.language.trim().is_empty() {
+                    self.telegram.language.clone()
+                } else {
+                    bot.language.trim().to_string()
+                },
+                i18n_path: if bot.i18n_path.trim().is_empty() {
+                    self.telegram.i18n_path.clone()
+                } else {
+                    bot.i18n_path.trim().to_string()
+                },
+                quick_result_wait_seconds: bot.quick_result_wait_seconds,
+                task_delivery_timeout_seconds: bot.task_delivery_timeout_seconds,
+            });
+        }
+
+        let compat_token = self.telegram_bot.bot_token.trim();
+        if self.telegram_bot.enabled
+            && !compat_token.is_empty()
+            && !bots.iter().any(|bot| bot.bot_token == compat_token)
+        {
+            bots.push(ResolvedTelegramBotConfig {
+                name: unique_telegram_bot_name(&bots, "telegram-bot", bots.len() + 1),
+                bot_token: compat_token.to_string(),
+                agent_id: default_agent_id().to_string(),
+                allowlist: if self.telegram_bot.allowlist.is_empty() {
+                    self.telegram.allowlist.clone()
+                } else {
+                    self.telegram_bot.allowlist.clone()
+                },
+                access_mode: if self.telegram_bot.access_mode.trim().is_empty() {
+                    if self.telegram.access_mode.trim().is_empty() {
+                        default_telegram_access_mode()
+                    } else {
+                        self.telegram.access_mode.trim().to_string()
+                    }
+                } else {
+                    self.telegram_bot.access_mode.trim().to_string()
+                },
+                allowed_usernames: if self.telegram_bot.allowed_usernames.is_empty() {
+                    self.telegram.allowed_usernames.clone()
+                } else {
+                    self.telegram_bot.allowed_usernames.clone()
+                },
+                language: if self.telegram_bot.language.trim().is_empty() {
+                    self.telegram.language.clone()
+                } else {
+                    self.telegram_bot.language.trim().to_string()
+                },
+                i18n_path: if self.telegram_bot.i18n_path.trim().is_empty() {
+                    self.telegram.i18n_path.clone()
+                } else {
+                    self.telegram_bot.i18n_path.trim().to_string()
+                },
+                quick_result_wait_seconds: self.telegram_bot.quick_result_wait_seconds,
+                task_delivery_timeout_seconds: self.telegram_bot.task_delivery_timeout_seconds,
+            });
+        }
+
+        bots
+    }
+
+    pub fn normalized_agents(&self) -> Vec<AgentConfig> {
+        let mut agents = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (index, agent) in self.agents.iter().enumerate() {
+            let preferred_id = if agent.id.trim().is_empty() {
+                if index == 0 {
+                    default_agent_id().to_string()
+                } else {
+                    format!("agent-{}", index + 1)
+                }
+            } else {
+                agent.id.trim().to_string()
+            };
+            if !seen.insert(preferred_id.clone()) {
+                continue;
+            }
+            agents.push(AgentConfig {
+                id: preferred_id.clone(),
+                name: if agent.name.trim().is_empty() {
+                    if preferred_id == default_agent_id() {
+                        "Main".to_string()
+                    } else {
+                        preferred_id.clone()
+                    }
+                } else {
+                    agent.name.trim().to_string()
+                },
+                description: agent.description.trim().to_string(),
+                persona_prompt: agent.persona_prompt.trim().to_string(),
+                preferred_vendor: agent
+                    .preferred_vendor
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(ToString::to_string),
+                preferred_model: agent
+                    .preferred_model
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(ToString::to_string),
+                allowed_skills: agent
+                    .allowed_skills
+                    .iter()
+                    .map(|skill| skill.trim())
+                    .filter(|skill| !skill.is_empty())
+                    .map(ToString::to_string)
+                    .collect(),
+            });
+        }
+
+        if !seen.contains(&default_agent_id()) {
+            agents.insert(
+                0,
+                AgentConfig {
+                    id: default_agent_id().to_string(),
+                    name: "Main".to_string(),
+                    ..AgentConfig::default()
+                },
+            );
+        }
+
+        agents
+    }
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_string_env(target: &mut String, key: &str) {
+    if let Some(value) = env_non_empty(key) {
+        *target = value;
+    }
+}
+
+fn apply_llm_vendor_api_key_env(target: &mut Option<LlmVendorConfig>, key: &str) {
+    if let (Some(value), Some(cfg)) = (env_non_empty(key), target.as_mut()) {
+        cfg.api_key = value;
+    }
+}
+
+fn apply_env_overrides(app: &mut AppConfig) {
+    apply_llm_vendor_api_key_env(&mut app.llm.openai, "OPENAI_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.google, "GOOGLE_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.anthropic, "ANTHROPIC_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.grok, "GROK_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.deepseek, "DEEPSEEK_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.qwen, "QWEN_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.minimax, "MINIMAX_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.custom, "CUSTOM_API_KEY");
+
+    apply_string_env(&mut app.telegram.bot_token, "TELEGRAM_BOT_TOKEN");
+    apply_string_env(&mut app.telegram_bot.bot_token, "TELEGRAM_BOT_TOKEN");
+
+    apply_string_env(&mut app.whatsapp.access_token, "WHATSAPP_ACCESS_TOKEN");
+    apply_string_env(&mut app.whatsapp.app_secret, "WHATSAPP_APP_SECRET");
+    apply_string_env(&mut app.whatsapp.verify_token, "WHATSAPP_VERIFY_TOKEN");
+    apply_string_env(
+        &mut app.whatsapp.phone_number_id,
+        "WHATSAPP_PHONE_NUMBER_ID",
+    );
+
+    apply_string_env(
+        &mut app.whatsapp_cloud.access_token,
+        "WHATSAPP_CLOUD_ACCESS_TOKEN",
+    );
+    apply_string_env(
+        &mut app.whatsapp_cloud.app_secret,
+        "WHATSAPP_CLOUD_APP_SECRET",
+    );
+    apply_string_env(
+        &mut app.whatsapp_cloud.verify_token,
+        "WHATSAPP_CLOUD_VERIFY_TOKEN",
+    );
+    apply_string_env(
+        &mut app.whatsapp_cloud.phone_number_id,
+        "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
+    );
+}
+
+fn unique_telegram_bot_name(
+    existing: &[ResolvedTelegramBotConfig],
+    preferred: &str,
+    index_hint: usize,
+) -> String {
+    let trimmed = preferred.trim();
+    if !trimmed.is_empty() && !existing.iter().any(|bot| bot.name == trimmed) {
+        return trimmed.to_string();
+    }
+    let base = if trimmed.is_empty() {
+        "bot".to_string()
+    } else {
+        trimmed.to_string()
+    };
+    let mut suffix = index_hint.max(1);
+    loop {
+        let candidate = format!("{base}-{suffix}");
+        if !existing.iter().any(|bot| bot.name == candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn default_agent_id() -> String {
+    "main".to_string()
+}

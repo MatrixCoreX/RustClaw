@@ -1,0 +1,40 @@
+# http_basic Interface Spec
+
+> This file is managed by `scripts/sync_skill_docs.py`.
+> Keep this spec aligned with the http_basic implementation.
+
+## Capability Summary
+- `http_basic` performs simple HTTP requests for fetch and JSON post use cases.
+- It is intended for lightweight API calls with explicit URL and optional headers/body.
+- When called inside RustClaw with a valid `user_key`, requests to local RustClaw API endpoints on `http://127.0.0.1:8787/` automatically include `X-RustClaw-Key`.
+
+## Actions
+- `get`
+- `post_json`
+
+## Parameter Contract
+| Action | Param | Required | Type | Default | Description |
+|---|---|---|---|---|---|
+| all | `action` | yes | string | - | Must be `get` or `post_json`. |
+| all | `url` | yes | string | - | Must start with `http://` or `https://`. |
+| all | `headers` | no | object | `{}` | Optional request headers map. |
+| all | `timeout_seconds` | no | number | impl default | Request timeout override. |
+| `post_json` | `body` | no | object/array/scalar | - | JSON payload for POST request. |
+
+## Error Contract
+- Missing/invalid URL or unsupported action.
+- Network/timeouts/HTTP errors should return readable error text.
+- Invalid JSON body serialization errors should be surfaced explicitly.
+- Non-2xx HTTP responses are returned as `status=error` with `error_text=http request returned non-success status=<code>\n<body preview>`.
+- Successful responses also mirror structured metadata into `extra`, including `action`, `url`, `status_code`, and `body_preview`.
+
+## Request/Response Examples
+### Example 1
+Request:
+```json
+{"request_id":"demo-1","args":{"action":"get","url":"https://example.com/api/ping"}}
+```
+Response:
+```json
+{"request_id":"demo-1","status":"ok","text":"status=200\n{\"ok\":true}","extra":{"action":"get","url":"https://example.com/api/ping","status_code":200,"body_preview":"{\"ok\":true}"},"error_text":null}
+```

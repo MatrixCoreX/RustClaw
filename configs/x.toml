@@ -1,0 +1,22 @@
+# X skill standalone config
+# This file is read by crates/skills/x/src/main.rs
+# You can override each field with environment variables:
+# - X_USE_XURL
+# - XURL_BIN
+# - XURL_APP
+# - XURL_AUTH
+# - XURL_USERNAME
+# - XURL_TIMEOUT_SECONDS
+# - X_REQUIRE_EXPLICIT_SEND
+# - X_MAX_TEXT_CHARS
+
+# Use xurl for user-context auth and posting.
+use_xurl = true
+xurl_bin = "xurl"
+xurl_app = ""
+xurl_auth = "oauth2"
+xurl_username = ""
+xurl_timeout_seconds = 30
+
+require_explicit_send = true
+max_text_chars = 280

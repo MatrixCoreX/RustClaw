@@ -1,0 +1,7 @@
+# Extra multi-turn follow-up / deictic cases for manual re-runs.
+# Format: case_name|turn1|turn2|turn3
+
+followup_readme_then_summary|先读一下 README.md 前 8 行|那这个项目主要是干什么的，用一句话说|再用更像给新手听的话重说一遍
+followup_logs_first_then_tail|先列出 logs 目录下前 5 个文件名|就第一个，看看最后 3 行|一句话说有没有异常
+followup_compare_two_dirs|先数一下 scripts 目录直接有多少个子项|那 document 目录呢，只输出数字|哪个更多，只回答目录名
+followup_two_files_compare|先读一下 package.json 里的 name，只输出值|那 Cargo.toml 里的 package.name 呢，只输出值|这两个一样吗，只回答一样或不一样

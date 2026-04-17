@@ -1,0 +1,1 @@
+followup_fuzzy_pick_last_then_second|去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd|就最后一个，只输出路径|那第二个呢，只输出路径

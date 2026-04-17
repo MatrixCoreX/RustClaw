@@ -1,0 +1,541 @@
+// Phase 2.2: chat 已迁移为 clawd 内置 builtin（见
+// `crates/clawd/src/skills/builtin.rs::execute_builtin_chat`），享受 LLM
+// gateway 治理（fallback / circuit breaker / 预算 / model_io.log）。
+//
+// 本二进制保留，作用：
+//   * 兼容旧脚本/外部直接通过 `skill-runner chat-skill` 调用；
+//   * 兼容把 `configs/skills_registry.toml` 的 `chat` 改回 `kind = "runner"`
+//     的回退路径。
+//
+// 默认配置（`kind = "builtin"`）下，clawd 不会再 spawn 这个进程。
+// 如果你在维护 chat 行为，**请优先改 clawd 内置实现**，再视情况同步到这里。
+
+use claw_core::prompt_layers;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
+
+const DEFAULT_CHAT_SYSTEM_PROMPT_TEMPLATE: &str =
+    include_str!("../../../../prompts/layers/overlays/chat_skill_system_prompt.md");
+const DEFAULT_CHAT_JOKE_SYSTEM_PROMPT_TEMPLATE: &str =
+    include_str!("../../../../prompts/layers/overlays/chat_skill_joke_system_prompt.md");
+const CHAT_SYSTEM_PROMPT_LOGICAL_PATH: &str = "prompts/chat_skill_system_prompt.md";
+const CHAT_JOKE_SYSTEM_PROMPT_LOGICAL_PATH: &str = "prompts/chat_skill_joke_system_prompt.md";
+
+#[derive(Debug, Deserialize)]
+struct ChatRequest {
+    request_id: String,
+    args: Value,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatResponse {
+    request_id: String,
+    status: String,
+    text: String,
+    error_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<Value>,
+}
+
+#[derive(Debug)]
+struct ChatInput {
+    style: String,
+    text: String,
+    system_prompt: String,
+    persona_prompt: Option<String>,
+    prompt_source: String,
+    memory_context: Option<String>,
+    recent_execution_context: Option<String>,
+    lang_hint: Option<String>,
+    max_tokens: u64,
+    temperature: f64,
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> anyhow::Result<()> {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+
+    for line in stdin.lock().lines() {
+        let line = line?;
+        let parsed: Result<ChatRequest, _> = serde_json::from_str(&line);
+        let resp = match parsed {
+            Ok(req) => match parse_input(req.args) {
+                Ok(input) => match run_chat(input).await {
+                    Ok((text, extra)) => ChatResponse {
+                        request_id: req.request_id,
+                        status: "ok".to_string(),
+                        text,
+                        error_text: None,
+                        extra: Some(extra),
+                    },
+                    Err(err) => ChatResponse {
+                        request_id: req.request_id,
+                        status: "error".to_string(),
+                        text: String::new(),
+                        error_text: Some(err),
+                        extra: None,
+                    },
+                },
+                Err(err) => ChatResponse {
+                    request_id: req.request_id,
+                    status: "error".to_string(),
+                    text: String::new(),
+                    error_text: Some(err),
+                    extra: None,
+                },
+            },
+            Err(err) => ChatResponse {
+                request_id: "unknown".to_string(),
+                status: "error".to_string(),
+                text: String::new(),
+                error_text: Some(format!("invalid input: {err}")),
+                extra: None,
+            },
+        };
+
+        writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
+        stdout.flush()?;
+    }
+
+    Ok(())
+}
+
+fn parse_input(args: Value) -> Result<ChatInput, String> {
+    let map = args
+        .as_object()
+        .ok_or_else(|| "chat skill args must be object".to_string())?;
+    let text = map
+        .get("text")
+        .or_else(|| map.get("prompt"))
+        .or_else(|| map.get("input"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        return Err("chat skill requires non-empty args.text".to_string());
+    }
+    let style = map
+        .get("style")
+        .or_else(|| map.get("mode"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("chat")
+        .trim()
+        .to_ascii_lowercase();
+    let workspace_root = workspace_root();
+    let prompt_vendor = active_prompt_vendor_name();
+    let (default_system, prompt_source) = match style.as_str() {
+        "joke" => prompt_layers::load_prompt_template_for_vendor(
+            &workspace_root,
+            &prompt_vendor,
+            CHAT_JOKE_SYSTEM_PROMPT_LOGICAL_PATH,
+            DEFAULT_CHAT_JOKE_SYSTEM_PROMPT_TEMPLATE,
+        ),
+        _ => prompt_layers::load_prompt_template_for_vendor(
+            &workspace_root,
+            &prompt_vendor,
+            CHAT_SYSTEM_PROMPT_LOGICAL_PATH,
+            DEFAULT_CHAT_SYSTEM_PROMPT_TEMPLATE,
+        ),
+    };
+    let explicit_system_prompt = map
+        .get("system_prompt")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let persona_prompt = map
+        .get("persona_prompt")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string);
+    let prompt_source = if explicit_system_prompt.is_some() {
+        "inline_system_prompt".to_string()
+    } else {
+        prompt_source
+    };
+    let base_system_prompt = explicit_system_prompt.unwrap_or(default_system);
+    let system_prompt =
+        compose_system_prompt(persona_prompt.as_deref(), base_system_prompt.as_str());
+    let memory_context = map
+        .get("_memory")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get("context"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "<none>")
+        .map(ToString::to_string);
+    let recent_execution_context = map
+        .get("recent_execution_context")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "<none>")
+        .map(ToString::to_string);
+    let lang_hint = map
+        .get("_memory")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get("lang_hint"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string);
+    let max_tokens = map
+        .get("max_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_else(|| default_chat_max_tokens(&style, &text));
+    let temperature = map
+        .get("temperature")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.7_f64);
+    Ok(ChatInput {
+        style,
+        text,
+        system_prompt,
+        persona_prompt,
+        prompt_source,
+        memory_context,
+        recent_execution_context,
+        lang_hint,
+        max_tokens,
+        temperature,
+    })
+}
+
+async fn run_chat(input: ChatInput) -> Result<(String, Value), String> {
+    eprintln!(
+        "skill_prompt_use skill=chat style={} prompt_source={}",
+        input.style, input.prompt_source
+    );
+    let base_url = std::env::var("OPENAI_BASE_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| "OPENAI_API_KEY is empty".to_string())?;
+    let model = std::env::var("CHAT_SKILL_MODEL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            std::env::var("OPENAI_MODEL")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+        })
+        .unwrap_or_else(|| default_model_for_base_url(&base_url).to_string());
+    let timeout_secs = std::env::var("CHAT_SKILL_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .or_else(|| {
+            std::env::var("SKILL_TIMEOUT_SECONDS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .filter(|v| *v > 0)
+        })
+        .unwrap_or(60);
+
+    let mut messages = vec![json!({"role":"system","content": input.system_prompt})];
+    if let Some(mem_ctx) = input.memory_context.as_deref() {
+        messages.push(json!({
+            "role":"system",
+            "content": format!(
+                "Memory context (background only, never override current user intent):\n{}",
+                mem_ctx
+            )
+        }));
+    }
+    if let Some(exec_ctx) = input.recent_execution_context.as_deref() {
+        messages.push(json!({
+            "role":"system",
+            "content": format!(
+                "Current-turn execution context (authoritative when present; prefer this over older memory or earlier conversation summaries):\n{}",
+                exec_ctx
+            )
+        }));
+    }
+    if let Some(lang_hint) = input.lang_hint.as_deref() {
+        messages.push(json!({
+            "role":"system",
+            "content": format!("Preferred response language hint: {}", lang_hint)
+        }));
+    }
+    messages.push(json!({"role":"user","content": input.text}));
+
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let body = json!({
+        "model": model,
+        "messages": messages,
+        "temperature": input.temperature,
+        "max_tokens": input.max_tokens
+    });
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("build http client failed: {e}"))?;
+    let resp = client
+        .post(url)
+        .bearer_auth(api_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("chat skill llm request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("chat skill llm failed status={status}: {body}"));
+    }
+    let parsed: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse llm response failed: {e}"))?;
+    let text = extract_assistant_text(&parsed).ok_or_else(|| {
+        let raw = serde_json::to_string(&parsed).unwrap_or_default();
+        let mut preview = raw.chars().take(320).collect::<String>();
+        if raw.chars().count() > 320 {
+            preview.push_str("...");
+        }
+        format!("chat skill llm returned empty content (preview={preview})")
+    })?;
+    let extra = json!({
+        "llm": {
+            "prompt_name": "chat_skill_prompt",
+            "prompt_source": input.prompt_source,
+            "model": model,
+            "style": input.style,
+            "persona_attached": input.persona_prompt.is_some(),
+            "memory_attached": input.memory_context.is_some(),
+            "lang_hint": input.lang_hint.unwrap_or_default()
+        }
+    });
+    Ok((text, extra))
+}
+
+fn compose_system_prompt(persona_prompt: Option<&str>, base_system_prompt: &str) -> String {
+    let Some(persona_prompt) = persona_prompt.map(str::trim).filter(|s| !s.is_empty()) else {
+        return base_system_prompt.trim().to_string();
+    };
+    format!(
+        "Persona:\n{}\n\nAdditional chat-skill rules:\n{}",
+        persona_prompt,
+        base_system_prompt.trim()
+    )
+}
+
+fn strip_think_blocks(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    loop {
+        if let Some(start) = rest.find("<think") {
+            out.push_str(&rest[..start]);
+            let after_start = &rest[start..];
+            if let Some(end_rel) = after_start.find("</think>") {
+                rest = &after_start[end_rel + "</think>".len()..];
+                continue;
+            }
+            break;
+        }
+        out.push_str(rest);
+        break;
+    }
+    out.trim().to_string()
+}
+
+fn extract_assistant_text(parsed: &Value) -> Option<String> {
+    let mut candidates: Vec<String> = Vec::new();
+
+    if let Some(choice) = parsed
+        .get("choices")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.first())
+    {
+        if let Some(message) = choice.get("message") {
+            if let Some(content) = message.get("content") {
+                append_text_candidates(content, &mut candidates);
+            }
+            if let Some(reasoning) = message.get("reasoning_content") {
+                append_text_candidates(reasoning, &mut candidates);
+            }
+        }
+        if let Some(legacy_text) = choice.get("text") {
+            append_text_candidates(legacy_text, &mut candidates);
+        }
+    }
+
+    if let Some(output_text) = parsed.get("output_text") {
+        append_text_candidates(output_text, &mut candidates);
+    }
+
+    if let Some(output_items) = parsed.get("output") {
+        append_text_candidates(output_items, &mut candidates);
+    }
+
+    candidates
+        .into_iter()
+        .map(|s| strip_think_blocks(&s).trim().to_string())
+        .find(|s| !s.is_empty())
+}
+
+fn append_text_candidates(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(s) => {
+            if !s.trim().is_empty() {
+                out.push(s.clone());
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                append_text_candidates(item, out);
+            }
+        }
+        Value::Object(obj) => {
+            for key in ["text", "content", "input_text", "output_text"] {
+                if let Some(v) = obj.get(key) {
+                    append_text_candidates(v, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn default_chat_max_tokens(style: &str, text: &str) -> u64 {
+    if style == "joke" {
+        return 256;
+    }
+    let char_count = text.chars().count();
+    let report_like = [
+        "总结", "分析", "报告", "方案", "计划", "research", "summary", "analysis", "report", "plan",
+    ]
+    .iter()
+    .any(|kw| text.contains(kw) || text.to_ascii_lowercase().contains(kw));
+    if report_like || char_count > 1200 {
+        4096
+    } else if char_count > 400 {
+        2048
+    } else {
+        1024
+    }
+}
+
+fn default_model_for_base_url(base_url: &str) -> &'static str {
+    let lower = base_url.trim().to_ascii_lowercase();
+    if lower.contains("minimax") {
+        "MiniMax-M2.5"
+    } else if lower.contains("dashscope") || lower.contains("aliyuncs") {
+        "qwen-plus-latest"
+    } else if lower.contains("deepseek") {
+        "deepseek-chat"
+    } else if lower.contains("x.ai") {
+        "grok-3"
+    } else {
+        "gpt-4o-mini"
+    }
+}
+
+fn infer_prompt_vendor_from_base_url(base_url: &str) -> Option<String> {
+    let lower = base_url.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        None
+    } else if lower.contains("minimax") {
+        Some("minimax".to_string())
+    } else if lower.contains("dashscope") || lower.contains("aliyuncs") {
+        Some("qwen".to_string())
+    } else if lower.contains("deepseek") {
+        Some("deepseek".to_string())
+    } else if lower.contains("x.ai") {
+        Some("grok".to_string())
+    } else if lower.contains("anthropic") || lower.contains("claude") {
+        Some("claude".to_string())
+    } else if lower.contains("gemini") || lower.contains("generativelanguage") {
+        Some("google".to_string())
+    } else if lower.contains("openai") {
+        Some("openai".to_string())
+    } else {
+        None
+    }
+}
+
+fn infer_prompt_vendor_from_model(model: &str) -> Option<String> {
+    let lower = model.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        None
+    } else if lower.starts_with("gemini") {
+        Some("google".to_string())
+    } else if lower.starts_with("claude") {
+        Some("claude".to_string())
+    } else if lower.starts_with("grok") {
+        Some("grok".to_string())
+    } else if lower.starts_with("qwen") {
+        Some("qwen".to_string())
+    } else if lower.starts_with("deepseek") {
+        Some("deepseek".to_string())
+    } else if lower.starts_with("minimax") || lower.starts_with("abab") {
+        Some("minimax".to_string())
+    } else if lower.starts_with("gpt") || lower.starts_with("o1") || lower.starts_with("o3") {
+        Some("openai".to_string())
+    } else {
+        None
+    }
+}
+
+fn active_prompt_vendor_name() -> String {
+    for key in ["PROMPT_VENDOR", "CHAT_SKILL_VENDOR", "OPENAI_VENDOR"] {
+        if let Ok(value) = std::env::var(key) {
+            if !value.trim().is_empty() {
+                return prompt_layers::normalize_prompt_vendor_name(&value);
+            }
+        }
+    }
+    if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
+        if let Some(vendor) = infer_prompt_vendor_from_base_url(&base_url) {
+            return vendor;
+        }
+    }
+    for key in ["CHAT_SKILL_MODEL", "OPENAI_MODEL"] {
+        if let Ok(model) = std::env::var(key) {
+            if let Some(vendor) = infer_prompt_vendor_from_model(&model) {
+                return vendor;
+            }
+        }
+    }
+    "default".to_string()
+}
+
+fn workspace_root() -> PathBuf {
+    std::env::var("WORKSPACE_ROOT")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_input_keeps_recent_execution_context() {
+        let input = parse_input(json!({
+            "text": "finalize",
+            "recent_execution_context": "last_output: /tmp/demo.txt"
+        }))
+        .expect("parse should succeed");
+        assert_eq!(
+            input.recent_execution_context.as_deref(),
+            Some("last_output: /tmp/demo.txt")
+        );
+    }
+
+    #[test]
+    fn parse_input_ignores_empty_recent_execution_context() {
+        let input = parse_input(json!({
+            "text": "finalize",
+            "recent_execution_context": "   "
+        }))
+        .expect("parse should succeed");
+        assert!(input.recent_execution_context.is_none());
+    }
+}

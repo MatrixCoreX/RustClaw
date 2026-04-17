@@ -1,0 +1,5 @@
+followup_read_then_send_same_file|先读一下 README.md 前 4 行|把这个文件发给我|只说这个文件名
+followup_send_then_read_prev|先列出 logs 目录下前 4 个文件名|把第三个发给我|不是这个，读上一个最后 1 行
+clarify_send_then_switch_target|把那个文件发给我|README.md|不是这个，发 document 目录下最后一个
+clarify_read_then_switch_explicit|读一下那个文件里的名字字段，只输出值|package.json|不是这个，读 README.md 前 2 行
+followup_jump_back_two_turns|先列出 logs 目录下前 4 个文件名|那 document 目录下前 4 个文件名呢|把上上个结果里的第二个发给我

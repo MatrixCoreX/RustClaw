@@ -1,0 +1,15 @@
+[package]
+name = "service-control-skill"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "service-control-skill"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+reqwest = { workspace = true, default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true

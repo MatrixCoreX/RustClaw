@@ -1,0 +1,4 @@
+locale = "en-US"
+
+[dict]
+"image_generate.msg.saved" = "Generated successfully and saved: {path}"

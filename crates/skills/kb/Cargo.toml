@@ -1,0 +1,17 @@
+[package]
+name = "kb-skill"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "kb-skill"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+claw-core = { path = "../../claw-core" }
+regex.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true

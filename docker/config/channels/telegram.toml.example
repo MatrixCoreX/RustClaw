@@ -1,0 +1,37 @@
+[[agents]]
+allowed_skills = []
+id = "main"
+name = "Main"
+persona_prompt = ""
+
+[telegram]
+access_mode = "public"
+agent_id = "main"
+allowed_usernames = []
+allowlist = []
+audio_inbox_dir = "audio/upload"
+auto_vision_on_image_only = false
+bindings = []
+# Telegram bot token，从 @BotFather 获取（"<numeric>:<base64>" 形式）
+bot_token = "REPLACE_ME_TELEGRAM_BOT_TOKEN"
+bots = []
+ephemeral_image_saved_seconds = 15
+i18n_path = "configs/i18n/telegramd.zh-CN.toml"
+language = "zh-CN"
+max_audio_input_bytes = 26214400
+voice_mode_nl_intent_enabled = false
+voice_reply_mode = "voice"
+
+[telegram.sendfile]
+admin_only = false
+allowed_dirs = [
+    "image/download",
+    "document",
+]
+full_access = true
+
+[telegram.voice_reply_mode_by_chat]
+1985996990 = "text"
+
+[telegram_bot]
+enabled = true

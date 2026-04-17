@@ -1,0 +1,6 @@
+[dict]
+git_basic.err.invalid_input = "invalid input: {error}"
+git_basic.err.args_object = "args must be object"
+git_basic.msg.not_git_repo = "current directory is not a git repository. Please use git_basic in a git repo."
+git_basic.err.unsupported_action = "unsupported action; use status|log|diff|branch|show|rev_parse"
+git_basic.err.run_git_failed = "run git failed: {error}"

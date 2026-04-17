@@ -1,0 +1,111 @@
+[[commands]]
+name = "help"
+aliases = ["start"]
+kind = "core"
+core_action = "start"
+channels = ["telegram", "whatsapp", "wechat", "feishu", "lark"]
+menu_channels = ["telegram"]
+description_key = "telegram.menu.help_desc"
+allow_unbound = true
+order = 10
+
+[[commands]]
+name = "key"
+kind = "core"
+core_action = "bind_key"
+channels = ["telegram", "whatsapp", "wechat", "feishu", "lark"]
+allow_unbound = true
+order = 30
+
+[[commands]]
+name = "ask"
+kind = "core"
+core_action = "ask"
+channels = ["telegram"]
+description_key = "telegram.menu.ask_desc"
+order = 40
+
+[[commands]]
+name = "agent"
+kind = "core"
+core_action = "agent_mode"
+channels = ["telegram"]
+description_key = "telegram.menu.agent_desc"
+order = 50
+
+[[commands]]
+name = "status"
+kind = "core"
+core_action = "status"
+channels = ["telegram"]
+menu_channels = ["telegram"]
+description_key = "telegram.menu.status_desc"
+order = 60
+
+[[commands]]
+name = "cancel"
+kind = "core"
+core_action = "cancel"
+channels = ["telegram"]
+menu_channels = ["telegram"]
+description_key = "telegram.menu.cancel_desc"
+order = 70
+
+[[commands]]
+name = "skills"
+kind = "core"
+core_action = "skills"
+channels = ["telegram"]
+description_key = "telegram.menu.skills_desc"
+order = 80
+
+[[commands]]
+name = "run"
+kind = "core"
+core_action = "run_skill"
+channels = ["telegram", "whatsapp"]
+description_key = "telegram.menu.run_desc"
+order = 90
+
+[[commands]]
+name = "sendfile"
+kind = "core"
+core_action = "send_file"
+channels = ["telegram"]
+description_key = "telegram.menu.sendfile_desc"
+admin_only = true
+order = 100
+
+[[commands]]
+name = "voicemode"
+kind = "core"
+core_action = "voice_mode"
+channels = ["telegram"]
+description_key = "telegram.menu.voicemode_desc"
+order = 110
+
+[[commands]]
+name = "rustclaw"
+kind = "core"
+core_action = "rustclaw_config"
+channels = ["telegram"]
+description_key = "telegram.menu.rustclaw_desc"
+admin_only = true
+order = 120
+
+[[commands]]
+name = "crypto"
+kind = "skill"
+skill_name = "crypto"
+channels = ["telegram"]
+menu_channels = ["telegram"]
+description_key = "telegram.menu.crypto_desc"
+order = 130
+
+[[commands]]
+name = "cryptoapi"
+kind = "core"
+core_action = "crypto_api"
+channels = ["telegram"]
+description_key = "telegram.menu.cryptoapi_desc"
+order = 140

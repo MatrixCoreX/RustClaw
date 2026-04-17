@@ -1,0 +1,62 @@
+# =============================================================================
+# Build artifacts
+# =============================================================================
+/target/
+**/target/
+*.rs.bk
+
+# =============================================================================
+# Logs / runtime / scratch / generated
+# =============================================================================
+/logs/
+/run/
+/data/
+/release-bin/
+/skills_output/
+/scripts/nl_suite_logs/
+/skill_develop/.cache/
+**/*.log
+
+# =============================================================================
+# Node / frontend
+# =============================================================================
+**/node_modules/
+**/dist/
+**/build/
+/UI/.vite/
+/pi_app/dist/
+/pi_app/build/
+
+# =============================================================================
+# Editor / OS
+# =============================================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# =============================================================================
+# Secrets — files containing real API keys / tokens / app_secrets.
+# Track *.example variants instead. After clone, copy *.example to the real
+# filename and fill in real credentials locally.
+# =============================================================================
+configs/map_merchant.toml
+configs/channels/feishu.toml
+docker/config/channels/feishu.toml
+docker/config/channels/telegram.toml
+
+# Generic env files (never tracked)
+.env
+.env.local
+.env.*.local
+*.env
+runtime_env*.sh
+
+# =============================================================================
+# Cursor / agent transcripts
+# =============================================================================
+.cursor/
+agent-transcripts/

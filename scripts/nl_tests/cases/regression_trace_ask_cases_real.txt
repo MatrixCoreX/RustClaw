@@ -1,0 +1,90 @@
+chat_weather_joke|今天天气闷，讲个和程序员加班有关的冷笑话
+act_hidden_files|帮我看看当前目录有没有隐藏文件
+act_precise_file_count|数一下当前目录一级有多少个普通文件，只告诉我数字和一句解释
+chat_act_compare_sizes|先执行 df -h，再用大白话告诉我哪个挂载点最该担心
+chat_act_explicit_dependency_poem|先执行 pwd，然后根据这个路径写一句打工人风格短诗
+chat_act_three_step_story|先执行 whoami，再执行 pwd，然后把这两个结果串成一句自嘲签名
+multi_act_mixed_tone|先执行 uname -a，再执行 date，然后用一句江湖口吻播报结果
+mid_fail_then_summary_new|先执行 pwd，再执行 definitely_missing_command_rustclaw_67890，然后总结刚才成功和失败各是什么
+mid_fail_then_continue_target|先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_67890，再执行 echo AFTER_BREAK_67890
+chat_act_dir_digest|先查看当前目录，再挑 5 个你觉得最像项目核心的条目简单说明
+followup_continue_new|继续
+followup_ask_failure_reason|刚才失败的是哪一步，后面还剩什么
+en_chat_weather_joke|The weather feels heavy today, tell me a cold joke about programmers working overtime.
+en_act_hidden_files|Check whether there are hidden files in the current directory.
+en_act_precise_file_count|Count how many regular files are directly under the current directory, and reply with just the number plus one short explanation.
+en_chat_act_compare_sizes|Run df -h first, then explain in plain English which mount point looks the most worrying.
+en_chat_act_dependency_poem|Run pwd first, then write one short worker-style line based on that path.
+en_chat_act_three_step_story|Run whoami, then run pwd, and turn those two results into one self-mocking signature line.
+en_mid_fail_then_summary|Run pwd, then run definitely_missing_command_rustclaw_english_67890, then summarize what succeeded and what failed.
+en_followup_continue|continue
+en_followup_failure_reason|Which step failed just now, and what work is still remaining?
+en_chat_act_write_line_reply_only|Run pwd first, then write one short worker-style line based on that path in the reply only. Do not save any file.
+en_chat_act_save_line_to_file|Run pwd first, save one short worker-style line based on that path to `worker_line_explicit.txt`, then tell me the saved path.
+followup_explain_failure_then_resume|先执行 echo BREAK_A，再执行 definitely_missing_command_rustclaw_follow_24680，然后说一下哪一步失败、还剩什么，先不要继续
+en_followup_explain_failure_then_resume|Run `echo BREAK_B`, then run `definitely_missing_command_rustclaw_follow_24681`, then explain which step failed and what still remains. Do not continue yet.
+followup_resume_with_change|先执行 echo BEFORE_CHANGE，再执行 definitely_missing_command_rustclaw_change_24682，再执行 echo AFTER_CHANGE_OLD；失败后如果我说继续，就把最后一步改成 echo AFTER_CHANGE_NEW
+en_followup_resume_with_change|Run `echo BEFORE_CHANGE_EN`, then `definitely_missing_command_rustclaw_change_24683`, then `echo AFTER_CHANGE_OLD_EN`; if I later say continue with a change, replace the last step with `echo AFTER_CHANGE_NEW_EN`.
+followup_discuss_then_continue_cn|刚才先别继续，只告诉我剩余步骤的原话
+en_followup_discuss_then_continue|Don't resume yet. Just tell me the exact remaining step text.
+en_followup_pick_up_from_there|Pick up from where it stopped.
+en_followup_go_on|Go on with the remaining step.
+en_followup_not_that_old_one|Continue the interrupted one, not the older successful task.
+en_followup_redo_from_start|Start over from the beginning instead of resuming the remaining step.
+en_followup_change_remaining_step|Continue, but change the remaining step so it says `echo AFTER_PATCHED_STEP` instead.
+en_act_hidden_files_plain|Are there any dotfiles here?
+en_act_list_top_level_dirs|List only the top-level directories here, not files.
+en_chat_act_reply_only_signature|Run whoami and pwd, then give me one short signature line in the reply only. Do not create any file.
+en_chat_act_explicit_file_delivery|Run pwd, write one short line based on it into `pwd_line.txt`, and send me the file path only.
+cn_chat_act_reply_only_poem|先执行 pwd，再根据这个路径写一句短诗，直接回复，不要保存成文件
+cn_followup_resume_old_vs_new|继续刚才中断的那个，不是更早之前成功的那个
+cn_followup_restart_not_resume|不要接着来，从头重做刚才那个失败任务
+cn_followup_change_remaining_step|继续，但把剩下那一步改成执行 echo AFTER_PATCHED_CN
+followup_continue_synonym_cn_1|接着往下跑
+followup_continue_synonym_cn_2|从断掉的地方继续
+followup_continue_synonym_cn_3|把没做完的那一步接着执行
+followup_failure_reason_synonym_cn_1|上次卡在哪一步了，后面还有什么没做
+followup_failure_reason_synonym_cn_2|刚刚报错的是第几步，剩余步骤还有哪些
+followup_failure_reason_synonym_cn_3|别继续，先告诉我失败点和未完成部分
+followup_reply_only_synonym_cn_1|先执行 pwd，再根据结果写一句打工人短句，直接回我，不要写文件
+followup_reply_only_synonym_cn_2|执行 pwd 后来一句短诗就行，只发文本，别落盘
+followup_hidden_files_synonym_cn_1|看看这里有没有点开头的隐藏文件
+followup_hidden_files_synonym_cn_2|当前目录里的隐藏项给我确认一下
+followup_df_synonym_cn_1|先跑 df -h，再用人话说说哪个盘最危险
+followup_df_synonym_cn_2|执行 df -h 后，告诉我最该担心的是哪个挂载点
+en_followup_continue_synonym_1|Keep going.
+en_followup_continue_synonym_2|Continue from where it broke.
+en_followup_continue_synonym_3|Carry on with whatever is left.
+en_followup_continue_synonym_4|Proceed with the unfinished part.
+en_followup_failure_reason_synonym_1|Before continuing, tell me which step blew up and what's still pending.
+en_followup_failure_reason_synonym_2|What exactly failed last time, and what remains undone?
+en_followup_failure_reason_synonym_3|Don't resume yet. I just want the failed step and the remaining steps.
+en_reply_only_synonym_1|Run pwd, then give me a short worker-style line in the reply only, not in a file.
+en_reply_only_synonym_2|After pwd, write one short line back to me as plain text. Do not save it anywhere.
+en_reply_only_synonym_3|Use the pwd result to make a one-line poem, but keep it in chat only.
+en_hidden_files_synonym_1|Do we have any dotfiles in this folder?
+en_hidden_files_synonym_2|Check whether this directory contains hidden entries.
+en_hidden_files_synonym_3|Show me if anything here starts with a dot.
+en_df_synonym_1|Run df -h and tell me, in simple words, which mount point looks the riskiest.
+en_df_synonym_2|Please check df -h first, then point out the filesystem that deserves the most concern.
+en_restart_synonym_1|Don't continue from the breakpoint. Rerun the failed task from scratch.
+en_restart_synonym_2|Forget the partial progress and restart that interrupted task from the top.
+bind_guard_fail_cn|先执行 echo BIND_GUARD_BEFORE_CN，再执行 definitely_missing_command_rustclaw_bind_guard_cn_24684，再执行 echo BIND_GUARD_AFTER_CN
+bind_guard_new_request_cn|别讨论刚才那个失败任务，直接执行 pwd
+bind_guard_fail_en|Run `echo BIND_GUARD_BEFORE_EN`, then `definitely_missing_command_rustclaw_bind_guard_en_24685`, then `echo BIND_GUARD_AFTER_EN`.
+bind_guard_new_request_en|Ignore the previous failed task and just run pwd now.
+cn_absolute_saved_path_only|执行 pwd，把一句短句写入 `pwd_line_cn_abs.txt`，只回复该文件的绝对路径
+en_absolute_saved_path_only|Run pwd, write one short line based on it into `pwd_line_abs.txt`, and reply with the absolute saved file path only.
+cn_repeat_hidden_files_again|再查一次当前目录有没有隐藏文件，直接给结果
+en_repeat_dir_digest_from_listing_only|List the current directory again, then pick 3 entries that look most central to the project based only on that listing.
+cn_send_named_file_readme|把readme.md 发给我
+en_send_named_file_readme|Send me readme.md
+cn_send_named_file_cargo|把 Cargo.toml 发给我
+en_send_named_file_cargo|Send me cargo.toml
+cn_send_named_file_license_casefold|把 license.zh-cn.md 发给我
+en_send_named_file_license_casefold|Send me license.zh-cn.md
+cn_generate_hello_sh_and_send|帮我写个打印helloworld的sh脚本，保存，并且发给我
+cn_generate_hello_sh_and_send_typo|帮我写个答应helloworld的sh脚本，保存，并且发给我
+en_generate_hello_sh_and_send|Write a shell script that prints hello world, save it, and send me the file.
+cn_send_named_file_missing|把 definitely_missing_named_file_rustclaw_24686.md 发给我
+en_send_named_file_missing|Send me definitely_missing_named_file_rustclaw_24687.md

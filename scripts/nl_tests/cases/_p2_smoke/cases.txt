@@ -1,0 +1,9 @@
+# Phase 2 smoke: chat (builtin) + act + chat_act + failure + file
+chat|chat_weather_joke||今天天气先别查，给我讲一个简短冷笑话
+chat|chat_translate_simple||把这句话翻成英文：现在服务已经恢复了
+act|act_pwd_only||只输出当前工作目录的绝对路径，不要解释
+act|act_whoami_only||只输出当前用户名，不要解释
+act|act_list_top_dirs||把当前仓库顶层目录和文件列出来，简单分组就行
+chat_act|chat_act_compare_sizes||比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+failure|missing_file_graceful|missing_file_graceful|把 definitely_missing_named_file_rustclaw_001.txt 发给我
+file|write_and_deliver_hello|write_and_deliver|写一个 hello world shell 脚本，保存成 document/hello_from_p2_smoke.sh，然后把文件发给我

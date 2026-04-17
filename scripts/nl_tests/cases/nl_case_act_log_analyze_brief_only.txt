@@ -1,0 +1,9 @@
+# DEPRECATED: this single-case file has been consolidated into
+# scripts/nl_tests/cases/nl_cases_singletons.txt
+# It is kept for backward compatibility with anyone who has the old path
+# bookmarked. Prefer running the consolidated file:
+#   ./scripts/nl_tests/run_manual_test.sh \
+#     --case-file scripts/nl_tests/cases/nl_cases_singletons.txt
+# This stub file may be removed in a future cleanup.
+#
+快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结

@@ -1,0 +1,4 @@
+chat|chat_weather_joke||今天天气先别查，给我讲一个简短冷笑话
+act|act_pwd_only||只输出当前工作目录的绝对路径，不要解释
+act|act_whoami_only||只输出当前用户名，不要解释
+file|write_and_deliver_hello|write_and_deliver|写一个 hello world shell 脚本，保存成 document/hello_from_p2_smoke_v2.sh，然后把文件发给我

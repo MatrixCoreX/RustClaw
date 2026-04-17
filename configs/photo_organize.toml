@@ -1,0 +1,5 @@
+[photo_organize]
+# 技能输出语言：zh-CN / en-US（可被 args.locale / args.lang 或 context.locale 覆盖）
+language = "zh-CN"
+# 可选：自定义词典路径（相对于仓库根目录）
+# i18n_path = "configs/i18n/photo_organize.zh-CN.toml"

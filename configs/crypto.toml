@@ -1,0 +1,58 @@
+[binance]
+base_url = "https://api.binance.com"
+enabled = false
+recv_window = 5000
+
+[crypto]
+alert_default_threshold_pct = 5.0
+alert_default_window_minutes = 15
+alert_max_window_minutes = 240
+allowed_exchanges = [
+    "binance",
+    "okx",
+    "coingecko",
+]
+allowed_symbols = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "DOGEUSDT",
+]
+binance_book_ticker_api_path = "/api/v3/ticker/bookTicker?symbol={symbol}"
+binance_quote_24hr_api_path = "/api/v3/ticker/24hr?symbol={symbol}"
+binance_quote_price_api_path = "/api/v3/ticker/price?symbol={symbol}"
+blocked_actions = []
+btc_onchain_fees_api_url = "https://mempool.space/api/v1/fees/recommended"
+coinbase_book_ticker_api_path = "/products/{product_id}/ticker"
+coinbase_quote_ticker_api_path = "/products/{product_id}/ticker"
+coingecko_simple_price_api_url = "https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true"
+default_exchange = "binance"
+eth_address_native_balance_api_url = "https://eth.blockscout.com/api?module=account&action=balance&address={address}"
+eth_address_token_balance_api_url = "https://eth.blockscout.com/api?module=account&action=tokenbalance&contractaddress={contract}&address={address}"
+eth_address_tx_list_api_url = "https://eth.blockscout.com/api?module=account&action=txlist&address={address}&sort=desc&offset={limit}"
+eth_onchain_stats_api_url = "https://api.blockchair.com/ethereum/stats"
+execution_mode = "binance"
+gateio_book_ticker_api_path = "/api/v4/spot/tickers?currency_pair={currency_pair}"
+gateio_quote_ticker_api_path = "/api/v4/spot/tickers?currency_pair={currency_pair}"
+kraken_book_ticker_api_path = "/0/public/Ticker?pair={pair}"
+kraken_quote_ticker_api_path = "/0/public/Ticker?pair={pair}"
+language = "zh-CN"
+max_notional_usd = 1000
+okx_market_ticker_api_path = "/api/v5/market/ticker?instId={inst_id}"
+require_explicit_send = true
+timeout_seconds = 20
+
+[crypto.eth_token_contracts]
+dai = "0x6B175474E89094C44Da98b954EedeAC495271d0F"
+usdc = "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+usdt = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+
+[crypto.eth_token_decimals]
+dai = 18
+usdc = 6
+usdt = 6
+
+[okx]
+base_url = "https://www.okx.com"
+enabled = false
+simulated = true

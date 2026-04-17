@@ -1,0 +1,5 @@
+manual|followup_logs_then_conclusion_fix|regression|列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物
+manual|transform_inline_json_table_fix|regression|sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+manual|archive_pack_brief_fix|regression|把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功
+manual|fixture_package_name_fix|regression|read scripts/nl_tests/fixtures/device_local/package.json and output only the name field
+manual|fixture_config_purpose_fix|regression|看一下 scripts/nl_tests/fixtures/device_local/configs/app_config.toml，然后用一句大白话说它主要配置了什么

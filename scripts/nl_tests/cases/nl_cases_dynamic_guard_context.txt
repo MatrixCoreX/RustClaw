@@ -1,0 +1,19 @@
+# Dynamic-guard context-chain regression cases.
+# Format: case_name|turn1|turn2|turn3
+# Curated list: keep alias binding, rebind, ambiguity, missing file, and mixed-language context carry.
+
+context_bound_readme_followup_20260327|先记一下，后面我说“那个 README”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md|读一下那个 README 开头 5 行|再用一句话总结它
+context_bound_log_followup_20260327|先记一下，“那个日志”指 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log|看一下那个日志最近 20 行|再从里面挑一个最值得注意的点
+context_bound_config_delivery_20260327|先记一下，“那个配置文件”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml|把那个配置文件发给我|再用一句话说它主要是干嘛的
+context_ambiguous_after_two_files_20260327|先读取 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md 开头 3 行|再读取 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md 开头 3 行|把那个文件发给我
+context_bound_alias_rebind_20260327|先记一下，“那个文档”是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md|再记一下，“那个文档”改成 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md|读一下那个文档开头并一句话总结
+context_bound_en_pronoun_log_20260327|Remember this: "that log" means /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log|tail that log 10 lines|in one sentence tell me if anything looks abnormal
+context_bound_missing_file_followup_20260327|先记一下，“那个文件”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/not_exists_case_002.md|把那个文件发给我|如果不存在就简短说明原因
+context_bound_db_then_focus_20260327|先记一下，“那个数据库”指 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite|看下那个数据库有哪些表|再告诉我最像业务数据的是哪一张
+context_two_targets_disambiguate_20260327|先记一下，“那个目录”是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs，“那个日志”是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log|看下那个目录里有什么|再看那个日志最后 5 行
+context_colloquial_mixed_docs_alias|先记一下，that docs dir 就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs|look at that docs dir, names only|然后告诉我一共有多少个直接子项，只输出数字
+context_bound_release_note_followup|先记一下，“那份发布说明”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md|读一下那份发布说明开头|再一句话说最该先做什么
+context_bound_package_name_followup|先记一下，“那个 package 文件”指 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/package.json|去读一下那个 package 文件里的 name|只输出那个值
+context_bound_model_log_followup|先记一下，“那份模型日志”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/model_io.log|看下那份模型日志最后 4 行|再一句话说有没有失败后恢复的迹象
+context_rebind_from_notes_to_release|先记一下，“那个说明”是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md|再记一下，“那个说明”改成 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md|读一下那个说明，并告诉我它更像操作指南还是背景介绍
+context_docs_archive_then_count|先记一下，“那个 archive 目录”就是 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/archive|列出那个 archive 目录下的名字|再告诉我一共有几个直接子项，只输出数字

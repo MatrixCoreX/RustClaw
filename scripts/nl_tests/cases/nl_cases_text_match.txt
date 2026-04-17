@@ -1,0 +1,40 @@
+# Canonical alias for text-match-removal regression cases.
+# Curated list: keep semantic variants with distinct routing pressure only.
+
+# suite|name|tags|prompt
+chat_act|run_cmd_pwd_with_result_tail||执行 pwd，然后告诉我结果
+chat_act|run_cmd_uname_with_result_tail_en||please run uname -a and tell me the result
+act|fs_readme_head_summary_semantic||看看 README.md 开头讲了什么，读前 20 行后用三句话总结
+act|fs_hidden_files_bool_semantic||帮我判断一下当前目录有没有隐藏文件，只回答有或没有，并举两个例子
+act|fs_package_name_scalar_semantic||去 package.json 里找 name，只把值给我
+chat_act|fs_service_semantic_explain||检查仓库里有没有 rustclaw.service；如果有，给路径并顺手解释它是干什么的
+chat_act|fs_compare_readmes_semantic||比较 README.md 和 README.zh-CN.md 哪个更大，再解释为什么可能不同
+chat_act|followup_extract_username_semantic||只输出当前用户名，不要解释
+chat_act|followup_extract_hostname_semantic||只输出当前机器 hostname，不要解释
+chat_act|followup_count_scripts_items_semantic||统计 scripts 目录下有多少个直接子项，只输出数字
+chat_act|followup_logs_then_conclusion||列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物
+file|file_write_and_deliver_semantic_cn||写一个文本文件到 document/text_match_regression_note.txt，内容是 semantic routing regression note，然后把文件发给我
+failure|missing_file_graceful_cn_semantic||把 document/definitely_missing_text_match_case_001.txt 发给我
+failure|missing_file_graceful_en_followup||send me document/definitely_missing_runtime_case_002.txt and do not paste the content
+chat|plain_chat_no_execution_cn||别执行任何命令，直接讲一个很短的冷笑话
+chat_act|mixed_request_cn_semantic||先看看当前目录有哪些顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么组织
+chat_act|git_branch_scalar_semantic||tell me the current git branch name and output only the branch
+chat_act|health_check_brief_semantic||run a basic health check and summarize the most important findings briefly
+chat_act|service_status_brief_semantic||check whether telegramd is currently running and explain the status briefly
+chat_act|transform_json_table_semantic||sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+chat_act|semantic_pwd_natural_cn|natural,semantic,cn|我只是想确认下当前所在位置，你直接告诉我完整路径就好
+act|semantic_readme_head_natural_cn|natural,semantic,cn|帮我瞄一眼 README 开头，别逐行复述，直接用三句话概括重点
+act|semantic_hidden_files_natural_cn|natural,semantic,cn|这个目录里有没有那种点开头的隐藏文件？有的话随便举两个例子
+act|semantic_package_name_natural_cn|natural,semantic,cn|去 package.json 里把项目名找出来，只把 name 的值回给我
+chat_act|semantic_service_explain_natural_cn|natural,semantic,cn|帮我看看仓库里有没有 rustclaw.service 这个文件；如果有，把路径给我，再顺带说一句它大概率是干嘛的
+chat_act|semantic_compare_readmes_natural_cn|natural,semantic,cn|你帮我比一下 README.md 和 README.zh-CN.md 哪个更大，再简单解释一下为什么会这样
+chat_act|semantic_username_only_natural_cn|natural,semantic,cn|不用展开，我只想知道当前用户名，直接回结果
+chat_act|semantic_hostname_only_natural_cn|natural,semantic,cn|只告诉我这台机器的 hostname，别补别的
+chat_act|semantic_count_scripts_items_natural_cn|natural,semantic,cn|麻烦数一下 scripts 目录下面有多少个直接子项，只回数字
+chat_act|semantic_logs_then_conclusion_natural_cn|natural,semantic,cn|列一下 logs 最近更新的 3 个文件名，然后告诉我这些更像测试产物还是正式日志
+failure|semantic_missing_file_graceful_natural_cn|natural,semantic,cn,missing_file_graceful|把 document/definitely_missing_natural_text_match_001.txt 发给我，不要猜内容
+chat|semantic_plain_chat_natural_cn|natural,semantic,cn|这次别查文件也别跑命令，直接讲一个很短的冷笑话
+chat_act|semantic_repo_structure_natural_cn|natural,semantic,cn|先看看当前目录最外层都有哪些主要文件夹，再用一句外行也能懂的话解释这个仓库大概怎么组织
+chat_act|semantic_branch_only_natural_en|natural,semantic,en|I only need the current git branch name. Please reply with the branch only.
+chat_act|semantic_health_check_natural_en|natural,semantic,en|Could you do a quick health check and tell me only the most important thing I should worry about?
+chat_act|semantic_transform_table_natural_cn|natural,semantic,cn|把这组数据按 score 从高到低排好，再整理成 markdown 表格给我：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]

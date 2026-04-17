@@ -1,0 +1,1 @@
+followup_logs_first_then_tail|先列出 logs 目录下前 5 个文件名|就第一个，看看最后 3 行|一句话说有没有异常

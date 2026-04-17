@@ -1,0 +1,42 @@
+# Consolidated singleton manual cases.
+#
+# Background: under cases/ there used to live ~18 single-case .txt files
+# (nl_case_*_only.txt etc) created ad-hoc when triaging a specific bug.
+# None of them were referenced by any script — they just leaked into the
+# directory. This file consolidates them into one with the same format
+# the runner already understands.
+#
+# The original singleton files are kept on disk with a deprecation header
+# pointing here; you can safely delete them in a future cleanup once nobody
+# is paste-running their paths anymore.
+#
+# Format: suite|name|tags|prompt|expect=<substring>
+
+# ---------- act ----------
+act|act_find_service_file_a||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径|expect=rustclaw.service
+act|act_git_status_brief_singleton||看看这个仓库现在有没有未提交改动，用一句话告诉我
+act|act_list_logs_singleton||列出 logs 目录下的前 10 个文件名，不要读内容
+act|act_log_analyze_brief_singleton||读取 logs/clawd.run.log 最后 10 行，挑最值得注意的一行告诉我
+act|act_service_status_brief_singleton||帮我检查 telegramd 现在是不是在运行，顺手简短解释状态
+act|act_disk_usage_one_sentence||查看当前磁盘使用情况，然后用一句大白话告诉我最该担心哪一项
+act|act_explicit_command_raw_pwd||执行命令 pwd，直接回复执行结果，不要解释|expect=/
+act|act_find_service_exists_with_path||检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径|expect=rustclaw.service
+act|act_health_check_brief_singleton||帮我做一次基础健康检查，只列最重要的结论
+act|act_http_local_health_brief_singleton||请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
+act|act_fuzzy_top3||去 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 找 abcd
+act|act_transform_inline_json_table||把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]|expect=beta
+
+# ---------- failure ----------
+failure|missing_file_graceful_singleton|missing_file_graceful|把 definitely_missing_named_file_rustclaw_001.txt 发给我
+
+# ---------- natural cn ----------
+act|natural_ports_brief_cn_singleton|natural,cn|看看这台机器现在有哪些端口在监听，然后挑最值得注意的几个简单说一下
+act|natural_service_status_brief_cn_singleton|natural,cn|我想确认 telegramd 现在还活着没，你帮我看一下，顺便用一句话解释状态
+
+# ---------- multi-turn (legacy: original files use 4+ pipe fields with multiple
+# prompts; the current runner only consumes a single prompt per row, so these
+# are flattened to the FIRST turn here. To exercise the full multi-turn flow
+# use the dedicated context_chain / followup_dir_compare suites instead.) ----------
+act|clarify_send_switch_target_first||把那个文件发给我
+act|followup_two_hops_dir_compare_first||先数一下 scripts 目录直接有多少个子项
+act|followup_switch_dir_then_ordinal_first||先列出 document 目录下前 5 个文件名
