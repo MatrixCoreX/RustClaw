@@ -40,20 +40,6 @@ overlay = ["prompts/layers/overlays/intent_normalizer_prompt.md"]
 vendor_patch = "routing/common.md"
 
 [[prompts]]
-logical_path = "prompts/intent_router_prompt.md"
-base = ["prompts/layers/base/system_truth.md"]
-overlay = ["prompts/layers/overlays/intent_router_prompt.md"]
-vendor_patch = "routing/common.md"
-
-[[prompts]]
-logical_path = "prompts/intent_router_rules.md"
-base = [
-  "prompts/layers/base/system_truth.md",
-  "prompts/layers/base/routing/common_rules.md",
-]
-overlay = ["prompts/layers/overlays/intent_router_rules.md"]
-
-[[prompts]]
 logical_path = "prompts/clarify_question_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",

@@ -381,28 +381,31 @@ pub(crate) async fn execute_ask_routed(
     normalizer_mode: Option<RoutedMode>,
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Result<AskReply, String> {
-    let (routed_mode, used_fallback_router, override_reason) = if resume_force_chat {
-        (RoutedMode::Chat, false, Some("resume_force_chat"))
+    // Phase 2.7: legacy `route_request_mode` (second-LLM router) was removed. All callers
+    // pass `Some(route_result.routed_mode)` derived from the normalizer; if for some reason
+    // a caller drops it, default to AskClarify rather than burning another LLM round-trip.
+    let (routed_mode, override_reason) = if resume_force_chat {
+        (RoutedMode::Chat, Some("resume_force_chat"))
     } else if let Some(m) = normalizer_mode {
-        (m, false, None)
+        (m, None)
     } else if agent_mode {
-        let mode = crate::intent_router::route_request_mode(state, task, resolved_prompt).await;
-        (mode, true, None)
+        (
+            RoutedMode::AskClarify,
+            Some("normalizer_mode=None and agent_mode=true"),
+        )
     } else {
         (
             RoutedMode::Chat,
-            false,
             Some("normalizer_mode=None and agent_mode=false"),
         )
     };
     tracing::info!(
-        "{} worker_once: ask task_id={} normalizer_mode={:?} routed_mode={:?} agent_mode={} used_fallback_router={} override={}",
+        "{} worker_once: ask task_id={} normalizer_mode={:?} routed_mode={:?} agent_mode={} override={}",
         crate::highlight_tag("routing"),
         task.task_id,
         normalizer_mode,
         routed_mode,
         agent_mode,
-        used_fallback_router,
         override_reason.unwrap_or("")
     );
     if let Some(reply) = crate::self_extension::maybe_handle_ask_self_extension(
