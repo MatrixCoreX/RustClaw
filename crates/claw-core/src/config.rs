@@ -507,6 +507,14 @@ impl Default for SendfileConfig {
 pub struct DatabaseConfig {
     pub sqlite_path: String,
     pub busy_timeout_ms: u64,
+    /// SQLite 连接池最大连接数。≥ 2，默认 8（与 worker 并发*2 + http 路径预留）。
+    /// 配合 WAL 模式：reader 不阻塞 writer，多 reader 并发；writer 串行（SQLite 限制）。
+    #[serde(default = "default_db_pool_max_size")]
+    pub pool_max_size: u32,
+}
+
+fn default_db_pool_max_size() -> u32 {
+    8
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -473,8 +473,8 @@ fn persist_valid_knowledge_candidates(
     }
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     for candidate in candidates {
         let Some(valid) = validate_knowledge_candidate(user_key, latest_id, candidate) else {
             continue;

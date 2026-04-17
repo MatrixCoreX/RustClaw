@@ -267,7 +267,7 @@ pub(crate) fn insert_memory(
 
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     upsert_user_preferences(
         state,
         &db,
@@ -330,7 +330,7 @@ pub(crate) fn count_chat_memory_rounds(
     chat_id: i64,
 ) -> anyhow::Result<usize> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let current_cnt: i64 = db.query_row(
         "SELECT COUNT(*) FROM memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3 AND role = 'user'",
         params![user_id, chat_id, user_key],
@@ -358,7 +358,7 @@ pub(crate) fn recall_recent_memories(
     limit: usize,
 ) -> anyhow::Result<Vec<(String, String)>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let rows = query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, limit)?;
     let mut out = Vec::new();
     for (role, content, safety_flag) in rows {
@@ -448,7 +448,7 @@ pub(crate) fn recall_user_preferences(
     limit: usize,
 ) -> anyhow::Result<Vec<(String, String)>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let rows = query_preferences_for_chat(&db, user_id, chat_id, &user_key, limit)?;
     let mut seen = HashSet::new();
     let mut out = Vec::new();
@@ -478,7 +478,7 @@ pub(crate) fn recall_long_term_summary(
     chat_id: i64,
 ) -> anyhow::Result<Option<String>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let summary = db
         .query_row(
             "SELECT summary FROM long_term_memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3",
@@ -511,7 +511,7 @@ pub(crate) fn recall_memories_since_id(
     limit: usize,
 ) -> anyhow::Result<Vec<(i64, String, String, String)>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let mut out = query_memories_since_id_for_chat(
         &db,
         user_id,
@@ -1159,7 +1159,7 @@ pub(crate) fn build_recent_turns_full_context(
     max_total_chars: usize,
 ) -> String {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = match state.db.lock() {
+    let db = match state.db.get() {
         Ok(db) => db,
         Err(_) => return "<none>".to_string(),
     };
@@ -1220,7 +1220,7 @@ pub(crate) fn build_last_turn_full_context(
     max_total_chars: usize,
 ) -> String {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = match state.db.lock() {
+    let db = match state.db.get() {
         Ok(db) => db,
         Err(_) => return "<none>".to_string(),
     };
@@ -1289,7 +1289,7 @@ pub(crate) fn build_recent_assistant_replies_context(
     let max_replies = max_replies.max(1);
     let preview_chars = preview_chars.max(48);
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = match state.db.lock() {
+    let db = match state.db.get() {
         Ok(db) => db,
         Err(_) => return "<none>".to_string(),
     };
@@ -1361,7 +1361,7 @@ pub(crate) fn read_recent_assistant_reply_texts(
 ) -> Vec<String> {
     let max_replies = max_replies.max(1);
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = match state.db.lock() {
+    let db = match state.db.get() {
         Ok(db) => db,
         Err(_) => return Vec::new(),
     };
@@ -1402,7 +1402,7 @@ pub(crate) fn read_long_term_source_memory_id(
     chat_id: i64,
 ) -> anyhow::Result<i64> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let source = db
         .query_row(
             "SELECT source_memory_id FROM long_term_memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3",
@@ -1435,7 +1435,7 @@ pub(crate) fn upsert_long_term_summary(
     source_memory_id: i64,
 ) -> anyhow::Result<()> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let now = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
     db.execute(
@@ -1757,7 +1757,7 @@ pub(crate) fn upsert_user_preferences_from_route_hint(
     let user_key = effective_user_key(user_key, user_id, chat_id);
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     upsert_user_preferences(
         state,
         &db,
@@ -1848,7 +1848,7 @@ mod tests {
         AppState {
             started_at: Instant::now(),
             queue_limit: 1,
-            db: Arc::new(Mutex::new(Connection::open_in_memory().expect("open db"))),
+            db: crate::db_init::test_pool(),
             llm_providers: Vec::new(),
             agents_by_id: Arc::new(agents_by_id),
             skill_timeout_seconds: 30,
@@ -2027,7 +2027,7 @@ mod tests {
     #[test]
     fn provider_unavailable_task_is_skipped_for_last_turn_context() {
         let state = test_state();
-        let db = state.db.lock().expect("db");
+        let db = state.db.get().expect("db");
         create_tasks_table(&db);
         let provider_unavailable = crate::i18n_t_with_default(
             &state,
@@ -2070,7 +2070,7 @@ mod tests {
     #[test]
     fn last_turn_full_context_does_not_fallback_to_legacy_chat() {
         let state = test_state();
-        let db = state.db.lock().expect("db");
+        let db = state.db.get().expect("db");
         create_tasks_table(&db);
         let legacy_chat_id = legacy_principal_chat_id("test-user", 2).expect("legacy chat id");
         db.execute(
@@ -2095,7 +2095,7 @@ mod tests {
     fn recent_assistant_replies_context_does_not_fallback_to_legacy_chat() {
         let state = test_state();
         {
-            let db = state.db.lock().expect("db");
+            let db = state.db.get().expect("db");
             create_memories_table(&db);
         }
         insert_memory(
@@ -2134,7 +2134,7 @@ mod tests {
     fn recent_assistant_replies_context_includes_ordered_entries_for_candidate_list() {
         let state = test_state();
         {
-            let db = state.db.lock().expect("db");
+            let db = state.db.get().expect("db");
             create_memories_table(&db);
         }
         insert_memory(
@@ -2264,7 +2264,7 @@ mod tests {
     fn route_hint_upserts_agent_display_name_preference() {
         let state = test_state();
         {
-            let db = state.db.lock().expect("db");
+            let db = state.db.get().expect("db");
             create_user_preferences_table(&db);
         }
 
@@ -2282,7 +2282,7 @@ mod tests {
     fn route_hint_rejects_invalid_agent_display_name() {
         let state = test_state();
         {
-            let db = state.db.lock().expect("db");
+            let db = state.db.get().expect("db");
             create_user_preferences_table(&db);
         }
 

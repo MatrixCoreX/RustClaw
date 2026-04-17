@@ -218,21 +218,28 @@ async fn main() -> anyhow::Result<()> {
     let workspace_root = std::env::current_dir()?;
     let tools_policy = ToolsPolicy::from_config(&config.tools)
         .map_err(|err| anyhow::anyhow!("invalid tools config: {err}"))?;
-    let db = init_db(&config)?;
-    seed_users(&db, &config)?;
-    ensure_schedule_schema(&db)?;
-    ensure_memory_schema(&db)?;
-    ensure_channel_schema(&db)?;
-    ensure_key_auth_schema(&db)?;
-    memory::indexing::ensure_retrieval_schema(&db)?;
-    if config.memory.hybrid_recall_enabled
-        && (config.memory.reindex_on_startup
-            || memory::indexing::retrieval_index_is_empty(&db).unwrap_or(true))
+    let db_pool = init_db(&config)?;
     {
-        memory::indexing::rebuild_retrieval_index(&db, &config.memory, &workspace_root)?;
+        let db = db_pool.get().map_err(|e| anyhow::anyhow!("get db conn for setup: {e}"))?;
+        seed_users(&db, &config)?;
+        ensure_schedule_schema(&db)?;
+        ensure_memory_schema(&db)?;
+        ensure_channel_schema(&db)?;
+        ensure_key_auth_schema(&db)?;
+        memory::indexing::ensure_retrieval_schema(&db)?;
+        if config.memory.hybrid_recall_enabled
+            && (config.memory.reindex_on_startup
+                || memory::indexing::retrieval_index_is_empty(&db).unwrap_or(true))
+        {
+            memory::indexing::rebuild_retrieval_index(&db, &config.memory, &workspace_root)?;
+        }
     }
-    let bootstrap_admin_key = ensure_bootstrap_admin_key(&db)?;
-    seed_channel_bindings(&db, &config)?;
+    let bootstrap_admin_key = {
+        let db = db_pool.get().map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
+        let key = ensure_bootstrap_admin_key(&db)?;
+        seed_channel_bindings(&db, &config)?;
+        key
+    };
     if let Some(user_key) = bootstrap_admin_key.as_deref() {
         warn!("============================================================");
         warn!("No auth key found in database. Generated initial admin key.");
@@ -244,10 +251,13 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("Please save it now and use it to bind UI / Telegram / WhatsApp.");
         eprintln!("============================================================");
     }
-    let recovered_task_ids = recover_stale_running_tasks_on_startup(
-        &db,
-        config.worker.running_no_progress_timeout_seconds.max(1),
-    )?;
+    let recovered_task_ids = {
+        let db = db_pool.get().map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
+        recover_stale_running_tasks_on_startup(
+            &db,
+            config.worker.running_no_progress_timeout_seconds.max(1),
+        )?
+    };
     if !recovered_task_ids.is_empty() {
         let recovery_detail = json!({
             "reason": "startup_stale_running_recovery",
@@ -255,13 +265,17 @@ async fn main() -> anyhow::Result<()> {
             "recovered_count": recovered_task_ids.len(),
             "task_ids": recovered_task_ids,
         });
-        if let Err(err) = repo::insert_audit_log_raw(
-            &db,
-            None,
-            "startup_recover_running_timeout",
-            Some(&recovery_detail.to_string()),
-            None,
-        ) {
+        let audit_res = {
+            let db = db_pool.get().map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
+            repo::insert_audit_log_raw(
+                &db,
+                None,
+                "startup_recover_running_timeout",
+                Some(&recovery_detail.to_string()),
+                None,
+            )
+        };
+        if let Err(err) = audit_res {
             warn!("write startup recovery audit log failed: {err}");
         }
         warn!(
@@ -453,7 +467,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         started_at: Instant::now(),
         queue_limit: config.worker.queue_limit,
-        db: Arc::new(Mutex::new(db)),
+        db: db_pool,
         llm_providers,
         agents_by_id: Arc::new(agents_by_id),
         skill_timeout_seconds: config.skills.skill_timeout_seconds,

@@ -1383,7 +1383,6 @@ mod tests {
     use claw_core::config::{
         AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
     };
-    use rusqlite::Connection;
     use tokio::sync::Semaphore;
 
     struct TempDirGuard {
@@ -1433,7 +1432,7 @@ mod tests {
         AppState {
             started_at: Instant::now(),
             queue_limit: 1,
-            db: Arc::new(Mutex::new(Connection::open_in_memory().expect("open db"))),
+            db: crate::db_init::test_pool(),
             llm_providers: Vec::new(),
             agents_by_id: Arc::new(agents_by_id),
             skill_timeout_seconds: 30,

@@ -11,8 +11,8 @@ use crate::{
 pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<ClaimedTask>> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let mut stmt = db.prepare(
         "SELECT task_id, user_id, chat_id, user_key, channel, external_user_id, external_chat_id, kind, payload_json
@@ -69,8 +69,8 @@ pub(crate) fn update_task_success(
 ) -> anyhow::Result<()> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'succeeded', result_json = ?2, error_text = NULL, updated_at = ?3
@@ -89,8 +89,8 @@ pub(crate) fn update_task_success(
 pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
         "UPDATE tasks SET updated_at = ?2 WHERE task_id = ?1 AND status = 'running'",
         params![task_id, now_ts()],
@@ -101,8 +101,8 @@ pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Res
 pub(crate) fn is_task_still_running(state: &AppState, task_id: &str) -> anyhow::Result<bool> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let status = db
         .query_row(
             "SELECT status FROM tasks WHERE task_id = ?1 LIMIT 1",
@@ -120,8 +120,8 @@ pub(crate) fn update_task_progress_result(
 ) -> anyhow::Result<()> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.execute(
         "UPDATE tasks SET result_json = ?2, updated_at = ?3 WHERE task_id = ?1 AND status IN ('queued','running')",
         params![task_id, result_json, now_ts()],
@@ -136,8 +136,8 @@ pub(crate) fn update_task_failure(
 ) -> anyhow::Result<()> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'failed', result_json = NULL, error_text = ?2, updated_at = ?3
@@ -161,8 +161,8 @@ pub(crate) fn update_task_failure_with_result(
 ) -> anyhow::Result<()> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'failed', result_json = ?2, error_text = ?3, updated_at = ?4
@@ -185,8 +185,8 @@ pub(crate) fn update_task_timeout(
 ) -> anyhow::Result<()> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'timeout', result_json = NULL, error_text = ?2, updated_at = ?3
@@ -250,8 +250,8 @@ pub(crate) fn list_active_tasks_internal(
     let now = now_ts().parse::<i64>().unwrap_or_default();
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
         "SELECT task_id, kind, payload_json, status,
                 CAST(COALESCE(NULLIF(created_at, ''), '0') AS INTEGER) AS created_ts,
@@ -308,8 +308,8 @@ pub(crate) fn cancel_tasks_for_user_chat(
     let now = now_ts();
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let mut stmt = db.prepare(
         "UPDATE tasks
@@ -335,8 +335,8 @@ pub(crate) fn cancel_one_task_for_user_chat(
     let now = now_ts();
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
         "UPDATE tasks
          SET status = 'canceled',
@@ -357,8 +357,8 @@ pub(crate) fn get_task_query_record(
 ) -> anyhow::Result<Option<(TaskQueryResponse, Option<String>, String)>> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let mut stmt = db.prepare(
         "SELECT status, result_json, error_text, user_key, channel

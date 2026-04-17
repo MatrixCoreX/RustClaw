@@ -11,8 +11,8 @@ pub(crate) fn insert_audit_log(
 ) -> anyhow::Result<()> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     insert_audit_log_raw(&db, user_id, action, detail_json, error_text)
 }
 

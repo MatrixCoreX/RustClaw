@@ -1068,8 +1068,8 @@ async fn maybe_complete_feishu_official_scan(
         if let Err(err) = start_service_if_needed(state, "feishud").await {
             let mut db = state
                 .db
-                .lock()
-                .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+                .get()
+                .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
             return mark_pending_channel_bind_session_failed(&mut db, session.id, &err.to_string());
         }
         return Ok(session);
@@ -1092,8 +1092,8 @@ async fn maybe_complete_feishu_official_scan(
         .unwrap_or_else(|| error_code.to_string());
     let mut db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     match error_code {
         "authorization_pending" | "slow_down" => Ok(session),
         "expired_token" => mark_pending_channel_bind_session_expired(&mut db, session.id),
@@ -1151,7 +1151,7 @@ async fn start_feishu_bind_session_handler(
         .saturating_add(ttl_seconds as i64)
         .to_string();
     let session = {
-        let mut db = match state.db.lock() {
+        let mut db = match state.db.get() {
             Ok(db) => db,
             Err(_) => {
                 return (
@@ -1211,7 +1211,7 @@ async fn start_feishu_bind_session_handler(
     let begin = match begin_feishu_official_registration(&state).await {
         Ok(begin) => begin,
         Err(err) => {
-            let mut db = match state.db.lock() {
+            let mut db = match state.db.get() {
                 Ok(db) => db,
                 Err(_) => {
                     return (
@@ -1239,7 +1239,7 @@ async fn start_feishu_bind_session_handler(
     let session_expires_at = current_unix_ts()
         .saturating_add(begin_expire_seconds.min(ttl_seconds) as i64)
         .to_string();
-    let mut db = match state.db.lock() {
+    let mut db = match state.db.get() {
         Ok(db) => db,
         Err(_) => {
             return (
@@ -1314,7 +1314,7 @@ async fn get_feishu_bind_session_handler(
     }
 
     let session = {
-        let mut db = match state.db.lock() {
+        let mut db = match state.db.get() {
             Ok(db) => db,
             Err(_) => {
                 return (
@@ -1434,7 +1434,7 @@ async fn detect_feishu_bind_session_handler(
         );
     }
 
-    let mut db = match state.db.lock() {
+    let mut db = match state.db.get() {
         Ok(db) => db,
         Err(_) => {
             return (
@@ -1744,7 +1744,7 @@ async fn webd_internal_verify_login(
     State(state): State<AppState>,
     Json(req): Json<WebdInternalVerifyRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let db = match state.db.lock() {
+    let db = match state.db.get() {
         Ok(g) => g,
         Err(_) => {
             return (
@@ -1851,7 +1851,7 @@ async fn admin_upsert_webd_account(
         }
         user_key
     };
-    let db = match state.db.lock() {
+    let db = match state.db.get() {
         Ok(g) => g,
         Err(_) => {
             return (
@@ -3199,8 +3199,8 @@ fn canonical_bound_channel_name(raw: &str) -> String {
 fn auth_user_summary_counts(state: &AppState) -> anyhow::Result<(usize, usize, Vec<String>)> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let user_count: i64 = db.query_row(
         "SELECT COUNT(*) FROM auth_keys WHERE enabled = 1",
         [],
@@ -3290,8 +3290,8 @@ fn task_access_meta_for_debug(
 ) -> anyhow::Result<Option<(Option<String>, String)>> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.query_row(
         "SELECT user_key, channel FROM tasks WHERE task_id = ?1 LIMIT 1",
         [task_id],
@@ -3533,8 +3533,8 @@ fn usage_search_matches(query: Option<&str>, record: &UsageHistoryRecordSummary)
 fn task_usage_meta(state: &AppState, task_id: &str) -> anyhow::Result<Option<UsageTaskMeta>> {
     let db = state
         .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.query_row(
         "SELECT channel, kind, status, user_key, external_user_id, external_chat_id, payload_json
          FROM tasks
@@ -3572,8 +3572,8 @@ async fn recent_robot_tasks(
     let read_result = (|| -> anyhow::Result<Vec<RecentRobotTaskSummary>> {
         let db = state
             .db
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+            .get()
+            .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
         let mut stmt = db.prepare(
             "SELECT task_id, status, kind, channel, external_user_id, external_chat_id, payload_json, result_json, error_text,
                     CAST(NULLIF(created_at, '') AS INTEGER) AS created_ts,

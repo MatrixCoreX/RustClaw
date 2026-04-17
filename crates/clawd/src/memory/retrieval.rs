@@ -116,7 +116,7 @@ pub(crate) fn retrieve_indexed_memories(
     anchor_prompt: &str,
 ) -> anyhow::Result<IndexedRecall> {
     let scope_user_key = super::effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let mut candidates = fetch_recent_candidates(
         &db,
         user_id,
@@ -807,7 +807,6 @@ mod tests {
         AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
     };
     use reqwest::Client;
-    use rusqlite::Connection;
     use tokio::sync::Semaphore;
 
     use super::{
@@ -838,7 +837,7 @@ mod tests {
         AppState {
             started_at: Instant::now(),
             queue_limit: 1,
-            db: Arc::new(Mutex::new(Connection::open_in_memory().expect("open db"))),
+            db: crate::db_init::test_pool(),
             llm_providers: Vec::new(),
             agents_by_id: Arc::new(agents_by_id),
             skill_timeout_seconds: 30,
@@ -979,7 +978,7 @@ mod tests {
         let chat_id = 2002;
         let user_key = "user:test";
         {
-            let db = state.db.lock().expect("db lock");
+            let db = state.db.get().expect("db lock");
             db.execute_batch(crate::INIT_SQL).expect("init base schema");
             ensure_memory_schema(&db).expect("ensure memory schema");
             ensure_retrieval_schema(&db).expect("ensure retrieval schema");
@@ -1042,7 +1041,7 @@ mod tests {
     fn kb_docs_are_scoped_by_user_key() {
         let state = test_state();
         {
-            let db = state.db.lock().expect("db lock");
+            let db = state.db.get().expect("db lock");
             db.execute_batch(crate::INIT_SQL).expect("init base schema");
             ensure_memory_schema(&db).expect("ensure memory schema");
             ensure_retrieval_schema(&db).expect("ensure retrieval schema");
