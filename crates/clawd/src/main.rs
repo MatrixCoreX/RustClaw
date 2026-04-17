@@ -128,12 +128,12 @@ use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bind
 #[allow(unused_imports)]
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, reload_skill_views, ActFinalizeStyle,
-    AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, ChannelConfig,
-    ChatEntryStrategy, ClaimedTask, CommandIntentRules, CommandIntentRuntime, CoreServices,
-    LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
-    PolicyConfig, RateLimiter, ReloadContext, RoutedMode, RuntimeChannel, ScheduleIntentOutput,
-    ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry,
-    ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
+    AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, AskState, AskTransition,
+    ChannelConfig, ChatEntryStrategy, ClaimedTask, CommandIntentRules, CommandIntentRuntime,
+    CoreServices, LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext,
+    MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext, RoutedMode, RuntimeChannel,
+    ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot,
+    TaskMetricsRegistry, ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
