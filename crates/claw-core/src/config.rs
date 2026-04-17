@@ -511,10 +511,28 @@ pub struct DatabaseConfig {
     /// 配合 WAL 模式：reader 不阻塞 writer，多 reader 并发；writer 串行（SQLite 限制）。
     #[serde(default = "default_db_pool_max_size")]
     pub pool_max_size: u32,
+    /// Phase 2.2 Stage 2: 把 audit_logs 拆到独立 SQLite 文件 +
+    /// 独立连接池，让任务流水线（tasks/scheduled_jobs/...）的 writer 锁
+    /// 不再被 audit append 抢占。默认 `data/rustclaw_audit.db`，
+    /// 启动时若主库存在 audit_logs 行会一次性迁移过去。
+    #[serde(default = "default_audit_sqlite_path")]
+    pub audit_sqlite_path: String,
+    /// audit pool 比主 pool 小：append-only 路径只需要 1 个 writer + 1 个
+    /// reader（清理任务 + 偶尔后台查询），默认 2。
+    #[serde(default = "default_audit_pool_max_size")]
+    pub audit_pool_max_size: u32,
 }
 
 fn default_db_pool_max_size() -> u32 {
     8
+}
+
+fn default_audit_sqlite_path() -> String {
+    "data/rustclaw_audit.db".to_string()
+}
+
+fn default_audit_pool_max_size() -> u32 {
+    2
 }
 
 #[derive(Debug, Clone, Deserialize)]

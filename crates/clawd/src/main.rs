@@ -219,6 +219,12 @@ async fn main() -> anyhow::Result<()> {
     let tools_policy = ToolsPolicy::from_config(&config.tools)
         .map_err(|err| anyhow::anyhow!("invalid tools config: {err}"))?;
     let db_pool = init_db(&config)?;
+    let audit_db_pool = db_init::init_audit_db(&config)?;
+    if let Err(e) = db_init::migrate_audit_logs_from_main_db(&db_pool, &audit_db_pool) {
+        warn!(
+            "phase2.2-stage2: audit_logs one-shot migration failed (non-fatal, audit_logs left in main db): {e}"
+        );
+    }
     {
         let db = db_pool.get().map_err(|e| anyhow::anyhow!("get db conn for setup: {e}"))?;
         seed_users(&db, &config)?;
@@ -468,6 +474,7 @@ async fn main() -> anyhow::Result<()> {
         started_at: Instant::now(),
         queue_limit: config.worker.queue_limit,
         db: db_pool,
+        audit_db: audit_db_pool,
         llm_providers,
         agents_by_id: Arc::new(agents_by_id),
         skill_timeout_seconds: config.skills.skill_timeout_seconds,

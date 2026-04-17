@@ -43,6 +43,16 @@ rules_dir = "configs/command_intent"
 busy_timeout_ms = 2000
 # SQLite 文件路径 / SQLite file path.
 sqlite_path = "data/rustclaw.db"
+# Phase 2.2 Stage 2: audit_logs 走独立 SQLite 文件 + 独立连接池，避免与任务/调度
+# 写入争抢同一份 writer 锁。首次启动时若主库还有 audit_logs 数据，会自动一次性
+# 迁移到这里，然后清空主库副本。
+# Audit logs are isolated to their own SQLite file/pool to avoid writer-lock
+# contention with tasks/schedule. On first boot any rows still in the main DB
+# are migrated here once and then cleared from main.
+audit_sqlite_path = "data/rustclaw_audit.db"
+# audit pool 上限：审计写入是低并发 append-only，2 条够用 / cap is small because
+# audit writes are low-concurrency append-only.
+audit_pool_max_size = 2
 
 # 用途/Purpose: 文档/文件生成默认输出目录.
 # 建议修改/Recommended change: 可改.

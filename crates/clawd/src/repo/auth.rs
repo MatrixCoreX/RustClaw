@@ -4,8 +4,9 @@ use argon2::{Argon2, PasswordVerifier};
 use claw_core::config::{AppConfig, ChannelBindingConfig};
 use claw_core::types::{AuthIdentity, ExchangeCredentialStatus};
 use rusqlite::{params, Connection, OptionalExtension};
-use tracing::info;
+use tracing::{info, warn};
 
+use crate::db_init::DbPool;
 use crate::{mask_secret, normalize_external_id_opt, now_ts, AppState};
 
 fn generate_user_key() -> String {
@@ -135,12 +136,24 @@ pub(crate) fn ensure_key_auth_schema(db: &Connection) -> anyhow::Result<()> {
         "user_key",
         "ALTER TABLE long_term_memories ADD COLUMN user_key TEXT",
     )?;
-    crate::ensure_column_exists(
-        db,
-        "audit_logs",
-        "user_key",
-        "ALTER TABLE audit_logs ADD COLUMN user_key TEXT",
-    )?;
+    // Phase 2.2 Stage 2: audit_logs 已经搬到独立 audit pool（INIT_AUDIT_SQL 自带 user_key 列）。
+    // 这里若主库还残留旧表（迁移之前的部署），仍保持 user_key 列对齐，让一次性
+    // migrate_audit_logs_from_main_db 能正确读出 user_key 字段。
+    let main_has_audit_logs: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='audit_logs'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if main_has_audit_logs > 0 {
+        crate::ensure_column_exists(
+            db,
+            "audit_logs",
+            "user_key",
+            "ALTER TABLE audit_logs ADD COLUMN user_key TEXT",
+        )?;
+    }
     crate::ensure_column_exists(
         db,
         "user_preferences",
@@ -527,7 +540,8 @@ fn rebind_user_key_references(
         "UPDATE scheduled_jobs SET user_key = ?2 WHERE user_key = ?1",
         "UPDATE memories SET user_key = ?2 WHERE user_key = ?1",
         "UPDATE long_term_memories SET user_key = ?2 WHERE user_key = ?1",
-        "UPDATE audit_logs SET user_key = ?2 WHERE user_key = ?1",
+        // Phase 2.2 Stage 2: audit_logs 已经搬到独立 audit pool，
+        // 由 rebind_audit_logs_user_key 在主事务提交后 best-effort 更新。
         "UPDATE user_preferences SET user_key = ?2 WHERE user_key = ?1",
         "UPDATE webd_login_accounts SET user_key = ?2 WHERE user_key = ?1",
         "UPDATE pending_channel_bind_sessions SET user_key = ?2 WHERE user_key = ?1",
@@ -536,6 +550,23 @@ fn rebind_user_key_references(
         tx.execute(sql, params![old_user_key, new_user_key])?;
     }
     Ok(())
+}
+
+/// Phase 2.2 Stage 2: audit_logs 在独立 audit pool 上，需要单独 best-effort 更新。
+/// 失败只 warn，不阻塞 user_key 旋转主流程（审计延迟一致性是可接受的）。
+fn rebind_audit_logs_user_key(
+    audit_db: &DbPool,
+    old_user_key: &str,
+    new_user_key: &str,
+) -> anyhow::Result<u64> {
+    let conn = audit_db
+        .get()
+        .map_err(|e| anyhow::anyhow!("audit db pool: {e}"))?;
+    let updated = conn.execute(
+        "UPDATE audit_logs SET user_key = ?2 WHERE user_key = ?1",
+        params![old_user_key, new_user_key],
+    )?;
+    Ok(updated as u64)
 }
 
 fn rotate_auth_key_row(
@@ -610,6 +641,26 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
             let tx = db.transaction()?;
             rotate_auth_key_row(&tx, admin_rowid, &old_user_key, &user_key)?;
             tx.commit()?;
+            // Phase 2.2 Stage 2: 主事务提交后再异步刷一次 audit_logs（独立 pool）。
+            // 失败只 warn，避免审计跨库写入阻塞 admin key 轮换。
+            match rebind_audit_logs_user_key(&state.audit_db, &old_user_key, &user_key) {
+                Ok(n) => {
+                    if n > 0 {
+                        info!(
+                            target = "audit",
+                            old_user_key = %mask_secret(&old_user_key),
+                            new_user_key = %mask_secret(&user_key),
+                            updated_rows = n,
+                            "rebound user_key in audit_logs after admin rotation"
+                        );
+                    }
+                }
+                Err(err) => warn!(
+                    target = "audit",
+                    error = %err,
+                    "failed to rebind user_key in audit_logs (best-effort, ignored)"
+                ),
+            }
             return Ok(user_key);
         }
     }
