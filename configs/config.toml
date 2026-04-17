@@ -166,6 +166,12 @@ models = [
     "qwen-turbo-latest",
 ]
 timeout_seconds = 60
+# Phase 2.5: per-vendor 默认参数（可选）。不写就沿用 vendor 默认；写了会
+# 在 chat 调用没显式传 hints 时生效。例：
+# [llm.qwen.params]
+# default_temperature = 0.4
+# default_max_tokens  = 2048
+# top_p               = 0.9
 
 # 用途/Purpose: MiniMax 提供商连接与模型池（OpenAI-compatible）.
 # 建议修改/Recommended change: 可改，建议按官方最新兼容模型名维护.

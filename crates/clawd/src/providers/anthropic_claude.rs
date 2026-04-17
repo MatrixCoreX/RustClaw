@@ -57,7 +57,15 @@ pub(super) async fn call_anthropic_claude(
         })?;
 
     let url = anthropic_messages_url(&provider);
-    let max_tokens = hints.max_tokens.unwrap_or(4096);
+    // Phase 2.5: hints → params → 4096 fallback。Anthropic 协议要求必须传 max_tokens，
+    // 所以这里**一定**会得到一个值，与 Phase 2.5 之前完全一致。
+    let params = &provider.config.params;
+    let max_tokens = hints
+        .max_tokens
+        .or(params.default_max_tokens)
+        .unwrap_or(4096);
+    let effective_temperature = hints.temperature.or(params.default_temperature);
+    let effective_top_p = params.top_p;
     let mut req_body = json!({
         "model": provider.config.model,
         "max_tokens": max_tokens,
@@ -65,9 +73,12 @@ pub(super) async fn call_anthropic_claude(
             { "role": "user", "content": prompt }
         ]
     });
-    if let Some(t) = hints.temperature {
-        if let Some(map) = req_body.as_object_mut() {
+    if let Some(map) = req_body.as_object_mut() {
+        if let Some(t) = effective_temperature {
             map.insert("temperature".to_string(), json!(t));
+        }
+        if let Some(tp) = effective_top_p {
+            map.insert("top_p".to_string(), json!(tp));
         }
     }
 
@@ -187,6 +198,7 @@ mod tests {
                 priority: 1,
                 timeout_seconds: 30,
                 max_concurrency: 1,
+                params: claw_core::config::LlmProviderParams::default(),
             },
             client: Client::new(),
             semaphore: Arc::new(Semaphore::new(1)),

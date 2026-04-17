@@ -36,18 +36,30 @@ pub(super) async fn call_google_gemini(
         provider.config.api_key
     );
 
+    // Phase 2.5: hints 优先 → 否则回退到 provider.config.params。
+    let params = &provider.config.params;
+    let effective_temperature = hints.temperature.or(params.default_temperature);
+    let effective_max_tokens = hints.max_tokens.or(params.default_max_tokens);
+    let effective_top_p = params.top_p;
+
     let mut req_body = json!({
         "contents": [{
             "parts": [{ "text": prompt }]
         }]
     });
-    if hints.temperature.is_some() || hints.max_tokens.is_some() {
+    if effective_temperature.is_some()
+        || effective_max_tokens.is_some()
+        || effective_top_p.is_some()
+    {
         let mut gen_cfg = serde_json::Map::new();
-        if let Some(t) = hints.temperature {
+        if let Some(t) = effective_temperature {
             gen_cfg.insert("temperature".to_string(), json!(t));
         }
-        if let Some(mt) = hints.max_tokens {
+        if let Some(mt) = effective_max_tokens {
             gen_cfg.insert("maxOutputTokens".to_string(), json!(mt));
+        }
+        if let Some(tp) = effective_top_p {
+            gen_cfg.insert("topP".to_string(), json!(tp));
         }
         if let Some(map) = req_body.as_object_mut() {
             map.insert("generationConfig".to_string(), Value::Object(gen_cfg));

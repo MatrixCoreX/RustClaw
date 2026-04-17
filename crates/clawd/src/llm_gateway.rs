@@ -227,6 +227,7 @@ fn synthesize_llm_providers(
                 priority: 1,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
+                params: v.params.clone(),
             });
         }
     }
@@ -247,6 +248,7 @@ fn synthesize_llm_providers(
                 priority: 2,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
+                params: v.params.clone(),
             });
         }
     }
@@ -267,6 +269,7 @@ fn synthesize_llm_providers(
                 priority: 3,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
+                params: v.params.clone(),
             });
         }
     }
@@ -287,6 +290,7 @@ fn synthesize_llm_providers(
                 priority: 4,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
+                params: v.params.clone(),
             });
         }
     }
@@ -307,6 +311,7 @@ fn synthesize_llm_providers(
                 priority: 5,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
+                params: v.params.clone(),
             });
         }
     }
@@ -327,6 +332,7 @@ fn synthesize_llm_providers(
                 priority: 6,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
+                params: v.params.clone(),
             });
         }
     }
@@ -348,6 +354,7 @@ fn synthesize_llm_providers(
                 priority: 7,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
+                params: v.params.clone(),
             });
         }
     }
@@ -368,6 +375,7 @@ fn synthesize_llm_providers(
                 priority: 8,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
+                params: v.params.clone(),
             });
         }
     }

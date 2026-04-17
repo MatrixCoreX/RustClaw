@@ -6965,6 +6965,7 @@ fn build_llm_test_runtime(
         priority: 1,
         timeout_seconds: 20,
         max_concurrency: 1,
+        params: claw_core::config::LlmProviderParams::default(),
     };
     let client = crate::providers::build_llm_http_client(config.timeout_seconds)
         .map_err(|err| format!("build llm test client failed: {err}"))?;

@@ -33,19 +33,31 @@ pub(super) async fn call_openai_compat(
         provider.config.base_url.trim_end_matches('/')
     );
 
+    // Phase 2.5: hints 优先 → 没传时回退到 provider.config.params 里的 default_*。
+    // 都没设则不写字段，保留 vendor 自己的默认行为（与 Phase 2.5 之前完全一致）。
+    let params = &provider.config.params;
+    let effective_temperature = hints.temperature.or(params.default_temperature);
+    let effective_max_tokens = hints.max_tokens.or(params.default_max_tokens);
+    let effective_top_p = params.top_p;
+    // stream 默认 false（clawd 当前不消费流式响应），允许 toml 显式覆盖。
+    let effective_stream = params.stream.unwrap_or(false);
+
     let mut req_body = json!({
         "model": provider.config.model,
         "messages": [
             { "role": "user", "content": prompt }
         ],
-        "stream": false
+        "stream": effective_stream
     });
     if let Some(map) = req_body.as_object_mut() {
-        if let Some(t) = hints.temperature {
+        if let Some(t) = effective_temperature {
             map.insert("temperature".to_string(), json!(t));
         }
-        if let Some(mt) = hints.max_tokens {
+        if let Some(mt) = effective_max_tokens {
             map.insert("max_tokens".to_string(), json!(mt));
+        }
+        if let Some(tp) = effective_top_p {
+            map.insert("top_p".to_string(), json!(tp));
         }
     }
 
