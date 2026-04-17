@@ -59,7 +59,7 @@ pub(crate) fn append_act_plan_log(
     tool_calls: usize,
     detail: &str,
 ) {
-    let logs_dir = state.workspace_root.join("logs");
+    let logs_dir = state.skill_rt.workspace_root.join("logs");
     if let Err(err) = create_dir_all(&logs_dir) {
         warn!("create act plan logs dir failed: {err}");
         return;

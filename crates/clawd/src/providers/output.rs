@@ -81,8 +81,8 @@ pub(crate) fn append_model_io_log(
     //   * `debug_log_prompt=true`  → "verbose" 行，包含 prompt / response / payload
     //   * `debug_log_prompt=false` → "slim" 行，只有 metadata + 字符数 + usage
     // 这样即使生产关闭 prompt 调试，也保留事件链路，方便事后追溯。
-    let verbose = state.routing.debug_log_prompt;
-    let logs_dir = state.workspace_root.join("logs");
+    let verbose = state.policy.routing.debug_log_prompt;
+    let logs_dir = state.skill_rt.workspace_root.join("logs");
     if let Err(err) = create_dir_all(&logs_dir) {
         warn!("create model io logs dir failed: {err}");
         return;

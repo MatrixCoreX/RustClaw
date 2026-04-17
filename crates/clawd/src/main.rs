@@ -125,10 +125,11 @@ use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bind
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, reload_skill_views, AgentAction,
     AgentRuntimeConfig, AppState, AskReply, ChannelConfig, ClaimedTask, CommandIntentRules,
-    CommandIntentRuntime, LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext,
-    MemoryConfigFileWrapper, RateLimiter, ReloadContext, RoutedMode, RuntimeChannel,
-    ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue, SkillViewsSnapshot, ToolsPolicy,
-    WhatsappDeliveryRoute,
+    CommandIntentRuntime, CoreServices, LlmPromptBucket, LlmProviderRuntime,
+    LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
+    RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
+    SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy, WhatsappDeliveryRoute,
+    WorkerConfig,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
@@ -471,54 +472,63 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let state = AppState {
-        started_at: Instant::now(),
-        queue_limit: config.worker.queue_limit,
-        db: db_pool,
-        audit_db: audit_db_pool,
-        llm_providers,
-        agents_by_id: Arc::new(agents_by_id),
-        skill_timeout_seconds: config.skills.skill_timeout_seconds,
-        skill_runner_path: effective_skill_runner_path,
-        skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-            registry: views.registry,
-            skills_list: Arc::new(views.execution_skills),
-        }))),
-        skill_semaphore: Arc::new(Semaphore::new(config.skills.skill_max_concurrency.max(1))),
-        rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
-            config.limits.global_rpm,
-            config.limits.user_rpm,
-        ))),
-        llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
-        llm_elapsed_per_task: Arc::new(Mutex::new(HashMap::new())),
-        llm_by_prompt_per_task: Arc::new(Mutex::new(HashMap::new())),
-        task_schedule_intent_cache: Arc::new(Mutex::new(HashMap::new())),
-        maintenance: config.maintenance.clone(),
-        memory: memory_runtime,
-        workspace_root,
-        default_locator_search_dir,
-        locator_scan_max_depth,
-        locator_scan_max_files,
-        tools_policy: Arc::new(tools_policy),
-        active_provider_type,
-        cmd_timeout_seconds: config.tools.cmd_timeout_seconds.max(1),
-        max_cmd_length: config.tools.max_cmd_length.max(16),
-        allow_path_outside_workspace: config.tools.allow_path_outside_workspace,
-        allow_sudo: config.tools.allow_sudo,
-        worker_task_timeout_seconds: config.worker.task_timeout_seconds.max(1),
-        worker_task_heartbeat_seconds: config.worker.task_heartbeat_seconds.max(5),
-        worker_running_no_progress_timeout_seconds: config
-            .worker
-            .running_no_progress_timeout_seconds
-            .max(60),
-        worker_running_recovery_check_interval_seconds: config
-            .worker
-            .running_recovery_check_interval_seconds
-            .max(10),
-        last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
-        routing,
-        persona_prompt,
-        command_intent,
-        schedule,
+        core: crate::CoreServices {
+            db: db_pool,
+            audit_db: audit_db_pool,
+            llm_providers,
+            agents_by_id: Arc::new(agents_by_id),
+            http_client: Client::new(),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                registry: views.registry,
+                skills_list: Arc::new(views.execution_skills),
+            }))),
+            active_provider_type,
+        },
+        skill_rt: crate::SkillRuntime {
+            skill_timeout_seconds: config.skills.skill_timeout_seconds,
+            skill_runner_path: effective_skill_runner_path,
+            skill_semaphore: Arc::new(Semaphore::new(config.skills.skill_max_concurrency.max(1))),
+            tools_policy: Arc::new(tools_policy),
+            cmd_timeout_seconds: config.tools.cmd_timeout_seconds.max(1),
+            max_cmd_length: config.tools.max_cmd_length.max(16),
+            workspace_root,
+            default_locator_search_dir,
+            locator_scan_max_depth,
+            locator_scan_max_files,
+        },
+        policy: crate::PolicyConfig {
+            maintenance: config.maintenance.clone(),
+            memory: memory_runtime,
+            routing,
+            self_extension: config.self_extension.clone(),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
+                config.limits.global_rpm,
+                config.limits.user_rpm,
+            ))),
+            allow_path_outside_workspace: config.tools.allow_path_outside_workspace,
+            allow_sudo: config.tools.allow_sudo,
+            persona_prompt,
+            command_intent,
+            schedule,
+        },
+        worker: crate::WorkerConfig {
+            started_at: Instant::now(),
+            queue_limit: config.worker.queue_limit,
+            worker_task_timeout_seconds: config.worker.task_timeout_seconds.max(1),
+            worker_task_heartbeat_seconds: config.worker.task_heartbeat_seconds.max(5),
+            worker_running_no_progress_timeout_seconds: config
+                .worker
+                .running_no_progress_timeout_seconds
+                .max(60),
+            worker_running_recovery_check_interval_seconds: config
+                .worker
+                .running_recovery_check_interval_seconds
+                .max(10),
+            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            database_busy_timeout_ms: config.database.busy_timeout_ms,
+            database_sqlite_path,
+        },
+        metrics: crate::TaskMetricsRegistry::default(),
         channels: ChannelConfig {
             telegram_bot_token,
             telegram_configured_bot_names,
@@ -539,10 +549,6 @@ async fn main() -> anyhow::Result<()> {
             feishu_send_config,
             lark_send_config,
         },
-        http_client: Client::new(),
-        database_sqlite_path,
-        database_busy_timeout_ms: config.database.busy_timeout_ms,
-        self_extension: config.self_extension.clone(),
         reload_ctx: ReloadContext {
             config_path_for_reload: "configs/config.toml".to_string(),
             registry_path_for_reload: config.skills.registry_path.clone(),

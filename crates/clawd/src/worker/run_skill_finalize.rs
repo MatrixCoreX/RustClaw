@@ -90,7 +90,7 @@ async fn finalize_run_skill_success(
         task.external_chat_id.as_deref(),
         crate::memory::MEMORY_ROLE_ASSISTANT,
         &clean_text,
-        state.memory.item_max_chars.max(256),
+        state.policy.memory.item_max_chars.max(256),
         crate::memory::MemoryWriteKind::AssistantOutcome,
     );
     let _ = repo::insert_audit_log(

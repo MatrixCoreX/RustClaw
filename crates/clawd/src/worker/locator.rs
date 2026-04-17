@@ -34,8 +34,8 @@ pub(crate) fn try_resolve_implicit_locator_path(
 ) -> Option<LocatorAutoResolution> {
     let query_text = format!("{raw_text}\n{resolved_text}");
     if let Some(explicit_path) = resolve_explicit_locator_path_from_text(
-        &state.workspace_root,
-        &state.default_locator_search_dir,
+        &state.skill_rt.workspace_root,
+        &state.skill_rt.default_locator_search_dir,
         &query_text,
     ) {
         return Some(LocatorAutoResolution::Direct(explicit_path));
@@ -44,37 +44,37 @@ pub(crate) fn try_resolve_implicit_locator_path(
     let filename_tokens = extract_filename_like_tokens(&query_text);
     if matches!(locator_kind, crate::OutputLocatorKind::CurrentWorkspace) {
         if let Some(resolved) = resolve_current_workspace_target(
-            &state.workspace_root,
+            &state.skill_rt.workspace_root,
             &keywords,
             &filename_tokens,
-            state.locator_scan_max_depth,
-            state.locator_scan_max_files,
+            state.skill_rt.locator_scan_max_depth,
+            state.skill_rt.locator_scan_max_files,
         ) {
             return Some(resolved);
         }
         return Some(LocatorAutoResolution::Direct(resolve_workspace_root_path(
-            &state.workspace_root,
+            &state.skill_rt.workspace_root,
         )));
     }
     if let Some(resolved) = resolve_explicit_workspace_child_target(
-        &state.workspace_root,
-        &state.default_locator_search_dir,
+        &state.skill_rt.workspace_root,
+        &state.skill_rt.default_locator_search_dir,
         &keywords,
         &filename_tokens,
     ) {
         return Some(resolved);
     }
     let roots = implicit_locator_search_roots(
-        &state.workspace_root,
-        &state.default_locator_search_dir,
+        &state.skill_rt.workspace_root,
+        &state.skill_rt.default_locator_search_dir,
         context_hint,
     );
     try_resolve_implicit_locator_path_in_roots(
         &roots,
         &keywords,
         &filename_tokens,
-        state.locator_scan_max_depth,
-        state.locator_scan_max_files,
+        state.skill_rt.locator_scan_max_depth,
+        state.skill_rt.locator_scan_max_files,
     )
 }
 

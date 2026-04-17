@@ -238,36 +238,36 @@ pub(crate) fn insert_memory(
         }
     }
     let trimmed = utf8_safe_prefix(&normalized, keep).to_string();
-    let extracted_prefs = if role == MEMORY_ROLE_USER && state.memory.enable_preference_extraction {
-        extract_user_preferences(content, &state.memory)
+    let extracted_prefs = if role == MEMORY_ROLE_USER && state.policy.memory.enable_preference_extraction {
+        extract_user_preferences(content, &state.policy.memory)
     } else {
         Vec::new()
     };
-    let should_skip = state.memory.write_filter_enabled
+    let should_skip = state.policy.memory.write_filter_enabled
         && should_skip_memory_write(
             &trimmed,
             role,
-            state.memory.write_min_chars.max(1),
-            &state.memory,
+            state.policy.memory.write_min_chars.max(1),
+            &state.policy.memory,
         );
     if should_skip && extracted_prefs.is_empty() {
         return Ok(());
     }
 
-    let safety_flag = classify_memory_safety_flag(&trimmed, &state.memory);
-    let is_instructional = detect_instructional_text(&trimmed, &state.memory);
+    let safety_flag = classify_memory_safety_flag(&trimmed, &state.policy.memory);
+    let is_instructional = detect_instructional_text(&trimmed, &state.policy.memory);
     let memory_type = infer_memory_type(role, is_instructional, &safety_flag, write_kind);
     let salience = estimate_memory_salience(
         &trimmed,
         is_instructional,
         &safety_flag,
-        &state.memory,
+        &state.policy.memory,
         write_kind,
     );
 
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     upsert_user_preferences(
         state,
         &db,
@@ -304,7 +304,7 @@ pub(crate) fn insert_memory(
             safety_flag
         ],
     )?;
-    if state.memory.hybrid_recall_enabled {
+    if state.policy.memory.hybrid_recall_enabled {
         let memory_id = db.last_insert_rowid();
         let _ = indexing::index_memory_row(
             &db,
@@ -330,7 +330,7 @@ pub(crate) fn count_chat_memory_rounds(
     chat_id: i64,
 ) -> anyhow::Result<usize> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let current_cnt: i64 = db.query_row(
         "SELECT COUNT(*) FROM memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3 AND role = 'user'",
         params![user_id, chat_id, user_key],
@@ -358,11 +358,11 @@ pub(crate) fn recall_recent_memories(
     limit: usize,
 ) -> anyhow::Result<Vec<(String, String)>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let rows = query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, limit)?;
     let mut out = Vec::new();
     for (role, content, safety_flag) in rows {
-        if state.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        if state.policy.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
             out.push((role, "[safety_signal content omitted]".to_string()));
             continue;
         }
@@ -373,7 +373,7 @@ pub(crate) fn recall_recent_memories(
             let rows =
                 query_recent_memories_for_chat(&db, user_id, legacy_chat_id, &user_key, limit)?;
             for (role, content, safety_flag) in rows {
-                if state.memory.safety_filter_enabled
+                if state.policy.memory.safety_filter_enabled
                     && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE
                 {
                     out.push((role, "[safety_signal content omitted]".to_string()));
@@ -448,7 +448,7 @@ pub(crate) fn recall_user_preferences(
     limit: usize,
 ) -> anyhow::Result<Vec<(String, String)>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let rows = query_preferences_for_chat(&db, user_id, chat_id, &user_key, limit)?;
     let mut seen = HashSet::new();
     let mut out = Vec::new();
@@ -478,7 +478,7 @@ pub(crate) fn recall_long_term_summary(
     chat_id: i64,
 ) -> anyhow::Result<Option<String>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let summary = db
         .query_row(
             "SELECT summary FROM long_term_memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3",
@@ -511,7 +511,7 @@ pub(crate) fn recall_memories_since_id(
     limit: usize,
 ) -> anyhow::Result<Vec<(i64, String, String, String)>> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let mut out = query_memories_since_id_for_chat(
         &db,
         user_id,
@@ -1114,15 +1114,15 @@ fn format_last_turn_full_context(
     max_segment_chars: usize,
     max_total_chars: usize,
 ) -> String {
-    let user_safety = classify_memory_safety_flag(user_content, &state.memory);
-    let assistant_safety = classify_memory_safety_flag(assistant_content, &state.memory);
+    let user_safety = classify_memory_safety_flag(user_content, &state.policy.memory);
+    let assistant_safety = classify_memory_safety_flag(assistant_content, &state.policy.memory);
     let user_text =
-        if state.memory.safety_filter_enabled && user_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        if state.policy.memory.safety_filter_enabled && user_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
             "[safety_signal content omitted]".to_string()
         } else {
             utf8_safe_prefix(user_content.trim(), max_segment_chars).to_string()
         };
-    let assistant_text = if state.memory.safety_filter_enabled
+    let assistant_text = if state.policy.memory.safety_filter_enabled
         && assistant_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
     {
         "[safety_signal content omitted]".to_string()
@@ -1159,7 +1159,7 @@ pub(crate) fn build_recent_turns_full_context(
     max_total_chars: usize,
 ) -> String {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = match state.db.get() {
+    let db = match state.core.db.get() {
         Ok(db) => db,
         Err(_) => return "<none>".to_string(),
     };
@@ -1176,16 +1176,16 @@ pub(crate) fn build_recent_turns_full_context(
     let mut out = String::from("### RECENT_TURNS_FULL\n");
     for (idx, (user_text, assistant_text)) in turns.iter().enumerate() {
         let relative = -((idx as i64) + 1);
-        let user_safety = classify_memory_safety_flag(user_text, &state.memory);
-        let assistant_safety = classify_memory_safety_flag(assistant_text, &state.memory);
-        let user_view = if state.memory.safety_filter_enabled
+        let user_safety = classify_memory_safety_flag(user_text, &state.policy.memory);
+        let assistant_safety = classify_memory_safety_flag(assistant_text, &state.policy.memory);
+        let user_view = if state.policy.memory.safety_filter_enabled
             && user_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
         {
             "[safety_signal content omitted]".to_string()
         } else {
             utf8_safe_prefix(user_text.trim(), max_segment_chars).to_string()
         };
-        let assistant_view = if state.memory.safety_filter_enabled
+        let assistant_view = if state.policy.memory.safety_filter_enabled
             && assistant_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
         {
             "[safety_signal content omitted]".to_string()
@@ -1220,7 +1220,7 @@ pub(crate) fn build_last_turn_full_context(
     max_total_chars: usize,
 ) -> String {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = match state.db.get() {
+    let db = match state.core.db.get() {
         Ok(db) => db,
         Err(_) => return "<none>".to_string(),
     };
@@ -1289,7 +1289,7 @@ pub(crate) fn build_recent_assistant_replies_context(
     let max_replies = max_replies.max(1);
     let preview_chars = preview_chars.max(48);
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = match state.db.get() {
+    let db = match state.core.db.get() {
         Ok(db) => db,
         Err(_) => return "<none>".to_string(),
     };
@@ -1306,7 +1306,7 @@ pub(crate) fn build_recent_assistant_replies_context(
         if role != MEMORY_ROLE_ASSISTANT {
             continue;
         }
-        if state.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        if state.policy.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
             continue;
         }
         let trimmed_content = content.trim();
@@ -1361,7 +1361,7 @@ pub(crate) fn read_recent_assistant_reply_texts(
 ) -> Vec<String> {
     let max_replies = max_replies.max(1);
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = match state.db.get() {
+    let db = match state.core.db.get() {
         Ok(db) => db,
         Err(_) => return Vec::new(),
     };
@@ -1377,7 +1377,7 @@ pub(crate) fn read_recent_assistant_reply_texts(
         if role != MEMORY_ROLE_ASSISTANT {
             continue;
         }
-        if state.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        if state.policy.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
             continue;
         }
         let trimmed = content.trim();
@@ -1402,7 +1402,7 @@ pub(crate) fn read_long_term_source_memory_id(
     chat_id: i64,
 ) -> anyhow::Result<i64> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let source = db
         .query_row(
             "SELECT source_memory_id FROM long_term_memories WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3",
@@ -1435,7 +1435,7 @@ pub(crate) fn upsert_long_term_summary(
     source_memory_id: i64,
 ) -> anyhow::Result<()> {
     let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     let now = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
     db.execute(
@@ -1730,7 +1730,7 @@ fn upsert_user_preferences(
             ],
         )?;
     }
-    if state.memory.hybrid_recall_enabled && !extracted_prefs.is_empty() {
+    if state.policy.memory.hybrid_recall_enabled && !extracted_prefs.is_empty() {
         let _ = indexing::index_preference_entries(
             db,
             user_id,
@@ -1757,7 +1757,7 @@ pub(crate) fn upsert_user_preferences_from_route_hint(
     let user_key = effective_user_key(user_key, user_id, chat_id);
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
-    let db = state.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
     upsert_user_preferences(
         state,
         &db,
@@ -1812,19 +1812,19 @@ fn score_memory_relevance(role: &str, content: &str, keywords: &[String]) -> f32
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use std::sync::{Arc, Mutex, RwLock};
-    use std::time::Instant;
+    use std::sync::{Arc, RwLock};
+    
 
     use claw_core::config::{
-        AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
+        AgentConfig, ToolsConfig,
     };
-    use reqwest::Client;
+    
     use rusqlite::{params, Connection};
-    use tokio::sync::Semaphore;
+    
 
-    use crate::runtime::policy::{RateLimiter, ToolsPolicy};
+    use crate::runtime::policy::ToolsPolicy;
     use crate::runtime::state::SkillViewsSnapshot;
-    use crate::runtime::types::{CommandIntentRuntime, ScheduleRuntime};
+    
     use crate::{AgentRuntimeConfig, AppState};
 
     use super::{
@@ -1846,63 +1846,26 @@ mod tests {
             AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
         )]);
         AppState {
-            started_at: Instant::now(),
-            queue_limit: 1,
-            db: crate::db_init::test_pool(),
-            audit_db: crate::db_init::test_audit_pool(),
-            llm_providers: Vec::new(),
-            agents_by_id: Arc::new(agents_by_id),
-            skill_timeout_seconds: 30,
-            skill_runner_path: std::path::PathBuf::new(),
-            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                registry: None,
-                skills_list: Arc::new(HashSet::new()),
-            }))),
-            skill_semaphore: Arc::new(Semaphore::new(1)),
-            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
-            llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_elapsed_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_by_prompt_per_task: Arc::new(Mutex::new(HashMap::new())),
-            task_schedule_intent_cache: Arc::new(Mutex::new(HashMap::new())),
-            maintenance: MaintenanceConfig::default(),
-            memory: MemoryConfig::default(),
-            workspace_root: std::env::temp_dir(),
-            default_locator_search_dir: std::env::temp_dir(),
-            locator_scan_max_depth: 3,
-            locator_scan_max_files: 200,
-            tools_policy: Arc::new(
-                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-            ),
-            active_provider_type: None,
-            cmd_timeout_seconds: 30,
-            max_cmd_length: 4096,
-            allow_path_outside_workspace: false,
-            allow_sudo: false,
-            worker_task_timeout_seconds: 300,
-            worker_task_heartbeat_seconds: 10,
-            worker_running_no_progress_timeout_seconds: 300,
-            worker_running_recovery_check_interval_seconds: 30,
-            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
-            routing: RoutingConfig::default(),
-            persona_prompt: String::new(),
-            command_intent: CommandIntentRuntime {
-                all_result_suffixes: Vec::new(),
-                default_locale: "zh-CN".to_string(),
-                verify_enforce_enabled: false,
+            core: crate::CoreServices {
+                agents_by_id: Arc::new(agents_by_id),
+                skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                                registry: None,
+                                skills_list: Arc::new(HashSet::new()),
+                            }))),
+                ..crate::CoreServices::test_default()
             },
-            schedule: ScheduleRuntime {
-                timezone: "Asia/Shanghai".to_string(),
-                intent_prompt_template: String::new(),
-                intent_prompt_source: String::new(),
-                intent_rules_template: String::new(),
-                locale: "zh-CN".to_string(),
-                i18n_dict: HashMap::new(),
+            skill_rt: crate::SkillRuntime {
+                locator_scan_max_depth: 3,
+                locator_scan_max_files: 200,
+                tools_policy: Arc::new(
+                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                            ),
+                ..crate::SkillRuntime::test_default()
             },
+            policy: crate::PolicyConfig::test_default(),
+            worker: crate::WorkerConfig::test_default(),
+            metrics: crate::TaskMetricsRegistry::default(),
             channels: crate::ChannelConfig::default(),
-            http_client: Client::new(),
-            database_sqlite_path: std::path::PathBuf::new(),
-            database_busy_timeout_ms: 5_000,
-            self_extension: claw_core::config::SelfExtensionConfig::default(),
             reload_ctx: crate::ReloadContext::default(),
         }
     }
@@ -2028,7 +1991,7 @@ mod tests {
     #[test]
     fn provider_unavailable_task_is_skipped_for_last_turn_context() {
         let state = test_state();
-        let db = state.db.get().expect("db");
+        let db = state.core.db.get().expect("db");
         create_tasks_table(&db);
         let provider_unavailable = crate::i18n_t_with_default(
             &state,
@@ -2071,7 +2034,7 @@ mod tests {
     #[test]
     fn last_turn_full_context_does_not_fallback_to_legacy_chat() {
         let state = test_state();
-        let db = state.db.get().expect("db");
+        let db = state.core.db.get().expect("db");
         create_tasks_table(&db);
         let legacy_chat_id = legacy_principal_chat_id("test-user", 2).expect("legacy chat id");
         db.execute(
@@ -2096,7 +2059,7 @@ mod tests {
     fn recent_assistant_replies_context_does_not_fallback_to_legacy_chat() {
         let state = test_state();
         {
-            let db = state.db.get().expect("db");
+            let db = state.core.db.get().expect("db");
             create_memories_table(&db);
         }
         insert_memory(
@@ -2135,7 +2098,7 @@ mod tests {
     fn recent_assistant_replies_context_includes_ordered_entries_for_candidate_list() {
         let state = test_state();
         {
-            let db = state.db.get().expect("db");
+            let db = state.core.db.get().expect("db");
             create_memories_table(&db);
         }
         insert_memory(
@@ -2265,7 +2228,7 @@ mod tests {
     fn route_hint_upserts_agent_display_name_preference() {
         let state = test_state();
         {
-            let db = state.db.get().expect("db");
+            let db = state.core.db.get().expect("db");
             create_user_preferences_table(&db);
         }
 
@@ -2283,7 +2246,7 @@ mod tests {
     fn route_hint_rejects_invalid_agent_display_name() {
         let state = test_state();
         {
-            let db = state.db.get().expect("db");
+            let db = state.core.db.get().expect("db");
             create_user_preferences_table(&db);
         }
 

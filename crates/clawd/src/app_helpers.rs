@@ -58,7 +58,7 @@ pub(crate) fn parse_resume_context_error(error_text: &str) -> Option<(String, Va
 
 pub(crate) fn i18n_t_with_default(state: &AppState, key: &str, default_text: &str) -> String {
     state
-        .schedule
+        .policy.schedule
         .i18n_dict
         .get(key)
         .cloned()
@@ -88,7 +88,7 @@ pub(crate) fn bilingual_t_with_default(
     default_en: &str,
     prefer_english: bool,
 ) -> String {
-    let configured_locale = state.schedule.locale.trim().to_ascii_lowercase();
+    let configured_locale = state.policy.schedule.locale.trim().to_ascii_lowercase();
     let configured_matches_requested = if prefer_english {
         configured_locale.starts_with("en")
     } else {
@@ -154,7 +154,7 @@ pub(crate) fn main_flow_rules(state: &AppState) -> &'static MainFlowRules {
     static RULES: OnceLock<MainFlowRules> = OnceLock::new();
     RULES.get_or_init(|| {
         let path = state
-            .workspace_root
+            .skill_rt.workspace_root
             .join("configs/hard_rules/main_flow.toml");
         let path_str = path.to_string_lossy().to_string();
         load_main_flow_rules(&path_str)

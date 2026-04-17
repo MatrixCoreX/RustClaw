@@ -125,7 +125,7 @@ fn load_recent_execution_rows(
     let legacy_chat_id = user_key
         .map(crate::stable_i64_from_key)
         .filter(|legacy| *legacy != task.chat_id);
-    let db = match state.db.get() {
+    let db = match state.core.db.get() {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };

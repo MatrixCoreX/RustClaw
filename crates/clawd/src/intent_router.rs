@@ -355,12 +355,12 @@ fn parse_execution_recipe_hint(
 
 fn render_self_extension_runtime(state: &AppState) -> String {
     serde_json::to_string_pretty(&json!({
-        "enabled": state.self_extension.enabled,
-        "auto_on_capability_gap": state.self_extension.auto_on_capability_gap,
-        "allow_execute": state.self_extension.allow_execute,
-        "allow_package_install": state.self_extension.allow_package_install,
-        "allow_permanent_extension": state.self_extension.allow_permanent_extension,
-        "allow_runtime_enable": state.self_extension.allow_runtime_enable,
+        "enabled": state.policy.self_extension.enabled,
+        "auto_on_capability_gap": state.policy.self_extension.auto_on_capability_gap,
+        "allow_execute": state.policy.self_extension.allow_execute,
+        "allow_package_install": state.policy.self_extension.allow_package_install,
+        "allow_permanent_extension": state.policy.self_extension.allow_permanent_extension,
+        "allow_runtime_enable": state.policy.self_extension.allow_runtime_enable,
         "supported_modes": ["temporary_fix", "permanent_extension"],
     }))
     .unwrap_or_else(|_| "{}".to_string())
@@ -956,7 +956,7 @@ pub(crate) async fn generate_clarify_question(
             ("__RESOLVER_REASON__", resolver_reason.trim()),
             (
                 "__CONFIG_RESPONSE_LANGUAGE__",
-                &state.command_intent.default_locale,
+                &state.policy.command_intent.default_locale,
             ),
             (
                 "__CANDIDATE_CONTEXT__",

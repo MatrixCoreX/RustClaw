@@ -161,7 +161,7 @@ fn load_skill_contract_hint(
     let registry_prompt_rel_path = registry.prompt_file(canonical_name)?;
     let vendor = crate::bootstrap::prompts::active_prompt_vendor_name(state);
     let (markdown, _) = crate::bootstrap::prompts::load_prompt_template_for_vendor(
-        &state.workspace_root,
+        &state.skill_rt.workspace_root,
         Some(&vendor),
         registry_prompt_rel_path,
         "",
@@ -246,7 +246,7 @@ pub(crate) async fn parse_schedule_intent(
     task: &ClaimedTask,
     request: &str,
 ) -> Option<ScheduleIntentOutput> {
-    let tz = parse_timezone(&state.schedule.timezone);
+    let tz = parse_timezone(&state.policy.schedule.timezone);
     let now_local = Utc::now().with_timezone(&tz);
     let structured = memory::service::recall_structured_memory_context(
         state,
@@ -254,31 +254,31 @@ pub(crate) async fn parse_schedule_intent(
         task.user_id,
         task.chat_id,
         request,
-        state.memory.recall_limit.max(1),
-        state.memory.schedule_memory_include_long_term,
-        state.memory.schedule_memory_include_preferences,
+        state.policy.memory.recall_limit.max(1),
+        state.policy.memory.schedule_memory_include_long_term,
+        state.policy.memory.schedule_memory_include_preferences,
     );
     let memory_context = memory::service::structured_memory_context_block(
         &structured,
         memory::retrieval::MemoryContextMode::Schedule,
-        state.memory.schedule_memory_max_chars.max(384),
+        state.policy.memory.schedule_memory_max_chars.max(384),
     );
     let skill_catalog = render_schedule_skill_catalog(state);
     let skill_contracts = render_schedule_skill_contracts(state);
     let prompt = crate::render_prompt_template(
-        &state.schedule.intent_prompt_template,
+        &state.policy.schedule.intent_prompt_template,
         &[
             (
                 "__NOW__",
                 &now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string(),
             ),
-            ("__TIMEZONE__", &state.schedule.timezone),
-            ("__RULES__", &state.schedule.intent_rules_template),
+            ("__TIMEZONE__", &state.policy.schedule.timezone),
+            ("__RULES__", &state.policy.schedule.intent_rules_template),
             ("__SKILL_CATALOG__", &skill_catalog),
             ("__SKILLS_CATALOG__", &skill_catalog),
             ("__SKILL_CONTRACTS__", &skill_contracts),
             ("__MEMORY_CONTEXT__", &memory_context),
-            ("__CONFIG_RESPONSE_LANGUAGE__", &state.schedule.locale),
+            ("__CONFIG_RESPONSE_LANGUAGE__", &state.policy.schedule.locale),
             ("__REQUEST__", request),
         ],
     );
@@ -286,7 +286,7 @@ pub(crate) async fn parse_schedule_intent(
         state,
         &task.task_id,
         "schedule_intent_prompt",
-        &state.schedule.intent_prompt_source,
+        &state.policy.schedule.intent_prompt_source,
         None,
     );
 
@@ -294,7 +294,7 @@ pub(crate) async fn parse_schedule_intent(
         state,
         task,
         &prompt,
-        &state.schedule.intent_prompt_source,
+        &state.policy.schedule.intent_prompt_source,
     )
     .await
     {
@@ -418,30 +418,30 @@ pub(crate) fn clean_schedule_kind(raw: &str) -> String {
 
 /// Returns (now_iso, timezone, schedule_rules) for intent normalizer prompt.
 pub(crate) fn schedule_context_for_normalizer(state: &AppState) -> (String, String, String) {
-    let tz = parse_timezone(&state.schedule.timezone);
+    let tz = parse_timezone(&state.policy.schedule.timezone);
     let now_local = Utc::now().with_timezone(&tz);
     let now_iso = now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string();
-    let timezone = state.schedule.timezone.clone();
-    let rules = state.schedule.intent_rules_template.clone();
+    let timezone = state.policy.schedule.timezone.clone();
+    let rules = state.policy.schedule.intent_rules_template.clone();
     (now_iso, timezone, rules)
 }
 
 pub(crate) fn schedule_timezone_from_intent(state: &AppState, intent_tz: &str) -> String {
     let chosen = if intent_tz.trim().is_empty() {
-        state.schedule.timezone.clone()
+        state.policy.schedule.timezone.clone()
     } else {
         intent_tz.trim().to_string()
     };
     if chosen.parse::<Tz>().is_ok() {
         chosen
     } else {
-        state.schedule.timezone.clone()
+        state.policy.schedule.timezone.clone()
     }
 }
 
 fn schedule_t(state: &AppState, key: &str) -> String {
     state
-        .schedule
+        .policy.schedule
         .i18n_dict
         .get(key)
         .cloned()
@@ -644,7 +644,7 @@ pub(crate) async fn try_handle_schedule_request(
     match kind.as_str() {
         "list" => {
             let db = state
-                .db
+                .core.db
                 .get()
                 .map_err(|e| format!("db pool: {e}"))?;
             let mut stmt = db
@@ -717,7 +717,7 @@ pub(crate) async fn try_handle_schedule_request(
         }
         "delete" => {
             let db = state
-                .db
+                .core.db
                 .get()
                 .map_err(|e| format!("db pool: {e}"))?;
             let target = intent.target_job_id.trim();
@@ -767,7 +767,7 @@ pub(crate) async fn try_handle_schedule_request(
         "pause" | "resume" => {
             let enabled = if kind == "resume" { 1 } else { 0 };
             let db = state
-                .db
+                .core.db
                 .get()
                 .map_err(|e| format!("db pool: {e}"))?;
             let target = intent.target_job_id.trim();
@@ -957,7 +957,7 @@ pub(crate) async fn try_handle_schedule_request(
             let job_id = format!("job_{}", &Uuid::new_v4().simple().to_string()[..10]);
             let created_at = crate::now_ts();
             let db = state
-                .db
+                .core.db
                 .get()
                 .map_err(|e| format!("db pool: {e}"))?;
             db.execute(

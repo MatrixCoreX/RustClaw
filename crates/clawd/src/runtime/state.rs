@@ -49,10 +49,6 @@ pub(crate) struct SkillViewsSnapshot {
 ///   `channel_send.rs` / `worker/channels.rs` / `http/ui_routes.rs` 三个文件被读。
 /// - 把它们隔离掉之后，AppState 主体从 55 字段降到 ~41，未来加新通道（Discord /
 ///   Slack / 企微）只动这一个子 struct，不再"加一个字段动 13 个 test fixture"。
-/// - 完整 7 簇方案（CoreServices / SkillRuntime / PolicyConfig / WorkerConfig /
-///   TaskMetricsRegistry / ReloadContext / ChannelConfig）见
-///   `docs/p21_p22_appstate_db_split_proposal.md`，本次只先落实 ChannelConfig +
-///   ReloadContext 这两个低频低耦合簇。
 #[derive(Clone, Default)]
 pub(crate) struct ChannelConfig {
     pub(crate) telegram_bot_token: String,
@@ -73,7 +69,6 @@ pub(crate) struct ChannelConfig {
 ///
 /// 这一组字段除了 `config_path_for_reload` 在 `reload_skill_views` 用到，其他
 /// 三个目前实际只在 reload 时被读（`#[allow(dead_code)]` 在历史版本里就标着）。
-/// 隔离到子 struct 后，AppState 主体上不再需要 `#[allow(dead_code)]` 噪音。
 #[derive(Clone, Default)]
 pub(crate) struct ReloadContext {
     pub(crate) config_path_for_reload: String,
@@ -83,6 +78,206 @@ pub(crate) struct ReloadContext {
     pub(crate) skill_switches_for_reload: Arc<HashMap<String, bool>>,
     #[allow(dead_code)]
     pub(crate) initial_skills_list_for_reload: Vec<String>,
+}
+
+/// P2.1 Stage 2 — `CoreServices` 簇：所有模块都需要的核心运行时句柄
+/// （DB/audit DB pool、LLM provider 列表、agent 字典、HTTP client、技能视图快照）。
+///
+/// 拆分动机：这些字段是"加一个新 pool / 新 provider 类型 / 新 agent runtime
+/// 字段"时最容易动到的，把它们集中在一个子 struct 里之后：
+///   * 12 个 test fixture 只需要 `CoreServices::test_default()` 一行；
+///   * 未来 `LlmProvider trait` 抽象（P2.3）只动这个簇；
+///   * 未来 memory pool 拆分（P2.2 Stage 2 memory）也只动这个簇。
+#[derive(Clone)]
+pub(crate) struct CoreServices {
+    pub(crate) db: crate::db_init::DbPool,
+    /// Phase 2.2 Stage 2: 独立 audit pool（独立 SQLite 文件）。
+    /// audit_logs 走这个池，主 pool 只承载任务/调度/记忆等热路径。
+    pub(crate) audit_db: crate::db_init::DbPool,
+    pub(crate) llm_providers: Vec<Arc<LlmProviderRuntime>>,
+    pub(crate) agents_by_id: Arc<HashMap<String, AgentRuntimeConfig>>,
+    pub(crate) http_client: Client,
+    pub(crate) skill_views_snapshot: Arc<RwLock<Arc<SkillViewsSnapshot>>>,
+    pub(crate) active_provider_type: Option<String>,
+}
+
+impl CoreServices {
+    #[cfg(test)]
+    pub(crate) fn test_default() -> Self {
+        let agents_by_id = HashMap::from([(
+            crate::DEFAULT_AGENT_ID.to_string(),
+            AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
+        )]);
+        Self {
+            db: crate::db_init::test_pool(),
+            audit_db: crate::db_init::test_audit_pool(),
+            llm_providers: Vec::new(),
+            agents_by_id: Arc::new(agents_by_id),
+            http_client: Client::new(),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                registry: None,
+                skills_list: Arc::new(HashSet::new()),
+            }))),
+            active_provider_type: None,
+        }
+    }
+}
+
+/// P2.1 Stage 2 — `SkillRuntime` 簇：技能链路 / 命令执行 / locator 相关参数。
+///
+/// 拆分动机：原 AppState 上这一簇有 10 个字段，其中 `workspace_root` 单独
+/// 84 处引用，`default_locator_search_dir` / `locator_scan_*` 在 locator
+/// 路径强相关——把它们集中在一个子 struct 之后，未来 sandbox/cap-std 改造
+/// (Phase 5) 改的也是同一份。
+#[derive(Clone)]
+pub(crate) struct SkillRuntime {
+    pub(crate) skill_timeout_seconds: u64,
+    pub(crate) skill_runner_path: PathBuf,
+    pub(crate) skill_semaphore: Arc<Semaphore>,
+    pub(crate) tools_policy: Arc<ToolsPolicy>,
+    pub(crate) cmd_timeout_seconds: u64,
+    pub(crate) max_cmd_length: usize,
+    pub(crate) workspace_root: PathBuf,
+    pub(crate) default_locator_search_dir: PathBuf,
+    pub(crate) locator_scan_max_depth: usize,
+    pub(crate) locator_scan_max_files: usize,
+}
+
+impl SkillRuntime {
+    #[cfg(test)]
+    pub(crate) fn test_default() -> Self {
+        let tools_policy = ToolsPolicy::from_config(&claw_core::config::ToolsConfig::default())
+            .expect("tools policy");
+        Self {
+            skill_timeout_seconds: 30,
+            skill_runner_path: PathBuf::new(),
+            skill_semaphore: Arc::new(Semaphore::new(1)),
+            tools_policy: Arc::new(tools_policy),
+            cmd_timeout_seconds: 30,
+            max_cmd_length: 4096,
+            workspace_root: std::env::temp_dir(),
+            default_locator_search_dir: std::env::temp_dir(),
+            locator_scan_max_depth: 2,
+            locator_scan_max_files: 100,
+        }
+    }
+}
+
+/// P2.1 Stage 2 — `PolicyConfig` 簇：运维 / 安全 / 限速 / 路由 / persona /
+/// 命令意图 / 调度运行时配置。
+///
+/// 拆分动机：这一簇是"启动时从 config.toml 装配出来、运行期只读"的策略
+/// 集合，与 SkillRuntime 的"执行参数"区分开。`maintenance` / `memory` /
+/// `routing` 是高频读字段，集中放可避免各模块为了读策略来回 import。
+#[derive(Clone)]
+pub(crate) struct PolicyConfig {
+    pub(crate) maintenance: MaintenanceConfig,
+    pub(crate) memory: MemoryConfig,
+    pub(crate) routing: RoutingConfig,
+    pub(crate) self_extension: SelfExtensionConfig,
+    pub(crate) rate_limiter: Arc<Mutex<RateLimiter>>,
+    pub(crate) allow_path_outside_workspace: bool,
+    pub(crate) allow_sudo: bool,
+    pub(crate) persona_prompt: String,
+    pub(crate) command_intent: CommandIntentRuntime,
+    pub(crate) schedule: ScheduleRuntime,
+}
+
+impl PolicyConfig {
+    #[cfg(test)]
+    pub(crate) fn test_default() -> Self {
+        let locale = "zh-CN";
+        Self {
+            maintenance: MaintenanceConfig::default(),
+            memory: MemoryConfig::default(),
+            routing: RoutingConfig::default(),
+            self_extension: SelfExtensionConfig::default(),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
+            allow_path_outside_workspace: false,
+            allow_sudo: false,
+            persona_prompt: String::new(),
+            command_intent: CommandIntentRuntime {
+                all_result_suffixes: Vec::new(),
+                default_locale: locale.to_string(),
+                verify_enforce_enabled: false,
+            },
+            schedule: ScheduleRuntime {
+                timezone: "Asia/Shanghai".to_string(),
+                intent_prompt_template: String::new(),
+                intent_prompt_source: String::new(),
+                intent_rules_template: String::new(),
+                locale: locale.to_string(),
+                i18n_dict: HashMap::new(),
+            },
+        }
+    }
+}
+
+/// P2.1 Stage 2 — `WorkerConfig` 簇：worker / 调度 / DB busy_timeout 等
+/// "进程级别参数"。
+///
+/// 拆分动机：字段不多（10 个）、读频也低（10 处引用），但每次新增 worker
+/// 行为参数都要改 12 个 fixture。集中后 fixtures 只调一次 `test_default()`。
+#[derive(Clone)]
+pub(crate) struct WorkerConfig {
+    pub(crate) started_at: Instant,
+    pub(crate) queue_limit: usize,
+    pub(crate) worker_task_timeout_seconds: u64,
+    pub(crate) worker_task_heartbeat_seconds: u64,
+    pub(crate) worker_running_no_progress_timeout_seconds: u64,
+    pub(crate) worker_running_recovery_check_interval_seconds: u64,
+    pub(crate) last_running_recovery_check_ts: Arc<Mutex<u64>>,
+    pub(crate) database_busy_timeout_ms: u64,
+    pub(crate) database_sqlite_path: PathBuf,
+}
+
+impl WorkerConfig {
+    #[cfg(test)]
+    pub(crate) fn test_default() -> Self {
+        Self {
+            started_at: Instant::now(),
+            queue_limit: 1,
+            worker_task_timeout_seconds: 300,
+            worker_task_heartbeat_seconds: 10,
+            worker_running_no_progress_timeout_seconds: 300,
+            worker_running_recovery_check_interval_seconds: 30,
+            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            database_busy_timeout_ms: 5_000,
+            database_sqlite_path: PathBuf::new(),
+        }
+    }
+}
+
+/// P2.1 Stage 2 — `TaskMetricsRegistry` 簇：per-task LLM 计数 / 耗时 /
+/// by-prompt 分桶 / schedule_intent 复用缓存。
+///
+/// 拆分动机：Phase 1.5 加 `llm_by_prompt_per_task` 一个字段就要改 12
+/// 处 fixture——这正是 P2.1 想根治的痛点。集中后 `TaskMetricsRegistry`
+/// 全 4 字段都是 `Arc<Mutex<HashMap::default()>>` 形式，`#[derive(Default)]`
+/// 直接生效，fixture 写 `TaskMetricsRegistry::default()` 即可。
+#[derive(Clone, Default)]
+pub(crate) struct TaskMetricsRegistry {
+    pub(crate) llm_calls_per_task: Arc<Mutex<HashMap<String, u64>>>,
+    /// Phase 1.3: 单任务 LLM 累计耗时（ms），与 `llm_calls_per_task` 一起构成
+    /// "单任务 LLM 预算"。在 `llm_gateway::run_with_fallback_with_prompt_source`
+    /// 入口处做一次预算检查，超过 `MAX_LLM_CALLS_PER_TASK` 或
+    /// `MAX_LLM_TOTAL_MS_PER_TASK` 就直接短路返回错误，防止单个任务
+    /// 无限扩张 LLM 预算（例如 plan_repair 抖动、fallback 雪崩）。
+    pub(crate) llm_elapsed_per_task: Arc<Mutex<HashMap<String, u64>>>,
+    /// Phase 1.5: per-task 的 LLM 调用按 prompt label 分桶累计（次数 + 耗时）。
+    /// 与 `llm_calls_per_task` / `llm_elapsed_per_task` 是同一份数据的不同维度：
+    /// 总量用前两个表，而"哪个 prompt 把额度烧光了"用这个表。诊断用。
+    /// 外层 key = task_id；内层 key = label（如 `normalizer` / `plan` /
+    /// `plan_repair` / `chat` / `classifier_direct` / `observed` / `nl2cmd`...）。
+    /// 标签由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
+    pub(crate) llm_by_prompt_per_task:
+        Arc<Mutex<HashMap<String, HashMap<String, LlmPromptBucket>>>>,
+    /// Phase 0.4: 缓存 `run_intent_normalizer` 产出的 `schedule_intent`，
+    /// 让后续 `schedule.compile` 技能在 `text` 与归一化后的原始输入一致时
+    /// 直接复用，不再重跑一次 `schedule_intent_prompt` LLM 调用。
+    /// Key = task_id；Value = (归一化后的原始 user_request, 解析结果)。
+    pub(crate) task_schedule_intent_cache:
+        Arc<Mutex<HashMap<String, (String, crate::ScheduleIntentOutput)>>>,
 }
 
 pub(crate) fn build_skill_views(
@@ -161,7 +356,7 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
     let registry_path = config.skills.registry_path.as_deref();
     let path_display = registry_path.unwrap_or("(none)");
     let views = build_skill_views(
-        &state.workspace_root,
+        &state.skill_rt.workspace_root,
         registry_path,
         &config.skills.skill_switches,
         &config.skills.skills_list,
@@ -178,7 +373,7 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
         registry: views.registry,
         skills_list: Arc::new(views.execution_skills),
     };
-    *state.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
+    *state.core.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
 
     tracing::info!(
         "reload_skill_views: success path={} registry_entries={} execution_skills_count={} planner_visible_count={}",
@@ -221,70 +416,20 @@ pub(crate) struct ReloadSkillViewsResult {
     pub(crate) planner_visible_count: usize,
 }
 
+/// P2.1 Stage 2 完成后：AppState 主体只剩 7 个子 struct 字段（CoreServices /
+/// SkillRuntime / PolicyConfig / WorkerConfig / TaskMetricsRegistry / ChannelConfig /
+/// ReloadContext），fixture 不再需要为新增字段同步 12 处。新增字段时只动一个
+/// 子 struct 的定义 + `test_default()`。
 #[derive(Clone)]
 pub(crate) struct AppState {
-    pub(crate) started_at: Instant,
-    pub(crate) queue_limit: usize,
-    pub(crate) db: crate::db_init::DbPool,
-    /// Phase 2.2 Stage 2: 独立 audit pool（独立 SQLite 文件）。
-    /// audit_logs 走这个池，主 pool 只承载任务/调度/记忆等热路径。
-    pub(crate) audit_db: crate::db_init::DbPool,
-    pub(crate) llm_providers: Vec<Arc<LlmProviderRuntime>>,
-    pub(crate) agents_by_id: Arc<HashMap<String, AgentRuntimeConfig>>,
-    pub(crate) skill_timeout_seconds: u64,
-    pub(crate) skill_runner_path: PathBuf,
-    pub(crate) skill_views_snapshot: Arc<RwLock<Arc<SkillViewsSnapshot>>>,
-    pub(crate) skill_semaphore: Arc<Semaphore>,
-    pub(crate) rate_limiter: Arc<Mutex<RateLimiter>>,
-    pub(crate) llm_calls_per_task: Arc<Mutex<HashMap<String, u64>>>,
-    /// Phase 1.3: 单任务 LLM 累计耗时（ms），与 `llm_calls_per_task` 一起构成
-    /// "单任务 LLM 预算"。在 `llm_gateway::run_with_fallback_with_prompt_source`
-    /// 入口处做一次预算检查，超过 `MAX_LLM_CALLS_PER_TASK` 或
-    /// `MAX_LLM_TOTAL_MS_PER_TASK` 就直接短路返回错误，防止单个任务
-    /// 无限扩张 LLM 预算（例如 plan_repair 抖动、fallback 雪崩）。
-    pub(crate) llm_elapsed_per_task: Arc<Mutex<HashMap<String, u64>>>,
-    /// Phase 1.5: per-task 的 LLM 调用按 prompt label 分桶累计（次数 + 耗时）。
-    /// 与 `llm_calls_per_task` / `llm_elapsed_per_task` 是同一份数据的不同维度：
-    /// 总量用前两个表，而"哪个 prompt 把额度烧光了"用这个表。诊断用。
-    /// 外层 key = task_id；内层 key = label（如 `normalizer` / `plan` /
-    /// `plan_repair` / `chat` / `classifier_direct` / `observed` / `nl2cmd`...）。
-    /// 标签由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
-    pub(crate) llm_by_prompt_per_task:
-        Arc<Mutex<HashMap<String, HashMap<String, LlmPromptBucket>>>>,
-    /// Phase 0.4: 缓存 `run_intent_normalizer` 产出的 `schedule_intent`，
-    /// 让后续 `schedule.compile` 技能在 `text` 与归一化后的原始输入一致时
-    /// 直接复用，不再重跑一次 `schedule_intent_prompt` LLM 调用。
-    /// Key = task_id；Value = (归一化后的原始 user_request, 解析结果)。
-    pub(crate) task_schedule_intent_cache:
-        Arc<Mutex<HashMap<String, (String, crate::ScheduleIntentOutput)>>>,
-    pub(crate) maintenance: MaintenanceConfig,
-    pub(crate) memory: MemoryConfig,
-    pub(crate) workspace_root: PathBuf,
-    pub(crate) default_locator_search_dir: PathBuf,
-    pub(crate) locator_scan_max_depth: usize,
-    pub(crate) locator_scan_max_files: usize,
-    pub(crate) tools_policy: Arc<ToolsPolicy>,
-    pub(crate) active_provider_type: Option<String>,
-    pub(crate) cmd_timeout_seconds: u64,
-    pub(crate) max_cmd_length: usize,
-    pub(crate) allow_path_outside_workspace: bool,
-    pub(crate) allow_sudo: bool,
-    pub(crate) worker_task_timeout_seconds: u64,
-    pub(crate) worker_task_heartbeat_seconds: u64,
-    pub(crate) worker_running_no_progress_timeout_seconds: u64,
-    pub(crate) worker_running_recovery_check_interval_seconds: u64,
-    pub(crate) last_running_recovery_check_ts: Arc<Mutex<u64>>,
-    pub(crate) routing: RoutingConfig,
-    pub(crate) persona_prompt: String,
-    pub(crate) command_intent: CommandIntentRuntime,
-    pub(crate) schedule: ScheduleRuntime,
+    pub(crate) core: CoreServices,
+    pub(crate) skill_rt: SkillRuntime,
+    pub(crate) policy: PolicyConfig,
+    pub(crate) worker: WorkerConfig,
+    pub(crate) metrics: TaskMetricsRegistry,
     /// P2.1 — 通道配置子 struct（telegram / whatsapp / wechat / feishu / lark /
     /// future_adapters）。详见 [`ChannelConfig`] 头部 doc。
     pub(crate) channels: ChannelConfig,
-    pub(crate) http_client: Client,
-    pub(crate) database_sqlite_path: PathBuf,
-    pub(crate) database_busy_timeout_ms: u64,
-    pub(crate) self_extension: SelfExtensionConfig,
     /// P2.1 — reload 元信息子 struct（config 路径、registry 路径、skill_switches、
     /// 初始 skills_list）。详见 [`ReloadContext`] 头部 doc。
     pub(crate) reload_ctx: ReloadContext,
@@ -292,7 +437,7 @@ pub(crate) struct AppState {
 
 impl AppState {
     fn snapshot(&self) -> Arc<SkillViewsSnapshot> {
-        self.skill_views_snapshot.read().unwrap().clone()
+        self.core.skill_views_snapshot.read().unwrap().clone()
     }
 
     /// 兼容入口：不带 label 的累计。新代码请优先调用 [`Self::note_task_llm_call_with_label`]
@@ -306,11 +451,11 @@ impl AppState {
     /// `label` 由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
     pub(crate) fn note_task_llm_call_with_label(&self, task_id: &str, label: &str) {
         {
-            let mut guard = self.llm_calls_per_task.lock().unwrap();
+            let mut guard = self.metrics.llm_calls_per_task.lock().unwrap();
             let counter = guard.entry(task_id.to_string()).or_insert(0);
             *counter = counter.saturating_add(1);
         }
-        let mut guard = self.llm_by_prompt_per_task.lock().unwrap();
+        let mut guard = self.metrics.llm_by_prompt_per_task.lock().unwrap();
         let bucket = guard
             .entry(task_id.to_string())
             .or_default()
@@ -320,7 +465,8 @@ impl AppState {
     }
 
     pub(crate) fn task_llm_call_count(&self, task_id: &str) -> u64 {
-        self.llm_calls_per_task
+        self.metrics
+            .llm_calls_per_task
             .lock()
             .unwrap()
             .get(task_id)
@@ -343,11 +489,11 @@ impl AppState {
         elapsed_ms: u64,
     ) {
         {
-            let mut guard = self.llm_elapsed_per_task.lock().unwrap();
+            let mut guard = self.metrics.llm_elapsed_per_task.lock().unwrap();
             let counter = guard.entry(task_id.to_string()).or_insert(0);
             *counter = counter.saturating_add(elapsed_ms);
         }
-        let mut guard = self.llm_by_prompt_per_task.lock().unwrap();
+        let mut guard = self.metrics.llm_by_prompt_per_task.lock().unwrap();
         let bucket = guard
             .entry(task_id.to_string())
             .or_default()
@@ -357,7 +503,8 @@ impl AppState {
     }
 
     pub(crate) fn task_llm_elapsed_ms(&self, task_id: &str) -> u64 {
-        self.llm_elapsed_per_task
+        self.metrics
+            .llm_elapsed_per_task
             .lock()
             .unwrap()
             .get(task_id)
@@ -368,7 +515,8 @@ impl AppState {
     /// Phase 1.5: 取出 per-task 的 by-prompt 分桶快照。返回 owned map 避免锁外延。
     /// 用于在 task journal 收口时调用 `record_llm_by_prompt` 写入 metrics。
     pub(crate) fn task_llm_by_prompt(&self, task_id: &str) -> HashMap<String, LlmPromptBucket> {
-        self.llm_by_prompt_per_task
+        self.metrics
+            .llm_by_prompt_per_task
             .lock()
             .unwrap()
             .get(task_id)
@@ -398,10 +546,19 @@ impl AppState {
     }
 
     pub(crate) fn clear_task_llm_call_count(&self, task_id: &str) {
-        self.llm_calls_per_task.lock().unwrap().remove(task_id);
-        self.llm_elapsed_per_task.lock().unwrap().remove(task_id);
-        self.llm_by_prompt_per_task.lock().unwrap().remove(task_id);
-        self.task_schedule_intent_cache
+        self.metrics.llm_calls_per_task.lock().unwrap().remove(task_id);
+        self.metrics
+            .llm_elapsed_per_task
+            .lock()
+            .unwrap()
+            .remove(task_id);
+        self.metrics
+            .llm_by_prompt_per_task
+            .lock()
+            .unwrap()
+            .remove(task_id);
+        self.metrics
+            .task_schedule_intent_cache
             .lock()
             .unwrap()
             .remove(task_id);
@@ -419,7 +576,8 @@ impl AppState {
         if normalized.is_empty() {
             return;
         }
-        self.task_schedule_intent_cache
+        self.metrics
+            .task_schedule_intent_cache
             .lock()
             .unwrap()
             .insert(task_id.to_string(), (normalized, intent.clone()));
@@ -436,7 +594,7 @@ impl AppState {
         if normalized.is_empty() {
             return None;
         }
-        let mut guard = self.task_schedule_intent_cache.lock().unwrap();
+        let mut guard = self.metrics.task_schedule_intent_cache.lock().unwrap();
         let cached_text_matches = guard
             .get(task_id)
             .map(|(cached, _)| cached == &normalized)
@@ -472,7 +630,7 @@ impl AppState {
         agent_id
             .map(str::trim)
             .filter(|id| !id.is_empty())
-            .and_then(|id| self.agents_by_id.get(id).map(|_| id.to_string()))
+            .and_then(|id| self.core.agents_by_id.get(id).map(|_| id.to_string()))
     }
 
     pub(crate) fn task_agent_id(&self, task: &ClaimedTask) -> String {
@@ -488,10 +646,11 @@ impl AppState {
 
     fn task_agent(&self, task: &ClaimedTask) -> AgentRuntimeConfig {
         let agent_id = self.task_agent_id(task);
-        self.agents_by_id
+        self.core
+            .agents_by_id
             .get(&agent_id)
             .cloned()
-            .or_else(|| self.agents_by_id.get(crate::DEFAULT_AGENT_ID).cloned())
+            .or_else(|| self.core.agents_by_id.get(crate::DEFAULT_AGENT_ID).cloned())
             .unwrap_or_else(|| AgentRuntimeConfig {
                 persona_prompt: String::new(),
                 restrict_skills: false,
@@ -505,7 +664,7 @@ impl AppState {
         let base_prompt = if !agent.persona_prompt.trim().is_empty() {
             agent.persona_prompt
         } else {
-            self.persona_prompt.clone()
+            self.policy.persona_prompt.clone()
         };
         let auth_role = task
             .user_key
@@ -542,7 +701,7 @@ impl AppState {
         if !agent.llm_providers.is_empty() {
             return agent.llm_providers;
         }
-        self.llm_providers.clone()
+        self.core.llm_providers.clone()
     }
 
     pub(crate) fn resolve_canonical_skill_name(&self, name: &str) -> String {

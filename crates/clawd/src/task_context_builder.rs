@@ -105,14 +105,14 @@ pub(crate) fn build_route_task_context_bundle(
             560,
             6400,
         ),
-        memory_context: if state.memory.route_memory_enabled {
+        memory_context: if state.policy.memory.route_memory_enabled {
             let structured = memory::service::recall_structured_memory_context(
                 state,
                 task.user_key.as_deref(),
                 task.user_id,
                 task.chat_id,
                 user_request,
-                state.memory.prompt_recall_limit.max(1),
+                state.policy.memory.prompt_recall_limit.max(1),
                 true,
                 true,
             );
@@ -120,10 +120,10 @@ pub(crate) fn build_route_task_context_bundle(
                 &structured,
                 memory::retrieval::MemoryContextMode::Route,
                 state
-                    .memory
+                    .policy.memory
                     .route_trigger_budget_chars
                     .max(384)
-                    .min(state.memory.route_memory_max_chars.max(384)),
+                    .min(state.policy.memory.route_memory_max_chars.max(384)),
             )
         } else {
             "<none>".to_string()

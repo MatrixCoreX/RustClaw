@@ -140,7 +140,7 @@ fn parse_bool_from_toml(root: &TomlValue, path: &[&str], fallback: bool) -> bool
 }
 
 pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPolicy {
-    let path = state.workspace_root.join("configs/agent_guard.toml");
+    let path = state.skill_rt.workspace_root.join("configs/agent_guard.toml");
     let parsed = std::fs::read_to_string(path)
         .ok()
         .and_then(|raw| toml::from_str::<TomlValue>(&raw).ok())

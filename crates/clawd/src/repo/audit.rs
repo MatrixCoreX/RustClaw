@@ -12,7 +12,7 @@ pub(crate) fn insert_audit_log(
     // Phase 2.2 Stage 2: audit_logs 走独立 audit pool（独立 SQLite 文件），
     // 与任务/调度等热路径写域分开，writer 锁互不抢占。
     let db = state
-        .audit_db
+        .core.audit_db
         .get()
         .map_err(|e| anyhow::anyhow!("audit db pool: {e}"))?;
     insert_audit_log_raw(&db, user_id, action, detail_json, error_text)

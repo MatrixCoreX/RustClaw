@@ -58,8 +58,8 @@ pub(crate) async fn execute_builtin_skill_with_task(
 ) -> Result<String, String> {
     let policy_token = format!("skill:{skill_name}");
     if !state
-        .tools_policy
-        .is_allowed(&policy_token, state.active_provider_type.as_deref())
+        .skill_rt.tools_policy
+        .is_allowed(&policy_token, state.core.active_provider_type.as_deref())
     {
         return Err(format!("blocked by policy: {policy_token}"));
     }
@@ -71,9 +71,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
             ensure_only_keys(map, &["path"])?;
             let path = required_string(map, "path")?;
             let real_path = resolve_workspace_path(
-                &state.workspace_root,
+                &state.skill_rt.workspace_root,
                 path,
-                state.allow_path_outside_workspace,
+                state.policy.allow_path_outside_workspace,
             )?;
             let bytes = std::fs::read(&real_path).map_err(|err| {
                 if err.kind() == std::io::ErrorKind::NotFound {
@@ -100,11 +100,11 @@ pub(crate) async fn execute_builtin_skill_with_task(
             if content.len() > crate::MAX_WRITE_FILE_BYTES {
                 return Err(format!("content too large: {} bytes", content.len()));
             }
-            let effective_path = crate::ensure_default_file_path(&state.workspace_root, path);
+            let effective_path = crate::ensure_default_file_path(&state.skill_rt.workspace_root, path);
             let real_path = resolve_workspace_path(
-                &state.workspace_root,
+                &state.skill_rt.workspace_root,
                 &effective_path,
-                state.allow_path_outside_workspace,
+                state.policy.allow_path_outside_workspace,
             )?;
             if let Some(parent) = real_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|err| format!("mkdir failed: {err}"))?;
@@ -121,18 +121,18 @@ pub(crate) async fn execute_builtin_skill_with_task(
             ensure_only_keys(map, &["path", "names_only"])?;
             let path = optional_string(map, "path").unwrap_or(".");
             let requested_path = resolve_workspace_path(
-                &state.workspace_root,
+                &state.skill_rt.workspace_root,
                 path,
-                state.allow_path_outside_workspace,
+                state.policy.allow_path_outside_workspace,
             )?;
             let real_path = if requested_path.is_dir() {
                 requested_path
             } else {
                 match crate::delivery_utils::resolve_directory_locator_for_execution(
                     path,
-                    &state.default_locator_search_dir,
-                    state.locator_scan_max_depth,
-                    state.locator_scan_max_files,
+                    &state.skill_rt.default_locator_search_dir,
+                    state.skill_rt.locator_scan_max_depth,
+                    state.skill_rt.locator_scan_max_files,
                 ) {
                     Some(crate::delivery_utils::DirectoryLocatorExecutionResolution::Resolved(
                         directory,
@@ -197,9 +197,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
             )?;
             let cwd = optional_string(map, "cwd").unwrap_or(".");
             let cwd_path = resolve_workspace_path(
-                &state.workspace_root,
+                &state.skill_rt.workspace_root,
                 cwd,
-                state.allow_path_outside_workspace,
+                state.policy.allow_path_outside_workspace,
             )?;
             let request_text = optional_string(map, "request_text")
                 .map(str::trim)
@@ -234,7 +234,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 }
             }
             let sanitized_command =
-                crate::bootstrap::sanitize_command_before_execute(&state.command_intent, &command);
+                crate::bootstrap::sanitize_command_before_execute(&state.policy.command_intent, &command);
             if sanitized_command.is_empty() {
                 return Err("empty command after sanitize".to_string());
             }
@@ -248,13 +248,13 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let timeout_seconds = map
                 .get("timeout_seconds")
                 .and_then(|v| v.as_u64())
-                .unwrap_or(state.cmd_timeout_seconds);
+                .unwrap_or(state.skill_rt.cmd_timeout_seconds);
             run_safe_command(
                 &cwd_path,
                 &sanitized_command,
-                state.max_cmd_length,
+                state.skill_rt.max_cmd_length,
                 timeout_seconds,
-                state.allow_sudo,
+                state.policy.allow_sudo,
             )
             .await
         }
@@ -262,9 +262,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
             ensure_only_keys(map, &["path"])?;
             let path = required_string(map, "path")?;
             let real_path = resolve_workspace_path(
-                &state.workspace_root,
+                &state.skill_rt.workspace_root,
                 path,
-                state.allow_path_outside_workspace,
+                state.policy.allow_path_outside_workspace,
             )?;
             std::fs::create_dir_all(&real_path)
                 .map_err(|err| format!("create_dir failed: {err}"))?;
@@ -274,9 +274,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
             ensure_only_keys(map, &["path"])?;
             let path = required_string(map, "path")?;
             let real_path = resolve_workspace_path(
-                &state.workspace_root,
+                &state.skill_rt.workspace_root,
                 path,
-                state.allow_path_outside_workspace,
+                state.policy.allow_path_outside_workspace,
             )?;
             if real_path.is_dir() {
                 return Err(
@@ -792,7 +792,7 @@ async fn suggest_command_for_run_cmd(
         .await
         .map_err(|e| format!("run_cmd NL2CMD provider failed: {e}"))?
     } else {
-        let provider = state.llm_providers.first().cloned().ok_or_else(|| {
+        let provider = state.core.llm_providers.first().cloned().ok_or_else(|| {
             "run_cmd NL2CMD unavailable: no llm provider configured".to_string()
         })?;
         let resp = crate::call_provider_with_retry(provider, &prompt)
@@ -835,20 +835,19 @@ mod tests {
         execute_builtin_skill,
     };
     use crate::{
-        runtime::state::AppState, AgentRuntimeConfig, CommandIntentRuntime, RateLimiter,
-        ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+        runtime::state::AppState, AgentRuntimeConfig, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
     };
     use claw_core::config::{
-        AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
+        AgentConfig, ToolsConfig,
     };
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
     use std::fs;
     use std::net::TcpListener;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex, RwLock};
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
-    use tokio::sync::Semaphore;
+    use std::sync::{Arc, RwLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    
 
     struct TempDirGuard {
         path: PathBuf,
@@ -889,63 +888,27 @@ mod tests {
             AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
         )]);
         AppState {
-            started_at: Instant::now(),
-            queue_limit: 1,
-            db: crate::db_init::test_pool(),
-            audit_db: crate::db_init::test_audit_pool(),
-            llm_providers: Vec::new(),
-            agents_by_id: Arc::new(agents_by_id),
-            skill_timeout_seconds: 30,
-            skill_runner_path: PathBuf::new(),
-            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                registry: None,
-                skills_list,
-            }))),
-            skill_semaphore: Arc::new(Semaphore::new(1)),
-            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
-            llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_elapsed_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_by_prompt_per_task: Arc::new(Mutex::new(HashMap::new())),
-            task_schedule_intent_cache: Arc::new(Mutex::new(HashMap::new())),
-            maintenance: MaintenanceConfig::default(),
-            memory: MemoryConfig::default(),
-            workspace_root: workspace_root.clone(),
-            default_locator_search_dir: workspace_root,
-            locator_scan_max_depth: 2,
-            locator_scan_max_files: 200,
-            tools_policy: Arc::new(
-                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-            ),
-            active_provider_type: None,
-            cmd_timeout_seconds: 30,
-            max_cmd_length: 4096,
-            allow_path_outside_workspace: false,
-            allow_sudo: false,
-            worker_task_timeout_seconds: 300,
-            worker_task_heartbeat_seconds: 10,
-            worker_running_no_progress_timeout_seconds: 300,
-            worker_running_recovery_check_interval_seconds: 30,
-            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
-            routing: RoutingConfig::default(),
-            persona_prompt: String::new(),
-            command_intent: CommandIntentRuntime {
-                all_result_suffixes: Vec::new(),
-                default_locale: "zh-CN".to_string(),
-                verify_enforce_enabled: false,
+            core: crate::CoreServices {
+                agents_by_id: Arc::new(agents_by_id),
+                skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                                registry: None,
+                                skills_list,
+                            }))),
+                ..crate::CoreServices::test_default()
             },
-            schedule: ScheduleRuntime {
-                timezone: "Asia/Shanghai".to_string(),
-                intent_prompt_template: String::new(),
-                intent_prompt_source: String::new(),
-                intent_rules_template: String::new(),
-                locale: "zh-CN".to_string(),
-                i18n_dict: HashMap::new(),
+            skill_rt: crate::SkillRuntime {
+                workspace_root: workspace_root.clone(),
+                default_locator_search_dir: workspace_root,
+                locator_scan_max_files: 200,
+                tools_policy: Arc::new(
+                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                            ),
+                ..crate::SkillRuntime::test_default()
             },
+            policy: crate::PolicyConfig::test_default(),
+            worker: crate::WorkerConfig::test_default(),
+            metrics: crate::TaskMetricsRegistry::default(),
             channels: crate::ChannelConfig::default(),
-            http_client: reqwest::Client::new(),
-            database_sqlite_path: PathBuf::new(),
-            database_busy_timeout_ms: 5_000,
-            self_extension: claw_core::config::SelfExtensionConfig::default(),
             reload_ctx: crate::ReloadContext::default(),
         }
     }

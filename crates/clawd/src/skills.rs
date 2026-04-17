@@ -185,7 +185,7 @@ fn task_request_locale_tag(state: &AppState, task: &ClaimedTask) -> String {
         RequestReplyLanguage::ZhCn => "zh-CN".to_string(),
         RequestReplyLanguage::En => "en-US".to_string(),
         RequestReplyLanguage::ConfigDefault => {
-            let locale = state.schedule.locale.trim().to_ascii_lowercase();
+            let locale = state.policy.schedule.locale.trim().to_ascii_lowercase();
             if locale.starts_with("en") {
                 "en-US".to_string()
             } else {
@@ -214,7 +214,7 @@ fn config_requires_web_admin_message(state: &AppState, task: &ClaimedTask) -> St
         }
         RequestReplyLanguage::ConfigDefault => {
             if state
-                .schedule
+                .policy.schedule
                 .locale
                 .trim()
                 .to_ascii_lowercase()
@@ -366,17 +366,17 @@ fn run_cmd_targets_config_mutation(workspace_root: &Path, command: &str) -> bool
 
 fn skill_attempts_config_mutation(state: &AppState, skill_name: &str, args: &Value) -> bool {
     match skill_name {
-        "write_file" => args_path_targets_configs_dir(&state.workspace_root, args, "path", true),
+        "write_file" => args_path_targets_configs_dir(&state.skill_rt.workspace_root, args, "path", true),
         "remove_file" | "make_dir" => {
-            args_path_targets_configs_dir(&state.workspace_root, args, "path", false)
+            args_path_targets_configs_dir(&state.skill_rt.workspace_root, args, "path", false)
         }
         "run_cmd" => args
             .get("command")
             .and_then(|value| value.as_str())
-            .map(|command| run_cmd_targets_config_mutation(&state.workspace_root, command))
+            .map(|command| run_cmd_targets_config_mutation(&state.skill_rt.workspace_root, command))
             .unwrap_or(false),
         "config_guard" => {
-            if !args_path_targets_configs_dir(&state.workspace_root, args, "path", false) {
+            if !args_path_targets_configs_dir(&state.skill_rt.workspace_root, args, "path", false) {
                 return false;
             }
             if args.get("key").is_some() || args.get("value").is_some() {
@@ -480,8 +480,8 @@ pub(crate) async fn run_skill_with_runner_outcome(
 
     let policy_token = format!("skill:{skill_name}");
     if !state
-        .tools_policy
-        .is_allowed(&policy_token, state.active_provider_type.as_deref())
+        .skill_rt.tools_policy
+        .is_allowed(&policy_token, state.core.active_provider_type.as_deref())
     {
         return Err(format!("blocked by policy: {policy_token}"));
     }
@@ -536,22 +536,22 @@ pub(crate) async fn run_skill_with_runner_outcome(
         .and_then(|r| {
             let s = r.timeout_seconds(&skill_name);
             if s > 0 {
-                Some(state.skill_timeout_seconds.max(s))
+                Some(state.skill_rt.skill_timeout_seconds.max(s))
             } else {
                 None
             }
         })
         .unwrap_or_else(|| match skill_name.as_str() {
-            "image_generate" | "image_edit" => state.skill_timeout_seconds.max(180),
-            "image_vision" => state.skill_timeout_seconds.max(90),
-            "audio_transcribe" => state.skill_timeout_seconds.max(120),
-            "audio_synthesize" => state.skill_timeout_seconds.max(90),
-            "crypto" => state.skill_timeout_seconds.max(60),
-            _ => state.skill_timeout_seconds,
+            "image_generate" | "image_edit" => state.skill_rt.skill_timeout_seconds.max(180),
+            "image_vision" => state.skill_rt.skill_timeout_seconds.max(90),
+            "audio_transcribe" => state.skill_rt.skill_timeout_seconds.max(120),
+            "audio_synthesize" => state.skill_rt.skill_timeout_seconds.max(90),
+            "crypto" => state.skill_rt.skill_timeout_seconds.max(60),
+            _ => state.skill_rt.skill_timeout_seconds,
         });
 
     let _permit = state
-        .skill_semaphore
+        .skill_rt.skill_semaphore
         .clone()
         .acquire_owned()
         .await
@@ -559,7 +559,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
 
     let args = inject_skill_persona_context(state, task, &skill_name, args);
     let args = inject_skill_memory_context(state, task, &skill_name, args);
-    let args = ensure_default_output_dir_for_skill_args(&state.workspace_root, &skill_name, args);
+    let args = ensure_default_output_dir_for_skill_args(&state.skill_rt.workspace_root, &skill_name, args);
     let source = match task_runtime_channel(state, task) {
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
@@ -663,18 +663,17 @@ mod tests {
         READ_FILE_NOT_FOUND_PREFIX,
     };
     use crate::{
-        runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime,
-        RateLimiter, ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+        runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime, ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
     };
     use claw_core::config::{
-        AgentConfig, MaintenanceConfig, MemoryConfig, RoutingConfig, ToolsConfig,
+        AgentConfig, ToolsConfig,
     };
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
-    use std::path::PathBuf;
-    use std::sync::{Arc, Mutex, RwLock};
-    use std::time::Instant;
-    use tokio::sync::Semaphore;
+    
+    use std::sync::{Arc, RwLock};
+    
+    
 
     fn test_state(locale: &str) -> AppState {
         let agents_by_id = HashMap::from([(
@@ -682,63 +681,39 @@ mod tests {
             AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
         )]);
         AppState {
-            started_at: Instant::now(),
-            queue_limit: 1,
-            db: crate::db_init::test_pool(),
-            audit_db: crate::db_init::test_audit_pool(),
-            llm_providers: Vec::new(),
-            agents_by_id: Arc::new(agents_by_id),
-            skill_timeout_seconds: 30,
-            skill_runner_path: PathBuf::new(),
-            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                registry: None,
-                skills_list: Arc::new(HashSet::new()),
-            }))),
-            skill_semaphore: Arc::new(Semaphore::new(1)),
-            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
-            llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_elapsed_per_task: Arc::new(Mutex::new(HashMap::new())),
-            llm_by_prompt_per_task: Arc::new(Mutex::new(HashMap::new())),
-            task_schedule_intent_cache: Arc::new(Mutex::new(HashMap::new())),
-            maintenance: MaintenanceConfig::default(),
-            memory: MemoryConfig::default(),
-            workspace_root: std::env::temp_dir(),
-            default_locator_search_dir: std::env::temp_dir(),
-            locator_scan_max_depth: 2,
-            locator_scan_max_files: 100,
-            tools_policy: Arc::new(
-                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-            ),
-            active_provider_type: None,
-            cmd_timeout_seconds: 30,
-            max_cmd_length: 4096,
-            allow_path_outside_workspace: false,
-            allow_sudo: false,
-            worker_task_timeout_seconds: 300,
-            worker_task_heartbeat_seconds: 10,
-            worker_running_no_progress_timeout_seconds: 300,
-            worker_running_recovery_check_interval_seconds: 30,
-            last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
-            routing: RoutingConfig::default(),
-            persona_prompt: String::new(),
-            command_intent: CommandIntentRuntime {
-                all_result_suffixes: Vec::new(),
-                default_locale: locale.to_string(),
-                verify_enforce_enabled: false,
+            core: crate::CoreServices {
+                agents_by_id: Arc::new(agents_by_id),
+                skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                                registry: None,
+                                skills_list: Arc::new(HashSet::new()),
+                            }))),
+                ..crate::CoreServices::test_default()
             },
-            schedule: ScheduleRuntime {
-                timezone: "Asia/Shanghai".to_string(),
-                intent_prompt_template: String::new(),
-                intent_prompt_source: String::new(),
-                intent_rules_template: String::new(),
-                locale: locale.to_string(),
-                i18n_dict: HashMap::new(),
+            skill_rt: crate::SkillRuntime {
+                tools_policy: Arc::new(
+                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                            ),
+                ..crate::SkillRuntime::test_default()
             },
+            policy: crate::PolicyConfig {
+                command_intent: CommandIntentRuntime {
+                                all_result_suffixes: Vec::new(),
+                                default_locale: locale.to_string(),
+                                verify_enforce_enabled: false,
+                            },
+                schedule: ScheduleRuntime {
+                                timezone: "Asia/Shanghai".to_string(),
+                                intent_prompt_template: String::new(),
+                                intent_prompt_source: String::new(),
+                                intent_rules_template: String::new(),
+                                locale: locale.to_string(),
+                                i18n_dict: HashMap::new(),
+                            },
+                ..crate::PolicyConfig::test_default()
+            },
+            worker: crate::WorkerConfig::test_default(),
+            metrics: crate::TaskMetricsRegistry::default(),
             channels: crate::ChannelConfig::default(),
-            http_client: reqwest::Client::new(),
-            database_sqlite_path: PathBuf::new(),
-            database_busy_timeout_ms: 5_000,
-            self_extension: claw_core::config::SelfExtensionConfig::default(),
             reload_ctx: crate::ReloadContext::default(),
         }
     }
@@ -950,16 +925,16 @@ pub(crate) async fn run_skill_with_runner_once(
     })
     .to_string();
 
-    if !state.skill_runner_path.exists() {
+    if !state.skill_rt.skill_runner_path.exists() {
         return Err(format!(
             "skill-runner binary not found: path={} (workspace_root={})",
-            state.skill_runner_path.display(),
-            state.workspace_root.display()
+            state.skill_rt.skill_runner_path.display(),
+            state.skill_rt.workspace_root.display()
         ));
     }
 
     let selected_openai_model = crate::llm_gateway::selected_openai_model(state, Some(task));
-    let mut child = Command::new(&state.skill_runner_path)
+    let mut child = Command::new(&state.skill_rt.skill_runner_path)
         .env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env(
             "OPENAI_API_KEY",
@@ -971,14 +946,14 @@ pub(crate) async fn run_skill_with_runner_once(
         )
         .env("OPENAI_MODEL", selected_openai_model.clone())
         .env("CHAT_SKILL_MODEL", selected_openai_model)
-        .env("WORKSPACE_ROOT", state.workspace_root.display().to_string())
+        .env("WORKSPACE_ROOT", state.skill_rt.workspace_root.display().to_string())
         .env(
             "RUSTCLAW_LOCATOR_SCAN_MAX_DEPTH",
-            state.locator_scan_max_depth.to_string(),
+            state.skill_rt.locator_scan_max_depth.to_string(),
         )
         .env(
             "RUSTCLAW_LOCATOR_SCAN_MAX_FILES",
-            state.locator_scan_max_files.to_string(),
+            state.skill_rt.locator_scan_max_files.to_string(),
         )
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -987,7 +962,7 @@ pub(crate) async fn run_skill_with_runner_once(
         .map_err(|err| {
             format!(
                 "spawn skill-runner failed: path={} err={}",
-                state.skill_runner_path.display(),
+                state.skill_rt.skill_runner_path.display(),
                 err
             )
         })?;
@@ -1093,15 +1068,15 @@ pub(crate) fn build_runner_skill_context(
     ctx.insert("language".to_string(), Value::String(locale_tag));
     ctx.insert(
         "workspace_root".to_string(),
-        Value::String(state.workspace_root.display().to_string()),
+        Value::String(state.skill_rt.workspace_root.display().to_string()),
     );
     ctx.insert(
         "database_sqlite_path".to_string(),
-        Value::String(state.database_sqlite_path.display().to_string()),
+        Value::String(state.worker.database_sqlite_path.display().to_string()),
     );
     ctx.insert(
         "database_busy_timeout_ms".to_string(),
-        Value::from(state.database_busy_timeout_ms),
+        Value::from(state.worker.database_busy_timeout_ms),
     );
 
     let recent_images = crate::collect_recent_image_candidates(
@@ -1150,7 +1125,7 @@ pub(crate) fn exchange_credential_context_for_task(
     else {
         return serde_json::json!({});
     };
-    let Ok(db) = state.db.get() else {
+    let Ok(db) = state.core.db.get() else {
         return serde_json::json!({});
     };
     let mut stmt = match db.prepare(

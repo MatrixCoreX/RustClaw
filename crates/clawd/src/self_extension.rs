@@ -94,7 +94,7 @@ fn text_contains_ascii_alpha(text: &str) -> bool {
 fn request_language(state: &AppState, request: &str) -> ReplyLanguage {
     let trimmed = request.trim();
     if trimmed.is_empty() {
-        return if state.command_intent.default_locale.starts_with("en") {
+        return if state.policy.command_intent.default_locale.starts_with("en") {
             ReplyLanguage::En
         } else {
             ReplyLanguage::ZhCn
@@ -107,14 +107,14 @@ fn request_language(state: &AppState, request: &str) -> ReplyLanguage {
         (true, false) => ReplyLanguage::ZhCn,
         (false, true) => ReplyLanguage::En,
         (true, true) => {
-            if state.command_intent.default_locale.starts_with("en") {
+            if state.policy.command_intent.default_locale.starts_with("en") {
                 ReplyLanguage::En
             } else {
                 ReplyLanguage::ZhCn
             }
         }
         (false, false) => {
-            if state.command_intent.default_locale.starts_with("en") {
+            if state.policy.command_intent.default_locale.starts_with("en") {
                 ReplyLanguage::En
             } else {
                 ReplyLanguage::ZhCn
@@ -162,8 +162,8 @@ fn self_extension_enabled_for_route(
 
 fn should_handle_self_extension(state: &AppState, route: &crate::RouteResult) -> bool {
     self_extension_enabled_for_route(
-        state.self_extension.enabled,
-        state.self_extension.auto_on_capability_gap,
+        state.policy.self_extension.enabled,
+        state.policy.self_extension.auto_on_capability_gap,
         route,
     )
 }
@@ -200,7 +200,7 @@ async fn run_extension_manager(
     args: &Value,
 ) -> Result<Value, String> {
     let _permit = state
-        .skill_semaphore
+        .skill_rt.skill_semaphore
         .clone()
         .acquire_owned()
         .await
@@ -213,7 +213,7 @@ async fn run_extension_manager(
         &runner_name,
         args,
         runtime_source(state, task),
-        state.skill_timeout_seconds.max(30),
+        state.skill_rt.skill_timeout_seconds.max(30),
     )
     .await
 }
@@ -589,7 +589,7 @@ async fn handle_temporary_fix(
 ) -> Result<AskReply, String> {
     handle_temporary_fix_with(
         Some(state),
-        &state.self_extension,
+        &state.policy.self_extension,
         request,
         execute_now,
         language,
@@ -697,7 +697,7 @@ async fn handle_permanent_extension(
 ) -> Result<AskReply, String> {
     handle_permanent_extension_with(
         Some(state),
-        &state.self_extension,
+        &state.policy.self_extension,
         request,
         execute_now,
         language,

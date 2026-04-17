@@ -182,15 +182,15 @@ fn current_unix_ts() -> i64 {
 }
 
 fn telegram_config_path(state: &AppState) -> PathBuf {
-    state.workspace_root.join("configs/channels/telegram.toml")
+    state.skill_rt.workspace_root.join("configs/channels/telegram.toml")
 }
 
 fn wechat_config_path(state: &AppState) -> PathBuf {
-    state.workspace_root.join("configs/channels/wechat.toml")
+    state.skill_rt.workspace_root.join("configs/channels/wechat.toml")
 }
 
 fn feishu_config_path(state: &AppState) -> PathBuf {
-    state.workspace_root.join("configs/channels/feishu.toml")
+    state.skill_rt.workspace_root.join("configs/channels/feishu.toml")
 }
 
 fn read_telegram_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
@@ -874,7 +874,7 @@ async fn call_feishu_official_registration<T: DeserializeOwned>(
     params: &[(&str, &str)],
 ) -> anyhow::Result<T> {
     let url = format!("{}/oauth/v1/app/registration", feishu_accounts_base_url());
-    let resp = state.http_client.post(url).form(params).send().await?;
+    let resp = state.core.http_client.post(url).form(params).send().await?;
     let status = resp.status();
     let body = resp.text().await?;
     serde_json::from_str::<T>(&body).map_err(|err| {
@@ -995,7 +995,7 @@ fn write_feishu_generated_credentials(
     let raw = read_feishu_config_raw(state)?;
     let output = update_feishu_config_raw_preserving_format(&raw, app_id, app_secret);
     write_workspace_and_mounted_file(
-        &state.workspace_root,
+        &state.skill_rt.workspace_root,
         "configs/channels/feishu.toml",
         &output,
     )?;
@@ -1013,7 +1013,7 @@ async fn start_service_if_needed(state: &AppState, service: &str) -> anyhow::Res
     let script_name = service_start_script(service)
         .ok_or_else(|| anyhow::anyhow!("unsupported service: {service}"))?;
     validate_service_start_readiness(state, service).map_err(|err| anyhow::anyhow!(err))?;
-    let workspace = state.workspace_root.to_string_lossy();
+    let workspace = state.skill_rt.workspace_root.to_string_lossy();
     let log_file = format!("logs/{}.log", service);
     let cmd = format!(
         "cd {} && mkdir -p logs .pids && nohup ./{} {} > {} 2>&1 &",
@@ -1067,7 +1067,7 @@ async fn maybe_complete_feishu_official_scan(
         write_feishu_generated_credentials(state, client_id, client_secret)?;
         if let Err(err) = start_service_if_needed(state, "feishud").await {
             let mut db = state
-                .db
+                .core.db
                 .get()
                 .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
             return mark_pending_channel_bind_session_failed(&mut db, session.id, &err.to_string());
@@ -1091,7 +1091,7 @@ async fn maybe_complete_feishu_official_scan(
         .map(|detail| format!("{error_code}: {detail}"))
         .unwrap_or_else(|| error_code.to_string());
     let mut db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     match error_code {
@@ -1151,7 +1151,7 @@ async fn start_feishu_bind_session_handler(
         .saturating_add(ttl_seconds as i64)
         .to_string();
     let session = {
-        let mut db = match state.db.get() {
+        let mut db = match state.core.db.get() {
             Ok(db) => db,
             Err(_) => {
                 return (
@@ -1211,7 +1211,7 @@ async fn start_feishu_bind_session_handler(
     let begin = match begin_feishu_official_registration(&state).await {
         Ok(begin) => begin,
         Err(err) => {
-            let mut db = match state.db.get() {
+            let mut db = match state.core.db.get() {
                 Ok(db) => db,
                 Err(_) => {
                     return (
@@ -1239,7 +1239,7 @@ async fn start_feishu_bind_session_handler(
     let session_expires_at = current_unix_ts()
         .saturating_add(begin_expire_seconds.min(ttl_seconds) as i64)
         .to_string();
-    let mut db = match state.db.get() {
+    let mut db = match state.core.db.get() {
         Ok(db) => db,
         Err(_) => {
             return (
@@ -1314,7 +1314,7 @@ async fn get_feishu_bind_session_handler(
     }
 
     let session = {
-        let mut db = match state.db.get() {
+        let mut db = match state.core.db.get() {
             Ok(db) => db,
             Err(_) => {
                 return (
@@ -1434,7 +1434,7 @@ async fn detect_feishu_bind_session_handler(
         );
     }
 
-    let mut db = match state.db.get() {
+    let mut db = match state.core.db.get() {
         Ok(db) => db,
         Err(_) => {
             return (
@@ -1744,7 +1744,7 @@ async fn webd_internal_verify_login(
     State(state): State<AppState>,
     Json(req): Json<WebdInternalVerifyRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let db = match state.db.get() {
+    let db = match state.core.db.get() {
         Ok(g) => g,
         Err(_) => {
             return (
@@ -1851,7 +1851,7 @@ async fn admin_upsert_webd_account(
         }
         user_key
     };
-    let db = match state.db.get() {
+    let db = match state.core.db.get() {
         Ok(g) => g,
         Err(_) => {
             return (
@@ -2024,7 +2024,7 @@ async fn get_telegram_config(
             }),
         );
     }
-    let config_path = state.workspace_root.join("configs/config.toml");
+    let config_path = state.skill_rt.workspace_root.join("configs/config.toml");
     let config = match claw_core::config::AppConfig::load(&config_path.to_string_lossy()) {
         Ok(config) => config,
         Err(err) => {
@@ -2099,7 +2099,7 @@ async fn update_telegram_config(
             );
         }
     };
-    let config_path = state.workspace_root.join("configs/config.toml");
+    let config_path = state.skill_rt.workspace_root.join("configs/config.toml");
     let existing_config = match claw_core::config::AppConfig::load(&config_path.to_string_lossy()) {
         Ok(config) => config,
         Err(err) => {
@@ -2339,7 +2339,7 @@ async fn update_telegram_config(
         }
     };
     if let Err(err) = write_workspace_and_mounted_file(
-        &state.workspace_root,
+        &state.skill_rt.workspace_root,
         "configs/channels/telegram.toml",
         &output,
     ) {
@@ -2375,7 +2375,7 @@ fn load_wechat_config_response(state: &AppState) -> anyhow::Result<WechatConfigR
         .and_then(|v| v.as_table())
         .cloned()
         .unwrap_or_default();
-    let session_path = state.workspace_root.join("data/wechatd/session.json");
+    let session_path = state.skill_rt.workspace_root.join("data/wechatd/session.json");
     let bot_token = wechat
         .get("bot_token")
         .and_then(|v| v.as_str())
@@ -2680,7 +2680,7 @@ async fn update_wechat_config(
         }
     };
     if let Err(err) = write_workspace_and_mounted_file(
-        &state.workspace_root,
+        &state.skill_rt.workspace_root,
         "configs/channels/wechat.toml",
         &output,
     ) {
@@ -2751,7 +2751,7 @@ async fn update_feishu_config(
     let app_secret = req.app_secret.trim().to_string();
     let output = update_feishu_config_raw_preserving_format(&raw, &app_id, &app_secret);
     if let Err(err) = write_workspace_and_mounted_file(
-        &state.workspace_root,
+        &state.skill_rt.workspace_root,
         "configs/channels/feishu.toml",
         &output,
     ) {
@@ -2828,7 +2828,7 @@ async fn reset_feishu_config_handler(
     };
     let output = reset_feishu_config_raw_preserving_format(&raw);
     if let Err(err) = write_workspace_and_mounted_file(
-        &state.workspace_root,
+        &state.skill_rt.workspace_root,
         "configs/channels/feishu.toml",
         &output,
     ) {
@@ -3198,7 +3198,7 @@ fn canonical_bound_channel_name(raw: &str) -> String {
 
 fn auth_user_summary_counts(state: &AppState) -> anyhow::Result<(usize, usize, Vec<String>)> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let user_count: i64 = db.query_row(
@@ -3249,7 +3249,7 @@ async fn logs_latest(
     }
     let file_name = normalize_log_file_name(query.file.as_deref());
     let lines = query.lines.unwrap_or(200).clamp(20, 2000);
-    let path = state.workspace_root.join("logs").join(&file_name);
+    let path = state.skill_rt.workspace_root.join("logs").join(&file_name);
     let raw = match read_last_lines(&path, lines) {
         Ok(v) => v,
         Err(err) => {
@@ -3289,7 +3289,7 @@ fn task_access_meta_for_debug(
     task_id: &str,
 ) -> anyhow::Result<Option<(Option<String>, String)>> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.query_row(
@@ -3532,7 +3532,7 @@ fn usage_search_matches(query: Option<&str>, record: &UsageHistoryRecordSummary)
 
 fn task_usage_meta(state: &AppState, task_id: &str) -> anyhow::Result<Option<UsageTaskMeta>> {
     let db = state
-        .db
+        .core.db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.query_row(
@@ -3571,7 +3571,7 @@ async fn recent_robot_tasks(
 
     let read_result = (|| -> anyhow::Result<Vec<RecentRobotTaskSummary>> {
         let db = state
-            .db
+            .core.db
             .get()
             .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
         let mut stmt = db.prepare(
@@ -3644,7 +3644,7 @@ async fn usage_records(
     let search = query.search.as_deref();
     let channel = query.channel.as_deref().filter(|value| *value != "all");
     let status = query.status.as_deref().filter(|value| *value != "all");
-    let log_path = state.workspace_root.join("logs").join("model_io.log");
+    let log_path = state.skill_rt.workspace_root.join("logs").join("model_io.log");
     if !log_path.exists() {
         return (
             StatusCode::OK,
@@ -3895,7 +3895,7 @@ async fn usage_record_detail(
 }
 
 fn read_task_debug_entries(state: &AppState, task_id: &str) -> anyhow::Result<Vec<TaskDebugEntry>> {
-    let path = state.workspace_root.join("logs").join("model_io.log");
+    let path = state.skill_rt.workspace_root.join("logs").join("model_io.log");
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -4232,7 +4232,7 @@ async fn control_service(
                     }),
                 );
             };
-            let workspace = state.workspace_root.to_string_lossy();
+            let workspace = state.skill_rt.workspace_root.to_string_lossy();
             let log_file = format!("logs/{}.log", service);
             let cmd = format!(
                 "cd {} && mkdir -p logs .pids && nohup ./{} {} > {} 2>&1 &",
@@ -4344,7 +4344,7 @@ async fn control_service(
                     }),
                 );
             };
-            let workspace = state.workspace_root.to_string_lossy();
+            let workspace = state.skill_rt.workspace_root.to_string_lossy();
             let cmd = format!(
                 "cd {} && rm -f .pids/{}",
                 shell_escape_arg(workspace.as_ref()),
@@ -4437,7 +4437,7 @@ async fn control_service(
                 }
             }
             if let Some(pid_file) = service_pid_file(service.as_str()) {
-                let workspace = state.workspace_root.to_string_lossy();
+                let workspace = state.skill_rt.workspace_root.to_string_lossy();
                 let cmd = format!(
                     "cd {} && rm -f .pids/{}",
                     shell_escape_arg(workspace.as_ref()),
@@ -4460,7 +4460,7 @@ async fn control_service(
                     }),
                 );
             };
-            let workspace = state.workspace_root.to_string_lossy();
+            let workspace = state.skill_rt.workspace_root.to_string_lossy();
             let log_file = format!("logs/{}.log", service);
             let cmd = format!(
                 "cd {} && mkdir -p logs .pids && nohup ./{} {} > {} 2>&1 &",
@@ -4632,9 +4632,9 @@ async fn health(
     let telegram_configured_bot_names =
         state.channels.telegram_configured_bot_names.as_ref().clone();
     let telegram_bot_statuses =
-        read_telegram_bot_statuses(&state.workspace_root, &telegram_configured_bot_names);
+        read_telegram_bot_statuses(&state.skill_rt.workspace_root, &telegram_configured_bot_names);
     let mut gateway_instance_statuses_by_scope =
-        read_gateway_instance_statuses(&state.workspace_root);
+        read_gateway_instance_statuses(&state.skill_rt.workspace_root);
     let whatsapp_cloud_gateway_healthy = gateway_instance_statuses_by_scope
         .get("whatsapp_cloud:primary")
         .map(|s| s.healthy);
@@ -4836,10 +4836,10 @@ async fn health(
         version: env!("CARGO_PKG_VERSION").to_string(),
         queue_length,
         worker_state: "running".to_string(),
-        uptime_seconds: state.started_at.elapsed().as_secs(),
+        uptime_seconds: state.worker.started_at.elapsed().as_secs(),
         memory_rss_bytes: current_rss_bytes(),
         running_length,
-        task_timeout_seconds: state.worker_task_timeout_seconds,
+        task_timeout_seconds: state.worker.worker_task_timeout_seconds,
         running_oldest_age_seconds,
         telegramd_healthy,
         telegramd_process_count,
@@ -4915,7 +4915,7 @@ async fn list_skills(
             data: Some(json!({
                 "skills": skills,
                 "skill_items": skill_items,
-                "skill_runner_path": state.skill_runner_path.display().to_string(),
+                "skill_runner_path": state.skill_rt.skill_runner_path.display().to_string(),
             })),
             error: None,
         }),
@@ -4926,7 +4926,7 @@ fn ui_skill_description(state: &AppState, skill_name: &str) -> Option<String> {
     let registry_prompt_rel_path = state.skill_registry_prompt_rel_path(skill_name)?;
     let vendor = crate::bootstrap::prompts::active_prompt_vendor_name(state);
     let (raw, _) = prompt_layers::load_prompt_template_for_vendor(
-        &state.workspace_root,
+        &state.skill_rt.workspace_root,
         &vendor,
         &registry_prompt_rel_path,
         "",
@@ -4983,7 +4983,7 @@ async fn import_external_skill(
     let raw_name = guess_bundle_name_from_path_or_source(source, "external-skill");
     let canonical_name = slugify_skill_name(&raw_name);
     let bundle_rel_dir = format!("third_party/clawhub/{canonical_name}");
-    let bundle_dir = state.workspace_root.join(&bundle_rel_dir);
+    let bundle_dir = state.skill_rt.workspace_root.join(&bundle_rel_dir);
     if bundle_dir.exists() {
         if let Err(err) = std::fs::remove_dir_all(&bundle_dir) {
             return (
@@ -5096,7 +5096,7 @@ async fn import_external_skill_upload(
     };
     let canonical_name = slugify_skill_name(&guessed_name);
     let bundle_rel_dir = format!("third_party/clawhub/{canonical_name}");
-    let bundle_dir = state.workspace_root.join(&bundle_rel_dir);
+    let bundle_dir = state.skill_rt.workspace_root.join(&bundle_rel_dir);
     if bundle_dir.exists() {
         if let Err(err) = std::fs::remove_dir_all(&bundle_dir) {
             return (
@@ -5374,7 +5374,7 @@ fn default_model_item() -> ModelConfigItem {
 }
 
 fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
-    let root = &state.workspace_root;
+    let root = &state.skill_rt.workspace_root;
 
     let config_path = root.join("configs/config.toml");
     let config_raw = std::fs::read_to_string(&config_path).unwrap_or_else(|_| String::new());
@@ -5475,7 +5475,7 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
 }
 
 fn write_model_config(state: &AppState, req: &ModelConfigUpdateRequest) -> anyhow::Result<()> {
-    let root = &state.workspace_root;
+    let root = &state.skill_rt.workspace_root;
 
     if let Some(ref llm) = req.llm {
         let path = root.join("configs/config.toml");
@@ -5651,7 +5651,7 @@ fn read_audio_provider_keys(audio: &toml::Value) -> HashMap<String, HashMap<Stri
 }
 
 fn read_provider_keys(state: &AppState) -> anyhow::Result<ProviderKeysResponse> {
-    let root = &state.workspace_root;
+    let root = &state.skill_rt.workspace_root;
 
     let config_path = root.join("configs/config.toml");
     let config_raw = std::fs::read_to_string(&config_path).unwrap_or_else(|_| String::new());
@@ -5679,7 +5679,7 @@ fn read_provider_keys(state: &AppState) -> anyhow::Result<ProviderKeysResponse> 
 }
 
 fn write_provider_keys(state: &AppState, req: &ProviderKeysResponse) -> anyhow::Result<()> {
-    let root = &state.workspace_root;
+    let root = &state.skill_rt.workspace_root;
 
     if !req.llm.is_empty() {
         let path = root.join("configs/config.toml");
@@ -5947,7 +5947,7 @@ async fn restart_clawd(
     if let Err(resp) = require_ui_identity(&state, &headers) {
         return resp;
     }
-    let workspace = state.workspace_root.to_string_lossy();
+    let workspace = state.skill_rt.workspace_root.to_string_lossy();
     let pid = std::process::id();
     let script =
         format!("sleep 2; kill {pid} 2>/dev/null; sleep 1; cd {workspace} && ./start-clawd.sh");
@@ -5955,7 +5955,7 @@ async fn restart_clawd(
     cmd.arg("bash")
         .arg("-c")
         .arg(&script)
-        .current_dir(&state.workspace_root)
+        .current_dir(&state.skill_rt.workspace_root)
         .stdin(StdProcessStdio::null())
         .stdout(StdProcessStdio::null())
         .stderr(StdProcessStdio::null());
@@ -5983,7 +5983,7 @@ async fn restart_clawd(
 }
 
 fn read_skill_config_file(state: &AppState) -> anyhow::Result<(String, toml::Value)> {
-    let path = state.workspace_root.join("configs/config.toml");
+    let path = state.skill_rt.workspace_root.join("configs/config.toml");
     let raw = std::fs::read_to_string(&path)?;
     let parsed = toml::from_str::<toml::Value>(&raw)?;
     Ok((raw, parsed))
@@ -6012,11 +6012,11 @@ fn write_workspace_and_mounted_file(
 }
 
 fn write_runtime_config_file(state: &AppState, raw: &str) -> std::io::Result<()> {
-    write_workspace_and_mounted_file(&state.workspace_root, "configs/config.toml", raw)
+    write_workspace_and_mounted_file(&state.skill_rt.workspace_root, "configs/config.toml", raw)
 }
 
 fn read_skills_registry_file(state: &AppState) -> std::io::Result<String> {
-    let path = state.workspace_root.join("configs/skills_registry.toml");
+    let path = state.skill_rt.workspace_root.join("configs/skills_registry.toml");
     match std::fs::read_to_string(path) {
         Ok(raw) => Ok(raw),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -6025,14 +6025,14 @@ fn read_skills_registry_file(state: &AppState) -> std::io::Result<String> {
 }
 
 fn write_skills_registry_file(state: &AppState, raw: &str) -> std::io::Result<()> {
-    let active_path = state.workspace_root.join("configs/skills_registry.toml");
+    let active_path = state.skill_rt.workspace_root.join("configs/skills_registry.toml");
     if let Some(parent) = active_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&active_path, raw)?;
 
     let mounted_path = state
-        .workspace_root
+        .skill_rt.workspace_root
         .join("docker/config/skills_registry.toml");
     if let Some(parent) = mounted_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -6600,7 +6600,7 @@ fn finalize_imported_bundle(
         }
     };
 
-    let prompt_body_path = state.workspace_root.join(&plan.prompt_body_rel_path);
+    let prompt_body_path = state.skill_rt.workspace_root.join(&plan.prompt_body_rel_path);
     if let Some(parent) = prompt_body_path.parent() {
         if let Err(err) = std::fs::create_dir_all(parent) {
             return (
@@ -6720,7 +6720,7 @@ async fn materialize_import_source(
     }
 
     let res = state
-        .http_client
+        .core.http_client
         .get(&normalized)
         .send()
         .await
@@ -6887,7 +6887,7 @@ fn normalize_minimax_api_format(raw: Option<&str>) -> String {
 }
 
 fn current_runtime_llm_info(state: &AppState) -> Value {
-    if let Some(provider) = state.llm_providers.first() {
+    if let Some(provider) = state.core.llm_providers.first() {
         let vendor = provider
             .config
             .name
@@ -7004,7 +7004,7 @@ fn llm_restart_required(
     selected_vendor: &str,
     selected_model: &str,
 ) -> bool {
-    let Some(provider) = state.llm_providers.first() else {
+    let Some(provider) = state.core.llm_providers.first() else {
         return true;
     };
     let runtime_vendor = provider
@@ -7795,9 +7795,9 @@ async fn uninstall_external_skill(
         let bundle_path = if Path::new(bundle_rel).is_absolute() {
             PathBuf::from(bundle_rel)
         } else {
-            state.workspace_root.join(bundle_rel)
+            state.skill_rt.workspace_root.join(bundle_rel)
         };
-        let allowed_root = state.workspace_root.join("third_party");
+        let allowed_root = state.skill_rt.workspace_root.join("third_party");
         if bundle_path.starts_with(&allowed_root) && bundle_path.exists() {
             match std::fs::remove_dir_all(&bundle_path) {
                 Ok(_) => removed_bundle = true,
@@ -7821,11 +7821,11 @@ async fn uninstall_external_skill(
         let prompt_body_path = if let Some(prompt_body_rel) =
             prompt_layers::canonical_skill_prompt_body_rel_path(registry_prompt_rel_path)
         {
-            state.workspace_root.join(prompt_body_rel)
+            state.skill_rt.workspace_root.join(prompt_body_rel)
         } else if Path::new(registry_prompt_rel_path).is_absolute() {
             PathBuf::from(registry_prompt_rel_path)
         } else {
-            state.workspace_root.join(registry_prompt_rel_path)
+            state.skill_rt.workspace_root.join(registry_prompt_rel_path)
         };
         match remove_managed_prompt_file(&prompt_body_path) {
             Ok(value) => removed_prompt = value,
@@ -7919,7 +7919,7 @@ async fn whatsapp_web_login_status(
         );
     }
     let url = format!("{base}/v1/login-status");
-    let resp = match state.http_client.get(&url).send().await {
+    let resp = match state.core.http_client.get(&url).send().await {
         Ok(v) => v,
         Err(err) => {
             return (
@@ -8025,7 +8025,7 @@ async fn wechat_login_status(
         return wechatd_base_url(&state).err().unwrap();
     };
     let url = format!("{}/login/status", base.trim_end_matches('/'));
-    let resp = match state.http_client.get(&url).send().await {
+    let resp = match state.core.http_client.get(&url).send().await {
         Ok(v) => v,
         Err(err) => {
             return (
@@ -8088,7 +8088,7 @@ async fn wechat_login_qr_start(
     };
     let url = format!("{}/login/qr/start", base.trim_end_matches('/'));
     let resp = match state
-        .http_client
+        .core.http_client
         .post(&url)
         .json(&json!({ "force": req.force }))
         .send()
@@ -8156,7 +8156,7 @@ async fn wechat_login_qr_wait(
     };
     let url = format!("{}/login/qr/wait", base.trim_end_matches('/'));
     let resp = match state
-        .http_client
+        .core.http_client
         .post(&url)
         .json(&json!({
             "session_key": req.session_key,
@@ -8237,7 +8237,7 @@ async fn whatsapp_web_logout(
         );
     }
     let url = format!("{base}/v1/logout");
-    let resp = match state.http_client.post(&url).send().await {
+    let resp = match state.core.http_client.post(&url).send().await {
         Ok(v) => v,
         Err(err) => {
             return (

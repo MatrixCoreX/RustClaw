@@ -79,7 +79,7 @@ fn direct_chat_answer_from_recent_replies(
         2,
     );
     let prefer_english = state
-        .command_intent
+        .policy.command_intent
         .default_locale
         .to_ascii_lowercase()
         .starts_with("en");
@@ -185,7 +185,7 @@ fn build_resume_continue_execute_prompt_from_parts(
             ("__RESUME_INSTRUCTION__", resume_instruction),
             (
                 "__CONFIG_RESPONSE_LANGUAGE__",
-                &state.command_intent.default_locale,
+                &state.policy.command_intent.default_locale,
             ),
         ],
     )
@@ -245,7 +245,7 @@ fn build_resume_followup_discussion_prompt_from_parts(
             ("__RESUME_CONTEXT__", &resume_context_json),
             (
                 "__CONFIG_RESPONSE_LANGUAGE__",
-                &state.command_intent.default_locale,
+                &state.policy.command_intent.default_locale,
             ),
         ],
     )
@@ -464,7 +464,7 @@ pub(crate) async fn execute_ask_routed(
                     ("__CONTEXT__", &chat_prompt_context),
                     (
                         "__CONFIG_RESPONSE_LANGUAGE__",
-                        &state.command_intent.default_locale,
+                        &state.policy.command_intent.default_locale,
                     ),
                     (
                         "__REQUEST_LANGUAGE_HINT__",

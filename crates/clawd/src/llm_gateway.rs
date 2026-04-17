@@ -422,7 +422,7 @@ async fn run_with_fallback_with_hints(
     prompt_source: &str,
     hints: crate::ChatRequestHints,
 ) -> Result<String, String> {
-    let _prompt_debug_enabled = state.routing.debug_log_prompt;
+    let _prompt_debug_enabled = state.policy.routing.debug_log_prompt;
     let task_providers = state.task_llm_providers(task);
     if task_providers.is_empty() {
         return Err("No available LLM provider configured".to_string());
@@ -655,7 +655,7 @@ async fn run_with_fallback_with_hints(
 pub(crate) fn selected_openai_api_key(state: &AppState, task: Option<&ClaimedTask>) -> String {
     let providers = task
         .map(|task| state.task_llm_providers(task))
-        .unwrap_or_else(|| state.llm_providers.clone());
+        .unwrap_or_else(|| state.core.llm_providers.clone());
     if let Some(p) = providers
         .iter()
         .find(|p| p.config.provider_type == "openai_compat")
@@ -668,7 +668,7 @@ pub(crate) fn selected_openai_api_key(state: &AppState, task: Option<&ClaimedTas
 pub(crate) fn selected_openai_base_url(state: &AppState, task: Option<&ClaimedTask>) -> String {
     let providers = task
         .map(|task| state.task_llm_providers(task))
-        .unwrap_or_else(|| state.llm_providers.clone());
+        .unwrap_or_else(|| state.core.llm_providers.clone());
     if let Some(p) = providers
         .iter()
         .find(|p| p.config.provider_type == "openai_compat")
@@ -681,7 +681,7 @@ pub(crate) fn selected_openai_base_url(state: &AppState, task: Option<&ClaimedTa
 pub(crate) fn selected_openai_model(state: &AppState, task: Option<&ClaimedTask>) -> String {
     let providers = task
         .map(|task| state.task_llm_providers(task))
-        .unwrap_or_else(|| state.llm_providers.clone());
+        .unwrap_or_else(|| state.core.llm_providers.clone());
     providers
         .iter()
         .find(|p| p.config.provider_type == "openai_compat")

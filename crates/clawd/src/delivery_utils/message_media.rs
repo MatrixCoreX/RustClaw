@@ -41,8 +41,8 @@ fn resolve_existing_delivery_path(state: &AppState, raw_path: &str) -> Option<Pa
         vec![PathBuf::from(&trimmed)]
     } else {
         vec![
-            state.default_locator_search_dir.join(&trimmed),
-            state.workspace_root.join(&trimmed),
+            state.skill_rt.default_locator_search_dir.join(&trimmed),
+            state.skill_rt.workspace_root.join(&trimmed),
         ]
     };
     for candidate in candidates {
@@ -66,7 +66,7 @@ pub(crate) fn collect_recent_image_candidates(
     let Some(user_key) = user_key.map(str::trim).filter(|v| !v.is_empty()) else {
         return Vec::new();
     };
-    let db = match state.db.get() {
+    let db = match state.core.db.get() {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
