@@ -359,12 +359,28 @@ fn parse_output_contract(
 fn parse_execution_recipe_hint(
     out: Option<IntentExecutionRecipeOut>,
 ) -> Option<crate::execution_recipe::ExecutionRecipeSpec> {
+    // 关键语义（B1 修复）：
+    //   - `out == None`           → normalizer 没在响应里给出 execution_recipe 字段，
+    //                               说明 LLM 没决断；下游应 fallback 到 keyword detect。
+    //   - `out == Some` 且 kind != none → normalizer 显式给出 ops loop spec，照用。
+    //   - `out == Some` 且 kind == none → normalizer 显式说"这不是 ops loop"，
+    //                               同样应被信任。返回 Some(default spec)（kind=None,
+    //                               runtime.is_active()=false），让下游知道 normalizer
+    //                               已分类过，不要再用 keyword detect 误升级。
+    //
+    // 这块逻辑是为了修复 act 类只读任务（如 `pwd`）被长期记忆里残留的
+    // "configs/" "verify" 等关键字误升级为 OpsClosedLoop config_change，
+    // 导致 plan 校验拒绝纯只读 plan、走完 max_repairs 后失败的问题。
     let raw = out?;
     let kind = crate::execution_recipe::parse_execution_recipe_kind_text(&raw.kind);
     let profile = crate::execution_recipe::parse_execution_recipe_profile_text(&raw.profile);
     let target_scope =
         crate::execution_recipe::parse_execution_recipe_target_scope_text(&raw.target_scope);
+    if matches!(kind, crate::execution_recipe::ExecutionRecipeKind::None) {
+        return Some(crate::execution_recipe::ExecutionRecipeSpec::default());
+    }
     crate::execution_recipe::explicit_execution_recipe_spec(kind, profile, target_scope)
+        .or_else(|| Some(crate::execution_recipe::ExecutionRecipeSpec::default()))
 }
 
 fn render_self_extension_runtime(state: &AppState) -> String {
@@ -1310,7 +1326,7 @@ mod tests {
         RouteDecision,
     };
     use crate::{
-        execution_recipe::{ExecutionRecipeProfile, ExecutionRecipeTargetScope},
+        execution_recipe::{ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeTargetScope},
         RoutedMode, SelfExtensionMode, SelfExtensionTrigger,
     };
 
@@ -1546,13 +1562,48 @@ mod tests {
     }
 
     #[test]
-    fn parse_execution_recipe_hint_rejects_missing_profile() {
-        assert!(parse_execution_recipe_hint(Some(IntentExecutionRecipeOut {
+    fn parse_execution_recipe_hint_missing_profile_falls_back_to_default_spec() {
+        // 历史语义：profile 缺失 → None（让下游 fallback 到 keyword detect）
+        // B1 修复后：normalizer 显式回了 execution_recipe 字段（即使 profile 缺）就视为
+        // 已分类，返回 default spec（kind=None, inactive），不再 fallback 到 keyword。
+        // 这样可以避免 keyword detect 因 STABLE_FACTS 污染而误升级 read-only 任务。
+        let spec = parse_execution_recipe_hint(Some(IntentExecutionRecipeOut {
             kind: "ops_closed_loop".to_string(),
             profile: String::new(),
             target_scope: "current_repo".to_string(),
         }))
-        .is_none());
+        .expect("normalizer-classified hint should yield Some, even with missing profile");
+        assert_eq!(spec.kind, ExecutionRecipeKind::None);
+    }
+
+    #[test]
+    fn parse_execution_recipe_hint_explicit_none_is_trusted() {
+        // 这是修复 B1 的核心回归测试。
+        // 场景：normalizer 已经基于完整上下文判定"这不是 ops loop"（kind=none）。
+        // 期望：返回 Some(default spec) → initial_execution_recipe_spec 用 default spec
+        // → runtime.is_active()=false → plan_repair_reason 不会触发
+        // ops_closed_loop_apply_requires_mutation。
+        // 反例：返回 None → 下游 fallback 到 detect_execution_recipe（keyword 启发式）
+        // → 长期记忆里残留的 "configs/" "verify" 关键字会把任务误升级为
+        // OpsClosedLoop config_change，让 read-only 的 `pwd` 任务跑挂。
+        let spec = parse_execution_recipe_hint(Some(IntentExecutionRecipeOut {
+            kind: "none".to_string(),
+            profile: "none".to_string(),
+            target_scope: "unknown".to_string(),
+        }))
+        .expect("explicit kind=none should still be Some so detect_execution_recipe is bypassed");
+        assert_eq!(spec.kind, ExecutionRecipeKind::None);
+        assert!(
+            !crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(spec).is_active(),
+            "default spec must produce an inactive runtime state"
+        );
+    }
+
+    #[test]
+    fn parse_execution_recipe_hint_missing_field_falls_back_to_keyword_detect() {
+        // 当 normalizer 完全没在响应里给出 execution_recipe 字段时（None），
+        // 下游应该 fallback 到 keyword detect。这是历史行为，需要保留。
+        assert!(parse_execution_recipe_hint(None).is_none());
     }
 
     #[test]
