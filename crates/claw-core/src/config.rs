@@ -594,6 +594,18 @@ pub struct LlmVendorConfig {
     /// 仅 `[llm.minimax]` 使用：clawd 合成 `vendor-minimax` 时的协议。未填或空字符串默认 `openai_compat`；`anthropic_claude`（及别名）走 Anthropic Messages。其它厂商忽略。
     #[serde(default)]
     pub api_format: Option<String>,
+    /// Phase 2.5: per-vendor 默认参数，从 toml 子表 `[llm.<vendor>.params]` 读取，
+    /// 在 [`LlmGateway::build_providers`] 合成 `LlmProviderConfig` 时透传到
+    /// [`LlmProviderConfig::params`]。全字段可选，空表 = 沿用 vendor 默认行为。
+    /// 例：
+    /// ```toml
+    /// [llm.qwen.params]
+    /// default_temperature = 0.4
+    /// default_max_tokens  = 2048
+    /// top_p               = 0.9
+    /// ```
+    #[serde(default)]
+    pub params: LlmProviderParams,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -607,6 +619,47 @@ pub struct LlmProviderConfig {
     pub priority: i32,
     pub timeout_seconds: u64,
     pub max_concurrency: usize,
+    /// Phase 2.5: per-provider 默认参数。toml 里写在 `[llm_providers.params]` 子表，
+    /// 例如：
+    /// ```toml
+    /// [[llm_providers]]
+    /// name = "vendor-qwen"
+    /// type = "openai_compat"
+    /// ...
+    /// [llm_providers.params]
+    /// default_temperature = 0.4
+    /// default_max_tokens  = 2048
+    /// top_p               = 0.9
+    /// ```
+    /// chat 调用如果通过 `ChatRequestHints` 显式传了 temperature/max_tokens，
+    /// 优先用 hints；否则 fallback 到这里的 default 值；都没写则不向 provider
+    /// 显式发字段，由 vendor 走自己的默认（与 Phase 2.5 之前行为一致）。
+    /// 全部 `Option`，缺省即"不主动设置"，**完全向后兼容**。
+    #[serde(default)]
+    pub params: LlmProviderParams,
+}
+
+/// Phase 2.5: per-provider 默认参数（来自 `[llm_providers.params]` 子表）。
+/// 全部字段都是 `Option`，没在 toml 里写就保持 `None`，对外行为与不带本字段时
+/// 完全一致——目的是把以前散落在 provider 实现里的"硬编码默认值"（OpenAI compat
+/// 的 `stream=false`、Anthropic 的 `max_tokens=4096` 等）显式化为可观测、可改的
+/// 配置入口，但不强制每个 provider 都填。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LlmProviderParams {
+    /// chat-class 调用没传 hints.temperature 时使用；不设走 vendor 默认。
+    #[serde(default)]
+    pub default_temperature: Option<f64>,
+    /// chat-class 调用没传 hints.max_tokens 时使用；anthropic_claude 协议
+    /// 因协议要求必须传 max_tokens，没在 hints/params 里写时仍 fallback 到 4096。
+    #[serde(default)]
+    pub default_max_tokens: Option<u64>,
+    /// 透传给 OpenAI compat / Gemini / Anthropic 的 `top_p`（核采样）。
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    /// 是否走 SSE 流式响应。默认 false（clawd 当前不消费 stream，留作未来用）。
+    /// 仅 OpenAI compat 协议下生效；Gemini/Anthropic 路由暂忽略此字段。
+    #[serde(default)]
+    pub stream: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
