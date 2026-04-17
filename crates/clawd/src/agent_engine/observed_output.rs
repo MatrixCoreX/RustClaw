@@ -125,8 +125,8 @@ pub(crate) fn extract_latest_generic_successful_output(
         }
         let body = step.output.as_deref().map(str::trim).unwrap_or_default();
         !body.is_empty()
-            && (crate::finalizer::classify_observed_content_status(body)
-                == crate::finalizer::ObservedContentStatus::ContentAvailable
+            && (crate::finalize::classify_observed_content_status(body)
+                == crate::finalize::ObservedContentStatus::ContentAvailable
                 || structured_scalar_candidate(None, &step.skill, body, None, false).is_some()
                 || structured_observed_body(&step.skill, body).is_some())
             || system_basic_info_value(&step.skill, body).is_some()
@@ -2882,8 +2882,8 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         auto_locator_path,
         prefer_full_path,
     ) {
-        if !crate::finalizer::looks_like_planner_artifact(&answer)
-            && !crate::finalizer::looks_like_internal_trace_artifact(&answer)
+        if !crate::finalize::looks_like_planner_artifact(&answer)
+            && !crate::finalize::looks_like_internal_trace_artifact(&answer)
         {
             return Some(answer);
         }
@@ -2897,8 +2897,8 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         prefer_english,
     )
     .or_else(|| normalized_scalar_candidate(&observed_output.body))?;
-    if crate::finalizer::looks_like_planner_artifact(&answer)
-        || crate::finalizer::looks_like_internal_trace_artifact(&answer)
+    if crate::finalize::looks_like_planner_artifact(&answer)
+        || crate::finalize::looks_like_internal_trace_artifact(&answer)
     {
         return None;
     }
@@ -3277,8 +3277,8 @@ fn extract_direct_answer_from_generic_output_impl(
             })
             .or_else(|| normalized_scalar_candidate(&observed_output.body))
         })?;
-    if crate::finalizer::looks_like_planner_artifact(&answer)
-        || crate::finalizer::looks_like_internal_trace_artifact(&answer)
+    if crate::finalize::looks_like_planner_artifact(&answer)
+        || crate::finalize::looks_like_internal_trace_artifact(&answer)
     {
         return None;
     }
@@ -3309,15 +3309,15 @@ fn observed_step_body(step: &crate::executor::StepExecutionResult) -> Option<Str
     if let Some(normalized) = structured_observed_body(&step.skill, body) {
         return Some(normalized);
     }
-    (crate::finalizer::classify_observed_content_status(body)
-        == crate::finalizer::ObservedContentStatus::ContentAvailable)
+    (crate::finalize::classify_observed_content_status(body)
+        == crate::finalize::ObservedContentStatus::ContentAvailable)
         .then(|| body.to_string())
 }
 
 fn observed_step_entry(step: &crate::executor::StepExecutionResult) -> Option<String> {
     let output = observed_step_body(step)?;
-    if crate::finalizer::looks_like_planner_artifact(&output)
-        || crate::finalizer::looks_like_internal_trace_artifact(&output)
+    if crate::finalize::looks_like_planner_artifact(&output)
+        || crate::finalize::looks_like_internal_trace_artifact(&output)
     {
         return None;
     }
@@ -3476,9 +3476,9 @@ pub(crate) async fn synthesize_answer_from_observed_output(
         crate::task_journal::TaskJournalFinalizerSummary {
             stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
             disposition: Some(if qualified {
-                crate::finalizer::FinalizerDisposition::QualifiedCompletion
+                crate::finalize::FinalizerDisposition::QualifiedCompletion
             } else {
-                crate::finalizer::FinalizerDisposition::AllowFallback
+                crate::finalize::FinalizerDisposition::AllowFallback
             }),
             parsed: true,
             contract_ok: qualified,

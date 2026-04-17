@@ -37,7 +37,7 @@ use self::types::{
 pub(crate) fn extract_delivery_file_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.lines() {
-        if let Some((kind, payload)) = crate::finalizer::parse_delivery_token(line) {
+        if let Some((kind, payload)) = crate::finalize::parse_delivery_token(line) {
             let payload = payload.trim();
             if payload.is_empty() {
                 continue;

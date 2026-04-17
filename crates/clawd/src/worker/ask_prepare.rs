@@ -578,7 +578,7 @@ pub(super) async fn maybe_finalize_schedule_direct_text_success(
         return Ok(false);
     }
     let answer_text = crate::intercept_response_text_for_delivery(direct_text);
-    super::finalize_ask_direct_success(
+    crate::finalize::finalize_ask_direct_success(
         state,
         task,
         payload,

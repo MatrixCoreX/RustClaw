@@ -488,7 +488,7 @@ pub(super) async fn execute_ask_dispatch(
             "schedule_direct_route",
             None,
         );
-        if super::try_finalize_schedule_direct_success(
+        if crate::finalize::try_finalize_schedule_direct_success(
             state,
             task,
             payload,
@@ -513,7 +513,7 @@ pub(super) async fn execute_ask_dispatch(
                 None,
             );
             return Ok(Some(
-                super::run_classifier_direct_reply(state, task, resolved_prompt_for_execution)
+                crate::finalize::run_classifier_direct_reply(state, task, resolved_prompt_for_execution)
                     .await,
             ));
         }
@@ -557,7 +557,7 @@ pub(super) async fn execute_ask_dispatch(
             None,
         );
         return Ok(Some(
-            super::run_classifier_direct_reply(state, task, resolved_prompt_for_execution).await,
+            crate::finalize::run_classifier_direct_reply(state, task, resolved_prompt_for_execution).await,
         ));
     }
     let routed_to_act = route_result.ask_mode.is_act();

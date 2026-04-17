@@ -1,7 +1,7 @@
 use tracing::info;
 
 use super::{
-    ensure_task_running, execute_actions_once, finalize_loop_reply, load_agent_loop_guard_policy,
+    ensure_task_running, execute_actions_once, load_agent_loop_guard_policy,
     prepare_round_actions, push_round_trace, AgentLoopGuardPolicy, AgentRunContext, LoopState,
     RoundOutcome,
 };
@@ -323,7 +323,7 @@ pub(super) async fn run_agent_with_loop(
             break;
         }
     }
-    finalize_loop_reply(state, task, user_text, loop_state, agent_run_context).await
+    crate::finalize::finalize_loop_reply(state, task, user_text, loop_state, agent_run_context).await
 }
 
 #[cfg(test)]

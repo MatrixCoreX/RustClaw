@@ -343,7 +343,7 @@ fn is_delivery_failure_terminal_reply(actions: &[AgentAction]) -> bool {
         return false;
     };
     let trimmed = content.trim();
-    !trimmed.is_empty() && crate::finalizer::parse_delivery_token(trimmed).is_none()
+    !trimmed.is_empty() && crate::finalize::parse_delivery_token(trimmed).is_none()
 }
 
 fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
