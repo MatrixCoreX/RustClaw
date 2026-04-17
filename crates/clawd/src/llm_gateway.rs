@@ -7,6 +7,52 @@ use tracing::{info, warn};
 use crate::providers::build_llm_http_client;
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
 
+/// Phase 1.5: 把 `prompt_source`（可能很长且带文件路径/版本/vendor 修饰）
+/// 收敛成短 label，作为 per-task LLM 指标的 by-prompt 分桶 key。
+///
+/// 规则：按 `prompt_source` 包含的特征字符串归类。任何无法识别的归到
+/// `"other"`，避免分桶炸开成无穷多 key。
+///
+/// 这套 label 是诊断维度（"哪个 prompt 把单任务额度烧光了"），不参与
+/// 预算判断，所以稳定优先于精确——后续新增 prompt 模板时可以直接补一行。
+pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
+    let s = prompt_source.to_ascii_lowercase();
+    // 顺序很重要：更具体的匹配放前面，避免被宽泛规则吃掉。
+    if s.contains("intent_normalizer") {
+        "normalizer"
+    } else if s.contains("intent_router") {
+        "router_legacy"
+    } else if s.contains("plan_repair") {
+        "plan_repair"
+    } else if s.contains("single_step_planner") || s.contains("plan_") {
+        "plan"
+    } else if s.contains("delivery_text_classifier") {
+        "classifier_direct"
+    } else if s.contains("observed_answer_fallback") || s.contains("observed_") {
+        "observed"
+    } else if s.contains("clarify_question") {
+        "clarify"
+    } else if s.contains("intent_meta_summary") || s.contains("meta_summary") {
+        "intent_meta"
+    } else if s.contains("schedule_intent") {
+        "schedule"
+    } else if s.contains("command_intent") || s.contains("nl2cmd") {
+        "nl2cmd"
+    } else if s.contains("self_extension") {
+        "self_extension"
+    } else if s.contains("memory_") || s.contains("memory_extract") || s.contains("memory_judge") {
+        "memory"
+    } else if s.contains("verifier") || s.contains("verify_") {
+        "verifier"
+    } else if s.contains("chat_") || s.contains("chat:") || s.contains("chat_template") {
+        "chat"
+    } else if s.contains("semantic_judge") {
+        "semantic_judge"
+    } else {
+        "other"
+    }
+}
+
 /// Phase 1.3: 单任务最多触发多少次 LLM 调用。超过即视为异常放大
 /// （例如 plan_repair 抖动、fallback 雪崩、normalizer/self-classify
 /// 循环误判），直接短路返回错误。正常 agent 单轮 ask 不会接近这个上限。
@@ -391,7 +437,9 @@ async fn run_with_fallback_with_hints(
     // 记一次 LLM 调用（无论是否成功）。原先 `note_task_llm_call` 挂在
     // `append_model_io_log` 里，只有 `debug_log_prompt=true` 时才计数；
     // 现在移到 gateway 入口，保证预算统计始终可靠。
-    state.note_task_llm_call(&task.task_id);
+    // Phase 1.5: 同时按 prompt label 分桶累计，task journal 里 by_prompt 维度可观测。
+    let prompt_label = classify_prompt_source(prompt_source);
+    state.note_task_llm_call_with_label(&task.task_id, prompt_label);
     let call_started_at = std::time::Instant::now();
 
     let mut last_error = "unknown llm error".to_string();
@@ -510,8 +558,9 @@ async fn run_with_fallback_with_hints(
                     ),
                     None,
                 );
-                state.note_task_llm_elapsed(
+                state.note_task_llm_elapsed_with_label(
                     &task.task_id,
+                    prompt_label,
                     call_started_at.elapsed().as_millis() as u64,
                 );
                 provider.breaker.note_success();
@@ -570,7 +619,11 @@ async fn run_with_fallback_with_hints(
         }
     }
 
-    state.note_task_llm_elapsed(&task.task_id, call_started_at.elapsed().as_millis() as u64);
+    state.note_task_llm_elapsed_with_label(
+        &task.task_id,
+        prompt_label,
+        call_started_at.elapsed().as_millis() as u64,
+    );
     if !any_provider_attempted && !skipped_providers.is_empty() {
         // 全员被 breaker 拦下，所有 provider 当前都在 cooldown。
         // 这种情况要给一个**明确的可识别错误**，让上游日志/指标里能看见

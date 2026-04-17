@@ -1,0 +1,42 @@
+# Phase 1.5 _golden 回归集
+#
+# 目的：覆盖 8 条最具代表性的"流量画像"，作为 LLM 链路（normalizer / chat /
+# planner / observed / clarify / schedule / memory / 多语言）整体稳定性
+# 的事实 baseline。后续任何架构改动（trait 抽象、AppState 拆分、DB pool
+# 切换、prompt 改版）跑完这一组应保持稳定，否则即视为回归。
+#
+# 设计原则：
+#   * 8 条尽量覆盖不同 prompt label（normalizer / chat / plan / classifier_direct
+#     / observed / schedule / memory / clarify），方便 task_journal 的
+#     by_prompt 维度看到不同链路的开销分布。
+#   * 短任务为主，单轮跑完不超过 ~6 min；带 expect 的硬断言尽量挑跨 vendor
+#     都稳定的"必现关键字"（hostname、文件路径、active 等），避免被自然语言
+#     表述差异打散。
+#   * "记忆 / 多轮"刻意保留 1 条不带 expect（只断不超时不报错），因为这类
+#     任务的"成功"本来就难以用关键字精确判定。
+#
+# Format: suite|name|tags|prompt|expect=<substring>
+
+# --- chat: 闲聊，走 builtin chat skill；prompt label 应以 chat / normalizer 为主 ---
+chat|golden_chat_intro|golden,chat|你好，请用一句话介绍一下你自己
+
+# --- 多语言：中英混杂，chat skill；验证 normalizer 不被语种切换搞挂 ---
+chat|golden_chat_bilingual|golden,chat,bilingual|Briefly tell me 你是谁，回答用中文
+
+# --- 单转 act：极短读类任务；走 plan + classifier_direct，验证 B1 + 占位符 guard 仍生效 ---
+act|golden_act_hostname|golden,act,short|只输出当前机器 hostname，不要解释
+
+# --- 多步 act：需要 list + 二次摘取；验证 multi-step planner + observed 链路 ---
+act|golden_act_logs_top3|golden,act,multistep|列出 logs 目录下最大的 3 个文件，按大小从大到小，输出"文件名 大小"|expect=logs
+
+# --- observed：列文件并挑选回答；验证 observed_answer_fallback 复用 ---
+act|golden_observed_hidden|golden,act,observed|看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+
+# --- clarify：信息不足，应该触发 clarify_question 而不是瞎猜 ---
+ask|golden_clarify_send_file|golden,clarify|把那个文件发给我
+
+# --- schedule：定时任务；走 schedule_intent + schedule.compile ---
+schedule|golden_schedule_morning|golden,schedule|每天早上 8 点提醒我开会
+
+# --- failure graceful：明确不存在的文件，应优雅返回"找不到"而不是崩 ---
+failure|golden_missing_file_graceful|golden,failure|把 definitely_missing_named_file_golden_001.txt 发给我

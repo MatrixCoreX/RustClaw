@@ -217,11 +217,35 @@ fn step_trace_json(step: &TaskJournalStepTrace) -> Value {
 }
 
 fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
+    let by_prompt_value = metrics.by_prompt.as_ref().map(|map| {
+        let mut entries: Vec<(&String, &crate::LlmPromptBucket)> = map.iter().collect();
+        // 按 count 降序输出，方便人眼一眼看到"哪个 prompt 把额度烧光了"。
+        entries.sort_by(|a, b| {
+            b.1.count
+                .cmp(&a.1.count)
+                .then_with(|| b.1.elapsed_ms.cmp(&a.1.elapsed_ms))
+                .then_with(|| a.0.cmp(b.0))
+        });
+        let object: serde_json::Map<String, Value> = entries
+            .into_iter()
+            .map(|(label, bucket)| {
+                (
+                    label.clone(),
+                    json!({
+                        "count": bucket.count,
+                        "elapsed_ms": bucket.elapsed_ms,
+                    }),
+                )
+            })
+            .collect();
+        Value::Object(object)
+    });
     json!({
         "used_evidence_ids_count": metrics.used_evidence_ids_count,
         "delivery_consistent": metrics.delivery_consistent,
         "llm_calls_per_task": metrics.llm_calls_per_task,
         "llm_elapsed_ms_per_task": metrics.llm_elapsed_ms_per_task,
+        "by_prompt": by_prompt_value,
     })
 }
 
@@ -235,6 +259,10 @@ pub(crate) struct TaskJournalTaskMetrics {
     /// `llm_calls_per_task` 一起暴露，方便快速识别"某条任务把
     /// 预算耗在了 LLM 上 vs. 耗在了 skill/runner 上"。
     pub(crate) llm_elapsed_ms_per_task: Option<u64>,
+    /// Phase 1.5: per-task 按 prompt label 分桶的 (count, elapsed_ms)。
+    /// 取自 [`crate::AppState::task_llm_by_prompt`]。
+    /// 用于在 `task_journal_summary.task_metrics.by_prompt` 暴露细分维度。
+    pub(crate) by_prompt: Option<std::collections::HashMap<String, crate::LlmPromptBucket>>,
 }
 
 #[allow(dead_code)]
@@ -376,6 +404,16 @@ impl TaskJournal {
         self.task_metrics.llm_elapsed_ms_per_task = Some(llm_elapsed_ms_per_task);
     }
 
+    /// Phase 1.5: 写入 per-task LLM 调用的 by-prompt 分桶。
+    /// 来源是 [`crate::AppState::task_llm_by_prompt`] 在收口时取的快照。
+    /// 空 map 也接受（表示这次没产生任何 LLM 调用）。
+    pub(crate) fn record_llm_by_prompt(
+        &mut self,
+        by_prompt: std::collections::HashMap<String, crate::LlmPromptBucket>,
+    ) {
+        self.task_metrics.by_prompt = Some(by_prompt);
+    }
+
     pub(crate) fn record_final_answer(&mut self, final_answer: impl Into<String>) {
         self.final_answer = Some(final_answer.into());
     }
@@ -426,6 +464,9 @@ impl TaskJournal {
         }
         if self.task_metrics.llm_elapsed_ms_per_task.is_none() {
             self.task_metrics.llm_elapsed_ms_per_task = other.task_metrics.llm_elapsed_ms_per_task;
+        }
+        if self.task_metrics.by_prompt.is_none() {
+            self.task_metrics.by_prompt = other.task_metrics.by_prompt.clone();
         }
         if self.final_answer.is_none() {
             self.final_answer = other.final_answer.clone();

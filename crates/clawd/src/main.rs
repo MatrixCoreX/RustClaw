@@ -125,9 +125,9 @@ use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bind
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, reload_skill_views, AgentAction,
     AgentRuntimeConfig, AppState, AskReply, ClaimedTask, CommandIntentRules, CommandIntentRuntime,
-    LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper, RateLimiter, RoutedMode,
-    RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue, SkillViewsSnapshot,
-    ToolsPolicy, WhatsappDeliveryRoute,
+    LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
+    RateLimiter, RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
+    SkillViewsSnapshot, ToolsPolicy, WhatsappDeliveryRoute,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
@@ -468,6 +468,7 @@ async fn main() -> anyhow::Result<()> {
         ))),
         llm_calls_per_task: Arc::new(Mutex::new(HashMap::new())),
         llm_elapsed_per_task: Arc::new(Mutex::new(HashMap::new())),
+        llm_by_prompt_per_task: Arc::new(Mutex::new(HashMap::new())),
         task_schedule_intent_cache: Arc::new(Mutex::new(HashMap::new())),
         maintenance: config.maintenance.clone(),
         memory: memory_runtime,
