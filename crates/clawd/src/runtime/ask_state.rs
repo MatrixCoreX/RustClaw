@@ -153,6 +153,69 @@ impl AskTransition {
     }
 }
 
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 记录一次 ask 状态转换：写 tracing 日志（`[ASK_STATE]` 行）并返回构造好的
+/// [`AskTransition`]，由 caller 自行决定是否 `push` 到 [`crate::task_journal::TaskJournal::transitions`]。
+///
+/// `from = None` 表示这是 ask 任务的首次状态进入（约定为 `Received`）。
+///
+/// # 调用面约束（Stage C）
+/// 主路径上每次 transition 调用前应满足
+/// `prev.can_transition_to(next)`，由 Stage D 在调用点加 `debug_assert!` 强保证。
+///
+/// # 日志格式
+/// ```text
+/// [ASK_STATE] task_id=<id> state_from=<label|none> state_to=<label> reason=<text> round_no=<n|none>
+/// ```
+pub(crate) fn log_ask_transition(
+    state: &crate::AppState,
+    task_id: &str,
+    from: Option<AskState>,
+    to: AskState,
+    reason: &str,
+    round_no: Option<usize>,
+) -> AskTransition {
+    // §3.1 Stage D: debug 模式下强守合法 transition 表，release build 不触发。
+    // from = None 是 ask 任务首次进入（约定 to = Received），任何 to。
+    if let Some(prev) = from {
+        debug_assert!(
+            prev.can_transition_to(to),
+            "illegal ask state transition: {:?} -> {:?} (task_id={}, reason={})",
+            prev,
+            to,
+            task_id,
+            reason
+        );
+    }
+    let at_ms = now_unix_ms();
+    let transition = AskTransition::new(from, to, reason.to_string(), at_ms, round_no);
+    if !state.policy.routing.debug_log_ask_state {
+        return transition;
+    }
+    let from_label = from.map(AskState::as_str).unwrap_or("none");
+    let to_label = to.as_str();
+    let round_label = round_no
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "none".to_string());
+    tracing::info!(
+        "{} ask_state_transition task_id={} state_from={} state_to={} reason={} round_no={} at_ms={}",
+        crate::highlight_tag("ask_state"),
+        task_id,
+        from_label,
+        to_label,
+        reason,
+        round_label,
+        at_ms,
+    );
+    transition
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +361,13 @@ mod tests {
     #[test]
     fn executing_self_loop_is_legal() {
         assert!(AskState::Executing.can_transition_to(AskState::Executing));
+    }
+
+    #[test]
+    fn now_unix_ms_is_monotonic_enough() {
+        let a = super::now_unix_ms();
+        let b = super::now_unix_ms();
+        assert!(b >= a, "now_unix_ms should be non-decreasing in same call sequence");
+        assert!(a > 0, "now_unix_ms should be positive after UNIX_EPOCH");
     }
 }

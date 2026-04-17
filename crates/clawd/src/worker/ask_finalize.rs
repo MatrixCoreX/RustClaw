@@ -417,7 +417,19 @@ pub(crate) async fn finalize_ask_result(
     route_result: &crate::RouteResult,
     result: Result<crate::AskReply, String>,
 ) -> Result<()> {
+    // §3.1: ask 状态机 — 进入 finalize。
+    // from = None 因为 dispatch 内部各分支态没向调用面回传"上一次状态"；
+    // reason 携带 ask_mode 信息以便日志检索。
+    let finalize_entry_transition = crate::log_ask_transition(
+        state,
+        &task.task_id,
+        None,
+        crate::AskState::Finalizing,
+        &format!("finalize_ask_result_entry mode={}", route_result.ask_mode.as_str()),
+        None,
+    );
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", prompt);
+    journal.transitions.push(finalize_entry_transition);
     journal.record_route_result(route_result);
     journal.record_context_bundle_summary(format!(
         "{} needs_clarify={} resolved_prompt={}",
@@ -534,6 +546,18 @@ pub(crate) async fn finalize_ask_result(
                     insert_unfinished_goal_memory(state, task, prompt, &answer_text);
                 }
             }
+            // §3.1: Finalizing → Completed（成功路径，含 success / failure / resume_failure / clarify
+            // 子分类，在 final_status 字段已区分；这里 ask 状态机视为正常完成 = Completed）。
+            // 真实失败的 Err(...) 入分支会在下方打 Failed。
+            let completed_transition = crate::log_ask_transition(
+                state,
+                &task.task_id,
+                Some(crate::AskState::Finalizing),
+                crate::AskState::Completed,
+                "finalize_ok",
+                None,
+            );
+            journal.transitions.push(completed_transition);
             info!(
                 "task_journal_summary task_id={} kind=ask phase=finalize {}",
                 task.task_id,
@@ -581,6 +605,15 @@ pub(crate) async fn finalize_ask_result(
                 )
                 .await?;
                 insert_unfinished_goal_memory(state, task, prompt, &user_error);
+                // §3.1: Finalizing → Failed (resume_failure 子路径)。
+                crate::log_ask_transition(
+                    state,
+                    &task.task_id,
+                    Some(crate::AskState::Finalizing),
+                    crate::AskState::Failed,
+                    "finalize_resume_failure",
+                    None,
+                );
                 state.clear_task_llm_call_count(&task.task_id);
                 return Ok(());
             }
@@ -592,6 +625,15 @@ pub(crate) async fn finalize_ask_result(
             journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
             finalize_ask_failure(state, task, payload, &err_text, &[], &err_text, &journal).await?;
             insert_unfinished_goal_memory(state, task, prompt, &err_text);
+            // §3.1: Finalizing → Failed（dispatch 抛 Err 进入此分支）。
+            crate::log_ask_transition(
+                state,
+                &task.task_id,
+                Some(crate::AskState::Finalizing),
+                crate::AskState::Failed,
+                "finalize_err",
+                None,
+            );
             info!(
                 "task_journal_summary task_id={} kind=ask phase=failure error={} {}",
                 task.task_id,
