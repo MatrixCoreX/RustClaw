@@ -50,7 +50,7 @@ fn has_executable_observation_or_action(actions: &[AgentAction]) -> bool {
     })
 }
 
-pub(super) fn requested_success_marker(
+pub(crate) fn requested_success_marker(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<&'static str> {
     let request = agent_run_context

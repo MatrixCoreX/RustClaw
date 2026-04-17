@@ -7,9 +7,8 @@ use tracing::{debug, info, warn};
 mod arg_resolver;
 mod dispatch_support;
 mod execution_loop;
-mod loop_control;
-mod loop_finalize;
-mod observed_output;
+pub(crate) mod loop_control;
+pub(crate) mod observed_output;
 mod planning;
 mod prepare_round;
 mod skill_execution;
@@ -25,16 +24,15 @@ use self::execution_loop::execute_actions_once;
 use self::loop_control::run_agent_with_loop;
 use self::prepare_round::{prepare_round_actions, push_round_trace};
 
-// Phase 3.3 Stage 1：暴露给 `crate::finalize` facade 使用。
-// 同时也满足 agent_engine 内部对 `finalize_loop_reply` 的引用（原本是 `use self::...`）。
-// 调用方应优先使用 `crate::finalize::*`，本路径仅供 facade 与 agent_engine 内部消费。
-pub(crate) use self::loop_finalize::finalize_loop_reply;
+// Phase 3.3 Stage 2.3：loop_finalize.rs 已物理搬移到 `crate::finalize::loop_reply`。
+// observed_output 暴露 synthesize_answer_from_observed_output 给 finalize facade。
 pub(crate) use self::observed_output::synthesize_answer_from_observed_output;
 use self::skill_execution::execute_prepared_skill_action;
+pub(crate) use self::support::append_delivery_message;
 use self::support::{
-    action_fingerprint, append_delivery_message, append_progress_hint,
-    build_safe_skill_args_summary, encode_progress_i18n, load_agent_loop_guard_policy,
-    maybe_publish_execution_recipe_phase_hint, AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
+    action_fingerprint, append_progress_hint, build_safe_skill_args_summary, encode_progress_i18n,
+    load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint, AgentLoopGuardPolicy,
+    PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
@@ -204,46 +202,46 @@ fn build_single_plan_prompt(
 /// Progress: short hints only (e.g. "Step 1/3", "Skill X completed"). For "in progress" UI. Not final content.
 /// Delivery: final user-facing content only. Only respond and fallback finalizer append here. Channel consumes this.
 /// Trace: step output / subtask_results / history_compact for logs and resume; not sent as final delivery.
-// Phase 3.3 Stage 1：LoopState 升 pub(crate) 以便 finalize facade 暴露
-// `finalize_loop_reply` / `synthesize_answer_from_observed_output` 时类型可达。
-// 字段保持原始私有性，外部不允许直接构造或读写。
+// Phase 3.3 Stage 2.3：LoopState 字段升 pub(crate)，因 finalize/loop_reply.rs 物理搬到了
+// 不同模块（`crate::finalize`），无法再通过 `pub(super)` 隐式继承；继续保持仅 `pub(crate)`，
+// 不暴露给 crate 外部。改字段时请关注 crate::finalize::* 与 crate::agent_engine::* 内的写入点。
 #[derive(Debug, Default)]
 pub(crate) struct LoopState {
-    round_no: usize,
-    max_rounds: usize,
-    tool_calls_total: usize,
-    total_steps_executed: usize,
+    pub(crate) round_no: usize,
+    pub(crate) max_rounds: usize,
+    pub(crate) tool_calls_total: usize,
+    pub(crate) total_steps_executed: usize,
     /// Progress hints only; published to task progress for "processing..." display. Must not contain full raw output.
-    progress_messages: Vec<String>,
+    pub(crate) progress_messages: Vec<String>,
     /// Final delivery to user. Only respond and fallback finalizer write here. Sole source for AskReply.messages.
-    delivery_messages: Vec<String>,
-    subtask_results: Vec<String>,
-    history_compact: Vec<String>,
-    last_actions_fingerprint: Option<String>,
-    repeat_action_counts: HashMap<String, usize>,
-    successful_action_fingerprints: HashMap<String, usize>,
-    consecutive_no_progress: usize,
-    last_output: Option<String>,
-    output_vars: HashMap<String, String>,
-    has_tool_or_skill_output: bool,
-    has_recoverable_failure_context: bool,
-    last_stop_signal: Option<String>,
-    written_file_aliases: HashMap<String, String>,
-    last_written_file_path: Option<String>,
+    pub(crate) delivery_messages: Vec<String>,
+    pub(crate) subtask_results: Vec<String>,
+    pub(crate) history_compact: Vec<String>,
+    pub(crate) last_actions_fingerprint: Option<String>,
+    pub(crate) repeat_action_counts: HashMap<String, usize>,
+    pub(crate) successful_action_fingerprints: HashMap<String, usize>,
+    pub(crate) consecutive_no_progress: usize,
+    pub(crate) last_output: Option<String>,
+    pub(crate) output_vars: HashMap<String, String>,
+    pub(crate) has_tool_or_skill_output: bool,
+    pub(crate) has_recoverable_failure_context: bool,
+    pub(crate) last_stop_signal: Option<String>,
+    pub(crate) written_file_aliases: HashMap<String, String>,
+    pub(crate) last_written_file_path: Option<String>,
     /// Last user-visible respond text (final or publishable). Used when delivery_messages was not filled so we do not fall back to subtask summary.
-    last_user_visible_respond: Option<String>,
+    pub(crate) last_user_visible_respond: Option<String>,
     /// Last publishable chat-skill output. Prefer this over LLM finalization when no explicit respond was emitted.
-    last_publishable_chat_output: Option<String>,
-    executed_step_results: Vec<crate::executor::StepExecutionResult>,
-    round_traces: Vec<crate::task_journal::TaskJournalRoundTrace>,
-    execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
-    last_recipe_progress_phase: Option<crate::execution_recipe::ExecutionRecipePhase>,
-    last_recipe_progress_scope: Option<crate::execution_recipe::ExecutionRecipeTargetScope>,
-    recipe_scope_ready_hint_sent: bool,
+    pub(crate) last_publishable_chat_output: Option<String>,
+    pub(crate) executed_step_results: Vec<crate::executor::StepExecutionResult>,
+    pub(crate) round_traces: Vec<crate::task_journal::TaskJournalRoundTrace>,
+    pub(crate) execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
+    pub(crate) last_recipe_progress_phase: Option<crate::execution_recipe::ExecutionRecipePhase>,
+    pub(crate) last_recipe_progress_scope: Option<crate::execution_recipe::ExecutionRecipeTargetScope>,
+    pub(crate) recipe_scope_ready_hint_sent: bool,
 }
 
 impl LoopState {
-    fn new(max_rounds: usize) -> Self {
+    pub(crate) fn new(max_rounds: usize) -> Self {
         Self {
             max_rounds,
             ..Self::default()
@@ -662,7 +660,7 @@ fn confirmation_remaining_step_labels(steps: &[crate::PlanStep]) -> Vec<String> 
         .collect()
 }
 
-fn build_confirmation_required_resume_context(
+pub(crate) fn build_confirmation_required_resume_context(
     state: &AppState,
     steps: &[crate::PlanStep],
     user_request: &str,

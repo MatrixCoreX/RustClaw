@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tracing::info;
 
-use super::{append_delivery_message, AgentRunContext, LoopState};
+use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
 use crate::{AppState, AskReply, ClaimedTask};
 
 fn backfill_delivery_from_last_outputs(task: &ClaimedTask, loop_state: &mut LoopState) {
@@ -279,7 +279,7 @@ fn should_drop_passthrough_delivery_for_content_evidence(
                 return Some(true);
             }
             (step.skill == "list_dir"
-                && super::observed_output::normalized_observed_listing(body, None).is_some_and(
+                && crate::agent_engine::observed_output::normalized_observed_listing(body, None).is_some_and(
                     |listing| {
                         listing.trim() == respond
                             || listing
@@ -356,26 +356,26 @@ fn direct_scalar_observed_answer(
     if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
         return None;
     }
-    let answer = if super::observed_output::scalar_route_prefers_structured_observed_answer(
+    let answer = if crate::agent_engine::observed_output::scalar_route_prefers_structured_observed_answer(
         route, loop_state,
     ) {
         state
             .and_then(|state| {
-                super::observed_output::extract_direct_answer_from_generic_output_i18n(
+                crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
                     loop_state,
                     state,
                     agent_run_context,
                 )
             })
             .or_else(|| {
-                super::observed_output::extract_direct_answer_from_generic_output(
+                crate::agent_engine::observed_output::extract_direct_answer_from_generic_output(
                     loop_state,
                     agent_run_context,
                 )
             })
             .or_else(|| {
                 state.and_then(|state| {
-                    super::observed_output::extract_direct_scalar_from_generic_output_i18n(
+                    crate::agent_engine::observed_output::extract_direct_scalar_from_generic_output_i18n(
                         loop_state,
                         state,
                         agent_run_context,
@@ -383,7 +383,7 @@ fn direct_scalar_observed_answer(
                 })
             })
             .or_else(|| {
-                super::observed_output::extract_direct_scalar_from_generic_output(
+                crate::agent_engine::observed_output::extract_direct_scalar_from_generic_output(
                     loop_state,
                     agent_run_context,
                 )
@@ -391,14 +391,14 @@ fn direct_scalar_observed_answer(
     } else {
         state
             .and_then(|state| {
-                super::observed_output::extract_direct_scalar_from_generic_output_i18n(
+                crate::agent_engine::observed_output::extract_direct_scalar_from_generic_output_i18n(
                     loop_state,
                     state,
                     agent_run_context,
                 )
             })
             .or_else(|| {
-                super::observed_output::extract_direct_scalar_from_generic_output(
+                crate::agent_engine::observed_output::extract_direct_scalar_from_generic_output(
                     loop_state,
                     agent_run_context,
                 )
@@ -452,7 +452,7 @@ fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
 fn execution_recipe_budget_exhausted_message(
     state: &AppState,
     user_text: &str,
-    loop_state: &super::LoopState,
+    loop_state: &crate::agent_engine::LoopState,
 ) -> String {
     let prefer_english = prefer_english_for_user_text(state, user_text);
     let repair_count = loop_state.execution_recipe.repair_count.to_string();
@@ -620,7 +620,7 @@ fn can_attach_execution_recipe_closeout(
             .map(|route| route.output_contract.response_shape),
         Some(crate::OutputResponseShape::Scalar)
     );
-    !is_scalar || super::loop_control::requested_success_marker(agent_run_context).is_some()
+    !is_scalar || crate::agent_engine::loop_control::requested_success_marker(agent_run_context).is_some()
 }
 
 fn attach_execution_recipe_closeout_to_delivery(
@@ -639,7 +639,7 @@ fn attach_execution_recipe_closeout_to_delivery(
     let Some(mut note) = execution_recipe_closeout_note(state, user_text, loop_state) else {
         return;
     };
-    if let Some(marker) = super::loop_control::requested_success_marker(agent_run_context) {
+    if let Some(marker) = crate::agent_engine::loop_control::requested_success_marker(agent_run_context) {
         if !note.contains(marker) {
             note = format!("{note}\n\n{marker}");
         }
@@ -651,7 +651,7 @@ fn ensure_requested_success_marker_visible(
     agent_run_context: Option<&AgentRunContext>,
     delivery_messages: &mut Vec<String>,
 ) {
-    let Some(marker) = super::loop_control::requested_success_marker(agent_run_context) else {
+    let Some(marker) = crate::agent_engine::loop_control::requested_success_marker(agent_run_context) else {
         return;
     };
     if delivery_messages.iter().any(|item| item.contains(marker)) {
@@ -670,10 +670,10 @@ fn ensure_requested_success_marker_visible(
 
 fn missing_requested_success_marker<'a>(
     agent_run_context: Option<&AgentRunContext>,
-    loop_state: &super::LoopState,
+    loop_state: &crate::agent_engine::LoopState,
     delivery_messages: &'a [String],
 ) -> Option<&'static str> {
-    let marker = super::loop_control::requested_success_marker(agent_run_context)?;
+    let marker = crate::agent_engine::loop_control::requested_success_marker(agent_run_context)?;
     let has_marker = delivery_messages.iter().any(|item| item.contains(marker));
     if loop_state.execution_recipe.is_active() && !has_marker {
         Some(marker)
@@ -684,10 +684,10 @@ fn missing_requested_success_marker<'a>(
 
 fn auto_requested_success_marker<'a>(
     agent_run_context: Option<&AgentRunContext>,
-    loop_state: &super::LoopState,
+    loop_state: &crate::agent_engine::LoopState,
     delivery_messages: &'a [String],
 ) -> Option<&'static str> {
-    let marker = super::loop_control::requested_success_marker(agent_run_context)?;
+    let marker = crate::agent_engine::loop_control::requested_success_marker(agent_run_context)?;
     let has_marker = delivery_messages.iter().any(|item| item.contains(marker));
     if loop_state.execution_recipe.is_active()
         && matches!(
@@ -717,14 +717,14 @@ fn direct_structured_observed_answer(
     }
     let answer = state
         .and_then(|state| {
-            super::observed_output::extract_direct_answer_from_generic_output_i18n(
+            crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
                 loop_state,
                 state,
                 agent_run_context,
             )
         })
         .or_else(|| {
-            super::observed_output::extract_direct_answer_from_generic_output(
+            crate::agent_engine::observed_output::extract_direct_answer_from_generic_output(
                 loop_state,
                 agent_run_context,
             )
@@ -804,7 +804,7 @@ async fn direct_publishable_observed_answer(
     {
         return None;
     }
-    let observed = super::observed_output::extract_latest_generic_successful_output(loop_state)?;
+    let observed = crate::agent_engine::observed_output::extract_latest_generic_successful_output(loop_state)?;
     let answer = observed.body.trim().to_string();
     if answer.is_empty()
         || crate::finalize::looks_like_planner_artifact(&answer)
@@ -871,7 +871,7 @@ fn pending_confirmation_resume_payload(
         .find(|issue| issue.kind == crate::verifier::VerifyIssueKind::ConfirmationRequired)
         .map(|issue| issue.detail.as_str())
         .unwrap_or("current plan requires explicit confirmation");
-    Some(super::build_confirmation_required_resume_context(
+    Some(crate::agent_engine::build_confirmation_required_resume_context(
         state,
         &plan.steps,
         user_text,
@@ -1529,7 +1529,7 @@ mod tests {
         let mut route = scalar_route_result();
         route.needs_clarify = true;
         route.clarify_question = "请确认要读取哪个文件？".to_string();
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
         };
@@ -1540,7 +1540,7 @@ mod tests {
 
         let mut route = scalar_route_result();
         route.clarify_question = "不会被复用".to_string();
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
         };
@@ -1585,7 +1585,7 @@ mod tests {
 
     #[test]
     fn execution_recipe_closeout_note_mentions_external_workspace_for_english_code_change() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
@@ -1612,7 +1612,7 @@ mod tests {
 
     #[test]
     fn execution_recipe_closeout_prefixes_greenfield_plain_text_delivery() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
@@ -1626,7 +1626,7 @@ mod tests {
             saw_greenfield_creation: true,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(free_route_result()),
             ..Default::default()
         };
@@ -1647,7 +1647,7 @@ mod tests {
 
     #[test]
     fn execution_recipe_closeout_prefix_includes_requested_success_marker() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             profile: crate::execution_recipe::ExecutionRecipeProfile::OpsService,
@@ -1658,7 +1658,7 @@ mod tests {
             saw_inspect: true,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(free_route_result()),
             user_request: Some(
                 "When it passes, explicitly output VALIDATION_PASSED and stop immediately."
@@ -1684,7 +1684,7 @@ mod tests {
 
     #[test]
     fn execution_recipe_closeout_prefixes_current_repo_plain_text_delivery() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
@@ -1697,7 +1697,7 @@ mod tests {
             saw_validation: true,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(free_route_result()),
             ..Default::default()
         };
@@ -1718,7 +1718,7 @@ mod tests {
 
     #[test]
     fn execution_recipe_closeout_note_mentions_system_scope_for_english_ops() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             profile: crate::execution_recipe::ExecutionRecipeProfile::OpsService,
@@ -1744,7 +1744,7 @@ mod tests {
 
     #[test]
     fn execution_recipe_closeout_note_allows_apply_phase_when_recipe_already_progressed() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             profile: crate::execution_recipe::ExecutionRecipeProfile::OpsService,
@@ -1767,7 +1767,7 @@ mod tests {
 
     #[test]
     fn execution_recipe_closeout_skips_file_token_delivery() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             profile: crate::execution_recipe::ExecutionRecipeProfile::ConfigChange,
@@ -1778,7 +1778,7 @@ mod tests {
             saw_external_target: true,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(free_route_result()),
             ..Default::default()
         };
@@ -1797,7 +1797,7 @@ mod tests {
 
     #[test]
     fn execution_recipe_closeout_skips_scalar_route_delivery() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
@@ -1808,7 +1808,7 @@ mod tests {
             saw_external_target: true,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(scalar_route_result()),
             ..Default::default()
         };
@@ -1827,7 +1827,7 @@ mod tests {
 
     #[test]
     fn execution_recipe_closeout_allows_scalar_route_when_success_marker_requested() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             profile: crate::execution_recipe::ExecutionRecipeProfile::OpsService,
@@ -1840,7 +1840,7 @@ mod tests {
             saw_validation: true,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(scalar_route_result()),
             user_request: Some(
                 "When it passes, explicitly output VALIDATION_PASSED and stop immediately."
@@ -1865,7 +1865,7 @@ mod tests {
 
     #[test]
     fn ensure_requested_success_marker_visible_appends_marker_to_closeout_text() {
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             user_request: Some(
                 "When it passes, explicitly output VALIDATION_PASSED and stop immediately."
                     .to_string(),
@@ -1884,7 +1884,7 @@ mod tests {
 
     #[test]
     fn missing_requested_success_marker_blocks_recipe_success() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             phase: crate::execution_recipe::ExecutionRecipePhase::Done,
@@ -1895,7 +1895,7 @@ mod tests {
             saw_validation: true,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             user_request: Some(
                 "When it passes, explicitly output VALIDATION_PASSED and stop immediately."
                     .to_string(),
@@ -1911,7 +1911,7 @@ mod tests {
 
     #[test]
     fn requested_success_marker_allows_recipe_success_when_present() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             phase: crate::execution_recipe::ExecutionRecipePhase::Done,
@@ -1922,7 +1922,7 @@ mod tests {
             saw_validation: true,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             user_request: Some(
                 "When it passes, explicitly output VALIDATION_PASSED and stop immediately."
                     .to_string(),
@@ -1938,7 +1938,7 @@ mod tests {
 
     #[test]
     fn auto_requested_success_marker_fires_when_recipe_done() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             phase: crate::execution_recipe::ExecutionRecipePhase::Done,
@@ -1949,7 +1949,7 @@ mod tests {
             saw_validation: true,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             user_request: Some(
                 "When it passes, explicitly output VALIDATION_PASSED and stop immediately."
                     .to_string(),
@@ -1965,7 +1965,7 @@ mod tests {
 
     #[test]
     fn auto_requested_success_marker_stays_off_before_recipe_done() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
             phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
@@ -1976,7 +1976,7 @@ mod tests {
             saw_validation: false,
             ..Default::default()
         };
-        let ctx = super::super::AgentRunContext {
+        let ctx = crate::agent_engine::AgentRunContext {
             user_request: Some(
                 "When it passes, explicitly output VALIDATION_PASSED and stop immediately."
                     .to_string(),
@@ -1992,7 +1992,7 @@ mod tests {
 
     #[test]
     fn direct_scalar_finalize_uses_structured_extract_field_missing_result() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
             skill: "system_basic".to_string(),
@@ -2005,7 +2005,7 @@ mod tests {
             started_at: 0,
             finished_at: 0,
         });
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(scalar_route_result()),
             ..Default::default()
         };
@@ -2021,7 +2021,7 @@ mod tests {
 
     #[test]
     fn direct_scalar_finalize_uses_hidden_entries_direct_answer() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
             skill: "list_dir".to_string(),
@@ -2037,7 +2037,7 @@ mod tests {
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
         route.output_contract.locator_hint = ".".to_string();
         route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
         };
@@ -2053,7 +2053,7 @@ mod tests {
 
     #[test]
     fn direct_scalar_finalize_prefers_health_check_summary_over_raw_scalar_field() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
             skill: "health_check".to_string(),
@@ -2070,7 +2070,7 @@ mod tests {
         route.resolved_intent =
             "执行基础健康检查，仅提取并返回操作系统相关的关键字段，排除 RustClaw 自身的状态摘要"
                 .to_string();
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
         };
@@ -2084,7 +2084,7 @@ mod tests {
 
     #[test]
     fn direct_structured_finalize_uses_existence_with_path_answer_when_shape_drifted_free() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
             skill: "system_basic".to_string(),
@@ -2104,7 +2104,7 @@ mod tests {
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
         route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
         route.output_contract.locator_hint = "rustclaw.service".to_string();
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
         };
@@ -2121,7 +2121,7 @@ mod tests {
     #[test]
     fn direct_non_builtin_finalize_preserves_raw_skill_text() {
         let state = test_state();
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state
             .output_vars
             .insert("last_skill_name".to_string(), "crypto".to_string());
@@ -2137,7 +2137,7 @@ mod tests {
             started_at: 0,
             finished_at: 0,
         });
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(free_route_result()),
             ..Default::default()
         };
@@ -2158,7 +2158,7 @@ mod tests {
     #[test]
     fn direct_non_builtin_finalize_skips_structured_machine_output() {
         let state = test_state();
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state
             .output_vars
             .insert("last_skill_name".to_string(), "stock".to_string());
@@ -2171,7 +2171,7 @@ mod tests {
             started_at: 0,
             finished_at: 0,
         });
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(free_route_result()),
             ..Default::default()
         };
@@ -2185,7 +2185,7 @@ mod tests {
     #[test]
     fn raw_structured_passthrough_is_dropped_for_scalar_contract() {
         let raw = r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#;
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.has_tool_or_skill_output = true;
         loop_state.last_user_visible_respond = Some(raw.to_string());
         loop_state.delivery_messages.push(raw.to_string());
@@ -2198,7 +2198,7 @@ mod tests {
             started_at: 0,
             finished_at: 0,
         });
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(scalar_route_result()),
             ..Default::default()
         };
@@ -2215,7 +2215,7 @@ mod tests {
 
     #[test]
     fn qualified_scalar_passthrough_is_not_dropped() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.has_tool_or_skill_output = true;
         loop_state.last_user_visible_respond = Some("rustclaw".to_string());
         loop_state.delivery_messages.push("rustclaw".to_string());
@@ -2228,7 +2228,7 @@ mod tests {
             started_at: 0,
             finished_at: 0,
         });
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(scalar_route_result()),
             ..Default::default()
         };
@@ -2246,7 +2246,7 @@ mod tests {
     #[test]
     fn raw_listing_passthrough_is_dropped_for_content_evidence_free_shape() {
         let listing = "base_skill_response_contract.md\nskill_integration_guide.md";
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.has_tool_or_skill_output = true;
         loop_state.last_user_visible_respond = Some(listing.to_string());
         loop_state.delivery_messages.push(listing.to_string());
@@ -2289,7 +2289,7 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
         };
@@ -2307,7 +2307,7 @@ mod tests {
     #[test]
     fn single_listing_entry_passthrough_is_dropped_for_content_evidence() {
         let listing = "base_skill_response_contract.md\nskill_integration_guide.md";
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.has_tool_or_skill_output = true;
         loop_state.last_user_visible_respond = Some("base_skill_response_contract.md".to_string());
         loop_state
@@ -2352,7 +2352,7 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             auto_locator_path: Some("/tmp/docs".to_string()),
             ..Default::default()
@@ -2370,7 +2370,7 @@ mod tests {
 
     #[test]
     fn direct_scalar_finalize_prefers_presence_plus_path_for_fs_search_presence_queries() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
             skill: "fs_search".to_string(),
@@ -2389,7 +2389,7 @@ mod tests {
                 .to_string();
         route.output_contract.requires_content_evidence = false;
         route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
         };
@@ -2405,7 +2405,7 @@ mod tests {
 
     #[test]
     fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.has_tool_or_skill_output = true;
         loop_state.last_user_visible_respond = Some("exit=0".to_string());
         loop_state.delivery_messages.push("exit=0".to_string());
@@ -2451,7 +2451,7 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
         };
@@ -2524,14 +2524,14 @@ mod tests {
                 .unwrap_or(file_path.clone())
                 .display()
         );
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.last_user_visible_respond = Some("report.txt".to_string());
         loop_state.delivery_messages.push("report.txt".to_string());
 
         let mut route = scalar_route_result();
         route.output_contract.response_shape = OutputResponseShape::FileToken;
         route.output_contract.delivery_required = true;
-        let agent_run_context = super::super::AgentRunContext {
+        let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             auto_locator_path: Some(temp.path().to_string_lossy().to_string()),
             ..Default::default()
@@ -2548,7 +2548,7 @@ mod tests {
 
     #[test]
     fn missing_file_search_evidence_detects_zero_match_fs_search() {
-        let mut loop_state = super::super::LoopState::new(2);
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
             skill: "fs_search".to_string(),

@@ -33,7 +33,6 @@ mod execution_adapters;
 mod execution_recipe;
 mod executor;
 mod finalize;
-mod finalizer;
 mod http;
 mod intent_router;
 mod llm_gateway;
