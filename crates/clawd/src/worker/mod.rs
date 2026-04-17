@@ -5,7 +5,6 @@ use anyhow::anyhow;
 use serde_json::Value;
 use tracing::{debug, error, info, info_span, warn, Instrument};
 
-mod ask_finalize;
 mod ask_pipeline;
 mod ask_prepare;
 mod channels;
@@ -13,13 +12,8 @@ mod locator;
 mod run_skill_finalize;
 mod runtime_support;
 
-// Phase 3.3 Stage 1：finalize 入口集中到 `crate::finalize::*` facade。
-// 调用方应一律使用 `crate::finalize::*`；本处 re-export 仅为让 facade 能从
-// `crate::worker::*` 路径取到符号（Stage 2 物理搬移到 `finalize/task.rs` 后即可移除）。
-pub(crate) use ask_finalize::{
-    finalize_ask_direct_success, finalize_ask_result, run_classifier_direct_reply,
-    try_finalize_schedule_direct_success,
-};
+// Phase 3.3 Stage 2.2：ask_finalize.rs 已物理搬移到 `crate::finalize::task`，
+// 调用面统一通过 `crate::finalize::*` facade 访问。
 use ask_prepare::{maybe_finalize_schedule_direct_text_success, prepare_run_skill_input};
 use ask_prepare::{prepare_ask_execution_context, prepare_ask_input, prepare_ask_routing};
 pub(crate) use channels::{
@@ -31,7 +25,7 @@ pub(super) use locator::{
     try_resolve_implicit_locator_path, LocatorAutoResolution,
 };
 pub(super) use run_skill_finalize::finalize_run_skill_result;
-use runtime_support::spawn_long_term_summary_refresh;
+pub(crate) use runtime_support::spawn_long_term_summary_refresh;
 pub(crate) use runtime_support::{
     maybe_recover_stale_running_tasks_runtime, recover_stale_running_tasks_on_startup,
     spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, start_task_heartbeat,

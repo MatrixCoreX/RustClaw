@@ -217,7 +217,7 @@ async fn finalize_ask_success(
 ) -> Result<()> {
     let result = ask_result_payload(answer_text, answer_messages, Some(journal));
     repo::update_task_success(state, &task.task_id, &result.to_string())?;
-    super::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
+    crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
     insert_ask_memory_pair(
         state,
         task,
@@ -227,7 +227,7 @@ async fn finalize_ask_success(
         is_llm_reply,
         agent_display_name_hint,
     );
-    super::spawn_long_term_summary_refresh(
+    crate::worker::spawn_long_term_summary_refresh(
         state.clone(),
         task.clone(),
         should_refresh_long_term_memory,
@@ -257,7 +257,7 @@ async fn finalize_ask_resume_failure(
     }
     let result = journal.attach_to_result(result);
     repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), user_error)?;
-    super::maybe_notify_schedule_result(state, task, payload, false, user_error).await;
+    crate::worker::maybe_notify_schedule_result(state, task, payload, false, user_error).await;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
         "task_call_end task_id={} kind=ask status=failed path=normal error={} resume_context=true",
@@ -283,7 +283,7 @@ async fn finalize_ask_failure(
     );
     let result = journal.attach_to_result(ask_result_payload(answer_text, answer_messages, None));
     repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), err_text)?;
-    super::maybe_notify_schedule_result(state, task, payload, false, answer_text).await;
+    crate::worker::maybe_notify_schedule_result(state, task, payload, false, answer_text).await;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
         "task_call_end task_id={} kind=ask status=failed path=normal error={}",
@@ -318,7 +318,7 @@ pub(crate) async fn finalize_ask_direct_success(
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     let result = journal.attach_to_result(json!({ "text": answer_text }));
     repo::update_task_success(state, &task.task_id, &result.to_string())?;
-    super::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
+    crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
     insert_ask_memory_pair(
         state,
         task,
@@ -328,7 +328,7 @@ pub(crate) async fn finalize_ask_direct_success(
         false,
         agent_display_name_hint,
     );
-    super::spawn_long_term_summary_refresh(
+    crate::worker::spawn_long_term_summary_refresh(
         state.clone(),
         task.clone(),
         should_refresh_long_term_memory,

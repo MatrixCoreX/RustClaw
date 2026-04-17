@@ -514,7 +514,7 @@ pub(super) fn maybe_publish_execution_recipe_phase_hint(
 }
 
 /// Append to final delivery only. This is the only path that feeds user-visible result. No progress publish.
-pub(super) fn append_delivery_message(
+pub(crate) fn append_delivery_message(
     task_id: &str,
     delivery_messages: &mut Vec<String>,
     message: String,

@@ -164,7 +164,7 @@ pub(crate) fn start_task_heartbeat(state: AppState, task_id: String) -> oneshot:
     stop_tx
 }
 
-pub(super) fn spawn_long_term_summary_refresh(
+pub(crate) fn spawn_long_term_summary_refresh(
     state: AppState,
     task: crate::ClaimedTask,
     force_refresh: bool,
