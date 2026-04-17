@@ -17,6 +17,10 @@ pub(super) struct PreparedAskFlow {
     pub(super) direct_resume_execution: bool,
     pub(super) direct_resume_discussion: bool,
     pub(super) classifier_direct_mode: bool,
+    /// Phase 3.2 Stage C4：从 PreparedAskRouting.ask_mode 复制而来，
+    /// 与上面 3 个 bool flag 双轨。dispatch 内部读这个字段做分支决策，
+    /// Stage D 删除旧 bool。
+    pub(super) ask_mode: crate::AskMode,
     pub(super) clarify_reason: String,
     pub(super) clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     pub(super) fuzzy_locator_suggestions: Vec<String>,
@@ -34,10 +38,7 @@ struct AppliedAskPostRoute {
 }
 
 fn should_allow_classifier_direct(route_result: &crate::RouteResult) -> bool {
-    !matches!(
-        route_result.routed_mode,
-        crate::RoutedMode::Act | crate::RoutedMode::ChatAct
-    )
+    !route_result.ask_mode.is_act()
 }
 
 fn normalize_brief_route_text(input: &str) -> String {
@@ -345,6 +346,7 @@ pub(super) async fn prepare_ask_flow(
         direct_resume_execution: prepared_routing.direct_resume_execution,
         direct_resume_discussion: prepared_routing.direct_resume_discussion,
         classifier_direct_mode: prepared_routing.classifier_direct_mode,
+        ask_mode: prepared_routing.ask_mode.clone(),
         clarify_reason: applied_post_route.clarify_reason,
         clarify_reason_kind: applied_post_route.clarify_reason_kind,
         fuzzy_locator_suggestions: applied_post_route.fuzzy_locator_suggestions,
@@ -369,11 +371,27 @@ pub(super) async fn execute_ask_dispatch(
     classifier_direct_mode: bool,
     direct_resume_discussion: bool,
     direct_resume_execution: bool,
+    ask_mode: &crate::AskMode,
     should_route_schedule_direct: bool,
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Result<Option<Result<crate::AskReply, String>>> {
     let execution_user_request = execution_user_request(prompt, resolved_prompt_for_execution);
-    if matches!(route_result.routed_mode, crate::RoutedMode::AskClarify) {
+    debug_assert_eq!(
+        ask_mode.is_resume_discussion(),
+        direct_resume_discussion,
+        "ask_mode/resume_discussion drift"
+    );
+    debug_assert_eq!(
+        ask_mode.resume_execution(),
+        direct_resume_execution,
+        "ask_mode/resume_execution drift"
+    );
+    debug_assert_eq!(
+        ask_mode.is_classifier_direct(),
+        classifier_direct_mode,
+        "ask_mode/classifier_direct drift"
+    );
+    if route_result.ask_mode.is_clarify_only() {
         let suppress_recent_execution_context = should_suppress_recent_execution_in_clarify_context(
             prompt,
             route_result,
@@ -426,7 +444,7 @@ pub(super) async fn execute_ask_dispatch(
         .await;
         return Ok(Some(Ok(crate::AskReply::non_llm(clarify))));
     }
-    if direct_resume_discussion {
+    if ask_mode.is_resume_discussion() {
         let resume_prompt_source = crate::resolve_prompt_rel_path_for_vendor(
             &state.skill_rt.workspace_root,
             &crate::active_prompt_vendor_name(state),
@@ -449,7 +467,7 @@ pub(super) async fn execute_ask_dispatch(
         .map(|s| crate::AskReply::llm(s.trim().to_string()));
         return Ok(Some(reply));
     }
-    if direct_resume_execution {
+    if ask_mode.resume_execution() {
         return Ok(Some(
             crate::agent_engine::run_agent_with_tools(
                 state,
@@ -474,8 +492,8 @@ pub(super) async fn execute_ask_dispatch(
         {
             return Ok(None);
         }
-        if classifier_direct_mode
-            && !direct_resume_discussion
+        if ask_mode.is_classifier_direct()
+            && !ask_mode.is_resume_discussion()
             && should_allow_classifier_direct(route_result)
         {
             return Ok(Some(
@@ -499,7 +517,7 @@ pub(super) async fn execute_ask_dispatch(
             .await,
         ));
     }
-    if classifier_direct_mode && should_allow_classifier_direct(route_result) {
+    if ask_mode.is_classifier_direct() && should_allow_classifier_direct(route_result) {
         return Ok(Some(
             super::run_classifier_direct_reply(state, task, resolved_prompt_for_execution).await,
         ));
