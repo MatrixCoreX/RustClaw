@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/finalizer_out.schema.json",
+  "title": "FinalizerOut",
+  "description": "Schema for the JSON object returned by `prompts/observed_answer_fallback_prompt.md` (and other finalize-tier classifiers that share the same envelope). Mirrors `ObservedAnswerFallbackOut` in `crates/clawd/src/agent_engine/observed_output.rs` and is enforced by the `finalizer_out_schema_drift` unit test in the same file.\n\n§D2 (schema-driven prompt I/O 第三份样板, after intent_normalizer + plan_result): the finalizer always returns a flat object with `answer` text plus 5 boolean / numeric quality flags that the caller cross-checks against `semantic_judge` only on low confidence (< 0.55). All flags must be present (`#[serde(default)]` covers missing keys, but the schema documents the canonical shape).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "answer",
+    "qualified",
+    "needs_clarify",
+    "is_meta_instruction",
+    "publishable",
+    "confidence"
+  ],
+  "properties": {
+    "answer": {
+      "type": "string",
+      "description": "Final user-facing text. Empty string is allowed only when `qualified=false` and `needs_clarify=true`."
+    },
+    "qualified": {
+      "type": "boolean",
+      "description": "True iff observed outputs are sufficient for a direct final answer (caller's `qualified_completion` disposition)."
+    },
+    "needs_clarify": {
+      "type": "boolean",
+      "description": "True iff observed outputs truly cannot answer the request and a clarification turn is required."
+    },
+    "is_meta_instruction": {
+      "type": "boolean",
+      "description": "True iff the answer is still a meta/placeholder ('I will check/read/inspect first') instead of a real final answer. Caller drops the answer and falls back when this is true."
+    },
+    "publishable": {
+      "type": "boolean",
+      "description": "True iff `answer` is directly suitable for user delivery as the final answer (semantically OK to publish)."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Self-rated confidence in [0,1]. Below `OBSERVED_SELF_CLASSIFY_CONF_THRESHOLD` (= 0.55) the caller calls `semantic_judge::is_meta_respond_instruction` to double-check."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Short, concrete justification. Currently consumed only by audit log (renamed to `_reason` on the Rust side because the runtime body does not branch on it).",
+      "default": ""
+    }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/plan_result.schema.json",
+  "title": "PlanResult",
+  "description": "Schema for the JSON object returned by single-plan / loop-incremental-plan / plan-repair prompts (prompts/single_plan_execution_prompt.md, prompts/loop_incremental_plan_prompt.md, prompts/plan_repair_prompt.md). Mirrors `SinglePlanEnvelope` (crates/clawd/src/agent_engine.rs) and the `AgentAction` enum (crates/clawd/src/runtime/types.rs) and is enforced by the `plan_result_schema_drift` unit test in `crates/clawd/src/agent_engine/planning.rs`.\n\n§D2 (schema-driven prompt I/O 第二份样板, after intent_normalizer): the planner returns either an envelope `{steps: [...]}` or a bare action array. Each step is an `AgentAction` discriminated by `type`. `args` is intentionally `Value` (free-form) — per-skill arg shape is governed downstream by `skills_registry.toml` rather than this schema.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["steps"],
+  "properties": {
+    "steps": {
+      "type": "array",
+      "description": "Ordered list of plan steps. Each item is an `AgentAction` keyed by `type`.",
+      "items": {"$ref": "#/$defs/AgentAction"}
+    },
+    "planner_notes": {
+      "type": "string",
+      "description": "Free-text rationale, surfaced into journal but not consumed by the executor.",
+      "default": ""
+    }
+  },
+  "$defs": {
+    "AgentAction": {
+      "oneOf": [
+        {"$ref": "#/$defs/ActionThink"},
+        {"$ref": "#/$defs/ActionCallSkill"},
+        {"$ref": "#/$defs/ActionCallTool"},
+        {"$ref": "#/$defs/ActionRespond"}
+      ]
+    },
+    "ActionThink": {
+      "type": "object",
+      "required": ["type", "content"],
+      "properties": {
+        "type": {"const": "think"},
+        "content": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "ActionCallSkill": {
+      "type": "object",
+      "required": ["type", "skill"],
+      "properties": {
+        "type": {"const": "call_skill"},
+        "skill": {
+          "type": "string",
+          "description": "Skill name; must exist in configs/skills_registry.toml under `[skills.<name>]`."
+        },
+        "args": {
+          "description": "Free-form per-skill argument bag. Shape is enforced by skill manifest, not by this schema."
+        }
+      },
+      "additionalProperties": true
+    },
+    "ActionCallTool": {
+      "type": "object",
+      "required": ["type", "tool"],
+      "properties": {
+        "type": {"const": "call_tool"},
+        "tool": {
+          "type": "string",
+          "description": "Built-in tool name (read_file / write_file / run_cmd / fs_search / ...)."
+        },
+        "args": {
+          "description": "Free-form per-tool argument bag."
+        }
+      },
+      "additionalProperties": true
+    },
+    "ActionRespond": {
+      "type": "object",
+      "required": ["type", "content"],
+      "properties": {
+        "type": {"const": "respond"},
+        "content": {
+          "type": "string",
+          "description": "User-visible message body. After §3.4, planner-stage Respond steps without preceding actions are filtered locally to avoid passthrough; meta-respond markers are also rejected by `looks_like_meta_respond_directive_local`."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

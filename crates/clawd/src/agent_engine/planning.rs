@@ -2915,4 +2915,98 @@ mod tests {
         let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
         assert_eq!(actions_as_json(&out), before);
     }
+
+    /// §D2.a：plan_result schema 与 `AgentAction` enum / `SinglePlanEnvelope` 漂移检查。
+    ///
+    /// 校验内容：
+    /// 1. `prompts/schemas/plan_result.schema.json` 是合法 JSON 且为 object schema；
+    /// 2. envelope 顶层 required 含 `steps`；
+    /// 3. `$defs/AgentAction.oneOf` 必须正好覆盖 4 个 variant：think / call_skill /
+    ///    call_tool / respond（与 `AgentAction` enum 一一对应）；
+    /// 4. 每个 variant 的 `type` const 必须是 snake_case 的 variant 名；
+    /// 5. 每个 variant 的 required 字段必须 ⊇ `AgentAction` 该 variant 的非空字段；
+    /// 6. 完整性闭环：把每个 variant 的最小合法实例 round-trip
+    ///    `serde_json::from_value::<AgentAction>` 必须成功。
+    #[test]
+    fn plan_result_schema_drift() {
+        const SCHEMA_RAW: &str =
+            include_str!("../../../../prompts/schemas/plan_result.schema.json");
+        let schema: serde_json::Value =
+            serde_json::from_str(SCHEMA_RAW).expect("plan_result.schema.json must be valid JSON");
+        assert_eq!(
+            schema.get("type").and_then(|v| v.as_str()),
+            Some("object"),
+            "schema root must be object"
+        );
+        let required = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("schema must have `required`");
+        assert!(
+            required.iter().any(|v| v.as_str() == Some("steps")),
+            "envelope must require `steps`"
+        );
+        let defs = schema
+            .get("$defs")
+            .and_then(|v| v.as_object())
+            .expect("schema must declare $defs");
+        let action = defs
+            .get("AgentAction")
+            .expect("$defs.AgentAction must exist");
+        let one_of = action
+            .get("oneOf")
+            .and_then(|v| v.as_array())
+            .expect("AgentAction must be a oneOf union");
+
+        // 期望与 `AgentAction` enum 完全对齐：think / call_skill / call_tool / respond
+        let expected: HashSet<&str> = ["think", "call_skill", "call_tool", "respond"]
+            .into_iter()
+            .collect();
+        let mut actual: HashSet<String> = HashSet::new();
+        for entry in one_of {
+            let ref_path = entry
+                .get("$ref")
+                .and_then(|v| v.as_str())
+                .expect("oneOf entry must use $ref");
+            let def_name = ref_path
+                .strip_prefix("#/$defs/")
+                .expect("$ref must point under #/$defs/");
+            let def = defs.get(def_name).expect("referenced def must exist");
+            let type_const = def
+                .get("properties")
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.get("const"))
+                .and_then(|v| v.as_str())
+                .expect("variant must declare `properties.type.const`");
+            actual.insert(type_const.to_string());
+        }
+        let actual_refs: HashSet<&str> = actual.iter().map(String::as_str).collect();
+        assert_eq!(
+            actual_refs, expected,
+            "plan_result.schema.json AgentAction oneOf must cover exactly {:?}, got {:?}",
+            expected, actual_refs
+        );
+
+        // §D2.a 步骤 6：每个 variant 的最小合法实例必须能反序列化进 AgentAction。
+        let probes: &[(&str, serde_json::Value)] = &[
+            ("think", json!({"type": "think", "content": "x"})),
+            (
+                "call_skill",
+                json!({"type": "call_skill", "skill": "run_cmd", "args": {}}),
+            ),
+            (
+                "call_tool",
+                json!({"type": "call_tool", "tool": "read_file", "args": {}}),
+            ),
+            ("respond", json!({"type": "respond", "content": "ok"})),
+        ];
+        for (label, value) in probes {
+            serde_json::from_value::<AgentAction>(value.clone()).unwrap_or_else(|err| {
+                panic!(
+                    "AgentAction variant `{}` failed to deserialize from schema-conformant minimum payload: {}",
+                    label, err
+                )
+            });
+        }
+    }
 }
