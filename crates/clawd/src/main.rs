@@ -449,6 +449,28 @@ async fn main() -> anyhow::Result<()> {
         views.planner_visible.len()
     );
 
+    // §P4.1 收尾：registry 必须覆盖所有 REQUIRED_BUILTIN_SKILLS（且 kind=builtin），
+    // 否则 chat / run_cmd / read_file 这些核心技能在 dispatch 时会被走 runner
+    // 子进程，行为静默回退。这里在启动期一次性 bail，便于早发现别名漂移或
+    // 误改 kind。
+    if let Some(ref reg) = views.registry {
+        let report = reg.integrity_report();
+        if !report.is_clean() {
+            let path_display = config.skills.registry_path.as_deref().unwrap_or("(none)");
+            let detail = report.into_human_message().unwrap_or_default();
+            let msg = format!(
+                "skills registry integrity check failed (path={path_display}): {detail}"
+            );
+            error!("startup: {msg}");
+            return Err(anyhow::anyhow!(msg));
+        }
+    } else {
+        warn!(
+            "startup: no skills registry loaded (path={}); falling back to hardcoded builtin set, future routing may drift",
+            config.skills.registry_path.as_deref().unwrap_or("(none)")
+        );
+    }
+
     let feishu_send_config = load_feishu_send_config(&workspace_root);
     let lark_send_config = load_lark_send_config(&workspace_root);
     let wechat_send_config = load_wechat_send_config(&workspace_root);
