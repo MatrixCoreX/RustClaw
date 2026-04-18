@@ -1,3 +1,4 @@
+use claw_core::secrets::{provision_secret_envs, EnvSecretsBroker};
 use claw_core::skill_registry::{Capability, SkillsRegistry, REQUIRED_BUILTIN_SKILLS};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -255,6 +256,45 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
                  add it to the test allowlist if intentional",
                 path.display(),
                 caps.iter().map(Capability::as_token).collect::<Vec<_>>(),
+            );
+        }
+    }
+}
+
+/// §E1.b 守底：当前 registry 状态下，spawn 路径**不应**注入任何 secrets env。
+///
+/// 这条测试在 §E1.c 之前是 zero-secret 状态的"基线快照"。一旦给 image_generate
+/// 等技能加上 `secrets.<usage>_<vendor>_api_key`，本测试会红，提醒同步把这条
+/// 守底升级成"按 manifest 期望的 env 名清单逐一断言"。这样：
+/// - PR 阶段就能看见 secrets 变更对 spawn 路径的影响；
+/// - 永远不会出现"manifest 写了 capability，但运行期忘了 wire"的静默错误。
+#[test]
+fn provision_secret_envs_baseline_is_empty_for_current_registry() {
+    let registry_paths = [
+        workspace_root().join("configs/skills_registry.toml"),
+        workspace_root().join("docker/config/skills_registry.toml"),
+    ];
+    let broker = EnvSecretsBroker::new();
+
+    for path in registry_paths.iter() {
+        let registry = SkillsRegistry::load_from_path(path).expect("load registry");
+        for name in registry.all_names() {
+            let caps = registry.capabilities(&name).to_vec();
+            // missing 报错也算违反基线：当前任何 declared secret 都没有 broker 后端。
+            // 一旦升级到 §E1.c，把这里改成"对每个 skill 验期望 env 名集合"。
+            let provisioned = provision_secret_envs(&broker, &caps).unwrap_or_else(|err| {
+                panic!(
+                    "{}: skill `{name}` capabilities {:?} unexpectedly require secrets at baseline: {err}",
+                    path.display(),
+                    caps.iter().map(Capability::as_token).collect::<Vec<_>>(),
+                );
+            });
+            assert!(
+                provisioned.is_empty(),
+                "{}: skill `{name}` provisioned {} secret env(s) at baseline; this is the §E1.c rollout marker — \
+                 once intentional, replace this test with a per-skill expected-env-name allowlist",
+                path.display(),
+                provisioned.len(),
             );
         }
     }

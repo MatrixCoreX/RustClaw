@@ -30,8 +30,11 @@
 
 use std::env;
 use std::fmt;
+use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
+
+use crate::skill_registry::Capability;
 
 /// secret 内容的强类型包装。
 ///
@@ -219,6 +222,112 @@ impl SecretsBroker for EnvSecretsBroker {
     }
 }
 
+// ============================================================================
+// §E1.b: provision_secret_envs —— 按 manifest capabilities 把 secrets 翻译成
+// 子进程要看到的 (ENV_VAR_NAME, SecretValue) 列表。
+// ============================================================================
+
+#[derive(Debug, Error)]
+pub enum ProvisionError {
+    /// manifest 声明了 secrets.<name> 但 broker 找不到对应凭证。
+    /// **fail-loud**：调用方应当直接拒绝 spawn，绝不让 skill 拿空字符串去
+    /// 打 vendor API（那样会在远端日志里留下"鉴权失败"，难排查）。
+    #[error("missing secrets: {missing:?}")]
+    MissingSecrets { missing: Vec<String> },
+    /// 单条 secret 查询失败（命名违规 / 后端 IO）。
+    #[error("secret lookup failed for `{name}`: {source}")]
+    Lookup {
+        name: String,
+        #[source]
+        source: SecretsError,
+    },
+}
+
+/// 把 manifest 上声明的 [`Capability::Secrets`] 翻译成"子进程 env 名 → secret 值"。
+///
+/// **设计要点（§P4.4 / §E1.b）**：
+/// - 只处理 `Capability::Secrets(name)`，其余 capability 静默跳过 ——
+///   `Net` / `Llm` / `FsRead` 等是 sandbox/policy 层关心的，不属于本函数；
+/// - env var 名 = `name.to_ascii_uppercase()`；与 [`EnvSecretsBroker`]
+///   的默认翻译策略保持一致，这样无论 broker 是 env / KMS / vault，子进
+///   程读到的都是同一个 env 名（等于把 broker 的"翻译规则"前置成 spawn
+///   path 的事实标准）；
+/// - **fail-loud**：任何 declared secret 在 broker 里找不到 → 返回
+///   `MissingSecrets` 列表（不是单个 Err）；调用方一次看到所有缺的，
+///   方便运维一次补齐；
+/// - 输出按 env name 字典序排序 + 同名去重，让日志可重现、调用方可写
+///   稳定的字符串断言。
+///
+/// **不做什么**：
+/// - 不读父进程 env 作为 fallback（broker 自己决定 env / 别的后端）；
+/// - 不写子进程的 env（那是 spawn path 的事，本函数纯函数）；
+/// - 不脱敏日志（SecretValue 本身就拒绝明文 Debug，安全）。
+pub fn provision_secret_envs(
+    broker: &dyn SecretsBroker,
+    capabilities: &[Capability],
+) -> Result<Vec<(String, SecretValue)>, ProvisionError> {
+    let mut wanted: Vec<&str> = capabilities
+        .iter()
+        .filter_map(|c| match c {
+            Capability::Secrets(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    wanted.sort_unstable();
+    wanted.dedup();
+
+    let mut provisioned: Vec<(String, SecretValue)> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+
+    for canonical in wanted {
+        let env_name = canonical.to_ascii_uppercase();
+        match broker.lookup(canonical) {
+            Ok(Some(secret)) => provisioned.push((env_name, secret)),
+            Ok(None) => missing.push(canonical.to_string()),
+            Err(e) => {
+                return Err(ProvisionError::Lookup {
+                    name: canonical.to_string(),
+                    source: e,
+                });
+            }
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(ProvisionError::MissingSecrets { missing });
+    }
+    Ok(provisioned)
+}
+
+// ============================================================================
+// §E1.b: 进程级 broker 单例（避免污染 AppState / 10 处 test fixture）。
+// ============================================================================
+
+static GLOBAL_BROKER: OnceLock<Arc<dyn SecretsBroker>> = OnceLock::new();
+
+/// 安装进程级 SecretsBroker。**只能成功一次**，之后调用返回 `Err(broker)`
+/// 把入参原样还回（与 `OnceLock::set` 行为一致），避免线上误"换 broker"。
+///
+/// 典型调用点：clawd `main()` 启动期，在加载 registry 之后、在 spawn 任何
+/// skill runner 之前。测试里如果要换 broker，用 `global_or_default` 不会写
+/// singleton；要测自定义 broker 直接用 [`provision_secret_envs`] 注入即可，
+/// 不要去动这个全局。
+pub fn install_global(broker: Arc<dyn SecretsBroker>) -> Result<(), Arc<dyn SecretsBroker>> {
+    GLOBAL_BROKER.set(broker)
+}
+
+/// 取进程级 broker；若未 install，惰性返回一个默认 [`EnvSecretsBroker`]。
+///
+/// 注意：惰性默认 broker **不会**写进 `GLOBAL_BROKER`，所以后续 install 仍
+/// 然有效。这意味着：在 install 之前调一次 `global_or_default()` 是安全的，
+/// 不会把 install 的窗口关掉。
+pub fn global_or_default() -> Arc<dyn SecretsBroker> {
+    if let Some(b) = GLOBAL_BROKER.get() {
+        return b.clone();
+    }
+    Arc::new(EnvSecretsBroker::new())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,5 +499,172 @@ mod tests {
     #[test]
     fn secrets_broker_trait_is_dyn_safe() {
         let _boxed: Box<dyn SecretsBroker> = Box::new(EnvSecretsBroker::new());
+    }
+
+    // ========================================================================
+    // §E1.b: provision_secret_envs 单测
+    // ========================================================================
+
+    /// 测试用 mock broker：内存 map，单测里独立可控，不依赖 env。
+    struct MockBroker {
+        map: std::collections::HashMap<String, String>,
+        fail_on: Option<String>, // 命中此 name 时返回 BackendIo
+    }
+    impl MockBroker {
+        fn new(pairs: &[(&str, &str)]) -> Self {
+            Self {
+                map: pairs
+                    .iter()
+                    .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                    .collect(),
+                fail_on: None,
+            }
+        }
+        fn fail_on(mut self, name: &str) -> Self {
+            self.fail_on = Some(name.to_string());
+            self
+        }
+    }
+    impl SecretsBroker for MockBroker {
+        fn lookup(&self, name: &str) -> Result<Option<SecretValue>, SecretsError> {
+            if Some(name.to_string()) == self.fail_on {
+                return Err(SecretsError::BackendIo {
+                    name: name.to_string(),
+                    source: std::io::Error::other("mock backend down"),
+                });
+            }
+            Ok(self.map.get(name).map(|v| SecretValue::new(v.clone())))
+        }
+        fn label(&self) -> &str {
+            "mock"
+        }
+    }
+
+    #[test]
+    fn provision_skips_non_secret_capabilities() {
+        let broker = MockBroker::new(&[]);
+        let caps = vec![
+            Capability::Llm,
+            Capability::Net,
+            Capability::FsRead,
+            Capability::FsWrite,
+            Capability::Exec,
+            Capability::ExecSudo,
+        ];
+        let out = provision_secret_envs(&broker, &caps).unwrap();
+        assert!(out.is_empty(), "non-secret caps must not produce env entries");
+    }
+
+    #[test]
+    fn provision_translates_secret_name_to_uppercase_env() {
+        let broker = MockBroker::new(&[
+            ("image_generation_minimax_api_key", "image-secret"),
+            ("text_openai_api_key", "text-secret"),
+        ]);
+        let caps = vec![
+            Capability::Llm,
+            Capability::Secrets("image_generation_minimax_api_key".to_string()),
+            Capability::Secrets("text_openai_api_key".to_string()),
+        ];
+        let out = provision_secret_envs(&broker, &caps).unwrap();
+        // 字典序：IMAGE_... 在 TEXT_... 前
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].0, "IMAGE_GENERATION_MINIMAX_API_KEY");
+        assert_eq!(out[0].1.expose(), "image-secret");
+        assert_eq!(out[1].0, "TEXT_OPENAI_API_KEY");
+        assert_eq!(out[1].1.expose(), "text-secret");
+    }
+
+    #[test]
+    fn provision_dedupes_identical_secret_capabilities() {
+        // 同一个 secret 名出现两次（manifest 写错时偶发），不应注入两遍。
+        let broker = MockBroker::new(&[("text_openai_api_key", "v")]);
+        let caps = vec![
+            Capability::Secrets("text_openai_api_key".to_string()),
+            Capability::Secrets("text_openai_api_key".to_string()),
+        ];
+        let out = provision_secret_envs(&broker, &caps).unwrap();
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn provision_fails_loud_with_all_missing_secrets_at_once() {
+        // 三条 declared，broker 只有一条 → 一次性报告 2 条 missing
+        let broker = MockBroker::new(&[("text_openai_api_key", "v")]);
+        let caps = vec![
+            Capability::Secrets("text_openai_api_key".to_string()),
+            Capability::Secrets("image_generation_minimax_api_key".to_string()),
+            Capability::Secrets("image_edit_qwen_api_key".to_string()),
+        ];
+        let err = provision_secret_envs(&broker, &caps).unwrap_err();
+        match err {
+            ProvisionError::MissingSecrets { mut missing } => {
+                missing.sort();
+                assert_eq!(
+                    missing,
+                    vec![
+                        "image_edit_qwen_api_key".to_string(),
+                        "image_generation_minimax_api_key".to_string(),
+                    ]
+                );
+            }
+            other => panic!("expected MissingSecrets, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provision_propagates_backend_io_error_immediately() {
+        let broker = MockBroker::new(&[("text_openai_api_key", "v")]).fail_on("image_edit_qwen_api_key");
+        let caps = vec![
+            Capability::Secrets("text_openai_api_key".to_string()),
+            Capability::Secrets("image_edit_qwen_api_key".to_string()),
+        ];
+        let err = provision_secret_envs(&broker, &caps).unwrap_err();
+        match err {
+            ProvisionError::Lookup { name, .. } => {
+                assert_eq!(name, "image_edit_qwen_api_key");
+            }
+            other => panic!("expected Lookup error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provision_output_is_alphabetically_stable() {
+        // 不依赖输入顺序：故意倒序声明 capability，输出仍按 env name 字典序
+        let broker = MockBroker::new(&[
+            ("text_openai_api_key", "x"),
+            ("chat_minimax_api_key", "y"),
+            ("image_vision_anthropic_api_key", "z"),
+        ]);
+        let caps = vec![
+            Capability::Secrets("text_openai_api_key".to_string()),
+            Capability::Secrets("image_vision_anthropic_api_key".to_string()),
+            Capability::Secrets("chat_minimax_api_key".to_string()),
+        ];
+        let out = provision_secret_envs(&broker, &caps).unwrap();
+        let names: Vec<&str> = out.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "CHAT_MINIMAX_API_KEY",
+                "IMAGE_VISION_ANTHROPIC_API_KEY",
+                "TEXT_OPENAI_API_KEY",
+            ]
+        );
+    }
+
+    #[test]
+    fn provision_handles_empty_capabilities_list() {
+        let broker = MockBroker::new(&[]);
+        let out = provision_secret_envs(&broker, &[]).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn global_or_default_returns_env_broker_when_uninstalled() {
+        // 注：本测试不调 install_global —— OnceLock 一旦 set 就锁死，会污染
+        // 后续测试。这里只验证"未 install 时 fallback 是 env"。
+        let b = global_or_default();
+        assert_eq!(b.label(), "env");
     }
 }
