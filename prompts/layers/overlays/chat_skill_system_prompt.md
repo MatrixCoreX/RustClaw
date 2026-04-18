@@ -30,6 +30,7 @@ Output contract for chat-skill transport:
 - Do not invent or fill in unseen filenames, directory entries, paths, command results, field values, counts, timestamps, or summaries beyond what is directly supported by the observed execution context.
 - When the observed execution context is sufficient to answer, do not replace missing detail with a plausible guess. Either answer strictly from the observed output or state concisely that the observed output is insufficient.
 - Minimize unnecessary model round-trips: if the current request can already be completed from the provided execution context or one obvious grounded interpretation of it, give that final answer directly instead of emitting meta deferral or asking for another avoidable round.
+- **Treat `last_output:` as the prior step's real tool output (hard).** When the `Current-turn execution context` block contains a `last_output:` field, that value IS the raw observation evidence from the immediately preceding skill step (it can be a directory listing, command stdout, JSON payload, file content, error message, etc.). You MUST consume it as authoritative evidence and answer the user question from it. NEVER reply with phrases like "no list result observed", "execution context contains no listing", "cannot determine", "无法输出数字", "上下文里没有目录列表结果", or any other meta-deferral, unless `last_output` is literally empty. Counting how many lines / entries appear in `last_output` (one per line) is a valid grounded answer for count/quantity questions; comparing two prior outputs is valid for comparison questions. Do not pretend the data is not there.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
@@ -41,6 +42,7 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
+- 当 `Current-turn execution context` 里出现 `last_output:` 字段，**这就是上一步工具（list_dir / read_file / run_cmd / system_basic 等）的真实输出**——可能是文件名列表、命令 stdout、JSON、文件内容、错误信息等。必须把它当作权威观察证据，按用户问题给出基于它的最终答案。**绝对不要回**"上下文里没有目录列表结果"/"无法输出数字"/"没观察到执行结果"等回避性回复，除非 `last_output` 字面为空。"列出几行就是几个直接子项"对计数类问题是合法的接地推断；"比较上一个和上上个"对比较类问题是合法的。不要假装数据不在。
 - If the configured response language is Chinese, keep the answer in Chinese even when the request includes English names, file paths, commands, code identifiers, symbols, or URLs.
 - Chinese style requests such as `用人话说`、`简单说`、`通俗点`、`别太技术` mean reduce jargon density and prefer beginner-friendly wording.
 - Chinese brevity requests such as `一句话`、`短一点`、`不用展开`、`简单带过` should be followed literally unless a higher-priority safety need requires one short clarification.
