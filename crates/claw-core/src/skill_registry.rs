@@ -390,6 +390,85 @@ fn to_canonical_key(s: &str) -> String {
     s.trim().to_lowercase()
 }
 
+/// §P4.1 收尾：clawd 进程内"必须存在且 kind=builtin"的技能 canonical 集合。
+///
+/// 这一组在 `crates/clawd/src/skills.rs::is_builtin_skill_name` 仍保留作为
+/// registry 缺失时的安全网，但运行期权威是这里。任何变动都需要同时更新
+/// 那张安全网；CI 上有 `crates/clawd/tests/config_templates.rs` 里的
+/// `registry_covers_all_required_builtins` 守底，registry 漏一个就红。
+pub const REQUIRED_BUILTIN_SKILLS: &[&str] = &[
+    "run_cmd",
+    "read_file",
+    "write_file",
+    "list_dir",
+    "make_dir",
+    "remove_file",
+    "schedule",
+    // chat 在 §P2.2 后被搬进 clawd 内（享受 LLM gateway 治理：fallback /
+    // circuit breaker / per-task budget / model_io.log）。registry 里仍
+    // 标 kind=builtin，是这条记录的真相来源。
+    "chat",
+];
+
+/// §P4.1 收尾：registry 完整性校验报告，便于启动期 / CI 一次性输出全部漂移点。
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RegistryIntegrityReport {
+    /// 在 [`REQUIRED_BUILTIN_SKILLS`] 里但 registry 完全找不到的 canonical name。
+    pub missing: Vec<String>,
+    /// 找到了，但 `kind` 不是 `Builtin`（例如被误改成 `Runner`）的 canonical name。
+    pub wrong_kind: Vec<String>,
+}
+
+impl RegistryIntegrityReport {
+    pub fn is_clean(&self) -> bool {
+        self.missing.is_empty() && self.wrong_kind.is_empty()
+    }
+
+    /// 把报告打成给人看的一行错误描述。空报告返回 None。
+    pub fn into_human_message(self) -> Option<String> {
+        if self.is_clean() {
+            return None;
+        }
+        let mut parts: Vec<String> = Vec::new();
+        if !self.missing.is_empty() {
+            parts.push(format!("missing builtins: {}", self.missing.join(", ")));
+        }
+        if !self.wrong_kind.is_empty() {
+            parts.push(format!(
+                "builtins with wrong kind (expected kind=builtin): {}",
+                self.wrong_kind.join(", ")
+            ));
+        }
+        Some(parts.join("; "))
+    }
+}
+
+impl SkillsRegistry {
+    /// 检查 registry 是否覆盖了 [`REQUIRED_BUILTIN_SKILLS`]，并且每条都标
+    /// `kind = "builtin"`。返回结构化报告，便于一次性输出所有漂移点。
+    ///
+    /// 这是 §P4.1 alias 收敛子项的"启动期 + CI 双保险"基础：
+    /// - clawd 启动时调一次，发现漂移直接 bail；
+    /// - `tests/config_templates.rs` 在 CI 跑同一套校验，避免 dev 漏跑。
+    pub fn integrity_report(&self) -> RegistryIntegrityReport {
+        let mut missing: Vec<String> = Vec::new();
+        let mut wrong_kind: Vec<String> = Vec::new();
+        for name in REQUIRED_BUILTIN_SKILLS {
+            match self.get(name) {
+                None => missing.push((*name).to_string()),
+                Some(entry) if entry.kind != SkillKind::Builtin => {
+                    wrong_kind.push((*name).to_string());
+                }
+                Some(_) => {}
+            }
+        }
+        RegistryIntegrityReport {
+            missing,
+            wrong_kind,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,6 +511,61 @@ output_kind = "image"
         assert_eq!(reg.timeout_seconds("image_vision"), 90);
         assert!(reg.enabled_names().contains(&"run_cmd".to_string()));
         assert!(reg.enabled_names().contains(&"image_vision".to_string()));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn integrity_report_flags_missing_and_wrong_kind() {
+        let toml = r#"
+[[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+
+[[skills]]
+name = "read_file"
+enabled = true
+kind = "runner"   # 故意写错 kind，应该被 wrong_kind 抓到
+"#;
+        let path = std::env::temp_dir().join("test_registry_integrity_report.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path).unwrap();
+        let report = reg.integrity_report();
+
+        assert!(!report.is_clean());
+        assert!(
+            report.missing.contains(&"write_file".to_string()),
+            "missing should include uncovered builtins, got {:?}",
+            report.missing
+        );
+        assert!(
+            report.missing.contains(&"chat".to_string()),
+            "missing should include chat, got {:?}",
+            report.missing
+        );
+        assert_eq!(report.wrong_kind, vec!["read_file".to_string()]);
+
+        let human = report.into_human_message().unwrap();
+        assert!(human.contains("missing builtins"));
+        assert!(human.contains("wrong kind"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn integrity_report_clean_when_all_required_builtins_present() {
+        let mut toml = String::new();
+        for name in REQUIRED_BUILTIN_SKILLS {
+            toml.push_str(&format!(
+                "[[skills]]\nname = \"{name}\"\nenabled = true\nkind = \"builtin\"\n\n"
+            ));
+        }
+        let path = std::env::temp_dir().join("test_registry_integrity_clean.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path).unwrap();
+        let report = reg.integrity_report();
+        assert!(report.is_clean(), "expected clean report, got {report:?}");
+        assert!(report.into_human_message().is_none());
         let _ = std::fs::remove_file(path);
     }
 

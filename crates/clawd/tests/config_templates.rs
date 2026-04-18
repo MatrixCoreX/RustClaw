@@ -1,4 +1,4 @@
-use claw_core::skill_registry::SkillsRegistry;
+use claw_core::skill_registry::{SkillsRegistry, REQUIRED_BUILTIN_SKILLS};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -150,5 +150,28 @@ fn registry_covers_all_legacy_hardcoded_aliases() {
                 path.display()
             );
         }
+    }
+}
+
+/// §P4.1 收尾：clawd 启动期会拒绝缺失或 kind 漂移的 builtin。这条测试是
+/// CI 等价物 —— 把仓内两份 registry 用同一个 `integrity_report` 跑一遍，
+/// 任何漏 builtin / kind 写错都会在 PR 阶段就红。
+#[test]
+fn registry_covers_all_required_builtins() {
+    let registry_paths = [
+        workspace_root().join("configs/skills_registry.toml"),
+        workspace_root().join("docker/config/skills_registry.toml"),
+    ];
+
+    for path in registry_paths.iter() {
+        let registry = SkillsRegistry::load_from_path(path).expect("load registry");
+        let report = registry.integrity_report();
+        assert!(
+            report.is_clean(),
+            "{}: registry integrity check failed (REQUIRED_BUILTIN_SKILLS={:?}): {}",
+            path.display(),
+            REQUIRED_BUILTIN_SKILLS,
+            report.into_human_message().unwrap_or_default()
+        );
     }
 }
