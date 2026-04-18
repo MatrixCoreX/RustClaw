@@ -260,3 +260,8 @@ overlay = ["prompts/layers/overlays/publishable_raw_classifier_prompt.md"]
 logical_path = "prompts/delivery_text_classifier_prompt.md"
 base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/delivery_text_classifier_prompt.md"]
+
+[[prompts]]
+logical_path = "prompts/observed_answer_fallback_prompt.md"
+base = ["prompts/layers/base/system_truth.md"]
+overlay = ["prompts/layers/overlays/observed_answer_fallback_prompt.md"]
