@@ -5,6 +5,104 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
+/// §E2 step1: skill-runner 子进程在 strict 模式下允许从父进程继承的 env 白名单。
+///
+/// 设计原则：
+/// * 只放行子进程**最低运行所必需**的基础设施变量（locale / 临时目录 / TLS 根证书 /
+///   PATH 之类），其它一切配置（API key、model、workspace 路径等）必须由 clawd 通过
+///   `cmd.env(...)` 显式注入或经 `SecretsBroker` 走 `secrets.<usage>_<vendor>_api_key`
+///   契约下来 —— 这才是 §3.4 "secrets 成为唯一渠道" 的真正落地。
+/// * 严格模式默认 OFF (`RUSTCLAW_SKILL_ENV_STRICT=1` 才打开)，避免兼容性突变；
+///   开启后 skill 若再依赖未声明的环境变量会立刻为空，运维可由此发现遗漏。
+/// * 列表保持小而稳：扩列前请先评估能否用 manifest capability 替代。
+pub(crate) const SKILL_RUNNER_ENV_WHITELIST: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "TZ",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+];
+
+/// §E2 step1: 运行期判断是否启用 strict env 隔离。
+///
+/// 接受 `1` / `true` / `on` / `yes`（大小写不敏感）作为打开信号，其余视为关闭。
+pub(crate) fn skill_runner_env_strict_enabled() -> bool {
+    matches!(
+        std::env::var("RUSTCLAW_SKILL_ENV_STRICT")
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("1") | Some("true") | Some("on") | Some("yes")
+    )
+}
+
+/// §E2 step1: 在 strict 模式下从一个 source env map 计算应当注入子进程的白名单 env。
+///
+/// 抽成纯函数便于单元测试 —— `apply_skill_runner_env_isolation` 内部用 `std::env::vars()`
+/// 作为 source，但测试时我们想喂一个固定 map 验证白名单语义。
+///
+/// 返回值已按 key 字典序排序、过滤掉空值（避免把空字符串传下去再触发 fail-loud）。
+pub(crate) fn collect_whitelisted_env_pairs<I, K, V>(source: I) -> Vec<(String, String)>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    use std::collections::BTreeMap;
+    let allowed: std::collections::HashSet<&'static str> =
+        SKILL_RUNNER_ENV_WHITELIST.iter().copied().collect();
+    let mut kept: BTreeMap<String, String> = BTreeMap::new();
+    for (k, v) in source {
+        let key = k.as_ref();
+        if !allowed.contains(key) {
+            continue;
+        }
+        let val = v.as_ref();
+        if val.is_empty() {
+            continue;
+        }
+        kept.insert(key.to_string(), val.to_string());
+    }
+    kept.into_iter().collect()
+}
+
+/// §E2 step1: 打开 strict 隔离时，把白名单变量原样塞回 `cmd`，并返回剥离 / 保留的统计。
+///
+/// 只做"清空 + 白名单注入"，不碰任何后续 `.env(K, V)` 调用 —— 那部分仍是 clawd 显式
+/// 配置 + broker secrets，是子进程的**唯一**真实 env 来源。
+pub(crate) struct StrictEnvReport {
+    pub(crate) preserved: Vec<String>,
+    pub(crate) stripped_count: usize,
+}
+
+pub(crate) fn apply_skill_runner_env_isolation(cmd: &mut Command) -> Option<StrictEnvReport> {
+    if !skill_runner_env_strict_enabled() {
+        return None;
+    }
+    let kept = collect_whitelisted_env_pairs(std::env::vars());
+    let total_env = std::env::vars().count();
+    cmd.env_clear();
+    let preserved: Vec<String> = kept.iter().map(|(k, _)| k.clone()).collect();
+    for (k, v) in &kept {
+        cmd.env(k, v);
+    }
+    Some(StrictEnvReport {
+        preserved,
+        stripped_count: total_env.saturating_sub(kept.len()),
+    })
+}
+
 mod builtin;
 mod external;
 mod memory_context;
@@ -653,9 +751,10 @@ pub(crate) async fn run_skill_with_runner_outcome(
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_task_request_text, is_recoverable_skill_error, normalize_skill_error_for_user,
-        request_reply_language, task_request_locale_tag, RequestReplyLanguage,
-        READ_FILE_NOT_FOUND_PREFIX,
+        collect_whitelisted_env_pairs, extract_task_request_text, is_recoverable_skill_error,
+        normalize_skill_error_for_user, request_reply_language, skill_runner_env_strict_enabled,
+        task_request_locale_tag, RequestReplyLanguage, READ_FILE_NOT_FOUND_PREFIX,
+        SKILL_RUNNER_ENV_WHITELIST,
     };
     use crate::{
         runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime, ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
@@ -830,6 +929,112 @@ mod tests {
         assert!(!is_recoverable_skill_error("system_basic", "command not found"));
         assert!(!is_recoverable_skill_error("read_file", "some random error"));
     }
+
+    // §E2 step1 ===============================================================
+    // 抽象 helper 才能稳定测：apply_skill_runner_env_isolation 直接读 std::env::vars()
+    // 在并发测试里读到的是 cargo runner 的环境，没法稳定断言；所以靠 collect 函数 +
+    // 显式 source map 验证白名单语义本身。
+
+    #[test]
+    fn skill_env_strict_off_when_env_unset_or_empty() {
+        // 暂存 + 清掉避免邻测污染
+        let prev = std::env::var_os("RUSTCLAW_SKILL_ENV_STRICT");
+        std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT");
+        assert!(!skill_runner_env_strict_enabled(), "默认应 OFF");
+
+        std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", "");
+        assert!(!skill_runner_env_strict_enabled(), "空字符串视为 OFF");
+
+        std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", "0");
+        assert!(!skill_runner_env_strict_enabled(), "\"0\" 视为 OFF");
+
+        std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", "false");
+        assert!(!skill_runner_env_strict_enabled(), "\"false\" 视为 OFF");
+
+        // 恢复
+        match prev {
+            Some(v) => std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", v),
+            None => std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT"),
+        }
+    }
+
+    #[test]
+    fn skill_env_strict_on_for_truthy_values() {
+        let prev = std::env::var_os("RUSTCLAW_SKILL_ENV_STRICT");
+        for val in ["1", "true", "TRUE", "True", "on", "yes"] {
+            std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", val);
+            assert!(
+                skill_runner_env_strict_enabled(),
+                "RUSTCLAW_SKILL_ENV_STRICT={val:?} 应被识别为 ON"
+            );
+        }
+        match prev {
+            Some(v) => std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", v),
+            None => std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT"),
+        }
+    }
+
+    #[test]
+    fn whitelist_keeps_only_listed_keys_and_drops_secrets_or_unknown() {
+        let source = vec![
+            ("PATH", "/usr/bin:/bin"),
+            ("HOME", "/home/u"),
+            ("LANG", "en_US.UTF-8"),
+            // 以下都不在白名单，必须被剥离
+            ("OPENAI_API_KEY", "sk-fake-leak"),
+            ("MINIMAX_API_KEY", "sk-fake-leak2"),
+            ("RUSTCLAW_USER_KEY", "rk-leak"),
+            ("DATABASE_URL", "postgres://leak"),
+            ("AWS_ACCESS_KEY_ID", "AKIA..."),
+        ];
+        let kept = collect_whitelisted_env_pairs(source);
+        let kept_keys: Vec<&str> = kept.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(kept_keys, vec!["HOME", "LANG", "PATH"], "字典序 + 仅白名单");
+        for (k, _) in &kept {
+            assert!(SKILL_RUNNER_ENV_WHITELIST.contains(&k.as_str()));
+        }
+    }
+
+    #[test]
+    fn whitelist_drops_empty_value_to_avoid_silent_propagation() {
+        let source = vec![
+            ("PATH", "/usr/bin"),
+            ("HOME", ""), // 空值不传，避免 skill 拿到 "" 又 fail-loud
+            ("LC_ALL", "C"),
+        ];
+        let kept = collect_whitelisted_env_pairs(source);
+        let kept_keys: Vec<&str> = kept.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(kept_keys, vec!["LC_ALL", "PATH"]);
+    }
+
+    #[test]
+    fn whitelist_does_not_invent_keys_for_missing_source() {
+        let source: Vec<(&str, &str)> = vec![("UNRELATED", "x")];
+        let kept = collect_whitelisted_env_pairs(source);
+        assert!(kept.is_empty(), "没有白名单匹配时不应注入任何 env");
+    }
+
+    #[test]
+    fn whitelist_constant_does_not_include_obvious_secrets_or_clawd_specific_keys() {
+        // §E2 step1 防回归：白名单不能不小心放进 API key / RustClaw 专属变量。
+        let banned = [
+            "OPENAI_API_KEY",
+            "MINIMAX_API_KEY",
+            "QWEN_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "RUSTCLAW_USER_KEY",
+            "RUSTCLAW_ADMIN_KEY",
+            "DATABASE_URL",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+        ];
+        for needle in banned {
+            assert!(
+                !SKILL_RUNNER_ENV_WHITELIST.contains(&needle),
+                "{needle} 不能进白名单 —— 必须走 secrets broker 或 clawd 显式 env 注入"
+            );
+        }
+    }
 }
 
 fn extract_skill_provider_model(value: &Value) -> Option<(String, String, String)> {
@@ -990,6 +1195,16 @@ pub(crate) async fn run_skill_with_runner_once(
 
     let selected_openai_model = crate::llm_gateway::selected_openai_model(state, Some(task));
     let mut cmd = Command::new(&state.skill_rt.skill_runner_path);
+    // §E2 step1: 严格模式下先 env_clear + 白名单，让后续 `.env(...)` / secrets 注入
+    // 成为子进程 env 的唯一来源。默认 OFF，行为与历史一致。
+    if let Some(report) = apply_skill_runner_env_isolation(&mut cmd) {
+        tracing::info!(
+            "skill_dispatch skill={} env_strict=on preserved={:?} stripped_parent_env={}",
+            canonical_skill_name,
+            report.preserved,
+            report.stripped_count
+        );
+    }
     cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env(
             "OPENAI_API_KEY",
