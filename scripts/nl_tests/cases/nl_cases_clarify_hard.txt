@@ -2,13 +2,13 @@
 # Format: case_name|turn1|turn2
 # Curated list: keep the hard path-scoped and pronoun-heavy cases only.
 
-clarify_which_readme|读一下那个 README 开头并用一句话总结|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md
-clarify_which_config_file|把那个配置文件发给我|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
-clarify_which_log_tail|帮我看一下那个日志最近 20 行|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log
-clarify_which_db|查一下那个 sqlite 里有哪些表|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
-clarify_which_archive_unpack|把那个压缩包解压到 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/clarify_unpack_case 然后告诉我结果|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip
-clarify_which_json_name|读一下那个 JSON 里的 name 字段，只输出值|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/package.json
-clarify_which_dir_count|数一下那个目录里有多少个直接子项，只输出数字|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs
-clarify_pronoun_it_file|把它发给我|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md
-clarify_pronoun_that_log|看下那个最近 10 行|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/model_io.log
-clarify_missing_target_then_file|把那个文件发给我，不要贴内容|/tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/definitely_missing_clarify_hard_001.txt
+clarify_which_readme|读一下那个 README 开头并用一句话总结|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md
+clarify_which_config_file|把那个配置文件发给我|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+clarify_which_log_tail|帮我看一下那个日志最近 20 行|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/app.log
+clarify_which_db|查一下那个 sqlite 里有哪些表|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
+clarify_which_archive_unpack|把那个压缩包解压到 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/clarify_unpack_case 然后告诉我结果|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip
+clarify_which_json_name|读一下那个 JSON 里的 name 字段，只输出值|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/package.json
+clarify_which_dir_count|数一下那个目录里有多少个直接子项，只输出数字|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs
+clarify_pronoun_it_file|把它发给我|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md
+clarify_pronoun_that_log|看下那个最近 10 行|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/model_io.log
+clarify_missing_target_then_file|把那个文件发给我，不要贴内容|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/definitely_missing_clarify_hard_001.txt
