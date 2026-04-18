@@ -78,9 +78,9 @@ user_rpm = 20
 # 风险/Risk: vendor/model 不匹配会导致调用失败.
 [llm]
 # 默认模型名 / Default selected model.
-selected_model = "qwen-max-latest"
+selected_model = "MiniMax-M2.7"
 # 默认厂商标识 / Default selected vendor.
-selected_vendor = "qwen"
+selected_vendor = "minimax"
 
 # 用途/Purpose: Anthropic 提供商连接与模型池.
 # 建议修改/Recommended change: 可改，需保证 key/base_url/model 对齐.
