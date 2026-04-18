@@ -88,6 +88,37 @@ fn locator_hint_looks_file_like(locator_hint: &str) -> bool {
             .is_some_and(|name| name.eq_ignore_ascii_case("readme"))
 }
 
+/// 检查 normalizer 给的 `locator_hint` 字段里是否含有任意一个**真实存在**的绝对路径。
+/// 用于支持别名/多目标场景：normalizer 把"甲/乙"等别名解析后写成
+/// `"乙对应/abs/foo.md；甲对应/abs/bar.md"`，此时 raw_prompt 里只有别名、
+/// `has_concrete_locator_hint(prompt)` 会返回 false，但 normalizer 自己已经
+/// 给出了具体可执行的 path，post_route_policy 不应再强行触发 clarify。
+fn locator_hint_contains_existing_absolute_path(locator_hint: &str) -> bool {
+    let trimmed = locator_hint.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // locator_hint 可能是单个 path（简单形式），也可能是包含中英文标签的多 path 拼接，如：
+    //   "/home/.../README.md"
+    //   "乙对应/home/.../service_notes.md；甲对应/home/.../README.md"
+    //   "乙: /home/.../foo.md, 甲: /home/.../bar.md"
+    // 用一个宽松的拆分：按空白 / 逗号 / 分号 / 中文分号 / 冒号 / 中文冒号 切，
+    // 然后挑出以 '/' 开头的 token，去掉首尾标点，逐个测 exists。
+    let separators: &[char] = &[
+        ' ', '\t', '\n', '\r', ',', '，', ';', '；', ':', '：', '"', '“', '”', '\'', '‘', '’',
+        '(', ')', '（', '）', '[', ']', '【', '】',
+    ];
+    for token in trimmed.split(separators) {
+        let token = token.trim_matches(|c: char| {
+            !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
+        });
+        if token.starts_with('/') && Path::new(token).exists() {
+            return true;
+        }
+    }
+    false
+}
+
 fn should_default_to_content_excerpt_summary(
     route_result: &RouteResult,
     direct_locator_path: Option<&str>,
@@ -156,10 +187,13 @@ pub(crate) fn apply_post_route_policy(
     let mut auto_locator_hint = None;
     let mut auto_locator_resolved_direct = false;
     let mut fuzzy_locator_suggestions = Vec::new();
+    let normalizer_locator_hint_has_existing_path =
+        locator_hint_contains_existing_absolute_path(&route_result.output_contract.locator_hint);
     let mut missing_locator_for_path_scoped_content = path_scoped_content_request
         && !locator_kind_is_current_workspace(route_result.output_contract.locator_kind)
         && !raw_has_concrete_locator_hint
-        && !resolved_has_concrete_locator_hint;
+        && !resolved_has_concrete_locator_hint
+        && !normalizer_locator_hint_has_existing_path;
 
     match locator_resolution {
         LocatorResolution::Direct(path) => {
