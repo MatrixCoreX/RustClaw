@@ -176,6 +176,28 @@ fn registry_covers_all_required_builtins() {
     }
 }
 
+/// §P4.2：仓内两份 registry 必须满足 capability ↔ shape 一致性
+/// （exec.sudo 必须 confirm + high；fs.write/exec 不允许显式 side_effect=false）。
+/// 这里在 CI 跑一遍，确保 dev 改 registry 时漏配立刻红。
+#[test]
+fn registry_capability_shape_consistency_is_clean() {
+    let registry_paths = [
+        workspace_root().join("configs/skills_registry.toml"),
+        workspace_root().join("docker/config/skills_registry.toml"),
+    ];
+
+    for path in registry_paths.iter() {
+        let registry = SkillsRegistry::load_from_path(path).expect("load registry");
+        let violations = registry.validate_shape_consistency();
+        assert!(
+            violations.is_empty(),
+            "{}: capability shape consistency violations:\n  - {}",
+            path.display(),
+            violations.join("\n  - ")
+        );
+    }
+}
+
 /// §P4.1 主体：示范技能 image_generate 必须按 schema 声明 capabilities。
 ///
 /// 本测试同时承担两个守底职责：
