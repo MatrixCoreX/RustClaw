@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WAIT_SECONDS="${WAIT_SECONDS:-120}"
 KEEP_WORKSPACE="${KEEP_WORKSPACE:-0}"
 CLAWD_BIN="${CLAWD_BIN:-}"
-RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-/tmp/rustclaw-home/runtime_env_filled.sh}"
+RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-/home/guagua/runtime_env_filled.sh}"
 
 usage() {
   cat <<'EOF'

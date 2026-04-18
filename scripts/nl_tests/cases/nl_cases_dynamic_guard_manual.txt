@@ -2,23 +2,23 @@
 # Curated list: keep explicit path, mixed language, missing file, and colloquial pressure.
 
 # Format accepted by run_manual_test.sh: suite|name|tags|prompt
-dynamic_guard|explicit_path_readme_summary|path,file,summary|帮我看一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md 开头，然后一句话说重点
-dynamic_guard|explicit_path_readme_send|path,file,delivery|把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md 这个文件直接发我
-dynamic_guard|explicit_config_send|path,config,delivery|把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml 发给我，别贴正文
-dynamic_guard|explicit_log_tail|path,log,read|帮我看下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log 最后 10 行
-dynamic_guard|explicit_db_tables|path,db,read|看看 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里面有哪些表
-dynamic_guard|explicit_archive_unpack|path,archive,act|把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 解压到 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/tmp/manual_dynamic_guard_unpack 然后告诉我结果
-dynamic_guard|explicit_docs_list_names_only|path,dir,list|列一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs 这一层直接子项，只要名字
-dynamic_guard|explicit_docs_count_scalar|path,dir,count|数一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs 目录直接有多少个子项，只回数字
-dynamic_guard|explicit_missing_file_graceful|path,file,missing|把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/not_exists_case_003.md 发给我，不要瞎编
-dynamic_guard|explicit_db_schema_version_cn|path,db,scalar|查一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema version，只输出值
-dynamic_guard|english_explicit_readme_summary|path,file,en|Read the first part of /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md and give me a one-line summary.
-dynamic_guard|english_explicit_log_tail|path,log,en|Show me the last 12 lines of /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log.
-dynamic_guard|mixed_lang_explicit_file_summary|path,file,mixed|read /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/README.md 前几行，然后用中文一句话总结
-dynamic_guard|colloquial_cn_send_no_paste|path,file,delivery,colloquial|别贴正文，直接把 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/service_notes.md 丢给我
-dynamic_guard|colloquial_en_log_focus|path,log,en,colloquial|Could you quickly tail /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/app.log for 9 lines and give me a one-liner takeaway?
-dynamic_guard|explicit_release_checklist_summary|path,file,summary|读一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md，然后一句话说它主要提醒什么
-dynamic_guard|explicit_package_name_scalar|path,json,scalar|去 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/package.json 里把 name 的值拿出来，只输出值
-dynamic_guard|explicit_model_io_tail_brief|path,log,summary|看一下 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/logs/model_io.log 最后 5 行，再一句话说有什么现象
-dynamic_guard|explicit_docs_archive_names_only|path,dir,list|列出 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/docs/archive 下面直接文件名，只要名字
-dynamic_guard|colloquial_cn_config_purpose|path,config,colloquial|瞅一眼 /tmp/rustclaw-workspace/scripts/nl_tests/fixtures/device_local/configs/app_config.toml，然后用一句人话说它是干嘛的
+dynamic_guard|explicit_path_readme_summary|path,file,summary|帮我看一下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md 开头，然后一句话说重点
+dynamic_guard|explicit_path_readme_send|path,file,delivery|把 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md 这个文件直接发我
+dynamic_guard|explicit_config_send|path,config,delivery|把 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml 发给我，别贴正文
+dynamic_guard|explicit_log_tail|path,log,read|帮我看下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/app.log 最后 10 行
+dynamic_guard|explicit_db_tables|path,db,read|看看 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里面有哪些表
+dynamic_guard|explicit_archive_unpack|path,archive,act|把 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 解压到 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/tmp/manual_dynamic_guard_unpack 然后告诉我结果
+dynamic_guard|explicit_docs_list_names_only|path,dir,list|列一下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs 这一层直接子项，只要名字
+dynamic_guard|explicit_docs_count_scalar|path,dir,count|数一下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs 目录直接有多少个子项，只回数字
+dynamic_guard|explicit_missing_file_graceful|path,file,missing|把 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/not_exists_case_003.md 发给我，不要瞎编
+dynamic_guard|explicit_db_schema_version_cn|path,db,scalar|查一下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema version，只输出值
+dynamic_guard|english_explicit_readme_summary|path,file,en|Read the first part of /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md and give me a one-line summary.
+dynamic_guard|english_explicit_log_tail|path,log,en|Show me the last 12 lines of /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/app.log.
+dynamic_guard|mixed_lang_explicit_file_summary|path,file,mixed|read /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md 前几行，然后用中文一句话总结
+dynamic_guard|colloquial_cn_send_no_paste|path,file,delivery,colloquial|别贴正文，直接把 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md 丢给我
+dynamic_guard|colloquial_en_log_focus|path,log,en,colloquial|Could you quickly tail /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/app.log for 9 lines and give me a one-liner takeaway?
+dynamic_guard|explicit_release_checklist_summary|path,file,summary|读一下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md，然后一句话说它主要提醒什么
+dynamic_guard|explicit_package_name_scalar|path,json,scalar|去 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/package.json 里把 name 的值拿出来，只输出值
+dynamic_guard|explicit_model_io_tail_brief|path,log,summary|看一下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/model_io.log 最后 5 行，再一句话说有什么现象
+dynamic_guard|explicit_docs_archive_names_only|path,dir,list|列出 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/archive 下面直接文件名，只要名字
+dynamic_guard|colloquial_cn_config_purpose|path,config,colloquial|瞅一眼 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml，然后用一句人话说它是干嘛的
