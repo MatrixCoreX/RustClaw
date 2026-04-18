@@ -147,7 +147,16 @@ fn rewrite_path_field(args: &mut Value, auto_locator_path: &str) -> bool {
     };
     match obj.get("path").and_then(|v| v.as_str()) {
         Some(current) if current == auto_locator_path => false,
-        Some(_) => {
+        Some(current) => {
+            // AUTO_LOCATOR 只是 turn 级"默认 path 兜底"，仅当 LLM 给的 path 看起来是
+            // 猜测/无效（不是已存在的文件/目录）时才能覆盖。已显式且存在的具体路径
+            // （例如 plan 中的 read_file(README.md) 与 read_file(service_notes.md) 这种
+            // 多目标 read 链路）必须保留 LLM 原值，否则会把多步 read 全部 rewrite 成同一个
+            // auto_locator path，导致下游 chat 拿到重复内容、看不到第二个目标的真实输出。
+            let trimmed = current.trim();
+            if !trimmed.is_empty() && Path::new(trimmed).exists() {
+                return false;
+            }
             obj.insert(
                 "path".to_string(),
                 Value::String(auto_locator_path.to_string()),
@@ -164,7 +173,13 @@ fn rewrite_root_field(args: &mut Value, auto_locator_path: &str) -> bool {
     };
     match obj.get("root").and_then(|v| v.as_str()) {
         Some(current) if current == auto_locator_path => false,
-        Some(_) => {
+        Some(current) => {
+            // 与 rewrite_path_field 同义：已存在的真实 root（如 LLM 显式给的 fs_search.find_path
+            // root="/home/.../docs"）不该被 turn 级 AUTO_LOCATOR 默认值覆盖。
+            let trimmed = current.trim();
+            if !trimmed.is_empty() && Path::new(trimmed).exists() {
+                return false;
+            }
             obj.insert(
                 "root".to_string(),
                 Value::String(auto_locator_path.to_string()),
@@ -363,9 +378,10 @@ mod tests {
         loop_state
             .output_vars
             .insert("auto_locator_path".to_string(), document_path.clone());
+        // 用一个明确不存在的 root，以贴近 AUTO_LOCATOR 的"兜底猜测路径"语义。
         let mut args = json!({
             "action": "find_path",
-            "root": ".",
+            "root": "/nonexistent_root_for_auto_locator_test_xyz",
             "name": "manual_note.txt"
         });
         assert!(rewrite_args_with_auto_locator_path(
@@ -376,6 +392,28 @@ mod tests {
         assert_eq!(
             args.get("root").and_then(|v| v.as_str()),
             Some(document_path.as_str())
+        );
+    }
+
+    #[test]
+    fn auto_locator_preserves_explicit_existing_path() {
+        // F8 回归用例：当 LLM 显式给的 path 是真实存在的具体文件时（典型场景：
+        // 多文件 read 链路第二个 read_file），AUTO_LOCATOR 不得覆盖它。
+        let root = TempDirGuard::new("explicit_existing");
+        let readme = root.path.join("README.md");
+        let notes = root.path.join("notes.md");
+        fs::write(&readme, "# readme\n").expect("write readme");
+        fs::write(&notes, "# notes\n").expect("write notes");
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("auto_locator_path".to_string(), notes.display().to_string());
+        let mut args = json!({"path": readme.display().to_string()});
+        let rewritten = rewrite_args_with_auto_locator_path("read_file", &mut args, &loop_state);
+        assert!(!rewritten, "explicit existing path must not be rewritten");
+        assert_eq!(
+            args.get("path").and_then(|v| v.as_str()),
+            Some(readme.display().to_string().as_str())
         );
     }
 }
