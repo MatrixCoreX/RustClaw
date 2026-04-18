@@ -929,9 +929,68 @@ pub(crate) async fn run_skill_with_runner_once(
         ));
     }
 
+    // §E1.b: 按 manifest capabilities 注入 secrets env。fail-loud：声明了
+    // 但 broker 找不到 ⇒ 直接拒绝 spawn，绝不让 skill 拿空字符串去打 vendor。
+    // 当前 manifest 里没有任何 skill 声明 `secrets.*`（image_generate 走的是
+    // 父进程 env 继承），所以 provisioned 大概率为空 ⇒ 行为零变化；下一步
+    // §E1.c 给 image_generate 声明 secrets.image_generation_<vendor>_api_key
+    // 时本路径自动接管。
+    let secret_envs = {
+        let caps: Vec<claw_core::skill_registry::Capability> = state
+            .get_skills_registry()
+            .as_ref()
+            .map(|reg| reg.capabilities(canonical_skill_name).to_vec())
+            .unwrap_or_default();
+        let broker = claw_core::secrets::global_or_default();
+        match claw_core::secrets::provision_secret_envs(broker.as_ref(), &caps) {
+            Ok(pairs) => {
+                if !pairs.is_empty() {
+                    let names: Vec<&str> = pairs.iter().map(|(n, _)| n.as_str()).collect();
+                    tracing::info!(
+                        "skill_dispatch skill={} provisioned_secrets={:?} broker={}",
+                        canonical_skill_name,
+                        names,
+                        broker.label()
+                    );
+                }
+                pairs
+            }
+            Err(claw_core::secrets::ProvisionError::MissingSecrets { missing }) => {
+                let env_names: Vec<String> = missing
+                    .iter()
+                    .map(|n| n.to_ascii_uppercase())
+                    .collect();
+                tracing::error!(
+                    "skill_dispatch skill={} missing_secrets={:?} broker={} — refuse to spawn",
+                    canonical_skill_name,
+                    env_names,
+                    broker.label()
+                );
+                return Err(format!(
+                    "skill `{canonical_skill_name}` declared secrets but broker `{}` is missing: {} (set the corresponding env var(s) and retry)",
+                    broker.label(),
+                    env_names.join(", ")
+                ));
+            }
+            Err(claw_core::secrets::ProvisionError::Lookup { name, source }) => {
+                tracing::error!(
+                    "skill_dispatch skill={} secret_lookup_failed name={} err={} broker={}",
+                    canonical_skill_name,
+                    name,
+                    source,
+                    broker.label()
+                );
+                return Err(format!(
+                    "skill `{canonical_skill_name}` secret `{name}` lookup failed via broker `{}`: {source}",
+                    broker.label()
+                ));
+            }
+        }
+    };
+
     let selected_openai_model = crate::llm_gateway::selected_openai_model(state, Some(task));
-    let mut child = Command::new(&state.skill_rt.skill_runner_path)
-        .env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
+    let mut cmd = Command::new(&state.skill_rt.skill_runner_path);
+    cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env(
             "OPENAI_API_KEY",
             crate::llm_gateway::selected_openai_api_key(state, Some(task)),
@@ -950,7 +1009,13 @@ pub(crate) async fn run_skill_with_runner_once(
         .env(
             "RUSTCLAW_LOCATOR_SCAN_MAX_FILES",
             state.skill_rt.locator_scan_max_files.to_string(),
-        )
+        );
+    // §E1.b: secrets 在最后注入，确保覆盖任何上面无意命中的同名硬编码键
+    // （目前没有，但留给以后清理 OPENAI_API_KEY 等硬编码时不会被静默覆盖）。
+    for (env_name, secret) in &secret_envs {
+        cmd.env(env_name, secret.expose());
+    }
+    let mut child = cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
