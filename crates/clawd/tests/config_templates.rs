@@ -213,9 +213,19 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
     // (canonical, sorted-tokens) — sorted 顺序与 SkillsRegistry::load_from_path
     // 内部 dedup+sort 后的结果一致。
     let expected_with_caps: &[(&str, &[&str])] = &[
-        // 首批示例：图像生成需要 LLM 网关 + 对外网络 + 写盘 + minimax 凭证。
-        // 注意 sort 顺序：`fs.write` < `llm` < `net` < `secrets.image_...`。
-        // 新增 vendor 段时（openai/google/qwen/...），同步加 secrets.image_generation_<vendor>_api_key。
+        // 注意 sort 顺序：`fs.write` < `llm` < `net` < `secrets.*`（按字典序）。
+        // 新增 vendor 段时（openai/google/qwen/...），同步加 secrets.<usage>_<vendor>_api_key。
+        // chat 当前是 builtin（kind="builtin" 不走 spawn path），所以不在本表里 ——
+        // 它的凭证由 clawd 主路径 selected_openai_api_key forge，broker 注入跳过。
+        (
+            "image_edit",
+            &[
+                "fs.write",
+                "llm",
+                "net",
+                "secrets.image_edit_minimax_api_key",
+            ],
+        ),
         (
             "image_generate",
             &[
@@ -224,6 +234,10 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
                 "net",
                 "secrets.image_generation_minimax_api_key",
             ],
+        ),
+        (
+            "image_vision",
+            &["llm", "net", "secrets.image_vision_minimax_api_key"],
         ),
     ];
 
@@ -303,9 +317,12 @@ fn provision_secret_envs_matches_manifest_expectation() {
 
     // 期望：skill canonical name -> 子进程应当看到的 ENV_VAR_NAME 集合（已排序）
     let expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
-        // §E1.c：image_generate 当前默认 default_vendor=minimax（见 configs/image.toml），
-        // 因此只声明这一条。新启用别的 vendor 段时，同步加该 vendor 的 env 名。
+        // §E1.c：image_generate 当前默认 default_vendor=minimax（见 configs/image.toml）。
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
+        // §E1.d：image_edit / image_vision 同样默认 default_vendor=minimax。
+        // 新启用别的 vendor 段时，同步加对应 ENV_VAR_NAME。
+        ("image_edit", vec!["IMAGE_EDIT_MINIMAX_API_KEY"]),
+        ("image_vision", vec!["IMAGE_VISION_MINIMAX_API_KEY"]),
     ]);
 
     let registry_paths = [
