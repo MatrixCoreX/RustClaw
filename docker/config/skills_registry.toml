@@ -192,7 +192,12 @@ prompt_file = "prompts/skills/image_generate.md"
 output_kind = "image"
 # §P4.1 主体首批示例：image_generate 走外部 LLM provider 生成图，
 # 落盘到 workspace 的输出目录，因此声明 llm + net + fs.write。
-# 未来 §P4.4 落 secrets 短期 token 时再加 secrets.<provider>_api_key。
+# 注意：image_generation / image_edit / image_vision / [llm]（chat&规划）
+# 是四套互相独立的 provider 配置（见 configs/image.toml + configs/config.toml）。
+# §P4.4 落 secrets 短期 token 时，secret 命名必须按 <用途>_<vendor>_api_key
+# 展开（如 secrets.image_generation_minimax_api_key），不能用
+# secrets.openai_api_key 这种跨用途的"vendor-唯一"命名，否则会把 image
+# 的 key 注入到 chat 链路。
 capabilities = ["llm", "net", "fs.write"]
 # §P4.2 shape 一致性：fs.write 隐含写盘副作用，显式标 side_effect=true
 # 让 risk 路由 / finalize 决策都能拿到正确信号。
