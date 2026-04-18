@@ -321,6 +321,12 @@ enabled = true
 # Phase 2.2: chat 并入 clawd 内置实现，享受 LLM gateway（fallback / circuit
 # breaker / 预算 / model_io.log）。chat-skill 二进制保留，但 clawd 内部
 # dispatch 一律走 builtin。如要回退到旧子进程路径，把 kind 改回 "runner"。
+#
+# §E2 step2 备忘：chat 保持 builtin 也意味着它**不**走 §E2 step1 的 spawn 隔离
+# 路径（env_clear + 白名单），因为它就在 clawd 进程内调用 LLM gateway，凭据
+# 用的是进程级 LlmProviderRuntime（启动期从 toml + env 加载）。把 LLM 凭据
+# 也改成跟 image_* 一样走 SecretsBroker（`secrets.text_<vendor>_api_key`），
+# 是 §P4.4 E3「短期 token broker」的范畴；E2 阶段不动 chat 凭据来源。
 kind = "builtin"
 aliases = ["talk", "smalltalk", "joke", "chitchat"]
 timeout_seconds = 30

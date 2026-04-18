@@ -68,3 +68,4 @@ scripts/nl_tests/cases/_probe/
 # =============================================================================
 .cursor/
 agent-transcripts/
+tmp/
