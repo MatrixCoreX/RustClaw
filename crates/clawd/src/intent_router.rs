@@ -512,9 +512,79 @@ fn fallback_response_shape(user_request: &str, delivery_required: bool) -> Outpu
     }
 }
 
+/// §F2：判断用户原始消息是不是「只有路径，没有动词」的形态。
+///
+/// 命中条件（**全部**满足）：
+/// 1. trim 后非空且 ≤ 60 字节（bare path 一般很短）；
+/// 2. 不含明显的中文/英文动词性提示（check / list / send / read / show /
+///    look / write / find / 看 / 列 / 发 / 读 / 查 / 检查 / 写 / 帮 / 告诉 / 显示
+///    等），见 `BARE_PATH_VERB_TOKENS`；
+/// 3. 路径形态特征：含 `/` 或以常见文件后缀结尾，**或**整段就是单个非空白 token；
+///    并且不含问号 / 感叹号 / 逗号 / `?` / `？` 等会话标点（避免把"那是 a/b/c 吗？"
+///    这种问句误判）。
+///
+/// 命中后调用方应把 needs_clarify 强制改成 true，让 routing 走 ask_clarify
+/// 拿到动词，避免下游 planner 死循环。
+fn is_bare_path_only_input_no_verb(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.len() > 60 {
+        return false;
+    }
+    if trimmed.contains('?') || trimmed.contains('？') || trimmed.contains('!') || trimmed.contains('！') {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    const BARE_PATH_VERB_TOKENS: &[&str] = &[
+        // English action verbs / hints
+        "check", "list", "send", "read", "show", "look", "write", "find",
+        "open", "tell", "give", "explain", "summary", "summarize", "compare",
+        "count", "delete", "remove", "create", "make", "run", "exec", "execute",
+        "deliver", "what", "where", "when", "why", "how", "which", "who",
+        "is ", "are ", "do ", "does ", "did ", "can ", "could ", "would ",
+        "please", "help", "want", "need",
+        // 中文动词 / 提问词
+        "看", "列", "发", "读", "查", "写", "帮", "告诉", "显示", "找", "返回",
+        "执行", "运行", "比较", "对比", "解释", "总结", "数", "删", "创建", "制作",
+        "想", "需要", "请", "把", "给", "再", "什么", "哪个", "哪里", "怎么", "如何",
+        "是不是", "有没有", "多少",
+    ];
+    for token in BARE_PATH_VERB_TOKENS {
+        if lower.contains(token) {
+            return false;
+        }
+    }
+    let has_path_marker = trimmed.contains('/')
+        || trimmed.ends_with(".md")
+        || trimmed.ends_with(".toml")
+        || trimmed.ends_with(".json")
+        || trimmed.ends_with(".rs")
+        || trimmed.ends_with(".log")
+        || trimmed.ends_with(".sh")
+        || trimmed.ends_with(".py")
+        || trimmed.ends_with(".txt");
+    // 这里只针对带 `/` / 有文件后缀的 path-like 形态触发；纯单词（"git" 这种）
+    // 走原有 normalizer 的 clarify 路径，不在本规则修复范围内。
+    has_path_marker
+}
+
+/// §F2：根据 bare-path 输入造一个简洁的中英双语 clarify 问句。
+fn bare_path_clarify_question_for(text: &str) -> String {
+    let path = text.trim();
+    format!(
+        "你想对 `{path}` 做什么？比如列出内容、读取某个文件、还是发给我？ / What do you want to do with `{path}`? e.g. list its contents, read a file, or send it to me?",
+        path = path
+    )
+}
+
 fn deterministic_fallback_route_decision(user_request: &str) -> Option<RouteDecision> {
     let trimmed = user_request.trim();
     if trimmed.is_empty() {
+        return None;
+    }
+    // §F2：bare-path-no-verb 也别走 deterministic explicit-locator fallback；
+    // 让外层 normalizer-fallback 路径走 AskClarify，由 generate_clarify_question
+    // 提一个动词。
+    if is_bare_path_only_input_no_verb(trimmed) {
         return None;
     }
 
@@ -884,6 +954,35 @@ pub(crate) async fn run_intent_normalizer(
                 ))
                 .unwrap_or_else(|| "none".to_string())
         );
+        // §F2：bare-path-no-verb 兜底。某些 vendor（实测 minimax）会把单独
+        // 的 `document/` / `prompts/` / `./logs` 之类纯路径输入判成
+        // needs_clarify=false + mode=Act/ChatAct，下游 planner 在没有动词时
+        // 反复 repair non-actionable，最终走 fallback i18n 误报 provider 不可用。
+        // 这里在解析成功路径上加一道保险：若用户原始消息只是裸路径而 LLM 没
+        // 主动 clarify，强制翻译成 needs_clarify + 默认问句，让 routing 进入
+        // ask_clarify 干脆地拿一个动词。
+        let (needs_clarify_eff, clarify_question_eff) =
+            if !out.needs_clarify && is_bare_path_only_input_no_verb(req) {
+                let q = if clarify_question.is_empty() {
+                    bare_path_clarify_question_for(req)
+                } else {
+                    clarify_question.clone()
+                };
+                info!(
+                    "{} intent_normalizer task_id={} bare_path_no_verb_override needs_clarify=true clarify_question={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    crate::truncate_for_log(&q)
+                );
+                (true, q)
+            } else {
+                (out.needs_clarify, clarify_question)
+            };
+        let routed_mode_eff = if needs_clarify_eff && !out.needs_clarify {
+            RoutedMode::AskClarify
+        } else {
+            routed_mode
+        };
         return IntentNormalizerOutput {
             resolved_user_intent: if resolved.is_empty() {
                 req.to_string()
@@ -896,13 +995,13 @@ pub(crate) async fn run_intent_normalizer(
             wants_file_delivery: out.wants_file_delivery,
             should_refresh_long_term_memory: out.should_refresh_long_term_memory,
             agent_display_name_hint: out.agent_display_name_hint.trim().to_string(),
-            needs_clarify: out.needs_clarify,
-            clarify_question,
+            needs_clarify: needs_clarify_eff,
+            clarify_question: clarify_question_eff,
             reason: out.reason,
             confidence,
             output_contract,
             execution_recipe_hint,
-            routed_mode,
+            routed_mode: routed_mode_eff,
             direct_reply_candidate: out.direct_reply_candidate.trim().to_string(),
             direct_reply_confidence: out.direct_reply_confidence,
         };
@@ -1281,6 +1380,76 @@ mod tests {
             ClarifyQuestionPolicy::default(),
             ClarifyQuestionPolicy::AllowModel
         );
+    }
+
+    /// §F2：bare-path-no-verb 启发式正向命中。
+    #[test]
+    fn is_bare_path_only_input_no_verb_recognizes_path_only() {
+        for case in [
+            "document/",
+            "prompts/",
+            "./logs/",
+            "/tmp/foo.log",
+            "scripts/nl_tests/",
+            "Cargo.toml",
+            "AGENTS.md",
+            "src/main.rs",
+        ] {
+            assert!(
+                super::is_bare_path_only_input_no_verb(case),
+                "expected `{}` to be detected as bare-path-no-verb",
+                case
+            );
+        }
+    }
+
+    /// §F2：bare-path-no-verb 反向不命中。
+    /// 任意带动词或问句标点的输入都不应被这条规则覆盖。
+    #[test]
+    fn is_bare_path_only_input_no_verb_skips_verb_or_punctuated() {
+        for case in [
+            // 动词
+            "看一下 document/",
+            "list document/",
+            "把 document/ 发给我",
+            "read src/main.rs",
+            "查 prompts/ 下有哪些文件",
+            // 问句标点
+            "document/?",
+            "prompts/ ？",
+            // 空 / 太长
+            "",
+            "this is a very very very very very very very very very long sentence not a path",
+            // 非 path-like 单词
+            "git",
+            "logs",
+            // 含路径但同时含动词
+            "show /tmp/foo.log",
+        ] {
+            assert!(
+                !super::is_bare_path_only_input_no_verb(case),
+                "expected `{}` to NOT be flagged",
+                case
+            );
+        }
+    }
+
+    /// §F2：clarify 问句生成把原始路径回灌到 backtick 区块。
+    #[test]
+    fn bare_path_clarify_question_includes_raw_path() {
+        let q = super::bare_path_clarify_question_for("document/");
+        assert!(q.contains("`document/`"), "got: {q}");
+        assert!(q.contains("/"), "must keep both EN and CN halves");
+    }
+
+    /// §F2：deterministic_fallback_route_decision 对裸路径返回 None
+    /// （让外层走 AskClarify 路径）。
+    #[test]
+    fn deterministic_fallback_returns_none_for_bare_path() {
+        assert!(super::deterministic_fallback_route_decision("document/").is_none());
+        assert!(super::deterministic_fallback_route_decision("./logs/").is_none());
+        // 带动词的合法 act 请求仍然能走 fallback。
+        assert!(super::deterministic_fallback_route_decision("read src/main.rs").is_some());
     }
 
     /// §3.5c-小切口：intent_normalizer schema 与 Rust parser 漂移检查。

@@ -1,0 +1,65 @@
+# NL adversarial probe v1 (2026-04-18)
+#
+# 目的：用一组「故意找碴」的 prompt 探 nl_cases_full.txt 没怎么压到的 angle。
+# 每条 prompt 后面注释行写明探的是哪一类问题。所有用例都不带破坏性副作用
+# （写入只落 tmp/ 子目录），可放进任何主回归套餐。
+#
+# 命名约定：adv<XX>_<angle>，方便日后从 summary 里 grep。
+# 格式：suite|name|tags|prompt[|expect=substr]
+
+# === A. 超极简 / 极短指令 ===
+# 单词级输入：路由能否在没有动词时合理 clarify 而不是死循环。
+chat_act|adv01_one_word_git||git
+chat_act|adv02_one_word_logs||logs
+chat_act|adv03_just_a_path||document/
+
+# === B. 歧义与双关 ===
+# "git" 既可以是命令也可以是目录名；"target" 既是构建目录也是 idiom。
+chat_act|adv04_ambiguous_target||看一下 target 大概多大
+chat_act|adv05_ambiguous_show_status||show status
+
+# === C. 否定语义 ===
+# 模型常把「除了 X」误读成「列 X」。
+chat_act|adv06_negation_other_dirs||列出仓库顶层目录，但不要把 .git 算进去，只告诉我其它的有几个|expect=
+chat_act|adv07_negation_other_md||列出 document 目录里所有 .md 文件，但排除 README，告诉我还剩哪些
+
+# === D. 数值精确性 ===
+# 严格 N：前 5 个 / 最多 3 句话。模型经常多给或少给。
+chat_act|adv08_strict_top_n||列出 prompts 目录前 5 个文件名，不要超过 5 个
+chat_act|adv09_strict_three_sentences||读一下 README 然后用恰好三句话总结，不要多也不要少
+
+# === E. 数字推理 + 比较 ===
+# 大小倍数推理：模型容易给精确数字而不是倍数判断。
+chat_act|adv10_size_ratio||比较 Cargo.lock 和 Cargo.toml 的大小，告诉我 lock 大概是 toml 的几倍
+
+# === F. 路径含中文 / 写入 tmp 不污染仓库 ===
+# 中文文件名能否走通 write/deliver 链路。
+file|adv11_write_chinese_filename|write_and_deliver|创建一个文本文件到 tmp/对抗测试_笔记.txt，内容是「adversarial v1」，然后把文件发给我
+
+# === G. 存在性 + 路径定位 (locator_kind=path) ===
+# 期望：先回答 yes/no，再给路径。
+act|adv12_locator_with_path||仓库里有没有 AGENTS.md，回答有或没有，并给出绝对路径|expect=AGENTS.md
+
+# === H. 元指令 / 二次加工（单轮版本：组合在一句里）===
+# 对结果再做一次加工，模型容易直接交第一步原始输出。
+chat_act|adv13_post_transform||执行 ls scripts，把结果按字母倒序排，只输出前 5 个
+
+# === I. 中英混杂 ===
+# code-switch：normalizer 容易丢字段。
+chat_act|adv14_code_switch||list 一下当前 dir 顶层有哪些 toml 文件，brief 一句解释它们是干嘛的
+
+# === J. emoji / 标点扰动 ===
+# 不应被路由到 chat-only。
+chat_act|adv15_emoji_noise||???? 帮我看看 pwd 是哪儿 :) thx!!!|expect=/
+
+# === K. schedule 误触发探针 ===
+# 含「明天/今天」字样但实际不是 schedule create。
+chat_act|adv16_pseudo_schedule||今天的工作目录是哪个，告诉我路径就行|expect=/
+
+# === L. 嵌套 JSON 字段读取 ===
+# 读 package.json 里更深的字段。
+act|adv17_nested_json_read||读 scripts/nl_tests/fixtures/device_local/package.json，告诉我 scripts 字段下都有哪些子键
+
+# === M. 长 prompt + 多约束 ===
+# 测 prompt 截断 / planner 是否丢约束。
+chat_act|adv18_long_multi_constraint||我现在需要你做这件事：先列出 prompts/schemas 目录下所有 .json 文件，然后告诉我里面哪个的体积最大，再用一句中文大白话告诉我这个最大的 schema 大概是描述什么对象的，最后顺带提醒一句这个目录的整体作用是什么，整个回答控制在 5 行以内

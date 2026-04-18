@@ -1183,6 +1183,7 @@ fn normalize_planned_actions(
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = rewrite_service_status_probe_actions(route_result, actions);
     let actions = rewrite_http_probe_actions(route_result, actions);
+    let actions = rewrite_pre_observation_concrete_respond_to_placeholder(loop_state, actions);
     inject_chat_transform_for_bare_placeholder_respond(actions, user_text)
 }
 
@@ -1202,6 +1203,129 @@ fn is_bare_last_output_placeholder(content: &str) -> bool {
     lower == "last_output"
         || lower.starts_with("last_output.")
         || lower.starts_with("last_output[")
+}
+
+/// §F1：检测「未观测先编造」的幻觉 Respond，把内容改写为 `{{last_output}}` 占位
+/// 让下游 [`inject_chat_transform_for_bare_placeholder_respond`] 把它包成 chat 转
+/// 换步，从而在执行完上游观测步后再用真实输出生成回复。
+///
+/// 触发条件（必须**全部**满足）：
+/// 1. `loop_state` 仍是 round-1 状态：`executed_step_results` 为空（没有任何
+///    skill 实际跑过），`last_output` 为空 → 这一批 actions 全部都还没执行。
+/// 2. `actions` 末尾是 `Respond` 步。
+/// 3. 倒数第二步是 `CallSkill` / `CallTool`（即「先跑后说」的常见 plan 形态）。
+/// 4. Respond 的 content 不包含 `{{last_output}}` 之类的占位符
+///    （[`is_bare_last_output_placeholder`] 已经在主入口处理纯占位符路径），
+///    并且 content 长度足够 + 含「观测过才能知道」的特征 token：
+///    - 含至少一行以数字+点开头的列表项（`1. xxx` / `2. xxx` …）；或
+///    - 含 3+ 行换行 + 至少一个文件路径字符（`/`、`.md`、`.toml` 等）；或
+///    - 含 `result: ` / `count: ` / `size: ` 这种结构化字段标签。
+///
+/// 这一招专门针对 minimax 偶发的「planner 一次性把 list_dir + respond 编造
+/// 内容写在同一个 plan，respond 直接交给用户」的 adversarial v1 → adv08 复现路径。
+/// 不命中条件时 actions 原样返回，不破坏正确 plan。
+fn rewrite_pre_observation_concrete_respond_to_placeholder(
+    loop_state: &LoopState,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if actions.len() < 2 {
+        return actions;
+    }
+    if !loop_state.executed_step_results.is_empty() {
+        return actions;
+    }
+    if loop_state
+        .last_output
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return actions;
+    }
+    let last_idx = actions.len() - 1;
+    let respond_content = match &actions[last_idx] {
+        AgentAction::Respond { content } => content.clone(),
+        _ => return actions,
+    };
+    let prior_is_observation = matches!(
+        &actions[last_idx - 1],
+        AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+    );
+    if !prior_is_observation {
+        return actions;
+    }
+    if is_bare_last_output_placeholder(&respond_content) {
+        return actions;
+    }
+    if !looks_like_pre_observation_hallucinated_concrete_content(&respond_content) {
+        return actions;
+    }
+    let mut rewritten = actions;
+    let original_len = respond_content.len();
+    let respond_idx = rewritten.len() - 1;
+    if let AgentAction::Respond { content } = &mut rewritten[respond_idx] {
+        *content = "{{last_output}}".to_string();
+    }
+    info!(
+        "plan_rewrite_pre_observation_concrete_respond_to_placeholder original_len={}",
+        original_len
+    );
+    rewritten
+}
+
+/// §F1 启发式：判断 Respond.content 是否是「未观测就编造」的具体内容形态。
+///
+/// 命中任意一条即视为可疑：
+/// - 含至少一行以数字+点+空格开头的枚举项（最少 1 行；`1. foo` / `2. bar`）
+/// - 含 3+ 行（`\n` ≥ 2）且至少含一个 `/` 或常见文件后缀
+/// - 含明显结构化字段标签（`result:` / `count:` / `size:` / `path:`，大小写不敏感）
+///
+/// 这些都是 list_dir / read_file / fs_search / run_cmd 的典型输出形态，
+/// 在 round 1 还没执行任何步骤时不可能合法出现在 Respond 里。
+fn looks_like_pre_observation_hallucinated_concrete_content(content: &str) -> bool {
+    let trimmed = content.trim();
+    if trimmed.len() < 8 {
+        return false;
+    }
+    // 1) 数字枚举项（`\d+\. xxx`），至少 1 行。
+    for line in trimmed.lines() {
+        let l = line.trim_start();
+        let bytes = l.as_bytes();
+        if bytes.is_empty() || !bytes[0].is_ascii_digit() {
+            continue;
+        }
+        let mut idx = 1usize;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        if idx + 1 < bytes.len() && bytes[idx] == b'.' && (bytes[idx + 1] == b' ' || bytes[idx + 1] == b'\t') {
+            return true;
+        }
+    }
+    // 2) 3+ 行 + 含路径分隔符或常见后缀。
+    let line_count = trimmed.lines().count();
+    if line_count >= 3 {
+        let lower = trimmed.to_ascii_lowercase();
+        let has_pathlike = lower.contains('/')
+            || lower.contains(".md")
+            || lower.contains(".toml")
+            || lower.contains(".json")
+            || lower.contains(".rs")
+            || lower.contains(".log")
+            || lower.contains(".sh")
+            || lower.contains(".py");
+        if has_pathlike {
+            return true;
+        }
+    }
+    // 3) 结构化字段标签。
+    let lower = trimmed.to_ascii_lowercase();
+    for label in ["result:", "count:", "size:", "path:", "files:", "items:"] {
+        if lower.contains(label) {
+            return true;
+        }
+    }
+    false
 }
 
 /// 当 plan 末尾是 `respond.content="{{last_output}}"` 这种裸 placeholder 时，
@@ -1647,7 +1771,8 @@ mod tests {
 
     use super::{
         inject_chat_transform_for_bare_placeholder_respond, is_bare_last_output_placeholder,
-        looks_health_check_request, plan_repair_reason, rewrite_http_probe_actions,
+        looks_health_check_request, looks_like_pre_observation_hallucinated_concrete_content,
+        plan_repair_reason, rewrite_http_probe_actions, rewrite_pre_observation_concrete_respond_to_placeholder,
         rewrite_service_status_probe_actions, should_force_actionable_plan_repair,
         strip_terminal_discussion_for_direct_skill_passthrough,
         strip_terminal_discussion_for_observed_finalize, synthesize_health_check_fallback_actions,
@@ -2914,6 +3039,121 @@ mod tests {
         let before = actions_as_json(&actions);
         let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
         assert_eq!(actions_as_json(&out), before);
+    }
+
+    /// §F1：`looks_like_pre_observation_hallucinated_concrete_content` 启发式检测覆盖。
+    #[test]
+    fn looks_hallucinated_concrete_content_recognizes_listing_shapes() {
+        // 真实 adv08 复现：list_dir 还没跑，respond 编出 5 行 numbered 列表 + 路径。
+        let adv08 = "prompts 目录前 5 个文件名：\n1. prompts/skills\n2. prompts/agents\n3. prompts/system\n4. prompts/user\n5. prompts/layers";
+        assert!(looks_like_pre_observation_hallucinated_concrete_content(adv08));
+
+        // 多行 + 文件后缀，但没编号。
+        let multi_paths = "Cargo.toml\nCargo.lock\nREADME.md\nLICENSE";
+        assert!(looks_like_pre_observation_hallucinated_concrete_content(
+            multi_paths
+        ));
+
+        // 结构化字段标签。
+        assert!(looks_like_pre_observation_hallucinated_concrete_content(
+            "result: 42\ncount: 3"
+        ));
+
+        // 一句正常文本 → 不命中。
+        assert!(!looks_like_pre_observation_hallucinated_concrete_content(
+            "好的，正在查询，请稍候。"
+        ));
+        // {{last_output}} 占位符 → 不命中（应由 inject_chat_transform_for_bare 处理）。
+        assert!(!looks_like_pre_observation_hallucinated_concrete_content(
+            "{{last_output}}"
+        ));
+        // 只有一行短回复 → 不命中。
+        assert!(!looks_like_pre_observation_hallucinated_concrete_content("yes"));
+    }
+
+    /// §F1：rewrite 触发条件 —— round 1 + 上一步 CallSkill + Respond 含枚举。
+    #[test]
+    fn rewrite_pre_observation_rewrites_concrete_respond_after_call_skill() {
+        let loop_state = LoopState::new(2);
+        assert!(loop_state.executed_step_results.is_empty());
+        assert!(loop_state.last_output.is_none());
+
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: json!({"path": "/home/guagua/rustclaw/prompts"}),
+            },
+            AgentAction::Respond {
+                content: "prompts 目录前 5 个文件名：\n1. prompts/skills\n2. prompts/agents\n3. prompts/system\n4. prompts/user\n5. prompts/layers".to_string(),
+            },
+        ];
+        let out = rewrite_pre_observation_concrete_respond_to_placeholder(&loop_state, actions);
+        match out.last().expect("should have a last action") {
+            AgentAction::Respond { content } => {
+                assert_eq!(
+                    content, "{{last_output}}",
+                    "concrete content must be replaced with placeholder"
+                );
+            }
+            other => panic!("last action should remain Respond, got: {:?}", other),
+        }
+    }
+
+    /// §F1：执行过任何 step 后不再触发（避免误改 round 2+ 的合法 grounded respond）。
+    #[test]
+    fn rewrite_pre_observation_no_op_after_any_step_executed() {
+        use crate::executor::{StepExecutionResult, StepExecutionStatus};
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "s1".to_string(),
+            skill: "list_dir".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("foo\nbar".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.last_output = Some("foo\nbar".to_string());
+
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: json!({"path": "/x"}),
+            },
+            AgentAction::Respond {
+                content: "1. foo\n2. bar".to_string(),
+            },
+        ];
+        let before = actions.clone();
+        let after =
+            rewrite_pre_observation_concrete_respond_to_placeholder(&loop_state, actions);
+        assert_eq!(actions_as_json(&before), actions_as_json(&after));
+    }
+
+    /// §F1：Respond 内容是合法占位符或短确认时不触发。
+    #[test]
+    fn rewrite_pre_observation_no_op_for_placeholder_or_short_ack() {
+        let loop_state = LoopState::new(2);
+        for content in ["{{last_output}}", "好的", "稍候，正在执行"] {
+            let actions = vec![
+                AgentAction::CallSkill {
+                    skill: "run_cmd".to_string(),
+                    args: json!({"command": "ls"}),
+                },
+                AgentAction::Respond {
+                    content: content.to_string(),
+                },
+            ];
+            let before = actions.clone();
+            let after =
+                rewrite_pre_observation_concrete_respond_to_placeholder(&loop_state, actions);
+            assert_eq!(
+                actions_as_json(&before),
+                actions_as_json(&after),
+                "should not rewrite for content={:?}",
+                content
+            );
+        }
     }
 
     /// §D2.a：plan_result schema 与 `AgentAction` enum / `SinglePlanEnvelope` 漂移检查。
