@@ -81,6 +81,12 @@ where
 ///
 /// 只做"清空 + 白名单注入"，不碰任何后续 `.env(K, V)` 调用 —— 那部分仍是 clawd 显式
 /// 配置 + broker secrets，是子进程的**唯一**真实 env 来源。
+///
+/// §E2 step2 边界澄清：本函数只对 **spawn-path** 生效（即 `kind="runner"` 的外部
+/// skill），对 **builtin skill**（`chat` / `read_file` / `write_file` / `run_cmd` 等
+/// 内嵌实现）完全无效——它们运行在 clawd 自身进程里，自然继承 clawd 的 env。
+/// 所以 strict 模式下 `chat` 的 LLM 凭据仍然走 `LlmProviderRuntime`（toml + env
+/// 加载），不经 `SecretsBroker`。让 chat 也走 broker 是 §P4.4 E3 的范畴。
 pub(crate) struct StrictEnvReport {
     pub(crate) preserved: Vec<String>,
     pub(crate) stripped_count: usize,
@@ -542,6 +548,14 @@ fn inject_skill_persona_context(
     Value::Object(obj)
 }
 
+/// §P4.1 fallback：当 `SkillsRegistry` 还没装载（启动早期 / 某些测试 stub）时
+/// 用这个常量名单兜底"哪些 skill 是 builtin（in-process）"。**真正生效的是
+/// `AppState::is_builtin_skill`**——它优先从 registry 拿 kind，failure 才退到这里。
+///
+/// 维护规则：本列表必须与 `configs/skills_registry.toml` / `docker/config/skills_registry.toml`
+/// 中 `kind = "builtin"` 的 skill 一一对应；新增/删除 builtin 时同步改这里，并由
+/// `crates/clawd/tests/config_templates.rs` 的 `registry_covers_all_required_builtins`
+/// 负责守底（registry 必须覆盖这里列出的每一个名字）。
 pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
     matches!(
         name,
@@ -556,6 +570,8 @@ pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
             // （fallback / circuit breaker / 预算 / model_io.log）。
             // chat-skill 二进制保留，外部 caller 仍可独立 spawn，但 clawd
             // 内部 dispatch 一律走 builtin 实现，不再起子进程。
+            // §E2 step2：因为 chat 是 builtin，§E2 step1 的 env_clear 隔离对它无效；
+            // 它的 LLM 凭据仍走 LlmProviderRuntime，broker 接管推迟到 §P4.4 E3。
             | "chat"
     )
 }
