@@ -330,10 +330,24 @@ impl SkillsRegistry {
                 }
             }
         }
-        Ok(Self {
+        let registry = Self {
             by_name,
             alias_to_name,
-        })
+        };
+
+        // §P4.2：声明的 capabilities 必须和 manifest 的 shape 一致，否则
+        // 加载失败 — 例如 exec.sudo 不允许自动执行（必须 confirm + high
+        // risk），fs.write/exec 不允许显式 side_effect=false。
+        let shape_violations = registry.validate_shape_consistency();
+        if !shape_violations.is_empty() {
+            return Err(format!(
+                "skill registry shape consistency check failed in {}:\n  - {}",
+                path.display(),
+                shape_violations.join("\n  - ")
+            ));
+        }
+
+        Ok(registry)
     }
 
     /// 解析别名或名称得到 canonical name（小写）；不存在则返回 None
@@ -504,6 +518,52 @@ impl SkillsRegistry {
     /// 其他能力走变体相等。例：调用 `has_capability("image_generate", &Capability::Llm)`。
     pub fn has_capability(&self, canonical_name: &str, cap: &Capability) -> bool {
         self.capabilities(canonical_name).iter().any(|c| c == cap)
+    }
+
+    /// §P4.2：capability ↔ skill shape 一致性审计。
+    ///
+    /// 规则（PR 阶段就会触发，不会等到 runtime 才暴）：
+    /// - **R1** `exec.sudo` ⇒ 必须 `requires_confirmation = true`，禁止自动提权。
+    /// - **R2** `exec.sudo` ⇒ 必须 `risk_level = "high"`，让所有 risk 路由都把它当最高级。
+    /// - **R3** 含 `fs.write` / `exec` / `exec.sudo` ⇒ 禁止显式 `side_effect = false`
+    ///   （未声明时容忍，迁移友好；一旦显式关掉，必然是误配）。
+    ///
+    /// 返回违规列表（按字符串排序，便于 diff 稳定）。空列表表示通过。
+    /// 这个函数对外公开是为了让 CI 单独跑一遍以保证 registry 文件本身合法；
+    /// `load_from_path` 内部已经在加载流程结束时调用它，违规会让 registry
+    /// **加载失败**（与 `Capability::parse` 的失败行为一致）。
+    pub fn validate_shape_consistency(&self) -> Vec<String> {
+        let mut violations: Vec<String> = Vec::new();
+
+        for (name, entry) in &self.by_name {
+            let caps = &entry.resolved_capabilities;
+            let has = |c: &Capability| caps.contains(c);
+
+            if has(&Capability::ExecSudo) {
+                if entry.requires_confirmation != Some(true) {
+                    violations.push(format!(
+                        "skill `{name}` declares `exec.sudo` but `requires_confirmation` is not `true` (R1)"
+                    ));
+                }
+                if entry.risk_level != Some(SkillRiskLevel::High) {
+                    violations.push(format!(
+                        "skill `{name}` declares `exec.sudo` but `risk_level` is not `high` (R2)"
+                    ));
+                }
+            }
+
+            let has_write_or_exec = has(&Capability::FsWrite)
+                || has(&Capability::Exec)
+                || has(&Capability::ExecSudo);
+            if has_write_or_exec && entry.side_effect == Some(false) {
+                violations.push(format!(
+                    "skill `{name}` declares fs.write/exec/exec.sudo but `side_effect = false` is set explicitly (R3)"
+                ));
+            }
+        }
+
+        violations.sort();
+        violations
     }
 }
 
@@ -767,6 +827,107 @@ capabilities = ["llm", "net", "fs.write", "llm", "secrets.openai_api_key"]
         // manifest 视图也带上
         let manifest = reg.manifest("image_generate").unwrap();
         assert_eq!(manifest.capabilities.len(), 4);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn shape_consistency_rejects_exec_sudo_without_confirmation() {
+        let toml = r#"
+[[skills]]
+name = "danger_skill"
+enabled = true
+kind = "runner"
+risk_level = "high"
+side_effect = true
+capabilities = ["exec.sudo"]
+# 故意没设 requires_confirmation
+"#;
+        let path = std::env::temp_dir().join("test_shape_exec_sudo_no_confirm.toml");
+        std::fs::write(&path, toml).unwrap();
+        let err = SkillsRegistry::load_from_path(&path)
+            .err()
+            .expect("expected load to fail when exec.sudo lacks requires_confirmation");
+        assert!(err.contains("`danger_skill`"), "{err}");
+        assert!(err.contains("requires_confirmation"), "{err}");
+        assert!(err.contains("R1"), "{err}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn shape_consistency_rejects_exec_sudo_without_high_risk() {
+        let toml = r#"
+[[skills]]
+name = "danger_skill"
+enabled = true
+kind = "runner"
+requires_confirmation = true
+side_effect = true
+risk_level = "medium"
+capabilities = ["exec.sudo"]
+"#;
+        let path = std::env::temp_dir().join("test_shape_exec_sudo_medium_risk.toml");
+        std::fs::write(&path, toml).unwrap();
+        let err = SkillsRegistry::load_from_path(&path)
+            .err()
+            .expect("expected load to fail when exec.sudo is not high risk");
+        assert!(err.contains("risk_level"), "{err}");
+        assert!(err.contains("R2"), "{err}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn shape_consistency_rejects_explicit_side_effect_false_with_write_cap() {
+        let toml = r#"
+[[skills]]
+name = "lying_skill"
+enabled = true
+kind = "runner"
+side_effect = false
+capabilities = ["fs.write"]
+"#;
+        let path = std::env::temp_dir().join("test_shape_fs_write_no_side_effect.toml");
+        std::fs::write(&path, toml).unwrap();
+        let err = SkillsRegistry::load_from_path(&path)
+            .err()
+            .expect("expected load to fail when fs.write declared with side_effect=false");
+        assert!(err.contains("`lying_skill`"), "{err}");
+        assert!(err.contains("side_effect"), "{err}");
+        assert!(err.contains("R3"), "{err}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn shape_consistency_passes_with_proper_declarations() {
+        // 完全合规：exec.sudo + confirm + high + side_effect=true
+        let toml = r#"
+[[skills]]
+name = "safe_sudo"
+enabled = true
+kind = "runner"
+requires_confirmation = true
+risk_level = "high"
+side_effect = true
+capabilities = ["exec.sudo"]
+
+[[skills]]
+name = "writer"
+enabled = true
+kind = "runner"
+side_effect = true
+capabilities = ["fs.write"]
+
+[[skills]]
+name = "writer_unspecified_side_effect"
+enabled = true
+kind = "runner"
+# 没设 side_effect — 容忍 None，但禁止显式 false
+capabilities = ["fs.write"]
+"#;
+        let path = std::env::temp_dir().join("test_shape_consistency_clean.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path)
+            .expect("registry with proper shape should load");
+        assert!(reg.validate_shape_consistency().is_empty());
         let _ = std::fs::remove_file(path);
     }
 

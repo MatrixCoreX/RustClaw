@@ -226,6 +226,9 @@ output_kind = "image"
 # 落盘到 workspace 的输出目录，因此声明 llm + net + fs.write。
 # 未来 §P4.4 落 secrets 短期 token 时再加 secrets.<provider>_api_key。
 capabilities = ["llm", "net", "fs.write"]
+# §P4.2 shape 一致性：fs.write 隐含写盘副作用，显式标 side_effect=true
+# 让 risk 路由 / finalize 决策都能拿到正确信号。
+side_effect = true
 
 [[skills]]
 name = "image_edit"
