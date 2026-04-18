@@ -1282,4 +1282,214 @@ mod tests {
             ClarifyQuestionPolicy::AllowModel
         );
     }
+
+    /// §3.5c-小切口：intent_normalizer schema 与 Rust parser 漂移检查。
+    ///
+    /// 校验内容：
+    /// 1. `prompts/schemas/intent_normalizer.schema.json` 是合法 JSON 且为 object schema；
+    /// 2. `IntentNormalizerOut` 里所有 `#[serde(default)]` 字段都在 schema `properties` 里；
+    /// 3. 每个 enum-bearing 字段的 schema 枚举值，喂给对应 `parse_*` 函数都能落到非默认 variant
+    ///    （空字符串和 `"none"`/`"unknown"` 这种"显式无"语义值排除）。
+    ///
+    /// 任何一项不满足都说明 prompt / schema / parser 三者已漂移，应在本测试里同步更新。
+    #[test]
+    fn intent_normalizer_schema_drift() {
+        const SCHEMA_RAW: &str =
+            include_str!("../../../prompts/schemas/intent_normalizer.schema.json");
+        let schema: serde_json::Value =
+            serde_json::from_str(SCHEMA_RAW).expect("intent_normalizer.schema.json must be valid JSON");
+        assert_eq!(
+            schema.get("type").and_then(|v| v.as_str()),
+            Some("object"),
+            "schema root must be object"
+        );
+
+        // §3.5c-小切口 步骤 2：每个 IntentNormalizerOut 字段必须在 properties 里登记。
+        const STRUCT_FIELDS: &[&str] = &[
+            "resolved_user_intent",
+            "resume_behavior",
+            "schedule_kind",
+            "wants_file_delivery",
+            "should_refresh_long_term_memory",
+            "agent_display_name_hint",
+            "needs_clarify",
+            "clarify_question",
+            "reason",
+            "confidence",
+            "mode",
+            "schedule_intent",
+            "output_contract",
+            "execution_recipe",
+            "direct_reply_candidate",
+            "direct_reply_confidence",
+        ];
+        let properties = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema must have `properties` object");
+        for field in STRUCT_FIELDS {
+            assert!(
+                properties.contains_key(*field),
+                "schema missing parser field `{}` under properties — sync prompts/schemas/intent_normalizer.schema.json with IntentNormalizerOut",
+                field
+            );
+        }
+
+        // §3.5c-小切口 步骤 3：枚举值 → parse_* 函数必须落到非默认 variant
+        // （除非是显式的「无 / 未知」语义占位）。
+        fn enum_strings<'a>(schema: &'a serde_json::Value, path: &[&str]) -> Vec<String> {
+            let mut node = schema;
+            for p in path {
+                node = node.get(*p).unwrap_or_else(|| {
+                    panic!("schema path `{}` not found", path.join("."))
+                });
+            }
+            node.get("enum")
+                .and_then(|v| v.as_array())
+                .unwrap_or_else(|| panic!("schema path `{}.enum` not found", path.join(".")))
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        }
+
+        // resume_behavior：none / "" 是「无」语义，跳过。
+        for token in enum_strings(&schema, &["properties", "resume_behavior"]) {
+            if token.is_empty() || token == "none" {
+                continue;
+            }
+            let parsed = super::parse_resume_behavior(&token);
+            assert_ne!(
+                parsed,
+                super::ResumeBehavior::None,
+                "resume_behavior token `{}` not recognized by parse_resume_behavior",
+                token
+            );
+        }
+
+        for token in enum_strings(&schema, &["properties", "schedule_kind"]) {
+            if token.is_empty() || token == "none" {
+                continue;
+            }
+            let parsed = super::parse_schedule_kind(&token);
+            assert_ne!(
+                parsed,
+                super::ScheduleKind::None,
+                "schedule_kind token `{}` not recognized by parse_schedule_kind",
+                token
+            );
+        }
+
+        // mode：parse_mode_text 是 substring 匹配，没匹配返回 None。
+        for token in enum_strings(&schema, &["properties", "mode"]) {
+            if token.is_empty() {
+                continue;
+            }
+            assert!(
+                super::parse_mode_text(&token).is_some(),
+                "mode token `{}` not recognized by parse_mode_text",
+                token
+            );
+        }
+
+        for token in enum_strings(&schema, &["properties", "output_contract", "properties", "response_shape"]) {
+            if token.is_empty() || token == "free" {
+                continue;
+            }
+            assert_ne!(
+                super::parse_output_response_shape(&token),
+                OutputResponseShape::Free,
+                "response_shape `{}` not recognized",
+                token
+            );
+        }
+        for token in enum_strings(&schema, &["properties", "output_contract", "properties", "locator_kind"]) {
+            if token.is_empty() || token == "none" {
+                continue;
+            }
+            assert_ne!(
+                super::parse_output_locator_kind(&token),
+                OutputLocatorKind::None,
+                "locator_kind `{}` not recognized",
+                token
+            );
+        }
+        for token in enum_strings(&schema, &["properties", "output_contract", "properties", "delivery_intent"]) {
+            if token.is_empty() || token == "none" {
+                continue;
+            }
+            assert_ne!(
+                super::parse_output_delivery_intent(&token),
+                OutputDeliveryIntent::None,
+                "delivery_intent `{}` not recognized",
+                token
+            );
+        }
+        for token in enum_strings(&schema, &["properties", "output_contract", "properties", "semantic_kind"]) {
+            if token.is_empty() || token == "none" {
+                continue;
+            }
+            assert_ne!(
+                super::parse_output_semantic_kind(&token),
+                OutputSemanticKind::None,
+                "semantic_kind `{}` not recognized",
+                token
+            );
+        }
+        for token in enum_strings(&schema, &["properties", "output_contract", "properties", "self_extension", "properties", "mode"]) {
+            if token.is_empty() || token == "none" {
+                continue;
+            }
+            assert_ne!(
+                super::parse_self_extension_mode(&token),
+                crate::SelfExtensionMode::None,
+                "self_extension.mode `{}` not recognized",
+                token
+            );
+        }
+        for token in enum_strings(&schema, &["properties", "output_contract", "properties", "self_extension", "properties", "trigger"]) {
+            if token.is_empty() || token == "none" {
+                continue;
+            }
+            assert_ne!(
+                super::parse_self_extension_trigger(&token),
+                crate::SelfExtensionTrigger::None,
+                "self_extension.trigger `{}` not recognized",
+                token
+            );
+        }
+
+        for token in enum_strings(&schema, &["properties", "execution_recipe", "properties", "kind"]) {
+            if token.is_empty() || token == "none" {
+                continue;
+            }
+            assert_ne!(
+                crate::execution_recipe::parse_execution_recipe_kind_text(&token),
+                ExecutionRecipeKind::None,
+                "execution_recipe.kind `{}` not recognized",
+                token
+            );
+        }
+        for token in enum_strings(&schema, &["properties", "execution_recipe", "properties", "profile"]) {
+            if token.is_empty() || token == "none" {
+                continue;
+            }
+            assert_ne!(
+                crate::execution_recipe::parse_execution_recipe_profile_text(&token),
+                ExecutionRecipeProfile::None,
+                "execution_recipe.profile `{}` not recognized",
+                token
+            );
+        }
+        for token in enum_strings(&schema, &["properties", "execution_recipe", "properties", "target_scope"]) {
+            if token.is_empty() || token == "unknown" {
+                continue;
+            }
+            assert_ne!(
+                crate::execution_recipe::parse_execution_recipe_target_scope_text(&token),
+                ExecutionRecipeTargetScope::Unknown,
+                "execution_recipe.target_scope `{}` not recognized",
+                token
+            );
+        }
+    }
 }
