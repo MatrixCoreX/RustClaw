@@ -1,4 +1,6 @@
-use claw_core::secrets::{provision_secret_envs, EnvSecretsBroker};
+use claw_core::secrets::{
+    provision_secret_envs, SecretValue, SecretsBroker, SecretsError,
+};
 use claw_core::skill_registry::{Capability, SkillsRegistry, REQUIRED_BUILTIN_SKILLS};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -211,8 +213,18 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
     // (canonical, sorted-tokens) — sorted 顺序与 SkillsRegistry::load_from_path
     // 内部 dedup+sort 后的结果一致。
     let expected_with_caps: &[(&str, &[&str])] = &[
-        // 首批示例：图像生成需要 LLM 网关 + 对外网络 + 写盘。
-        ("image_generate", &["fs.write", "llm", "net"]),
+        // 首批示例：图像生成需要 LLM 网关 + 对外网络 + 写盘 + minimax 凭证。
+        // 注意 sort 顺序：`fs.write` < `llm` < `net` < `secrets.image_...`。
+        // 新增 vendor 段时（openai/google/qwen/...），同步加 secrets.image_generation_<vendor>_api_key。
+        (
+            "image_generate",
+            &[
+                "fs.write",
+                "llm",
+                "net",
+                "secrets.image_generation_minimax_api_key",
+            ],
+        ),
     ];
 
     let registry_paths = [
@@ -261,41 +273,110 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
     }
 }
 
-/// §E1.b 守底：当前 registry 状态下，spawn 路径**不应**注入任何 secrets env。
+/// §E1.c 守底：spawn 路径按 manifest 注入的 secrets env 必须等于期望集合。
 ///
-/// 这条测试在 §E1.c 之前是 zero-secret 状态的"基线快照"。一旦给 image_generate
-/// 等技能加上 `secrets.<usage>_<vendor>_api_key`，本测试会红，提醒同步把这条
-/// 守底升级成"按 manifest 期望的 env 名清单逐一断言"。这样：
-/// - PR 阶段就能看见 secrets 变更对 spawn 路径的影响；
-/// - 永远不会出现"manifest 写了 capability，但运行期忘了 wire"的静默错误。
+/// 设计取舍：用一个**永远返回 Some(<placeholder>)** 的 mock broker —— 我们
+/// 在这里要测的是"manifest → env 名翻译"的契约，而不是"CI 跑测试时机器上
+/// 真有没有 IMAGE_GENERATION_MINIMAX_API_KEY"。后者属于运维/secrets 配置层。
+///
+/// 维护规则：
+/// - manifest 给某个 skill 加 / 减 `secrets.<name>` → 同步改本测试 `expected_secrets_envs`；
+/// - 没在表里的 skill 默认期望"零 secrets env 注入"；
+/// - 永远不要把这里改成读真实 env，否则 CI 会变成"机器配置依赖测试"。
 #[test]
-fn provision_secret_envs_baseline_is_empty_for_current_registry() {
+fn provision_secret_envs_matches_manifest_expectation() {
+    use std::collections::HashMap;
+
+    /// 测试专用 broker：所有合法 secret 名都返回非空占位值；
+    /// 非法名（broker 自己 validate_secret_name 拦下）会返回 Err，与生产
+    /// 行为对齐 —— 这样测试既验"翻译契约"又验"命名规范运行期 enforcement"。
+    struct AlwaysFoundBroker;
+    impl SecretsBroker for AlwaysFoundBroker {
+        fn lookup(&self, name: &str) -> Result<Option<SecretValue>, SecretsError> {
+            claw_core::secrets::validate_secret_name(name)?;
+            Ok(Some(SecretValue::new(format!("<test-{name}>"))))
+        }
+        fn label(&self) -> &str {
+            "always-found-mock"
+        }
+    }
+
+    // 期望：skill canonical name -> 子进程应当看到的 ENV_VAR_NAME 集合（已排序）
+    let expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
+        // §E1.c：image_generate 当前默认 default_vendor=minimax（见 configs/image.toml），
+        // 因此只声明这一条。新启用别的 vendor 段时，同步加该 vendor 的 env 名。
+        ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
+    ]);
+
     let registry_paths = [
         workspace_root().join("configs/skills_registry.toml"),
         workspace_root().join("docker/config/skills_registry.toml"),
     ];
-    let broker = EnvSecretsBroker::new();
+    let broker = AlwaysFoundBroker;
 
     for path in registry_paths.iter() {
         let registry = SkillsRegistry::load_from_path(path).expect("load registry");
         for name in registry.all_names() {
             let caps = registry.capabilities(&name).to_vec();
-            // missing 报错也算违反基线：当前任何 declared secret 都没有 broker 后端。
-            // 一旦升级到 §E1.c，把这里改成"对每个 skill 验期望 env 名集合"。
             let provisioned = provision_secret_envs(&broker, &caps).unwrap_or_else(|err| {
                 panic!(
-                    "{}: skill `{name}` capabilities {:?} unexpectedly require secrets at baseline: {err}",
-                    path.display(),
-                    caps.iter().map(Capability::as_token).collect::<Vec<_>>(),
+                    "{}: skill `{name}` provisioning failed despite mock broker always returning Some \
+                     — capability declaration likely violates secret-name rules: {err}",
+                    path.display()
                 );
             });
-            assert!(
-                provisioned.is_empty(),
-                "{}: skill `{name}` provisioned {} secret env(s) at baseline; this is the §E1.c rollout marker — \
-                 once intentional, replace this test with a per-skill expected-env-name allowlist",
+            let actual: Vec<&str> = provisioned.iter().map(|(n, _)| n.as_str()).collect();
+            let expected_owned = expected_secrets_envs
+                .get(name.as_str())
+                .cloned()
+                .unwrap_or_default();
+            assert_eq!(
+                actual,
+                expected_owned,
+                "{}: skill `{name}` provisioned {:?}, expected {:?}; \
+                 update `expected_secrets_envs` in this test if intentional",
                 path.display(),
-                provisioned.len(),
+                actual,
+                expected_owned,
             );
         }
     }
+}
+
+/// §E1.c 配套：manifest 声明了 secrets.* 但 broker 找不到时，spawn 路径必须
+/// 选择 fail-loud（不能 spawn 然后让 skill 拿空字符串去打 vendor）。
+///
+/// 这条测试不依赖具体 spawn 路径，只验 `provision_secret_envs` 在 broker 找
+/// 不到声明的 secret 时返回 `MissingSecrets`，且包含完整的 missing 清单。
+#[test]
+fn provision_secret_envs_fails_loud_when_broker_lacks_declared_secret() {
+    /// always-empty broker：任何合法 secret 名都返回 None（模拟生产环境忘
+    /// 设 env 的情况）。
+    struct AlwaysMissingBroker;
+    impl SecretsBroker for AlwaysMissingBroker {
+        fn lookup(&self, name: &str) -> Result<Option<SecretValue>, SecretsError> {
+            claw_core::secrets::validate_secret_name(name)?;
+            Ok(None)
+        }
+        fn label(&self) -> &str {
+            "always-missing-mock"
+        }
+    }
+
+    let path = workspace_root().join("configs/skills_registry.toml");
+    let registry = SkillsRegistry::load_from_path(&path).expect("load registry");
+    let caps = registry.capabilities("image_generate").to_vec();
+    assert!(
+        caps.iter()
+            .any(|c| matches!(c, Capability::Secrets(_))),
+        "image_generate must declare at least one secrets.* capability after §E1.c"
+    );
+
+    let err = provision_secret_envs(&AlwaysMissingBroker, &caps)
+        .expect_err("missing broker backing must surface as ProvisionError, not silent Ok");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("image_generation_minimax_api_key"),
+        "error must name the missing secret to help operators: {msg}"
+    );
 }
