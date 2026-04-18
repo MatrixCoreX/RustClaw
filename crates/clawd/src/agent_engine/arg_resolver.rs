@@ -75,6 +75,21 @@ pub(super) fn attach_recent_execution_context_to_chat_args(
     {
         context_lines.push(format!("last_output: {}", crate::truncate_for_log(output)));
     }
+    // Cross-turn bridge: when current turn references prior turns ("上一个文件 / 上上个 /
+    // 那个文件 / 甲 / 乙" / "对比" / "比较" / "用 X 解释 Y"), the chat-skill LLM only sees
+    // intra-turn last_output above. Append the task-level recent_execution_context (rendered
+    // from past turns' tasks) so chat skill can ground its answer in earlier turns' outputs.
+    if let Some(cross_turn) = loop_state
+        .output_vars
+        .get("cross_turn_recent_execution_context")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        context_lines.push(format!(
+            "cross_turn_recent_execution_context (prior turns in this conversation; treat as authoritative observation evidence the same way as last_output):\n{cross_turn}"
+        ));
+    }
     if context_lines.is_empty() {
         return;
     }
