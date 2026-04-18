@@ -1,7 +1,7 @@
 <!--
 Purpose: unified front-door understanding layer. In one pass it handles resume binding, intent completion, schedule-intent detection, and clarification need.
 Component: clawd (`crates/clawd/src/intent_router.rs`) `run_intent_normalizer`
-Version: 2026-04-17.1
+Version: 2026-04-18.1
 Placeholders: __PERSONA_PROMPT__, __CAPABILITY_MAP__, __SELF_EXTENSION_RUNTIME__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __RECENT_EXECUTION_CONTEXT__, __MEMORY_CONTEXT__, __RECENT_TURNS_FULL__, __NOW__, __TIMEZONE__, __SCHEDULE_RULES__, __REQUEST__; optional: __RECENT_ASSISTANT_REPLIES__ (recent assistant-turn ordinal anchors for previous / two-turns-back reply references; entries may include `ordered_entries=1:... | 2:...`)
 -->
 
@@ -94,6 +94,7 @@ You are a unified intent normalizer for a tool-using assistant. In a single pass
    - Treat clarification as a last resort after current-turn text, __RECENT_TURNS_FULL__, __RECENT_EXECUTION_CONTEXT__, and the executable current-workspace/default-locator rules have been applied.
 
 5) **Terminal mode**: Decide exactly one: `chat` (Q&A only), `act` (execute tools/skills), `ask_clarify` (missing key, ask user), or `chat_act` (secondary: action + explicit narrated summary in one turn; do not use as fallback). Choose `act` or `chat_act` only when an existing skill clearly matches the request; if no skill clearly matches, prefer `chat` (honest limitation) or `ask_clarify` (unclear but potentially executable). Do not force `act` by inventing or coercing a skill.
+   - **Conversational acknowledge / alias-binding rule (hard):** If the current turn is a pure conversational acknowledgement that asks the assistant to remember a temporary mapping or fact for this conversation (for example `先记一下"那个文件"是 /abs/path`, `记下别名 X = /path`, `把"乙"指向 /path`, `Just remember X refers to /path`, `Let me tell you "alias" means <value>`), there is no skill to execute and no content to fetch. Route to `chat` (acknowledgement reply), set `should_refresh_long_term_memory` per persistence intent (true when user clearly wants future persistence, false when session-only), and keep `requires_content_evidence=false` and `delivery_required=false`. Do not pick `act`/`chat_act` merely because the message contains a literal path/url/filename — the literal is binding payload, not an execution target. The same applies when the user is *rebinding* an existing alias to a different value (e.g. `把"那个文件"改成 /other/path`); rebinding is still pure conversational acknowledgement, not delivery.
    - A self-contained local workspace inspection request is executable even when phrased casually. Examples include reading a file, listing a directory, checking whether something exists, counting items, extracting one field or value, comparing two local files, or reading content and then summarizing or explaining it. Route these to `act` or `chat_act` based on whether narrated explanation is explicitly requested.
    - If the request says both "inspect local data" and "tell me the conclusion / summarize / explain / compare / group / categorize", prefer `chat_act` rather than `chat`, because the user-facing organization depends on execution.
    - Generic baseline diagnostic requests such as `run a basic health check` / `帮我做一次基础健康检查` are executable by the existing `health_check` capability and should stay in `act` / `chat_act` unless the user explicitly narrows to a missing target that truly cannot be inferred.
@@ -264,6 +265,7 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
+- 纯陈述/记忆建立类指令（例如 `先记一下"那个文件"是 /abs/path`、`记下别名 X 指 /path`、`把"乙"指向 /path`、`告诉你"那个目录"等于 /dir`、`你先记住 X 等于 Y`）以及对已有别名的**重绑定**（例如 `把"那个文件"改成 /other/path`、`"那个文件"现在指向 /new`）都属于纯对话型确认，没有可执行 skill；归 `chat`，按是否要持久化设置 `should_refresh_long_term_memory`，不要因为消息里出现了路径/URL/文件名字面量就误归 `act`/`chat_act`。`output_contract.requires_content_evidence` 应保持 `false`、`delivery_required` 应保持 `false`。
 - Chinese colloquial executable requests such as `帮我看下`、`瞄一眼`、`顺手查一下`、`帮我确认下` should still be normalized as concrete executable intent when the target is otherwise clear.
 - Chinese brevity/output constraints such as `只回数字`、`只回路径`、`只给结果`、`一句话说完`、`不用展开` should be preserved in `resolved_user_intent` and reflected in `output_contract`.
 - Chinese style requests such as `用人话说`、`通俗点`、`给新手讲` mainly constrain answer style and usually imply `chat_act` when execution evidence is needed first.
