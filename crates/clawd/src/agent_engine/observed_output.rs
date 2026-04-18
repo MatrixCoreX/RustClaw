@@ -6670,4 +6670,95 @@ mod tests {
         assert!(entries[0].contains("recent_matches:\n- 10: error one\n- 20: panic two"));
         assert!(!entries[0].contains(r#""keyword_counts""#));
     }
+
+    /// §D2.b：finalizer_out schema 与 `ObservedAnswerFallbackOut` 漂移检查。
+    ///
+    /// 校验内容：
+    /// 1. `prompts/schemas/finalizer_out.schema.json` 是合法 JSON 且为 object schema；
+    /// 2. `properties` ⊇ `ObservedAnswerFallbackOut` 全部字段（含 serde rename 后的 `reason`）；
+    /// 3. `required` 列表精确包含 5 个核心硬要求字段（answer + 4 个布尔 + confidence）；
+    /// 4. 完整性闭环：把一份 schema-conformant 的最小负载 round-trip
+    ///    `serde_json::from_str::<ObservedAnswerFallbackOut>` 必须成功，且 confidence 0/1
+    ///    边界都被接受。
+    ///
+    /// 任意不满足说明 prompt / schema / parser 三者已漂移，build 红灯。
+    #[test]
+    fn finalizer_out_schema_drift() {
+        const SCHEMA_RAW: &str =
+            include_str!("../../../../prompts/schemas/finalizer_out.schema.json");
+        let schema: serde_json::Value =
+            serde_json::from_str(SCHEMA_RAW).expect("finalizer_out.schema.json must be valid JSON");
+        assert_eq!(
+            schema.get("type").and_then(|v| v.as_str()),
+            Some("object"),
+            "schema root must be object"
+        );
+
+        const STRUCT_FIELDS: &[&str] = &[
+            "answer",
+            "qualified",
+            "needs_clarify",
+            "is_meta_instruction",
+            "publishable",
+            "confidence",
+            "reason",
+        ];
+        let properties = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema must have `properties` object");
+        for field in STRUCT_FIELDS {
+            assert!(
+                properties.contains_key(*field),
+                "schema missing parser field `{}` under properties — sync prompts/schemas/finalizer_out.schema.json with ObservedAnswerFallbackOut",
+                field
+            );
+        }
+
+        let required: std::collections::HashSet<&str> = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("schema must have `required`")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        let expected_required: std::collections::HashSet<&str> = [
+            "answer",
+            "qualified",
+            "needs_clarify",
+            "is_meta_instruction",
+            "publishable",
+            "confidence",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            required, expected_required,
+            "finalizer_out required set drifted from canonical 5+1"
+        );
+
+        // 步骤 4：最小 schema-conformant 负载必须能解码到 parser struct。
+        let probes: &[(&str, &str)] = &[
+            (
+                "minimum",
+                r#"{"answer":"ok","qualified":true,"needs_clarify":false,"is_meta_instruction":false,"publishable":true,"confidence":0.0}"#,
+            ),
+            (
+                "boundary_high",
+                r#"{"answer":"ok","qualified":true,"needs_clarify":false,"is_meta_instruction":false,"publishable":true,"confidence":1.0,"reason":"r"}"#,
+            ),
+            (
+                "needs_clarify_with_empty_answer",
+                r#"{"answer":"","qualified":false,"needs_clarify":true,"is_meta_instruction":false,"publishable":false,"confidence":0.5}"#,
+            ),
+        ];
+        for (label, raw) in probes {
+            serde_json::from_str::<super::ObservedAnswerFallbackOut>(raw).unwrap_or_else(|err| {
+                panic!(
+                    "ObservedAnswerFallbackOut probe `{}` failed: {} (raw: {})",
+                    label, err, raw
+                )
+            });
+        }
+    }
 }
