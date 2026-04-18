@@ -181,6 +181,16 @@ aliases = ["vision", "image_vision_skill", "vision_image", "image-analyze"]
 timeout_seconds = 90
 prompt_file = "prompts/skills/image_vision.md"
 output_kind = "image"
+# §P4.1 / §P4.4 E1.d：image_vision 调远端多模态 vendor 读图返回描述，
+# 不写盘 → 只声明 llm + net + secrets。命名遵守 <用途>_<vendor>_api_key
+# 规范，保持与 image_edit / image_generation / chat 四套 LLM 配置完全独立。
+# 当前默认 default_vendor=minimax（见 configs/image.toml [image_vision]），
+# 启用别的 vendor 段时同步追加 secrets.image_vision_<vendor>_api_key。
+capabilities = [
+    "llm",
+    "net",
+    "secrets.image_vision_minimax_api_key",
+]
 
 [[skills]]
 name = "image_generate"
@@ -220,6 +230,18 @@ aliases = ["image_modify", "image_editor", "edit_image", "image_outpaint"]
 timeout_seconds = 180
 prompt_file = "prompts/skills/image_edit.md"
 output_kind = "image"
+# §P4.1 / §P4.4 E1.d：image_edit 调远端 vendor 编辑图，落盘到 workspace。
+# 命名遵守 <用途>_<vendor>_api_key 规范（不能与 image_generation / image_vision
+# / chat 串货）。当前默认 default_vendor=minimax（见 configs/image.toml
+# [image_edit]），启用别的 vendor 段时同步追加 secrets.image_edit_<vendor>_api_key。
+capabilities = [
+    "llm",
+    "net",
+    "fs.write",
+    "secrets.image_edit_minimax_api_key",
+]
+# §P4.2 shape consistency R3：fs.write 隐含写盘副作用 → 必须 side_effect=true。
+side_effect = true
 
 [[skills]]
 name = "audio_transcribe"
