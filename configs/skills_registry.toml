@@ -226,11 +226,20 @@ output_kind = "image"
 # 落盘到 workspace 的输出目录，因此声明 llm + net + fs.write。
 # 注意：image_generation / image_edit / image_vision / [llm]（chat&规划）
 # 是四套互相独立的 provider 配置（见 configs/image.toml + configs/config.toml）。
-# §P4.4 落 secrets 短期 token 时，secret 命名必须按 <用途>_<vendor>_api_key
-# 展开（如 secrets.image_generation_minimax_api_key），不能用
-# secrets.openai_api_key 这种跨用途的"vendor-唯一"命名，否则会把 image
-# 的 key 注入到 chat 链路。
-capabilities = ["llm", "net", "fs.write"]
+# §P4.4 / §E1.c：声明所需 secrets。命名遵守 <用途>_<vendor>_api_key
+# 规范（不能用 secrets.openai_api_key 这种跨用途命名，否则会把 image
+# 的 key 注入到 chat 链路）。
+#
+# 当前只声明 minimax —— configs/image.toml 默认 default_vendor="minimax"
+# 且只启用 [image_generation.providers.minimax]。新启用别的 vendor 段
+# （openai/google/qwen/...）时，必须在这里同步加 secrets.image_generation_<vendor>_api_key，
+# 否则 spawn path 会按 manifest 拒绝注入对应凭证（fail-loud）。
+capabilities = [
+    "llm",
+    "net",
+    "fs.write",
+    "secrets.image_generation_minimax_api_key",
+]
 # §P4.2 shape 一致性：fs.write 隐含写盘副作用，显式标 side_effect=true
 # 让 risk 路由 / finalize 决策都能拿到正确信号。
 side_effect = true
