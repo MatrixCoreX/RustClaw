@@ -606,7 +606,21 @@ while IFS=$'\t' read -r -a parts; do
       printf '%s\n' "$raw" > "$submit_file"
       task_id="$(extract_submit_task_id "$raw")"
       echo "[TASK${turn}]  ${task_id}"
-      poll_until_terminal "$task_id" "$final_file" "$llm_offset_file"
+      # poll_until_terminal returns 1 on poll timeout; under `set -e` that would
+      # tear down the whole multi-turn suite (and the parent run_suite). Wrap
+      # with `if !` and synthesize a timeout final so the case is recorded as
+      # `timeout` and the suite continues. Mirrors run_manual_test.sh:744.
+      poll_failed=0
+      if ! poll_until_terminal "$task_id" "$final_file" "$llm_offset_file"; then
+        poll_failed=1
+      fi
+      if (( poll_failed != 0 )); then
+        echo "  [poll] timed out waiting for terminal status on turn ${turn}; marking turn as timeout"
+        if [[ ! -s "$final_file" ]]; then
+          printf '%s\n' '{"data":{"status":"timeout","result_json":{"text":""},"error_text":"poll timeout"}}' > "$final_file"
+        fi
+        effective_status="timeout"
+      fi
       echo "[TEXT${turn}]  $(extract_result_text "$final_file")"
       print_turn_dialog "$final_file" "$turn" "$prompt"
       if final_result_provider_unavailable "$final_file"; then
