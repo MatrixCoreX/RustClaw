@@ -317,6 +317,13 @@ async fn main() -> anyhow::Result<()> {
         config.llm.selected_vendor.as_deref(),
         &config.persona,
     );
+    {
+        let prompt_validation = bootstrap::validate_core_prompts(
+            &workspace_root,
+            config.llm.selected_vendor.as_deref(),
+        );
+        bootstrap::log_prompt_validation_report(&prompt_validation);
+    }
     let effective_skill_runner_path = workspace_root.join("target/release/skill-runner");
     info!(
         "skill_runner_path resolved: {}",
