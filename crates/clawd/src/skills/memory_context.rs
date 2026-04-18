@@ -15,7 +15,7 @@ pub(crate) fn inject_skill_memory_context(
         Value::Object(map) => map,
         other => return other,
     };
-    if crate::canonical_skill_name(skill_name) == "chat" {
+    if state.resolve_canonical_skill_name(skill_name) == "chat" {
         return Value::Object(obj);
     }
     if obj.contains_key("_memory") {
