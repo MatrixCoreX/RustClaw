@@ -75,6 +75,48 @@ pub(super) fn attach_recent_execution_context_to_chat_args(
     {
         context_lines.push(format!("last_output: {}", crate::truncate_for_log(output)));
     }
+    // Multi-step intra-turn bridge: when the LLM plan contains multiple observation steps
+    // (e.g. `[read_file(乙), read_file(甲)]`), `last_output` only carries the last step's
+    // output (甲), and earlier steps' real outputs (乙) would be silently dropped before the
+    // chat-skill sees them. Surface every prior OK observation step so multi-evidence
+    // questions ("读一下乙的开头，然后顺手说甲是干什么的", "对比文件 A 和 B") can ground
+    // on full evidence. Skip the last step (already in `last_output`) and skip non-evidence
+    // steps (chat / respond) to avoid feeding the chat-skill its own prior reply.
+    {
+        use crate::executor::StepExecutionStatus;
+        let evidence_steps: Vec<(usize, &crate::executor::StepExecutionResult)> = loop_state
+            .executed_step_results
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                matches!(s.status, StepExecutionStatus::Ok)
+                    && !s.skill.eq_ignore_ascii_case("chat")
+                    && !s.skill.eq_ignore_ascii_case("respond")
+                    && s.output
+                        .as_deref()
+                        .map(|o| !o.trim().is_empty())
+                        .unwrap_or(false)
+            })
+            .collect();
+        if evidence_steps.len() > 1 {
+            // All but the final evidence step (final one is already exposed via last_output).
+            let prior = &evidence_steps[..evidence_steps.len() - 1];
+            let mut prior_lines = Vec::with_capacity(prior.len());
+            for (idx, step) in prior {
+                let out = step.output.as_deref().unwrap_or("");
+                prior_lines.push(format!(
+                    "step[{}] skill={}: {}",
+                    idx + 1,
+                    step.skill,
+                    crate::truncate_for_log(out.trim())
+                ));
+            }
+            context_lines.push(format!(
+                "prior_step_outputs (earlier observation steps in current turn; treat as authoritative observation evidence the same way as last_output):\n{}",
+                prior_lines.join("\n")
+            ));
+        }
+    }
     // Cross-turn bridge: when current turn references prior turns ("上一个文件 / 上上个 /
     // 那个文件 / 甲 / 乙" / "对比" / "比较" / "用 X 解释 Y"), the chat-skill LLM only sees
     // intra-turn last_output above. Append the task-level recent_execution_context (rendered
