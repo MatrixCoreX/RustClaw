@@ -83,28 +83,23 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
     err.trim().to_string()
 }
 
+/// 历史遗留入口：只在 [`crate::runtime::state::AppState::resolve_canonical_skill_name`]
+/// 拿不到 registry 时被作为最后兜底（identity 直传）。
+///
+/// **§P4.1（aliases 收敛）**：原本这里维护的一张 16 行硬编码 alias → canonical 的
+/// match 表，与 `configs/skills_registry.toml` 里 `[[skills]].aliases` 同时存在，
+/// 是典型的"双来源真相"。现在已经把那张表里的所有别名（包括拼写错容错 `fs_rearch`）
+/// 收进 registry，本函数变成纯 identity，不再维护任何 alias 知识。
+///
+/// 调用方应当优先走 [`crate::runtime::state::AppState::resolve_canonical_skill_name`]
+/// 而不是直接调本函数，原因：
+/// - 走 AppState 才能命中 registry 的真实 alias 解析；
+/// - 直接调本函数等价于"假装 registry 没加载"，会丢掉别名归一化能力。
+///
+/// 仍然返回 `&str` 是为了向后兼容已有的 `crate::canonical_skill_name(s).to_string()`
+/// 调用点，避免本轮 P4.1 一次改动牵动 runtime/state.rs 多处签名。
 pub(crate) fn canonical_skill_name(name: &str) -> &str {
-    match name {
-        "fs_rearch" | "fs-search" | "filesystem_search" | "file_search" | "search_files" => {
-            "fs_search"
-        }
-        "package_install" | "pkg_manager" | "packages" => "package_manager",
-        "module_install" | "install_modules" => "install_module",
-        "process" | "process_manager" => "process_basic",
-        "archive" | "archive_tool" => "archive_basic",
-        "database" | "sqlite_tool" => "db_basic",
-        "docker" | "docker_ops" => "docker_basic",
-        "rss" | "rss_reader" | "rss_fetcher" => "rss_fetch",
-        "image_vision_skill" | "vision" | "vision_image" | "image-analyze" => "image_vision",
-        "image_generation" | "generate_image" | "draw_image" | "text_to_image" => "image_generate",
-        "image_modify" | "image_editor" | "edit_image" | "image_outpaint" => "image_edit",
-        "coin" | "coins" | "crypto_trade" | "market_data" | "crypto_market" => "crypto",
-        "talk" | "smalltalk" | "joke" | "chitchat" => "chat",
-        "git" => "git_basic",
-        "http" => "http_basic",
-        "system" => "system_basic",
-        _ => name,
-    }
+    name.trim()
 }
 
 fn current_task_auth_role(state: &AppState, task: &ClaimedTask) -> Option<String> {
@@ -427,7 +422,7 @@ fn inject_skill_persona_context(
     skill_name: &str,
     args: Value,
 ) -> Value {
-    if canonical_skill_name(skill_name) != "chat" {
+    if state.resolve_canonical_skill_name(skill_name) != "chat" {
         return args;
     }
     let mut obj = match args {
