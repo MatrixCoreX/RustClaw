@@ -424,6 +424,86 @@ fn parse_json_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
                 })?;
             serde_json::from_str::<T>(&deduped).ok()
         })
+        // §F3-a：补齐截断 JSON 末尾未闭合的 `{`/`[`。
+        // adv12 复现：MiniMax 偶发把 envelope 末尾 `}` 漏掉 + 把
+        // `direct_reply_candidate`/`direct_reply_confidence` 误嵌入
+        // `execution_recipe` 内部，导致 normalizer 解析失败 → 走 ask_clarify
+        // 兜底，永远到不了 planner。补齐括号后 serde 用 `#[serde(default)]`
+        // 拿到字段的默认值，路由路径恢复。
+        .or_else(|| {
+            let balanced = balance_unclosed_brackets(raw)?;
+            serde_json::from_str::<T>(&balanced).ok()
+        })
+        .or_else(|| {
+            let balanced = balance_unclosed_brackets(&repair_invalid_json_escapes(raw))?;
+            serde_json::from_str::<T>(&balanced).ok()
+        })
+        .or_else(|| {
+            let balanced = balance_unclosed_brackets(&repair_unescaped_inner_quotes(raw))?;
+            serde_json::from_str::<T>(&balanced).ok()
+        })
+        .or_else(|| {
+            let balanced = balance_unclosed_brackets(&repair_unescaped_inner_quotes(
+                &repair_invalid_json_escapes(raw),
+            ))?;
+            serde_json::from_str::<T>(&balanced).ok()
+        })
+}
+
+/// §F3-a：在 raw 末尾按未闭合栈顺序补齐 `]` / `}`。
+///
+/// 实现要点：
+/// - 全程感知 JSON 字符串语法（含 `\\` / `\"` 等转义），不会把字面量里的
+///   括号当成结构标记；
+/// - 只追加，不删除任何字符，保持已有内容字节级稳定，避免破坏其它 repair
+///   路径；
+/// - 字符串里如果末尾仍未闭合，先补一个 `"` 再补结构括号；
+/// - 如果一路扫到末尾 `stack` 已经空了（即已经是平衡 JSON），返回 None
+///   表示「无需追加」，让上游继续走原路径，而不是返回一个完全相同的字符串
+///   再做一次 `from_str` 浪费一次 CPU。
+fn balance_unclosed_brackets(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_end();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let bytes = trimmed.as_bytes();
+    let mut stack: Vec<u8> = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    for &c in bytes {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            b'"' => in_string = true,
+            b'{' => stack.push(b'}'),
+            b'[' => stack.push(b']'),
+            b'}' | b']' => {
+                if stack.last() == Some(&c) {
+                    stack.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+    if !in_string && stack.is_empty() {
+        return None;
+    }
+    let mut out = trimmed.to_string();
+    if in_string {
+        out.push('"');
+    }
+    while let Some(closer) = stack.pop() {
+        out.push(closer as char);
+    }
+    Some(out)
 }
 
 fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
@@ -566,6 +646,67 @@ mod tests {
             Some("system")
         );
         assert_eq!(parsed.get("mode").and_then(|v| v.as_str()), Some("chat_act"));
+    }
+
+    /// §F3-a：补齐缺失尾括号 + 测试 adv12 真实 MiniMax 输出。
+    #[test]
+    fn balance_unclosed_brackets_recovers_truncated_object() {
+        // 完整对象本身已平衡，应返回 None（不重复劳动）。
+        assert!(super::balance_unclosed_brackets(r#"{"a":1}"#).is_none());
+        // 简单缺一个 `}`。
+        assert_eq!(
+            super::balance_unclosed_brackets(r#"{"a":1"#).as_deref(),
+            Some(r#"{"a":1}"#)
+        );
+        // 嵌套缺多个 `}`。
+        assert_eq!(
+            super::balance_unclosed_brackets(r#"{"a":{"b":{"c":1"#).as_deref(),
+            Some(r#"{"a":{"b":{"c":1}}}"#)
+        );
+        // 字符串里出现 `{` / `}` 不应当成结构标记。
+        assert!(super::balance_unclosed_brackets(r#"{"text":"{x}"}"#).is_none());
+        // 数组也兼容。
+        assert_eq!(
+            super::balance_unclosed_brackets(r#"[1,[2,3"#).as_deref(),
+            Some(r#"[1,[2,3]]"#)
+        );
+        // 字符串未闭合 + 缺 `}`：先补 `"`，再补 `}`。
+        assert_eq!(
+            super::balance_unclosed_brackets(r#"{"a":"hello"#).as_deref(),
+            Some(r#"{"a":"hello"}"#)
+        );
+    }
+
+    /// §F3-a：adv12 复现的真实 MiniMax 输出（结尾少一个 `}` +
+    /// `direct_reply_*` 误嵌入 `execution_recipe`）必须能被 repair 成可解析。
+    #[test]
+    fn parse_llm_json_raw_or_any_with_repair_recovers_adv12_minimax_envelope() {
+        // 注意：原始 JSON 末尾少了 envelope 自己的最后一个 `}`，
+        // 且 `direct_reply_candidate` / `direct_reply_confidence` 错误地嵌入
+        // 在 `execution_recipe` 内部（这两个字段顶层是 IntentNormalizerOut
+        // 用 #[serde(default)]，缺失也 OK；嵌进 execution_recipe 也不会让
+        // 顶层 deserialize 失败）。
+        let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"mode":"act","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","direct_reply_candidate":"","direct_reply_confidence":0.0}"#;
+        // 直接 from_str 必失败：少最后一个 `}`。
+        assert!(serde_json::from_str::<serde_json::Value>(raw).is_err());
+        let parsed = super::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(raw)
+            .expect("balance pass should recover truncated MiniMax envelope");
+        assert_eq!(
+            parsed.get("mode").and_then(|v| v.as_str()),
+            Some("act"),
+            "envelope mode field must survive repair"
+        );
+        assert_eq!(
+            parsed.get("needs_clarify").and_then(|v| v.as_bool()),
+            Some(false),
+            "envelope needs_clarify must survive repair"
+        );
+        assert_eq!(
+            parsed
+                .pointer("/output_contract/locator_kind")
+                .and_then(|v| v.as_str()),
+            Some("filename")
+        );
     }
 
     #[test]
