@@ -582,6 +582,100 @@ mod tests {
         );
     }
 
+    /// §D1：dedupe_json_object_keys 幂等性。任意 JSON dedup 一次和二次结果必须一致。
+    /// 防止未来引入「dedup 自身搬动了 key 顺序导致再 dedup 又改」这种回归。
+    #[test]
+    fn dedupe_json_object_keys_is_idempotent() {
+        let corpus = [
+            r#"{"a":1}"#,
+            r#"{"a":1,"a":2}"#,
+            r#"{"a":1,"a":2,"a":3,"a":4}"#,
+            r#"{"a":{"b":1,"b":2},"a":{"b":3,"b":4}}"#,
+            r#"[{"x":1,"x":2},{"x":3,"x":4}]"#,
+            r#"{"mode":"chat_act","execution_recipe":{"kind":"none","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#,
+            r#"{"a":[1,2,3],"a":[4,5,6]}"#,
+            r#"{}"#,
+            r#"[]"#,
+            r#""hi""#,
+            r#"42"#,
+            r#"true"#,
+            r#"null"#,
+        ];
+        for raw in corpus {
+            let once =
+                super::dedupe_json_object_keys(raw).expect("first dedup pass should succeed");
+            let twice =
+                super::dedupe_json_object_keys(&once).expect("second dedup pass should succeed");
+            assert_eq!(
+                once, twice,
+                "dedupe_json_object_keys not idempotent on input {}",
+                raw
+            );
+        }
+    }
+
+    /// §D1：N-fold 重复键 last-wins 规则覆盖。覆盖 minimax 偶发把同一字段
+    /// 重复 2/3/5/10 次的全部观测形态。
+    #[test]
+    fn dedupe_json_object_keys_last_wins_for_n_fold_duplicates() {
+        for n in [2usize, 3, 5, 10] {
+            let mut payload = String::from("{");
+            for i in 0..n {
+                if i > 0 {
+                    payload.push(',');
+                }
+                payload.push_str(&format!(r#""x":"v{}""#, i));
+            }
+            payload.push('}');
+            let deduped = super::dedupe_json_object_keys(&payload)
+                .expect("n-fold duplicate input should round-trip through Value");
+            let parsed: Value = serde_json::from_str(&deduped)
+                .expect("dedup output should still parse as Value");
+            assert_eq!(
+                parsed.get("x").and_then(|v| v.as_str()),
+                Some(format!("v{}", n - 1).as_str()),
+                "expected last-wins for n={}, got: {}",
+                n,
+                deduped
+            );
+        }
+    }
+
+    /// §D1：minimax 实际观测的「病态 JSON 语料库」全部能跑通解析回路 —— 含
+    /// duplicate keys / 嵌套 duplicate / 数组里的 object-with-duplicates / 数值与
+    /// bool 重复 / null 与字符串混合重复。任何一条 panic 都视为回归。
+    ///
+    /// 这里**不**断言每一条都能 dedup 成功；只断言不 panic 且能 round-trip：
+    /// `parse_llm_json_raw_or_any_with_repair::<Value>(...)` 拿到结果后再 to_string
+    /// 然后再 dedup 仍然能 parse。
+    #[test]
+    fn parse_llm_json_raw_or_any_with_repair_survives_minimax_pathological_corpus() {
+        let corpus = [
+            // duplicate top-level keys
+            r#"{"target_scope":"system","target_scope":"system"}"#,
+            // duplicate top + duplicate nested
+            r#"{"a":"x","a":"y","b":{"c":1,"c":2,"c":3}}"#,
+            // duplicate inside array element
+            r#"{"items":[{"k":1,"k":2},{"k":3,"k":4,"k":5}]}"#,
+            // duplicate boolean / null mixed
+            r#"{"flag":true,"flag":false,"missing":null,"missing":"present"}"#,
+            // duplicate keys with mixed value types (str -> obj)
+            r#"{"contract":"loose","contract":{"shape":"strict"}}"#,
+            // realistic minimax normalizer payload: duplicate target_scope inside
+            // execution_recipe nested in IntentNormalizerOut-style envelope.
+            r#"{"resolved_user_intent":"check service","mode":"chat_act","needs_clarify":false,"reason":"r","confidence":0.8,"execution_recipe":{"kind":"ops_closed_loop","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#,
+        ];
+        for raw in corpus {
+            let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
+                .unwrap_or_else(|| panic!("failed to repair-and-parse: {}", raw));
+            let reserialized = serde_json::to_string(&parsed)
+                .expect("repaired Value should re-serialize");
+            let again = super::parse_llm_json_raw_or_any_with_repair::<Value>(&reserialized)
+                .unwrap_or_else(|| panic!("re-parse of normalized form failed: {}", reserialized));
+            assert!(again.is_object() || again.is_array() || again.is_string() || again.is_number() || again.is_boolean() || again.is_null());
+        }
+    }
+
     #[test]
     fn extract_agent_action_objects_recovers_inner_actions_from_malformed_wrapper() {
         let raw = r#"{"steps":[{"type":"call_skill","skill":"read_file","args":{"path":"README.md"}},{"type":"call_skill","skill":"chat","args":{"text":"summarize","style":"chat"}]}"#;
