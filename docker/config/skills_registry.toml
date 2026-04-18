@@ -190,6 +190,10 @@ aliases = ["image_generation", "generate_image", "draw_image", "text_to_image"]
 timeout_seconds = 180
 prompt_file = "prompts/skills/image_generate.md"
 output_kind = "image"
+# §P4.1 主体首批示例：image_generate 走外部 LLM provider 生成图，
+# 落盘到 workspace 的输出目录，因此声明 llm + net + fs.write。
+# 未来 §P4.4 落 secrets 短期 token 时再加 secrets.<provider>_api_key。
+capabilities = ["llm", "net", "fs.write"]
 
 [[skills]]
 name = "image_edit"
