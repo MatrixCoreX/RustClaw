@@ -373,6 +373,21 @@ fn repair_unescaped_inner_quotes(raw: &str) -> String {
     out
 }
 
+/// 把任意 JSON 文本里的对象重复键去重为「last-wins」。
+///
+/// 背景：minimax 这类模型偶尔会输出包含重复键的 JSON（例如
+/// `{"target_scope":"system","target_scope":"system"}`）。serde_json 自身把
+/// `Value::Object` 实现为 BTreeMap/Map（last-wins，不会报错），但
+/// `serde::Deserialize` 派生的 struct 反序列化时会触发
+/// `Error("duplicate field ...")`，导致整个 JSON 解析失败。
+///
+/// 这里先把字符串 round-trip 一次：解析为 `Value` 时已经隐式去重，再
+/// 序列化回字符串即可作为后续 struct deserialize 的喂入。
+fn dedupe_json_object_keys(raw: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(raw).ok()?;
+    serde_json::to_string(&value).ok()
+}
+
 fn parse_json_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
     serde_json::from_str::<T>(raw)
         .ok()
@@ -387,6 +402,27 @@ fn parse_json_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
         .or_else(|| {
             let repaired = repair_unescaped_inner_quotes(&repair_invalid_json_escapes(raw));
             serde_json::from_str::<T>(&repaired).ok()
+        })
+        // 最后再尝试一次「对象重复键去重」回退路径：
+        // 处理 minimax / 部分模型偶发输出 `{"x":1,"x":1}` 之类 duplicate-field
+        // 的合法 JSON 但派生 Deserialize 失败的 case（详见 dedupe_json_object_keys 注释）。
+        // 仍然套一层 escape/quote repair，覆盖「重复键 + 转义异常」的复合场景。
+        .or_else(|| {
+            let deduped = dedupe_json_object_keys(raw)?;
+            serde_json::from_str::<T>(&deduped).ok()
+        })
+        .or_else(|| {
+            let deduped = dedupe_json_object_keys(&repair_invalid_json_escapes(raw))?;
+            serde_json::from_str::<T>(&deduped).ok()
+        })
+        .or_else(|| {
+            let deduped =
+                dedupe_json_object_keys(&repair_unescaped_inner_quotes(raw)).or_else(|| {
+                    dedupe_json_object_keys(&repair_unescaped_inner_quotes(
+                        &repair_invalid_json_escapes(raw),
+                    ))
+                })?;
+            serde_json::from_str::<T>(&deduped).ok()
         })
 }
 
@@ -494,6 +530,42 @@ mod tests {
                 .unwrap_or_default(),
             "记住：\"那玩意README\"指向 /home/guagua/test/README.md"
         );
+    }
+
+    #[test]
+    fn parse_llm_json_raw_or_any_with_repair_dedupes_object_keys_for_struct() {
+        use serde::Deserialize;
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        struct ExecutionRecipeProbe {
+            kind: String,
+            target_scope: String,
+        }
+        let raw = r#"{"kind":"none","target_scope":"system","target_scope":"system"}"#;
+        // Sanity check: 直接 derive Deserialize 在 duplicate field 上会失败。
+        assert!(serde_json::from_str::<ExecutionRecipeProbe>(raw).is_err());
+        let parsed = super::parse_llm_json_raw_or_any_with_repair::<ExecutionRecipeProbe>(raw)
+            .expect("dedup pass should recover duplicate-key object");
+        assert_eq!(
+            parsed,
+            ExecutionRecipeProbe {
+                kind: "none".to_string(),
+                target_scope: "system".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_llm_json_raw_or_any_with_repair_dedupes_nested_duplicate_keys() {
+        let raw = r#"{"mode":"chat_act","execution_recipe":{"kind":"none","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#;
+        let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
+            .expect("nested duplicate keys should be repaired");
+        assert_eq!(
+            parsed
+                .pointer("/execution_recipe/target_scope")
+                .and_then(|v| v.as_str()),
+            Some("system")
+        );
+        assert_eq!(parsed.get("mode").and_then(|v| v.as_str()), Some("chat_act"));
     }
 
     #[test]
