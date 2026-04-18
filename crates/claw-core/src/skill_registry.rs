@@ -49,6 +49,91 @@ pub enum PrimaryFallbackRole {
     Fallback,
 }
 
+/// §P4.1 主体：技能能力声明（closed-set + 命名 secrets.*）。
+///
+/// **设计目标**
+/// - operator 在 registry 加载阶段就能审视技能要的资源（CI 拦截漂移）。
+/// - §P4.4 短期 secrets token：将凭 `secrets.<name>` 决定是否注入对应密钥。
+/// - §P4.2 skill shape 决策：对外呼出的能力（net/exec）会推导出更严的隔离形态。
+///
+/// **词汇表**（任何不在表内的字符串都会让 registry 加载报错，避免 typo）：
+/// - `llm`：调用 LLM 网关（受 clawd LLM gateway 管控：fallback / 限流 / 审计）。
+/// - `net`：除 LLM 网关外的对外网络（HTTP/HTTPS/raw socket）。
+/// - `fs.read`：读取技能 bundle 目录之外的文件。
+/// - `fs.write`：在技能 bundle 目录之外创建/修改文件。
+/// - `exec`：fork/exec 子进程（含 shell）。
+/// - `exec.sudo`：以提权方式 fork（必须额外 opt-in，独立于 `exec`）。
+/// - `secrets.<name>`：需要某个具名密钥（如 `secrets.openai_api_key`）。
+///   `<name>` 仅允许 `[a-z0-9_]`，长度 1..=64，避免拼写漂移。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Capability {
+    Llm,
+    Net,
+    FsRead,
+    FsWrite,
+    Exec,
+    ExecSudo,
+    /// 内部存的是密钥的 canonical name（小写、`[a-z0-9_]`）。
+    Secrets(String),
+}
+
+impl Capability {
+    /// 解析 TOML 中的字符串到 [`Capability`]。
+    ///
+    /// 收尾 §P4.1 的契约：未知 token 必须报错而不是默默忽略。
+    pub fn parse(token: &str) -> Result<Self, String> {
+        let raw = token.trim();
+        if raw.is_empty() {
+            return Err("capability token must not be empty".to_string());
+        }
+        // 全部按小写比对，让 registry 写法宽松、内存表示稳定。
+        let lower = raw.to_ascii_lowercase();
+        match lower.as_str() {
+            "llm" => Ok(Self::Llm),
+            "net" => Ok(Self::Net),
+            "fs.read" => Ok(Self::FsRead),
+            "fs.write" => Ok(Self::FsWrite),
+            "exec" => Ok(Self::Exec),
+            "exec.sudo" => Ok(Self::ExecSudo),
+            other => {
+                if let Some(name) = other.strip_prefix("secrets.") {
+                    if name.is_empty() || name.len() > 64 {
+                        return Err(format!(
+                            "secrets capability name length must be 1..=64: `{token}`"
+                        ));
+                    }
+                    if !name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                    {
+                        return Err(format!(
+                            "secrets capability name must match [a-z0-9_]: `{token}`"
+                        ));
+                    }
+                    Ok(Self::Secrets(name.to_string()))
+                } else {
+                    Err(format!(
+                        "unknown capability `{token}` (allowed: llm, net, fs.read, fs.write, exec, exec.sudo, secrets.<name>)"
+                    ))
+                }
+            }
+        }
+    }
+
+    /// 反向 → token，便于日志/错误信息打印（与 [`Self::parse`] 自洽）。
+    pub fn as_token(&self) -> String {
+        match self {
+            Self::Llm => "llm".to_string(),
+            Self::Net => "net".to_string(),
+            Self::FsRead => "fs.read".to_string(),
+            Self::FsWrite => "fs.write".to_string(),
+            Self::Exec => "exec".to_string(),
+            Self::ExecSudo => "exec.sudo".to_string(),
+            Self::Secrets(name) => format!("secrets.{name}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SkillManifest {
     pub name: String,
@@ -66,6 +151,9 @@ pub struct SkillManifest {
     pub retryable: Option<bool>,
     pub group: Option<String>,
     pub primary_fallback_role: Option<PrimaryFallbackRole>,
+    /// §P4.1 主体：这条技能对外声明需要使用的能力集（去重、按 [`Capability::as_token`]
+    /// 排序）。空表示"纯计算 + 标准库"，不需要任何特权资源。
+    pub capabilities: Vec<Capability>,
 }
 
 /// 注册表中的单条技能定义
@@ -143,6 +231,21 @@ pub struct SkillRegistryEntry {
     /// External 技能：鉴权引用（预留，本轮不实现完整 secret 管理）
     #[serde(default)]
     pub external_auth_ref: Option<String>,
+
+    // ---------- Phase 4.1 主体：能力声明 ----------
+    /// 该技能对外声明的能力集（TOML 写法：`capabilities = ["llm", "net", "secrets.openai_api_key"]`）。
+    ///
+    /// 文件层用 `Vec<String>` 接，[`SkillsRegistry::load_from_path`] 会把它
+    /// 转成 [`Capability`]（未知 token 会让 registry **加载失败**）。
+    /// 转换后的强类型放在 [`SkillRegistryEntry::resolved_capabilities`]，
+    /// `capabilities_raw` 字段仅作为审计/调试痕迹保留。
+    #[serde(default, rename = "capabilities")]
+    pub capabilities_raw: Vec<String>,
+
+    /// 内部使用：`load_from_path` 把 `capabilities_raw` 解析后塞这里。
+    /// 不被 serde 反序列化（永远从 raw 算出来，避免双源真相）。
+    #[serde(skip)]
+    pub resolved_capabilities: Vec<Capability>,
 }
 
 fn default_true() -> bool {
@@ -202,6 +305,23 @@ impl SkillsRegistry {
                 .map(|a| to_canonical_key(a))
                 .filter(|a| !a.is_empty() && *a != canonical)
                 .collect();
+            // §P4.1 主体：把 capabilities_raw 翻译成强类型，未知 token 直接报错。
+            // 排序 + dedup 让"声明顺序"不影响等价性，并避免重复声明在策略层
+            // 引出二义性。
+            let mut resolved: Vec<Capability> = Vec::with_capacity(entry.capabilities_raw.len());
+            for token in &entry.capabilities_raw {
+                let cap = Capability::parse(token).map_err(|e| {
+                    format!(
+                        "parse capabilities for skill `{canonical}` in {}: {e}",
+                        path.display()
+                    )
+                })?;
+                resolved.push(cap);
+            }
+            resolved.sort_by(|a, b| a.as_token().cmp(&b.as_token()));
+            resolved.dedup();
+            entry.resolved_capabilities = resolved;
+
             by_name.insert(canonical.clone(), entry);
             alias_to_name.insert(canonical.clone(), canonical.clone());
             for a in &aliases {
@@ -366,7 +486,24 @@ impl SkillsRegistry {
             retryable: entry.retryable,
             group: trim_optional_string(entry.group.as_deref()),
             primary_fallback_role: entry.primary_fallback_role,
+            capabilities: entry.resolved_capabilities.clone(),
         })
+    }
+
+    /// §P4.1 主体：取该技能的强类型能力声明（已去重 + 排序）。
+    /// 未注册的技能返回空切片（与"未声明任何能力"语义同 — 都不应放行任何
+    /// 受控资源）。
+    pub fn capabilities(&self, canonical_name: &str) -> &[Capability] {
+        match self.get(canonical_name) {
+            Some(entry) => entry.resolved_capabilities.as_slice(),
+            None => &[],
+        }
+    }
+
+    /// §P4.1 主体：审计/策略层的命中查询。`secrets.<name>` 走精确匹配，
+    /// 其他能力走变体相等。例：调用 `has_capability("image_generate", &Capability::Llm)`。
+    pub fn has_capability(&self, canonical_name: &str, cap: &Capability) -> bool {
+        self.capabilities(canonical_name).iter().any(|c| c == cap)
     }
 }
 
@@ -549,6 +686,106 @@ kind = "runner"   # 故意写错 kind，应该被 wrong_kind 抓到
         assert!(human.contains("missing builtins"));
         assert!(human.contains("wrong kind"));
 
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn capability_parses_closed_set_and_secrets_namespace() {
+        for token in [
+            "llm",
+            "net",
+            "fs.read",
+            "fs.write",
+            "exec",
+            "exec.sudo",
+            "secrets.openai_api_key",
+        ] {
+            let cap = Capability::parse(token).unwrap_or_else(|e| {
+                panic!("expected `{token}` to parse, got error: {e}");
+            });
+            assert_eq!(cap.as_token(), token);
+        }
+    }
+
+    #[test]
+    fn capability_parse_is_case_insensitive_but_normalizes_to_lowercase() {
+        assert_eq!(Capability::parse("LLM").unwrap(), Capability::Llm);
+        assert_eq!(
+            Capability::parse("FS.Write").unwrap(),
+            Capability::FsWrite
+        );
+        assert_eq!(
+            Capability::parse("Secrets.OpenAI_Api_Key").unwrap(),
+            Capability::Secrets("openai_api_key".to_string())
+        );
+    }
+
+    #[test]
+    fn capability_rejects_unknown_tokens_and_bad_secret_names() {
+        // 完全未知词
+        assert!(Capability::parse("disk").is_err());
+        // 空 token
+        assert!(Capability::parse("").is_err());
+        // secrets 但名字非法（含点、空、过长）
+        assert!(Capability::parse("secrets.").is_err());
+        assert!(Capability::parse("secrets.bad-name").is_err());
+        assert!(Capability::parse("secrets.has space").is_err());
+        let too_long = format!("secrets.{}", "a".repeat(65));
+        assert!(Capability::parse(&too_long).is_err());
+    }
+
+    #[test]
+    fn registry_load_resolves_capabilities_and_dedups() {
+        let toml = r#"
+[[skills]]
+name = "image_generate"
+enabled = true
+kind = "runner"
+capabilities = ["llm", "net", "fs.write", "llm", "secrets.openai_api_key"]
+"#;
+        let path = std::env::temp_dir().join("test_registry_capabilities_ok.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path).unwrap();
+        let caps = reg.capabilities("image_generate");
+        let tokens: Vec<String> = caps.iter().map(Capability::as_token).collect();
+        // 已 dedup（"llm" 出现两次）+ 已按 as_token 排序
+        assert_eq!(
+            tokens,
+            vec![
+                "fs.write".to_string(),
+                "llm".to_string(),
+                "net".to_string(),
+                "secrets.openai_api_key".to_string(),
+            ]
+        );
+        assert!(reg.has_capability("image_generate", &Capability::Llm));
+        assert!(reg.has_capability(
+            "image_generate",
+            &Capability::Secrets("openai_api_key".to_string())
+        ));
+        assert!(!reg.has_capability("image_generate", &Capability::ExecSudo));
+        // manifest 视图也带上
+        let manifest = reg.manifest("image_generate").unwrap();
+        assert_eq!(manifest.capabilities.len(), 4);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn registry_load_rejects_unknown_capability_token() {
+        let toml = r#"
+[[skills]]
+name = "foo"
+enabled = true
+kind = "runner"
+capabilities = ["llm", "wifi"]
+"#;
+        let path = std::env::temp_dir().join("test_registry_capabilities_bad.toml");
+        std::fs::write(&path, toml).unwrap();
+        let err = SkillsRegistry::load_from_path(&path)
+            .err()
+            .expect("expected load to fail on unknown capability token");
+        assert!(err.contains("`foo`"), "error should mention skill name: {err}");
+        assert!(err.contains("wifi"), "error should mention bad token: {err}");
         let _ = std::fs::remove_file(path);
     }
 

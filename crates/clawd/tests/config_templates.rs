@@ -1,4 +1,4 @@
-use claw_core::skill_registry::{SkillsRegistry, REQUIRED_BUILTIN_SKILLS};
+use claw_core::skill_registry::{Capability, SkillsRegistry, REQUIRED_BUILTIN_SKILLS};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -173,5 +173,67 @@ fn registry_covers_all_required_builtins() {
             REQUIRED_BUILTIN_SKILLS,
             report.into_human_message().unwrap_or_default()
         );
+    }
+}
+
+/// §P4.1 主体：示范技能 image_generate 必须按 schema 声明 capabilities。
+///
+/// 本测试同时承担两个守底职责：
+/// 1. 防止 image_generate 的 capabilities 被误改/误删（运行期会有策略层依赖）；
+/// 2. 防止其他未声明能力的技能被偷偷加上能力 —— 当下没有第三方 audit 入口时，
+///    这条测试是最便宜的"显式声明才能放开"门闸。新增带 capabilities 的技能时，
+///    把它加到 `expected_with_caps` 列表里。
+#[test]
+fn registry_capabilities_declared_match_expected_demo_skill() {
+    // (canonical, sorted-tokens) — sorted 顺序与 SkillsRegistry::load_from_path
+    // 内部 dedup+sort 后的结果一致。
+    let expected_with_caps: &[(&str, &[&str])] = &[
+        // 首批示例：图像生成需要 LLM 网关 + 对外网络 + 写盘。
+        ("image_generate", &["fs.write", "llm", "net"]),
+    ];
+
+    let registry_paths = [
+        workspace_root().join("configs/skills_registry.toml"),
+        workspace_root().join("docker/config/skills_registry.toml"),
+    ];
+
+    for path in registry_paths.iter() {
+        let registry = SkillsRegistry::load_from_path(path).expect("load registry");
+
+        for (skill, expected) in expected_with_caps {
+            let actual: Vec<String> = registry
+                .capabilities(skill)
+                .iter()
+                .map(Capability::as_token)
+                .collect();
+            let want: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
+            assert_eq!(
+                actual,
+                want,
+                "{}: skill `{skill}` declared capabilities drift; expected {:?}, got {:?}",
+                path.display(),
+                want,
+                actual,
+            );
+        }
+
+        // 守底：除了 expected_with_caps 列表里的技能，其他任何技能都不应该有
+        // capabilities 声明（确保新增技能的 capability 必须显式入这条测试，
+        // 任何"偷偷加权限"的 PR 都会红）。
+        let allowed: std::collections::HashSet<&str> =
+            expected_with_caps.iter().map(|(s, _)| *s).collect();
+        for name in registry.all_names() {
+            if allowed.contains(name.as_str()) {
+                continue;
+            }
+            let caps = registry.capabilities(&name);
+            assert!(
+                caps.is_empty(),
+                "{}: skill `{name}` declares capabilities {:?} but is not in `expected_with_caps`; \
+                 add it to the test allowlist if intentional",
+                path.display(),
+                caps.iter().map(Capability::as_token).collect::<Vec<_>>(),
+            );
+        }
     }
 }
