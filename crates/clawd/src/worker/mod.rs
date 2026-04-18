@@ -251,12 +251,21 @@ pub(crate) async fn process_ask_task(
     );
     let prepared_flow =
         ask_pipeline::prepare_ask_flow(state, task, payload, &prompt, &source).await?;
+    let cross_turn_recent_execution_context = {
+        let trimmed = prepared_flow.recent_execution_context.trim();
+        if trimmed.is_empty() || trimmed == "<none>" {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    };
     let agent_run_context = Some(crate::agent_engine::AgentRunContext {
         route_result: Some(prepared_flow.route_result.clone()),
         execution_recipe_hint: prepared_flow.execution_recipe_hint,
         context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
         auto_locator_path: prepared_flow.auto_locator_path.clone(),
         user_request: Some(prompt.clone()),
+        cross_turn_recent_execution_context,
     });
 
     let Some(result) = ask_pipeline::execute_ask_dispatch(

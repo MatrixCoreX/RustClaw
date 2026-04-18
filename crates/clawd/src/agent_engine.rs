@@ -272,6 +272,17 @@ fn seed_loop_state_from_agent_context(
             route.output_contract.locator_kind.as_str().to_string(),
         );
     }
+    if let Some(cross_turn_ctx) = ctx
+        .cross_turn_recent_execution_context
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty() && *v != "<none>")
+    {
+        loop_state.output_vars.insert(
+            "cross_turn_recent_execution_context".to_string(),
+            cross_turn_ctx.to_string(),
+        );
+    }
     if let Some(spec) = ctx.execution_recipe_hint {
         loop_state.output_vars.insert(
             "route_execution_recipe_kind".to_string(),
@@ -304,6 +315,11 @@ pub(crate) struct AgentRunContext {
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) auto_locator_path: Option<String>,
     pub(crate) user_request: Option<String>,
+    /// Cross-turn recent execution context (rendered by routing_context::build_recent_execution_context).
+    /// Used by chat skill bridging so the chat-skill LLM can see prior turns' outputs (file content,
+    /// list_dir results, alias bindings, etc.) when the current turn references "上一个文件 / 上上个 /
+    /// 那个文件 / 甲 / 乙" or asks to compare/relate prior outputs.
+    pub(crate) cross_turn_recent_execution_context: Option<String>,
 }
 
 struct RespondActionOutcome {
