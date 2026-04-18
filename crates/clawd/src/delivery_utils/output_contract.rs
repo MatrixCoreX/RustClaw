@@ -118,8 +118,17 @@ pub(super) fn enforce_output_contract(
             }
         }
         OutputResponseShape::Scalar => {
-            if let Some(scalar) = extract_scalar_literal(normalized_text) {
-                *normalized_text = scalar;
+            // QuantityComparison 的回答天然由"较大方 + 双方数值"组成（如 "docs 更多：docs 有 3 个，logs 有 2 个"），
+            // 强行 extract_scalar_literal 会把整句压成首个 ASCII 数字 "3"，把已经合规的对比答案破坏成
+            // 单孤立数字——典型"假成功"。Comparison 类保留 LLM 的完整短句即可，下游 chat 渲染器
+            // 已经按 chat_response_prompt 的硬规则保证了简洁度。
+            if !matches!(
+                output_contract.semantic_kind,
+                crate::OutputSemanticKind::QuantityComparison
+            ) {
+                if let Some(scalar) = extract_scalar_literal(normalized_text) {
+                    *normalized_text = scalar;
+                }
             }
         }
         _ => {}
