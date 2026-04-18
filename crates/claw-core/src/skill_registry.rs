@@ -63,8 +63,23 @@ pub enum PrimaryFallbackRole {
 /// - `fs.write`：在技能 bundle 目录之外创建/修改文件。
 /// - `exec`：fork/exec 子进程（含 shell）。
 /// - `exec.sudo`：以提权方式 fork（必须额外 opt-in，独立于 `exec`）。
-/// - `secrets.<name>`：需要某个具名密钥（如 `secrets.openai_api_key`）。
-///   `<name>` 仅允许 `[a-z0-9_]`，长度 1..=64，避免拼写漂移。
+/// - `secrets.<name>`：需要某个具名密钥。`<name>` 仅允许 `[a-z0-9_]`，长度
+///   1..=64，避免拼写漂移。
+///
+/// **关于 `secrets.<name>` 的命名规范（重要 — 与 §P4.4 配合）**：
+///
+/// 本仓里 `image_generation` / `image_edit` / `image_vision` / `[llm]`（即文本
+/// 对话与规划）是**四个互相独立**的 LLM provider 配置域 —— 同一个 vendor 可
+/// 以在不同用途下填不同 base_url 与 api_key。所以 secret 命名必须按
+/// `<用途>_<vendor>_api_key` 展开，**不能**用 `secrets.openai_api_key` 这种
+/// 跨用途的"vendor-唯一"命名，否则会把 image_generate 的 key 误注入到
+/// chat/规划链路（反之亦然）。
+///
+/// 推荐命名：
+/// - `secrets.image_generation_minimax_api_key`
+/// - `secrets.image_edit_qwen_api_key`
+/// - `secrets.image_vision_openai_api_key`
+/// - `secrets.text_openai_api_key`（对应 `[llm.openai].api_key`）
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Capability {
     Llm,
@@ -109,6 +124,24 @@ impl Capability {
                         return Err(format!(
                             "secrets capability name must match [a-z0-9_]: `{token}`"
                         ));
+                    }
+                    // §P4.1 ↔ image/text 配置独立性：拦截"裸 vendor 名"反模式。
+                    // image_generation / image_edit / image_vision / [llm] 是
+                    // 4 套互相独立的 LLM provider 配置（同一 vendor 在不同用途
+                    // 下可能填不同 key）。`secrets.openai_api_key` 这种命名
+                    // 隐含"vendor-唯一 key"，会让 §P4.4 的 token 注入跨域串货。
+                    // 必须按 `<用途>_<vendor>_api_key` 命名（如
+                    // `secrets.image_generation_minimax_api_key`）。
+                    const KNOWN_VENDORS: &[&str] = &[
+                        "openai", "google", "gemini", "anthropic", "claude", "grok", "xai",
+                        "deepseek", "qwen", "minimax",
+                    ];
+                    for vendor in KNOWN_VENDORS {
+                        if name == &format!("{vendor}_api_key") || name == *vendor {
+                            return Err(format!(
+                                "secrets capability `{token}` uses bare vendor naming, which conflates the four independent LLM provider configs (image_generation/image_edit/image_vision/text). Rename to `secrets.<usage>_<vendor>_api_key`, e.g. `secrets.image_generation_{vendor}_api_key` or `secrets.text_{vendor}_api_key`."
+                            ));
+                        }
                     }
                     Ok(Self::Secrets(name.to_string()))
                 } else {
@@ -233,7 +266,10 @@ pub struct SkillRegistryEntry {
     pub external_auth_ref: Option<String>,
 
     // ---------- Phase 4.1 主体：能力声明 ----------
-    /// 该技能对外声明的能力集（TOML 写法：`capabilities = ["llm", "net", "secrets.openai_api_key"]`）。
+    /// 该技能对外声明的能力集（TOML 写法示例：
+    /// `capabilities = ["llm", "net", "secrets.image_generation_minimax_api_key"]`。
+    /// 注意 `secrets.<name>` 必须按 `<用途>_<vendor>_api_key` 命名，
+    /// image / text / vision 等用途各自独立，不要写成 `secrets.openai_api_key` 这种跨用途的"vendor-唯一"命名）。
     ///
     /// 文件层用 `Vec<String>` 接，[`SkillsRegistry::load_from_path`] 会把它
     /// 转成 [`Capability`]（未知 token 会让 registry **加载失败**）。
@@ -751,6 +787,8 @@ kind = "runner"   # 故意写错 kind，应该被 wrong_kind 抓到
 
     #[test]
     fn capability_parses_closed_set_and_secrets_namespace() {
+        // 注意：`secrets.<name>` 用 `<用途>_<vendor>_api_key` 命名，避免把
+        // image / chat / vision 三套独立 LLM 配置的 key 串到一起。
         for token in [
             "llm",
             "net",
@@ -758,7 +796,8 @@ kind = "runner"   # 故意写错 kind，应该被 wrong_kind 抓到
             "fs.write",
             "exec",
             "exec.sudo",
-            "secrets.openai_api_key",
+            "secrets.image_generation_minimax_api_key",
+            "secrets.text_openai_api_key",
         ] {
             let cap = Capability::parse(token).unwrap_or_else(|e| {
                 panic!("expected `{token}` to parse, got error: {e}");
@@ -775,8 +814,8 @@ kind = "runner"   # 故意写错 kind，应该被 wrong_kind 抓到
             Capability::FsWrite
         );
         assert_eq!(
-            Capability::parse("Secrets.OpenAI_Api_Key").unwrap(),
-            Capability::Secrets("openai_api_key".to_string())
+            Capability::parse("Secrets.Image_Generation_MiniMax_Api_Key").unwrap(),
+            Capability::Secrets("image_generation_minimax_api_key".to_string())
         );
     }
 
@@ -795,13 +834,58 @@ kind = "runner"   # 故意写错 kind，应该被 wrong_kind 抓到
     }
 
     #[test]
+    fn capability_rejects_bare_vendor_secret_naming() {
+        // 反模式：会让 image / text / vision / chat 共用 key —— 必须拒。
+        for token in [
+            "secrets.openai_api_key",
+            "secrets.gemini_api_key",
+            "secrets.anthropic_api_key",
+            "secrets.claude_api_key",
+            "secrets.qwen_api_key",
+            "secrets.minimax_api_key",
+            // 极端反模式：连 _api_key 都不带，纯 vendor 名
+            "secrets.openai",
+            "secrets.minimax",
+        ] {
+            let err = Capability::parse(token).err().unwrap_or_else(|| {
+                panic!("expected `{token}` to be rejected as bare-vendor naming")
+            });
+            assert!(
+                err.contains("bare vendor naming"),
+                "unexpected error for `{token}`: {err}"
+            );
+            assert!(
+                err.contains("<usage>_<vendor>_api_key"),
+                "error should hint the canonical naming pattern: {err}"
+            );
+        }
+
+        // 正模式：带用途前缀必须放行。
+        for token in [
+            "secrets.image_generation_minimax_api_key",
+            "secrets.image_edit_qwen_api_key",
+            "secrets.image_vision_openai_api_key",
+            "secrets.text_openai_api_key",
+            "secrets.chat_minimax_api_key",
+        ] {
+            assert!(
+                Capability::parse(token).is_ok(),
+                "expected `{token}` to be accepted"
+            );
+        }
+    }
+
+    #[test]
     fn registry_load_resolves_capabilities_and_dedups() {
+        // 故意写两次 "llm" 验证 dedup；secret 用 image_generation 命名空间，
+        // 与 chat/规划用的 [llm] 配置完全分离，杜绝把 image 的 key 注入到 text 链路。
         let toml = r#"
 [[skills]]
 name = "image_generate"
 enabled = true
 kind = "runner"
-capabilities = ["llm", "net", "fs.write", "llm", "secrets.openai_api_key"]
+side_effect = true
+capabilities = ["llm", "net", "fs.write", "llm", "secrets.image_generation_minimax_api_key"]
 "#;
         let path = std::env::temp_dir().join("test_registry_capabilities_ok.toml");
         std::fs::write(&path, toml).unwrap();
@@ -815,13 +899,18 @@ capabilities = ["llm", "net", "fs.write", "llm", "secrets.openai_api_key"]
                 "fs.write".to_string(),
                 "llm".to_string(),
                 "net".to_string(),
-                "secrets.openai_api_key".to_string(),
+                "secrets.image_generation_minimax_api_key".to_string(),
             ]
         );
         assert!(reg.has_capability("image_generate", &Capability::Llm));
         assert!(reg.has_capability(
             "image_generate",
-            &Capability::Secrets("openai_api_key".to_string())
+            &Capability::Secrets("image_generation_minimax_api_key".to_string())
+        ));
+        // 关键：image_generation 的 key 不应被 chat/text 链路误命中
+        assert!(!reg.has_capability(
+            "image_generate",
+            &Capability::Secrets("text_minimax_api_key".to_string())
         ));
         assert!(!reg.has_capability("image_generate", &Capability::ExecSudo));
         // manifest 视图也带上
