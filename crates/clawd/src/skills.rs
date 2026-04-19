@@ -813,9 +813,9 @@ mod tests {
                             },
                 schedule: ScheduleRuntime {
                                 timezone: "Asia/Shanghai".to_string(),
-                                intent_prompt_template: String::new(),
+                                intent_prompt_template: Arc::new(RwLock::new(String::new())),
                                 intent_prompt_source: String::new(),
-                                intent_rules_template: String::new(),
+                                intent_rules_template: Arc::new(RwLock::new(String::new())),
                                 locale: locale.to_string(),
                                 i18n_dict: HashMap::new(),
                             },

@@ -52,6 +52,8 @@ pub struct AppConfig {
     pub webd: WebdConfig,
     #[serde(default)]
     pub self_extension: SelfExtensionConfig,
+    #[serde(default)]
+    pub prompts: PromptsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1224,6 +1226,42 @@ impl Default for ScheduleConfig {
             i18n_dir: default_schedule_i18n_dir(),
         }
     }
+}
+
+/// §3.5d: prompts hot-reload 运维开关。
+///
+/// - `reload_on_sighup`：进程收到 SIGHUP 信号时，是否触发
+///   [`crate::bootstrap::prompts::reload_runtime_prompts`] 把 persona /
+///   schedule.intent_prompt / schedule.intent_rules 的内存快照与磁盘对齐，并
+///   复跑核心 prompt 校验。
+///   - 默认 true：本地开发体验佳（编辑 → kill -HUP → 下一次 LLM 调用即生效）。
+///   - 生产环境若希望显式禁用 SIGHUP 行为（例如 systemd 用 SIGHUP 做 reload
+///     其它资源），可显式设为 false。
+/// - `config_path`：reload 时重读的 config 文件路径。默认与 clawd 启动相同：
+///   `configs/config.toml`。允许覆盖以适配多套 config 共存的部署。
+#[derive(Debug, Clone, Deserialize)]
+pub struct PromptsConfig {
+    #[serde(default = "default_prompts_reload_on_sighup")]
+    pub reload_on_sighup: bool,
+    #[serde(default = "default_prompts_config_path")]
+    pub config_path: String,
+}
+
+impl Default for PromptsConfig {
+    fn default() -> Self {
+        Self {
+            reload_on_sighup: default_prompts_reload_on_sighup(),
+            config_path: default_prompts_config_path(),
+        }
+    }
+}
+
+fn default_prompts_reload_on_sighup() -> bool {
+    true
+}
+
+fn default_prompts_config_path() -> String {
+    "configs/config.toml".to_string()
 }
 
 fn default_skill_timeout_seconds() -> u64 {
