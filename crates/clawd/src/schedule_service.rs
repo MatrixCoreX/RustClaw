@@ -265,15 +265,19 @@ pub(crate) async fn parse_schedule_intent(
     );
     let skill_catalog = render_schedule_skill_catalog(state);
     let skill_contracts = render_schedule_skill_contracts(state);
+    // §3.5d: 模板字段封装为 `Arc<RwLock<String>>`，每次取一份 owned snapshot 用于
+    // render（写锁短命，避免 reload 时阻塞当前 LLM 调用）。
+    let intent_prompt_template = state.policy.schedule.intent_prompt_template_string();
+    let intent_rules_template = state.policy.schedule.intent_rules_template_string();
     let prompt = crate::render_prompt_template(
-        &state.policy.schedule.intent_prompt_template,
+        &intent_prompt_template,
         &[
             (
                 "__NOW__",
                 &now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string(),
             ),
             ("__TIMEZONE__", &state.policy.schedule.timezone),
-            ("__RULES__", &state.policy.schedule.intent_rules_template),
+            ("__RULES__", &intent_rules_template),
             ("__SKILL_CATALOG__", &skill_catalog),
             ("__SKILLS_CATALOG__", &skill_catalog),
             ("__SKILL_CONTRACTS__", &skill_contracts),
@@ -422,7 +426,7 @@ pub(crate) fn schedule_context_for_normalizer(state: &AppState) -> (String, Stri
     let now_local = Utc::now().with_timezone(&tz);
     let now_iso = now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string();
     let timezone = state.policy.schedule.timezone.clone();
-    let rules = state.policy.schedule.intent_rules_template.clone();
+    let rules = state.policy.schedule.intent_rules_template_string();
     (now_iso, timezone, rules)
 }
 

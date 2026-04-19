@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 use claw_core::config::{CommandIntentConfig, MemoryConfig, ScheduleConfig};
 use toml::Value as TomlValue;
@@ -230,9 +231,9 @@ pub(crate) fn load_schedule_runtime(
 
     ScheduleRuntime {
         timezone,
-        intent_prompt_template,
+        intent_prompt_template: Arc::new(RwLock::new(intent_prompt_template)),
         intent_prompt_source,
-        intent_rules_template,
+        intent_rules_template: Arc::new(RwLock::new(intent_rules_template)),
         locale,
         i18n_dict,
     }

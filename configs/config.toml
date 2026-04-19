@@ -378,6 +378,17 @@ allow_package_install = false
 allow_permanent_extension = false
 allow_runtime_enable = false
 
+# Phase 7 §3.5d: prompts 热替换。
+# - reload_on_sighup: 收到 SIGHUP 时把 persona / schedule.intent_prompt /
+#   schedule.intent_rules 三个"启动期快照"字段与磁盘对齐，并复跑核心 prompt 校验。
+#   绝大多数 prompts 已经每次 LLM 调用时从磁盘读，所以编辑 prompts/layers/**/*.md
+#   下次调用就生效，无须 SIGHUP；本开关只针对上述快照字段。
+# - config_path: reload 时重读的 config 文件路径；默认与启动一致。
+# 操作示例: kill -HUP $(pgrep -x clawd)
+[prompts]
+reload_on_sighup = true
+config_path = "configs/config.toml"
+
 # 渠道配置已拆分到以下文件 / Channel configs are split into:
 # - configs/channels/telegram.toml（Telegram）/ Telegram channel settings
 # - configs/channels/whatsapp-cloud.toml（WhatsApp Cloud / webhook）/ WhatsApp Cloud settings

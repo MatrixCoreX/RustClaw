@@ -178,12 +178,29 @@ pub(crate) struct PolicyConfig {
     pub(crate) rate_limiter: Arc<Mutex<RateLimiter>>,
     pub(crate) allow_path_outside_workspace: bool,
     pub(crate) allow_sudo: bool,
-    pub(crate) persona_prompt: String,
+    /// §3.5d: persona prompt 文本封装为 `Arc<RwLock<String>>`，使 SIGHUP 触发的
+    /// hot reload 能 swap 内部内容；所有 `AppState` clone（axum router 分发）
+    /// 共享同一份内部存储。读取请用 `persona_prompt_string()` helper。
+    pub(crate) persona_prompt: Arc<RwLock<String>>,
     pub(crate) command_intent: CommandIntentRuntime,
     pub(crate) schedule: ScheduleRuntime,
 }
 
 impl PolicyConfig {
+    pub(crate) fn persona_prompt_string(&self) -> String {
+        self.persona_prompt
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    /// §3.5d: 用新串覆盖现有 persona prompt 内容（写锁；poison 时静默回退）。
+    pub(crate) fn replace_persona_prompt(&self, new_persona: String) {
+        if let Ok(mut guard) = self.persona_prompt.write() {
+            *guard = new_persona;
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn test_default() -> Self {
         let locale = "zh-CN";
@@ -195,7 +212,7 @@ impl PolicyConfig {
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(60, 30))),
             allow_path_outside_workspace: false,
             allow_sudo: false,
-            persona_prompt: String::new(),
+            persona_prompt: Arc::new(RwLock::new(String::new())),
             command_intent: CommandIntentRuntime {
                 all_result_suffixes: Vec::new(),
                 default_locale: locale.to_string(),
@@ -203,9 +220,9 @@ impl PolicyConfig {
             },
             schedule: ScheduleRuntime {
                 timezone: "Asia/Shanghai".to_string(),
-                intent_prompt_template: String::new(),
+                intent_prompt_template: Arc::new(RwLock::new(String::new())),
                 intent_prompt_source: String::new(),
-                intent_rules_template: String::new(),
+                intent_rules_template: Arc::new(RwLock::new(String::new())),
                 locale: locale.to_string(),
                 i18n_dict: HashMap::new(),
             },
@@ -705,7 +722,7 @@ impl AppState {
         let base_prompt = if !agent.persona_prompt.trim().is_empty() {
             agent.persona_prompt
         } else {
-            self.policy.persona_prompt.clone()
+            self.policy.persona_prompt_string()
         };
         let auth_role = task
             .user_key

@@ -356,8 +356,8 @@ async fn main() -> anyhow::Result<()> {
     info!(
         "schedule config: timezone={}, prompt_chars={}, rules_chars={}",
         schedule.timezone,
-        schedule.intent_prompt_template.chars().count(),
-        schedule.intent_rules_template.chars().count()
+        schedule.intent_prompt_template_string().chars().count(),
+        schedule.intent_rules_template_string().chars().count()
     );
     info!(
         "persona loaded: profile={} chars={}",
@@ -544,7 +544,7 @@ async fn main() -> anyhow::Result<()> {
             ))),
             allow_path_outside_workspace: config.tools.allow_path_outside_workspace,
             allow_sudo: config.tools.allow_sudo,
-            persona_prompt,
+            persona_prompt: Arc::new(RwLock::new(persona_prompt)),
             command_intent,
             schedule,
         },
@@ -652,8 +652,55 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&config.server.listen).await?;
     info!("clawd listening on {}", config.server.listen);
+
+    // §3.5d: prompts hot-reload via SIGHUP。
+    // 行为见 [`crate::PromptsConfig`] / [`bootstrap::reload_runtime_prompts`]。
+    // 仅在 unix + reload_on_sighup=true 时启用；其它 target / 显式禁用直接跳过。
+    spawn_prompts_sighup_listener(state.clone(), config.prompts.clone());
+
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+/// §3.5d: 启动后台 SIGHUP listener。该任务与 `axum::serve` 同 runtime 共存；
+/// clawd 进程退出时随之终止（无须显式 join）。
+///
+/// - **非 unix 平台**：直接 no-op（windows / wasm 等无 SIGHUP 概念）。
+/// - **`reload_on_sighup = false`**：明确不订阅 signal，让 SIGHUP 走 default
+///   tokio 行为（即终止进程，与未启用本特性时一致），避免改变运维语义。
+#[cfg(unix)]
+fn spawn_prompts_sighup_listener(state: AppState, cfg: claw_core::config::PromptsConfig) {
+    if !cfg.reload_on_sighup {
+        info!("prompt_hot_reload: SIGHUP listener disabled (prompts.reload_on_sighup=false)");
+        return;
+    }
+    tokio::spawn(async move {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut stream = match signal(SignalKind::hangup()) {
+            Ok(s) => s,
+            Err(err) => {
+                warn!(
+                    "prompt_hot_reload: failed to install SIGHUP listener: err={}",
+                    err
+                );
+                return;
+            }
+        };
+        info!(
+            "prompt_hot_reload: SIGHUP listener active (config_path={}); send `kill -HUP <pid>` to swap persona/schedule prompts in-place",
+            cfg.config_path
+        );
+        while stream.recv().await.is_some() {
+            info!("prompt_hot_reload: SIGHUP received, reloading runtime prompts");
+            let _report = bootstrap::reload_runtime_prompts(&state, &cfg.config_path);
+        }
+        info!("prompt_hot_reload: SIGHUP listener exiting");
+    });
+}
+
+#[cfg(not(unix))]
+fn spawn_prompts_sighup_listener(_state: AppState, _cfg: claw_core::config::PromptsConfig) {
+    // No-op on non-unix targets.
 }
 
 async fn submit_task(

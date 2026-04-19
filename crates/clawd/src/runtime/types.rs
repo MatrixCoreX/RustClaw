@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -130,11 +131,44 @@ pub(crate) struct CommandIntentRuntime {
 #[derive(Clone)]
 pub(crate) struct ScheduleRuntime {
     pub(crate) timezone: String,
-    pub(crate) intent_prompt_template: String,
+    /// §3.5d: prompt 模板字段封装为 `Arc<RwLock<String>>`，使 SIGHUP 触发的
+    /// hot reload 能 swap 内部内容；所有 `AppState` clone（axum router 分发）
+    /// 共享同一份内部存储。读取请用 `intent_prompt_template_string()` helper。
+    pub(crate) intent_prompt_template: Arc<RwLock<String>>,
     pub(crate) intent_prompt_source: String,
-    pub(crate) intent_rules_template: String,
+    /// §3.5d: 同上。
+    pub(crate) intent_rules_template: Arc<RwLock<String>>,
     pub(crate) locale: String,
     pub(crate) i18n_dict: HashMap<String, String>,
+}
+
+impl ScheduleRuntime {
+    pub(crate) fn intent_prompt_template_string(&self) -> String {
+        self.intent_prompt_template
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn intent_rules_template_string(&self) -> String {
+        self.intent_rules_template
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    /// §3.5d: 用新串覆盖现有 prompt 模板内容（写锁；poison 时静默回退）。
+    pub(crate) fn replace_intent_prompt_template(&self, new_template: String) {
+        if let Ok(mut guard) = self.intent_prompt_template.write() {
+            *guard = new_template;
+        }
+    }
+
+    pub(crate) fn replace_intent_rules_template(&self, new_rules: String) {
+        if let Ok(mut guard) = self.intent_rules_template.write() {
+            *guard = new_rules;
+        }
+    }
 }
 
 #[derive(Serialize)]

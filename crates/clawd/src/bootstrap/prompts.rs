@@ -1,7 +1,8 @@
 use std::path::Path;
+use std::time::Instant;
 
 use claw_core::{
-    config::PersonaConfig,
+    config::{AppConfig, PersonaConfig},
     prompt_layers::{self, ResolvedPromptTemplate},
 };
 use tracing::{info, warn};
@@ -286,4 +287,318 @@ pub(crate) fn load_prompt_template_for_state_with_meta(
         rel_path,
         default_template,
     )
+}
+
+/// §3.5d: prompt hot-reload 汇总报告。`persona/schedule_*` 字段记录 reload 前后的字符数；
+/// `validation` 是重跑的 [`validate_core_prompts`] 结果；`elapsed_ms` 给运维看本次 reload 耗时。
+///
+/// 字段当前主要服务于单测 / 未来管理 API；运行期 SIGHUP listener 只把摘要打到日志。
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct PromptReloadReport {
+    pub persona_chars_before: usize,
+    pub persona_chars_after: usize,
+    pub schedule_intent_chars_before: usize,
+    pub schedule_intent_chars_after: usize,
+    pub schedule_rules_chars_before: usize,
+    pub schedule_rules_chars_after: usize,
+    pub validation: PromptValidationReport,
+    pub elapsed_ms: u64,
+    pub config_reread_ok: bool,
+}
+
+/// §3.5d: prompt hot-reload 主入口。
+///
+/// 设计要点：
+/// - 大部分 `load_prompt_template_for_state_*` 路径已经每次调用时从磁盘读 prompt，
+///   编辑 `prompts/layers/**/*.md` 下次 LLM 调用就生效，**无须**任何 reload 操作。
+/// - 真正在启动期被快照进内存的字段只有：
+///     - `policy.persona_prompt`（`load_persona_prompt` 的产物）
+///     - `policy.schedule.intent_prompt_template` / `intent_rules_template`
+///       （`load_schedule_runtime` 的产物）
+/// - 本函数只负责 swap 上面三个字段的内部内容，并复用 [`validate_core_prompts`]
+///   把所有核心 prompt 再校验一次，便于运维感知"我刚才编辑的文件是不是写崩了"。
+///
+/// 行为：
+/// 1. 重读 `configs/config.toml`（用以拿到最新 `persona.profile` / `schedule.*_path`
+///    等可能被同步编辑的字段）；解析失败时跳过 reload 并返回 `config_reread_ok=false`，
+///    避免半截配置污染运行时（fail-soft：不动现状）。
+/// 2. 从最新 config + 当前 `workspace_root` 重新加载 persona / schedule，
+///    用 `replace_persona_prompt` / `replace_intent_*_template` 写入 `state.policy`。
+/// 3. 复用 `validate_core_prompts` 跑一遍所有核心 prompt 的"磁盘有内容吗"。
+///
+/// 不做：
+/// - 不改 vendor / 不切换 provider / 不重建 LLM 连接池 —— 这些是另一个项目（重启级别）。
+/// - 不清 `semantic_judge` 的 task-scoped cache —— key 含 `task_id`，新任务自然吃新 prompt；
+///   旧任务继续用上一版判定是合理的"运行中事务隔离"行为。
+pub(crate) fn reload_runtime_prompts(state: &AppState, config_path: &str) -> PromptReloadReport {
+    reload_runtime_prompts_impl(
+        &state.skill_rt.workspace_root,
+        &state.policy,
+        config_path,
+    )
+}
+
+/// §3.5d: testable inner — 只依赖 `workspace_root + PolicyConfig`，便于单测构造。
+pub(crate) fn reload_runtime_prompts_impl(
+    workspace_root: &Path,
+    policy: &crate::PolicyConfig,
+    config_path: &str,
+) -> PromptReloadReport {
+    let started = Instant::now();
+    let persona_chars_before = policy.persona_prompt_string().chars().count();
+    let schedule_intent_chars_before = policy
+        .schedule
+        .intent_prompt_template_string()
+        .chars()
+        .count();
+    let schedule_rules_chars_before = policy
+        .schedule
+        .intent_rules_template_string()
+        .chars()
+        .count();
+
+    let workspace_root = workspace_root.to_path_buf();
+
+    let (
+        persona_chars_after,
+        schedule_intent_chars_after,
+        schedule_rules_chars_after,
+        config_reread_ok,
+        vendor_for_validation,
+    ) = match AppConfig::load(config_path) {
+        Ok(new_config) => {
+            let vendor = new_config.llm.selected_vendor.clone();
+            let new_persona =
+                load_persona_prompt(&workspace_root, vendor.as_deref(), &new_config.persona);
+            let new_schedule = super::config_loaders::load_schedule_runtime(
+                &workspace_root,
+                &new_config.schedule,
+                vendor.as_deref(),
+            );
+            let new_intent_template = new_schedule.intent_prompt_template_string();
+            let new_rules_template = new_schedule.intent_rules_template_string();
+            let pa = new_persona.chars().count();
+            let sia = new_intent_template.chars().count();
+            let sra = new_rules_template.chars().count();
+            policy.replace_persona_prompt(new_persona);
+            policy
+                .schedule
+                .replace_intent_prompt_template(new_intent_template);
+            policy
+                .schedule
+                .replace_intent_rules_template(new_rules_template);
+            (pa, sia, sra, true, vendor)
+        }
+        Err(err) => {
+            warn!(
+                "prompt_hot_reload: re-read config failed, keeping current prompts: path={} err={}",
+                config_path, err
+            );
+            (
+                persona_chars_before,
+                schedule_intent_chars_before,
+                schedule_rules_chars_before,
+                false,
+                None,
+            )
+        }
+    };
+
+    let validation = validate_core_prompts(&workspace_root, vendor_for_validation.as_deref());
+    log_prompt_validation_report(&validation);
+
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    info!(
+        "prompt_hot_reload: done elapsed_ms={} config_reread_ok={} \
+        persona_chars=({}->{}) schedule_intent_chars=({}->{}) schedule_rules_chars=({}->{}) \
+        validation_missing={}/{}",
+        elapsed_ms,
+        config_reread_ok,
+        persona_chars_before,
+        persona_chars_after,
+        schedule_intent_chars_before,
+        schedule_intent_chars_after,
+        schedule_rules_chars_before,
+        schedule_rules_chars_after,
+        validation.missing.len(),
+        validation.checked
+    );
+
+    PromptReloadReport {
+        persona_chars_before,
+        persona_chars_after,
+        schedule_intent_chars_before,
+        schedule_intent_chars_after,
+        schedule_rules_chars_before,
+        schedule_rules_chars_after,
+        validation,
+        elapsed_ms,
+        config_reread_ok,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::PolicyConfig;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_workspace(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("rustclaw_prompts_hot_reload_{name}_{unique}"));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn write_file(root: &Path, rel: &str, content: &str) {
+        let abs = root.join(rel);
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir parent");
+        }
+        std::fs::write(&abs, content).expect("write file");
+    }
+
+    fn write_minimal_config(root: &Path, persona_text: &str) {
+        write_file(
+            root,
+            "configs/config.toml",
+            r#"
+[server]
+listen = "127.0.0.1:0"
+request_timeout_seconds = 30
+
+[telegram]
+
+[database]
+sqlite_path = ":memory:"
+busy_timeout_ms = 5000
+
+[worker]
+
+[persona]
+profile = "executor"
+dir = "prompts/personas"
+
+[schedule]
+timezone = "Asia/Shanghai"
+intent_prompt_path = "prompts/schedule_intent_prompt.md"
+intent_rules_path  = "prompts/schedule_intent_rules.md"
+locale = "zh-CN"
+i18n_dir = "configs/i18n"
+
+[llm]
+selected_vendor = "openai"
+selected_model  = "gpt-4o-mini"
+"#,
+        );
+        // persona file
+        write_file(root, "prompts/personas/executor.md", persona_text);
+        // schedule prompt + rules
+        write_file(
+            root,
+            "prompts/schedule_intent_prompt.md",
+            "<!-- Version: test.1 -->\nTEMPLATE_V1 __REQUEST__",
+        );
+        write_file(root, "prompts/schedule_intent_rules.md", "RULES_V1");
+        // schedule i18n (load_schedule_runtime tries it; missing falls back to defaults)
+        write_file(
+            root,
+            "configs/i18n/schedule.zh-CN.toml",
+            "[dict]\n\"schedule.desc.daily\" = \"daily {time}\"\n",
+        );
+    }
+
+    #[test]
+    fn reload_runtime_prompts_swaps_persona_and_schedule() {
+        let root = temp_workspace("swap");
+        write_minimal_config(&root, "PERSONA_V1");
+
+        let policy = PolicyConfig::test_default();
+        policy.replace_persona_prompt("PERSONA_V0".to_string());
+        policy
+            .schedule
+            .replace_intent_prompt_template("OLD_TEMPLATE".to_string());
+        policy
+            .schedule
+            .replace_intent_rules_template("OLD_RULES".to_string());
+
+        let cfg_path = root.join("configs/config.toml");
+        let report = reload_runtime_prompts_impl(&root, &policy, cfg_path.to_str().unwrap());
+
+        assert!(report.config_reread_ok);
+        assert_eq!(policy.persona_prompt_string(), "PERSONA_V1");
+        assert!(policy
+            .schedule
+            .intent_prompt_template_string()
+            .contains("TEMPLATE_V1"));
+        assert_eq!(policy.schedule.intent_rules_template_string(), "RULES_V1");
+
+        write_file(
+            &root,
+            "prompts/personas/executor.md",
+            "PERSONA_V2_AFTER_EDIT",
+        );
+        write_file(
+            &root,
+            "prompts/schedule_intent_prompt.md",
+            "<!-- Version: test.2 -->\nTEMPLATE_V2 __REQUEST__",
+        );
+        write_file(&root, "prompts/schedule_intent_rules.md", "RULES_V2");
+
+        let report2 = reload_runtime_prompts_impl(&root, &policy, cfg_path.to_str().unwrap());
+        assert!(report2.config_reread_ok);
+        assert_eq!(policy.persona_prompt_string(), "PERSONA_V2_AFTER_EDIT");
+        assert!(policy
+            .schedule
+            .intent_prompt_template_string()
+            .contains("TEMPLATE_V2"));
+        assert_eq!(policy.schedule.intent_rules_template_string(), "RULES_V2");
+    }
+
+    #[test]
+    fn reload_runtime_prompts_keeps_state_when_config_missing() {
+        let root = temp_workspace("missing_config");
+        let policy = PolicyConfig::test_default();
+        policy.replace_persona_prompt("KEEP_ME".to_string());
+
+        let bad_path = root.join("configs/does_not_exist.toml");
+        let report = reload_runtime_prompts_impl(&root, &policy, bad_path.to_str().unwrap());
+
+        assert!(!report.config_reread_ok);
+        assert_eq!(policy.persona_prompt_string(), "KEEP_ME");
+        assert_eq!(report.persona_chars_before, report.persona_chars_after);
+    }
+
+    #[test]
+    fn reload_runtime_prompts_propagates_to_clones_via_arc_rwlock() {
+        let root = temp_workspace("clone_propagate");
+        write_minimal_config(&root, "SHARED_V1");
+
+        let policy = PolicyConfig::test_default();
+        // §3.5d: PolicyConfig is `#[derive(Clone)]`; the persona_prompt /
+        // schedule.intent_prompt_template / intent_rules_template fields are
+        // `Arc<RwLock<String>>` so a clone should observe writes through the
+        // original handle (this is the property axum's AppState clone path
+        // depends on).
+        let cloned_policy = policy.clone();
+
+        let cfg_path = root.join("configs/config.toml");
+        reload_runtime_prompts_impl(&root, &policy, cfg_path.to_str().unwrap());
+
+        assert_eq!(cloned_policy.persona_prompt_string(), "SHARED_V1");
+        assert!(cloned_policy
+            .schedule
+            .intent_prompt_template_string()
+            .contains("TEMPLATE_V1"));
+        assert_eq!(
+            cloned_policy.schedule.intent_rules_template_string(),
+            "RULES_V1"
+        );
+    }
 }
