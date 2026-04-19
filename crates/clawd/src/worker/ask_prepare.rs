@@ -653,6 +653,50 @@ pub(super) async fn prepare_ask_routing(
     let immediate_prior_turn_was_clarify = immediate_last_turn_was_clarify(&last_turn_full);
     let normalizer_prompt = clarify_followup_routing_prompt(prompt, &last_turn_full)
         .unwrap_or_else(|| prompt.to_string());
+
+    // §7.3 shortpath：上一轮 clarify + 当前 prompt 整段是 locator-only 续答时，
+    // 跳过 normalizer LLM 直接合成 RouteResult。故意放在 resume_binding 之前 ——
+    // resume 续答语义上不会同时满足 "上一轮 clarify + 当前只贴 path"，shortpath
+    // 命中时整个 resume 路径都不需要走，可以连 binding 计算都省。
+    // 命中后由 §7.1 verifier 在出口兜底输出形态规范；guard 链不必再跑（shortpath
+    // 命中已暗示 has_concrete_locator_hint(prompt) 为 true，所有 force-clarify guard
+    // 必然 no-op）。
+    if let Some(hit) = crate::clarify_followup::try_clarify_reply_shortpath(prompt, &last_turn_full)
+    {
+        crate::clarify_followup::emit_shortpath_hit_event(&task.task_id, &hit);
+        info!(
+            "{} worker_once: ask clarify_shortpath_route_synthesized task_id={} reason={} normalizer_skipped=true",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            hit.reason.as_metric_label()
+        );
+        let route_result = crate::clarify_followup::synthesize_route_result_from_hit(&hit);
+        let resolved_prompt = route_result.resolved_intent.clone();
+        let ask_mode = crate::AskMode::from_routed_mode(route_result.routed_mode);
+        info!(
+            "worker_once: ask raw_message task_id={} user_id={} chat_id={} text={}",
+            task.task_id,
+            task.user_id,
+            task.chat_id,
+            crate::truncate_for_log(prompt)
+        );
+        info!(
+            "{} worker_once: ask resolved_message task_id={} needs_clarify=false confidence=1 reason={} resolved_text={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            route_result.route_reason,
+            crate::truncate_for_log(&resolved_prompt)
+        );
+        return PreparedAskRouting {
+            route_result,
+            execution_recipe_hint: None,
+            resolved_prompt,
+            agent_mode,
+            immediate_prior_turn_was_clarify: true,
+            ask_mode,
+        };
+    }
+
     let explicit_resume_binding = explicit_resume_context_binding(payload, is_resume_continue);
     let recent_failed_resume_binding =
         recent_failed_resume_candidate(state, task, explicit_resume_binding.is_some());

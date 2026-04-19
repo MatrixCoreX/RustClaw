@@ -27,6 +27,7 @@ mod ask_flow;
 mod bootstrap;
 mod capability_map;
 mod channel_send;
+mod clarify_followup;
 mod db_init;
 mod delivery_utils;
 mod execution_adapters;
