@@ -35,6 +35,8 @@ mod execution_recipe;
 mod executor;
 mod fallback;
 mod finalize;
+#[cfg(test)]
+mod fixture_replay_e2e;
 mod http;
 mod intent_router;
 mod llm_gateway;

@@ -158,6 +158,36 @@ pub(crate) fn clear_cache_for_test() {
 
 pub(crate) struct FixtureReplayProvider;
 
+/// §7.5 Step 2.a：构造一份 fixture_replay 形态的 [`LlmProviderRuntime`]，仅供
+/// in-crate 测试 harness 用。`name` 体现在 `LlmProviderConfig::name`，方便在多
+/// provider fallback 链测试里区分（比如 `vendor-fixture-primary` /
+/// `vendor-fixture-fallback`）。
+///
+/// 抽出动机：Step 1 单测 `make_runtime()` 写法在 [`crate::fixture_replay_e2e`] /
+/// 未来 e2e harness 里要重复出现，复制粘贴就会漂——一处提供，单点维护。
+#[cfg(test)]
+pub(crate) fn build_fixture_replay_runtime(name: &str) -> Arc<LlmProviderRuntime> {
+    use claw_core::config::{LlmProviderConfig, LlmProviderParams};
+    use tokio::sync::Semaphore;
+
+    Arc::new(LlmProviderRuntime {
+        config: LlmProviderConfig {
+            name: name.to_string(),
+            provider_type: FIXTURE_REPLAY_PROVIDER_TYPE.to_string(),
+            base_url: "http://fixture.invalid".to_string(),
+            api_key: "fixture".to_string(),
+            model: "fixture-model".to_string(),
+            priority: 1,
+            timeout_seconds: 5,
+            max_concurrency: 1,
+            params: LlmProviderParams::default(),
+        },
+        client: reqwest::Client::new(),
+        semaphore: Arc::new(Semaphore::new(1)),
+        breaker: Arc::new(crate::providers::CircuitBreaker::new()),
+    })
+}
+
 impl LlmProvider for FixtureReplayProvider {
     fn name(&self) -> &'static str {
         FIXTURE_REPLAY_PROVIDER_TYPE
@@ -233,10 +263,8 @@ impl LlmProvider for FixtureReplayProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claw_core::config::{LlmProviderConfig, LlmProviderParams};
     use std::path::Path;
-    use std::sync::{Arc, Mutex};
-    use tokio::sync::Semaphore;
+    use std::sync::Mutex;
 
     /// 进程内 env 串扰隔离锁：本模块所有用 set_var 的测试串行化。
     fn env_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -270,22 +298,7 @@ mod tests {
     }
 
     fn make_runtime() -> Arc<LlmProviderRuntime> {
-        Arc::new(LlmProviderRuntime {
-            config: LlmProviderConfig {
-                name: "vendor-fixture".to_string(),
-                provider_type: FIXTURE_REPLAY_PROVIDER_TYPE.to_string(),
-                base_url: "http://fixture.invalid".to_string(),
-                api_key: "fixture".to_string(),
-                model: "fixture-model".to_string(),
-                priority: 1,
-                timeout_seconds: 5,
-                max_concurrency: 1,
-                params: LlmProviderParams::default(),
-            },
-            client: reqwest::Client::new(),
-            semaphore: Arc::new(Semaphore::new(1)),
-            breaker: Arc::new(crate::providers::CircuitBreaker::new()),
-        })
+        build_fixture_replay_runtime("vendor-fixture")
     }
 
     fn write_fixture(root: &Path, case: &str, lines: &[RecordedCall]) {
