@@ -40,6 +40,16 @@ locale = "en-US"
 "clawd.msg.crypto_trade_confirm_prompt" = "{out}\n\nPlease confirm order placement: only `Y` or `YES` is accepted; any other input will cancel. Valid for 10 minutes."
 "clawd.msg.crypto_trade_submit_requires_user_confirmation" = "Blocked direct trade submit. Please run trade preview first, then click confirm or reply `Y`/`YES` to place the order."
 "clawd.msg.clarify_question_fallback" = "I need to clarify: what task is this message about? Please provide the target or context and I'll continue right away."
+# §7.2 fallback matrix: split the legacy "super fallback" by trigger source so the user can tell
+# "where I got stuck" and "how you can help". The legacy key above is kept for historical-DB
+# compare-side compatibility only (write side no longer uses it).
+"clawd.msg.fallback.llm_unavailable" = "The model is temporarily unavailable (auth failure / network / circuit breaker). Please retry later, or switch to an available model."
+"clawd.msg.fallback.empty_response" = "The model returned an empty answer this time. Please describe the goal more concretely and I'll try again."
+"clawd.msg.fallback.intent_unresolved" = "I couldn't tell what this message wants me to do. Please add a target or context — for example, which file to look at, or which action to perform."
+"clawd.msg.fallback.planner_failed" = "I couldn't break the request into executable steps. Please rephrase as \"do Y by using X\", or be more specific."
+"clawd.msg.fallback.execution_failed_partial" = "I hit a problem partway through. Already done: {context_hint}. Want me to try a different path?"
+"clawd.msg.fallback.synthesis_empty" = "I got results but couldn't settle on a definitive answer. Which specific item do you want?"
+"clawd.msg.fallback.verify_rejected" = "The model's answer didn't match the expected shape ({context_hint}). Could you tell me the exact form you want?"
 "clawd.msg.clarify_missing_file_locator" = "Please provide the specific file name or path."
 "clawd.msg.clarify_missing_read_target" = "Please provide the specific file name or path to read."
 "clawd.msg.image_loop_stopped" = "Image generation succeeded. Repeated generation has been stopped to avoid task loops."

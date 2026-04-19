@@ -20,11 +20,14 @@ fn ask_result_payload(
     }
 }
 
+/// §7.2 后保留：仍被该模块某些调用方 / 单测引用以拿到老 super-fallback 的字面字符串。
+/// 真正的"是不是 fallback 占位符"判定走 [`crate::fallback::is_known_clarify_fallback_text`]。
+#[allow(dead_code)]
 fn provider_unavailable_answer_text(state: &AppState) -> String {
     crate::i18n_t_with_default(
         state,
-        "clawd.msg.clarify_question_fallback",
-        "I need to clarify: what task is this message about? Please provide the target or context.",
+        crate::fallback::LEGACY_SUPER_FALLBACK_KEY,
+        crate::fallback::LEGACY_SUPER_FALLBACK_DEFAULT_EN,
     )
 }
 
@@ -33,14 +36,14 @@ fn should_skip_ask_memory_pair(
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
-    let provider_unavailable = provider_unavailable_answer_text(state);
-    if answer_text.trim() == provider_unavailable.trim() {
+    // §7.2: 集合化比对 —— 旧 super-fallback / 新 7 个 source 文案任一命中都算
+    // "fallback 占位符"，跳过不写入 ask 记忆对。
+    if crate::fallback::is_known_clarify_fallback_text(state, answer_text) {
         return true;
     }
     answer_messages
         .iter()
-        .map(|message| message.trim())
-        .any(|message| !message.is_empty() && message == provider_unavailable.trim())
+        .any(|message| crate::fallback::is_known_clarify_fallback_text(state, message))
 }
 
 fn journal_has_missing_file_search_evidence(

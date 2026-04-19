@@ -1182,6 +1182,8 @@ pub(crate) async fn finalize_loop_reply(
             None,
             preferred_route_clarify_question(agent_run_context),
             crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+            // §7.2: finalize 触发 requires_clarify（无 evidence 可合成）→ SynthesisEmpty。
+            crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
         )
         .await;
         let delivery_messages = vec![clarify.clone()];
@@ -1241,6 +1243,8 @@ pub(crate) async fn finalize_loop_reply(
             None,
             preferred_route_clarify_question(agent_run_context),
             crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+            // §7.2: 执行结束但 delivery 全空（最常见的"我需要确认一下..."触发点之一）→ SynthesisEmpty。
+            crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
         )
         .await;
         let delivery_messages = vec![clarify.clone()];

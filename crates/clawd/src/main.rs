@@ -32,6 +32,7 @@ mod delivery_utils;
 mod execution_adapters;
 mod execution_recipe;
 mod executor;
+mod fallback;
 mod finalize;
 mod http;
 mod intent_router;

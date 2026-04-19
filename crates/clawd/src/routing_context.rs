@@ -54,11 +54,14 @@ fn query_recent_execution_rows(
     Ok(out)
 }
 
+/// §7.2 后保留：拿老 super-fallback 字面字符串，仅用于历史 DB 兼容场景与测试。
+/// 真正的"是不是 fallback 占位符"判定走 [`crate::fallback::is_known_clarify_fallback_text`]。
+#[allow(dead_code)]
 fn provider_unavailable_answer_text(state: &AppState) -> String {
     crate::i18n_t_with_default(
         state,
-        "clawd.msg.clarify_question_fallback",
-        "I need to clarify: what task is this message about? Please provide the target or context.",
+        crate::fallback::LEGACY_SUPER_FALLBACK_KEY,
+        crate::fallback::LEGACY_SUPER_FALLBACK_DEFAULT_EN,
     )
 }
 
@@ -83,9 +86,10 @@ fn should_skip_recent_execution_row(state: &AppState, kind: &str, result_json: &
     if kind != "ask" {
         return false;
     }
-    let provider_unavailable = provider_unavailable_answer_text(state);
+    // §7.2: 集合化 fallback 比对 —— 旧 super-fallback 与新 7 个 source 文案任一命中
+    // 都跳过，不让历史 fallback turn 进 recent_execution 上下文拼接。
     result_json_primary_text(result_json)
-        .map(|text| text == provider_unavailable.trim())
+        .map(|text| crate::fallback::is_known_clarify_fallback_text(state, &text))
         .unwrap_or(false)
 }
 

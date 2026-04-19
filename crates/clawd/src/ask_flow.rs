@@ -547,6 +547,9 @@ pub(crate) async fn execute_ask_routed(
                 None,
                 preferred_clarify.as_deref(),
                 clarify_policy,
+                // §7.2: ask_flow 路由到 AskClarify 但 route_result 也没给 clarify_question
+                // → IntentUnresolved（与 ask_pipeline 同语义）。
+                crate::fallback::ClarifyFallbackSource::IntentUnresolved,
             )
             .await;
             Ok(AskReply::non_llm(clarify))
