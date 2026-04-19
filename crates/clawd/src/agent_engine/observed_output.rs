@@ -3459,10 +3459,37 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             .await
             .ok()?;
     let parsed_raw = serde_json::from_str::<ObservedAnswerFallbackOut>(llm_out.trim()).ok();
-    let parsed = parsed_raw.or_else(|| {
-        crate::extract_first_json_object_any(&llm_out)
-            .and_then(|json| serde_json::from_str::<ObservedAnswerFallbackOut>(&json).ok())
-    })?;
+    let parsed = parsed_raw
+        .or_else(|| {
+            crate::extract_first_json_object_any(&llm_out)
+                .and_then(|json| serde_json::from_str::<ObservedAnswerFallbackOut>(&json).ok())
+        })
+        .or_else(|| {
+            // F14: minimax 等 vendor 偶发不遵守 prompt 的 "Output JSON only" 契约，
+            // 直接吐 markdown 文本（典型例：被多步 read 喂饱后给一段中文综述但没包成
+            // JSON envelope）。原先 ObservedAnswerFallbackOut 解析失败 → 整个 fallback
+            // 返回 None → finalize 落到 clarify_question_fallback，把已经合成好的真实
+            // 答案丢掉，变成"假需要确认"。这里把 trim 后的整段文本视作 answer 兜底，
+            // 同时 publishable=true、qualified=true、confidence=0.7（足以越过下游
+            // OBSERVED_SELF_CLASSIFY_CONF_THRESHOLD=0.55，并保留下游 semantic_judge 的
+            // meta-instruction 检查仍能拦截 "我会去检查/please confirm" 之类伪答案）。
+            let trimmed = llm_out.trim().trim_matches('`').trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if trimmed.starts_with('{') || trimmed.starts_with('[') {
+                return None;
+            }
+            Some(ObservedAnswerFallbackOut {
+                answer: trimmed.to_string(),
+                qualified: true,
+                needs_clarify: false,
+                is_meta_instruction: false,
+                publishable: true,
+                confidence: 0.7,
+                _reason: String::from("non_json_text_fallback"),
+            })
+        })?;
     let answer = parsed.answer.trim().to_string();
     // §3.4 finalize-tier: 这里属于 observed_answer_fallback 兜底路径（finalize 层
     // 的 fallback 分支），是 semantic_judge LLM 入口的允许调用方之一。
