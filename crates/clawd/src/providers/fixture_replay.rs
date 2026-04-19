@@ -156,6 +156,145 @@ pub(crate) fn clear_cache_for_test() {
     }
 }
 
+/// §7.5 Step 2.b：从 `model_io.log`（JSONL）转出 fixture `Vec<RecordedCall>`。
+///
+/// **使用前提**：录制时 `routing.debug_log_prompt = true`，否则 verbose 行不写
+/// 出来，slim 行没 prompt / response 也没办法回放。
+///
+/// **截断检测**（convert_* 拒绝两类行）：
+///   * 缺 `prompt_hash` 字段 —— 老版本 clawd 写的日志，prompt 被截断后无法反算
+///     hash。必须升级到含 §7.5 Step 2.b 的 clawd 重新录制。
+///   * `clean_response` 末尾出现 `...(truncated)` —— 响应被
+///     [`crate::log_utils::truncate_for_log`] 截到 [`crate::MODEL_IO_LOG_MAX_CHARS`]
+///     字符。回放时把截断后的字符串当 LLM 输出会让下游 parser 在结尾意外失败。
+///     这种情况极少（chat/normalizer/planner 的输出一般都 < 5000 字符），如果
+///     真的撞上，应在 prompt 端做减肥，不能装作没事。
+///
+/// **去重策略**：同一个 `prompt_hash` 在日志里出现多次时，**保留最后一次**
+/// （最贴近"现网当前行为"）。若需切到 first 策略，调用方可在拿到 Vec 后自己
+/// 反向遍历重建。
+///
+/// **过滤策略**：
+///   * 只接受 `"mode": "verbose"`；slim / 缺失 mode 直接跳过。
+///   * 只接受 `"status": "ok"`；error / retry 等失败状态跳过（fixture 是"成功
+///     case 的录制"，错误路径有专门测试覆盖）。
+///   * 空行 / 以 `#` 起头的注释行 / 解析失败的行：跳过，不算错。这与 fixture
+///     文件读取语义保持一致（[`load_table_from_disk`]）。
+pub(crate) fn convert_model_io_log_to_fixture(
+    log_text: &str,
+) -> Result<Vec<RecordedCall>, String> {
+    // 用 Vec 维持首次出现顺序、HashMap 维护"同 hash 覆盖到最后一次"的下标。
+    let mut latest_idx: HashMap<String, usize> = HashMap::new();
+    let mut records: Vec<RecordedCall> = Vec::new();
+
+    for (idx, line) in log_text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let value: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue, // 与 load_table_from_disk 保持一致：跳过坏行。
+        };
+
+        let mode = value.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+        if mode != "verbose" {
+            continue;
+        }
+        let status = value.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        if status != "ok" {
+            continue;
+        }
+
+        let prompt_hash = value
+            .get("prompt_hash")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "model_io.log line {} has no `prompt_hash` field — record was made with \
+                     pre-§7.5 clawd; rerun the case after rebuilding to capture hashes",
+                    idx + 1
+                )
+            })?
+            .to_string();
+
+        let prompt_source = value
+            .get("prompt_source")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // model_io.log 写的是 truncate_for_log 之后的 prompt，存到 prompt_preview
+        // 仅供人工排查用，运行期不参与 hash。
+        let prompt_preview = value
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let clean_response = value
+            .get("clean_response")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "model_io.log line {} has no `clean_response` (status=ok requires response)",
+                    idx + 1
+                )
+            })?
+            .to_string();
+        if clean_response.ends_with("...(truncated)") {
+            return Err(format!(
+                "model_io.log line {} `clean_response` was truncated by truncate_for_log \
+                 (>{} chars). Reduce prompt/response size or split the case before re-recording.",
+                idx + 1,
+                crate::MODEL_IO_LOG_MAX_CHARS
+            ));
+        }
+
+        let raw_response = value
+            .get("raw_response")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if raw_response
+            .as_deref()
+            .map(|s| s.ends_with("...(truncated)"))
+            .unwrap_or(false)
+        {
+            return Err(format!(
+                "model_io.log line {} `raw_response` was truncated by truncate_for_log \
+                 (>{} chars). Reduce response size or split the case.",
+                idx + 1,
+                crate::MODEL_IO_LOG_MAX_CHARS
+            ));
+        }
+
+        let usage = value
+            .get("usage")
+            .and_then(|v| {
+                if v.is_null() {
+                    None
+                } else {
+                    serde_json::from_value::<LlmUsageSnapshot>(v.clone()).ok()
+                }
+            });
+
+        let rec = RecordedCall {
+            prompt_hash: prompt_hash.clone(),
+            prompt_source,
+            prompt_preview,
+            clean_response,
+            raw_response,
+            usage,
+        };
+        if let Some(&existing) = latest_idx.get(&prompt_hash) {
+            records[existing] = rec;
+        } else {
+            latest_idx.insert(prompt_hash, records.len());
+            records.push(rec);
+        }
+    }
+
+    Ok(records)
+}
+
 pub(crate) struct FixtureReplayProvider;
 
 /// §7.5 Step 2.a：构造一份 fixture_replay 形态的 [`LlmProviderRuntime`]，仅供
@@ -400,6 +539,131 @@ mod tests {
             .await
             .expect_err("env missing");
         assert!(err.message.contains("RUSTCLAW_FIXTURE_LLM_ROOT"));
+    }
+
+    // ---------- §7.5 Step 2.b: convert_model_io_log_to_fixture ----------
+
+    fn verbose_ok_line(prompt_hash: &str, prompt: &str, clean: &str, source: &str) -> String {
+        serde_json::json!({
+            "ts": 1_700_000_000u64,
+            "mode": "verbose",
+            "task_id": "task-1",
+            "user_id": "u1",
+            "chat_id": "c1",
+            "vendor": "openai",
+            "provider": "vendor-openai",
+            "provider_type": "openai",
+            "model": "gpt-test",
+            "model_kind": "chat",
+            "status": "ok",
+            "prompt_source": source,
+            "prompt_hash": prompt_hash,
+            "prompt": prompt,
+            "request_payload": {"foo": 1},
+            "response": clean,
+            "raw_response": clean,
+            "clean_response": clean,
+            "usage": {"prompt_tokens": 10, "completion_tokens": 4},
+            "sanitized": false,
+            "error": null,
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn convert_empty_log_yields_empty_vec() {
+        let recs = convert_model_io_log_to_fixture("").expect("empty ok");
+        assert!(recs.is_empty());
+        let recs = convert_model_io_log_to_fixture("   \n# comment\n\n").expect("comments ok");
+        assert!(recs.is_empty());
+    }
+
+    #[test]
+    fn convert_picks_up_single_verbose_ok_line() {
+        let prompt = "what time is it";
+        let hash = fnv1a_64_hex(prompt);
+        let line = verbose_ok_line(&hash, prompt, "12:00", "intent_normalizer");
+        let recs = convert_model_io_log_to_fixture(&line).expect("convert ok");
+        assert_eq!(recs.len(), 1);
+        let r = &recs[0];
+        assert_eq!(r.prompt_hash, hash);
+        assert_eq!(r.clean_response, "12:00");
+        assert_eq!(r.raw_response.as_deref(), Some("12:00"));
+        assert_eq!(r.prompt_source.as_deref(), Some("intent_normalizer"));
+        assert!(r.usage.is_some(), "usage must be parsed");
+    }
+
+    #[test]
+    fn convert_dedupes_same_hash_keeping_latest() {
+        let prompt = "same prompt";
+        let hash = fnv1a_64_hex(prompt);
+        let body = format!(
+            "{}\n{}\n",
+            verbose_ok_line(&hash, prompt, "first", "chat_response"),
+            verbose_ok_line(&hash, prompt, "second", "chat_response"),
+        );
+        let recs = convert_model_io_log_to_fixture(&body).expect("convert ok");
+        assert_eq!(recs.len(), 1, "same hash must dedupe");
+        assert_eq!(
+            recs[0].clean_response, "second",
+            "must keep the LATEST occurrence (closest to current behaviour)"
+        );
+    }
+
+    #[test]
+    fn convert_skips_slim_and_failed_lines() {
+        let slim = serde_json::json!({
+            "ts": 1u64,
+            "mode": "slim",
+            "task_id": "t",
+            "status": "ok",
+            "prompt_source": "x",
+            "prompt_chars": 10u64,
+        })
+        .to_string();
+        let prompt = "p";
+        let hash = fnv1a_64_hex(prompt);
+        let mut errored = serde_json::from_str::<serde_json::Value>(
+            &verbose_ok_line(&hash, prompt, "ignored", "x"),
+        )
+        .unwrap();
+        errored["status"] = serde_json::json!("error");
+        let body = format!("{}\n{}\n", slim, errored);
+        let recs = convert_model_io_log_to_fixture(&body).expect("convert ok");
+        assert!(
+            recs.is_empty(),
+            "slim and non-ok status lines must be filtered out"
+        );
+    }
+
+    #[test]
+    fn convert_fails_when_prompt_hash_missing() {
+        // 模拟老版本 clawd 写出的日志（无 prompt_hash 字段）。
+        let mut v = serde_json::from_str::<serde_json::Value>(&verbose_ok_line(
+            "deadbeef0000beef",
+            "any",
+            "ok",
+            "x",
+        ))
+        .unwrap();
+        v.as_object_mut().unwrap().remove("prompt_hash");
+        let line = v.to_string();
+        let err = convert_model_io_log_to_fixture(&line).expect_err("must fail loud");
+        assert!(err.contains("`prompt_hash`"), "err msg = {err}");
+        assert!(err.contains("pre-§7.5"), "err msg should hint upgrade: {err}");
+    }
+
+    #[test]
+    fn convert_fails_when_response_was_truncated() {
+        let prompt = "p";
+        let hash = fnv1a_64_hex(prompt);
+        let mut v = serde_json::from_str::<serde_json::Value>(&verbose_ok_line(
+            &hash, prompt, "ok-base", "x",
+        ))
+        .unwrap();
+        v["clean_response"] = serde_json::json!("some-long-response...(truncated)");
+        let err = convert_model_io_log_to_fixture(&v.to_string()).expect_err("must fail loud");
+        assert!(err.contains("truncated"), "err = {err}");
     }
 
     #[tokio::test]

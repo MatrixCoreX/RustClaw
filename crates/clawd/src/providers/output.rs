@@ -115,6 +115,13 @@ pub(crate) fn append_model_io_log(
             "model_kind": llm_model_kind(provider),
             "status": status,
             "prompt_source": prompt_source,
+            // §7.5 Step 2.b：FNV-1a 64-bit hex(完整未截断 prompt)。
+            // model_io.log 的 `prompt` 字段会被截断到 MODEL_IO_LOG_MAX_CHARS，
+            // 但 fixture replay 必须用**完整 prompt** 的 hash 才能命中。把 hash
+            // 放在 verbose 行里，convert_model_io_log_to_fixture 直接读取，绕过
+            // 截断。Phase 7 §7.5 整层依赖这个字段；slim 模式不加（反正 slim 没
+            // prompt 字段，无法回放）。
+            "prompt_hash": crate::providers::fixture_replay::fnv1a_64_hex(prompt),
             "prompt": truncate_for_log(prompt),
             "request_payload": request_payload,
             "response": clean_response.map(truncate_for_log),
