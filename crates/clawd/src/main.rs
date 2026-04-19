@@ -39,6 +39,7 @@ mod intent_router;
 mod llm_gateway;
 mod log_utils;
 mod memory;
+mod output_contract_verifier;
 mod output_paths;
 mod pipeline_types;
 mod post_route_policy;

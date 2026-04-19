@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::path::Path;
 
 use super::LoopState;
+use crate::IntentOutputContract;
 
 pub(super) fn rewrite_run_cmd_with_written_aliases(
     command: &str,
@@ -47,9 +48,91 @@ pub(super) fn rewrite_tool_path_with_written_aliases(
     obj.insert("path".to_string(), Value::String(effective.clone()));
 }
 
+/// §7.1 把 normalizer 给出的 OutputContract 关键字段格式化成可读多行块，
+/// 注入到 chat 的 `recent_execution_context` 顶部，让下游 chat skill prompt
+/// 能拿到 "answer-shape spec"（response_shape / semantic_kind / locator_hint /
+/// must_include_tokens / no_paraphrase 等约束）作为硬锚点，避免再因为
+/// "normalizer 已经标了 existence_with_path、chat 却答成段落描述" 而失败。
+///
+/// 返回 None 表示当前 contract 没有任何可对下游有约束力的字段（比如默认值
+/// 全是 None / Free / 无 hint）—— 此时不注入，避免在 ad-hoc 调用上加噪声。
+pub(super) fn render_output_contract_for_chat(
+    contract: &IntentOutputContract,
+) -> Option<String> {
+    use crate::{OutputResponseShape, OutputSemanticKind};
+    let mut lines = Vec::with_capacity(8);
+    let shape_name = contract.response_shape.as_str();
+    let semantic_name = contract.semantic_kind.as_str();
+    let locator_kind_name = contract.locator_kind.as_str();
+    let delivery_intent_name = contract.delivery_intent.as_str();
+
+    let has_meaningful_shape = !matches!(contract.response_shape, OutputResponseShape::Free);
+    let has_meaningful_semantic = !matches!(contract.semantic_kind, OutputSemanticKind::None);
+    let has_locator_hint = !contract.locator_hint.trim().is_empty();
+    if !has_meaningful_shape
+        && !has_meaningful_semantic
+        && !has_locator_hint
+        && !contract.delivery_required
+        && !contract.requires_content_evidence
+    {
+        return None;
+    }
+
+    lines.push(format!("response_shape: {shape_name}"));
+    lines.push(format!("semantic_kind: {semantic_name}"));
+    if locator_kind_name != "none" {
+        lines.push(format!("locator_kind: {locator_kind_name}"));
+    }
+    if delivery_intent_name != "none" {
+        lines.push(format!("delivery_intent: {delivery_intent_name}"));
+    }
+    if has_locator_hint {
+        lines.push(format!("locator_hint: {}", contract.locator_hint.trim()));
+    }
+    if contract.delivery_required {
+        lines.push("delivery_required: true".to_string());
+    }
+    if contract.requires_content_evidence {
+        lines.push("requires_content_evidence: true".to_string());
+    }
+
+    // 按 semantic_kind 给 must_include 约束 —— 这是 §7.1 verifier 的对偶物，
+    // 在 chat-prompt 端先用文字告知"必须出现什么 token"，verifier 端再硬拦截。
+    match contract.semantic_kind {
+        OutputSemanticKind::ExistenceWithPath => {
+            lines.push(
+                "must_include_tokens: yes/no token (有/没有/不存在/yes/no/exists/missing) AND a real filesystem path substring".to_string(),
+            );
+            lines.push("no_paraphrase: do NOT replace the question with \"this is a systemd file\" / \"看起来像\" 类描述句".to_string());
+        }
+        OutputSemanticKind::ScalarPathOnly => {
+            lines.push("must_include_tokens: a single filesystem path literal, no surrounding prose".to_string());
+        }
+        OutputSemanticKind::ScalarCount => {
+            lines.push("must_include_tokens: an integer literal (count); the integer MUST come from the observed evidence, not paraphrased".to_string());
+        }
+        OutputSemanticKind::QuantityComparison => {
+            lines.push("must_include_tokens: \"<winner> 更多/更大/更高 (or 相同)\" + both sides' numeric values".to_string());
+        }
+        OutputSemanticKind::HiddenEntriesCheck => {
+            lines.push("must_include_tokens: yes/no token (有/没有) about whether hidden entries exist".to_string());
+        }
+        OutputSemanticKind::ServiceStatus => {
+            lines.push("must_include_tokens: a status word (running / active / inactive / stopped / failed) reflecting the observed evidence".to_string());
+        }
+        OutputSemanticKind::RecentScalarEqualityCheck => {
+            lines.push("must_include_tokens: yes/no equality verdict (是/否/相同/不同/yes/no) referencing the two observed values".to_string());
+        }
+        _ => {}
+    }
+    Some(lines.join("\n"))
+}
+
 pub(super) fn attach_recent_execution_context_to_chat_args(
     args: &mut Value,
     loop_state: &LoopState,
+    original_user_request: &str,
+    output_contract: Option<&IntentOutputContract>,
 ) {
     let Some(obj) = args.as_object_mut() else {
         return;
@@ -58,6 +141,32 @@ pub(super) fn attach_recent_execution_context_to_chat_args(
         return;
     }
     let mut context_lines = Vec::new();
+    // §7.1 output_contract 注入：放在最顶端，比 original_user_request 还高优先级，
+    // 因为它告诉 chat skill "回答必须长成什么样"——最强的硬锚点。
+    // 仅当 contract 非默认值时才注入（render_output_contract_for_chat 内部判定），
+    // 避免给无 contract 的 ad-hoc 调用引入噪声。
+    if let Some(contract) = output_contract {
+        if let Some(rendered) = render_output_contract_for_chat(contract) {
+            context_lines.push(format!(
+                "output_contract (authoritative answer-shape spec from normalizer; treat as a hard contract — your final reply MUST satisfy all listed must_include_tokens / no_paraphrase / response_shape rules; if the observed evidence cannot support these tokens, say so explicitly instead of paraphrasing):\n{rendered}"
+            ));
+        }
+    }
+    // §nl-fix-2026-04-19 act_find_service_file 失败链路的根因修复：planner 给
+    // chat-transform 步生成的 args.text 通常是 "用一句简短的中文回答用户问题，依据
+    // 是这条观察输出：{{last_output}}" 这种通用模板，**字面里完全不带原始用户请
+    // 求**。chat skill 收到的 User Message 因此只剩抽象的"用户问题"+ last_output，
+    // 容易脱离原问题语义自由发挥（例：用户问"有没有 + 路径"，chat 却回"这是 systemd
+    // 单元文件"）。这里把本轮真实的 user 请求字面置顶注入到 chat 的执行上下文，
+    // 让 chat 系统 prompt 里的 "treat original_user_request as the verbatim user
+    // question" 规则有锚点可抓。trim 后空才跳过，避免在 ad-hoc 调用（无 user 请求
+    // 上下文）时塞入空字符串造成歧义。
+    let user_req = original_user_request.trim();
+    if !user_req.is_empty() {
+        context_lines.push(format!(
+            "original_user_request (verbatim user request for this turn; treat as the authoritative user question that args.text refers to when args.text uses generic phrasing like \"用户问题\"/\"原问题\"/\"user question\"):\n{user_req}"
+        ));
+    }
     if let Some(path) = loop_state.last_written_file_path.as_deref() {
         context_lines.push(format!("last_written_file_path: {path}"));
     }
@@ -307,8 +416,12 @@ pub(super) fn resolve_arg_value(value: &Value, loop_state: &LoopState) -> Value 
 
 #[cfg(test)]
 mod tests {
-    use super::rewrite_args_with_auto_locator_path;
+    use super::{
+        attach_recent_execution_context_to_chat_args, render_output_contract_for_chat,
+        rewrite_args_with_auto_locator_path,
+    };
     use crate::agent_engine::LoopState;
+    use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind};
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
@@ -396,6 +509,87 @@ mod tests {
     }
 
     #[test]
+    fn attach_chat_context_injects_original_user_request_at_top() {
+        // §nl-fix-2026-04-19 act_find_service_file 回归用例：planner 给 chat-transform
+        // 步生成的 args.text 是固定模板"用一句简短的中文回答用户问题：{{last_output}}"，
+        // 不含原话；本注入必须把真正的 user 请求字面置顶塞进 chat 上下文，否则下游 chat
+        // skill 会脱离原问题语义自由发挥（如把"有没有 + 路径"答成"这是什么文件"）。
+        let mut loop_state = LoopState::new(2);
+        loop_state.last_output = Some("/home/guagua/rustclaw/rustclaw.service".to_string());
+        let mut args = json!({
+            "text": "用一句简短的中文回答用户问题，依据是这条观察输出：{{last_output}}"
+        });
+        attach_recent_execution_context_to_chat_args(
+            &mut args,
+            &loop_state,
+            "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
+            None,
+        );
+        let ctx = args
+            .get("recent_execution_context")
+            .and_then(|v| v.as_str())
+            .expect("recent_execution_context must be injected");
+        assert!(
+            ctx.starts_with("original_user_request"),
+            "original_user_request must be the first field, got: {ctx}"
+        );
+        assert!(
+            ctx.contains("检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"),
+            "verbatim user request must appear in context, got: {ctx}"
+        );
+        assert!(
+            ctx.contains("last_output:"),
+            "last_output must still be injected after original_user_request, got: {ctx}"
+        );
+    }
+
+    #[test]
+    fn attach_chat_context_omits_original_user_request_when_blank() {
+        // 边界：ad-hoc / 后台调用没有 user 请求上下文时，传空串/纯空白不应在
+        // context 里塞入空的 original_user_request 字段（避免下游 chat 误解为
+        // "用户原话就是空字符串"）。但其它已有信号（last_output 等）正常注入。
+        let mut loop_state = LoopState::new(2);
+        loop_state.last_output = Some("hello\n".to_string());
+        let mut args = json!({"text": "summarize: {{last_output}}"});
+        attach_recent_execution_context_to_chat_args(&mut args, &loop_state, "   \t  \n  ", None);
+        let ctx = args
+            .get("recent_execution_context")
+            .and_then(|v| v.as_str())
+            .expect("last_output should still drive context injection");
+        assert!(
+            !ctx.contains("original_user_request"),
+            "blank user_text must not produce original_user_request line, got: {ctx}"
+        );
+        assert!(
+            ctx.contains("last_output:"),
+            "last_output must still be injected, got: {ctx}"
+        );
+    }
+
+    #[test]
+    fn attach_chat_context_does_not_overwrite_existing_recent_execution_context() {
+        // 幂等性回归：上游若已经显式给出 recent_execution_context（罕见但合法），
+        // 这里不得覆盖，避免破坏调用方意图。
+        let mut loop_state = LoopState::new(2);
+        loop_state.last_output = Some("ignored".to_string());
+        let mut args = json!({
+            "text": "summarize",
+            "recent_execution_context": "preset by upstream"
+        });
+        attach_recent_execution_context_to_chat_args(
+            &mut args,
+            &loop_state,
+            "user asks something",
+            None,
+        );
+        assert_eq!(
+            args.get("recent_execution_context").and_then(|v| v.as_str()),
+            Some("preset by upstream"),
+            "must be idempotent when caller already set the field"
+        );
+    }
+
+    #[test]
     fn auto_locator_preserves_explicit_existing_path() {
         // F8 回归用例：当 LLM 显式给的 path 是真实存在的具体文件时（典型场景：
         // 多文件 read 链路第二个 read_file），AUTO_LOCATOR 不得覆盖它。
@@ -414,6 +608,135 @@ mod tests {
         assert_eq!(
             args.get("path").and_then(|v| v.as_str()),
             Some(readme.display().to_string().as_str())
+        );
+    }
+
+    #[test]
+    fn render_output_contract_returns_none_for_default_contract() {
+        // §7.1: 默认 contract（response_shape=Free / semantic_kind=None / 无 hint /
+        // 无 delivery_required / 无 requires_content_evidence）对下游 chat skill 没
+        // 任何约束力，render 必须返回 None，避免给 ad-hoc 调用注入噪声。
+        let contract = IntentOutputContract::default();
+        assert!(render_output_contract_for_chat(&contract).is_none());
+    }
+
+    #[test]
+    fn render_output_contract_for_existence_with_path_includes_must_include_tokens() {
+        // §7.1: ExistenceWithPath 是 act_find_service_file 类失败的核心 semantic_kind。
+        // contract 必须把 "yes/no token + 路径子串" 这条硬规则字面输出，
+        // 让 chat skill prompt 端能看见 must_include_tokens / no_paraphrase。
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::OneSentence,
+            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            locator_hint: "rustclaw.service".to_string(),
+            ..IntentOutputContract::default()
+        };
+        let rendered =
+            render_output_contract_for_chat(&contract).expect("non-default contract must render");
+        assert!(
+            rendered.contains("response_shape: one_sentence"),
+            "shape must be in render: {rendered}"
+        );
+        assert!(
+            rendered.contains("semantic_kind: existence_with_path"),
+            "semantic_kind must be in render: {rendered}"
+        );
+        assert!(
+            rendered.contains("locator_hint: rustclaw.service"),
+            "locator_hint must be surfaced: {rendered}"
+        );
+        assert!(
+            rendered.contains("must_include_tokens:") && rendered.contains("yes/no"),
+            "must_include_tokens line for existence_with_path must mention yes/no: {rendered}"
+        );
+        assert!(
+            rendered.contains("no_paraphrase"),
+            "no_paraphrase rule must be surfaced for existence_with_path: {rendered}"
+        );
+    }
+
+    #[test]
+    fn attach_chat_context_injects_output_contract_at_top() {
+        // §7.1 act_find_service_file 回归用例：normalizer 已经标了
+        // existence_with_path + locator_hint=rustclaw.service，但历史上
+        // chat skill 完全看不见，把"有没有 + 路径"答成"这是 systemd 文件"。
+        // 本注入必须把 contract 字段以最高优先级置顶，比 original_user_request
+        // 还要靠前——它告诉 chat 回答必须长成什么样。
+        let mut loop_state = LoopState::new(2);
+        loop_state.last_output = Some("/home/guagua/rustclaw/rustclaw.service".to_string());
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::OneSentence,
+            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            locator_hint: "rustclaw.service".to_string(),
+            ..IntentOutputContract::default()
+        };
+        let mut args = json!({
+            "text": "用一句简短的中文回答用户问题，依据是这条观察输出：{{last_output}}"
+        });
+        attach_recent_execution_context_to_chat_args(
+            &mut args,
+            &loop_state,
+            "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
+            Some(&contract),
+        );
+        let ctx = args
+            .get("recent_execution_context")
+            .and_then(|v| v.as_str())
+            .expect("recent_execution_context must be injected");
+        assert!(
+            ctx.starts_with("output_contract"),
+            "output_contract must be the first field (highest priority), got: {ctx}"
+        );
+        let oc_pos = ctx
+            .find("output_contract")
+            .expect("output_contract block must appear");
+        let our_pos = ctx
+            .find("original_user_request")
+            .expect("original_user_request block must still appear");
+        assert!(
+            oc_pos < our_pos,
+            "output_contract must come before original_user_request, got: {ctx}"
+        );
+        assert!(
+            ctx.contains("semantic_kind: existence_with_path"),
+            "semantic_kind line must be in injected ctx: {ctx}"
+        );
+        assert!(
+            ctx.contains("must_include_tokens:") && ctx.contains("yes/no"),
+            "must_include_tokens line must mention yes/no for existence_with_path: {ctx}"
+        );
+        assert!(
+            ctx.contains("last_output:"),
+            "last_output must still be present: {ctx}"
+        );
+    }
+
+    #[test]
+    fn attach_chat_context_skips_output_contract_when_default() {
+        // §7.1: 当 contract 是默认值（response_shape=Free / semantic_kind=None /
+        // 无 hint），不应在 ctx 里塞 output_contract 块（render 返回 None），
+        // 避免给非 contract-driven 路径加噪声。但其它已有信号正常注入。
+        let mut loop_state = LoopState::new(2);
+        loop_state.last_output = Some("hello\n".to_string());
+        let default_contract = IntentOutputContract::default();
+        let mut args = json!({"text": "summarize: {{last_output}}"});
+        attach_recent_execution_context_to_chat_args(
+            &mut args,
+            &loop_state,
+            "请总结一下",
+            Some(&default_contract),
+        );
+        let ctx = args
+            .get("recent_execution_context")
+            .and_then(|v| v.as_str())
+            .expect("recent_execution_context must be injected");
+        assert!(
+            !ctx.contains("output_contract"),
+            "default contract must not produce an output_contract block, got: {ctx}"
+        );
+        assert!(
+            ctx.contains("original_user_request"),
+            "original_user_request must still be in ctx, got: {ctx}"
         );
     }
 }

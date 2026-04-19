@@ -238,6 +238,14 @@ pub(crate) struct LoopState {
     pub(crate) last_recipe_progress_phase: Option<crate::execution_recipe::ExecutionRecipePhase>,
     pub(crate) last_recipe_progress_scope: Option<crate::execution_recipe::ExecutionRecipeTargetScope>,
     pub(crate) recipe_scope_ready_hint_sent: bool,
+    /// §7.1 output_contract 贯穿全链：normalizer 已经在 RouteResult.output_contract
+    /// 里给出了 response_shape / semantic_kind / locator_hint 等 answer-shape spec；
+    /// 但下游 chat skill 历史上完全看不到这些字段，造成"normalizer 标了
+    /// existence_with_path，chat 却答成段落描述"的根因型失败（典型：
+    /// act_find_service_file）。把契约挂到 LoopState 上由 chat-args 注入端
+    /// 透传到 chat 上下文，并在 finalize verifier 拦截违规候选。
+    /// 默认 None：测试与不走 RouteResult 的 ad-hoc 路径保持向后兼容。
+    pub(crate) output_contract: Option<crate::IntentOutputContract>,
 }
 
 impl LoopState {
@@ -271,6 +279,10 @@ fn seed_loop_state_from_agent_context(
             "route_locator_kind".to_string(),
             route.output_contract.locator_kind.as_str().to_string(),
         );
+        // §7.1: 把 normalizer 算出的 output_contract 挂到 loop 上，让 chat-args
+        // 注入端能拼出 verbatim contract 字段、finalize verifier 能拿到判定依据。
+        // clone 因为 RouteResult 跨 await 共享，loop 内部要独立可写。
+        loop_state.output_contract = Some(route.output_contract.clone());
     }
     if let Some(cross_turn_ctx) = ctx
         .cross_turn_recent_execution_context

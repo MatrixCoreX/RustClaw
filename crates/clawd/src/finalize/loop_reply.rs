@@ -161,6 +161,7 @@ fn normalize_file_token_delivery_from_auto_locator(
 
 fn enforce_delivery_output_contract(
     state: &AppState,
+    task: &ClaimedTask,
     user_text: &str,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -183,14 +184,86 @@ fn enforce_delivery_output_contract(
         .clone()
         .or_else(|| loop_state.delivery_messages.last().cloned())
         .unwrap_or_default();
-    let (normalized_text, normalized_messages) = crate::intercept_response_payload_for_delivery(
-        state,
-        user_text,
-        route.wants_file_delivery,
-        &route.output_contract,
-        seed_text,
-        loop_state.delivery_messages.clone(),
-    );
+    let (mut normalized_text, mut normalized_messages) =
+        crate::intercept_response_payload_for_delivery(
+            state,
+            user_text,
+            route.wants_file_delivery,
+            &route.output_contract,
+            seed_text,
+            loop_state.delivery_messages.clone(),
+        );
+
+    // §7.1 output_contract verifier hook：在 enforce_output_contract 的"shape 整形"
+    // 之后再做一层"语义合规性"判定。三态结果：
+    // - Pass：已合规，原文直出。
+    // - Reshape：候选基本合规但缺关键 token（如 existence_with_path 缺 yes/no 前缀），
+    //   verifier 给出已修复文本，直接覆盖 normalized_text。
+    // - Reject：候选明显违反 contract（如把"有没有 + 路径"答成纯描述段），
+    //   走 §7.2 ClarifyFallbackSource::VerifyRejected fallback，丢弃 candidate。
+    // 三种情况都打 tracing event verify_contract_emitted，便于 inspect_task.sh 关联。
+    if !normalized_text.trim().is_empty() {
+        let verdict = crate::output_contract_verifier::verify_output_contract(
+            &route.output_contract,
+            &normalized_text,
+            user_text,
+        );
+        match &verdict {
+            crate::output_contract_verifier::OutputContractVerdict::Pass => {
+                info!(
+                    "verify_contract_emitted task_id={} verdict=pass response_shape={:?} semantic_kind={:?}",
+                    task.task_id,
+                    route.output_contract.response_shape,
+                    route.output_contract.semantic_kind,
+                );
+            }
+            crate::output_contract_verifier::OutputContractVerdict::Reshape {
+                reason,
+                reshaped,
+            } => {
+                info!(
+                    "verify_contract_emitted task_id={} verdict=reshape response_shape={:?} semantic_kind={:?} reason={} from={} to={}",
+                    task.task_id,
+                    route.output_contract.response_shape,
+                    route.output_contract.semantic_kind,
+                    reason,
+                    crate::truncate_for_log(&normalized_text),
+                    crate::truncate_for_log(reshaped),
+                );
+                normalized_text = reshaped.clone();
+                if let Some(last) = normalized_messages.last_mut() {
+                    *last = reshaped.clone();
+                } else {
+                    normalized_messages.push(reshaped.clone());
+                }
+            }
+            crate::output_contract_verifier::OutputContractVerdict::Reject { reason } => {
+                info!(
+                    "verify_contract_emitted task_id={} verdict=reject response_shape={:?} semantic_kind={:?} reason={} dropped_candidate={}",
+                    task.task_id,
+                    route.output_contract.response_shape,
+                    route.output_contract.semantic_kind,
+                    reason,
+                    crate::truncate_for_log(&normalized_text),
+                );
+                let hint = format!(
+                    "shape={:?},kind={:?},reason={}",
+                    route.output_contract.response_shape,
+                    route.output_contract.semantic_kind,
+                    reason
+                );
+                let fallback_text = crate::fallback::render_clarify_fallback(
+                    state,
+                    &task.task_id,
+                    crate::fallback::ClarifyFallbackSource::VerifyRejected,
+                    Some(&hint),
+                );
+                normalized_text = fallback_text.clone();
+                normalized_messages = vec![fallback_text];
+            }
+        }
+    }
+
     loop_state.last_user_visible_respond =
         (!normalized_text.trim().is_empty()).then_some(normalized_text);
     loop_state.delivery_messages = normalized_messages;
@@ -1165,7 +1238,7 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     normalize_file_token_delivery_from_auto_locator(&mut loop_state, agent_run_context);
-    enforce_delivery_output_contract(state, user_text, &mut loop_state, agent_run_context);
+    enforce_delivery_output_contract(state, task, user_text, &mut loop_state, agent_run_context);
 
     let has_authoritative_delivery = !loop_state.delivery_messages.is_empty();
     if finalizer_requires_clarify(
