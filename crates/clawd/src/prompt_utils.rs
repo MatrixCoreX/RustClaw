@@ -75,9 +75,45 @@ pub(crate) fn parse_llm_json_raw_or_any<T: DeserializeOwned>(raw: &str) -> Optio
 }
 
 pub(crate) fn parse_llm_json_raw_or_any_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
+    // F11: minimax / 部分模型偏好把 JSON plan 包在 ```json ... ``` 代码围栏里，
+    // 围栏前/后还会带 prose（"根据上下文：..."、"需要先读取..."）。原生
+    // `extract_first_json_object_any` 是 byte-level brace balancer，少量 raw
+    // 在含中文宽括号 / 引号 / `\n` 转义 + `{{template}}` 占位时会过早终止，
+    // 抓出的 candidate 不完整 → 解析后 step_count < 真实 step 数（典型现象：
+    // plan 实际 4 步 [read, read, chat, respond] 被解析成只剩 [read, read]，
+    // 后续 chat/respond 全丢，执行落入 observed_answer_fallback）。
+    // 这里先用 codefence 显式提取一遍，命中则跳过 prose 干扰，保证 brace
+    // balancer 从 envelope 第一个真正的 `{` 起走，否则回退原行为不破坏其它
+    // 已经直接吐 JSON 的路径。
+    if let Some(stripped) = strip_first_json_codefence(raw) {
+        if let Some(value) = parse_json_with_repair::<T>(stripped.trim()) {
+            return Some(value);
+        }
+        if let Some(value) = extract_first_json_object_any(&stripped)
+            .and_then(|s| parse_json_with_repair::<T>(&s))
+        {
+            return Some(value);
+        }
+    }
     parse_json_with_repair(raw.trim()).or_else(|| {
         extract_first_json_object_any(raw).and_then(|s| parse_json_with_repair::<T>(&s))
     })
+}
+
+/// 提取 raw 里第一个 ```json``` / ``` 代码围栏的内容；命中返回 fence 内文本，
+/// 未命中返回 None。围栏类型容忍：` ```json `, ` ```JSON `, ` ``` ` 三种。
+fn strip_first_json_codefence(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_start();
+    // 找开 fence
+    let fence_start = trimmed.find("```")?;
+    let after_fence = &trimmed[fence_start + 3..];
+    // 跳过可选语言标签 (json / JSON / 任意非换行串) + 一个换行
+    let lang_end = after_fence.find('\n')?;
+    let body_start = lang_end + 1;
+    let body_and_rest = &after_fence[body_start..];
+    // 找闭 fence
+    let close = body_and_rest.find("```")?;
+    Some(body_and_rest[..close].to_string())
 }
 
 pub(crate) fn extract_first_json_value_any(text: &str) -> Option<String> {
