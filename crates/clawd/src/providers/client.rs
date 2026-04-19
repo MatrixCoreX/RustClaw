@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{LlmProviderRuntime, LLM_RETRY_TIMES};
@@ -43,7 +43,7 @@ pub(crate) fn build_llm_http_client(timeout_seconds: u64) -> reqwest::Result<Cli
         .build()
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct LlmUsageSnapshot {
     pub(crate) prompt_tokens: Option<u64>,
     pub(crate) completion_tokens: Option<u64>,
@@ -213,6 +213,11 @@ pub(crate) struct OpenAiCompatProvider;
 pub(crate) struct GoogleGeminiProvider;
 pub(crate) struct AnthropicClaudeProvider;
 
+/// §7.5: fixture 回放 provider，零 HTTP，仅供 `cargo test` / nl-replay 使用。
+/// 实际行为定义在 [`super::fixture_replay::FixtureReplayProvider`]，这里只
+/// 把它纳入 [`PROVIDER_IMPLS`] 静态注册表，让生产 dispatcher 走正常路径。
+pub(crate) use super::fixture_replay::FixtureReplayProvider;
+
 impl LlmProvider for OpenAiCompatProvider {
     fn name(&self) -> &'static str {
         "openai_compat"
@@ -267,6 +272,7 @@ pub(crate) static PROVIDER_IMPLS: &[&dyn LlmProvider] = &[
     &OpenAiCompatProvider,
     &GoogleGeminiProvider,
     &AnthropicClaudeProvider,
+    &FixtureReplayProvider,
 ];
 
 /// Provider 协议 dispatcher：通过 [`LlmProvider::name`] 匹配 trait object 实现。
@@ -304,7 +310,14 @@ mod tests {
             unique.len(),
             "duplicate provider names in PROVIDER_IMPLS: {names:?}"
         );
-        for required in ["openai_compat", "google_gemini", "anthropic_claude"] {
+        for required in [
+            "openai_compat",
+            "google_gemini",
+            "anthropic_claude",
+            // §7.5: fixture_replay 是 cargo test 的回放后端，必须始终在表里，
+            // 否则 intent_to_finalize_replay 静默失活。
+            "fixture_replay",
+        ] {
             assert!(
                 unique.contains(required),
                 "PROVIDER_IMPLS missing required protocol {required}; got {names:?}"
