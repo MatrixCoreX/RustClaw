@@ -463,7 +463,15 @@ pub(super) async fn handle_call_tool_action(
         );
     }
     if normalized_skill == "chat" {
-        attach_recent_execution_context_to_chat_args(&mut resolved_args, loop_state);
+        // §7.1: 透传 loop_state.output_contract（normalizer 算出的 answer-shape spec）
+        // 给 chat skill。None 表示当前 loop 没绑定 contract（典型：测试用 ::new 起的
+        // ad-hoc loop 或 RouteResult 缺失），保持向后兼容不注入。
+        attach_recent_execution_context_to_chat_args(
+            &mut resolved_args,
+            loop_state,
+            user_text,
+            loop_state.output_contract.as_ref(),
+        );
     }
     let read_file_requested_path = read_file_requested_path(tool, &resolved_args);
     let write_file_effective_path =
@@ -564,7 +572,13 @@ pub(super) async fn handle_call_skill_action(
     let write_file_effective_path =
         write_file_effective_path(state, &normalized_skill, &resolved_args);
     if normalized_skill == "chat" {
-        attach_recent_execution_context_to_chat_args(&mut resolved_args, loop_state);
+        // §7.1: 同 handle_call_tool_action —— 把 normalizer contract 透传给 chat skill。
+        attach_recent_execution_context_to_chat_args(
+            &mut resolved_args,
+            loop_state,
+            user_text,
+            loop_state.output_contract.as_ref(),
+        );
     }
     let args_summary = build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
     let skill_outcome = execute_prepared_skill_action(
