@@ -591,6 +591,36 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
                 });
             }
         }
+        // F17: 兼容 LLM（典型 minimax）把多 step 合并到一个对象时，后写的
+        // `"skill":"respond"` 字段覆盖前面的，导致 step 变成 call_skill(respond)。
+        // executor 看到 skill="respond" 直接报"技能未开启 respond"。这里检测
+        // call_skill+skill∈{respond,reply,answer} 时降级为顶层 respond，content
+        // 取 args.content / args.text / content / text 中第一个有值的字符串。
+        if step_type == "call_skill" {
+            if let Some(skill) = obj.get("skill").and_then(|v| v.as_str()) {
+                let canon = skill.trim().to_ascii_lowercase();
+                if matches!(canon.as_str(), "respond" | "reply" | "answer" | "final") {
+                    let args = obj.get("args").and_then(|v| v.as_object());
+                    let pick = |k: &str| -> Option<String> {
+                        let from_args = args
+                            .and_then(|m| m.get(k))
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                        let from_top = obj.get(k).and_then(|v| v.as_str()).map(str::to_string);
+                        from_args.or(from_top)
+                    };
+                    let content = pick("content")
+                        .or_else(|| pick("text"))
+                        .or_else(|| pick("message"))
+                        .or_else(|| pick("body"))
+                        .unwrap_or_default();
+                    return json!({
+                        "type": "respond",
+                        "content": content,
+                    });
+                }
+            }
+        }
         return value;
     }
 
