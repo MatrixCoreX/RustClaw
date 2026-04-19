@@ -552,11 +552,14 @@ enum AssistantContextReplyKind {
     ProviderUnavailablePlaceholder,
 }
 
+/// §7.2 后保留：仅用于历史 DB 兼容场景与测试，拿到老 super-fallback 字面字符串。
+/// 真正的"是不是 fallback 占位符"判定走 [`crate::fallback::is_known_clarify_fallback_text`]。
+#[allow(dead_code)]
 fn provider_unavailable_clarify_fallback_text(state: &AppState) -> String {
     crate::i18n_t_with_default(
         state,
-        "clawd.msg.clarify_question_fallback",
-        "I need to clarify: what task is this message about? Please provide the target or context.",
+        crate::fallback::LEGACY_SUPER_FALLBACK_KEY,
+        crate::fallback::LEGACY_SUPER_FALLBACK_DEFAULT_EN,
     )
 }
 
@@ -938,9 +941,12 @@ fn extract_result_text_for_recent_turns(value: &Value) -> Option<String> {
 fn classify_assistant_context_reply_kind(
     parsed_result: Option<&Value>,
     assistant_text: &str,
-    provider_unavailable_text: &str,
+    // §7.2: 旧 `provider_unavailable_text: &str` 改为 `is_fallback` 闭包，调用方注入
+    // `crate::fallback::is_known_clarify_fallback_text(state, _)` 后，新 7 个 source
+    // 文案与老 super-fallback 都能被识别为 ProviderUnavailablePlaceholder。
+    is_fallback: impl Fn(&str) -> bool,
 ) -> AssistantContextReplyKind {
-    if assistant_text.trim() == provider_unavailable_text.trim() {
+    if is_fallback(assistant_text) {
         return AssistantContextReplyKind::ProviderUnavailablePlaceholder;
     }
     let summary = parsed_result
@@ -988,11 +994,10 @@ fn extract_last_turn_assistant_text_from_task(
         None
     };
     let assistant_text = assistant_text.unwrap_or_else(|| result_json.to_string());
-    let provider_unavailable_text = provider_unavailable_clarify_fallback_text(state);
     match classify_assistant_context_reply_kind(
         parsed.as_ref(),
         &assistant_text,
-        &provider_unavailable_text,
+        |t| crate::fallback::is_known_clarify_fallback_text(state, t),
     ) {
         AssistantContextReplyKind::Normal => Some(assistant_text),
         AssistantContextReplyKind::ClarifyPlaceholder => {
@@ -1300,7 +1305,6 @@ pub(crate) fn build_recent_assistant_replies_context(
         return "<none>".to_string();
     }
 
-    let provider_unavailable_text = provider_unavailable_clarify_fallback_text(state);
     let mut lines: Vec<String> = Vec::new();
     for (role, content, safety_flag) in rows {
         if role != MEMORY_ROLE_ASSISTANT {
@@ -1310,8 +1314,10 @@ pub(crate) fn build_recent_assistant_replies_context(
             continue;
         }
         let trimmed_content = content.trim();
+        // §7.2: 集合化 fallback 比对，新老 fallback 文案都跳过；仍单独识别
+        // ProviderUnavailable assistant placeholder（写入端的占位 marker）。
         if trimmed_content.is_empty()
-            || trimmed_content == provider_unavailable_text.trim()
+            || crate::fallback::is_known_clarify_fallback_text(state, trimmed_content)
             || trimmed_content == provider_unavailable_assistant_placeholder()
         {
             continue;
@@ -1371,7 +1377,6 @@ pub(crate) fn read_recent_assistant_reply_texts(
         return Vec::new();
     }
 
-    let provider_unavailable_text = provider_unavailable_clarify_fallback_text(state);
     let mut replies = Vec::new();
     for (role, content, safety_flag) in rows {
         if role != MEMORY_ROLE_ASSISTANT {
@@ -1381,8 +1386,9 @@ pub(crate) fn read_recent_assistant_reply_texts(
             continue;
         }
         let trimmed = content.trim();
+        // §7.2: 同上 —— 集合化 fallback 比对。
         if trimmed.is_empty()
-            || trimmed == provider_unavailable_text.trim()
+            || crate::fallback::is_known_clarify_fallback_text(state, trimmed)
             || trimmed == provider_unavailable_assistant_placeholder()
         {
             continue;
@@ -1944,11 +1950,15 @@ mod tests {
                 }
             }
         });
+        // §7.2: helper 由"`provider_unavailable_text: &str`"改为"`is_fallback` 闭包"。
+        // 测试这里给一个把任意文本都判定为 false 的闭包 —— 让 routing summary 字段
+        // 决定走 ClarifyPlaceholder。
+        let never_fallback = |_: &str| false;
         assert_eq!(
             classify_assistant_context_reply_kind(
                 Some(&parsed),
                 "请问你指的是哪个文件？例如 logs/act_plan.log",
-                "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。",
+                never_fallback,
             ),
             AssistantContextReplyKind::ClarifyPlaceholder
         );
@@ -1960,11 +1970,15 @@ mod tests {
         let parsed = json!({
             "text": "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。"
         });
+        // §7.2: 模拟"is_fallback 集合命中"—— 文本本身被识别为 fallback 占位符。
+        let target_text = "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。";
+        let target = target_text.to_string();
+        let is_target_fallback = move |t: &str| t.trim() == target.trim();
         assert_eq!(
             classify_assistant_context_reply_kind(
                 Some(&parsed),
-                "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。",
-                "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。",
+                target_text,
+                is_target_fallback,
             ),
             AssistantContextReplyKind::ProviderUnavailablePlaceholder
         );
@@ -1979,11 +1993,13 @@ mod tests {
         let parsed = json!({
             "text": "README.md"
         });
+        // §7.2: 普通答案 + 任意 fallback 集合都不命中 → Normal。
+        let never_fallback = |_: &str| false;
         assert_eq!(
             classify_assistant_context_reply_kind(
                 Some(&parsed),
                 "README.md",
-                "当前大模型服务暂时不可用（未加载成功或鉴权失败），我先无法进行语义理解与规划。请稍后重试，或让我改用可用模型继续。若你愿意，也可以先补充目标或上下文，模型恢复后我会优先处理。",
+                never_fallback,
             ),
             AssistantContextReplyKind::Normal
         );

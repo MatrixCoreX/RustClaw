@@ -1084,10 +1084,12 @@ pub(crate) async fn generate_clarify_question(
         Ok(v) => {
             let out = v.trim();
             if out.is_empty() {
-                crate::i18n_t_with_default(
+                // §7.2: LLM 调用 OK 但内容为空 → EmptyResponse 特化文案 + tracing 上报。
+                crate::fallback::render_clarify_fallback(
                     state,
-                    "clawd.msg.clarify_question_fallback",
-                    "I need to clarify: what task is this message about? Please provide the target or context.",
+                    &task.task_id,
+                    crate::fallback::ClarifyFallbackSource::EmptyResponse,
+                    None,
                 )
             } else {
                 out.to_string()
@@ -1098,10 +1100,14 @@ pub(crate) async fn generate_clarify_question(
                 "generate_clarify_question llm failed, fallback default: task_id={} err={}",
                 task.task_id, err
             );
-            crate::i18n_t_with_default(
+            // §7.2: LLM 直接 Err（401 / 熔断 / 超时 / 网络）→ LlmUnavailable 特化文案。
+            // err 概要写进 context_hint，便于 inspect_task.sh 关联。
+            let hint = format!("err={err}");
+            crate::fallback::render_clarify_fallback(
                 state,
-                "clawd.msg.clarify_question_fallback",
-                "I need to clarify: what task is this message about? Please provide the target or context.",
+                &task.task_id,
+                crate::fallback::ClarifyFallbackSource::LlmUnavailable,
+                Some(&hint),
             )
         }
     }
@@ -1115,6 +1121,10 @@ pub(crate) async fn generate_or_reuse_clarify_question(
     candidate_context: Option<&str>,
     preferred_question: Option<&str>,
     policy: ClarifyQuestionPolicy,
+    // §7.2: 上游必须显式声明"我现在为什么走 SafeFallback"。
+    // policy=SafeFallback 时用此 source 渲染特化文案 + 上报 tracing；
+    // policy=AllowModel 时本参数被忽略（走真 LLM 路径）。
+    default_source: crate::fallback::ClarifyFallbackSource,
 ) -> String {
     let preferred = preferred_question
         .map(str::trim)
@@ -1124,10 +1134,11 @@ pub(crate) async fn generate_or_reuse_clarify_question(
         return question;
     }
     if matches!(policy, ClarifyQuestionPolicy::SafeFallback) {
-        return crate::i18n_t_with_default(
+        return crate::fallback::render_clarify_fallback(
             state,
-            "clawd.msg.clarify_question_fallback",
-            "I need to clarify: what task is this message about? Please provide the target or context.",
+            &task.task_id,
+            default_source,
+            None,
         );
     }
     generate_clarify_question(

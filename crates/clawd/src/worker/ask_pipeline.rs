@@ -424,6 +424,9 @@ pub(super) async fn execute_ask_dispatch(
             Some(&clarify_context),
             preferred_clarify_question,
             clarify_policy,
+            // §7.2: 路由阶段没拿到可用 clarify_question + 非 fuzzy_locator 触发的 SafeFallback
+            // → IntentUnresolved（我没看出这条消息要做什么）。
+            crate::fallback::ClarifyFallbackSource::IntentUnresolved,
         )
         .await;
         return Ok(Some(Ok(crate::AskReply::non_llm(clarify))));
