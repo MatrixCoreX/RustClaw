@@ -420,10 +420,47 @@ pub(crate) fn clean_schedule_kind(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
 
+/// §7.5: env 名 —— `cargo test` / nl-replay 通过它把 normalizer prompt 里的
+/// `__NOW__` 字段冻结到固定值，让 fixture FNV hash 在 `Utc::now()` 漂移下仍稳定。
+/// 生产路径 unset 时走 `Utc::now()`，行为与历史版本完全一致。
+pub(crate) const TEST_FREEZE_NOW_ENV: &str = "RUSTCLAW_TEST_FREEZE_NOW";
+
+/// §7.5: 解析 [`TEST_FREEZE_NOW_ENV`] 字符串。
+///
+/// 接受两种格式（`%:z` = `+08:00` 这类带冒号的 offset）：
+///   * RFC-3339-ish：`2026-04-19T12:00:00+08:00`
+///   * normalizer 形态：`2026-04-19 12:00:00 +08:00`
+///
+/// 解析成功 → 转换到 `tz`；失败 → **panic**（这是 test-only env，写错就该立刻
+/// 炸出来，避免静默 fallback 到 `Utc::now()` 让 fixture 跑出"看似稳定其实漂移"
+/// 的诡异行为）。
+fn parse_freeze_now_or_panic(raw: &str, tz: &Tz) -> chrono::DateTime<Tz> {
+    let trimmed = raw.trim();
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return dt.with_timezone(tz);
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S %:z") {
+        return dt.with_timezone(tz);
+    }
+    panic!(
+        "{TEST_FREEZE_NOW_ENV}={trimmed:?} failed to parse; accepted formats: \
+         RFC-3339 (`2026-04-19T12:00:00+08:00`) or `%Y-%m-%d %H:%M:%S %:z` \
+         (`2026-04-19 12:00:00 +08:00`)"
+    );
+}
+
+/// §7.5: 计算 normalizer prompt 用的"现在"，可被 [`TEST_FREEZE_NOW_ENV`] 冻结。
+fn effective_now_for_normalizer(tz: &Tz) -> chrono::DateTime<Tz> {
+    match std::env::var(TEST_FREEZE_NOW_ENV) {
+        Ok(v) if !v.trim().is_empty() => parse_freeze_now_or_panic(&v, tz),
+        _ => Utc::now().with_timezone(tz),
+    }
+}
+
 /// Returns (now_iso, timezone, schedule_rules) for intent normalizer prompt.
 pub(crate) fn schedule_context_for_normalizer(state: &AppState) -> (String, String, String) {
     let tz = parse_timezone(&state.policy.schedule.timezone);
-    let now_local = Utc::now().with_timezone(&tz);
+    let now_local = effective_now_for_normalizer(&tz);
     let now_iso = now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string();
     let timezone = state.policy.schedule.timezone.clone();
     let rules = state.policy.schedule.intent_rules_template_string();
@@ -1492,5 +1529,77 @@ output_kind = "text"
             .find(|(k, _)| *k == "invocation_source")
             .map(|(_, v)| v);
         assert_eq!(src.and_then(|v| v.as_str()), Some("schedule"));
+    }
+
+    // ---------- §7.5: TEST_FREEZE_NOW_ENV 解析与冻结行为 ----------
+
+    /// 进程内 env 串扰隔离锁：本 mod 里所有 set_var(TEST_FREEZE_NOW_ENV, ..) 的
+    /// 测试串行化，避免 cargo 默认并行下相互覆盖。
+    fn freeze_now_env_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn freeze_now_accepts_rfc3339_format() {
+        let _g = freeze_now_env_guard();
+        std::env::set_var(TEST_FREEZE_NOW_ENV, "2026-04-19T12:00:00+08:00");
+        let tz = parse_timezone("Asia/Shanghai");
+        let now = effective_now_for_normalizer(&tz);
+        assert_eq!(
+            now.format("%Y-%m-%d %H:%M:%S %:z").to_string(),
+            "2026-04-19 12:00:00 +08:00"
+        );
+        std::env::remove_var(TEST_FREEZE_NOW_ENV);
+    }
+
+    #[test]
+    fn freeze_now_accepts_normalizer_form_format() {
+        let _g = freeze_now_env_guard();
+        std::env::set_var(TEST_FREEZE_NOW_ENV, "2026-04-19 12:00:00 +08:00");
+        let tz = parse_timezone("Asia/Shanghai");
+        let now = effective_now_for_normalizer(&tz);
+        assert_eq!(
+            now.format("%Y-%m-%d %H:%M:%S %:z").to_string(),
+            "2026-04-19 12:00:00 +08:00"
+        );
+        std::env::remove_var(TEST_FREEZE_NOW_ENV);
+    }
+
+    #[test]
+    fn freeze_now_unset_falls_back_to_utc_now() {
+        let _g = freeze_now_env_guard();
+        std::env::remove_var(TEST_FREEZE_NOW_ENV);
+        let tz = parse_timezone("Asia/Shanghai");
+        let frozen_marker = "2026-04-19T12:00:00+08:00";
+        let real = effective_now_for_normalizer(&tz);
+        assert_ne!(
+            real.format("%Y-%m-%d %H:%M:%S %:z").to_string(),
+            "2026-04-19 12:00:00 +08:00",
+            "unset env must NOT collapse to the test-only frozen marker {frozen_marker}"
+        );
+    }
+
+    #[test]
+    fn freeze_now_empty_string_is_treated_as_unset() {
+        let _g = freeze_now_env_guard();
+        std::env::set_var(TEST_FREEZE_NOW_ENV, "   ");
+        let tz = parse_timezone("Asia/Shanghai");
+        // 空白 env 当作未设，必须走 Utc::now()，不能 panic。
+        let _now = effective_now_for_normalizer(&tz);
+        std::env::remove_var(TEST_FREEZE_NOW_ENV);
+    }
+
+    #[test]
+    #[should_panic(expected = "RUSTCLAW_TEST_FREEZE_NOW")]
+    fn freeze_now_panics_loudly_on_invalid_value() {
+        let _g = freeze_now_env_guard();
+        std::env::set_var(TEST_FREEZE_NOW_ENV, "not-a-date");
+        let tz = parse_timezone("Asia/Shanghai");
+        let _ = effective_now_for_normalizer(&tz);
+        // 走到这里说明回退了，违反了 fail-loud 契约。
+        std::env::remove_var(TEST_FREEZE_NOW_ENV);
     }
 }
