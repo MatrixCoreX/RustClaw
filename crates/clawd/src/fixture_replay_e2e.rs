@@ -150,18 +150,27 @@ pub(crate) struct LoadedCase {
 ///   * `expected_llm_call_count`：精确等于。仅当此 case 的 LLM 调用数稳定
 ///     时才设；不稳定时用 `expected_min_llm_call_count` /
 ///     `expected_max_llm_call_count` 给区间。
-///   * `expected_prompt_sources`：按调用顺序断言每次 LLM 入口的
-///     [`crate::llm_gateway::classify_prompt_source`] 标签序列；用来卡住
-///     "意外多走/少走某段 prompt"。允许值：`normalizer` / `plan` /
+///   * `expected_prompt_sources`：**集合（无序）** 断言 —— 每个列出的
+///     [`crate::llm_gateway::classify_prompt_source`] 标签必须在本次任务里
+///     至少被调用过一次。来源是 `state.task_llm_by_prompt(task_id)` 的 key
+///     集（HashMap，无调用顺序）。允许值：`normalizer` / `plan` /
 ///     `plan_repair` / `classifier_direct` / `observed` / `clarify` /
 ///     `intent_meta` / `schedule` / `nl2cmd` / `self_extension` / `memory` /
 ///     `verifier` / `chat` / `semantic_judge` / `router_legacy` / `other`。
-///   * `expected_fallback_source`：断言 final answer 的 fallback source
-///     标签（§7.2 引入），允许值取决于该 case 是否走 fallback 分支；
+///     未来若需要"按顺序"断言，需在 `state.metrics` 加事件序列字段 —— 当前
+///     不支持。
+///   * `expected_fallback_source`：断言 finalizer 收尾使用的 fallback 标签，
+///     源自 `task_journal.summary.finalizer_summary.fallback`。允许值见
+///     [`crate::task_journal::TaskJournalFinalizerFallback::as_str`]
+///     （`raw_text` / `no_answer_nonqualified` / `no_answer_parse_failed`）。
 ///     `None` / 缺字段 = 不断言。
-///   * `expected_verifier_verdict`：断言
-///     [`crate::output_contract_verifier::OutputContractVerdict`] 的 verdict
-///     名（`pass` / `reshape` / `reject`）。
+///   * `expected_verifier_verdict`：**当前未落 journal**，[`OutputContractVerdict`]
+///     只走 tracing event，没有结构化字段可断言。schema 保留字段名，但
+///     [`diff_outcome_against_expected`] 会把它当成"未实现的硬约束"
+///     `panic!`，避免 case 文件设了字段而被静默跳过。后续在 `task_journal`
+///     里加 `output_contract_verdict: Option<...>` 之后再启用。
+///
+///     [`OutputContractVerdict`]: crate::output_contract_verifier::OutputContractVerdict
 ///   * `expected_final_status`：断言
 ///     [`crate::task_journal::TaskJournalFinalStatus`]（`success` /
 ///     `failure` / `clarify` / `resume_failure`）。
@@ -301,6 +310,319 @@ impl ExpectedCase {
         }
         Ok(())
     }
+}
+
+/// §7.5 Step 4.b.2.6：`process_ask_task` 跑完后从 [`AppState`] + DB 抽取出来的
+/// 业务可观察值快照。是 [`diff_outcome_against_expected`] 的输入，让"抽取"和
+/// "断言"两步分离 —— 前者依赖 process_ask_task 真跑过，后者是纯函数可单测。
+#[derive(Debug, Clone)]
+pub(crate) struct ReplayOutcome {
+    /// `tasks.task_id` —— 与 [`crate::ClaimedTask::task_id`] 同。
+    pub task_id: String,
+    /// `tasks.status`：`succeeded` / `failed` / `running` / `queued` / `canceled` / `timeout`。
+    /// `process_ask_task` 收尾如果什么 update 都没跑（如 task 被预先 cancel），
+    /// 这里仍是 `queued` —— 与生产 inspect 路径同语义。
+    pub task_status: String,
+    /// `tasks.error_text`：失败路径下 finalizer 写入。
+    pub error_text: Option<String>,
+    /// `tasks.result_json` 反序列化后的 `task_journal.summary.final_answer`
+    /// （注意已被 `truncate_for_log` 截断，对短答案 contains 断言够用；
+    /// 长答案断言请挑独特子串而非长片段）。
+    pub final_answer_text: Option<String>,
+    /// `task_journal.summary.final_status`：`success` / `failure` / `clarify` /
+    /// `resume_failure`。task 还在 running 或 process_ask_task 早返时为 `None`。
+    pub final_status: Option<String>,
+    /// `task_journal.summary.finalizer_summary.fallback`：finalizer 走的 fallback 标签。
+    pub fallback_source: Option<String>,
+    /// `state.task_llm_call_count(task_id)`：本次任务实际发出的 LLM 逻辑调用数。
+    pub llm_call_count: u64,
+    /// `state.task_llm_by_prompt(task_id)` 的 key 集 —— 本次任务调用过的
+    /// `classify_prompt_source` 标签集合，无序。
+    pub prompt_sources_invoked: std::collections::BTreeSet<String>,
+}
+
+/// §7.5 Step 4.b.2.6：从 `AppState` + DB 抽出 [`ReplayOutcome`]。
+///
+/// **必须**在 `process_ask_task` 返回之后、清理 metrics 之前调用。读取 DB
+/// 失败 / `result_json` 不是合法 JSON / status 列缺失都视为 `Err`，
+/// 让 harness 立刻 panic 而不是给出半残数据。
+pub(crate) fn extract_outcome_from_state(
+    state: &crate::AppState,
+    task_id: &str,
+) -> Result<ReplayOutcome, String> {
+    let conn = state
+        .core
+        .db
+        .get()
+        .map_err(|e| format!("acquire main-db conn for outcome read: {e}"))?;
+    let row: (String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT status, result_json, error_text FROM tasks WHERE task_id = ?1 LIMIT 1",
+            rusqlite::params![task_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|e| {
+            format!(
+                "query tasks row for task_id={task_id}: {e} \
+                 (did you forget to call seed_ask_task_row before process_ask_task?)"
+            )
+        })?;
+    let (task_status, result_json_text, error_text) = row;
+
+    let mut final_answer_text = None;
+    let mut final_status = None;
+    let mut fallback_source = None;
+    if let Some(text) = &result_json_text {
+        let parsed: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+            format!(
+                "tasks.result_json for {task_id} is not valid JSON: {e}; raw = {}",
+                crate::truncate_for_log(text)
+            )
+        })?;
+        let summary = parsed
+            .get("task_journal")
+            .and_then(|j| j.get("summary"));
+        if let Some(summary) = summary {
+            final_answer_text = summary
+                .get("final_answer")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            final_status = summary
+                .get("final_status")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            fallback_source = summary
+                .get("finalizer_summary")
+                .and_then(|f| f.get("fallback"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+        }
+    }
+
+    let llm_call_count = state.task_llm_call_count(task_id);
+    let prompt_sources_invoked = state
+        .task_llm_by_prompt(task_id)
+        .into_keys()
+        .collect::<std::collections::BTreeSet<_>>();
+
+    Ok(ReplayOutcome {
+        task_id: task_id.to_string(),
+        task_status,
+        error_text,
+        final_answer_text,
+        final_status,
+        fallback_source,
+        llm_call_count,
+        prompt_sources_invoked,
+    })
+}
+
+/// §7.5 Step 4.b.2.6：纯函数比对器。返回 `Vec<String>` 失败说明（每条对应
+/// 一个未达预期的硬约束）；空 Vec 表示所有断言通过。
+///
+/// **失败模式分组**（与 [`ExpectedCase`] 字段一一对应）：
+///   * `expected_final_answer_contains` 子串缺失 → 一条失败/缺项；
+///   * `expected_final_answer_not_contains` 命中 → 一条失败/出现项；
+///   * `expected_llm_call_count` 不等 → 一条失败；
+///   * `expected_min_llm_call_count` / `_max_` 越界 → 各一条；
+///   * `expected_prompt_sources` 子集关系不满足 → 一条失败/缺项；
+///   * `expected_fallback_source` 不等 → 一条失败；
+///   * `expected_final_status` 不等 → 一条失败。
+///
+/// **特殊处理**：`expected_verifier_verdict` 设了非空值 → **panic**
+/// （不是返回失败），见 [`ExpectedCase`] doc：当前 journal 没暴露这个字段，
+/// 不能装作"已比对"。如果你确实需要，请先在 `task_journal` 里加结构化字段。
+pub(crate) fn diff_outcome_against_expected(
+    expected: &ExpectedCase,
+    outcome: &ReplayOutcome,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+
+    if let Some(verdict) = expected.expected_verifier_verdict.as_deref() {
+        if !verdict.is_empty() {
+            panic!(
+                "ExpectedCase {:?} sets expected_verifier_verdict = {:?}, but \
+                 task_journal currently does not expose OutputContractVerdict as a \
+                 structured field. Refusing to silently skip the assertion. \
+                 Either remove the field from expected.json, or first plumb \
+                 `output_contract_verdict` into TaskJournal.summary.",
+                expected.case, verdict
+            );
+        }
+    }
+
+    let answer = outcome.final_answer_text.as_deref().unwrap_or_default();
+    for needle in &expected.expected_final_answer_contains {
+        if !answer.contains(needle) {
+            failures.push(format!(
+                "expected_final_answer_contains: missing substring {:?} in final_answer = {:?}",
+                needle, answer
+            ));
+        }
+    }
+    for needle in &expected.expected_final_answer_not_contains {
+        if answer.contains(needle) {
+            failures.push(format!(
+                "expected_final_answer_not_contains: forbidden substring {:?} present in \
+                 final_answer = {:?}",
+                needle, answer
+            ));
+        }
+    }
+
+    if let Some(exact) = expected.expected_llm_call_count {
+        if outcome.llm_call_count != exact as u64 {
+            failures.push(format!(
+                "expected_llm_call_count: expected {exact}, got {}",
+                outcome.llm_call_count
+            ));
+        }
+    }
+    if let Some(min) = expected.expected_min_llm_call_count {
+        if outcome.llm_call_count < min as u64 {
+            failures.push(format!(
+                "expected_min_llm_call_count: expected >= {min}, got {}",
+                outcome.llm_call_count
+            ));
+        }
+    }
+    if let Some(max) = expected.expected_max_llm_call_count {
+        if outcome.llm_call_count > max as u64 {
+            failures.push(format!(
+                "expected_max_llm_call_count: expected <= {max}, got {}",
+                outcome.llm_call_count
+            ));
+        }
+    }
+
+    for label in &expected.expected_prompt_sources {
+        if !outcome.prompt_sources_invoked.contains(label) {
+            failures.push(format!(
+                "expected_prompt_sources: label {:?} was not invoked. Invoked set = {:?}",
+                label, outcome.prompt_sources_invoked
+            ));
+        }
+    }
+
+    if let Some(want) = expected.expected_fallback_source.as_deref() {
+        let got = outcome.fallback_source.as_deref().unwrap_or("<none>");
+        if got != want {
+            failures.push(format!(
+                "expected_fallback_source: expected {:?}, got {:?}",
+                want, got
+            ));
+        }
+    }
+
+    if let Some(want) = expected.expected_final_status.as_deref() {
+        let got = outcome.final_status.as_deref().unwrap_or("<none>");
+        if got != want {
+            failures.push(format!(
+                "expected_final_status: expected {:?}, got {:?}",
+                want, got
+            ));
+        }
+    }
+
+    failures
+}
+
+/// §7.5 Step 4.b.2.6：跑一条 `<case>/calls.jsonl` + `<case>/expected.json`
+/// 端到端 case，调 [`crate::worker::process_ask_task`] 后返回失败说明。
+///
+/// **协作约定（caller 必持）**：
+///   1. 调用前必须握住 [`fixture_env_lock`]，因为 [`FixtureEnvGuard`] 改的是
+///      进程级 env；
+///   2. 调用前应当 [`crate::providers::fixture_replay::clear_cache_for_test`]，
+///      否则上一条 case 残留的 hash → response map 会幽灵命中本 case；
+///   3. 本函数会自己 install / drop `FixtureEnvGuard`。
+///
+/// **失败语义**：
+///   * fixture 文件缺失（`calls.jsonl` 或 `expected.json`）→ `Err(说明)`；
+///   * `process_ask_task` 自己返 `Err` → `Err(说明)`；
+///   * 抽取 outcome 失败（DB 读失败 / result_json 非法）→ `Err(说明)`；
+///   * 比对失败（断言不通过）→ `Ok(Vec<String>)`，每条对应一个未达硬约束；
+///   * 全部通过 → `Ok(空 Vec)`。
+pub(crate) async fn run_replay_case(case_name: &str) -> Result<Vec<String>, String> {
+    let root = fixture_workspace_root();
+    let case_dir = root.join(case_name);
+    if !case_dir.is_dir() {
+        return Err(format!(
+            "fixture case dir not found: {} (did you record this case yet?)",
+            case_dir.display()
+        ));
+    }
+    let calls_path =
+        case_dir.join(crate::providers::fixture_replay::FIXTURE_CALLS_FILENAME);
+    if !calls_path.is_file() {
+        return Err(format!(
+            "fixture {} missing in {} (run scripts/regen_fixture.sh)",
+            crate::providers::fixture_replay::FIXTURE_CALLS_FILENAME,
+            case_dir.display()
+        ));
+    }
+    let expected = ExpectedCase::load_for_case(&case_dir)
+        .map_err(|e| format!("load expected.json failed: {e}"))?
+        .ok_or_else(|| {
+            format!(
+                "case {case_name:?} has no expected.json — required for e2e harness; \
+                 use only calls.jsonl if you want a smoke fixture instead"
+            )
+        })?;
+
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_minimal_builtin_registry()
+        .with_prompt_layers_installed()
+        .with_seeded_db_schema();
+
+    let task_id = format!(
+        "fixture-replay-{}-{}",
+        case_name,
+        uuid::Uuid::new_v4()
+    );
+    let payload_value = serde_json::json!({
+        "text": expected.user_text,
+        "channel": "ui",
+        "agent_id": crate::DEFAULT_AGENT_ID,
+        "call_id": task_id,
+    });
+    let payload_text = payload_value.to_string();
+    state.seed_ask_task_row(&task_id, expected.user_id, expected.chat_id, &payload_text);
+
+    let task = crate::ClaimedTask {
+        task_id: task_id.clone(),
+        user_id: expected.user_id,
+        chat_id: expected.chat_id,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: payload_text,
+    };
+    // claim 路径在生产里会把 status 从 'queued' 切到 'running'；fixture seed 后
+    // 直接驱动 process_ask_task 不走 claim_next_task —— 手工把行切到 'running'。
+    state
+        .core
+        .db
+        .get()
+        .map_err(|e| format!("acquire main-db conn for mark_running: {e}"))?
+        .execute(
+            "UPDATE tasks SET status = 'running', updated_at = ?2 WHERE task_id = ?1 AND status = 'queued'",
+            rusqlite::params![task_id, crate::now_ts()],
+        )
+        .map_err(|e| format!("mark task running failed: {e}"))?;
+
+    let _env = FixtureEnvGuard::install(&root, case_name, &expected.freeze_now);
+
+    let mut payload_for_process = serde_json::from_str::<serde_json::Value>(&task.payload_json)
+        .map_err(|e| format!("payload_json reparse: {e}"))?;
+    crate::worker::process_ask_task(&state, &task, &mut payload_for_process)
+        .await
+        .map_err(|e| format!("process_ask_task returned Err: {e:?}"))?;
+
+    let outcome = extract_outcome_from_state(&state, &task_id)?;
+    Ok(diff_outcome_against_expected(&expected, &outcome))
 }
 
 /// §7.5 Step 4.a：扫描 fixture root 下所有"真 case"目录（跳过 `_*`），把每个
@@ -1264,17 +1586,278 @@ mod tests {
     ///     fixture root 下 `README.md` / `_example/{calls.jsonl,expected.json}`
     ///     一份可机器校验的样例。`deny_unknown_fields` + 目录名 cross-check
     ///     + LLM count 区间一致性 + freeze_now 非空都已落入自检。
+    ///   * 4.b.2.6.a（本测试 body + 本文件三条
+    ///     `step4b2_6_self_check_*` 同步测试）：harness 真调
+    ///     `process_ask_task` 跑通整条 wiring，并通过
+    ///     [`super::diff_outcome_against_expected`] 把 ExpectedCase 与
+    ///     [`super::ReplayOutcome`] 比对。`extract_outcome_from_state` /
+    ///     `diff_outcome_against_expected` / `run_replay_case` 三段拆出来
+    ///     便于纯函数单测。
     ///
-    /// 仍待补的剩余工程：
-    ///   1. **真录 ≥ 9 条 case** 的 `calls.jsonl` + `expected.json`（Step
-    ///      4.b.2.6）；
-    ///   2. 写 harness body 真调 `process_ask_task` + 按 `expected.json`
-    ///      做断言；
-    ///   3. 删掉本测试的 `#[ignore]`。
+    /// 仍待补的剩余工程（4.b.2.6.b，需用户在本地有真 LLM key 的环境完成）：
+    ///   1. 用 `scripts/regen_fixture.sh` 真录 ≥ 9 条 case 的 `calls.jsonl`，
+    ///      并配套写 `expected.json`；
+    ///   2. 删掉本测试的 `#[ignore]` —— 本测试 body 已经能在有真 fixture 时
+    ///      原地启用，无需再改代码。
+    ///
+    /// **本测试 body 行为**：
+    ///   * 调 [`super::load_recorded_cases`] 拿到所有非 `_*` 真 case 目录；
+    ///   * 跳过没有 `expected.json` 的 case（视为 smoke fixture，由 §Step 2.b
+    ///     的 self-check 路径已经覆盖）；
+    ///   * 对剩下每条 case 调 [`super::run_replay_case`]，把所有 case 的
+    ///     失败说明聚合到一条 panic 里（避免一条挂掉就掩盖后面的）；
+    ///   * 0 条真 case 但被显式要求跑（`--ignored`）→ panic 提示用户先录。
     #[tokio::test]
-    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 / 4.b.2.2 / 4.b.2.3 / 4.b.2.4 / 4.b.2.5 已落地，等 1-3 项就绪再启用"]
+    #[ignore = "Step 4.b.2.6.b 等待用户在本地真录 ≥ 9 条 case；body 已就绪，录完后 unignore 即可"]
     async fn e2e_per_case_replay_with_process_ask_task() {
-        // 见上方 doc。
+        let _lock = fixture_env_lock();
+
+        let cases = load_recorded_cases().expect("scan fixture root");
+        let with_expected: Vec<_> = cases
+            .into_iter()
+            .filter_map(|case| {
+                let case_dir = case.calls_path.parent().unwrap().to_path_buf();
+                let has_expected = case_dir.join(FIXTURE_EXPECTED_FILENAME).is_file();
+                has_expected.then_some(case)
+            })
+            .collect();
+
+        assert!(
+            !with_expected.is_empty(),
+            "Step 4.b.2.6.b 入口：fixture root 下没有任何带 expected.json 的真 case。\
+             请先用 scripts/regen_fixture.sh 录至少 1 条 case，配套写 expected.json，\
+             再去掉本测试的 #[ignore] 跑 `cargo test e2e_per_case_replay_with_process_ask_task`。"
+        );
+
+        let mut all_failures = Vec::new();
+        for case in &with_expected {
+            crate::providers::fixture_replay::clear_cache_for_test();
+            match run_replay_case(&case.case).await {
+                Ok(case_failures) if case_failures.is_empty() => {}
+                Ok(case_failures) => {
+                    all_failures.push(format!(
+                        "[case {}] {} assertion(s) failed:\n  - {}",
+                        case.case,
+                        case_failures.len(),
+                        case_failures.join("\n  - "),
+                    ));
+                }
+                Err(err) => {
+                    all_failures.push(format!("[case {}] harness Err: {err}", case.case));
+                }
+            }
+        }
+
+        assert!(
+            all_failures.is_empty(),
+            "fixture-replay e2e harness saw {} failing case(s):\n\n{}",
+            all_failures.len(),
+            all_failures.join("\n\n"),
+        );
+    }
+
+    /// §7.5 Step 4.b.2.6.a self-check：[`super::extract_outcome_from_state`]
+    /// 真能从一条手工塞进 `tasks.result_json` 的 journal envelope 里抽出
+    /// `final_answer` / `final_status` / `finalizer_summary.fallback`。
+    ///
+    /// 不调 `process_ask_task` —— 走"建 schema + INSERT 一条 succeeded 行 +
+    /// 把假的 result_json 文本写进去 + 调 extract" 路径，用真 schema 验
+    /// 真抽取逻辑（与 production 字段路径同步：`task_journal.summary.*`）。
+    #[tokio::test]
+    async fn step4b2_6_self_check_extract_outcome_reads_journal_envelope_from_result_json() {
+        let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+        let task_id = "step4b2_6_extract_round_trip";
+        state.seed_ask_task_row(task_id, 7, 7, "{}");
+
+        let result_json = serde_json::json!({
+            "result": "ignored-by-extract",
+            "task_journal": {
+                "summary": {
+                    "final_answer": "answer-payload-from-fixture",
+                    "final_status": "success",
+                    "finalizer_summary": {
+                        "fallback": "raw_text",
+                        "stage": null,
+                        "disposition": null,
+                    },
+                },
+                "trace": {},
+            },
+        })
+        .to_string();
+        state
+            .core
+            .db
+            .get()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET status = 'succeeded', result_json = ?2, updated_at = '0' \
+                 WHERE task_id = ?1",
+                rusqlite::params![task_id, result_json],
+            )
+            .unwrap();
+
+        // 同步 metrics 桶（extract 也读这两个）：
+        state.note_task_llm_call_with_label(task_id, "normalizer");
+        state.note_task_llm_call_with_label(task_id, "chat");
+        state.note_task_llm_call_with_label(task_id, "chat");
+
+        let outcome = super::extract_outcome_from_state(&state, task_id).expect("extract ok");
+        assert_eq!(outcome.task_id, task_id);
+        assert_eq!(outcome.task_status, "succeeded");
+        assert!(
+            outcome.error_text.is_none(),
+            "succeeded path must leave error_text NULL, got {:?}",
+            outcome.error_text
+        );
+        assert_eq!(
+            outcome.final_answer_text.as_deref(),
+            Some("answer-payload-from-fixture")
+        );
+        assert_eq!(outcome.final_status.as_deref(), Some("success"));
+        assert_eq!(outcome.fallback_source.as_deref(), Some("raw_text"));
+        assert_eq!(outcome.llm_call_count, 3);
+        assert_eq!(
+            outcome.prompt_sources_invoked,
+            ["chat", "normalizer"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<std::collections::BTreeSet<_>>()
+        );
+    }
+
+    /// §7.5 Step 4.b.2.6.a self-check：所有断言路径都通过时
+    /// [`super::diff_outcome_against_expected`] 返回空 Vec。覆盖每个 schema
+    /// 字段的"匹配"分支。
+    #[test]
+    fn step4b2_6_self_check_diff_outcome_passes_when_all_expected_match() {
+        let expected = ExpectedCase {
+            case: "_test".to_string(),
+            description: None,
+            user_text: "hi".to_string(),
+            freeze_now: "2026-04-19T12:00:00+08:00".to_string(),
+            user_id: 1,
+            chat_id: 1,
+            expected_final_answer_contains: vec!["pong".to_string()],
+            expected_final_answer_not_contains: vec!["error".to_string()],
+            expected_llm_call_count: Some(2),
+            expected_min_llm_call_count: Some(1),
+            expected_max_llm_call_count: Some(3),
+            expected_prompt_sources: vec!["normalizer".to_string(), "chat".to_string()],
+            expected_fallback_source: Some("raw_text".to_string()),
+            expected_verifier_verdict: None,
+            expected_final_status: Some("success".to_string()),
+        };
+        let outcome = super::ReplayOutcome {
+            task_id: "t".to_string(),
+            task_status: "succeeded".to_string(),
+            error_text: None,
+            final_answer_text: Some("ok pong here".to_string()),
+            final_status: Some("success".to_string()),
+            fallback_source: Some("raw_text".to_string()),
+            llm_call_count: 2,
+            prompt_sources_invoked: ["normalizer", "chat", "verifier"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        };
+        let failures = super::diff_outcome_against_expected(&expected, &outcome);
+        assert!(
+            failures.is_empty(),
+            "expected all assertions to pass, got: {failures:?}"
+        );
+    }
+
+    /// §7.5 Step 4.b.2.6.a self-check：每种约束违反**都**进 failures Vec —— 一条挂
+    /// 不会掩盖另一条。这是 harness 的"诊断面板"语义：测试一次跑完报全部问题。
+    #[test]
+    fn step4b2_6_self_check_diff_outcome_reports_all_violations_at_once() {
+        let expected = ExpectedCase {
+            case: "_test".to_string(),
+            description: None,
+            user_text: "hi".to_string(),
+            freeze_now: "2026-04-19T12:00:00+08:00".to_string(),
+            user_id: 1,
+            chat_id: 1,
+            expected_final_answer_contains: vec!["pong".to_string()],
+            expected_final_answer_not_contains: vec!["error".to_string()],
+            expected_llm_call_count: Some(5),
+            expected_min_llm_call_count: Some(4),
+            expected_max_llm_call_count: Some(2),
+            expected_prompt_sources: vec!["chat".to_string(), "verifier".to_string()],
+            expected_fallback_source: Some("raw_text".to_string()),
+            expected_verifier_verdict: None,
+            expected_final_status: Some("success".to_string()),
+        };
+        let outcome = super::ReplayOutcome {
+            task_id: "t".to_string(),
+            task_status: "failed".to_string(),
+            error_text: None,
+            final_answer_text: Some("got an error here".to_string()),
+            final_status: Some("failure".to_string()),
+            fallback_source: Some("no_answer_parse_failed".to_string()),
+            llm_call_count: 3,
+            prompt_sources_invoked: ["normalizer"].iter().map(|s| s.to_string()).collect(),
+        };
+        let failures = super::diff_outcome_against_expected(&expected, &outcome);
+        let joined = failures.join("\n");
+
+        for needle in [
+            "expected_final_answer_contains",
+            "expected_final_answer_not_contains",
+            "expected_llm_call_count",
+            "expected_min_llm_call_count",
+            "expected_max_llm_call_count",
+            "expected_prompt_sources",
+            "expected_fallback_source",
+            "expected_final_status",
+        ] {
+            assert!(
+                joined.contains(needle),
+                "diff_outcome must surface a {needle:?} failure; got: {joined}"
+            );
+        }
+        assert!(
+            failures.len() >= 8,
+            "expected at least one failure per violated field, got {} (joined = {joined})",
+            failures.len()
+        );
+    }
+
+    /// §7.5 Step 4.b.2.6.a self-check：当 `expected_verifier_verdict` 设了非空值
+    /// 而 journal 还没暴露结构化字段时，[`super::diff_outcome_against_expected`]
+    /// 必须 **panic** 而不是返回失败 —— 避免被误以为"已比对但通过"。
+    #[test]
+    #[should_panic(expected = "expected_verifier_verdict")]
+    fn step4b2_6_self_check_diff_outcome_panics_on_unsupported_verifier_verdict() {
+        let expected = ExpectedCase {
+            case: "_test".to_string(),
+            description: None,
+            user_text: "hi".to_string(),
+            freeze_now: "2026-04-19T12:00:00+08:00".to_string(),
+            user_id: 1,
+            chat_id: 1,
+            expected_final_answer_contains: vec![],
+            expected_final_answer_not_contains: vec![],
+            expected_llm_call_count: None,
+            expected_min_llm_call_count: None,
+            expected_max_llm_call_count: None,
+            expected_prompt_sources: vec![],
+            expected_fallback_source: None,
+            expected_verifier_verdict: Some("pass".to_string()),
+            expected_final_status: None,
+        };
+        let outcome = super::ReplayOutcome {
+            task_id: "t".to_string(),
+            task_status: "succeeded".to_string(),
+            error_text: None,
+            final_answer_text: Some("anything".to_string()),
+            final_status: Some("success".to_string()),
+            fallback_source: None,
+            llm_call_count: 0,
+            prompt_sources_invoked: Default::default(),
+        };
+        let _ = super::diff_outcome_against_expected(&expected, &outcome);
     }
 
     /// §7.5 Step 4.b.2.4 自检：
