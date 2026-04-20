@@ -593,6 +593,47 @@ impl AppState {
         self
     }
 
+    /// §7.5 Step 4.b.2.2：链式 helper，把 [`SkillRuntime::workspace_root`] 指向
+    /// 真仓库根，让 [`crate::bootstrap::prompts::load_prompt_template_for_state`]
+    /// 经 [`claw_core::prompt_layers`] manifest 命中磁盘 layered prompt，而不是
+    /// 各 callsite 的 `include_str!` 兜底。
+    ///
+    /// 为什么需要：
+    ///   * 录制 fixture 时，LLM 拿到的 prompt 文本来自真生产 workspace 的
+    ///     `prompts/layers/{base,overlays}` 拼层（含 `prompts/layers/manifest.toml`
+    ///     描述的 base / overlay / vendor_patch 三段）—— 比每个 callsite 自带的
+    ///     `include_str!` 兜底文本通常要长且带 version 注释。
+    ///   * 回放在 [`SkillRuntime::test_default`] 默认的 `std::env::temp_dir()`
+    ///     workspace 下根本没有 `prompts/` 目录 → 加载落到兜底 → prompt 文本
+    ///     与录制版不一致 → fnv1a 输入字符串不同 → fixture miss。
+    ///   * 把 workspace_root 指到真仓库根后，prompt 加载读到的就是 git 里那份
+    ///     "录制时的同一份"，hash 自洽。
+    ///
+    /// **安全约束**：调用本 helper 后，测试**不应**触发任何写 `workspace_root`
+    /// 子树的代码路径（fs.write / make_dir / locator 落盘等）。fixture-replay
+    /// 的 `process_ask_task` 本身不写 `prompts/` / `crates/` 等 git-tracked 路径，
+    /// 但要配合 4.b.2.3 channel mock + 4.b.2.4 DB schema seed 一起约束"测试
+    /// 整体不会 mutate 仓库目录"。`SkillRuntime::default_locator_search_dir`
+    /// **不**改写，仍指 `std::env::temp_dir()`，避免 locator 把真仓库根全树扫
+    /// 一遍。
+    #[cfg(test)]
+    pub(crate) fn with_prompt_layers_installed(mut self) -> Self {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // CARGO_MANIFEST_DIR 是 `<repo>/crates/clawd`，向上两层 = workspace 根
+        let workspace_root = manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .map(std::path::Path::to_path_buf)
+            .expect("workspace root must exist (CARGO_MANIFEST_DIR is crates/clawd)");
+        debug_assert!(
+            workspace_root.join("prompts/layers/manifest.toml").is_file(),
+            "expected layered prompt manifest at workspace root: {}",
+            workspace_root.display(),
+        );
+        self.skill_rt.workspace_root = workspace_root;
+        self
+    }
+
     fn snapshot(&self) -> Arc<SkillViewsSnapshot> {
         self.core.skill_views_snapshot.read().unwrap().clone()
     }
