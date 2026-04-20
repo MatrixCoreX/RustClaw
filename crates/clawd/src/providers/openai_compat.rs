@@ -61,10 +61,13 @@ pub(super) async fn call_openai_compat(
         }
     }
 
+    // §P4.4 E3.a: 通过 LlmProviderRuntime::api_key() 走 SecretsBroker；broker
+    // 没装/没声明就回落到 config.api_key（行为零变化）。
+    let api_key = provider.api_key();
     let resp = provider
         .client
         .post(url)
-        .bearer_auth(&provider.config.api_key)
+        .bearer_auth(&*api_key)
         .json(&req_body)
         .send()
         .await

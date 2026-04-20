@@ -324,9 +324,16 @@ enabled = true
 #
 # §E2 step2 备忘：chat 保持 builtin 也意味着它**不**走 §E2 step1 的 spawn 隔离
 # 路径（env_clear + 白名单），因为它就在 clawd 进程内调用 LLM gateway，凭据
-# 用的是进程级 LlmProviderRuntime（启动期从 toml + env 加载）。把 LLM 凭据
-# 也改成跟 image_* 一样走 SecretsBroker（`secrets.text_<vendor>_api_key`），
-# 是 §P4.4 E3「短期 token broker」的范畴；E2 阶段不动 chat 凭据来源。
+# 用的是进程级 LlmProviderRuntime（启动期从 toml + env 加载）。
+#
+# §P4.4 E3.a 已落地：chat（与所有走 LlmProviderRuntime 的 LLM 调用）的凭据
+# 现在通过 `LlmProviderRuntime::api_key()` 在调用点查 `SecretsBroker`，broker
+# 命中就用 broker 值（拼名 `text_<active_vendor>_api_key`，按 runtime 真 vendor
+# 动态拼），未命中才回落到 `[llm.<vendor>].api_key`。**故意不在本 manifest 列
+# `secrets.*`**：manifest 的 `secrets.*` 是 spawn-path 注入契约（被
+# `provision_secret_envs` 消费给 `cmd.env` 用），builtin chat 不 spawn，让 chat
+# 在 manifest 列固定 vendor 反而会和"runtime 切换 vendor 时 secret 名漂移"打架。
+# 软合入语义：broker 没装就行为零变化，行为与 §E3 之前完全一致。
 kind = "builtin"
 aliases = ["talk", "smalltalk", "joke", "chitchat"]
 timeout_seconds = 30
