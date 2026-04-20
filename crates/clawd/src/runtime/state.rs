@@ -541,6 +541,58 @@ impl AppState {
         }
     }
 
+    /// §7.5 Step 4.b.2.1：在已有 `AppState` 上"原地装一份 minimal builtin
+    /// `SkillsRegistry`"链式 helper。
+    ///
+    /// 用途：`process_ask_task` e2e harness 启动期会跑
+    /// [`SkillsRegistry::integrity_report`]，缺任何一条
+    /// [`claw_core::skill_registry::REQUIRED_BUILTIN_SKILLS`] builtin 就 bail。
+    /// 真生产 registry（`configs/skills_registry.toml`）有 30+ 条，其中 20+ 条
+    /// 是 runner / external，要求 prompt 文件 / runner 二进制都在 —— 对
+    /// fixture-replay 测试是不必要的依赖。这里只装 [`REQUIRED_BUILTIN_SKILLS`]
+    /// 全集，最小、`integrity-clean` 且独立于 workspace 文件系统。
+    ///
+    /// 概念辨析：`normalize / classifier_direct / nl2cmd` 等是 **prompt label**
+    /// （走 `crates/clawd/configs/prompts/...`），不是 skill；它们的接入由后续
+    /// `bootstrap::prompts::install_prompt_layers_to_workspace` 配套 helper
+    /// 处理，本 helper 不涉及。
+    ///
+    /// 实现：把 minimal toml 写到一个 uuid 临时文件 → 调
+    /// [`SkillsRegistry::load_from_path`]（加载完即把内容拷进 HashMap，
+    /// 之后不再读 file）→ 立刻 unlink → 把 `Arc<SkillsRegistry>` +
+    /// `enabled_names()` 集合写入 `core.skill_views_snapshot`。
+    #[cfg(test)]
+    pub(crate) fn with_minimal_builtin_registry(self) -> Self {
+        use claw_core::skill_registry::REQUIRED_BUILTIN_SKILLS;
+        let mut toml_buf = String::new();
+        for name in REQUIRED_BUILTIN_SKILLS {
+            toml_buf.push_str(&format!(
+                "[[skills]]\nname = \"{name}\"\nenabled = true\nkind = \"builtin\"\n\n",
+            ));
+        }
+        let path = std::env::temp_dir().join(format!(
+            "rustclaw_test_minimal_registry_{}.toml",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, &toml_buf).expect("write minimal skills_registry.toml for test");
+        let registry = SkillsRegistry::load_from_path(&path)
+            .expect("load minimal skills_registry.toml for test");
+        let _ = std::fs::remove_file(&path);
+        let report = registry.integrity_report();
+        assert!(
+            report.is_clean(),
+            "minimal builtin registry must satisfy integrity check, got: {:?}",
+            report,
+        );
+        let enabled: HashSet<String> = registry.enabled_names().into_iter().collect();
+        let snapshot = SkillViewsSnapshot {
+            registry: Some(Arc::new(registry)),
+            skills_list: Arc::new(enabled),
+        };
+        *self.core.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
+        self
+    }
+
     fn snapshot(&self) -> Arc<SkillViewsSnapshot> {
         self.core.skill_views_snapshot.read().unwrap().clone()
     }
