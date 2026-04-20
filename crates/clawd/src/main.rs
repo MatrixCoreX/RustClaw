@@ -167,7 +167,28 @@ pub(crate) const AGENT_MAX_STEPS: usize = 32;
 pub(crate) const RESUME_CONTEXT_ERROR_PREFIX: &str = "__RESUME_CTX__";
 pub(crate) const MAX_READ_FILE_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_WRITE_FILE_BYTES: usize = 128 * 1024;
-const MODEL_IO_LOG_MAX_CHARS: usize = 16000;
+/// Per-line truncation ceiling for [`crate::log_utils::truncate_for_log`].
+///
+/// 历史值是 16_000：早期既要防"single fat line wrecks IDE / journalctl
+/// follow"，又要防"model_io.log 总量爆磁盘"；后者已被
+/// [`crate::providers::output::rotate_model_io_log_daily`] + 7 天过期机制覆盖
+/// （[`crate::providers::output::MODEL_IO_LOG_KEEP_DAYS`]）。
+///
+/// §7.5 把上限抬到 128_000：覆盖 99% 真实 normalizer / planner prompt
+/// （模板 + skill catalog + few-shots + 历史上下文 通常 15~30 KB；极端可达
+/// 60~100 KB），同时给 fixture 录制留足 response 长度 —— 之前 16K 截断会让
+/// `convert_model_io_log_to_fixture` 拒掉长 response 的 case。
+///
+/// 仍不去掉天花板的两个理由：
+///   1. stdout / tracing 行（被 25+ 处复用此函数）一行 1MB 时 IDE / `journalctl
+///      -f` / `docker logs` 会有可见卡顿；128K 是"留够空间但不让单行失控"的
+///      折衷点。
+///   2. 防御性编程：万一未来某条 prompt 被错误拼接到 GB 级（bug），日志
+///      也不至于把磁盘灌满整 行。
+///
+/// 仅当真的撞到 128K 上限时 [`crate::providers::fixture_replay::convert_model_io_log_to_fixture`]
+/// 仍会 fail-loud（截断后 response 喂回 LLM-output parser 会在结尾静默炸）。
+const MODEL_IO_LOG_MAX_CHARS: usize = 128_000;
 const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
 const LOG_CALL_WRAP: &str = "---- task-call ----";
 const DEFAULT_AGENT_ID: &str = "main";

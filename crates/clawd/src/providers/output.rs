@@ -116,11 +116,15 @@ pub(crate) fn append_model_io_log(
             "status": status,
             "prompt_source": prompt_source,
             // §7.5 Step 2.b：FNV-1a 64-bit hex(完整未截断 prompt)。
-            // model_io.log 的 `prompt` 字段会被截断到 MODEL_IO_LOG_MAX_CHARS，
-            // 但 fixture replay 必须用**完整 prompt** 的 hash 才能命中。把 hash
-            // 放在 verbose 行里，convert_model_io_log_to_fixture 直接读取，绕过
-            // 截断。Phase 7 §7.5 整层依赖这个字段；slim 模式不加（反正 slim 没
-            // prompt 字段，无法回放）。
+            //
+            // §7.5 后 MODEL_IO_LOG_MAX_CHARS 提到 128_000，正常 prompt 不会再被
+            // 截断，但 prompt_hash 字段仍保留作为：(a) 离线分析 / dashboard 的
+            // O(1) 反查索引列；(b) 读老版本（pre-§7.5 / 阈值还是 16K）日志时
+            // convert_model_io_log_to_fixture 仍能稳定命中，避免一次"prompt 被
+            // 截断后 hash 反算不出"的回归。
+            //
+            // FNV 计算成本 ~微秒级，对 LLM 路径完全可忽略；slim 模式不加（slim
+            // 本来就没 prompt，没法回放）。
             "prompt_hash": crate::providers::fixture_replay::fnv1a_64_hex(prompt),
             "prompt": truncate_for_log(prompt),
             "request_payload": request_payload,
