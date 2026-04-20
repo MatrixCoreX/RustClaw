@@ -57,10 +57,10 @@ parse with a clear error.
 | `expected_llm_call_count`              | `u32?`         | no       | Exact LLM-call count. Use only if stable across runs. |
 | `expected_min_llm_call_count`          | `u32?`         | no       | Inclusive lower bound. |
 | `expected_max_llm_call_count`          | `u32?`         | no       | Inclusive upper bound. |
-| `expected_prompt_sources`              | `Vec<String>`  | no       | Ordered sequence of `classify_prompt_source` labels — see [`crate::llm_gateway::classify_prompt_source`] for allowed values (`normalizer` / `plan` / `chat` / ...). |
-| `expected_fallback_source`             | `String?`      | no       | Asserts the §7.2 fallback source label of the final answer. |
-| `expected_verifier_verdict`            | `String?`      | no       | Asserts the `OutputContractVerdict` (`pass` / `reshape` / `reject`). |
-| `expected_final_status`                | `String?`      | no       | Asserts the `TaskJournalFinalStatus` (`success` / `failure` / `clarify` / `resume_failure`). |
+| `expected_prompt_sources`              | `Vec<String>`  | no       | **Set membership (unordered)**: each listed `classify_prompt_source` label must have been invoked at least once. Source: `state.task_llm_by_prompt(task_id)` keys (HashMap, so no order). Allowed values: `normalizer` / `plan` / `plan_repair` / `classifier_direct` / `observed` / `clarify` / `intent_meta` / `schedule` / `nl2cmd` / `self_extension` / `memory` / `verifier` / `chat` / `semantic_judge` / `router_legacy` / `other`. |
+| `expected_fallback_source`             | `String?`      | no       | Asserts `task_journal.summary.finalizer_summary.fallback`. Allowed: `raw_text` / `no_answer_nonqualified` / `no_answer_parse_failed`. |
+| `expected_verifier_verdict`            | `String?`      | no       | **NOT YET IMPLEMENTED** — `OutputContractVerdict` is only emitted to tracing today, no structured journal field. Setting this key will make the harness `panic!` rather than silently skip; either remove it, or first land an `output_contract_verdict` field on `task_journal.summary` and update `extract_outcome_from_state`. |
+| `expected_final_status`                | `String?`      | no       | Asserts `task_journal.summary.final_status` (`success` / `failure` / `clarify` / `resume_failure`). |
 
 ## Adding a new case
 
