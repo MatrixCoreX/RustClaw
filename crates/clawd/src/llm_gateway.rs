@@ -660,7 +660,10 @@ pub(crate) fn selected_openai_api_key(state: &AppState, task: Option<&ClaimedTas
         .iter()
         .find(|p| p.config.provider_type == "openai_compat")
     {
-        return p.config.api_key.clone();
+        // §P4.4 E3.a: 走 broker 优先 / config 兜底的统一通路，让 forge 给
+        // skill-runner 子进程的 OPENAI_API_KEY 与 builtin chat 的 LLM 调用
+        // 拿到同一份凭据，避免 broker 装上后两条路径漂移。
+        return p.api_key().to_string();
     }
     String::new()
 }

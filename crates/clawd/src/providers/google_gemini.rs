@@ -29,11 +29,15 @@ pub(super) async fn call_google_gemini(
             ProviderError::non_retryable(format!("semaphore closed: {err}"), Value::Null)
         })?;
 
+    // §P4.4 E3.a: 通过 LlmProviderRuntime::api_key() 走 SecretsBroker；broker
+    // 没装/没声明就回落到 config.api_key（行为零变化）。Gemini 把 key 拼在
+    // URL query 里，这里 expose 一次给 url 模板用，作用域结束即丢弃。
+    let api_key = provider.api_key();
     let url = format!(
         "{}/models/{}:generateContent?key={}",
         provider.config.base_url.trim_end_matches('/'),
         provider.config.model,
-        provider.config.api_key
+        &*api_key
     );
 
     // Phase 2.5: hints 优先 → 否则回退到 provider.config.params。

@@ -117,6 +117,44 @@ pub trait SecretsBroker: Send + Sync {
     }
 }
 
+/// §P4.4 E3.a：把 "`<usage>_<vendor>_api_key`" 命名规则集中成函数，
+/// 避免 4 套独立 LLM provider 配置在调用点散写字符串。
+///
+/// 4 个 usage 来自 [`crate::skill_registry::Capability`] 的设计文档：
+/// `text` / `image_generation` / `image_edit` / `image_vision`，互相**独立**
+/// （同一 vendor 在不同用途可填不同 base_url + api_key）。
+///
+/// vendor 名按 ASCII 小写归一；调用方负责传"裸 vendor 名"（如 `"openai"`），
+/// **不要**自己在外面拼前缀，否则 [`validate_secret_name`] 会在 broker 查询
+/// 阶段把它当成"裸 vendor 反模式"拒绝。
+///
+/// 返回的 secret name 永远满足 `validate_secret_name`，可直接喂给
+/// `SecretsBroker::lookup`。
+pub fn text_secret_name_for_vendor(vendor: &str) -> String {
+    format!("text_{}_api_key", vendor.trim().to_ascii_lowercase())
+}
+
+/// 见 [`text_secret_name_for_vendor`]。
+pub fn image_generation_secret_name_for_vendor(vendor: &str) -> String {
+    format!(
+        "image_generation_{}_api_key",
+        vendor.trim().to_ascii_lowercase()
+    )
+}
+
+/// 见 [`text_secret_name_for_vendor`]。
+pub fn image_edit_secret_name_for_vendor(vendor: &str) -> String {
+    format!("image_edit_{}_api_key", vendor.trim().to_ascii_lowercase())
+}
+
+/// 见 [`text_secret_name_for_vendor`]。
+pub fn image_vision_secret_name_for_vendor(vendor: &str) -> String {
+    format!(
+        "image_vision_{}_api_key",
+        vendor.trim().to_ascii_lowercase()
+    )
+}
+
 /// §P4.1 命名规范在运行期的二道防线。
 ///
 /// 与 [`crate::skill_registry::Capability::parse`] 的拒绝集合保持同步 ——
@@ -666,5 +704,118 @@ mod tests {
         // 后续测试。这里只验证"未 install 时 fallback 是 env"。
         let b = global_or_default();
         assert_eq!(b.label(), "env");
+    }
+
+    // ========================================================================
+    // §P4.4 E3.a: <usage>_<vendor>_api_key 命名 helpers
+    // ========================================================================
+
+    #[test]
+    fn helper_lowercases_vendor_and_emits_canonical_text_name() {
+        assert_eq!(text_secret_name_for_vendor("OpenAI"), "text_openai_api_key");
+        assert_eq!(
+            text_secret_name_for_vendor("  Anthropic  "),
+            "text_anthropic_api_key"
+        );
+        assert_eq!(
+            text_secret_name_for_vendor("MINIMAX"),
+            "text_minimax_api_key"
+        );
+    }
+
+    #[test]
+    fn helper_emits_distinct_names_per_image_usage() {
+        // 4 个 usage 必须互相独立 —— 同一 vendor 不同 usage 拿到不同 secret 名。
+        let v = "qwen";
+        let names = [
+            text_secret_name_for_vendor(v),
+            image_generation_secret_name_for_vendor(v),
+            image_edit_secret_name_for_vendor(v),
+            image_vision_secret_name_for_vendor(v),
+        ];
+        let unique: std::collections::HashSet<&str> = names.iter().map(|s| s.as_str()).collect();
+        assert_eq!(unique.len(), 4, "4 usages must yield 4 distinct names");
+        assert_eq!(names[0], "text_qwen_api_key");
+        assert_eq!(names[1], "image_generation_qwen_api_key");
+        assert_eq!(names[2], "image_edit_qwen_api_key");
+        assert_eq!(names[3], "image_vision_qwen_api_key");
+    }
+
+    #[test]
+    fn helper_output_passes_validate_secret_name() {
+        // 对每个 helper × 每个已知 vendor，输出都必须能过 broker 的二道防线。
+        let vendors = [
+            "openai",
+            "google",
+            "gemini",
+            "anthropic",
+            "claude",
+            "grok",
+            "xai",
+            "deepseek",
+            "qwen",
+            "minimax",
+        ];
+        for v in vendors {
+            for name in [
+                text_secret_name_for_vendor(v),
+                image_generation_secret_name_for_vendor(v),
+                image_edit_secret_name_for_vendor(v),
+                image_vision_secret_name_for_vendor(v),
+            ] {
+                assert!(
+                    validate_secret_name(&name).is_ok(),
+                    "expected `{name}` to pass validation but it was rejected"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn helper_output_does_not_collapse_to_bare_vendor_pattern() {
+        // 防御性回归：万一未来谁手抖把 usage 前缀去掉，validate 必须接得住。
+        // 这里直接断"helper 不能产出 `openai_api_key` 这种裸形式"。
+        for vendor in ["openai", "minimax", "anthropic"] {
+            let n = text_secret_name_for_vendor(vendor);
+            assert!(
+                !n.starts_with(&format!("{vendor}_")),
+                "helper must never collapse to bare-vendor naming: {n}"
+            );
+            assert!(n.starts_with("text_"), "must keep usage prefix: {n}");
+        }
+    }
+
+    #[test]
+    fn helper_handles_empty_vendor_gracefully() {
+        // 空 vendor 输入会产出 `text__api_key`，这种字符串能通过 [a-z0-9_]
+        // 形态校验（双下划线合法）但语义无效；调用方有责任先确认 vendor 非空。
+        // 本测试只锁定"helper 不 panic、输出形态可被进一步 validate"，把
+        // "vendor 必须非空"的语义校验留给上层（LlmProviderRuntime::api_key 会
+        // 在 strip 失败时直接 fallback 到 config.api_key，根本不调 helper）。
+        let n = text_secret_name_for_vendor("");
+        assert_eq!(n, "text__api_key");
+        assert!(validate_secret_name(&n).is_ok());
+    }
+
+    #[test]
+    fn helper_round_trips_through_provision_secret_envs() {
+        // 端到端：helper 产出的 name 喂给 Capability::Secrets，再走
+        // provision_secret_envs 必须能取出对应 SecretValue。
+        let n_text = text_secret_name_for_vendor("openai");
+        let n_img = image_generation_secret_name_for_vendor("minimax");
+        let broker = MockBroker::new(&[
+            (n_text.as_str(), "text-key"),
+            (n_img.as_str(), "img-key"),
+        ]);
+        let caps = vec![
+            Capability::Secrets(n_text.clone()),
+            Capability::Secrets(n_img.clone()),
+        ];
+        let out = provision_secret_envs(&broker, &caps).unwrap();
+        let names: Vec<&str> = out.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["IMAGE_GENERATION_MINIMAX_API_KEY", "TEXT_OPENAI_API_KEY"]
+        );
     }
 }

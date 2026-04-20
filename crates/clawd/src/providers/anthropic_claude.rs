@@ -82,13 +82,16 @@ pub(super) async fn call_anthropic_claude(
         }
     }
 
+    // §P4.4 E3.a: 通过 LlmProviderRuntime::api_key() 走 SecretsBroker；broker
+    // 没装/没声明就回落到 config.api_key（行为零变化）。
+    let api_key = provider.api_key();
     let request = provider
         .client
         .post(url)
         .header("anthropic-version", "2023-06-01");
     let request = match anthropic_auth_mode(&provider) {
-        AnthropicAuthMode::XApiKey => request.header("x-api-key", &provider.config.api_key),
-        AnthropicAuthMode::AuthorizationBearer => request.bearer_auth(&provider.config.api_key),
+        AnthropicAuthMode::XApiKey => request.header("x-api-key", &*api_key),
+        AnthropicAuthMode::AuthorizationBearer => request.bearer_auth(&*api_key),
     };
 
     let resp = request.json(&req_body).send().await.map_err(|err| {
