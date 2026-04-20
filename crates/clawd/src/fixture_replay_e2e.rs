@@ -100,7 +100,7 @@ mod tests {
     use crate::providers::client::{ChatRequestHints, PROVIDER_IMPLS};
     use crate::providers::fixture_replay::{
         build_fixture_replay_runtime, clear_cache_for_test, convert_model_io_log_to_fixture,
-        fnv1a_64_hex, RecordedCall, FIXTURE_CALLS_FILENAME,
+        fnv1a_64_hex, regen_fixture_from_log, RecordedCall, FIXTURE_CALLS_FILENAME,
     };
 
     /// Step 2.a 必须验证：
@@ -303,6 +303,68 @@ mod tests {
 
         drop(env);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// §7.5 Step 3 工具入口：把 `regen_fixture_from_log` 包成 `cargo test` 可
+    /// 直接调起来的形态，让 `scripts/regen_fixture.sh` 不必自己解析 model_io.log。
+    ///
+    /// 由 4 个 env 驱动（其它 env 一律不读，避免与其它 fixture 测试互污染）：
+    ///   * `RUSTCLAW_REGEN_FIXTURE_CASE`（必填）—— case 名（fixture root 下的子目录）；
+    ///   * `RUSTCLAW_REGEN_FIXTURE_LOG`（必填）—— 待解析的 model_io.log 路径；
+    ///   * `RUSTCLAW_REGEN_FIXTURE_FORCE=1`—— 允许覆盖已存在的 calls.jsonl；
+    ///   * `RUSTCLAW_REGEN_FIXTURE_DRY=1`—— 只解析、不落盘。
+    ///
+    /// `#[ignore]` 表示默认 `cargo test` 不跑（避免 CI 误触发文件 I/O）。
+    /// 调用形态（由 `scripts/regen_fixture.sh` 拼出来）：
+    ///
+    /// ```bash
+    /// RUSTCLAW_REGEN_FIXTURE_CASE=act_find_service_file \
+    /// RUSTCLAW_REGEN_FIXTURE_LOG=/tmp/log.jsonl \
+    /// cargo test -p clawd --bin clawd \
+    ///   fixture_replay_e2e::tests::regen_fixture_tool \
+    ///   -- --ignored --nocapture
+    /// ```
+    ///
+    /// 任何错误都 `panic!`，让 `cargo test` 把消息显示出来；成功时通过
+    /// `eprintln!`（`--nocapture` 才能看到）打印 [`crate::providers::fixture_replay::RegenSummary`]
+    /// 摘要。
+    #[test]
+    #[ignore = "tool entry; only invoked by scripts/regen_fixture.sh with env vars"]
+    fn regen_fixture_tool() {
+        const CASE_ENV: &str = "RUSTCLAW_REGEN_FIXTURE_CASE";
+        const LOG_ENV: &str = "RUSTCLAW_REGEN_FIXTURE_LOG";
+        const FORCE_ENV: &str = "RUSTCLAW_REGEN_FIXTURE_FORCE";
+        const DRY_ENV: &str = "RUSTCLAW_REGEN_FIXTURE_DRY";
+
+        let case = std::env::var(CASE_ENV)
+            .unwrap_or_else(|_| panic!("{CASE_ENV} env required (case name under fixture root)"));
+        let log_path = std::env::var(LOG_ENV).unwrap_or_else(|_| {
+            panic!("{LOG_ENV} env required (path to model_io.log to convert)")
+        });
+        let truthy = |v: String| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        };
+        let force = std::env::var(FORCE_ENV).map(truthy).unwrap_or(false);
+        let dry_run = std::env::var(DRY_ENV).map(truthy).unwrap_or(false);
+
+        let log_text = std::fs::read_to_string(&log_path).unwrap_or_else(|e| {
+            panic!("read log file {log_path:?} failed: {e}")
+        });
+        let root = fixture_workspace_root();
+        let summary = regen_fixture_from_log(&log_text, &case, &root, dry_run, force)
+            .unwrap_or_else(|e| panic!("regen_fixture_from_log failed: {e}"));
+
+        eprintln!(
+            "regen_fixture_tool ok: case={} written={} dry_run={} overwrote={} dest={}",
+            case,
+            summary.written_records,
+            summary.dry_run,
+            summary.overwrote_existing,
+            summary.dest_path.display()
+        );
     }
 
     /// Step 2.b 留下的真 case skeleton：等用户在本地按模块顶部"录制 → 回放

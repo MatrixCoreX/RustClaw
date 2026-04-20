@@ -148,6 +148,105 @@ fn get_or_load_table(
     Ok(loaded)
 }
 
+/// §7.5 Step 3：[`regen_fixture_from_log`] 的执行摘要。返回给调用方
+/// （CLI / `scripts/regen_fixture.sh`）打印，让操作者一眼看清"写了几条 / 写到
+/// 哪 / 是不是 dry-run / 是不是覆盖"。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RegenSummary {
+    /// 写入（或 dry-run 模式下"将写入"）的 record 条数。
+    pub written_records: usize,
+    /// 目标 fixture 文件绝对路径（`<root>/<case>/calls.jsonl`）。
+    pub dest_path: PathBuf,
+    /// `true` 时未真正写盘。
+    pub dry_run: bool,
+    /// `true` 表示目标已存在且本次是覆盖写。
+    pub overwrote_existing: bool,
+}
+
+/// §7.5 Step 3：从一段 `model_io.log` 文本生成 / 覆盖一个 fixture case 的
+/// `calls.jsonl`。`scripts/regen_fixture.sh` 与 env-driven 的 `cargo test`
+/// tool entry（[`crate::fixture_replay_e2e::tests::regen_fixture_tool`]）
+/// 都从这里入口。
+///
+/// 流程：
+///   1. 调 [`convert_model_io_log_to_fixture`] 把 log 抽成 `Vec<RecordedCall>`；
+///   2. 空 → 报错（提示 grep 范围 / `task_id` 过滤可能漏了，避免悄悄写空文件）；
+///   3. dest = `<root>/<case>/calls.jsonl`；
+///      * 已存在且 `!force` → 报错（避免误覆盖，强制操作者显式 `--force`）；
+///      * `dry_run = true` → 不 mkdir、不写盘，只返回 summary；
+///      * 否则 mkdir -p + 序列化 records 写入。
+///
+/// **不**对 records 做任何 reorder / sort —— 保持
+/// `convert_model_io_log_to_fixture` 的"首次出现顺序，同 hash 留最后一次值"语义，
+/// 让 fixture 文件在不同录制之间 diff 友好。
+pub(crate) fn regen_fixture_from_log(
+    log_text: &str,
+    case: &str,
+    root: &std::path::Path,
+    dry_run: bool,
+    force: bool,
+) -> Result<RegenSummary, String> {
+    if case.trim().is_empty() {
+        return Err("regen_fixture_from_log: case name must be non-empty".to_string());
+    }
+    if case.contains('/') || case.contains('\\') || case.contains("..") {
+        return Err(format!(
+            "regen_fixture_from_log: case name {case:?} contains path separators or `..`; \
+             must be a single directory name under fixture root"
+        ));
+    }
+
+    let records = convert_model_io_log_to_fixture(log_text)?;
+    if records.is_empty() {
+        return Err(format!(
+            "regen_fixture_from_log: convert produced 0 records — check that the log is \
+             grep'd to the right task_id, that `routing.debug_log_prompt = true` was on \
+             during recording, and that the run actually completed (status=ok)"
+        ));
+    }
+
+    let case_dir = root.join(case);
+    let dest = case_dir.join(FIXTURE_CALLS_FILENAME);
+    let overwrote_existing = dest.exists();
+    if overwrote_existing && !force {
+        return Err(format!(
+            "regen_fixture_from_log: {} already exists; pass force=true (env \
+             RUSTCLAW_REGEN_FIXTURE_FORCE=1) to overwrite",
+            dest.display()
+        ));
+    }
+
+    if !dry_run {
+        std::fs::create_dir_all(&case_dir).map_err(|e| {
+            format!(
+                "regen_fixture_from_log: mkdir {} failed: {e}",
+                case_dir.display()
+            )
+        })?;
+        let mut body = String::with_capacity(records.len() * 256);
+        for rec in &records {
+            let line = serde_json::to_string(rec).map_err(|e| {
+                format!("regen_fixture_from_log: serialize record failed: {e}")
+            })?;
+            body.push_str(&line);
+            body.push('\n');
+        }
+        std::fs::write(&dest, body).map_err(|e| {
+            format!(
+                "regen_fixture_from_log: write {} failed: {e}",
+                dest.display()
+            )
+        })?;
+    }
+
+    Ok(RegenSummary {
+        written_records: records.len(),
+        dest_path: dest,
+        dry_run,
+        overwrote_existing,
+    })
+}
+
 /// 强制清空 (root, case) 缓存。仅供单测用 —— 录制文件改完想立刻看到新值时调用。
 #[cfg(test)]
 pub(crate) fn clear_cache_for_test() {
@@ -652,6 +751,120 @@ mod tests {
         assert!(err.contains("`prompt_hash`"), "err msg = {err}");
         assert!(err.contains("pre-§7.5"), "err msg should hint upgrade: {err}");
     }
+
+    // ---------- §7.5 Step 3: regen_fixture_from_log ----------
+
+    fn make_log_with_n_records(n: usize) -> String {
+        (0..n)
+            .map(|i| {
+                let prompt = format!("prompt-{i}");
+                let hash = fnv1a_64_hex(&prompt);
+                verbose_ok_line(&hash, &prompt, &format!("clean-{i}"), "x")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn regen_writes_calls_jsonl_with_correct_records() {
+        let tmp = ScopedTempDir::new("regen_basic");
+        let log = make_log_with_n_records(3);
+        let summary = regen_fixture_from_log(&log, "case_a", tmp.path(), false, false)
+            .expect("regen ok");
+        assert_eq!(summary.written_records, 3);
+        assert!(!summary.dry_run);
+        assert!(!summary.overwrote_existing);
+        assert_eq!(
+            summary.dest_path,
+            tmp.path().join("case_a").join(FIXTURE_CALLS_FILENAME)
+        );
+        let body = std::fs::read_to_string(&summary.dest_path).expect("read written file");
+        let lines: Vec<_> = body.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 3, "must write exactly 3 JSONL lines");
+        for line in &lines {
+            let _: RecordedCall = serde_json::from_str(line).expect("each line parses back");
+        }
+    }
+
+    #[test]
+    fn regen_dry_run_does_not_touch_disk() {
+        let tmp = ScopedTempDir::new("regen_dry");
+        let log = make_log_with_n_records(2);
+        let summary = regen_fixture_from_log(&log, "case_dry", tmp.path(), true, false)
+            .expect("dry-run ok");
+        assert_eq!(summary.written_records, 2);
+        assert!(summary.dry_run);
+        assert!(
+            !summary.dest_path.exists(),
+            "dry-run must not create dest file"
+        );
+        assert!(
+            !summary.dest_path.parent().unwrap().exists(),
+            "dry-run must not even mkdir the case dir"
+        );
+    }
+
+    #[test]
+    fn regen_refuses_overwrite_without_force() {
+        let tmp = ScopedTempDir::new("regen_no_force");
+        let log = make_log_with_n_records(1);
+        regen_fixture_from_log(&log, "case_x", tmp.path(), false, false).expect("first write ok");
+        let err = regen_fixture_from_log(&log, "case_x", tmp.path(), false, false)
+            .expect_err("must refuse overwrite without force");
+        assert!(err.contains("already exists"), "err = {err}");
+        assert!(
+            err.contains("RUSTCLAW_REGEN_FIXTURE_FORCE"),
+            "err must hint at the force env: {err}"
+        );
+    }
+
+    #[test]
+    fn regen_with_force_overwrites_and_marks_summary() {
+        let tmp = ScopedTempDir::new("regen_force");
+        let log_a = make_log_with_n_records(2);
+        let log_b = make_log_with_n_records(5);
+        let s1 = regen_fixture_from_log(&log_a, "case_y", tmp.path(), false, false)
+            .expect("first");
+        assert!(!s1.overwrote_existing);
+        let s2 = regen_fixture_from_log(&log_b, "case_y", tmp.path(), false, true)
+            .expect("force overwrite ok");
+        assert_eq!(s2.written_records, 5);
+        assert!(s2.overwrote_existing);
+        let body = std::fs::read_to_string(&s2.dest_path).unwrap();
+        assert_eq!(body.lines().filter(|l| !l.is_empty()).count(), 5);
+    }
+
+    #[test]
+    fn regen_fails_loud_on_empty_records() {
+        let tmp = ScopedTempDir::new("regen_empty");
+        let err = regen_fixture_from_log("", "case_empty", tmp.path(), false, false)
+            .expect_err("empty must fail");
+        assert!(err.contains("0 records"), "err = {err}");
+        let only_slim = serde_json::json!({
+            "ts": 1u64, "mode": "slim", "task_id": "t", "status": "ok",
+            "prompt_source": "x", "prompt_chars": 5u64,
+        })
+        .to_string();
+        let err = regen_fixture_from_log(&only_slim, "case_empty", tmp.path(), false, false)
+            .expect_err("only slim must fail");
+        assert!(err.contains("0 records"), "err = {err}");
+    }
+
+    #[test]
+    fn regen_rejects_unsafe_case_names() {
+        let tmp = ScopedTempDir::new("regen_unsafe");
+        let log = make_log_with_n_records(1);
+        for bad in &["", "  ", "../escape", "a/b", "..", r"a\b"] {
+            let err = regen_fixture_from_log(&log, bad, tmp.path(), false, false)
+                .expect_err(&format!("case name {bad:?} must be rejected"));
+            assert!(
+                err.contains("case name") || err.contains("non-empty"),
+                "case={bad:?} err={err}"
+            );
+        }
+    }
+
+    // ---------- back to convert_* edge cases ----------
 
     #[test]
     fn convert_fails_when_response_was_truncated() {
