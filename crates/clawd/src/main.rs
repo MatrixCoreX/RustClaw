@@ -258,7 +258,9 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     {
-        let db = db_pool.get().map_err(|e| anyhow::anyhow!("get db conn for setup: {e}"))?;
+        let db = db_pool
+            .get()
+            .map_err(|e| anyhow::anyhow!("get db conn for setup: {e}"))?;
         seed_users(&db, &config)?;
         ensure_schedule_schema(&db)?;
         ensure_memory_schema(&db)?;
@@ -273,7 +275,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     let bootstrap_admin_key = {
-        let db = db_pool.get().map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
+        let db = db_pool
+            .get()
+            .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
         let key = ensure_bootstrap_admin_key(&db)?;
         seed_channel_bindings(&db, &config)?;
         key
@@ -290,7 +294,9 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("============================================================");
     }
     let recovered_task_ids = {
-        let db = db_pool.get().map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
+        let db = db_pool
+            .get()
+            .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
         recover_stale_running_tasks_on_startup(
             &db,
             config.worker.running_no_progress_timeout_seconds.max(1),
@@ -304,7 +310,9 @@ async fn main() -> anyhow::Result<()> {
             "task_ids": recovered_task_ids,
         });
         let audit_res = {
-            let db = db_pool.get().map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
+            let db = db_pool
+                .get()
+                .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
             repo::insert_audit_log_raw(
                 &db,
                 None,
@@ -349,6 +357,11 @@ async fn main() -> anyhow::Result<()> {
             config.llm.selected_vendor.as_deref(),
         );
         bootstrap::log_prompt_validation_report(&prompt_validation);
+        if config.prompts.strict_validation_at_startup {
+            if let Some(message) = bootstrap::strict_prompt_validation_error(&prompt_validation) {
+                anyhow::bail!(message);
+            }
+        }
     }
     let effective_skill_runner_path = workspace_root.join("target/release/skill-runner");
     info!(
@@ -484,9 +497,8 @@ async fn main() -> anyhow::Result<()> {
         if !report.is_clean() {
             let path_display = config.skills.registry_path.as_deref().unwrap_or("(none)");
             let detail = report.into_human_message().unwrap_or_default();
-            let msg = format!(
-                "skills registry integrity check failed (path={path_display}): {detail}"
-            );
+            let msg =
+                format!("skills registry integrity check failed (path={path_display}): {detail}");
             error!("startup: {msg}");
             return Err(anyhow::anyhow!(msg));
         }

@@ -395,3 +395,11 @@ running_recovery_check_interval_seconds = 60
 # 单任务硬超时（秒） / Hard timeout per task in seconds.
 # 注意：这是 clawd 后台任务生命周期上限，不作为 Telegram/WhatsApp 的用户侧投递等待时长。
 task_timeout_seconds = 86400
+
+# 用途/Purpose: 启动期 prompt 校验与 SIGHUP 热重载控制.
+# 建议修改/Recommended change: 生产建议保持 strict_validation_at_startup=true.
+# 风险/Risk: 若镜像/部署未携带 prompts/ 树，严格模式会拒绝启动。
+[prompts]
+reload_on_sighup = true
+strict_validation_at_startup = true
+config_path = "configs/config.toml"

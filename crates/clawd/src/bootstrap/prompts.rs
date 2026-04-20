@@ -117,8 +117,12 @@ pub(crate) fn validate_core_prompts(
     };
     for (logical_path, label) in CORE_PROMPT_REGISTRY {
         report.checked += 1;
-        let resolved =
-            prompt_layers::load_prompt_template_for_vendor_with_meta(workspace_root, &vendor, logical_path, "");
+        let resolved = prompt_layers::load_prompt_template_for_vendor_with_meta(
+            workspace_root,
+            &vendor,
+            logical_path,
+            "",
+        );
         if resolved.template.trim().is_empty() {
             report.missing.push(PromptValidationIssue {
                 logical_path: (*logical_path).to_string(),
@@ -156,6 +160,33 @@ pub(crate) fn log_prompt_validation_report(report: &PromptValidationReport) {
         report.checked,
         report.vendor
     );
+}
+
+/// 严格模式下把启动期 prompt 校验结果转成拒启错误信息。
+///
+/// 只在 `report.missing` 非空时返回 Some；调用方可在 log 之后 `bail!`。
+pub(crate) fn strict_prompt_validation_error(report: &PromptValidationReport) -> Option<String> {
+    if report.missing.is_empty() {
+        return None;
+    }
+    let details = report
+        .missing
+        .iter()
+        .map(|issue| {
+            format!(
+                "{} ({}) -> {}",
+                issue.label, issue.logical_path, issue.resolved_disk_path
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    Some(format!(
+        "prompt_validation strict mode blocked startup: {} of {} core prompts fell back to embedded templates (vendor={}): {}",
+        report.missing.len(),
+        report.checked,
+        report.vendor,
+        details
+    ))
 }
 
 fn builtin_persona_prompt(profile: &str) -> &'static str {
@@ -332,11 +363,7 @@ pub(crate) struct PromptReloadReport {
 /// - 不清 `semantic_judge` 的 task-scoped cache —— key 含 `task_id`，新任务自然吃新 prompt；
 ///   旧任务继续用上一版判定是合理的"运行中事务隔离"行为。
 pub(crate) fn reload_runtime_prompts(state: &AppState, config_path: &str) -> PromptReloadReport {
-    reload_runtime_prompts_impl(
-        &state.skill_rt.workspace_root,
-        &state.policy,
-        config_path,
-    )
+    reload_runtime_prompts_impl(&state.skill_rt.workspace_root, &state.policy, config_path)
 }
 
 /// §3.5d: testable inner — 只依赖 `workspace_root + PolicyConfig`，便于单测构造。
@@ -600,5 +627,24 @@ selected_model  = "gpt-4o-mini"
             cloned_policy.schedule.intent_rules_template_string(),
             "RULES_V1"
         );
+    }
+
+    #[test]
+    fn strict_prompt_validation_error_lists_missing_prompts() {
+        let report = PromptValidationReport {
+            checked: 15,
+            vendor: "minimax".to_string(),
+            missing: vec![PromptValidationIssue {
+                logical_path: "prompts/intent_normalizer_prompt.md".to_string(),
+                label: "intent_normalizer (routing)".to_string(),
+                resolved_disk_path: "prompts/intent_normalizer_prompt.md".to_string(),
+            }],
+        };
+
+        let message = strict_prompt_validation_error(&report)
+            .expect("strict mode should return an error message when prompts are missing");
+        assert!(message.contains("strict mode blocked startup"));
+        assert!(message.contains("intent_normalizer (routing)"));
+        assert!(message.contains("prompts/intent_normalizer_prompt.md"));
     }
 }

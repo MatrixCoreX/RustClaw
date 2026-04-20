@@ -71,6 +71,18 @@ pub(crate) struct ProviderError {
     pub(crate) request_payload: Value,
     pub(crate) raw_response: Option<String>,
     pub(crate) usage: Option<LlmUsageSnapshot>,
+    breaker_impact: BreakerImpact,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BreakerImpact {
+    /// 基础设施层失败：网络抖动 / 超时 / 5xx，应该累计到 provider breaker。
+    Failure,
+    /// provider 已经正常返回了一个可解析的 HTTP 响应，说明链路是通的；
+    /// 即使业务上失败（4xx/429/安全拦截/格式异常），也不该继续把 breaker 往 Open 推。
+    Healthy,
+    /// 本地或配置层错误，不足以说明 provider 健康或故障。
+    Neutral,
 }
 
 impl std::fmt::Display for ProviderError {
@@ -87,6 +99,7 @@ impl ProviderError {
             request_payload,
             raw_response: None,
             usage: None,
+            breaker_impact: BreakerImpact::Failure,
         }
     }
 
@@ -102,6 +115,7 @@ impl ProviderError {
             request_payload,
             raw_response: Some(raw_response),
             usage,
+            breaker_impact: BreakerImpact::Failure,
         }
     }
 
@@ -112,6 +126,7 @@ impl ProviderError {
             request_payload,
             raw_response: None,
             usage: None,
+            breaker_impact: BreakerImpact::Neutral,
         }
     }
 
@@ -127,8 +142,66 @@ impl ProviderError {
             request_payload,
             raw_response: Some(raw_response),
             usage,
+            breaker_impact: BreakerImpact::Healthy,
         }
     }
+
+    pub(super) fn rate_limited_with_response(
+        message: String,
+        request_payload: Value,
+        raw_response: String,
+        usage: Option<LlmUsageSnapshot>,
+    ) -> Self {
+        Self {
+            retryable: true,
+            message,
+            request_payload,
+            raw_response: Some(raw_response),
+            usage,
+            breaker_impact: BreakerImpact::Healthy,
+        }
+    }
+
+    pub(super) fn quota_exhausted_with_response(
+        message: String,
+        request_payload: Value,
+        raw_response: String,
+        usage: Option<LlmUsageSnapshot>,
+    ) -> Self {
+        Self {
+            retryable: false,
+            message,
+            request_payload,
+            raw_response: Some(raw_response),
+            usage,
+            breaker_impact: BreakerImpact::Healthy,
+        }
+    }
+
+    pub(crate) fn should_trip_breaker(&self) -> bool {
+        self.breaker_impact == BreakerImpact::Failure
+    }
+
+    pub(crate) fn should_reset_breaker(&self) -> bool {
+        self.breaker_impact == BreakerImpact::Healthy
+    }
+}
+
+pub(crate) fn is_quota_exhausted_429(body_text: &str) -> bool {
+    let lower = body_text.to_ascii_lowercase();
+    [
+        "usage limit exceeded",
+        "quota exceeded",
+        "exceeded your current quota",
+        "insufficient_quota",
+        "insufficient quota",
+        "credit balance",
+        "billing hard limit",
+        "out of credits",
+        "recharge",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 /// Phase 2.2: chat 风格调用的可选 hint（temperature / max_tokens）。
@@ -299,7 +372,8 @@ async fn call_provider(
 mod tests {
     use std::collections::HashSet;
 
-    use super::PROVIDER_IMPLS;
+    use super::{is_quota_exhausted_429, BreakerImpact, ProviderError, PROVIDER_IMPLS};
+    use serde_json::Value;
 
     #[test]
     fn provider_impls_names_are_unique_and_cover_known_protocols() {
@@ -323,5 +397,51 @@ mod tests {
                 "PROVIDER_IMPLS missing required protocol {required}; got {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn provider_error_marks_breaker_impact_by_failure_class() {
+        let retryable = ProviderError::retryable("timeout".to_string(), Value::Null);
+        assert!(retryable.should_trip_breaker());
+        assert!(!retryable.should_reset_breaker());
+
+        let rate_limited = ProviderError::rate_limited_with_response(
+            "http 429".to_string(),
+            Value::Null,
+            "{}".to_string(),
+            None,
+        );
+        assert!(!rate_limited.should_trip_breaker());
+        assert!(rate_limited.should_reset_breaker());
+
+        let business = ProviderError::non_retryable_with_response(
+            "http 400".to_string(),
+            Value::Null,
+            "{}".to_string(),
+            None,
+        );
+        assert!(!business.should_trip_breaker());
+        assert!(business.should_reset_breaker());
+
+        let local = ProviderError::non_retryable("unsupported".to_string(), Value::Null);
+        assert!(!local.should_trip_breaker());
+        assert!(!local.should_reset_breaker());
+
+        assert_eq!(retryable.breaker_impact, BreakerImpact::Failure);
+        assert_eq!(rate_limited.breaker_impact, BreakerImpact::Healthy);
+        assert_eq!(local.breaker_impact, BreakerImpact::Neutral);
+    }
+
+    #[test]
+    fn quota_exhausted_detector_matches_common_provider_phrases() {
+        assert!(is_quota_exhausted_429(
+            "{\"error\":\"usage limit exceeded (2056)\"}"
+        ));
+        assert!(is_quota_exhausted_429(
+            "{\"error\":{\"code\":\"insufficient_quota\"}}"
+        ));
+        assert!(!is_quota_exhausted_429(
+            "{\"error\":\"rate limit exceeded, retry later\"}"
+        ));
     }
 }

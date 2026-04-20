@@ -1,6 +1,4 @@
-use claw_core::secrets::{
-    provision_secret_envs, SecretValue, SecretsBroker, SecretsError,
-};
+use claw_core::secrets::{provision_secret_envs, SecretValue, SecretsBroker, SecretsError};
 use claw_core::skill_registry::{Capability, SkillsRegistry, REQUIRED_BUILTIN_SKILLS};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -33,6 +31,12 @@ fn minimax_default_model(value: &toml::Value) -> String {
         .to_string()
 }
 
+fn prompts_strict_validation(value: &toml::Value) -> bool {
+    value["prompts"]["strict_validation_at_startup"]
+        .as_bool()
+        .expect("prompts.strict_validation_at_startup")
+}
+
 #[test]
 fn minimax_templates_allow_the_repo_default_model() {
     let root = workspace_root();
@@ -57,6 +61,23 @@ fn minimax_templates_allow_the_repo_default_model() {
         minimax_default_model(&root_config),
         minimax_default_model(&docker_config),
         "root and docker minimax defaults should stay aligned",
+    );
+}
+
+#[test]
+fn prompt_validation_templates_enable_strict_startup_gate_consistently() {
+    let root = workspace_root();
+    let root_config = parse_toml(&root.join("configs/config.toml"));
+    let docker_config = parse_toml(&root.join("docker/config/config.toml"));
+
+    assert!(
+        prompts_strict_validation(&root_config),
+        "repo config should enable prompts.strict_validation_at_startup"
+    );
+    assert_eq!(
+        prompts_strict_validation(&root_config),
+        prompts_strict_validation(&docker_config),
+        "root and docker prompt validation strictness should stay aligned",
     );
 }
 
@@ -384,8 +405,7 @@ fn provision_secret_envs_fails_loud_when_broker_lacks_declared_secret() {
     let registry = SkillsRegistry::load_from_path(&path).expect("load registry");
     let caps = registry.capabilities("image_generate").to_vec();
     assert!(
-        caps.iter()
-            .any(|c| matches!(c, Capability::Secrets(_))),
+        caps.iter().any(|c| matches!(c, Capability::Secrets(_))),
         "image_generate must declare at least one secrets.* capability after §E1.c"
     );
 

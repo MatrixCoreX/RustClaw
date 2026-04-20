@@ -463,7 +463,8 @@ async fn run_with_fallback_with_hints(
         // Phase 2.1: 进入 provider 之前先问 circuit breaker。
         // Open + cooldown 未到期 → 直接跳到下一家，不浪费这次 fallback 的
         // retry / timeout 配额。也避免在 model_io.log 里反复刷同一个坏 provider。
-        match provider.breaker.before_attempt() {
+        let breaker_decision = provider.breaker.before_attempt();
+        match breaker_decision {
             crate::providers::AttemptDecision::Allow => {}
             crate::providers::AttemptDecision::AllowTrial => {
                 info!(
@@ -483,8 +484,7 @@ async fn run_with_fallback_with_hints(
                     prompt_source,
                     remaining_ms
                 );
-                skipped_providers
-                    .push(format!("{provider_name}(cooldown_ms={remaining_ms})"));
+                skipped_providers.push(format!("{provider_name}(cooldown_ms={remaining_ms})"));
                 continue;
             }
         }
@@ -575,7 +575,14 @@ async fn run_with_fallback_with_hints(
                 return Ok(cleaned_text);
             }
             Err(err) => {
-                provider.breaker.note_failure();
+                if err.should_trip_breaker() {
+                    provider.breaker.note_failure();
+                } else if err.should_reset_breaker() {
+                    // breaker 只跟踪 provider 基础设施健康。当前这次调用已经拿到了
+                    // 有效 provider 响应（哪怕业务上是 4xx/429/blocked），说明
+                    // 上游链路已恢复，不应继续维持 Open/HalfOpen。
+                    provider.breaker.note_success();
+                }
                 last_error = format!("provider={provider_name} failed: {err}");
                 warn!(
                     "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={} error={}",
