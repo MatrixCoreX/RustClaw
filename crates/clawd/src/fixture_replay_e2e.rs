@@ -815,7 +815,81 @@ mod tests {
         );
     }
 
-    /// §7.5 Step 4.b.2（待 channel mock / DB schema seed 到位）：真正驱动
+    /// §7.5 Step 4.b.2.3：契约守底测试 ——【fixture-replay e2e 下 channel push
+    /// **绝不应该**真发 HTTP】。
+    ///
+    /// 调研结论（详见 commit log）：
+    ///   * `process_ask_task` 主流程**不**调用 `channel_send::*`；任何 finalize /
+    ///     loop_reply 路径都不主动 push 通道，回复经 DB → 各通道 daemon
+    ///     polling 反向出去。
+    ///   * 唯一 channel push 调用点是 [`crate::worker::maybe_notify_schedule_result`]，
+    ///     仅在 `payload.schedule_triggered == true` 时走 `send_task_channel_message`，
+    ///     且对 send 失败 **fail-soft**（只 `warn!`，不 propagate）。
+    ///   * `ChannelConfig::default()`（`AppState::test_default_with_fixture_provider`
+    ///     用的就是它）所有 token 字段均为空串/`None`，每个 `channel_send::send_*`
+    ///     入口第一步 `if token.is_empty() { return Err(...) }` short-circuit
+    ///     返回，**不发任何 HTTP 请求**。
+    ///
+    /// 本测试把上面三条契约一次性钉死：
+    ///   1. 默认 channels 所有可标识为"配好了"的字段都是 empty / None；
+    ///   2. 直接调 `send_telegram_message(&state, 0, "...")` 必返回带
+    ///      `telegram bot token is empty` 的 Err，证明 short-circuit 路径走通；
+    ///   3. （隐式）—— 调用过程中**没**发 HTTP，因为 token 检查在任何 reqwest
+    ///      调用之前。
+    ///
+    /// 守底意义：未来若有人手贱往 `ChannelConfig::default()` 里塞了真 token
+    /// 默认值（例如挪 dev token 来调试 / fixture seed 时不慎复制粘贴），本测试
+    /// 会立刻挂掉，避免 fixture-replay 测试集**默默地**对真生产 telegram /
+    /// wechat / 飞书后端发 HTTP。
+    #[tokio::test]
+    async fn step4b2_3_self_check_default_channels_short_circuit_without_http() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        assert!(
+            state.channels.telegram_bot_token.is_empty(),
+            "default channels.telegram_bot_token must stay empty in tests, got {:?}",
+            state.channels.telegram_bot_token,
+        );
+        assert!(
+            state.channels.whatsapp_access_token.is_empty(),
+            "default channels.whatsapp_access_token must stay empty in tests, got {:?}",
+            state.channels.whatsapp_access_token,
+        );
+        assert!(
+            !state.channels.whatsapp_cloud_enabled,
+            "default channels.whatsapp_cloud_enabled must stay false"
+        );
+        assert!(
+            !state.channels.whatsapp_web_enabled,
+            "default channels.whatsapp_web_enabled must stay false"
+        );
+        assert!(
+            state.channels.wechat_send_config.is_none(),
+            "default channels.wechat_send_config must stay None in tests"
+        );
+        assert!(
+            state.channels.feishu_send_config.is_none(),
+            "default channels.feishu_send_config must stay None in tests"
+        );
+        assert!(
+            state.channels.lark_send_config.is_none(),
+            "default channels.lark_send_config must stay None in tests"
+        );
+
+        let err = crate::channel_send::send_telegram_message(&state, 0, "should-not-send")
+            .await
+            .expect_err(
+                "with empty telegram_bot_token, send_telegram_message must short-circuit \
+                 with Err(...) instead of issuing an HTTP call to api.telegram.org",
+            );
+        assert!(
+            err.contains("telegram bot token is empty"),
+            "Err message must come from the short-circuit branch, not from a network \
+             error. Got: {err}",
+        );
+    }
+
+    /// §7.5 Step 4.b.2（待 DB schema seed 到位）：真正驱动
     /// [`crate::worker::process_ask_task`] 的端到端 harness。当前只是占位 + 文档。
     ///
     /// 已落地子项：
@@ -829,20 +903,23 @@ mod tests {
     ///     [`AppState::with_prompt_layers_installed`] 链式 helper 把
     ///     `workspace_root` 指到真仓库根，让 `load_prompt_template_for_state*`
     ///     命中 `prompts/layers/manifest.toml` 拼层 → fnv1a 输入与录制时一致。
+    ///   * 4.b.2.3（本文件 `step4b2_3_self_check_default_channels_short_circuit_without_http`）：
+    ///     调研发现 `process_ask_task` 主流程不调 channel push，
+    ///     `maybe_notify_schedule_result` 是 fail-soft，且 `ChannelConfig::default()`
+    ///     全空字段让 `channel_send::send_*` 立即 short-circuit 不发 HTTP ——
+    ///     无需 helper，只补一份契约守底测试。
     ///
     /// 仍待补的剩余工程：
-    ///   1. **channel mock**：`channels.telegram_bot_token` 留空 + `channel_send.rs`
-    ///      在 test 配置下走 in-memory 收集，不去 hit 任何 HTTP；
-    ///   2. **DB schema seed**：`db_init::test_pool` 已建表，但 `tasks` 行需要
+    ///   1. **DB schema seed**：`db_init::test_pool` 已建表，但 `tasks` 行需要
     ///      先 insert 一条对应 `task.task_id` 的记录，否则 finalize 的 audit
     ///      写入会 FK 失败；
-    ///   3. **每个 case 目录下 commit `expected.json`**：含 `user_text` /
+    ///   2. **每个 case 目录下 commit `expected.json`**：含 `user_text` /
     ///      `expected_final_answer_contains` / `expected_llm_call_count` /
     ///      `expected_prompt_sources` / `expected_verifier_verdict` /
     ///      `expected_fallback_source` 字段；
-    ///   4. 删掉本测试的 `#[ignore]`。
+    ///   3. 删掉本测试的 `#[ignore]`。
     #[tokio::test]
-    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 / 4.b.2.2 已落地，等 1-4 项就绪再启用"]
+    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 / 4.b.2.2 / 4.b.2.3 已落地，等 1-3 项就绪再启用"]
     async fn e2e_per_case_replay_with_process_ask_task() {
         // 见上方 doc。
     }
