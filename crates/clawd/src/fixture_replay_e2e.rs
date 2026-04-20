@@ -710,27 +710,81 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// §7.5 Step 4.b.2（待 SkillsRegistry / prompts / channel 桩到位）：真正驱动
+    /// §7.5 Step 4.b.2.1：验证 [`crate::AppState::with_minimal_builtin_registry`]
+    /// 链式 helper 装出来的 registry **能过 §P4.1 integrity 校验**，且 `core` 里
+    /// `skill_views_snapshot` 真被替换（不是被静默丢弃）。
+    ///
+    /// 前置：`process_ask_task` 启动期会跑 `integrity_report().is_clean()`，缺
+    /// 任何一条 [`claw_core::skill_registry::REQUIRED_BUILTIN_SKILLS`] 就 bail；
+    /// 本测试是 e2e harness 启动这道门的 self-check 入口 —— 任何后续 builtin
+    /// 增删漏在 helper 里都会让本测试先红，而不是污染 e2e 报错。
+    #[tokio::test]
+    async fn step4b2_1_self_check_minimal_builtin_registry_satisfies_integrity() {
+        use claw_core::skill_registry::REQUIRED_BUILTIN_SKILLS;
+
+        let state = crate::AppState::test_default_with_fixture_provider()
+            .with_minimal_builtin_registry();
+
+        let registry = state
+            .get_skills_registry()
+            .expect("with_minimal_builtin_registry must install Some(registry)");
+        let report = registry.integrity_report();
+        assert!(
+            report.is_clean(),
+            "minimal builtin registry must satisfy integrity check, got {:?}",
+            report,
+        );
+
+        let installed: std::collections::HashSet<String> =
+            registry.all_names().into_iter().collect();
+        for required in REQUIRED_BUILTIN_SKILLS {
+            assert!(
+                installed.contains(*required),
+                "minimal registry missing REQUIRED builtin {required:?}; \
+                 if you added a new builtin to REQUIRED_BUILTIN_SKILLS, also \
+                 extend with_minimal_builtin_registry to spit it into the toml"
+            );
+        }
+
+        let skills_list = state.get_skills_list();
+        assert_eq!(
+            skills_list.len(),
+            REQUIRED_BUILTIN_SKILLS.len(),
+            "skills_list snapshot must equal enabled builtin set, got {:?}",
+            skills_list,
+        );
+    }
+
+    /// §7.5 Step 4.b.2（待 prompts / channel / DB schema 桩到位）：真正驱动
     /// [`crate::worker::process_ask_task`] 的端到端 harness。当前只是占位 + 文档。
     ///
-    /// Step 4.b.1（本文件 [`step4b1_self_check_appstate_with_fixture_provider_routes_through_task`]）
-    /// 已经把"AppState 装得起 fixture provider，task_llm_providers 取得到，
-    /// PROVIDER_IMPLS 命中"这条入口固定下来。剩下的工程量在：
-    ///   1. SkillsRegistry：minimal builtin-only 注册表（含 normalize / chat /
-    ///      classifier_direct / nl2cmd 的 prompt_file 路径）；
-    ///   2. prompts：把 `crates/clawd/configs/prompts/*` 用 [`crate::bootstrap::prompts`]
-    ///      在测试初始化时 install 一次，让 hot reload 路径不必触发；
-    ///   3. channel mock：`channels.telegram_bot_token` 留空 + `channel_send.rs`
+    /// 已落地子项：
+    ///   * 4.b.1（本文件 `step4b1_self_check_appstate_with_fixture_provider_routes_through_task`）：
+    ///     `AppState` 装得起 fixture provider，`task_llm_providers` 取得到，
+    ///     `PROVIDER_IMPLS` 命中。
+    ///   * 4.b.2.1（本文件 `step4b2_1_self_check_minimal_builtin_registry_satisfies_integrity`）：
+    ///     [`AppState::with_minimal_builtin_registry`] 链式 helper 装出
+    ///     integrity-clean 的 builtin 注册表。
+    ///
+    /// 仍待补的剩余工程：
+    ///   1. **prompt label 文件**：`normalize / classifier_direct / nl2cmd / chat`
+    ///      等是 prompt label（`crates/clawd/configs/prompts/*`），不是 skill。
+    ///      需要在测试初始化时调一次
+    ///      [`crate::bootstrap::prompts::install_prompt_layers_to_workspace`]
+    ///      把 layered prompts 落到 `state.skill_rt.workspace_root` 下，让
+    ///      `process_ask_task` 拼 prompt 时找得到模板；
+    ///   2. **channel mock**：`channels.telegram_bot_token` 留空 + `channel_send.rs`
     ///      在 test 配置下走 in-memory 收集，不去 hit 任何 HTTP；
-    ///   4. DB schema：`db_init::test_pool` 已建表，但 `tasks` 行需要先 insert
-    ///      一条对应 `task.task_id` 的记录，否则 finalize 的 audit 写入会 FK 失败；
-    ///   5. 每个 case 目录下 commit `expected.json`：含 user_text /
-    ///      expected_final_answer_contains / expected_llm_call_count /
-    ///      expected_prompt_sources / expected_verifier_verdict /
-    ///      expected_fallback_source 字段；
-    ///   6. 删掉本测试的 `#[ignore]`。
+    ///   3. **DB schema seed**：`db_init::test_pool` 已建表，但 `tasks` 行需要
+    ///      先 insert 一条对应 `task.task_id` 的记录，否则 finalize 的 audit
+    ///      写入会 FK 失败；
+    ///   4. **每个 case 目录下 commit `expected.json`**：含 `user_text` /
+    ///      `expected_final_answer_contains` / `expected_llm_call_count` /
+    ///      `expected_prompt_sources` / `expected_verifier_verdict` /
+    ///      `expected_fallback_source` 字段；
+    ///   5. 删掉本测试的 `#[ignore]`。
     #[tokio::test]
-    #[ignore = "Step 4.b.2 占位：4.b.1 已落地，等 1-6 工程项就绪再启用"]
+    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 已落地，等 1-5 项就绪再启用"]
     async fn e2e_per_case_replay_with_process_ask_task() {
         // 见上方 doc。
     }
