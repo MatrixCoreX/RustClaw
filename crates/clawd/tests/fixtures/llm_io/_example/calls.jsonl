@@ -1,0 +1,2 @@
+{"prompt_hash":"deadbeefcafe0001","prompt_source":"normalizer:example","prompt_preview":"example normalizer prompt for `ping`","clean_response":"{\"intent_kind\":\"chat\",\"response_shape\":\"scalar\"}","raw_response":null,"usage":{"prompt_tokens":10,"completion_tokens":3}}
+{"prompt_hash":"deadbeefcafe0002","prompt_source":"chat:example","prompt_preview":"example chat prompt for `ping`","clean_response":"pong","raw_response":null,"usage":{"prompt_tokens":4,"completion_tokens":1}}

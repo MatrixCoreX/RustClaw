@@ -40,10 +40,19 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::providers::fixture_replay::{
     FIXTURE_LLM_CASE_ENV, FIXTURE_LLM_ROOT_ENV, FIXTURE_REPLAY_PROVIDER_TYPE,
 };
 use crate::schedule_service::TEST_FREEZE_NOW_ENV;
+
+/// §7.5 Step 4.b.2.5：每个 case 目录下 `expected.json` 的文件名常量。
+///
+/// 与 [`crate::providers::fixture_replay::FIXTURE_CALLS_FILENAME`]（`calls.jsonl`）
+/// 配套：`calls.jsonl` 描述"喂给 LLM 的 prompt + LLM 应该回什么"，
+/// `expected.json` 描述"端到端跑完后业务层面应该看到什么"。
+pub(crate) const FIXTURE_EXPECTED_FILENAME: &str = "expected.json";
 
 /// fixture 仓内根目录：`crates/clawd/tests/fixtures/llm_io/`。
 ///
@@ -102,6 +111,196 @@ pub(crate) struct LoadedCase {
     pub case: String,
     pub calls_path: std::path::PathBuf,
     pub records: Vec<crate::providers::fixture_replay::RecordedCall>,
+}
+
+/// §7.5 Step 4.b.2.5：每个 case 的端到端期望声明。
+///
+/// **设计原则**：
+///   1. **全字段可选**：让一条新 case 可以"先只断言一个 contains 子串"上岗，
+///      日后再逐步加严。`load_expected_for_case` 文件不存在也返回 `Ok(None)`，
+///      不强制每个 fixture 目录都有 `expected.json`（兼容仅含 `calls.jsonl`
+///      的 smoke fixture）。
+///   2. **严 schema**：开了 `deny_unknown_fields`，typo 立刻在 parse 阶段
+///      报错，避免新加字段被悄悄拼错。
+///   3. **冗余字段做 cross-check**：`case` 字段必须等于所在目录名，避免
+///      文件被错挂到别的 case 下还能"看似正常"。
+///   4. **无 LLM-specific 字段下沉到 fixture-replay 层**：harness 用
+///      [`crate::providers::fixture_replay::RecordedCall`] + 本结构两份，
+///      角色分离：calls = 输入端 contract（prompt → response），
+///      expected = 输出端 contract（业务可观察值）。
+///
+/// **字段语义**：
+///   * `case`：必须与目录名相同（典型：`act_find_service_file`）。
+///   * `description`：人类可读注释，仅文档用，不参与断言。
+///   * `user_text`：用户输入原文，作为 ask payload 的 `text` 字段；harness
+///     会把它和 [`crate::repo::submit::insert_submitted_task`] 一致地包成
+///     `{"text": user_text}` 写进 `tasks.payload_json`。
+///   * `freeze_now`：`RUSTCLAW_TEST_FREEZE_NOW` 应当注入的 wallclock；必须
+///     与录制 `calls.jsonl` 时一致，否则 normalizer prompt 里的 `__NOW__`
+///     字段会让 fnv1a hash 漂、fixture miss。
+///   * `user_id` / `chat_id`：seed 进 `tasks` 行，缺省 1 / 1 —— 与 telegram
+///     allowlist 里的"自家人"约定俗成保持一致；`user_id < 0` 留给 webd 用户
+///     体系（与 [`crate::repo::auth`] 的 `negative-id-for-webd` 约定一致）。
+///
+///   * `expected_final_answer_contains`：所有列出的子串都必须出现在 final
+///     answer 文本里（顺序无关，大小写敏感）。最常用的轻量断言。
+///   * `expected_final_answer_not_contains`：禁止出现的子串集合。用来卡住
+///     "幻觉文案"或老版本的固定坏话术（如：旧 chat skill 把"有没有"答成
+///     "这是 systemd 文件…"段落式描述）。
+///   * `expected_llm_call_count`：精确等于。仅当此 case 的 LLM 调用数稳定
+///     时才设；不稳定时用 `expected_min_llm_call_count` /
+///     `expected_max_llm_call_count` 给区间。
+///   * `expected_prompt_sources`：按调用顺序断言每次 LLM 入口的
+///     [`crate::llm_gateway::classify_prompt_source`] 标签序列；用来卡住
+///     "意外多走/少走某段 prompt"。允许值：`normalizer` / `plan` /
+///     `plan_repair` / `classifier_direct` / `observed` / `clarify` /
+///     `intent_meta` / `schedule` / `nl2cmd` / `self_extension` / `memory` /
+///     `verifier` / `chat` / `semantic_judge` / `router_legacy` / `other`。
+///   * `expected_fallback_source`：断言 final answer 的 fallback source
+///     标签（§7.2 引入），允许值取决于该 case 是否走 fallback 分支；
+///     `None` / 缺字段 = 不断言。
+///   * `expected_verifier_verdict`：断言
+///     [`crate::output_contract_verifier::OutputContractVerdict`] 的 verdict
+///     名（`pass` / `reshape` / `reject`）。
+///   * `expected_final_status`：断言
+///     [`crate::task_journal::TaskJournalFinalStatus`]（`success` /
+///     `failure` / `clarify` / `resume_failure`）。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExpectedCase {
+    pub case: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    pub user_text: String,
+
+    pub freeze_now: String,
+
+    #[serde(default = "default_user_id", skip_serializing_if = "is_default_user_id")]
+    pub user_id: i64,
+    #[serde(default = "default_chat_id", skip_serializing_if = "is_default_chat_id")]
+    pub chat_id: i64,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_final_answer_contains: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_final_answer_not_contains: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_llm_call_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_min_llm_call_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_max_llm_call_count: Option<u32>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_prompt_sources: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_fallback_source: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_verifier_verdict: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_final_status: Option<String>,
+}
+
+fn default_user_id() -> i64 {
+    1
+}
+fn default_chat_id() -> i64 {
+    1
+}
+fn is_default_user_id(v: &i64) -> bool {
+    *v == 1
+}
+fn is_default_chat_id(v: &i64) -> bool {
+    *v == 1
+}
+
+impl ExpectedCase {
+    /// 在 case 目录尝试加载 `expected.json`。
+    ///
+    /// 文件不存在 → `Ok(None)`（仅含 `calls.jsonl` 的 smoke fixture 合法）。
+    /// 文件存在 → 解析 + 调 [`Self::validate_against_dir`] cross-check。
+    /// 解析失败 / cross-check 失败 → `Err(具体原因 + 路径)`。
+    pub(crate) fn load_for_case(case_dir: &std::path::Path) -> Result<Option<Self>, String> {
+        let path = case_dir.join(FIXTURE_EXPECTED_FILENAME);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let body = std::fs::read_to_string(&path)
+            .map_err(|e| format!("read {} failed: {e}", path.display()))?;
+        let parsed: Self = serde_json::from_str(&body).map_err(|e| {
+            format!(
+                "{} parse expected.json failed: {e} \
+                 (typo in field name? schema deny_unknown_fields)",
+                path.display()
+            )
+        })?;
+        parsed.validate_against_dir(case_dir).map_err(|e| {
+            format!("{} validate expected.json failed: {e}", path.display())
+        })?;
+        Ok(Some(parsed))
+    }
+
+    /// 一致性 cross-check：
+    ///   * `case` 字段必须等于目录名；
+    ///   * `freeze_now` 非空；
+    ///   * `user_text` 非空；
+    ///   * 三条 LLM call count 约束相互不冲突（`exact` 与 `min/max` 不能同时给
+    ///     而又互相违背）。
+    fn validate_against_dir(&self, case_dir: &std::path::Path) -> Result<(), String> {
+        let dir_name = case_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "case dir name not utf8: {}",
+                    case_dir.display()
+                )
+            })?;
+        if self.case != dir_name {
+            return Err(format!(
+                "expected.case = {:?} but lives under directory {:?}",
+                self.case, dir_name
+            ));
+        }
+        if self.user_text.is_empty() {
+            return Err("user_text must not be empty".to_string());
+        }
+        if self.freeze_now.is_empty() {
+            return Err(
+                "freeze_now must not be empty (must match the wallclock used during recording, \
+                 e.g. \"2026-04-19T12:00:00+08:00\")"
+                    .to_string(),
+            );
+        }
+        if let (Some(exact), Some(min)) = (self.expected_llm_call_count, self.expected_min_llm_call_count) {
+            if exact < min {
+                return Err(format!(
+                    "expected_llm_call_count ({exact}) < expected_min_llm_call_count ({min})"
+                ));
+            }
+        }
+        if let (Some(exact), Some(max)) = (self.expected_llm_call_count, self.expected_max_llm_call_count) {
+            if exact > max {
+                return Err(format!(
+                    "expected_llm_call_count ({exact}) > expected_max_llm_call_count ({max})"
+                ));
+            }
+        }
+        if let (Some(min), Some(max)) = (self.expected_min_llm_call_count, self.expected_max_llm_call_count) {
+            if min > max {
+                return Err(format!(
+                    "expected_min_llm_call_count ({min}) > expected_max_llm_call_count ({max})"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// §7.5 Step 4.a：扫描 fixture root 下所有"真 case"目录（跳过 `_*`），把每个
@@ -889,6 +1088,150 @@ mod tests {
         );
     }
 
+    /// §7.5 Step 4.b.2.5 自检（schema + loader）：
+    ///   * `_example/expected.json` 能 deserialize + cross-check 通过；
+    ///   * 字段缺省 (`user_id` / `chat_id` 默认 1 / 1) 在 ExpectedCase 上正确；
+    ///   * `case` 字段与目录名不符 → 报错；
+    ///   * `freeze_now` 空 → 报错；
+    ///   * `expected_llm_call_count` 与区间约束矛盾 → 报错；
+    ///   * `deny_unknown_fields`：unknown key → 报错。
+    ///
+    /// 不调 `process_ask_task`，只验证 schema/loader 自身契约 —— 真 e2e 留给
+    /// `e2e_per_case_replay_with_process_ask_task`。
+    #[test]
+    fn step4b2_5_self_check_expected_json_schema_and_loader() {
+        let example_dir = fixture_workspace_root().join("_example");
+        assert!(
+            example_dir.is_dir(),
+            "expected `_example/` dir to ship as documentation: {}",
+            example_dir.display()
+        );
+        let parsed = ExpectedCase::load_for_case(&example_dir)
+            .expect("`_example/expected.json` must parse + cross-check cleanly")
+            .expect("`_example/expected.json` must exist (it is the documented sample)");
+        assert_eq!(parsed.case, "_example");
+        assert_eq!(parsed.user_text, "ping");
+        assert_eq!(parsed.user_id, 1, "default user_id must be 1");
+        assert_eq!(parsed.chat_id, 1, "default chat_id must be 1");
+        assert_eq!(parsed.expected_final_answer_contains, vec!["pong"]);
+        assert_eq!(parsed.expected_min_llm_call_count, Some(1));
+        assert_eq!(parsed.expected_max_llm_call_count, Some(4));
+        assert_eq!(parsed.expected_final_status.as_deref(), Some("success"));
+
+        // 反例 1：case 字段与目录名不符 → 报错。
+        let tmp = std::env::temp_dir().join(format!(
+            "rustclaw_test_expected_case_mismatch_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(
+            tmp.join(FIXTURE_EXPECTED_FILENAME),
+            r#"{"case":"WRONG","user_text":"u","freeze_now":"2026-04-19T12:00:00+08:00"}"#,
+        )
+        .unwrap();
+        let err = ExpectedCase::load_for_case(&tmp)
+            .expect_err("case-name mismatch must Err, not Ok");
+        assert!(
+            err.contains("WRONG") && err.contains("validate"),
+            "err must name the offending case + the validation step. Got: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        // 反例 2：freeze_now 空 → 报错。
+        let tmp = std::env::temp_dir().join(format!(
+            "rustclaw_test_expected_freeze_now_empty_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let dir_name = tmp.file_name().unwrap().to_string_lossy().into_owned();
+        std::fs::write(
+            tmp.join(FIXTURE_EXPECTED_FILENAME),
+            format!(
+                r#"{{"case":"{dir_name}","user_text":"u","freeze_now":""}}"#
+            ),
+        )
+        .unwrap();
+        let err = ExpectedCase::load_for_case(&tmp)
+            .expect_err("empty freeze_now must Err");
+        assert!(
+            err.contains("freeze_now"),
+            "err must name the offending field. Got: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        // 反例 3：expected_llm_call_count 与 max 矛盾 → 报错。
+        let tmp = std::env::temp_dir().join(format!(
+            "rustclaw_test_expected_count_conflict_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let dir_name = tmp.file_name().unwrap().to_string_lossy().into_owned();
+        std::fs::write(
+            tmp.join(FIXTURE_EXPECTED_FILENAME),
+            format!(
+                r#"{{"case":"{dir_name}","user_text":"u","freeze_now":"2026-04-19T12:00:00+08:00","expected_llm_call_count":10,"expected_max_llm_call_count":5}}"#
+            ),
+        )
+        .unwrap();
+        let err = ExpectedCase::load_for_case(&tmp)
+            .expect_err("exact > max must Err");
+        assert!(
+            err.contains("expected_llm_call_count") && err.contains("expected_max_llm_call_count"),
+            "err must name both bounds. Got: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        // 反例 4：unknown field → deny_unknown_fields trip → parse 失败。
+        let tmp = std::env::temp_dir().join(format!(
+            "rustclaw_test_expected_unknown_field_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let dir_name = tmp.file_name().unwrap().to_string_lossy().into_owned();
+        std::fs::write(
+            tmp.join(FIXTURE_EXPECTED_FILENAME),
+            format!(
+                r#"{{"case":"{dir_name}","user_text":"u","freeze_now":"2026-04-19T12:00:00+08:00","totally_unrelated_typo":42}}"#
+            ),
+        )
+        .unwrap();
+        let err = ExpectedCase::load_for_case(&tmp)
+            .expect_err("unknown field must Err thanks to deny_unknown_fields");
+        assert!(
+            err.contains("totally_unrelated_typo") || err.contains("unknown field"),
+            "err must report the typo'd field. Got: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        // 反例 5：fixture root 上其他真 case 目录里若有 expected.json，必须全部通过 cross-check。
+        // 这一条是"未来扩 case 时的 regression 网"：任何人加新 case 误把
+        // `case` 字段写错或字段拼错，本测试必跑挂。
+        let real_root = fixture_workspace_root();
+        if real_root.is_dir() {
+            for entry in std::fs::read_dir(&real_root).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if name.starts_with('.') {
+                    continue;
+                }
+                ExpectedCase::load_for_case(&path).unwrap_or_else(|e| {
+                    panic!(
+                        "expected.json in {} failed to parse / validate: {e}\n\
+                         (fix the file, or delete it if the case has no business assertions yet)",
+                        path.display()
+                    )
+                });
+            }
+        }
+    }
+
     /// §7.5 Step 4.b.2（待 DB schema seed 到位）：真正驱动
     /// [`crate::worker::process_ask_task`] 的端到端 harness。当前只是占位 + 文档。
     ///
@@ -916,15 +1259,20 @@ mod tests {
     ///     先调研澄清：`migrations/001_init.sql` 不含 FK，`tasks` 行不在不会
     ///     报错而是让所有 `UPDATE tasks ... WHERE task_id = ?` 静默 no-op，
     ///     下游 `mark_running` / `record_result` 全部失效 → 必须 seed。
+    ///   * 4.b.2.5（本文件 `step4b2_5_self_check_expected_json_schema_and_loader`）：
+    ///     [`ExpectedCase`] schema + [`ExpectedCase::load_for_case`] loader +
+    ///     fixture root 下 `README.md` / `_example/{calls.jsonl,expected.json}`
+    ///     一份可机器校验的样例。`deny_unknown_fields` + 目录名 cross-check
+    ///     + LLM count 区间一致性 + freeze_now 非空都已落入自检。
     ///
     /// 仍待补的剩余工程：
-    ///   1. **每个 case 目录下 commit `expected.json`**：含 `user_text` /
-    ///      `expected_final_answer_contains` / `expected_llm_call_count` /
-    ///      `expected_prompt_sources` / `expected_verifier_verdict` /
-    ///      `expected_fallback_source` 字段；
-    ///   2. 删掉本测试的 `#[ignore]`。
+    ///   1. **真录 ≥ 9 条 case** 的 `calls.jsonl` + `expected.json`（Step
+    ///      4.b.2.6）；
+    ///   2. 写 harness body 真调 `process_ask_task` + 按 `expected.json`
+    ///      做断言；
+    ///   3. 删掉本测试的 `#[ignore]`。
     #[tokio::test]
-    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 / 4.b.2.2 / 4.b.2.3 / 4.b.2.4 已落地，等 1-2 项就绪再启用"]
+    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 / 4.b.2.2 / 4.b.2.3 / 4.b.2.4 / 4.b.2.5 已落地，等 1-3 项就绪再启用"]
     async fn e2e_per_case_replay_with_process_ask_task() {
         // 见上方 doc。
     }
