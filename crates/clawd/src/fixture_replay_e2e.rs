@@ -755,7 +755,67 @@ mod tests {
         );
     }
 
-    /// §7.5 Step 4.b.2（待 prompts / channel / DB schema 桩到位）：真正驱动
+    /// §7.5 Step 4.b.2.2：验证 [`crate::AppState::with_prompt_layers_installed`]
+    /// 把 `workspace_root` 指到真仓库根后，**通过生产路径**
+    /// [`crate::bootstrap::prompts::load_prompt_template_for_state_with_meta`]
+    /// 加载 `prompts/intent_normalizer_prompt.md` 拿到的是磁盘 layered manifest
+    /// 的拼接结果，而不是各 callsite 的 `include_str!` 兜底常量。
+    ///
+    /// 同时确认 `default_locator_search_dir` 没被这个 helper 改写 —— 这是 helper
+    /// 的安全契约（见 helper doc）。
+    #[tokio::test]
+    async fn step4b2_2_self_check_prompt_layers_installed_loads_real_disk_prompt() {
+        let state = crate::AppState::test_default_with_fixture_provider()
+            .with_minimal_builtin_registry()
+            .with_prompt_layers_installed();
+
+        assert!(
+            state
+                .skill_rt
+                .workspace_root
+                .join("prompts/layers/manifest.toml")
+                .is_file(),
+            "with_prompt_layers_installed must point workspace_root at a tree \
+             containing prompts/layers/manifest.toml; got {}",
+            state.skill_rt.workspace_root.display(),
+        );
+
+        // 用一段刻意不像生产 prompt 的兜底字符串，便于通过"是否等于它"判断
+        // 命中了磁盘还是 include_str fallback。
+        const SENTINEL_FALLBACK: &str = "<EMBEDDED_FALLBACK_FOR_STEP4B22_SELF_CHECK>";
+        let resolved = crate::bootstrap::prompts::load_prompt_template_for_state_with_meta(
+            &state,
+            "prompts/intent_normalizer_prompt.md",
+            SENTINEL_FALLBACK,
+        );
+        assert_ne!(
+            resolved.template, SENTINEL_FALLBACK,
+            "with_prompt_layers_installed must resolve real disk prompt, not the \
+             include_str fallback (source={})",
+            resolved.source,
+        );
+        assert!(
+            !resolved.template.trim().is_empty(),
+            "resolved layered prompt body must be non-empty (source={})",
+            resolved.source,
+        );
+        assert!(
+            resolved.source.starts_with("layered:")
+                || resolved.source.contains("intent_normalizer"),
+            "source should reflect the layered manifest or the disk path, got {:?}",
+            resolved.source,
+        );
+
+        assert_eq!(
+            state.skill_rt.default_locator_search_dir,
+            std::env::temp_dir(),
+            "with_prompt_layers_installed must NOT change default_locator_search_dir; \
+             only workspace_root should be promoted to the real repo root, otherwise \
+             locator paths would scan the whole git tree"
+        );
+    }
+
+    /// §7.5 Step 4.b.2（待 channel mock / DB schema seed 到位）：真正驱动
     /// [`crate::worker::process_ask_task`] 的端到端 harness。当前只是占位 + 文档。
     ///
     /// 已落地子项：
@@ -765,26 +825,24 @@ mod tests {
     ///   * 4.b.2.1（本文件 `step4b2_1_self_check_minimal_builtin_registry_satisfies_integrity`）：
     ///     [`AppState::with_minimal_builtin_registry`] 链式 helper 装出
     ///     integrity-clean 的 builtin 注册表。
+    ///   * 4.b.2.2（本文件 `step4b2_2_self_check_prompt_layers_installed_loads_real_disk_prompt`）：
+    ///     [`AppState::with_prompt_layers_installed`] 链式 helper 把
+    ///     `workspace_root` 指到真仓库根，让 `load_prompt_template_for_state*`
+    ///     命中 `prompts/layers/manifest.toml` 拼层 → fnv1a 输入与录制时一致。
     ///
     /// 仍待补的剩余工程：
-    ///   1. **prompt label 文件**：`normalize / classifier_direct / nl2cmd / chat`
-    ///      等是 prompt label（`crates/clawd/configs/prompts/*`），不是 skill。
-    ///      需要在测试初始化时调一次
-    ///      [`crate::bootstrap::prompts::install_prompt_layers_to_workspace`]
-    ///      把 layered prompts 落到 `state.skill_rt.workspace_root` 下，让
-    ///      `process_ask_task` 拼 prompt 时找得到模板；
-    ///   2. **channel mock**：`channels.telegram_bot_token` 留空 + `channel_send.rs`
+    ///   1. **channel mock**：`channels.telegram_bot_token` 留空 + `channel_send.rs`
     ///      在 test 配置下走 in-memory 收集，不去 hit 任何 HTTP；
-    ///   3. **DB schema seed**：`db_init::test_pool` 已建表，但 `tasks` 行需要
+    ///   2. **DB schema seed**：`db_init::test_pool` 已建表，但 `tasks` 行需要
     ///      先 insert 一条对应 `task.task_id` 的记录，否则 finalize 的 audit
     ///      写入会 FK 失败；
-    ///   4. **每个 case 目录下 commit `expected.json`**：含 `user_text` /
+    ///   3. **每个 case 目录下 commit `expected.json`**：含 `user_text` /
     ///      `expected_final_answer_contains` / `expected_llm_call_count` /
     ///      `expected_prompt_sources` / `expected_verifier_verdict` /
     ///      `expected_fallback_source` 字段；
-    ///   5. 删掉本测试的 `#[ignore]`。
+    ///   4. 删掉本测试的 `#[ignore]`。
     #[tokio::test]
-    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 已落地，等 1-5 项就绪再启用"]
+    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 / 4.b.2.2 已落地，等 1-4 项就绪再启用"]
     async fn e2e_per_case_replay_with_process_ask_task() {
         // 见上方 doc。
     }
