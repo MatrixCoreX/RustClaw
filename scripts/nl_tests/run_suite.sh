@@ -263,6 +263,64 @@ run_mode_clarify_context_prompt() {
 
 FILTERED_SUITE_ARGS=()
 
+suite_accepts_value_option() {
+  local suite="$1"
+  local option="$2"
+  case "$option" in
+    --base-url|--user-id|--chat-id|--user-key)
+      case "$suite" in
+        manual|text_match|full|trace|resume|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+          return 0
+          ;;
+      esac
+      ;;
+    --wait-seconds)
+      case "$suite" in
+        manual|text_match|full|trace|resume|self_extension|sensitive_flows|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+          return 0
+          ;;
+      esac
+      ;;
+    --poll-seconds)
+      case "$suite" in
+        manual|text_match|full|trace|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+          return 0
+          ;;
+      esac
+      ;;
+    --provider-retries|--provider-retry-sleep)
+      case "$suite" in
+        manual|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+          return 0
+          ;;
+      esac
+      ;;
+  esac
+  return 1
+}
+
+suite_accepts_flag_option() {
+  local suite="$1"
+  local option="$2"
+  case "$option" in
+    --no-llm-trace)
+      case "$suite" in
+        manual|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+          return 0
+          ;;
+      esac
+      ;;
+    --reuse-chat-id-base)
+      case "$suite" in
+        manual|text_match|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+          return 0
+          ;;
+      esac
+      ;;
+  esac
+  return 1
+}
+
 filter_pass_through_for_suite() {
   local suite="$1"
   shift
@@ -271,38 +329,20 @@ filter_pass_through_for_suite() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --base-url|--user-id|--chat-id|--wait-seconds)
-        FILTERED_SUITE_ARGS+=("$1")
-        if [[ $# -ge 2 ]]; then
-          FILTERED_SUITE_ARGS+=("$2")
+      --base-url|--user-id|--chat-id|--user-key|--wait-seconds|--poll-seconds|--provider-retries|--provider-retry-sleep)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for $1" >&2
+          exit 2
+        fi
+        if suite_accepts_value_option "$suite" "$1"; then
+          FILTERED_SUITE_ARGS+=("$1" "$2")
         fi
         shift 2
         ;;
-      --provider-retries|--provider-retry-sleep)
-        case "$suite" in
-          manual|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard)
-            FILTERED_SUITE_ARGS+=("$1")
-            if [[ $# -ge 2 ]]; then
-              FILTERED_SUITE_ARGS+=("$2")
-            fi
-            ;;
-        esac
-        shift 2
-        ;;
-      --no-llm-trace)
-        case "$suite" in
-          manual|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard)
-            FILTERED_SUITE_ARGS+=("$1")
-            ;;
-        esac
-        shift
-        ;;
-      --reuse-chat-id-base)
-        case "$suite" in
-          clarify|clarify_hard|context_chain|dynamic_guard)
-            FILTERED_SUITE_ARGS+=("$1")
-            ;;
-        esac
+      --no-llm-trace|--reuse-chat-id-base)
+        if suite_accepts_flag_option "$suite" "$1"; then
+          FILTERED_SUITE_ARGS+=("$1")
+        fi
         shift
         ;;
       *)

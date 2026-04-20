@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Regression: failed multi-step ask should emit resume_context,
 # and follow-up "continue" message should trigger LLM-based resume path.
 #
 # Usage:
-#   bash scripts/regression_resume_continue.sh [--base-url URL] [--user-id ID] [--chat-id ID] [--wait-seconds N]
+#   bash scripts/regression_resume_continue.sh [--base-url URL] [--user-id ID] [--chat-id ID] [--user-key KEY] [--wait-seconds N]
 
 BASE_URL="${BASE_URL:-}"
 USER_ID="${USER_ID:-}"
 CHAT_ID="${CHAT_ID:-}"
+USER_KEY="${RUSTCLAW_USER_KEY:-${USER_KEY:-}}"
 WAIT_SECONDS="${WAIT_SECONDS:-120}"
 POLL_INTERVAL="${POLL_INTERVAL:-1}"
 
@@ -18,6 +21,17 @@ need_cmd() {
     echo "Missing command: $1"
     exit 2
   }
+}
+
+resolve_admin_key() {
+  if [[ -n "${USER_KEY:-}" ]]; then
+    return 0
+  fi
+  USER_KEY="$("${ROOT_DIR}/scripts/auth-key.sh" list | awk '$2 == "admin" && $3 == "enabled" { print $1; exit }')"
+  if [[ -z "${USER_KEY:-}" ]]; then
+    echo "No enabled admin key found. Pass --user-key explicitly." >&2
+    exit 2
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -32,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --chat-id)
       CHAT_ID="${2:-}"
+      shift 2
+      ;;
+    --user-key)
+      USER_KEY="${2:-}"
       shift 2
       ;;
     --wait-seconds)
@@ -52,6 +70,8 @@ done
 need_cmd curl
 need_cmd jq
 need_cmd python3
+
+resolve_admin_key
 
 if [[ -z "$USER_ID" || -z "$CHAT_ID" ]]; then
   read -r default_user_id default_chat_id < <(
@@ -86,13 +106,17 @@ submit_ask() {
     --argjson user_id "$USER_ID" \
     --argjson chat_id "$CHAT_ID" \
     --arg text "$text" \
+    --arg user_key "$USER_KEY" \
     '{
       user_id: $user_id,
       chat_id: $chat_id,
       kind: "ask",
       payload: { text: $text, agent_mode: true }
-    }' \
-  | curl -sS -X POST "${BASE_URL}/v1/tasks" -H "Content-Type: application/json" -d @-
+    } + (if ($user_key | length) > 0 then { user_key: $user_key } else {} end)' \
+  | curl -sS -X POST "${BASE_URL}/v1/tasks" \
+      -H "Content-Type: application/json" \
+      -H "X-RustClaw-Key: ${USER_KEY}" \
+      -d @-
 }
 
 poll_terminal() {
@@ -100,7 +124,7 @@ poll_terminal() {
   local waited=0
   while [[ "$waited" -le "$WAIT_SECONDS" ]]; do
     local row status
-    row="$(curl -sS "${BASE_URL}/v1/tasks/${task_id}")"
+    row="$(curl -sS -H "X-RustClaw-Key: ${USER_KEY}" "${BASE_URL}/v1/tasks/${task_id}")"
     status="$(echo "$row" | jq -r '.data.status // ""')"
     case "$status" in
       succeeded|failed|timeout|canceled)
