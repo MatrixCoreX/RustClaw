@@ -620,19 +620,118 @@ mod tests {
         );
     }
 
-    /// §7.5 Step 4.b（待 Step 2.c 录完 + process_ask_task minimal AppState 落地）：
-    /// 真正的端到端 e2e harness。当前只是占位 + 文档，提醒后续工作。
+    /// §7.5 Step 4.b.1：验证 [`AppState::test_default_with_fixture_provider`]
+    /// 装出来的 state，**通过生产路径** [`AppState::task_llm_providers`] 取 provider
+    /// 列表 → 经 [`PROVIDER_IMPLS`] 这条生产分发表 → 命中 fixture，全链路通。
+    ///
+    /// 区别于 [`step2a_self_check_e2e_wiring_through_provider_impls`]：那条测试
+    /// 直接 `build_fixture_replay_runtime("vendor-fixture-self-check")` 自己
+    /// 攒 runtime 调起来，**不**经 `AppState`；本测试走 `AppState` 真路径，
+    /// 保证未来 `process_ask_task` harness 拿到的 provider 列表里**真的有**
+    /// fixture replay。
+    ///
+    /// 任何一环坏（helper 没装 provider / agent_runtime 把 provider 吞了 /
+    /// task_llm_providers 走错分支），本测试会挂；这是 Step 4.b 真 e2e harness
+    /// 的入口前置 self-check。
     #[tokio::test]
-    #[ignore = "Step 4.b 占位：等 process_ask_task minimal AppState helper 落地后再启用"]
+    async fn step4b1_self_check_appstate_with_fixture_provider_routes_through_task() {
+        let _guard = fixture_env_lock();
+        clear_cache_for_test();
+
+        let root = fixture_workspace_root().join("__appstate_wiring");
+        let case = "task_routing";
+        let case_dir = root.join(case);
+        std::fs::create_dir_all(&case_dir).expect("mkdir appstate wiring case");
+
+        let prompt = "appstate-wired ping";
+        let hash = fnv1a_64_hex(prompt);
+        let rec = RecordedCall {
+            prompt_hash: hash.clone(),
+            prompt_source: Some("appstate_wiring".to_string()),
+            prompt_preview: Some(prompt.to_string()),
+            clean_response: "appstate-wired pong".to_string(),
+            raw_response: None,
+            usage: None,
+        };
+        std::fs::write(
+            case_dir.join(FIXTURE_CALLS_FILENAME),
+            serde_json::to_string(&rec).unwrap(),
+        )
+        .expect("write appstate wiring fixture");
+
+        let env = FixtureEnvGuard::install(&root, case, "2026-04-19T12:00:00+08:00");
+
+        let state = crate::AppState::test_default_with_fixture_provider();
+        assert_eq!(
+            state.core.active_provider_type.as_deref(),
+            Some(FIXTURE_REPLAY_PROVIDER_TYPE),
+            "AppState helper must set active_provider_type so call sites that branch \
+             on provider_type pick up fixture_replay"
+        );
+
+        // 走 ClaimedTask → task_llm_providers 真路径，保证生产分支里
+        // 没有偷偷 fallback 到一条空 provider 列表。
+        let task = crate::ClaimedTask {
+            task_id: "task-step4b1".to_string(),
+            user_id: 1,
+            chat_id: 1,
+            user_key: None,
+            channel: "ui".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: serde_json::json!({}).to_string(),
+        };
+        let providers = state.task_llm_providers(&task);
+        assert_eq!(
+            providers.len(),
+            1,
+            "expected exactly 1 fixture provider, got {}",
+            providers.len()
+        );
+        assert_eq!(providers[0].config.provider_type, FIXTURE_REPLAY_PROVIDER_TYPE);
+
+        let dispatch = PROVIDER_IMPLS
+            .iter()
+            .find(|p| p.name() == providers[0].config.provider_type)
+            .expect("PROVIDER_IMPLS must dispatch fixture_replay");
+        let resp = dispatch
+            .call(
+                providers[0].clone(),
+                prompt.to_string(),
+                ChatRequestHints::default(),
+            )
+            .await
+            .expect("AppState-routed fixture call must hit");
+        assert_eq!(resp.text, "appstate-wired pong");
+        assert_eq!(resp.request_payload["prompt_hash"], hash);
+
+        drop(env);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// §7.5 Step 4.b.2（待 SkillsRegistry / prompts / channel 桩到位）：真正驱动
+    /// [`crate::worker::process_ask_task`] 的端到端 harness。当前只是占位 + 文档。
+    ///
+    /// Step 4.b.1（本文件 [`step4b1_self_check_appstate_with_fixture_provider_routes_through_task`]）
+    /// 已经把"AppState 装得起 fixture provider，task_llm_providers 取得到，
+    /// PROVIDER_IMPLS 命中"这条入口固定下来。剩下的工程量在：
+    ///   1. SkillsRegistry：minimal builtin-only 注册表（含 normalize / chat /
+    ///      classifier_direct / nl2cmd 的 prompt_file 路径）；
+    ///   2. prompts：把 `crates/clawd/configs/prompts/*` 用 [`crate::bootstrap::prompts`]
+    ///      在测试初始化时 install 一次，让 hot reload 路径不必触发；
+    ///   3. channel mock：`channels.telegram_bot_token` 留空 + `channel_send.rs`
+    ///      在 test 配置下走 in-memory 收集，不去 hit 任何 HTTP；
+    ///   4. DB schema：`db_init::test_pool` 已建表，但 `tasks` 行需要先 insert
+    ///      一条对应 `task.task_id` 的记录，否则 finalize 的 audit 写入会 FK 失败；
+    ///   5. 每个 case 目录下 commit `expected.json`：含 user_text /
+    ///      expected_final_answer_contains / expected_llm_call_count /
+    ///      expected_prompt_sources / expected_verifier_verdict /
+    ///      expected_fallback_source 字段；
+    ///   6. 删掉本测试的 `#[ignore]`。
+    #[tokio::test]
+    #[ignore = "Step 4.b.2 占位：4.b.1 已落地，等 1-6 工程项就绪再启用"]
     async fn e2e_per_case_replay_with_process_ask_task() {
-        // 设计参考 fixture_replay_e2e.rs 顶部 "录制 → 回放 工作流" doc。
-        // 启用前置：
-        //   1. crates/clawd/src/runtime/state.rs 加 minimal AppState helper（DB
-        //      pool / SkillsRegistry / prompts / channels 全部最小可用），
-        //   2. 每个 case 目录下 commit `expected.json`：含 user_text /
-        //      expected_final_answer_contains / expected_llm_call_count /
-        //      expected_prompt_sources / expected_verifier_verdict /
-        //      expected_fallback_source 字段，
-        //   3. 删掉本测试的 #[ignore]。
+        // 见上方 doc。
     }
 }

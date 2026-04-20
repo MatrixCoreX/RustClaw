@@ -121,6 +121,29 @@ impl CoreServices {
             active_provider_type: None,
         }
     }
+
+    /// §7.5 Step 4.b.1：与 [`Self::test_default`] 等价，但 `llm_providers` 装一条
+    /// `fixture_replay` runtime（`vendor-fixture-test`）、`active_provider_type`
+    /// 设为 `"fixture_replay"`。
+    ///
+    /// 用途：未来覆盖 `process_ask_task` 的真 e2e harness 装 `AppState` 时直接
+    /// 调 [`AppState::test_default_with_fixture_provider`]，省掉重复"new provider
+    /// runtime + 塞进 Vec + 改 active_provider_type"三连。
+    ///
+    /// **必须配合** [`crate::fixture_replay_e2e::FixtureEnvGuard`] 才能让 provider
+    /// 真的命中 fixture：guard 负责 set `RUSTCLAW_FIXTURE_LLM_ROOT` /
+    /// `RUSTCLAW_FIXTURE_CASE`，本 helper 只负责"把 provider 装进 AppState"。
+    #[cfg(test)]
+    pub(crate) fn test_default_with_fixture_provider() -> Self {
+        let mut base = Self::test_default();
+        base.llm_providers = vec![
+            crate::providers::fixture_replay::build_fixture_replay_runtime("vendor-fixture-test"),
+        ];
+        base.active_provider_type = Some(
+            crate::providers::fixture_replay::FIXTURE_REPLAY_PROVIDER_TYPE.to_string(),
+        );
+        base
+    }
 }
 
 /// P2.1 Stage 2 — `SkillRuntime` 簇：技能链路 / 命令执行 / locator 相关参数。
@@ -486,6 +509,38 @@ impl AskStateRegistry {
 }
 
 impl AppState {
+    /// §7.5 Step 4.b.1：装一份完整 minimal `AppState`，所有子 struct 走 `test_default()`，
+    /// `core` 走 [`CoreServices::test_default_with_fixture_provider`] —— 即 LLM
+    /// provider 链路上有且只有一条 fixture replay。
+    ///
+    /// 不复用现有 `crates/clawd/src/skills.rs` 里那个 file-private `test_state`
+    /// helper：那个是 skills 模块自查时造的，留在原地与 skills 测试耦合；这里
+    /// 给 fixture-replay e2e harness 一份纯净版，避免互相牵动。
+    ///
+    /// **不**初始化任何 schema / 不写任何表 / 不预 install SkillsRegistry —— 它
+    /// 只保证：
+    ///   * `state.task_llm_providers(&task)` 能拿到 fixture provider；
+    ///   * `state.policy.persona_prompt` 是空串 +
+    ///     `state.policy.routing` / `state.policy.maintenance` 走默认值；
+    ///   * 所有 metrics 桶可写不可坏。
+    ///
+    /// 真正跑 [`crate::worker::process_ask_task`] 还要补 SkillsRegistry / prompts
+    /// / channel mock 等 —— 见 [`crate::fixture_replay_e2e`] 模块顶部 doc 列出的
+    /// "Step 4.b 前置清单"。
+    #[cfg(test)]
+    pub(crate) fn test_default_with_fixture_provider() -> Self {
+        Self {
+            core: CoreServices::test_default_with_fixture_provider(),
+            skill_rt: SkillRuntime::test_default(),
+            policy: PolicyConfig::test_default(),
+            worker: WorkerConfig::test_default(),
+            metrics: TaskMetricsRegistry::default(),
+            channels: ChannelConfig::default(),
+            reload_ctx: ReloadContext::default(),
+            ask_states: AskStateRegistry::default(),
+        }
+    }
+
     fn snapshot(&self) -> Arc<SkillViewsSnapshot> {
         self.core.skill_views_snapshot.read().unwrap().clone()
     }
