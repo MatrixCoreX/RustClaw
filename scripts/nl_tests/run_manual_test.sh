@@ -586,7 +586,15 @@ case_name = sys.argv[2]
 tags = sys.argv[3]
 prompt = sys.argv[4]
 task_id = sys.argv[5]
-obj = json.loads(Path(sys.argv[6]).read_text(encoding="utf-8")) if Path(sys.argv[6]).exists() else {}
+# 当 submit_task 在网络层就失败时，调用方会传空字符串作为 final_json 路径。
+# 注意 Path("") == Path(".") 且 .exists() 在当前目录下恒为 True，但 .read_text()
+# 会立刻抛 IsADirectoryError。这里统一用 is_file() + 非空判断兜底。
+final_json_arg = sys.argv[6]
+final_json_path = Path(final_json_arg) if final_json_arg else None
+if final_json_path is not None and final_json_path.is_file():
+    obj = json.loads(final_json_path.read_text(encoding="utf-8"))
+else:
+    obj = {}
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
 effective_status = (sys.argv[7] or "").strip()
