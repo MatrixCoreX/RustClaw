@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use tracing::warn;
 
 use super::anthropic_usage_snapshot;
-use super::client::{ChatRequestHints, LlmProviderResponse, ProviderError};
+use super::client::{is_quota_exhausted_429, ChatRequestHints, LlmProviderResponse, ProviderError};
 use crate::LlmProviderRuntime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +107,26 @@ pub(super) async fn call_anthropic_claude(
         ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
     })?;
 
-    if status.as_u16() == 429 || status.is_server_error() {
+    if status.as_u16() == 429 {
+        let err = if is_quota_exhausted_429(&body_text) {
+            ProviderError::quota_exhausted_with_response(
+                format!("http {}: {}", status.as_u16(), body_text),
+                req_body.clone(),
+                body_text,
+                None,
+            )
+        } else {
+            ProviderError::rate_limited_with_response(
+                format!("http {}: {}", status.as_u16(), body_text),
+                req_body.clone(),
+                body_text,
+                None,
+            )
+        };
+        return Err(err);
+    }
+
+    if status.is_server_error() {
         return Err(ProviderError::retryable_with_response(
             format!("http {}: {}", status.as_u16(), body_text),
             req_body.clone(),

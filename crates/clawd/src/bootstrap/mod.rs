@@ -13,5 +13,5 @@ pub(crate) use prompts::{
     active_prompt_vendor_name, load_persona_prompt, load_prompt_template_for_state,
     load_prompt_template_for_state_with_meta, load_prompt_template_for_vendor,
     log_prompt_validation_report, reload_runtime_prompts, resolve_prompt_rel_path_for_vendor,
-    validate_core_prompts,
+    strict_prompt_validation_error, validate_core_prompts,
 };

@@ -572,8 +572,8 @@ impl Default for WorkerConfig {
             poll_interval_ms: default_worker_poll_interval_ms(),
             queue_limit: default_worker_queue_limit(),
             task_heartbeat_seconds: default_worker_task_heartbeat_seconds(),
-            running_no_progress_timeout_seconds:
-                default_worker_running_no_progress_timeout_seconds(),
+            running_no_progress_timeout_seconds: default_worker_running_no_progress_timeout_seconds(
+            ),
             running_recovery_check_interval_seconds:
                 default_worker_running_recovery_check_interval_seconds(),
         }
@@ -1237,12 +1237,18 @@ impl Default for ScheduleConfig {
 ///   - 默认 true：本地开发体验佳（编辑 → kill -HUP → 下一次 LLM 调用即生效）。
 ///   - 生产环境若希望显式禁用 SIGHUP 行为（例如 systemd 用 SIGHUP 做 reload
 ///     其它资源），可显式设为 false。
+/// - `strict_validation_at_startup`：启动时若核心 prompt 只能退回到 embedded
+///   `include_str!` 常量，是否直接拒绝启动。
+///   - 默认 false：兼容当前 warn-only 行为。
+///   - 生产环境建议显式打开，避免部署漏带 `prompts/` 树时静默跑旧模板。
 /// - `config_path`：reload 时重读的 config 文件路径。默认与 clawd 启动相同：
 ///   `configs/config.toml`。允许覆盖以适配多套 config 共存的部署。
 #[derive(Debug, Clone, Deserialize)]
 pub struct PromptsConfig {
     #[serde(default = "default_prompts_reload_on_sighup")]
     pub reload_on_sighup: bool,
+    #[serde(default)]
+    pub strict_validation_at_startup: bool,
     #[serde(default = "default_prompts_config_path")]
     pub config_path: String,
 }
@@ -1251,6 +1257,7 @@ impl Default for PromptsConfig {
     fn default() -> Self {
         Self {
             reload_on_sighup: default_prompts_reload_on_sighup(),
+            strict_validation_at_startup: false,
             config_path: default_prompts_config_path(),
         }
     }
