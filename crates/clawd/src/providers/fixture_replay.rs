@@ -261,13 +261,13 @@ pub(crate) fn clear_cache_for_test() {
 /// 出来，slim 行没 prompt / response 也没办法回放。
 ///
 /// **截断检测**（convert_* 拒绝两类行）：
-///   * 缺 `prompt_hash` 字段 —— 老版本 clawd 写的日志，prompt 被截断后无法反算
-///     hash。必须升级到含 §7.5 Step 2.b 的 clawd 重新录制。
+///   * 缺 `prompt_hash` 字段 —— 老版本 clawd 写的日志，prompt 可能被截断后无法
+///     反算 hash。必须升级到含 §7.5 Step 2.b 的 clawd 重新录制。
 ///   * `clean_response` 末尾出现 `...(truncated)` —— 响应被
 ///     [`crate::log_utils::truncate_for_log`] 截到 [`crate::MODEL_IO_LOG_MAX_CHARS`]
-///     字符。回放时把截断后的字符串当 LLM 输出会让下游 parser 在结尾意外失败。
-///     这种情况极少（chat/normalizer/planner 的输出一般都 < 5000 字符），如果
-///     真的撞上，应在 prompt 端做减肥，不能装作没事。
+///     字符（§7.5 把阈值抬到 128_000，所以正常 chat/normalizer/planner 输出
+///     不会再触发；这条仍保留作为"读旧日志"或"未来某天 prompt 又膨胀回来"的
+///     fail-loud 兜底，不能让被截断的字符串当 LLM 输出喂下游 parser）。
 ///
 /// **去重策略**：同一个 `prompt_hash` 在日志里出现多次时，**保留最后一次**
 /// （最贴近"现网当前行为"）。若需切到 first 策略，调用方可在拿到 Vec 后自己
@@ -865,6 +865,19 @@ mod tests {
     }
 
     // ---------- back to convert_* edge cases ----------
+
+    /// §7.5 抬阈值后回归保护：模型 io 日志阈值不能再回到 16K。
+    /// 16K 会让 normalizer prompt（典型 15~30 KB）被截断，prompt_hash 虽然落了
+    /// 但 prompt_preview 看不全，长 response 也直接拒录。
+    #[test]
+    fn model_io_log_max_chars_must_stay_at_or_above_128k() {
+        assert!(
+            crate::MODEL_IO_LOG_MAX_CHARS >= 128_000,
+            "MODEL_IO_LOG_MAX_CHARS regressed below 128K (now {}); \
+             fixture recording for normal-sized cases will start hitting the truncated guard",
+            crate::MODEL_IO_LOG_MAX_CHARS
+        );
+    }
 
     #[test]
     fn convert_fails_when_response_was_truncated() {
