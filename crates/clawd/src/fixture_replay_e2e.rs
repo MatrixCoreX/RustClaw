@@ -94,6 +94,76 @@ pub(crate) fn fixture_env_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|e| e.into_inner())
 }
 
+/// §7.5 Step 4.a：一个已录 case 的内存视图 —— 路径 + 全部 [`RecordedCall`]。
+///
+/// `case`：fixture root 下的子目录名。约定子目录名以**字母数字**开头：`_`
+/// 起头的目录视为"内部 / 临时"（self-check / regen smoke 等），扫描器主动跳过。
+pub(crate) struct LoadedCase {
+    pub case: String,
+    pub calls_path: std::path::PathBuf,
+    pub records: Vec<crate::providers::fixture_replay::RecordedCall>,
+}
+
+/// §7.5 Step 4.a：扫描 fixture root 下所有"真 case"目录（跳过 `_*`），把每个
+/// case 的 `calls.jsonl` 整体读进内存。用在批量 smoke harness 与未来
+/// process_ask_task 端到端 harness 里，避免散落的 fs 路径拼接。
+///
+/// 失败语义：fixture root 不存在 → 返回空 Vec（用户还没录任何 case 是合法
+/// 状态）；某个 case 的 calls.jsonl 解析挂了 → `Err`（fixture 数据坏不能装作没事）。
+pub(crate) fn load_recorded_cases() -> Result<Vec<LoadedCase>, String> {
+    use crate::providers::fixture_replay::{RecordedCall, FIXTURE_CALLS_FILENAME};
+    let root = fixture_workspace_root();
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    let entries = std::fs::read_dir(&root)
+        .map_err(|e| format!("read fixture root {} failed: {e}", root.display()))?;
+    let mut sorted_dirs: Vec<std::path::PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    sorted_dirs.sort();
+    for case_dir in sorted_dirs {
+        let case_name = match case_dir.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        if case_name.starts_with('_') || case_name.starts_with('.') {
+            continue;
+        }
+        let calls_path = case_dir.join(FIXTURE_CALLS_FILENAME);
+        if !calls_path.exists() {
+            // case 目录里没有 calls.jsonl —— 视为"目录占位但还没录"，跳过而不报错。
+            continue;
+        }
+        let body = std::fs::read_to_string(&calls_path)
+            .map_err(|e| format!("read {} failed: {e}", calls_path.display()))?;
+        let mut records = Vec::new();
+        for (line_idx, line) in body.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let rec: RecordedCall = serde_json::from_str(trimmed).map_err(|e| {
+                format!(
+                    "{}:{} parse RecordedCall failed: {e}",
+                    calls_path.display(),
+                    line_idx + 1
+                )
+            })?;
+            records.push(rec);
+        }
+        out.push(LoadedCase {
+            case: case_name,
+            calls_path,
+            records,
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,70 +437,202 @@ mod tests {
         );
     }
 
-    /// Step 2.b 留下的真 case skeleton：等用户在本地按模块顶部"录制 → 回放
-    /// 工作流"录完 `act_find_service_file` 把 fixture 落进
-    /// `crates/clawd/tests/fixtures/llm_io/act_find_service_file/calls.jsonl`
-    /// 后，删掉本测试上方的 `#[ignore]` 即可启用。
+    /// §7.5 Step 4.a：扫所有已录 case 做 schema + best-effort 命中验证。
     ///
-    /// 当前为 `#[ignore]`：
-    ///   * 没人录的时候跑会必 miss（fixture 文件不存在），让 CI 必绿;
-    ///   * `cargo test -- --ignored` 一键看哪些 case 还没录;
-    ///   * 一旦 unignore 跑通，就为后续 8 条 case 提供模板。
+    /// **不带 `#[ignore]`，CI 一直跑** —— 没录任何 case 时会通过并打印
+    /// "no recorded cases yet"。一旦你 commit 了任何 `<case>/calls.jsonl`，
+    /// 本测试自动覆盖它，无需为每条 case 单独写 `#[test]`。
     ///
-    /// 真 case 的完整 e2e（含 `process_ask_task` 端到端）在 Step 2.c+ 落地。
-    /// 此 skeleton 当前只验证：fixture 文件存在 + 通过 PROVIDER_IMPLS 能命中
-    /// "至少一条已录的 prompt"，作为录制是否成功的最快冒烟。
+    /// 每个 case 的检查：
+    ///   1. **Schema 完整性**：每条 record 能反序列化成 [`RecordedCall`]，
+    ///      `prompt_hash` 长度 16 hex 字符（FNV-1a），`clean_response` 非空。
+    ///   2. **Hash 唯一性**：同一 `calls.jsonl` 内 `prompt_hash` 不重复
+    ///      （重复说明 [`convert_model_io_log_to_fixture`] 的 dedup 出了问题，
+    ///      或者录制阶段 prompt 漂移）。
+    ///   3. **Best-effort 命中**：把每条 `prompt_preview` 当 prompt 喂回 fixture
+    ///      provider —— preview 没被截断（§7.5 抬到 128K 后正常 prompt 都不会
+    ///      截）时 hash 一致，必命中；preview 被截断时报 miss，统计为
+    ///      `preview_drift`，**不**算 fail。这是"fixture 内容能被 PROVIDER_IMPLS
+    ///      正确分发"的最低烟雾，端到端命中率由 Step 4.b 的 process_ask_task
+    ///      harness 覆盖。
+    ///   4. **总耗时**：所有 case 加起来 < 1 秒（schema 检查纯 in-memory；
+    ///      网络 / DB 都不该在路径上）。
+    ///
+    /// 输出 dashboard（`--nocapture` 可见）：
+    /// ```text
+    /// fixture-replay smoke dashboard:
+    ///   act_find_service_file       :  7 records, 7 hit, 0 drift, 0.4 ms
+    ///   chat_simple_hello           :  3 records, 2 hit, 1 drift, 0.2 ms
+    /// total: 2 cases, 10 records, 9 hit, 1 drift, 0.6 ms
+    /// ```
     #[tokio::test]
-    #[ignore = "需要先按 module-level doc 的 '录制 → 回放工作流' 录入 fixture"]
-    async fn e2e_act_find_service_file_replay_smoke() {
+    async fn batch_replay_smoke_all_recorded_cases() {
         let _guard = fixture_env_lock();
         clear_cache_for_test();
 
-        let case = "act_find_service_file";
-        let root = fixture_workspace_root();
-        let calls_path = root.join(case).join(FIXTURE_CALLS_FILENAME);
-        assert!(
-            calls_path.exists(),
-            "fixture missing: {} —— 按 module-level doc 录制后再 unignore",
-            calls_path.display()
-        );
+        let cases = load_recorded_cases().expect("load recorded cases");
+        if cases.is_empty() {
+            eprintln!(
+                "fixture-replay smoke: no recorded cases yet under {} — \
+                 see scripts/regen_fixture.sh to record one.",
+                fixture_workspace_root().display()
+            );
+            return;
+        }
 
-        // 读出第一条 RecordedCall，作为"至少一条 prompt 能命中"的冒烟样本。
-        let body = std::fs::read_to_string(&calls_path).expect("read fixture");
-        let first_line = body
-            .lines()
-            .find(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
-            .expect("fixture must have at least one record");
-        let rec: RecordedCall = serde_json::from_str(first_line).expect("parse first record");
-
-        let env = FixtureEnvGuard::install(&root, case, "2026-04-19T12:00:00+08:00");
         let provider = PROVIDER_IMPLS
             .iter()
             .find(|p| p.name() == FIXTURE_REPLAY_PROVIDER_TYPE)
             .expect("fixture_replay registered");
-        let runtime = build_fixture_replay_runtime("vendor-fixture-act-find-service-file");
 
-        // 我们没法重建出原始 prompt 字符串（只有 hash），所以只能间接验证：
-        // 把 prompt_preview 当 prompt 喂回去，断言报 miss（说明 dispatcher 走通了，
-        // 只是因为 preview 被截断后 hash 不同而已）；这是录制 fixture 文件
-        // 完整性的最低烟雾。完整 e2e 在 Step 2.c 通过 process_ask_task 端到端验证。
-        let preview = rec.prompt_preview.unwrap_or_else(|| "<no preview>".to_string());
-        let r = provider
-            .call(runtime, preview, ChatRequestHints::default())
-            .await;
-        match r {
-            Ok(_) => {
-                // 命中也行（preview 没被截断时 hash 一致）。
-            }
-            Err(e) => {
+        let mut total_records = 0usize;
+        let mut total_hit = 0usize;
+        let mut total_drift = 0usize;
+        let total_start = std::time::Instant::now();
+        let mut per_case_lines = Vec::new();
+
+        for loaded in &cases {
+            let case = &loaded.case;
+            assert!(
+                !loaded.records.is_empty(),
+                "case {case} has empty calls.jsonl ({} records, expected >= 1) — \
+                 if this is a placeholder, name the directory `_<case>` to skip the scan",
+                loaded.records.len()
+            );
+
+            // 1) Schema 完整性
+            for (idx, rec) in loaded.records.iter().enumerate() {
+                let path = loaded.calls_path.display();
+                assert_eq!(
+                    rec.prompt_hash.len(),
+                    16,
+                    "{path} record #{idx}: prompt_hash must be FNV-1a 64-bit hex \
+                     (16 chars), got len={}",
+                    rec.prompt_hash.len()
+                );
                 assert!(
-                    e.message.contains("fixture_replay miss"),
-                    "expected miss-style err, got: {}",
-                    e.message
+                    rec.prompt_hash.chars().all(|c| c.is_ascii_hexdigit()),
+                    "{path} record #{idx}: prompt_hash must be lowercase hex, got {:?}",
+                    rec.prompt_hash
+                );
+                assert!(
+                    !rec.clean_response.is_empty(),
+                    "{path} record #{idx}: clean_response must not be empty (status=ok \
+                     records always carry response text)"
                 );
             }
+
+            // 2) Hash 唯一性
+            let mut seen = std::collections::HashSet::new();
+            for rec in &loaded.records {
+                assert!(
+                    seen.insert(rec.prompt_hash.clone()),
+                    "{}: prompt_hash {} appears more than once — convert_* dedup \
+                     should have collapsed these; possible re-record drift",
+                    loaded.calls_path.display(),
+                    rec.prompt_hash,
+                );
+            }
+
+            // 3) Best-effort 命中：env 切到本 case，逐条用 preview 喂回去。
+            let case_start = std::time::Instant::now();
+            let env = FixtureEnvGuard::install(
+                &fixture_workspace_root(),
+                case,
+                "2026-04-19T12:00:00+08:00",
+            );
+            let runtime =
+                build_fixture_replay_runtime(&format!("vendor-fixture-{case}"));
+            let mut hit = 0usize;
+            let mut drift = 0usize;
+            for rec in &loaded.records {
+                let preview = match rec.prompt_preview.clone() {
+                    Some(p) if !p.is_empty() => p,
+                    _ => {
+                        // 没 preview / preview 空 —— 无法做 best-effort 命中，
+                        // 直接计入 drift。
+                        drift += 1;
+                        continue;
+                    }
+                };
+                match provider
+                    .call(runtime.clone(), preview, ChatRequestHints::default())
+                    .await
+                {
+                    Ok(resp) => {
+                        assert_eq!(
+                            resp.text, rec.clean_response,
+                            "preview hit but returned different clean_response for \
+                             case={case} hash={}",
+                            rec.prompt_hash
+                        );
+                        hit += 1;
+                    }
+                    Err(e) => {
+                        // 必须是 miss-style 错（dispatcher 通了，只是 hash 对不上），
+                        // 不能是其它系统错（env 没 set / 文件不存在 / etc.）。
+                        assert!(
+                            e.message.contains("fixture_replay miss"),
+                            "case={case} unexpected provider error: {}",
+                            e.message
+                        );
+                        drift += 1;
+                    }
+                }
+            }
+            drop(env);
+
+            let case_ms = case_start.elapsed().as_secs_f64() * 1000.0;
+            total_records += loaded.records.len();
+            total_hit += hit;
+            total_drift += drift;
+            per_case_lines.push(format!(
+                "  {case:<32}: {n:>3} records, {h:>3} hit, {d:>3} drift, {ms:>5.1} ms",
+                case = case,
+                n = loaded.records.len(),
+                h = hit,
+                d = drift,
+                ms = case_ms,
+            ));
         }
 
-        drop(env);
+        let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+        eprintln!("fixture-replay smoke dashboard:");
+        for line in &per_case_lines {
+            eprintln!("{line}");
+        }
+        eprintln!(
+            "total: {} cases, {} records, {} hit, {} drift, {:.1} ms",
+            cases.len(),
+            total_records,
+            total_hit,
+            total_drift,
+            total_ms
+        );
+
+        // 4) 整批 schema + smoke < 1 秒。process_ask_task 端到端有自己的 5s 预算，
+        // 这里只盯纯 in-memory 的部分。
+        assert!(
+            total_ms < 1_000.0,
+            "batch_replay_smoke total {:.1} ms exceeds 1s budget — fixture growth \
+             or non-trivial work crept into the smoke path",
+            total_ms,
+        );
+    }
+
+    /// §7.5 Step 4.b（待 Step 2.c 录完 + process_ask_task minimal AppState 落地）：
+    /// 真正的端到端 e2e harness。当前只是占位 + 文档，提醒后续工作。
+    #[tokio::test]
+    #[ignore = "Step 4.b 占位：等 process_ask_task minimal AppState helper 落地后再启用"]
+    async fn e2e_per_case_replay_with_process_ask_task() {
+        // 设计参考 fixture_replay_e2e.rs 顶部 "录制 → 回放 工作流" doc。
+        // 启用前置：
+        //   1. crates/clawd/src/runtime/state.rs 加 minimal AppState helper（DB
+        //      pool / SkillsRegistry / prompts / channels 全部最小可用），
+        //   2. 每个 case 目录下 commit `expected.json`：含 user_text /
+        //      expected_final_answer_contains / expected_llm_call_count /
+        //      expected_prompt_sources / expected_verifier_verdict /
+        //      expected_fallback_source 字段，
+        //   3. 删掉本测试的 #[ignore]。
     }
 }

@@ -151,6 +151,10 @@ fn get_or_load_table(
 /// §7.5 Step 3：[`regen_fixture_from_log`] 的执行摘要。返回给调用方
 /// （CLI / `scripts/regen_fixture.sh`）打印，让操作者一眼看清"写了几条 / 写到
 /// 哪 / 是不是 dry-run / 是不是覆盖"。
+///
+/// `#[cfg(test)]`：本类型仅在 `cargo test`（含 `regen_fixture_tool` 这条
+/// `--ignored` 入口）路径用，生产 bin 不引用。
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegenSummary {
     /// 写入（或 dry-run 模式下"将写入"）的 record 条数。
@@ -179,6 +183,10 @@ pub(crate) struct RegenSummary {
 /// **不**对 records 做任何 reorder / sort —— 保持
 /// `convert_model_io_log_to_fixture` 的"首次出现顺序，同 hash 留最后一次值"语义，
 /// 让 fixture 文件在不同录制之间 diff 友好。
+///
+/// `#[cfg(test)]`：本函数仅在 `cargo test`（含 `regen_fixture_tool` env-driven
+/// 入口）路径用，生产 bin 不调用，避免在 release 二进制里背一份 IO 落盘逻辑。
+#[cfg(test)]
 pub(crate) fn regen_fixture_from_log(
     log_text: &str,
     case: &str,
@@ -279,6 +287,10 @@ pub(crate) fn clear_cache_for_test() {
 ///     case 的录制"，错误路径有专门测试覆盖）。
 ///   * 空行 / 以 `#` 起头的注释行 / 解析失败的行：跳过，不算错。这与 fixture
 ///     文件读取语义保持一致（[`load_table_from_disk`]）。
+///
+/// `#[cfg(test)]`：本函数仅供 [`regen_fixture_from_log`] 与 e2e harness 调用，
+/// 生产 bin 不需要 model_io.log → fixture 的转换路径。
+#[cfg(test)]
 pub(crate) fn convert_model_io_log_to_fixture(
     log_text: &str,
 ) -> Result<Vec<RecordedCall>, String> {
