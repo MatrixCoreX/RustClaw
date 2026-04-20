@@ -909,18 +909,117 @@ mod tests {
     ///     全空字段让 `channel_send::send_*` 立即 short-circuit 不发 HTTP ——
     ///     无需 helper，只补一份契约守底测试。
     ///
+    ///   * 4.b.2.4（本文件 `step4b2_4_self_check_seeded_db_schema_and_task_row_round_trip`）：
+    ///     [`AppState::with_seeded_db_schema`] 链式 helper 在 `core.db` 上跑
+    ///     `INIT_SQL` + `ensure_memory_schema` + `ensure_channel_schema`；
+    ///     [`AppState::seed_ask_task_row`] 普通方法 INSERT 一条 `tasks` 行。
+    ///     先调研澄清：`migrations/001_init.sql` 不含 FK，`tasks` 行不在不会
+    ///     报错而是让所有 `UPDATE tasks ... WHERE task_id = ?` 静默 no-op，
+    ///     下游 `mark_running` / `record_result` 全部失效 → 必须 seed。
+    ///
     /// 仍待补的剩余工程：
-    ///   1. **DB schema seed**：`db_init::test_pool` 已建表，但 `tasks` 行需要
-    ///      先 insert 一条对应 `task.task_id` 的记录，否则 finalize 的 audit
-    ///      写入会 FK 失败；
-    ///   2. **每个 case 目录下 commit `expected.json`**：含 `user_text` /
+    ///   1. **每个 case 目录下 commit `expected.json`**：含 `user_text` /
     ///      `expected_final_answer_contains` / `expected_llm_call_count` /
     ///      `expected_prompt_sources` / `expected_verifier_verdict` /
     ///      `expected_fallback_source` 字段；
-    ///   3. 删掉本测试的 `#[ignore]`。
+    ///   2. 删掉本测试的 `#[ignore]`。
     #[tokio::test]
-    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 / 4.b.2.2 / 4.b.2.3 已落地，等 1-3 项就绪再启用"]
+    #[ignore = "Step 4.b.2 占位：4.b.1 / 4.b.2.1 / 4.b.2.2 / 4.b.2.3 / 4.b.2.4 已落地，等 1-2 项就绪再启用"]
     async fn e2e_per_case_replay_with_process_ask_task() {
         // 见上方 doc。
+    }
+
+    /// §7.5 Step 4.b.2.4 自检：
+    ///   * `AppState::with_seeded_db_schema` 真的在 `core.db` 建出 `tasks` /
+    ///     `users` / `memories` / `scheduled_jobs` 等基础表（用 `sqlite_master`
+    ///     探测）；
+    ///   * `AppState::seed_ask_task_row` INSERT 后能被 `crate::repo::tasks`
+    ///     的 `UPDATE tasks ... WHERE task_id = ?` 命中（行数 > 0）；
+    ///   * 同一 task_id 二次 seed 应 panic（PK 冲突），保证不会被悄悄"双
+    ///     seed"误用。
+    ///
+    /// 不调 `process_ask_task`，只验证 helper 自身契约 —— 真 e2e 留给被
+    /// `#[ignore]` 标记的 `e2e_per_case_replay_with_process_ask_task`。
+    #[tokio::test]
+    async fn step4b2_4_self_check_seeded_db_schema_and_task_row_round_trip() {
+        let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+
+        {
+            let conn = state.core.db.get().expect("acquire main-db conn");
+            let table_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN \
+                     ('users', 'tasks', 'audit_logs', 'memories', 'long_term_memories', 'scheduled_jobs')",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("count base tables");
+            assert_eq!(
+                table_count, 6,
+                "with_seeded_db_schema must create all 6 base tables, got {table_count}"
+            );
+
+            let mut stmt = conn
+                .prepare("PRAGMA table_info(tasks)")
+                .expect("prep PRAGMA tasks");
+            let cols: Vec<String> = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .expect("PRAGMA query")
+                .filter_map(|r| r.ok())
+                .collect();
+            drop(stmt);
+            for required in ["task_id", "user_id", "chat_id", "channel", "status"] {
+                assert!(
+                    cols.iter().any(|c| c.eq_ignore_ascii_case(required)),
+                    "tasks table missing column `{required}` after schema seed; got {cols:?}",
+                );
+            }
+        }
+
+        let task_id = "step4b2_4_round_trip_task_id";
+        state.seed_ask_task_row(task_id, 4242, 9090, "{}");
+
+        let row_count: i64 = state
+            .core
+            .db
+            .get()
+            .expect("acquire main-db conn")
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE task_id = ?1 AND status = 'queued'",
+                rusqlite::params![task_id],
+                |r| r.get(0),
+            )
+            .expect("count seeded task row");
+        assert_eq!(
+            row_count, 1,
+            "seed_ask_task_row must INSERT exactly one queued row for task_id `{task_id}`"
+        );
+
+        let updated = state
+            .core
+            .db
+            .get()
+            .expect("acquire main-db conn")
+            .execute(
+                "UPDATE tasks SET status = 'running', updated_at = '0' \
+                 WHERE task_id = ?1 AND status = 'queued'",
+                rusqlite::params![task_id],
+            )
+            .expect("dry-run mark_running UPDATE");
+        assert_eq!(
+            updated, 1,
+            "production-style `UPDATE tasks ... WHERE status = 'queued'` must hit the seeded row \
+             (rows updated, expected 1)",
+        );
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            state.seed_ask_task_row(task_id, 4242, 9090, "{}");
+        }))
+        .is_err();
+        assert!(
+            panicked,
+            "seed_ask_task_row must panic on PK collision instead of silently double-seeding \
+             (so accidental double seed in a future case fixture surfaces immediately)",
+        );
     }
 }

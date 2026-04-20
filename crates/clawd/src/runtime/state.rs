@@ -634,6 +634,79 @@ impl AppState {
         self
     }
 
+    /// §7.5 Step 4.b.2.4：链式 helper，把 `process_ask_task` 端到端跑通需要的
+    /// 主库 schema 一次性建齐。
+    ///
+    /// 默认 [`CoreServices::test_default_with_fixture_provider`] 拿到的
+    /// `core.db` 是空 in-memory pool（`db_init::test_pool()`）—— 没有 `tasks`
+    /// / `users` / `memories` / `scheduled_jobs` 任何表；
+    /// `core.audit_db` 已被 [`db_init::test_audit_pool`] 预 init `audit_logs`，
+    /// 这里**不动**它。
+    ///
+    /// 本 helper 在 `core.db` 上按生产顺序执行：
+    ///   1. `INIT_SQL`（`migrations/001_init.sql`）—— 建 users/tasks/audit_logs/
+    ///      memories/long_term_memories/scheduled_jobs + 必要 index；
+    ///   2. [`crate::ensure_memory_schema`] —— memory 链路 ALTER 升级（幂等）；
+    ///   3. [`crate::ensure_channel_schema`] —— tasks/scheduled_jobs/memories
+    ///      上 `channel` / `external_*_id` 列（幂等：列存在即 skip）。
+    ///
+    /// 注意 `migrations/001_init.sql` **不**含 FK 约束：
+    /// [`crate::repo::tasks`] 里所有写都是 `UPDATE tasks ... WHERE task_id = ?`，
+    /// 行不在不会报错也不会更新，导致 `process_ask_task` 后续读 `tasks.status`
+    /// 时拿到旧/空记录而下游断言失败 —— 因此本 helper 只负责"建表"，行级
+    /// seed 走 [`Self::seed_ask_task_row`]。
+    #[cfg(test)]
+    pub(crate) fn with_seeded_db_schema(self) -> Self {
+        let conn = self
+            .core
+            .db
+            .get()
+            .expect("acquire test main-db connection for schema seed");
+        conn.execute_batch(crate::INIT_SQL)
+            .expect("apply migrations/001_init.sql to test main db");
+        crate::ensure_memory_schema(&conn).expect("ensure_memory_schema for test main db");
+        crate::ensure_channel_schema(&conn).expect("ensure_channel_schema for test main db");
+        drop(conn);
+        self
+    }
+
+    /// §7.5 Step 4.b.2.4：在已 [`Self::with_seeded_db_schema`] 过的 `AppState`
+    /// 上 INSERT 一条 `tasks` 行，使后续 `UPDATE tasks ... WHERE task_id = ?`
+    /// 真能命中。
+    ///
+    /// 不写成 chain helper（`fn(self) -> Self`），因为 `task_id` / `user_id` /
+    /// `chat_id` / `payload_json` 都是 per-case 输入，链式风格会让 caller 眼花;
+    /// 改成 `&self` 普通方法，调用方先 `let state = …; state.seed_ask_task_row(…);`
+    /// 再传 `&state` 给 `process_ask_task`。
+    ///
+    /// `channel` 默认 `"ui"`：与 fixture-replay e2e 默认走 UI 入口一致；走
+    /// `"telegram"` 这条路 finalize 末尾会走 `notify_user`，遇到空 token 会
+    /// short-circuit 但日志噪音多。`status` 写 `"queued"` —— 与生产
+    /// [`crate::repo::submit::insert_submitted_task`] 完全一致，让
+    /// `crate::repo::tasks::mark_running` 那条 `UPDATE ... WHERE status =
+    /// 'queued'` 能命中。
+    #[cfg(test)]
+    pub(crate) fn seed_ask_task_row(
+        &self,
+        task_id: &str,
+        user_id: i64,
+        chat_id: i64,
+        payload_json: &str,
+    ) {
+        let conn = self
+            .core
+            .db
+            .get()
+            .expect("acquire test main-db connection for tasks seed");
+        let now = crate::now_ts();
+        conn.execute(
+            "INSERT INTO tasks (task_id, user_id, chat_id, channel, kind, payload_json, status, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, 'ui', 'ask', ?4, 'queued', ?5, ?5)",
+            rusqlite::params![task_id, user_id, chat_id, payload_json, now],
+        )
+        .expect("INSERT INTO tasks for fixture-replay e2e seed");
+    }
+
     fn snapshot(&self) -> Arc<SkillViewsSnapshot> {
         self.core.skill_views_snapshot.read().unwrap().clone()
     }
