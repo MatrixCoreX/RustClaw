@@ -21,11 +21,11 @@ Options:
   -h, --help             Show this help
 
 This suite runs:
-  1. deterministic backend self-extension runtime-enable regression
+  1. local backend self-extension runtime-enable regression
   2. provider-backed natural-language self-extension handoff regression
 
 If the NL handoff stage hits provider_unavailable, the suite reports SKIP for
-that stage but still exits success as long as the deterministic backend stage
+that stage but still exits success as long as the local backend stage
 passes.
 EOF
 }
@@ -78,7 +78,7 @@ if [[ -n "$CLAWD_BIN" ]]; then
   nl_cmd+=(--clawd-bin "$CLAWD_BIN")
 fi
 
-echo "== Stage 1/2: deterministic self-extension runtime-enable =="
+echo "== Stage 1/2: local self-extension runtime-enable =="
 "${runtime_cmd[@]}"
 
 echo

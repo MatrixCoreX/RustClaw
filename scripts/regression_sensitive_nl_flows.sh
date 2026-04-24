@@ -608,7 +608,7 @@ wait_for_health
 printf 'workspace_root=%s\nbase_url=%s\nadmin_key=%s\nuser_key=%s\nrounds=%s\ncase_file=%s\n' \
   "$TEMP_WORKSPACE" "$BASE_URL" "$ADMIN_USER_KEY" "$REGULAR_USER_KEY" "$ROUNDS" "$CASE_FILE" > "$LOG_DIR/meta.txt"
 
-echo "== Stage 1: deterministic direct checks =="
+echo "== Stage 1: local direct checks =="
 run_direct_case \
   "config_guard_direct_en" \
   '{"path":"configs/config.toml","content":"forbidden","request_text":"Please modify configs/config.toml and apply the change directly."}' \
