@@ -612,6 +612,7 @@ Skill behavior notes (file/path):
 #### system_basic JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"system_basic","args":{...}}`
 - Use `system_basic` only for the higher-level readonly actions above. For raw file/dir/command execution, continue to use the standalone base skills.
+- Canonical action/field names are part of the contract: use `action="read_range"` (never `action="read"`), use `path_batch_facts.paths` (never `targets`), and use `compare_paths.left_path` + `compare_paths.right_path` (never a generic `targets` array).
 - For vague directory references like "the xxx directory", "the directory that might be called logs", or partial names, prefer `action="find_path"` with `target_kind="dir"` and `match_mode="contains"` before asking the user to clarify.
 
 ## Execution constraints
