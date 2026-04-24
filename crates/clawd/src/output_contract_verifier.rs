@@ -287,16 +287,47 @@ fn verify_scalar_count(text: &str) -> OutputContractVerdict {
 }
 
 /// hidden_entries_check / recent_scalar_equality_check：回答必须含 yes/no token。
-fn verify_yes_no_only(text: &str, kind_label: &str) -> OutputContractVerdict {
-    let has_yes = contains_existence_yes_token(text);
-    let has_no = contains_existence_no_token(text);
-    if has_yes || has_no {
+fn looks_like_hidden_entries_evidence(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.contains("隐藏") || trimmed.to_ascii_lowercase().contains("hidden") {
+        return true;
+    }
+    trimmed
+        .split(|c: char| c.is_whitespace() || matches!(c, ',' | '，' | ';' | '；' | '、'))
+        .map(|token| {
+            token.trim_matches(|c: char| {
+                matches!(
+                    c,
+                    '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '。'
+                )
+            })
+        })
+        .any(|token| {
+            token.len() > 1
+                && token.starts_with('.')
+                && token
+                    .chars()
+                    .nth(1)
+                    .map(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                    .unwrap_or(false)
+        })
+}
+
+fn verify_hidden_entries_check(
+    contract: &IntentOutputContract,
+    text: &str,
+) -> OutputContractVerdict {
+    if contract.response_shape == OutputResponseShape::Scalar {
+        return verify_scalar_count(text);
+    }
+    if contains_existence_yes_token(text)
+        || contains_existence_no_token(text)
+        || looks_like_hidden_entries_evidence(text)
+    {
         return OutputContractVerdict::Pass;
     }
     OutputContractVerdict::Reject {
-        reason: format!(
-            "{kind_label}: candidate missing yes/no token; cannot be salvaged programmatically"
-        ),
+        reason: "hidden_entries_check: candidate lacks hidden-entry evidence".to_string(),
     }
 }
 
@@ -340,7 +371,7 @@ pub(crate) fn verify_output_contract(
         }
         OutputSemanticKind::ScalarPathOnly => verify_scalar_path_only(contract, trimmed_candidate),
         OutputSemanticKind::HiddenEntriesCheck => {
-            verify_yes_no_only(trimmed_candidate, "hidden_entries_check")
+            verify_hidden_entries_check(contract, trimmed_candidate)
         }
         OutputSemanticKind::RecentScalarEqualityCheck => {
             verify_same_or_different_only(trimmed_candidate, "recent_scalar_equality_check")
@@ -543,5 +574,51 @@ mod tests {
         );
         let v = verify_output_contract(&contract, "看起来一切正常", "?");
         assert!(matches!(v, OutputContractVerdict::Reject { .. }));
+    }
+
+    #[test]
+    fn hidden_entries_check_accepts_explanatory_sentence_with_examples() {
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::OneSentence,
+            semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
+            ..IntentOutputContract::default()
+        };
+        assert_eq!(
+            verify_output_contract(
+                &contract,
+                "The current directory has hidden files such as .git and .gitignore.",
+                "check hidden files",
+            ),
+            OutputContractVerdict::Pass
+        );
+        assert_eq!(
+            verify_output_contract(
+                &contract,
+                "当前目录存在隐藏文件（如 .git、.codex），通常用于保存元数据。",
+                "检查隐藏文件",
+            ),
+            OutputContractVerdict::Pass
+        );
+    }
+
+    #[test]
+    fn hidden_entries_count_uses_scalar_count_contract() {
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Scalar,
+            semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
+            ..IntentOutputContract::default()
+        };
+        assert_eq!(
+            verify_output_contract(&contract, "4", "count hidden entries"),
+            OutputContractVerdict::Pass
+        );
+        assert_eq!(
+            verify_output_contract(
+                &contract,
+                "There are 4 hidden entries in this directory.",
+                "count hidden entries",
+            ),
+            OutputContractVerdict::Pass
+        );
     }
 }
