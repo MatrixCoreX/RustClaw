@@ -223,7 +223,7 @@ rustclaw -key disable rk-xxxx
 
 面向长尾闭环链路的常用入口：
 
-- `bash scripts/nl_tests/run_suite.sh ops_deterministic`
+- `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
 - `bash scripts/nl_tests/run_suite.sh long_tail_flows`
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
 
@@ -262,7 +262,7 @@ RustClaw 当前内置的技能已经比较完整，按类别可大致分为：
 - 文件与开发工具：`archive_basic`、`fs_search`、`git_basic`、`package_manager`、`install_module`、`docker_basic`、`db_basic`
 - 网络与内容处理：`http_basic`、`rss_fetch`、`browser_web`、`doc_parse`、`transform`、`web_search_extract`
 - 多模态：`image_generate`、`image_edit`、`image_vision`、`audio_transcribe`、`audio_synthesize`
-- 业务类：`crypto`、`stock`、`weather`、`map_merchant`、`kb`、`chat`、`x`
+- 业务类：`crypto`、`stock`、`weather`、`map_merchant`、`kb`、`x`
 
 如果要回答“某个 skill 怎么配置、怎么绑定、缺什么前置条件”，优先看：`prompts/references/skill_setup_guide.zh-CN.md`。
 
@@ -310,7 +310,7 @@ cd pi_app && ./open-small-screen.sh
 - 如果你只想更新 UI 静态站点，优先看 `build-ui-nginx.sh` 和 `deploy-ui-nginx.sh`
 - 如果你在做技能接入，记得显式执行 `python3 scripts/sync_skill_docs.py`，不要依赖启动脚本帮你同步
 - 各类回归和辅助脚本主要集中在 `scripts/`
-- 如果要跑本地 deterministic 的 `ops_closed_loop` 闭环回归，执行 `bash scripts/regression_ops_closed_loop_deterministic.sh`
+- 如果要跑本地 `ops_closed_loop` 闭环回归，执行 `bash scripts/regression_ops_closed_loop.sh`
 
 ## 许可证
 

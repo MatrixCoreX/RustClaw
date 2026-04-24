@@ -427,7 +427,7 @@ run_one_suite() {
     sensitive_flows)
       run_mode_sensitive_flows "${FILTERED_SUITE_ARGS[@]}"
       ;;
-    ops_closed_loop|ops_deterministic)
+    ops_closed_loop)
       run_mode_ops_closed_loop "${FILTERED_SUITE_ARGS[@]}"
       ;;
     ops_http_repair)
@@ -473,7 +473,7 @@ add_suite() {
 expand_selector() {
   local selector="$1"
   case "$selector" in
-    manual|compound_single|task_updates|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_deterministic|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+    manual|compound_single|task_updates|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
       add_suite "$selector"
       ;;
     smoke)
