@@ -452,6 +452,85 @@ fn parse_output_contract(
     contract
 }
 
+fn normalized_scope_patch_hint_text(raw: &str) -> Option<String> {
+    let mut value = raw.trim().trim_matches(['"', '\'']).trim();
+    if value.is_empty() {
+        return None;
+    }
+    loop {
+        let lower = value.to_ascii_lowercase();
+        let stripped = if lower.ends_with("_only") {
+            value[..value.len().saturating_sub("_only".len())].trim()
+        } else if lower.ends_with("-only") {
+            value[..value.len().saturating_sub("-only".len())].trim()
+        } else if lower.ends_with(" only") {
+            value[..value.len().saturating_sub(" only".len())].trim()
+        } else {
+            value
+        };
+        if stripped == value {
+            break;
+        }
+        value = stripped.trim_matches(['_', '-', ' ']).trim();
+        if value.is_empty() {
+            return None;
+        }
+    }
+    let simple_scope_token = value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '/' | '\\' | '.'));
+    if !simple_scope_token || matches!(value, "." | "./" | "/" | "\\") {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn scope_patch_hint_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(raw) => normalized_scope_patch_hint_text(raw),
+        Value::Array(values) => values.iter().find_map(scope_patch_hint_value),
+        Value::Object(map) => [
+            "scope",
+            "module",
+            "area",
+            "section",
+            "topic",
+            "focus",
+            "target_scope",
+        ]
+        .iter()
+        .filter_map(|key| map.get(*key))
+        .find_map(scope_patch_hint_value),
+        _ => None,
+    }
+}
+
+fn locator_hint_is_unset_or_broad(hint: &str) -> bool {
+    let hint = hint.trim();
+    hint.is_empty() || matches!(hint, "." | "./" | "/" | "\\") || Path::new(hint).is_absolute()
+}
+
+fn apply_workspace_scope_patch_to_contract(
+    output_contract: &mut IntentOutputContract,
+    turn_type: Option<TurnType>,
+    target_task_policy: Option<TargetTaskPolicy>,
+    state_patch: Option<&Value>,
+) -> Option<String> {
+    if !matches!(turn_type, Some(TurnType::TaskScopeUpdate))
+        || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
+        || output_contract.semantic_kind != OutputSemanticKind::WorkspaceProjectSummary
+    {
+        return None;
+    }
+    let scope_hint = scope_patch_hint_value(state_patch?)?;
+    if !locator_hint_is_unset_or_broad(&output_contract.locator_hint) {
+        return None;
+    }
+    output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    output_contract.locator_hint = scope_hint.clone();
+    Some(scope_hint)
+}
+
 fn parse_execution_recipe_hint(
     out: Option<IntentExecutionRecipeOut>,
 ) -> Option<crate::execution_recipe::ExecutionRecipeSpec> {
@@ -485,6 +564,16 @@ fn active_primary_task_prompt<'a>(
     session_snapshot
         .and_then(|snapshot| snapshot.conversation_state.as_ref())
         .and_then(|state| state.last_primary_task_prompt.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn active_primary_task_output<'a>(
+    session_snapshot: Option<&'a crate::conversation_state::ActiveSessionSnapshot>,
+) -> Option<&'a str> {
+    session_snapshot
+        .and_then(|snapshot| snapshot.conversation_state.as_ref())
+        .and_then(|state| state.last_primary_task_output.as_deref())
         .map(str::trim)
         .filter(|value| !value.is_empty())
 }
@@ -578,6 +667,15 @@ fn active_task_turn_can_reuse_semantic_patch(
         && surface.inline_json_shape.is_none()
 }
 
+fn prompt_is_output_shape_refinement(
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    surface.output_request_shape.is_some()
+        || surface.output_compression_shape.is_some()
+        || surface.table_request_shape.is_some()
+        || surface.requested_sentence_count.is_some()
+}
+
 fn should_resolve_task_scope_update_clarify_with_active_task(
     prompt: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
@@ -590,6 +688,47 @@ fn should_resolve_task_scope_update_clarify_with_active_task(
         || !matches!(routed_mode, RoutedMode::AskClarify)
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(turn_type, Some(TurnType::TaskScopeUpdate))
+        || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
+    {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    active_task_turn_can_reuse_semantic_patch(&surface)
+}
+
+fn should_rebind_output_shape_clarify_to_active_task(
+    prompt: &str,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    attachment_processing_required: bool,
+    routed_mode: RoutedMode,
+) -> bool {
+    if attachment_processing_required
+        || !matches!(routed_mode, RoutedMode::AskClarify)
+        || active_primary_task_prompt(session_snapshot).is_none()
+        || active_primary_task_output(session_snapshot).is_none()
+    {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    active_task_turn_can_reuse_semantic_patch(&surface)
+        && prompt_is_output_shape_refinement(&surface)
+}
+
+fn should_resolve_task_append_clarify_with_active_task(
+    prompt: &str,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    turn_type: Option<TurnType>,
+    target_task_policy: Option<TargetTaskPolicy>,
+    attachment_processing_required: bool,
+    routed_mode: RoutedMode,
+) -> bool {
+    if attachment_processing_required
+        || !matches!(routed_mode, RoutedMode::AskClarify)
+        || active_primary_task_prompt(session_snapshot).is_none()
+        || !matches!(
+            turn_type,
+            Some(TurnType::TaskAppend | TurnType::TaskCorrect | TurnType::TaskScopeUpdate)
+        )
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
     {
         return false;
@@ -625,10 +764,12 @@ fn should_route_active_task_mutation_to_chat(
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
     routed_mode: RoutedMode,
+    output_contract: &IntentOutputContract,
 ) -> bool {
     if attachment_processing_required
         || !matches!(routed_mode, RoutedMode::Act | RoutedMode::ChatAct)
         || active_primary_task_prompt(session_snapshot).is_none()
+        || !output_contract_allows_chat_only_task_mutation(output_contract)
     {
         return false;
     }
@@ -657,6 +798,14 @@ fn should_route_active_task_mutation_to_chat(
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     active_task_turn_can_reuse_semantic_patch(&surface)
+}
+
+fn output_contract_allows_chat_only_task_mutation(output_contract: &IntentOutputContract) -> bool {
+    !output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
 }
 
 fn prompt_looks_like_task_replace_instruction(prompt: &str) -> bool {
@@ -1009,10 +1158,28 @@ pub(crate) async fn run_intent_normalizer(
             &clarify_question,
             confidence,
         );
-        let turn_type = parse_turn_type(&out.turn_type);
-        let target_task_policy = parse_target_task_policy(&out.target_task_policy);
+        let mut turn_type = parse_turn_type(&out.turn_type);
+        let mut target_task_policy = parse_target_task_policy(&out.target_task_policy);
         let state_patch = out.state_patch.clone().filter(|value| !value.is_null());
         let mut reason = out.reason;
+        if let Some(scope_hint) = apply_workspace_scope_patch_to_contract(
+            &mut output_contract,
+            turn_type,
+            target_task_policy,
+            state_patch.as_ref(),
+        ) {
+            if reason.trim().is_empty() {
+                reason = "workspace_scope_patch_locator_hint".to_string();
+            } else if !reason.contains("workspace_scope_patch_locator_hint") {
+                reason.push_str("; workspace_scope_patch_locator_hint");
+            }
+            info!(
+                "{} intent_normalizer task_id={} workspace_scope_patch_locator_hint={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                crate::truncate_for_log(&scope_hint)
+            );
+        }
         let had_normalizer_direct_reply =
             !out.direct_reply_candidate.trim().is_empty() || out.direct_reply_confidence > 0.0;
         // Planner-first: normalizer can still output these deprecated
@@ -1083,6 +1250,7 @@ pub(crate) async fn run_intent_normalizer(
             target_task_policy,
             out.attachment_processing_required,
             routed_mode,
+            &output_contract,
         ) {
             routed_mode = RoutedMode::Chat;
             direct_reply_candidate.clear();
@@ -1119,6 +1287,56 @@ pub(crate) async fn run_intent_normalizer(
             }
             info!(
                 "{} intent_normalizer task_id={} turn_analysis_override=active_task_replace_resolves_clarify input={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                crate::truncate_for_log(req)
+            );
+        }
+        if should_resolve_task_append_clarify_with_active_task(
+            req,
+            session_snapshot,
+            turn_type,
+            target_task_policy,
+            out.attachment_processing_required,
+            routed_mode,
+        ) {
+            needs_clarify = false;
+            clarify_question.clear();
+            routed_mode = RoutedMode::Chat;
+            direct_reply_candidate.clear();
+            direct_reply_confidence = 0.0;
+            if reason.trim().is_empty() {
+                reason = "active_task_append_resolves_clarify".to_string();
+            } else if !reason.contains("active_task_append_resolves_clarify") {
+                reason.push_str("; active_task_append_resolves_clarify");
+            }
+            info!(
+                "{} intent_normalizer task_id={} turn_analysis_override=active_task_append_resolves_clarify input={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                crate::truncate_for_log(req)
+            );
+        }
+        if should_rebind_output_shape_clarify_to_active_task(
+            req,
+            session_snapshot,
+            out.attachment_processing_required,
+            routed_mode,
+        ) {
+            needs_clarify = false;
+            clarify_question.clear();
+            routed_mode = RoutedMode::Chat;
+            turn_type = Some(TurnType::TaskAppend);
+            target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+            direct_reply_candidate.clear();
+            direct_reply_confidence = 0.0;
+            if reason.trim().is_empty() {
+                reason = "active_task_output_shape_rebind".to_string();
+            } else if !reason.contains("active_task_output_shape_rebind") {
+                reason.push_str("; active_task_output_shape_rebind");
+            }
+            info!(
+                "{} intent_normalizer task_id={} turn_analysis_override=active_task_output_shape_rebind input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)
@@ -1590,6 +1808,53 @@ mod tests {
     }
 
     #[test]
+    fn workspace_scope_patch_sets_locator_hint_from_structured_scope() {
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+            locator_hint: "/home/guagua/rustclaw".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        };
+        let applied = super::apply_workspace_scope_patch_to_contract(
+            &mut contract,
+            Some(TurnType::TaskScopeUpdate),
+            Some(TargetTaskPolicy::ReuseActive),
+            Some(&serde_json::json!({"scope": "UI_only"})),
+        );
+
+        assert_eq!(applied.as_deref(), Some("UI"));
+        assert_eq!(contract.locator_hint, "UI");
+        assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+    }
+
+    #[test]
+    fn workspace_scope_patch_keeps_specific_locator_hint() {
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+            locator_hint: "UI".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        };
+        let applied = super::apply_workspace_scope_patch_to_contract(
+            &mut contract,
+            Some(TurnType::TaskScopeUpdate),
+            Some(TargetTaskPolicy::ReuseActive),
+            Some(&serde_json::json!({"scope": "pi_app_only"})),
+        );
+
+        assert_eq!(applied, None);
+        assert_eq!(contract.locator_hint, "UI");
+    }
+
+    #[test]
     fn fallback_normalizer_keeps_llm_failure_on_safe_clarify() {
         let out = normalizer_output_from_fallback(
             "read scripts/nl_tests/fixtures/device_local/package.json and output only the name field",
@@ -1789,6 +2054,7 @@ mod tests {
             Some(TargetTaskPolicy::ReuseActive),
             false,
             RoutedMode::Act,
+            &IntentOutputContract::default(),
         ));
     }
 
@@ -1810,6 +2076,7 @@ mod tests {
             Some(TargetTaskPolicy::ReuseActive),
             false,
             RoutedMode::ChatAct,
+            &IntentOutputContract::default(),
         ));
     }
 
@@ -1834,6 +2101,7 @@ mod tests {
             Some(TargetTaskPolicy::ReuseActive),
             false,
             RoutedMode::Act,
+            &IntentOutputContract::default(),
         ));
     }
 
@@ -1857,6 +2125,146 @@ mod tests {
             Some(TargetTaskPolicy::ReuseActive),
             false,
             RoutedMode::Act,
+            &IntentOutputContract::default(),
+        ));
+    }
+
+    #[test]
+    fn active_task_mutation_with_content_evidence_stays_executable() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("Summarize this repository".to_string()),
+                last_primary_task_output: Some("It has a web UI and backend services.".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let contract = IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+            ..IntentOutputContract::default()
+        };
+        assert!(!super::should_route_active_task_mutation_to_chat(
+            "Focus only on the UI part",
+            Some(&snapshot),
+            Some(TurnType::TaskScopeUpdate),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            RoutedMode::ChatAct,
+            &contract,
+        ));
+    }
+
+    #[test]
+    fn active_task_output_refinement_clarify_is_resolved() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("Summarize this repository".to_string()),
+                last_primary_task_output: Some(
+                    "The UI is a web-based frontend for RustClaw.".to_string(),
+                ),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        assert!(super::should_resolve_task_append_clarify_with_active_task(
+            "Output a two-row markdown table",
+            Some(&snapshot),
+            Some(TurnType::TaskAppend),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            RoutedMode::AskClarify,
+        ));
+    }
+
+    #[test]
+    fn active_task_append_clarify_without_output_is_resolved() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("帮我写个方案".to_string()),
+                last_primary_task_output: None,
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        assert!(super::should_resolve_task_append_clarify_with_active_task(
+            "控制在 80 字内，只输出正文",
+            Some(&snapshot),
+            Some(TurnType::TaskAppend),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            RoutedMode::AskClarify,
+        ));
+    }
+
+    #[test]
+    fn active_task_append_clarify_keeps_file_locator_guard() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("帮我检查这个文件".to_string()),
+                last_primary_task_output: None,
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        assert!(!super::should_resolve_task_append_clarify_with_active_task(
+            "README.md",
+            Some(&snapshot),
+            Some(TurnType::TaskAppend),
+            Some(TargetTaskPolicy::ReuseActive),
+            false,
+            RoutedMode::AskClarify,
+        ));
+    }
+
+    #[test]
+    fn output_shape_clarify_rebinds_to_active_output() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("Summarize this repository".to_string()),
+                last_primary_task_output: Some(
+                    "RustClaw has a browser UI and channel adapters.".to_string(),
+                ),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        assert!(super::should_rebind_output_shape_clarify_to_active_task(
+            "Output a two-row markdown table",
+            Some(&snapshot),
+            false,
+            RoutedMode::AskClarify,
+        ));
+    }
+
+    #[test]
+    fn output_shape_clarify_without_active_output_is_not_rebound() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("Read README.md".to_string()),
+                last_primary_task_output: None,
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        assert!(!super::should_rebind_output_shape_clarify_to_active_task(
+            "Output a two-row markdown table",
+            Some(&snapshot),
+            false,
+            RoutedMode::AskClarify,
         ));
     }
 
@@ -2215,7 +2623,7 @@ mod tests {
                 "target_scope",
             ],
         ) {
-            if token.is_empty() || token == "unknown" {
+            if token.is_empty() || token == "none" || token == "unknown" {
                 continue;
             }
             assert_ne!(

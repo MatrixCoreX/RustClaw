@@ -10,6 +10,7 @@ SUITE="clarify"
 CASE_FILE=""
 LOG_ROOT=""
 TURN_COUNT=0
+TURN_COUNT_OVERRIDE=""
 
 RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
 RUN_DIR=""
@@ -50,6 +51,7 @@ Options:
   --provider-retries N  retry count when provider is unavailable/capacity-limited (default: 2)
   --provider-retry-sleep N
                         sleep seconds before provider retry (default: 3)
+  --turn-count N        override turn count for custom multi-turn case files
   --no-llm-trace        Do not print per-turn LLM request/response trace
   --prompt-reply-only   Print only prompt and assistant reply for each turn
   -h, --help            show this help
@@ -163,10 +165,10 @@ if prompt_reply_only:
     for line in text.splitlines() or [""]:
         print(line)
 else:
-    print(f"  [USER{turn}]")
+    print(f"  [PROMPT turn={turn}]")
     for line in prompt.splitlines() or [""]:
         print(f"    {line}")
-    print(f"  [ASSISTANT{turn}]")
+    print(f"  [REPLY turn={turn}]")
     for line in text.splitlines() or [""]:
         print(f"    {line}")
 PY
@@ -471,7 +473,15 @@ select_suite_defaults() {
       echo "Unsupported --suite: $SUITE (expected: clarify|context_chain)" >&2
       exit 2
       ;;
-  esac
+esac
+
+  if [[ -n "${TURN_COUNT_OVERRIDE:-}" ]]; then
+    if ! [[ "$TURN_COUNT_OVERRIDE" =~ ^[1-9][0-9]*$ ]]; then
+      echo "Invalid --turn-count: ${TURN_COUNT_OVERRIDE}" >&2
+      exit 2
+    fi
+    TURN_COUNT="$TURN_COUNT_OVERRIDE"
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -522,6 +532,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --provider-retry-sleep)
       PROVIDER_RETRY_SLEEP_VALUE="${2:-}"
+      shift 2
+      ;;
+    --turn-count)
+      TURN_COUNT_OVERRIDE="${2:-}"
       shift 2
       ;;
     --no-llm-trace)

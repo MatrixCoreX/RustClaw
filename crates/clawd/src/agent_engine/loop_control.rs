@@ -49,6 +49,45 @@ fn has_executable_observation_or_action(actions: &[AgentAction]) -> bool {
     })
 }
 
+fn last_executable_action(actions: &[AgentAction]) -> Option<&AgentAction> {
+    actions.iter().rev().find(|action| {
+        matches!(
+            action,
+            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+        )
+    })
+}
+
+fn action_reads_text_content(action: &AgentAction) -> bool {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            (skill.as_str(), args)
+        }
+        AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::Think { .. } => return false,
+    };
+    let normalized_skill = skill.trim().replace('-', "_").to_ascii_lowercase();
+    if matches!(normalized_skill.as_str(), "read_file" | "doc_parse") {
+        return true;
+    }
+    normalized_skill == "system_basic"
+        && args
+            .get("action")
+            .and_then(|value| value.as_str())
+            .map(|action| action.trim().eq_ignore_ascii_case("read_range"))
+            .unwrap_or(false)
+}
+
+fn route_needs_workspace_text_evidence_before_observed_finalize(route: &RouteResult) -> bool {
+    route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && route.output_contract.response_shape == crate::OutputResponseShape::Free
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && route.output_contract.locator_hint.trim().is_empty()
+}
+
 pub(crate) fn requested_success_marker(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<&'static str> {
@@ -104,6 +143,12 @@ fn should_stop_for_observed_finalize(
     if route_result.needs_clarify
         || !loop_state.has_tool_or_skill_output
         || has_authoritative_delivery(loop_state)
+    {
+        return false;
+    }
+    if route_needs_workspace_text_evidence_before_observed_finalize(route_result)
+        && !has_discussion_followup_action(actions)
+        && !last_executable_action(actions).is_some_and(action_reads_text_content)
     {
         return false;
     }
@@ -483,6 +528,64 @@ mod tests {
         assert!(should_stop_for_observed_finalize(
             Some(&AgentRunContext {
                 route_result: Some(route_result(OutputResponseShape::Free)),
+                ..Default::default()
+            }),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn unscoped_workspace_evidence_drafting_does_not_stop_on_search_only() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_search",
+            r#"{"action":"find_name","count":2,"results":["README.md","USAGE.md"]}"#,
+        ));
+        let mut route = route_result(OutputResponseShape::Free);
+        route.resolved_intent =
+            "Write a short setup note grounded in the current workspace docs".to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "fs_search".to_string(),
+            args: json!({"action":"find_name","pattern":"README"}),
+        }];
+        assert!(!should_stop_for_observed_finalize(
+            Some(&AgentRunContext {
+                route_result: Some(route),
+                ..Default::default()
+            }),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn unscoped_workspace_evidence_drafting_can_stop_after_doc_read() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"README.md","excerpt":"1|# RustClaw\n2|## Setup"}"#,
+        ));
+        let mut route = route_result(OutputResponseShape::Free);
+        route.resolved_intent =
+            "Write a short setup note grounded in the current workspace docs".to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action":"read_range","path":"README.md","mode":"head","n":120}),
+        }];
+        assert!(should_stop_for_observed_finalize(
+            Some(&AgentRunContext {
+                route_result: Some(route),
                 ..Default::default()
             }),
             &loop_state,

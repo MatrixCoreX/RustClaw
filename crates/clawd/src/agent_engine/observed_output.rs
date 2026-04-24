@@ -547,6 +547,14 @@ fn latest_directory_listing_entries(
 ) -> Option<Vec<String>> {
     let idx = latest_successful_step_index(loop_state, |_| true)?;
     let step = &loop_state.executed_step_results[idx];
+    directory_listing_entries_from_step(step, auto_locator_path, max_entries)
+}
+
+fn directory_listing_entries_from_step(
+    step: &crate::executor::StepExecutionResult,
+    auto_locator_path: Option<&str>,
+    max_entries: Option<usize>,
+) -> Option<Vec<String>> {
     if !step.is_ok() {
         return None;
     }
@@ -568,6 +576,18 @@ fn latest_directory_listing_entries(
         _ => None,
     }
     .filter(|entries| !entries.is_empty())
+}
+
+fn latest_workspace_project_listing_entries(
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<String>> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter_map(|step| directory_listing_entries_from_step(step, auto_locator_path, None))
+        .next()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -954,6 +974,70 @@ fn workspace_project_summary_from_entries(
     ))
 }
 
+fn workspace_project_summary_from_scoped_entries(
+    state: Option<&AppState>,
+    entries: &[String],
+    scope_hint: Option<&str>,
+    prefer_english: bool,
+) -> Option<String> {
+    let scope_hint = scope_hint
+        .map(str::trim)
+        .filter(|hint| !hint.is_empty())
+        .unwrap_or_default();
+    let scope_lower = scope_hint.to_ascii_lowercase();
+    let contains_exact = |target: &str| {
+        let target = target.trim().trim_end_matches('/');
+        entries.iter().any(|entry| {
+            entry
+                .trim()
+                .trim_end_matches('/')
+                .eq_ignore_ascii_case(target)
+        })
+    };
+    let contains_substring = |needle: &str| {
+        let needle = needle.to_ascii_lowercase();
+        entries.iter().any(|entry| {
+            entry
+                .trim()
+                .trim_end_matches('/')
+                .to_ascii_lowercase()
+                .contains(&needle)
+        })
+    };
+
+    if !scope_lower.is_empty()
+        && (scope_lower == "ui" || scope_lower.ends_with("/ui"))
+        && (contains_exact("package.json")
+            || contains_exact("index.html")
+            || contains_exact("src")
+            || contains_exact("vite.config.ts"))
+    {
+        return Some(observed_t(
+            state,
+            "clawd.msg.workspace_project_summary_scoped_web_ui",
+            "UI 部分是 RustClaw 的浏览器前端，用来给普通用户提供本地可视化控制台和聊天式操作入口。",
+            "The UI part is RustClaw's browser front end, providing a local visual console and chat-style operating entry point for users.",
+            prefer_english,
+        ));
+    }
+
+    if (scope_lower.contains("pi_app") || scope_lower.contains("small"))
+        && (contains_substring("small_screen")
+            || contains_exact("SMALL-SCREEN.md")
+            || contains_exact("run-small-screen.sh"))
+    {
+        return Some(observed_t(
+            state,
+            "clawd.msg.workspace_project_summary_scoped_small_screen",
+            "这个部分是 RustClaw 的小屏幕桌面应用，面向树莓派或触屏设备，提供独立的可视化操作面板。",
+            "This part is RustClaw's small-screen desktop app for Raspberry Pi or touch devices, providing a standalone visual control panel.",
+            prefer_english,
+        ));
+    }
+
+    workspace_project_summary_from_entries(state, entries, prefer_english)
+}
+
 fn workspace_project_summary_direct_answer(
     state: Option<&AppState>,
     route: &crate::RouteResult,
@@ -964,8 +1048,13 @@ fn workspace_project_summary_direct_answer(
     if !route_requests_workspace_project_summary(route) {
         return None;
     }
-    let entries = latest_directory_listing_entries(loop_state, auto_locator_path, None)?;
-    workspace_project_summary_from_entries(state, &entries, prefer_english)
+    let entries = latest_workspace_project_listing_entries(loop_state, auto_locator_path)?;
+    workspace_project_summary_from_scoped_entries(
+        state,
+        &entries,
+        Some(route.output_contract.locator_hint.as_str()),
+        prefer_english,
+    )
 }
 
 fn comparison_winner_from_route(
@@ -1222,11 +1311,29 @@ fn observed_request_language_hint(user_text: &str) -> &'static str {
     }
 }
 
-fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> &'static str {
-    match agent_run_context
+fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> String {
+    let response_shape = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.response_shape)
-    {
+        .map(|route| route.output_contract.response_shape);
+    let request_text = agent_run_context
+        .and_then(|ctx| ctx.user_request.as_deref())
+        .or_else(|| {
+            agent_run_context
+                .and_then(|ctx| ctx.route_result.as_ref())
+                .map(|route| route.resolved_intent.as_str())
+        })
+        .unwrap_or_default();
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request_text);
+    if matches!(
+        surface.output_compression_shape,
+        Some(crate::intent::surface_signals::OutputCompressionShape::Brief)
+    ) && matches!(
+        response_shape,
+        Some(crate::OutputResponseShape::Free) | Some(crate::OutputResponseShape::OneSentence)
+    ) {
+        return "Return a compact final answer. For short/brief notes or one-paragraph requests, prefer one short paragraph with no headings and no fenced code blocks unless the user explicitly asked for a full step-by-step guide.".to_string();
+    }
+    match response_shape {
         Some(crate::OutputResponseShape::Scalar) => {
             "Return only the final scalar value with no label, prefix, suffix, or explanation."
         }
@@ -1241,6 +1348,7 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
         }
         None => "Return the shortest grounded answer that directly satisfies the user request.",
     }
+    .to_string()
 }
 
 fn db_basic_scalar_candidate(value: &serde_json::Value) -> Option<String> {
@@ -4780,6 +4888,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
                 return None;
             }
         };
+    let response_style_hint = observed_response_style_hint(agent_run_context);
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
@@ -4795,10 +4904,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
                 &state.policy.command_intent.default_locale,
             ),
             ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
-            (
-                "__RESPONSE_STYLE_HINT__",
-                observed_response_style_hint(agent_run_context),
-            ),
+            ("__RESPONSE_STYLE_HINT__", &response_style_hint),
         ],
     );
     crate::log_prompt_render(
@@ -5400,6 +5506,47 @@ mod tests {
         route_result.output_contract.response_shape = OutputResponseShape::FileToken;
         agent_run_context.route_result = Some(route_result);
         assert!(observed_response_style_hint(Some(&agent_run_context)).contains("delivery token"));
+    }
+
+    #[test]
+    fn observed_response_style_hint_reflects_brief_surface_shape() {
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "Write a short RustClaw setup note".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            user_request: Some("Write a short RustClaw setup note".to_string()),
+            ..AgentRunContext::default()
+        };
+        let hint = observed_response_style_hint(Some(&agent_run_context));
+        assert!(hint.contains("one short paragraph"));
+        assert!(hint.contains("no headings"));
     }
 
     #[test]
@@ -7937,6 +8084,107 @@ sqlite_path = "data/rustclaw.db"
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("This looks like a locally deployable assistant platform with a web UI, multiple chat-channel adapters, and backend services for tasks, memory, scheduling, and automation.")
+        );
+    }
+
+    #[test]
+    fn workspace_project_summary_ignores_later_field_extract_when_listing_exists() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "list_dir",
+            "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nprompts/\nrustclaw.service\nstart-telegramd.sh\nstart-wechatd.sh\nstart-whatsappd.sh\n",
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "system_basic",
+            r#"{"action":"extract_fields","path":"Cargo.toml","results":[{"exists":false,"field_path":"package.name","value":null}]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "帮我总结这个仓库".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这是一个可本地部署的智能助手平台仓库，带网页界面、多聊天渠道接入和后台服务，用来通过聊天或浏览器处理任务、记忆、调度和自动化。")
+        );
+    }
+
+    #[test]
+    fn workspace_project_summary_uses_scoped_ui_listing() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "list_dir",
+            ".env.example\nREADME.md\nindex.html\npackage.json\nsrc/\nvite.config.ts\n",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "Summarize only the UI part of this repository".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+                locator_hint: "UI".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("The UI part is RustClaw's browser front end, providing a local visual console and chat-style operating entry point for users.")
         );
     }
 
