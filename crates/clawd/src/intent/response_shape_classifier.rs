@@ -90,7 +90,7 @@ fn classify_structured_response_shape(
             "structured_field_selector_scalar",
         ));
     }
-    if crate::intent::deterministic_gate::text_looks_like_git_scalar_query(user_request) {
+    if crate::intent::git_scalar_surface::text_has_git_scalar_surface(user_request) {
         return Some((OutputResponseShape::Scalar, "structured_git_scalar_query"));
     }
     if surface_signals.requested_sentence_count == Some(1) {

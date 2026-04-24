@@ -236,26 +236,30 @@ pub(crate) struct RouteResult {
     pub(crate) should_refresh_long_term_memory: bool,
     pub(crate) agent_display_name_hint: String,
     pub(crate) output_contract: IntentOutputContract,
-    /// Phase 1.5: normalizer 顺手给出的直接回复候选。仅在 `chat` 模式且
-    /// 命中 ask_flow 里的 4 条护栏时被直接复用，跳过第二次
-    /// `chat_response_prompt` LLM。未命中时为空串/0.0，链路照旧。
+    /// Planner-first 兼容字段。normalizer 仍可返回这两个字段，但主链不再把
+    /// 它们当作 direct-reply 短路权威；普通回答继续进入 chat/planner 层。
     pub(crate) direct_reply_candidate: String,
     pub(crate) direct_reply_confidence: f64,
 }
 
-pub(crate) const DETERMINISTIC_CONTRACT_REASON_PREFIX: &str = "deterministic_contract:";
+pub(crate) const ROUTE_CONTRACT_REASON_PREFIX: &str = "route_contract:";
+const LEGACY_DETERMINISTIC_CONTRACT_REASON_PREFIX: &str = "deterministic_contract:";
 
-pub(crate) fn route_reason_starts_with_deterministic_contract(
+fn route_contract_tail(route_reason: &str) -> Option<&str> {
+    route_reason
+        .strip_prefix(ROUTE_CONTRACT_REASON_PREFIX)
+        .or_else(|| route_reason.strip_prefix(LEGACY_DETERMINISTIC_CONTRACT_REASON_PREFIX))
+}
+
+pub(crate) fn route_reason_starts_with_route_contract(
     route_reason: &str,
     contract_prefix: &str,
 ) -> bool {
-    route_reason
-        .strip_prefix(DETERMINISTIC_CONTRACT_REASON_PREFIX)
-        .is_some_and(|tail| tail.starts_with(contract_prefix))
+    route_contract_tail(route_reason).is_some_and(|tail| tail.starts_with(contract_prefix))
 }
 
-pub(crate) fn route_reason_is_any_deterministic_contract(route_reason: &str) -> bool {
-    route_reason.starts_with(DETERMINISTIC_CONTRACT_REASON_PREFIX)
+pub(crate) fn route_reason_is_any_route_contract(route_reason: &str) -> bool {
+    route_contract_tail(route_reason).is_some()
 }
 
 impl RouteResult {
@@ -443,7 +447,10 @@ pub(crate) fn plan_step_from_agent_action(
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_step_from_agent_action, AgentAction, PlanStep};
+    use super::{
+        plan_step_from_agent_action, route_reason_is_any_route_contract,
+        route_reason_starts_with_route_contract, AgentAction, PlanStep,
+    };
     use serde_json::json;
 
     #[test]
@@ -480,5 +487,24 @@ mod tests {
         assert_eq!(step.skill, "synthesize_answer");
         assert_eq!(step.args, json!({ "evidence_refs": ["last_output"] }));
         assert_eq!(step.depends_on, vec!["step_1".to_string()]);
+    }
+
+    #[test]
+    fn route_contract_reason_helpers_accept_new_and_legacy_prefixes() {
+        assert!(route_reason_starts_with_route_contract(
+            "route_contract:generic_filename_scalar_extract",
+            "generic_"
+        ));
+        assert!(route_reason_starts_with_route_contract(
+            "deterministic_contract:generic_filename_scalar_extract",
+            "generic_"
+        ));
+        assert!(route_reason_is_any_route_contract(
+            "route_contract:current_workspace_scalar_count"
+        ));
+        assert!(route_reason_is_any_route_contract(
+            "deterministic_contract:current_workspace_scalar_count"
+        ));
+        assert!(!route_reason_is_any_route_contract("normalizer:execute"));
     }
 }

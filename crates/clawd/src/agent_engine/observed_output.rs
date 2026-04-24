@@ -2964,7 +2964,7 @@ fn structured_scalar_candidate(
     match action {
         "inventory_dir" => {
             let hidden_count_route = route.is_some_and(|route| {
-                crate::route_reason_starts_with_deterministic_contract(
+                crate::route_reason_starts_with_route_contract(
                     &route.route_reason,
                     "current_workspace_hidden_entries_count",
                 )
@@ -3376,7 +3376,7 @@ fn route_allows_raw_read_range_direct_answer(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Free
         )
-        && crate::route_reason_starts_with_deterministic_contract(&route.route_reason, "generic_")
+        && crate::route_reason_starts_with_route_contract(&route.route_reason, "generic_")
         && route.route_reason.ends_with("_read_range")
         && !route_requests_content_excerpt_summary(route, agent_run_context)
 }
@@ -4990,7 +4990,7 @@ mod tests {
                     .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:compare_targets".to_string(),
+            route_reason: "route_contract:compare_targets".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5043,7 +5043,7 @@ mod tests {
             resolved_intent: "Are those two names the same? Answer same or different".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:same_or_different".to_string(),
+            route_reason: "route_contract:same_or_different".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5578,7 +5578,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "看看 README.md 开头讲了什么，读前 20 行后用三句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:generic_filename_read_range".to_string(),
+            route_reason: "route_contract:generic_filename_read_range".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5681,7 +5681,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "读取 /tmp/clawd.run.log 最后 3 行，然后用一句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:generic_explicit_path_read_range".to_string(),
+            route_reason: "route_contract:generic_explicit_path_read_range".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5730,7 +5730,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "看一下 /tmp/release_checklist.md，然后用一句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:generic_explicit_path_single_read".to_string(),
+            route_reason: "route_contract:generic_explicit_path_single_read".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5828,7 +5828,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "先读一下 README.md 前 4 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:generic_filename_read_range".to_string(),
+            route_reason: "route_contract:generic_filename_read_range".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5877,7 +5877,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "先读一下 README.md 前 4 行，再用三句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:generic_filename_read_range".to_string(),
+            route_reason: "route_contract:generic_filename_read_range".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5926,7 +5926,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "先读一下 README.md 前 4 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:generic_filename_read_range".to_string(),
+            route_reason: "route_contract:generic_filename_read_range".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5976,7 +5976,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "读 /tmp/package.json，告诉我 scripts 字段下都有哪些子键".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:generic_explicit_path_structured_keys"
+            route_reason: "route_contract:generic_explicit_path_structured_keys"
                 .to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
@@ -6027,7 +6027,7 @@ sqlite_path = "data/rustclaw.db"
                     .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:generic_explicit_path_extract_fields"
+            route_reason: "route_contract:generic_explicit_path_extract_fields"
                 .to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
@@ -8143,7 +8143,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "数一下 scripts 目录直接子项有多少个，只输出数字".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:current_workspace_scalar_count".to_string(),
+            route_reason: "route_contract:current_workspace_scalar_count".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -8191,7 +8191,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "数一下当前目录里以点开头的隐藏文件有几个，只输出数字".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:current_workspace_hidden_entries_count"
+            route_reason: "route_contract:current_workspace_hidden_entries_count"
                 .to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
@@ -8241,7 +8241,7 @@ sqlite_path = "data/rustclaw.db"
                 .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:package_manager_detect_summary".to_string(),
+            route_reason: "route_contract:package_manager_detect_summary".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -8599,7 +8599,7 @@ sqlite_path = "data/rustclaw.db"
                 .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:compare_targets".to_string(),
+            route_reason: "route_contract:compare_targets".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -8641,7 +8641,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "deterministic_contract:compare_targets".to_string(),
+            route_reason: "route_contract:compare_targets".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,

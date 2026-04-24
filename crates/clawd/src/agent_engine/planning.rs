@@ -2985,7 +2985,7 @@ mod tests {
     #[test]
     fn planning_prompt_class_uses_lightweight_execution_for_scalar_contract() {
         let mut route = base_route_result();
-        route.route_reason = "deterministic_contract:generic_filename_scalar_extract".to_string();
+        route.route_reason = "route_contract:generic_filename_scalar_extract".to_string();
         route.resolved_intent = "读取 UI/package.json 里的 name 字段，只输出值".to_string();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.requires_content_evidence = true;
@@ -3027,7 +3027,7 @@ mod tests {
     #[test]
     fn planning_prompt_class_uses_lightweight_execution_for_pwd_only_route() {
         let mut route = base_route_result();
-        route.route_reason = "deterministic_contract:pwd_only_current_workspace".to_string();
+        route.route_reason = "route_contract:pwd_only_current_workspace".to_string();
         route.resolved_intent = "只输出当前工作目录的绝对路径，不要解释".to_string();
         route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
         route.output_contract.response_shape = OutputResponseShape::Scalar;
@@ -3047,7 +3047,7 @@ mod tests {
         let mut route = base_route_result();
         route.routed_mode = RoutedMode::ChatAct;
         route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
-        route.route_reason = "deterministic_contract:generic_filename_read_range".to_string();
+        route.route_reason = "route_contract:generic_filename_read_range".to_string();
         route.resolved_intent = "先读一下 README.md 前 4 行".to_string();
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.requires_content_evidence = true;
@@ -3078,7 +3078,7 @@ mod tests {
         );
 
         let mut scalar = base_route_result();
-        scalar.route_reason = "deterministic_contract:generic_filename_scalar_extract".to_string();
+        scalar.route_reason = "route_contract:generic_filename_scalar_extract".to_string();
         scalar.resolved_intent = "读取 UI/package.json 里的 name 字段，只输出值".to_string();
         scalar.output_contract.response_shape = OutputResponseShape::Scalar;
         scalar.output_contract.requires_content_evidence = true;
@@ -3115,7 +3115,7 @@ mod tests {
     fn lightweight_tool_spec_includes_contract_and_auto_locator() {
         let mut route = base_route_result();
         route.route_reason =
-            "deterministic_contract:generic_explicit_path_scalar_extract".to_string();
+            "route_contract:generic_explicit_path_scalar_extract".to_string();
         route.resolved_intent = "读取 UI/package.json 里的 name 字段，只输出值".to_string();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -3526,7 +3526,7 @@ mod tests {
             },
         ];
         let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
-        route.route_reason = "deterministic_contract:generic_filename_single_read".to_string();
+        route.route_reason = "route_contract:generic_filename_single_read".to_string();
         route.resolved_intent = "看一下 README.md，然后一句话说它主要讲了什么".to_string();
         route.output_contract.locator_kind = OutputLocatorKind::Filename;
         route.output_contract.locator_hint = "README.md".to_string();

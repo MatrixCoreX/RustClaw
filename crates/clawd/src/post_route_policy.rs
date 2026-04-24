@@ -293,7 +293,7 @@ fn should_clear_scalar_path_only_without_locator_binding(route_result: &RouteRes
     {
         return false;
     }
-    if crate::route_reason_starts_with_deterministic_contract(
+    if crate::route_reason_starts_with_route_contract(
         &route_result.route_reason,
         "pwd_only_current_workspace",
     ) {
@@ -311,7 +311,7 @@ fn should_clear_scalar_path_only_for_git_scalar_query(route_result: &RouteResult
     {
         return false;
     }
-    crate::intent::deterministic_gate::route_is_git_scalar_query(route_result)
+    crate::intent::git_scalar_surface::route_has_git_scalar_surface(route_result)
 }
 
 fn should_clear_raw_command_output_for_contract_mismatch(
@@ -1240,7 +1240,7 @@ mod tests {
     fn scalar_path_only_contract_stays_for_pwd_contract_without_locator_binding() {
         let mut route = route_result();
         route.resolved_intent = "只输出当前工作目录的绝对路径，不要解释".to_string();
-        route.route_reason = "deterministic_contract:pwd_only_current_workspace".to_string();
+        route.route_reason = "route_contract:pwd_only_current_workspace".to_string();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.requires_content_evidence = false;
         route.output_contract.locator_kind = OutputLocatorKind::None;

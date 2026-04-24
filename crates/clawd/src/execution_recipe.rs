@@ -707,7 +707,7 @@ pub(crate) fn detect_execution_recipe(
     if route.needs_clarify || !route.is_execute_gate() {
         return ExecutionRecipeSpec::default();
     }
-    if crate::route_reason_is_any_deterministic_contract(&route.route_reason) {
+    if crate::route_reason_is_any_route_contract(&route.route_reason) {
         return ExecutionRecipeSpec::default();
     }
     if matches!(
@@ -1939,13 +1939,13 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_contract_scalar_extract_does_not_trigger_recipe() {
+    fn route_contract_scalar_extract_does_not_trigger_recipe() {
         let mut route = route_result(
             RoutedMode::Act,
             "读取 /home/guagua/rustclaw/configs/config.toml 里的 tools.allow_sudo，只输出值",
         );
         route.route_reason =
-            "deterministic_contract:generic_explicit_path_scalar_extract".to_string();
+            "route_contract:generic_explicit_path_scalar_extract".to_string();
         let spec =
             detect_execution_recipe(Some(&route), &route.resolved_intent, &route.resolved_intent);
         assert_eq!(spec.kind, ExecutionRecipeKind::None);

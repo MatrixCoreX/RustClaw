@@ -100,8 +100,8 @@ pub(crate) use log_utils::{
 pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
 pub(crate) use pipeline_types::{
-    plan_step_from_agent_action, route_reason_is_any_deterministic_contract,
-    route_reason_starts_with_deterministic_contract, IntentOutputContract, OutputDeliveryIntent,
+    plan_step_from_agent_action, route_reason_is_any_route_contract,
+    route_reason_starts_with_route_contract, IntentOutputContract, OutputDeliveryIntent,
     OutputLocatorKind, OutputResponseShape, OutputSemanticKind, PlanKind, PlanResult, PlanStep,
     ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind, SelfExtensionContract,
     SelfExtensionMode, SelfExtensionTrigger,
