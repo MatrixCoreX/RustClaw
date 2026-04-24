@@ -202,17 +202,6 @@ impl PromptSurfaceSignals {
             || self.requested_listing_limit.is_some()
     }
 
-    pub(crate) fn has_delivery_token_reference(&self) -> bool {
-        matches!(
-            self.file_reference_prompt_shape,
-            Some(
-                FileReferencePromptShape::DeliveryToken
-                    | FileReferencePromptShape::DeliveryTokenAndGenericObject
-                    | FileReferencePromptShape::DeliveryTokenAndFileishReference
-            )
-        )
-    }
-
     pub(crate) fn has_generic_or_fileish_reference(&self) -> bool {
         matches!(
             self.file_reference_prompt_shape,

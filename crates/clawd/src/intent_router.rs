@@ -899,7 +899,10 @@ pub(crate) async fn run_intent_normalizer(
                 &context_bundle.raw_sources.binding_context,
             ),
             ("__ACTIVE_TASK_CONTEXT__", &route_view.active_task_context),
-            ("__REQUEST_SURFACE_HINTS__", &route_view.request_surface_hints),
+            (
+                "__REQUEST_SURFACE_HINTS__",
+                &route_view.request_surface_hints,
+            ),
             (
                 "__RECENT_EXECUTION_CONTEXT__",
                 &route_view.recent_execution_context,
@@ -1188,23 +1191,13 @@ pub(crate) async fn run_intent_normalizer(
                 .unwrap_or_else(|| "none".to_string()),
             turn_analysis_log,
         );
-        // §F2：bare-path-no-verb 兜底。某些 vendor（实测 minimax）会把单独
-        // 的 `document/` / `prompts/` / `./logs` 之类纯路径输入判成
-        // needs_clarify=false + mode=Act/ChatAct，下游 planner 在没有动词时
-        // 反复 repair non-actionable，最终走 fallback i18n 误报 provider 不可用。
-        // 这里在解析成功路径上加一道保险：若用户原始消息只是裸路径而 LLM 没
-        // 主动 clarify，强制翻译成 needs_clarify + 默认问句，让 routing 进入
-        // ask_clarify 干脆地拿一个动词。
-        let bare_path_classification =
-            crate::intent::intent_kind_classifier::classify_bare_path_only_input_with_surface(
-                req,
-                &req_surface,
-            );
-        let (needs_clarify_eff, clarify_question_eff) = if !needs_clarify
-            && bare_path_classification.is_bare_path_only
-        {
+        // Structural safety guard only: a single path/file token has no action verb, so
+        // ask for the missing operation instead of letting the planner repair a non-actionable
+        // instruction. This does not classify natural-language intent.
+        let bare_path_only = is_bare_path_only_input_for_clarify(req, &req_surface);
+        let (needs_clarify_eff, clarify_question_eff) = if !needs_clarify && bare_path_only {
             let q = if clarify_question.is_empty() {
-                crate::intent::intent_kind_classifier::bare_path_clarify_question_for(req)
+                bare_path_clarify_question_for(req)
             } else {
                 clarify_question.clone()
             };
@@ -1261,6 +1254,52 @@ pub(crate) async fn run_intent_normalizer(
     }
     let fallback = empty_ask_clarify_decision(req, "normalizer_parse_failed");
     normalizer_output_from_fallback(req, "parse_failed_safe_clarify", fallback)
+}
+
+fn is_bare_path_only_input_for_clarify(
+    text: &str,
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.len() > 60 {
+        return false;
+    }
+    if trimmed.contains(['?', '？', '!', '！']) {
+        return false;
+    }
+    if surface.inline_json_shape.is_some() || surface.has_structured_target_refinement() {
+        return false;
+    }
+    if trimmed.split_whitespace().count() != 1 {
+        return false;
+    }
+    surface.has_explicit_path_or_url()
+        || surface.has_workspace_single_token_hint()
+        || surface.has_single_filename_candidate()
+        || token_looks_like_pathish_filename(trimmed)
+}
+
+fn token_looks_like_pathish_filename(token: &str) -> bool {
+    let token = token.trim();
+    if token.is_empty() || token.starts_with('.') || token.contains('/') || token.contains('\\') {
+        return false;
+    }
+    let Some((stem, extension)) = token.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && !extension.is_empty()
+        && extension.len() <= 8
+        && extension
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+}
+
+fn bare_path_clarify_question_for(text: &str) -> String {
+    let path = text.trim();
+    format!(
+        "你想对 `{path}` 做什么？比如列出内容、读取某个文件、还是发给我？ / What do you want to do with `{path}`? e.g. list its contents, read a file, or send it to me?"
+    )
 }
 
 /// Fallback `RouteDecision` used when normalizer LLM fails or its output cannot be parsed.
@@ -1598,66 +1637,6 @@ mod tests {
             ClarifyQuestionPolicy::default(),
             ClarifyQuestionPolicy::AllowModel
         );
-    }
-
-    /// §F2：bare-path-no-verb 启发式正向命中。
-    #[test]
-    fn is_bare_path_only_input_no_verb_recognizes_path_only() {
-        for case in [
-            "document/",
-            "prompts/",
-            "./logs/",
-            "/tmp/foo.log",
-            "scripts/nl_tests/",
-            "Cargo.toml",
-            "AGENTS.md",
-            "src/main.rs",
-            "logs",
-        ] {
-            assert!(
-                crate::intent::intent_kind_classifier::is_bare_path_only_input_no_verb(case),
-                "expected `{}` to be detected as bare-path-no-verb",
-                case
-            );
-        }
-    }
-
-    /// §F2：bare-path-no-verb 反向不命中。
-    /// 任意带动词或问句标点的输入都不应被这条规则覆盖。
-    #[test]
-    fn is_bare_path_only_input_no_verb_skips_verb_or_punctuated() {
-        for case in [
-            // 动词
-            "看一下 document/",
-            "list document/",
-            "把 document/ 发给我",
-            "read src/main.rs",
-            "查 prompts/ 下有哪些文件",
-            // 问句标点
-            "document/?",
-            "prompts/ ？",
-            // 空 / 太长
-            "",
-            "this is a very very very very very very very very very long sentence not a path",
-            // 非 path-like 单词
-            "git",
-            // 含路径但同时含动词
-            "show /tmp/foo.log",
-        ] {
-            assert!(
-                !crate::intent::intent_kind_classifier::is_bare_path_only_input_no_verb(case),
-                "expected `{}` to NOT be flagged",
-                case
-            );
-        }
-    }
-
-    /// §F2：clarify 问句生成把原始路径回灌到 backtick 区块。
-    #[test]
-    fn bare_path_clarify_question_includes_raw_path() {
-        let q = crate::intent::intent_kind_classifier::bare_path_clarify_question_for("document/");
-        assert!(q.contains("`document/`"), "got: {q}");
-        assert!(q.contains("/"), "must keep both EN and CN halves");
     }
 
     #[test]
@@ -2251,9 +2230,7 @@ mod tests {
     #[test]
     fn parse_output_semantic_kind_prefers_last_recognized_token_in_multi_value_output() {
         assert_eq!(
-            super::parse_output_semantic_kind(
-                "sqlite_table_listing|sqlite_database_kind_judgment"
-            ),
+            super::parse_output_semantic_kind("sqlite_table_listing|sqlite_database_kind_judgment"),
             OutputSemanticKind::SqliteDatabaseKindJudgment
         );
     }
