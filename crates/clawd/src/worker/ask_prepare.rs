@@ -14,14 +14,13 @@ pub(super) struct PreparedAskExecutionContext {
 pub(super) struct PreparedAskRouting {
     pub(super) route_result: crate::RouteResult,
     pub(super) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    pub(super) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(super) resolved_prompt: String,
     pub(super) agent_mode: bool,
     pub(super) immediate_prior_turn_was_clarify: bool,
-    /// Phase 3.2：合并 routed_mode + classifier_direct + direct_resume_*
-    /// 后的最终模式。Stage D 已删除原 3 个 bool 字段（classifier_direct_mode /
-    /// direct_resume_discussion / direct_resume_execution），全部判断走
-    /// ask_mode 谓词方法（is_classifier_direct / is_resume_discussion /
-    /// resume_execution）。
+    /// Phase 3.2：合并 routed_mode + direct_resume_* 后的最终模式。
+    /// Stage D 已删除原 direct_resume_discussion / direct_resume_execution bool 字段，
+    /// 全部判断走 ask_mode 谓词方法（is_resume_discussion / resume_execution）。
     pub(super) ask_mode: crate::AskMode,
 }
 
@@ -35,346 +34,219 @@ pub(super) struct PreparedRunSkillInput {
     pub(super) args: Value,
 }
 
-fn context_contains_immediate_locator_anchor(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed == "<none>" {
+fn apply_fresh_deictic_clarify_guard(
+    state: &AppState,
+    prompt: &str,
+    prompt_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    route_result: &mut crate::RouteResult,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    last_turn_full: &str,
+    recent_assistant_replies: &str,
+) {
+    let Some(decision) =
+        crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard_with_surface(
+            route_result,
+            prompt,
+            session_snapshot,
+            last_turn_full,
+            recent_assistant_replies,
+            prompt_surface,
+        )
+    else {
+        return;
+    };
+    route_result.set_routed_mode(crate::RoutedMode::AskClarify);
+    route_result.needs_clarify = true;
+    route_result.resolved_intent = prompt.trim().to_string();
+    route_result.clarify_question =
+        crate::i18n_t_with_default(state, decision.question_i18n_key, decision.default_question);
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.locator_hint.clear();
+    if route_result.route_reason.trim().is_empty() {
+        route_result.route_reason = decision.reason.to_string();
+    } else if !route_result.route_reason.contains(decision.reason) {
+        route_result.route_reason.push(';');
+        route_result.route_reason.push_str(decision.reason);
+    }
+}
+
+fn merged_prompt_from_task_turn_analysis(
+    prior_primary_task_prompt: Option<&str>,
+    prior_primary_task_output: Option<&str>,
+    current_prompt: &str,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> Option<String> {
+    let prior = prior_primary_task_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let current = current_prompt.trim();
+    if current.is_empty() || current == prior || current.contains(prior) {
+        return None;
+    }
+    let analysis = turn_analysis?;
+    let policy = analysis.target_task_policy?;
+    let turn_type = analysis.turn_type?;
+    let structured_patch = analysis
+        .state_patch
+        .as_ref()
+        .and_then(render_task_state_patch);
+    let include_prior_output = matches!(
+        (turn_type, policy),
+        (
+            crate::intent_router::TurnType::TaskAppend
+                | crate::intent_router::TurnType::TaskCorrect
+                | crate::intent_router::TurnType::TaskScopeUpdate,
+            crate::intent_router::TargetTaskPolicy::ReuseActive,
+        )
+    );
+    let prior_output = if include_prior_output {
+        prior_primary_task_output
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(truncate_task_output_for_merge)
+    } else {
+        None
+    };
+    match (turn_type, policy) {
+        (
+            crate::intent_router::TurnType::TaskAppend,
+            crate::intent_router::TargetTaskPolicy::ReuseActive,
+        ) => Some(merged_reuse_active_prompt(
+            prior,
+            prior_output.as_deref(),
+            current,
+            structured_patch.as_deref(),
+            "Keep the same task and append this new instruction.",
+        )),
+        (
+            crate::intent_router::TurnType::TaskCorrect,
+            crate::intent_router::TargetTaskPolicy::ReuseActive,
+        ) => Some(merged_reuse_active_prompt(
+            prior,
+            prior_output.as_deref(),
+            current,
+            structured_patch.as_deref(),
+            "Keep the same task, but treat the new instruction as a correction that overrides conflicting earlier details.",
+        )),
+        (
+            crate::intent_router::TurnType::TaskScopeUpdate,
+            crate::intent_router::TargetTaskPolicy::ReuseActive,
+        ) => Some(merged_reuse_active_prompt(
+            prior,
+            prior_output.as_deref(),
+            current,
+            structured_patch.as_deref(),
+            "Keep the same task, but update its scope, priorities, or boundaries using the new instruction. Treat conceptual scope words such as module/topic/section/audience as content constraints, not filesystem targets, unless the user explicitly asks to inspect files, code, or logs. If the updated scope is enough to produce a useful generic draft/plan/answer, produce that scoped result now instead of asking for optional platform/system subtype details.",
+        )),
+        (
+            crate::intent_router::TurnType::TaskReplace,
+            crate::intent_router::TargetTaskPolicy::ReplaceActive,
+        ) => Some(merged_replace_active_prompt(
+            prior,
+            prior_output.as_deref(),
+            current,
+            structured_patch.as_deref(),
+        )),
+        _ => None,
+    }
+}
+
+fn truncate_task_output_for_merge(output: &str) -> String {
+    const MAX_CHARS: usize = 2000;
+    let trimmed = output.trim();
+    if trimmed.chars().count() <= MAX_CHARS {
+        return trimmed.to_string();
+    }
+    trimmed.chars().take(MAX_CHARS).collect::<String>()
+}
+
+fn render_task_state_patch(state_patch: &Value) -> Option<String> {
+    match state_patch {
+        Value::Null => None,
+        Value::String(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        other => serde_json::to_string(other)
+            .ok()
+            .filter(|serialized| !serialized.is_empty()),
+    }
+}
+
+fn merged_reuse_active_prompt(
+    prior: &str,
+    prior_output: Option<&str>,
+    current: &str,
+    structured_patch: Option<&str>,
+    merge_instruction: &str,
+) -> String {
+    let recent_output_block = prior_output
+        .map(|output| format!("\n\nMost recent generated output:\n{output}"))
+        .unwrap_or_default();
+    match structured_patch {
+        Some(patch) => format!(
+            "Current task:\n{prior}{recent_output_block}\n\nStructured task updates:\n{patch}\n\n{merge_instruction}\nNew user instruction:\n{current}"
+        ),
+        None => format!(
+            "Current task:\n{prior}{recent_output_block}\n\n{merge_instruction}\nNew user instruction:\n{current}"
+        ),
+    }
+}
+
+fn merged_replace_active_prompt(
+    prior: &str,
+    prior_output: Option<&str>,
+    current: &str,
+    structured_patch: Option<&str>,
+) -> String {
+    let recent_output_block = prior_output
+        .map(|output| format!("\n\nMost recent generated output:\n{output}"))
+        .unwrap_or_default();
+    match structured_patch {
+        Some(patch) => format!(
+            "Previous task:\n{prior}{recent_output_block}\n\nStructured replacement details:\n{patch}\n\nDiscard that task and replace it with this new goal. Preserve the prior subject/topic unless the new instruction explicitly changes it, and treat the replacement as a deliverable/style update rather than a filesystem lookup unless the user explicitly asks to inspect files, code, or logs:\n{current}"
+        ),
+        None => format!(
+            "Previous task:\n{prior}{recent_output_block}\n\nDiscard that task and replace it with this new goal. Preserve the prior subject/topic unless the new instruction explicitly changes it, and treat the replacement as a deliverable/style update rather than a filesystem lookup unless the user explicitly asks to inspect files, code, or logs:\n{current}"
+        ),
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn should_probe_transcript_for_clarify_fallback(
+    prompt: &str,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    should_probe_transcript_for_clarify_fallback_with_surface(session_snapshot, &surface)
+}
+
+fn should_probe_transcript_for_clarify_fallback_with_surface(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    if session_snapshot
+        .conversation_state
+        .as_ref()
+        .and_then(|state| state.last_primary_task_prompt.as_deref())
+        .is_some_and(|prompt| !prompt.trim().is_empty())
+    {
         return false;
     }
-    if trimmed.starts_with("### RECENT_ASSISTANT_REPLIES") {
-        let Some(immediate_line) = trimmed
-            .lines()
-            .find(|line| line.contains("turn_id=assistant[-1]"))
-        else {
-            return false;
-        };
-        return !crate::extract_delivery_file_tokens(immediate_line).is_empty()
-            || crate::delivery_utils::has_concrete_locator_input(immediate_line);
-    }
-    !crate::extract_delivery_file_tokens(trimmed).is_empty()
-        || crate::delivery_utils::has_concrete_locator_input(trimmed)
-}
-
-fn immediate_last_turn_was_clarify(text: &str) -> bool {
-    text.contains("[clarification_requested]")
-}
-
-fn extract_last_turn_user_text(text: &str) -> Option<String> {
-    text.lines()
-        .find_map(|line| line.trim().strip_prefix("User: "))
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToString::to_string)
-}
-
-fn prompt_is_inline_json_value(prompt: &str) -> bool {
-    let trimmed = prompt.trim();
-    !trimmed.is_empty()
-        && crate::extract_first_json_value_any(trimmed).is_some_and(|value| value.trim() == trimmed)
-}
-
-fn prompt_looks_like_clarify_target_only(prompt: &str) -> bool {
-    let trimmed = prompt.trim();
-    !trimmed.is_empty()
-        && (prompt_is_inline_json_value(trimmed)
-            || super::has_concrete_locator_hint(trimmed)
-            || super::has_explicit_path_or_url_locator_hint(trimmed))
-}
-
-fn clarify_followup_routing_prompt(prompt: &str, last_turn_full: &str) -> Option<String> {
-    if !immediate_last_turn_was_clarify(last_turn_full)
-        || !prompt_looks_like_clarify_target_only(prompt)
+    if session_snapshot.active_clarify_state.is_some()
+        || session_snapshot.active_followup_frame.is_some()
+        || session_snapshot.active_observed_facts.is_some()
     {
-        return None;
+        return false;
     }
-    let previous_user_request = extract_last_turn_user_text(last_turn_full)?;
-    Some(format!(
-        "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
-        previous_user_request.trim(),
-        prompt.trim()
-    ))
-}
-
-fn should_force_clarify_for_fresh_delivery_deictic(
-    route_result: &crate::RouteResult,
-    prompt: &str,
-    last_turn_full: &str,
-    recent_assistant_replies: &str,
-) -> bool {
-    route_result.wants_file_delivery
-        && !route_result.needs_clarify
-        && !super::has_concrete_locator_hint(prompt)
-        && !context_contains_immediate_locator_anchor(last_turn_full)
-        && !context_contains_immediate_locator_anchor(recent_assistant_replies)
-}
-
-fn should_force_clarify_for_fresh_scalar_deictic(
-    route_result: &crate::RouteResult,
-    prompt: &str,
-    last_turn_full: &str,
-    recent_assistant_replies: &str,
-) -> bool {
-    !route_result.needs_clarify
-        && route_result.output_contract.requires_content_evidence
-        && matches!(
-            route_result.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar
-        )
-        && matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::Url
-        )
-        && !super::has_concrete_locator_hint(prompt)
-        && !context_contains_immediate_locator_anchor(last_turn_full)
-        && !context_contains_immediate_locator_anchor(recent_assistant_replies)
-}
-
-fn should_force_clarify_for_fresh_content_deictic(
-    route_result: &crate::RouteResult,
-    prompt: &str,
-    last_turn_full: &str,
-    recent_assistant_replies: &str,
-) -> bool {
-    !route_result.needs_clarify
-        && route_result.output_contract.requires_content_evidence
-        && matches!(
-            route_result.output_contract.response_shape,
-            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
-        )
-        && matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::Url
-        )
-        && !super::has_concrete_locator_hint(prompt)
-        && !context_contains_immediate_locator_anchor(last_turn_full)
-        && !context_contains_immediate_locator_anchor(recent_assistant_replies)
-}
-
-fn apply_fresh_delivery_deictic_clarify_guard(
-    state: &AppState,
-    prompt: &str,
-    route_result: &mut crate::RouteResult,
-    last_turn_full: &str,
-    recent_assistant_replies: &str,
-) {
-    if !should_force_clarify_for_fresh_delivery_deictic(
-        route_result,
-        prompt,
-        last_turn_full,
-        recent_assistant_replies,
-    ) {
-        return;
+    if surface.looks_like_locator_only_reply() {
+        return true;
     }
-    route_result.routed_mode = crate::RoutedMode::AskClarify;
-    route_result.needs_clarify = true;
-    route_result.resolved_intent = prompt.trim().to_string();
-    route_result.clarify_question = crate::i18n_t_with_default(
-        state,
-        "clawd.msg.clarify_missing_file_locator",
-        "Please provide the specific file name or path.",
-    );
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route_result.output_contract.locator_hint.clear();
-    if route_result.route_reason.trim().is_empty() {
-        route_result.route_reason = "fresh_delivery_deictic_requires_locator".to_string();
-    } else if !route_result
-        .route_reason
-        .contains("fresh_delivery_deictic_requires_locator")
-    {
-        route_result
-            .route_reason
-            .push_str(";fresh_delivery_deictic_requires_locator");
-    }
-}
-
-fn apply_fresh_scalar_deictic_clarify_guard(
-    state: &AppState,
-    prompt: &str,
-    route_result: &mut crate::RouteResult,
-    last_turn_full: &str,
-    recent_assistant_replies: &str,
-) {
-    if !should_force_clarify_for_fresh_scalar_deictic(
-        route_result,
-        prompt,
-        last_turn_full,
-        recent_assistant_replies,
-    ) {
-        return;
-    }
-    route_result.routed_mode = crate::RoutedMode::AskClarify;
-    route_result.needs_clarify = true;
-    route_result.resolved_intent = prompt.trim().to_string();
-    route_result.clarify_question = crate::i18n_t_with_default(
-        state,
-        "clawd.msg.clarify_missing_read_target",
-        "Please provide the specific file name or path to read.",
-    );
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route_result.output_contract.locator_hint.clear();
-    if route_result.route_reason.trim().is_empty() {
-        route_result.route_reason = "fresh_scalar_deictic_requires_locator".to_string();
-    } else if !route_result
-        .route_reason
-        .contains("fresh_scalar_deictic_requires_locator")
-    {
-        route_result
-            .route_reason
-            .push_str(";fresh_scalar_deictic_requires_locator");
-    }
-}
-
-fn apply_fresh_content_deictic_clarify_guard(
-    state: &AppState,
-    prompt: &str,
-    route_result: &mut crate::RouteResult,
-    last_turn_full: &str,
-    recent_assistant_replies: &str,
-) {
-    if !should_force_clarify_for_fresh_content_deictic(
-        route_result,
-        prompt,
-        last_turn_full,
-        recent_assistant_replies,
-    ) {
-        return;
-    }
-    route_result.routed_mode = crate::RoutedMode::AskClarify;
-    route_result.needs_clarify = true;
-    route_result.resolved_intent = prompt.trim().to_string();
-    route_result.clarify_question = crate::i18n_t_with_default(
-        state,
-        "clawd.msg.clarify_missing_read_target",
-        "Please provide the specific file name or path to read.",
-    );
-    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route_result.output_contract.locator_hint.clear();
-    if route_result.route_reason.trim().is_empty() {
-        route_result.route_reason = "fresh_content_deictic_requires_locator".to_string();
-    } else if !route_result
-        .route_reason
-        .contains("fresh_content_deictic_requires_locator")
-    {
-        route_result
-            .route_reason
-            .push_str(";fresh_content_deictic_requires_locator");
-    }
-}
-
-fn direct_classifier_route_result(prompt: &str) -> crate::RouteResult {
-    crate::RouteResult {
-        routed_mode: crate::RoutedMode::Chat,
-        ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
-        resolved_intent: prompt.trim().to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "classifier_direct_source".to_string(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-        direct_reply_candidate: String::new(),
-        direct_reply_confidence: 0.0,
-    }
-}
-
-#[derive(Clone)]
-enum ResumeContextSource {
-    ExplicitContinue,
-    RecentFailedCandidate,
-}
-
-#[derive(Clone)]
-struct ResumeContextBinding {
-    source: ResumeContextSource,
-    resume_context: Value,
-    failed_ts: Option<i64>,
-    has_newer_successful_ask_after_failed_task: bool,
-}
-
-fn explicit_resume_context_binding(
-    payload: &Value,
-    is_resume_continue: bool,
-) -> Option<ResumeContextBinding> {
-    if !is_resume_continue {
-        return None;
-    }
-    Some(ResumeContextBinding {
-        source: ResumeContextSource::ExplicitContinue,
-        resume_context: payload.get("resume_context").cloned()?,
-        failed_ts: payload
-            .get("failed_resume_context_ts")
-            .and_then(|v| v.as_i64()),
-        has_newer_successful_ask_after_failed_task: payload
-            .get("has_newer_successful_ask_after_failed_task")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-    })
-}
-
-fn recent_failed_resume_candidate(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    explicit_binding_present: bool,
-) -> Option<ResumeContextBinding> {
-    if explicit_binding_present {
-        return None;
-    }
-    let candidate = crate::find_recent_failed_resume_context(state, task.user_id, task.chat_id)?;
-    Some(ResumeContextBinding {
-        source: ResumeContextSource::RecentFailedCandidate,
-        resume_context: candidate.resume_context,
-        failed_ts: Some(candidate.failed_ts),
-        has_newer_successful_ask_after_failed_task: candidate
-            .has_newer_successful_ask_after_failed_task,
-    })
-}
-
-fn binding_context_json(
-    source: &str,
-    is_resume_continue: bool,
-    resume_binding: Option<&ResumeContextBinding>,
-) -> Value {
-    let (
-        resume_context_source,
-        failed_resume_context_ts,
-        has_newer_successful_ask_after_failed_task,
-    ) = match resume_binding {
-        Some(binding) => (
-            match binding.source {
-                ResumeContextSource::ExplicitContinue => "explicit_continue_source",
-                ResumeContextSource::RecentFailedCandidate => "recent_failed_resume_candidate",
-            },
-            binding.failed_ts.map(Value::from).unwrap_or(Value::Null),
-            binding.has_newer_successful_ask_after_failed_task,
-        ),
-        None => ("none", Value::Null, false),
-    };
-    json!({
-        "source": source.trim(),
-        "is_resume_continue_source": is_resume_continue,
-        "resume_context_source": resume_context_source,
-        "failed_resume_context_ts": failed_resume_context_ts,
-        "has_newer_successful_ask_after_failed_task": has_newer_successful_ask_after_failed_task,
-    })
-}
-
-fn select_resume_runtime_binding<'a>(
-    route_result: &crate::RouteResult,
-    resume_binding: Option<&'a ResumeContextBinding>,
-) -> Option<&'a ResumeContextBinding> {
-    (!matches!(route_result.resume_behavior, crate::ResumeBehavior::None))
-        .then_some(resume_binding)
-        .flatten()
+    crate::intent::continuation_resolver::prompt_looks_like_clarify_target_only_with_surface(
+        &surface,
+    ) && surface.requested_read_range.is_none()
+        && surface.field_selector_count == 0
+        && surface.requested_listing_limit.is_none()
 }
 
 fn log_ask_memory_snapshot(
@@ -404,6 +276,7 @@ pub(super) async fn prepare_ask_execution_context(
     state: &AppState,
     task: &crate::ClaimedTask,
     payload: &Value,
+    route_result: &crate::RouteResult,
     resolved_prompt: &str,
 ) -> anyhow::Result<PreparedAskExecutionContext> {
     let chat_memory_budget_chars =
@@ -411,6 +284,7 @@ pub(super) async fn prepare_ask_execution_context(
     let mut context_bundle = crate::task_context_builder::build_execution_task_context_bundle(
         state,
         task,
+        route_result,
         resolved_prompt,
         chat_memory_budget_chars,
     );
@@ -599,116 +473,98 @@ pub(super) async fn prepare_ask_routing(
     prompt: &str,
     source: &str,
 ) -> PreparedAskRouting {
-    let normalized_source = source.trim().to_ascii_lowercase();
-    let classifier_direct_mode = crate::CLASSIFIER_DIRECT_SOURCES
-        .iter()
-        .any(|value| *value == normalized_source);
     let agent_mode = payload
         .get("agent_mode")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    if classifier_direct_mode {
-        info!(
-            "{} worker_once: ask classifier_direct_route_bypass task_id={} source={} normalizer_skipped=true",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            source
-        );
-        let direct_route = direct_classifier_route_result(prompt);
-        let ask_mode = crate::AskMode::from_legacy(
-            direct_route.routed_mode,
-            true,
-            false,
-            false,
-            Some(&normalized_source),
-        );
-        return PreparedAskRouting {
-            route_result: direct_route,
-            execution_recipe_hint: None,
-            resolved_prompt: prompt.trim().to_string(),
-            agent_mode,
-            immediate_prior_turn_was_clarify: false,
-            ask_mode,
-        };
-    }
     let is_resume_continue = super::is_resume_continue_source(source);
     let (now_iso, timezone_str, schedule_rules) =
         schedule_service::schedule_context_for_normalizer(state);
-    let last_turn_full = crate::memory::build_last_turn_full_context(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        400,
-        1200,
-    );
-    let recent_assistant_replies = crate::memory::build_recent_assistant_replies_context(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        3,
-        220,
-    );
-    let immediate_prior_turn_was_clarify = immediate_last_turn_was_clarify(&last_turn_full);
-    let normalizer_prompt = clarify_followup_routing_prompt(prompt, &last_turn_full)
-        .unwrap_or_else(|| prompt.to_string());
-
-    // §7.3 shortpath：上一轮 clarify + 当前 prompt 整段是 locator-only 续答时，
-    // 跳过 normalizer LLM 直接合成 RouteResult。故意放在 resume_binding 之前 ——
-    // resume 续答语义上不会同时满足 "上一轮 clarify + 当前只贴 path"，shortpath
-    // 命中时整个 resume 路径都不需要走，可以连 binding 计算都省。
-    // 命中后由 §7.1 verifier 在出口兜底输出形态规范；guard 链不必再跑（shortpath
-    // 命中已暗示 has_concrete_locator_hint(prompt) 为 true，所有 force-clarify guard
-    // 必然 no-op）。
-    if let Some(hit) = crate::clarify_followup::try_clarify_reply_shortpath(prompt, &last_turn_full)
-    {
-        crate::clarify_followup::emit_shortpath_hit_event(&task.task_id, &hit);
-        info!(
-            "{} worker_once: ask clarify_shortpath_route_synthesized task_id={} reason={} normalizer_skipped=true",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            hit.reason.as_metric_label()
+    let session_snapshot = crate::conversation_state::load_active_session_snapshot(state, task);
+    let routed_prompt = crate::conversation_state::rewrite_prompt_with_alias_bindings(
+        prompt,
+        Some(&session_snapshot),
+    )
+    .unwrap_or_else(|| prompt.to_string());
+    let mut last_turn_full = None;
+    let mut recent_assistant_replies = None;
+    let routed_prompt_surface =
+        crate::intent::surface_signals::analyze_prompt_surface(&routed_prompt);
+    let mut clarify_followup_resolution =
+        crate::intent::continuation_resolver::resolve_clarify_followup_from_session_with_surface(
+            &routed_prompt,
+            None,
+            Some(&session_snapshot),
+            &routed_prompt_surface,
         );
-        let route_result = crate::clarify_followup::synthesize_route_result_from_hit(&hit);
-        let resolved_prompt = route_result.resolved_intent.clone();
-        let ask_mode = crate::AskMode::from_routed_mode(route_result.routed_mode);
-        info!(
-            "worker_once: ask raw_message task_id={} user_id={} chat_id={} text={}",
-            task.task_id,
+    let mut immediate_prior_turn_was_clarify = session_snapshot.active_clarify_state.is_some();
+    if matches!(
+        clarify_followup_resolution,
+        crate::intent::continuation_resolver::ClarifyFollowupResolution::None
+    ) && should_probe_transcript_for_clarify_fallback_with_surface(
+        &session_snapshot,
+        &routed_prompt_surface,
+    ) {
+        let built_last_turn_full = crate::memory::build_last_turn_full_context(
+            state,
+            task.user_key.as_deref(),
             task.user_id,
             task.chat_id,
-            crate::truncate_for_log(prompt)
+            400,
+            1200,
         );
-        info!(
-            "{} worker_once: ask resolved_message task_id={} needs_clarify=false confidence=1 reason={} resolved_text={}",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            route_result.route_reason,
-            crate::truncate_for_log(&resolved_prompt)
-        );
-        return PreparedAskRouting {
-            route_result,
-            execution_recipe_hint: None,
-            resolved_prompt,
-            agent_mode,
-            immediate_prior_turn_was_clarify: true,
-            ask_mode,
-        };
+        immediate_prior_turn_was_clarify =
+            crate::intent::continuation_resolver::immediate_prior_turn_was_clarify(
+                &built_last_turn_full,
+            );
+        clarify_followup_resolution =
+            crate::intent::continuation_resolver::resolve_clarify_followup_from_session_with_surface(
+                &routed_prompt,
+                Some(&built_last_turn_full),
+                Some(&session_snapshot),
+                &routed_prompt_surface,
+            );
+        last_turn_full = Some(built_last_turn_full);
     }
-
-    let explicit_resume_binding = explicit_resume_context_binding(payload, is_resume_continue);
-    let recent_failed_resume_binding =
-        recent_failed_resume_candidate(state, task, explicit_resume_binding.is_some());
+    let normalizer_prompt = match &clarify_followup_resolution {
+        crate::intent::continuation_resolver::ClarifyFollowupResolution::NormalizerRewrite {
+            rewritten_prompt,
+            ..
+        } => rewritten_prompt.clone(),
+        crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
+            hit,
+        ) => {
+            crate::clarify_followup::emit_clarify_rewrite_event(&task.task_id, hit);
+            info!(
+                "{} worker_once: ask clarify_locator_reply_rewrite task_id={} reason={} normalizer_rewrite=true",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                hit.reason.as_metric_label()
+            );
+            hit.resolved_intent.clone()
+        }
+        _ => routed_prompt.clone(),
+    };
+    let explicit_resume_binding =
+        crate::intent::resume_policy::explicit_resume_context_binding(payload, is_resume_continue);
+    let recent_failed_resume_binding = crate::intent::resume_policy::recent_failed_resume_candidate(
+        state,
+        task,
+        explicit_resume_binding.is_some(),
+    );
     let resume_binding = explicit_resume_binding
         .clone()
         .or_else(|| recent_failed_resume_binding.clone());
-    let binding_context_value =
-        binding_context_json(source, is_resume_continue, resume_binding.as_ref());
+    let binding_context_value = crate::intent::resume_policy::binding_context_json(
+        source,
+        is_resume_continue,
+        resume_binding.as_ref(),
+    );
     let normalizer_out = crate::intent_router::run_intent_normalizer(
         state,
         task,
         &normalizer_prompt,
+        Some(&session_snapshot),
         resume_binding
             .as_ref()
             .map(|binding| &binding.resume_context),
@@ -724,36 +580,70 @@ pub(super) async fn prepare_ask_routing(
     if let Some(intent) = normalizer_out.schedule_intent.as_ref() {
         state.cache_task_schedule_intent(&task.task_id, &normalizer_prompt, intent);
     }
+    let turn_analysis = normalizer_out.turn_analysis.clone();
     let mut execution_recipe_hint = normalizer_out.execution_recipe_hint;
     let mut route_result =
         crate::intent_router::route_result_from_normalizer(state, task, &normalizer_out);
-    apply_fresh_delivery_deictic_clarify_guard(
+    let needs_last_turn_full_after_normalizer = !immediate_prior_turn_was_clarify
+        || crate::intent::continuation_resolver::fresh_deictic_guard_needs_recent_assistant_probe_with_surface(
+            &route_result,
+            &routed_prompt,
+            Some(&session_snapshot),
+            "<none>",
+            &routed_prompt_surface,
+        );
+    let last_turn_full = last_turn_full.unwrap_or_else(|| {
+        if !needs_last_turn_full_after_normalizer {
+            return "<none>".to_string();
+        }
+        crate::memory::build_last_turn_full_context(
+            state,
+            task.user_key.as_deref(),
+            task.user_id,
+            task.chat_id,
+            400,
+            1200,
+        )
+    });
+    if !immediate_prior_turn_was_clarify && last_turn_full != "<none>" {
+        immediate_prior_turn_was_clarify =
+            crate::intent::continuation_resolver::immediate_prior_turn_was_clarify(&last_turn_full);
+    }
+    let recent_assistant_replies = if crate::intent::continuation_resolver::
+        fresh_deictic_guard_needs_recent_assistant_probe_with_surface(
+            &route_result,
+            &routed_prompt,
+            Some(&session_snapshot),
+            &last_turn_full,
+            &routed_prompt_surface,
+        )
+    {
+        recent_assistant_replies.get_or_insert_with(|| {
+            crate::memory::build_recent_assistant_replies_context(
+                state,
+                task.user_key.as_deref(),
+                task.user_id,
+                task.chat_id,
+                3,
+                220,
+            )
+        })
+    } else {
+        recent_assistant_replies.get_or_insert_with(|| "<none>".to_string())
+    };
+    apply_fresh_deictic_clarify_guard(
         state,
-        prompt,
+        &routed_prompt,
+        &routed_prompt_surface,
         &mut route_result,
+        Some(&session_snapshot),
         &last_turn_full,
         &recent_assistant_replies,
     );
-    apply_fresh_scalar_deictic_clarify_guard(
-        state,
-        prompt,
-        &mut route_result,
-        &last_turn_full,
-        &recent_assistant_replies,
+    let resume_runtime_binding = crate::intent::resume_policy::select_resume_runtime_binding(
+        &route_result,
+        resume_binding.as_ref(),
     );
-    apply_fresh_content_deictic_clarify_guard(
-        state,
-        prompt,
-        &mut route_result,
-        &last_turn_full,
-        &recent_assistant_replies,
-    );
-    let resume_runtime_binding =
-        select_resume_runtime_binding(&route_result, resume_binding.as_ref());
-    let resume_should_apply_context = resume_runtime_binding.is_some()
-        && route_result.resume_behavior == crate::ResumeBehavior::ResumeExecute;
-    let resume_should_discuss_context = resume_runtime_binding.is_some()
-        && route_result.resume_behavior == crate::ResumeBehavior::ResumeDiscuss;
     info!(
         "worker_once: ask raw_message task_id={} user_id={} chat_id={} text={}",
         task.task_id,
@@ -761,35 +651,43 @@ pub(super) async fn prepare_ask_routing(
         task.chat_id,
         crate::truncate_for_log(prompt)
     );
-    let runtime_prompt = if resume_should_apply_context {
-        match resume_runtime_binding {
-            Some(ResumeContextBinding {
-                source: ResumeContextSource::ExplicitContinue,
-                ..
-            }) => crate::build_resume_continue_execute_prompt(state, payload, prompt),
-            Some(binding) => crate::ask_flow::build_resume_continue_execute_prompt_from_context(
-                state,
-                prompt,
-                &binding.resume_context,
-            ),
-            None => route_result.resolved_intent.clone(),
+    let resume_runtime = crate::intent::resume_policy::resolve_resume_runtime_prompt(
+        state,
+        task,
+        payload,
+        prompt,
+        &route_result,
+        resume_runtime_binding,
+    );
+    let mut runtime_prompt = resume_runtime.runtime_prompt;
+    if let Some(merged_prompt) = merged_prompt_from_task_turn_analysis(
+        session_snapshot
+            .conversation_state
+            .as_ref()
+            .and_then(|state| state.last_primary_task_prompt.as_deref()),
+        session_snapshot
+            .conversation_state
+            .as_ref()
+            .and_then(|state| state.last_primary_task_output.as_deref()),
+        prompt,
+        turn_analysis.as_ref(),
+    ) {
+        info!(
+            "{} worker_once: ask task_turn_merge task_id={} turn_type={:?} target_task_policy={:?} merged_prompt={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            turn_analysis.as_ref().and_then(|analysis| analysis.turn_type),
+            turn_analysis
+                .as_ref()
+                .and_then(|analysis| analysis.target_task_policy),
+            crate::truncate_for_log(&merged_prompt)
+        );
+        runtime_prompt = merged_prompt;
+        route_result.resolved_intent = runtime_prompt.clone();
+        if !route_result.route_reason.contains("task_turn_merge") {
+            route_result.route_reason.push_str(";task_turn_merge");
         }
-    } else if resume_should_discuss_context {
-        match resume_runtime_binding {
-            Some(ResumeContextBinding {
-                source: ResumeContextSource::ExplicitContinue,
-                ..
-            }) => crate::build_resume_followup_discussion_prompt(state, payload, prompt),
-            Some(binding) => crate::ask_flow::build_resume_followup_discussion_prompt_from_context(
-                state,
-                prompt,
-                &binding.resume_context,
-            ),
-            None => route_result.resolved_intent.clone(),
-        }
-    } else {
-        route_result.resolved_intent.clone()
-    };
+    }
     info!(
         "worker_once: ask received_message task_id={} user_id={} chat_id={} text={}",
         task.task_id,
@@ -804,14 +702,13 @@ pub(super) async fn prepare_ask_routing(
         reason: route_result.route_reason.clone(),
     };
     let resolved_prompt = context_resolution.resolved_user_intent.clone();
-    if route_result.needs_clarify
-        || !matches!(
-            route_result.routed_mode,
-            crate::RoutedMode::Act | crate::RoutedMode::ChatAct
-        )
-    {
+    if route_result.needs_clarify || !route_result.ask_mode.is_execute_gate() {
         execution_recipe_hint = None;
     }
+    crate::intent::safety_class::apply_route_risk_ceiling(
+        &mut route_result,
+        execution_recipe_hint.as_ref(),
+    );
     info!(
         "{} worker_once: ask resolved_message task_id={} needs_clarify={} confidence={} reason={} resolved_text={}",
         crate::highlight_tag("routing"),
@@ -821,21 +718,27 @@ pub(super) async fn prepare_ask_routing(
         crate::truncate_for_log(&context_resolution.reason),
         crate::truncate_for_log(&resolved_prompt)
     );
+    if let Some(analysis) = turn_analysis.as_ref() {
+        info!(
+            "{} worker_once: ask turn_analysis task_id={} turn_type={:?} target_task_policy={:?} should_interrupt_active_run={} has_state_patch={} attachment_processing_required={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            analysis.turn_type,
+            analysis.target_task_policy,
+            analysis.should_interrupt_active_run,
+            analysis.state_patch.is_some(),
+            analysis.attachment_processing_required
+        );
+    }
     let ask_mode = crate::AskMode::from_legacy(
         route_result.routed_mode,
-        classifier_direct_mode,
-        resume_should_discuss_context,
-        resume_should_apply_context,
-        if classifier_direct_mode {
-            Some(normalized_source.as_str())
-        } else {
-            None
-        },
+        resume_runtime.should_discuss_context,
+        resume_runtime.should_apply_context,
     );
-    // 仅在没有任何 flag 主导时校验反向 round-trip；resume_continue/discussion/
-    // classifier_direct 命中时 to_routed_mode 会做"语义等价但取值不同"的折叠
+    // 仅在没有 resume flag 主导时校验反向 round-trip；resume_continue/discussion
+    // 命中时 to_routed_mode 会做"语义等价但取值不同"的折叠
     // （比如 ResumeContinue → Act 即便原 routed_mode 是 ChatAct），不等于即合理。
-    if !classifier_direct_mode && !resume_should_discuss_context && !resume_should_apply_context {
+    if !resume_runtime.should_discuss_context && !resume_runtime.should_apply_context {
         debug_assert_eq!(
             ask_mode.to_routed_mode(),
             route_result.routed_mode,
@@ -845,6 +748,7 @@ pub(super) async fn prepare_ask_routing(
     PreparedAskRouting {
         route_result,
         execution_recipe_hint,
+        turn_analysis,
         resolved_prompt,
         agent_mode,
         immediate_prior_turn_was_clarify,
@@ -854,26 +758,22 @@ pub(super) async fn prepare_ask_routing(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::{
-        binding_context_json, clarify_followup_routing_prompt,
-        context_contains_immediate_locator_anchor, direct_classifier_route_result,
-        immediate_last_turn_was_clarify, select_resume_runtime_binding,
-        should_force_clarify_for_fresh_content_deictic,
-        should_force_clarify_for_fresh_delivery_deictic,
-        should_force_clarify_for_fresh_scalar_deictic, ResumeContextBinding, ResumeContextSource,
+        merged_prompt_from_task_turn_analysis, should_probe_transcript_for_clarify_fallback,
     };
+
+    use serde_json::json;
 
     #[test]
     fn binding_context_marks_recent_failed_candidate_without_mutating_source() {
-        let binding = ResumeContextBinding {
-            source: ResumeContextSource::RecentFailedCandidate,
+        let binding = crate::intent::resume_policy::ResumeContextBinding {
+            source: crate::intent::resume_policy::ResumeContextSource::RecentFailedCandidate,
             resume_context: json!({"resume_context_id":"ctx-1"}),
             failed_ts: Some(42),
             has_newer_successful_ask_after_failed_task: true,
         };
-        let value = binding_context_json("manual", false, Some(&binding));
+        let value =
+            crate::intent::resume_policy::binding_context_json("manual", false, Some(&binding));
         assert_eq!(
             value.get("resume_context_source").and_then(|v| v.as_str()),
             Some("recent_failed_resume_candidate")
@@ -914,22 +814,17 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        let binding = ResumeContextBinding {
-            source: ResumeContextSource::RecentFailedCandidate,
+        let binding = crate::intent::resume_policy::ResumeContextBinding {
+            source: crate::intent::resume_policy::ResumeContextSource::RecentFailedCandidate,
             resume_context: json!({"resume_context_id":"ctx-2"}),
             failed_ts: Some(7),
             has_newer_successful_ask_after_failed_task: false,
         };
-        assert!(select_resume_runtime_binding(&route, Some(&binding)).is_none());
-    }
-
-    #[test]
-    fn direct_classifier_route_uses_chat_without_clarify() {
-        let route = direct_classifier_route_result("detect voice mode");
-        assert_eq!(route.routed_mode, crate::RoutedMode::Chat);
-        assert!(!route.needs_clarify);
-        assert_eq!(route.resolved_intent, "detect voice mode");
-        assert_eq!(route.route_reason, "classifier_direct_source");
+        assert!(crate::intent::resume_policy::select_resume_runtime_binding(
+            &route,
+            Some(&binding)
+        )
+        .is_none());
     }
 
     #[test]
@@ -963,12 +858,18 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(should_force_clarify_for_fresh_delivery_deictic(
+        let out = crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
             &route,
             "把那个文件发给我",
+            None,
             "<none>",
             "<none>",
-        ));
+        )
+        .expect("delivery deictic should require clarify");
+        assert_eq!(
+            out.kind,
+            crate::intent::continuation_resolver::FreshDeicticClarifyKind::Delivery
+        );
     }
 
     #[test]
@@ -1002,23 +903,29 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(context_contains_immediate_locator_anchor(
-            "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=README.md",
-        ));
-        assert!(!should_force_clarify_for_fresh_delivery_deictic(
-            &route,
-            "把那个文件发给我",
-            "<none>",
-            "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=README.md",
-        ));
+        assert!(
+            crate::intent::continuation_resolver::context_contains_immediate_locator_anchor(
+                "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=README.md",
+            )
+        );
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "把那个文件发给我",
+                None,
+                "<none>",
+                "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=README.md",
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn immediate_locator_anchor_ignores_older_assistant_replies() {
-        assert!(!context_contains_immediate_locator_anchor(
+        assert!(!crate::intent::continuation_resolver::context_contains_immediate_locator_anchor(
             "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=好的，我来读取 has_code_block=false\n- turn_id=assistant[-2] short_preview=package.json has_code_block=false",
         ));
-        assert!(context_contains_immediate_locator_anchor(
+        assert!(crate::intent::continuation_resolver::context_contains_immediate_locator_anchor(
             "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=package.json has_code_block=false\n- turn_id=assistant[-2] short_preview=README.md has_code_block=false",
         ));
     }
@@ -1054,12 +961,18 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(should_force_clarify_for_fresh_scalar_deictic(
+        let out = crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
             &route,
             "读一下那个文件里的名字字段，只输出值",
+            None,
             "<none>",
             "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=好的，我来读取 has_code_block=false\n- turn_id=assistant[-2] short_preview=package.json has_code_block=false",
-        ));
+        )
+        .expect("scalar deictic should require clarify");
+        assert_eq!(
+            out.kind,
+            crate::intent::continuation_resolver::FreshDeicticClarifyKind::ScalarRead
+        );
     }
 
     #[test]
@@ -1093,12 +1006,16 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(!should_force_clarify_for_fresh_scalar_deictic(
-            &route,
-            "读一下那个文件里的名字字段，只输出值",
-            "<none>",
-            "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=package.json has_code_block=false\n- turn_id=assistant[-2] short_preview=README.md has_code_block=false",
-        ));
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "读一下那个文件里的名字字段，只输出值",
+                None,
+                "<none>",
+                "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=package.json has_code_block=false\n- turn_id=assistant[-2] short_preview=README.md has_code_block=false",
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1132,12 +1049,18 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(should_force_clarify_for_fresh_content_deictic(
+        let out = crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
             &route,
             "看看那个模型日志最后 5 行",
+            None,
             "<none>",
             "<none>",
-        ));
+        )
+        .expect("content deictic should require clarify");
+        assert_eq!(
+            out.kind,
+            crate::intent::continuation_resolver::FreshDeicticClarifyKind::ContentRead
+        );
     }
 
     #[test]
@@ -1171,12 +1094,16 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(!should_force_clarify_for_fresh_content_deictic(
-            &route,
-            "看看那个模型日志最后 5 行",
-            "<none>",
-            "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=model_io.log has_code_block=false",
-        ));
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "看看那个模型日志最后 5 行",
+                None,
+                "<none>",
+                "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=model_io.log has_code_block=false",
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1210,12 +1137,16 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(!should_force_clarify_for_fresh_delivery_deictic(
-            &route,
-            "README.md",
-            "<none>",
-            "<none>",
-        ));
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "README.md",
+                None,
+                "<none>",
+                "<none>",
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1249,12 +1180,16 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(!should_force_clarify_for_fresh_delivery_deictic(
-            &route,
-            "把 README 发给我",
-            "<none>",
-            "<none>",
-        ));
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "把 README 发给我",
+                None,
+                "<none>",
+                "<none>",
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1288,12 +1223,16 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(!should_force_clarify_for_fresh_content_deictic(
-            &route,
-            "扫一眼 README 前 20 行，再提炼成 3 句话",
-            "<none>",
-            "<none>",
-        ));
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "扫一眼 README 前 20 行，再提炼成 3 句话",
+                None,
+                "<none>",
+                "<none>",
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1327,41 +1266,213 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(!should_force_clarify_for_fresh_content_deictic(
-            &route,
-            "比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因",
-            "<none>",
-            "<none>",
-        ));
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因",
+                None,
+                "<none>",
+                "<none>",
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn immediate_last_turn_clarify_placeholder_is_detected() {
-        assert!(immediate_last_turn_was_clarify(
+        assert!(crate::intent::continuation_resolver::immediate_prior_turn_was_clarify(
             "### LAST_TURN_FULL\n[TURN -1]\nUser: 读一下那个文件里的名字字段，只输出值\nAssistant: [clarification_requested]\n[/TURN]"
         ));
-        assert!(!immediate_last_turn_was_clarify(
+        assert!(!crate::intent::continuation_resolver::immediate_prior_turn_was_clarify(
             "### LAST_TURN_FULL\n[TURN -1]\nUser: 看看那个重启脚本在不在\nAssistant: 有，路径：scripts/restart_clawd_latest.sh\n[/TURN]"
         ));
     }
 
     #[test]
-    fn clarify_followup_routing_prompt_merges_previous_operation_for_json_payload() {
-        let merged = clarify_followup_routing_prompt(
-            "[{\"name\":\"alpha\",\"score\":7}]",
-            "[LAST_TURN_FULL]\nUser: 把那个 JSON 数组按 score 排一下并转成表格\nAssistant: [clarification_requested]\n[/LAST_TURN_FULL]",
-        )
-        .expect("merged clarify follow-up prompt");
-        assert!(merged.contains("把那个 JSON 数组按 score 排一下并转成表格"));
-        assert!(merged.contains("[{\"name\":\"alpha\",\"score\":7}]"));
+    fn transcript_probe_is_enabled_for_locator_only_reply_without_session_state() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        assert!(should_probe_transcript_for_clarify_fallback(
+            "/tmp/device_local/logs/model_io.log",
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn transcript_probe_is_skipped_when_session_state_already_exists() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: Some(crate::clarify_state::ClarifyState {
+                missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+                pending_question: "请提供具体要读取的文件名或路径。".to_string(),
+                candidate_targets: Vec::new(),
+                delivery_required: false,
+                output_shape: None,
+                semantic_kind: None,
+                source_request: "看一下那个日志最后 5 行".to_string(),
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+            }),
+            active_observed_facts: None,
+        };
+        assert!(!should_probe_transcript_for_clarify_fallback(
+            "/tmp/device_local/logs/model_io.log",
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn transcript_probe_is_skipped_for_regular_new_request() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        assert!(!should_probe_transcript_for_clarify_fallback(
+            "读取 /tmp/device_local/logs/model_io.log 最后 5 行",
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn transcript_probe_is_skipped_when_primary_task_prompt_exists() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("Help me write a proposal".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        assert!(!should_probe_transcript_for_clarify_fallback(
+            "It is for executives",
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn clarify_followup_routing_prompt_merges_previous_operation_for_non_locator_reply_target() {
+        let merged = crate::intent::continuation_resolver::resolve_clarify_followup(
+            "就在 scripts/restart_clawd_latest.sh",
+            Some("[LAST_TURN_FULL]\nUser: 把那个重启脚本发给我\nAssistant: [clarification_requested]\n[/LAST_TURN_FULL]"),
+            None,
+            None,
+            None,
+        );
+        match merged {
+            crate::intent::continuation_resolver::ClarifyFollowupResolution::NormalizerRewrite {
+                rewritten_prompt,
+            } => {
+                assert!(rewritten_prompt.contains("把那个重启脚本发给我"));
+                assert!(rewritten_prompt.contains("就在 scripts/restart_clawd_latest.sh"));
+            }
+            other => panic!("expected normalizer rewrite, got {other:?}"),
+        }
     }
 
     #[test]
     fn clarify_followup_routing_prompt_skips_unrelated_new_request() {
-        assert!(clarify_followup_routing_prompt(
-            "今天天气怎么样",
-            "[LAST_TURN_FULL]\nUser: 把那个 JSON 数组按 score 排一下并转成表格\nAssistant: [clarification_requested]\n[/LAST_TURN_FULL]",
+        assert!(matches!(
+            crate::intent::continuation_resolver::resolve_clarify_followup(
+                "今天天气怎么样",
+                Some(
+                    "[LAST_TURN_FULL]\nUser: 把那个 JSON 数组按 score 排一下并转成表格\nAssistant: [clarification_requested]\n[/LAST_TURN_FULL]"
+                ),
+                None,
+                None,
+                None,
+            ),
+            crate::intent::continuation_resolver::ClarifyFollowupResolution::None
+        ));
+    }
+
+    #[test]
+    fn task_append_merge_reuses_prior_primary_task_prompt() {
+        let merged = merged_prompt_from_task_turn_analysis(
+            Some("帮我写个方案"),
+            None,
+            "面向老板",
+            Some(&crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskAppend),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+                should_interrupt_active_run: false,
+                state_patch: Some(json!({"audience":"boss"})),
+                attachment_processing_required: false,
+            }),
         )
-        .is_none());
+        .expect("merged prompt");
+        assert!(merged.contains("帮我写个方案"));
+        assert!(merged.contains("面向老板"));
+        assert!(merged.contains("\"audience\":\"boss\""));
+        assert!(merged.contains("append this new instruction"));
+    }
+
+    #[test]
+    fn task_replace_merge_discards_prior_goal() {
+        let merged = merged_prompt_from_task_turn_analysis(
+            Some("别写长文，先做方案"),
+            None,
+            "算了，改成 X thread",
+            Some(&crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskReplace),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReplaceActive),
+                should_interrupt_active_run: false,
+                state_patch: Some(json!({"deliverable":"thread"})),
+                attachment_processing_required: false,
+            }),
+        )
+        .expect("merged prompt");
+        assert!(merged.contains("别写长文，先做方案"));
+        assert!(merged.contains("算了，改成 X thread"));
+        assert!(merged.contains("\"deliverable\":\"thread\""));
+        assert!(merged.contains("replace it with this new goal"));
+    }
+
+    #[test]
+    fn task_correct_merge_marks_conflicting_details_as_overrides() {
+        let merged = merged_prompt_from_task_turn_analysis(
+            Some("帮我写安装说明，面向 Python 3.10"),
+            None,
+            "不对，不是 Python 3.10，是 Python 3.11",
+            Some(&crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskCorrect),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+                should_interrupt_active_run: false,
+                state_patch: Some(json!({"python_version":"3.11"})),
+                attachment_processing_required: false,
+            }),
+        )
+        .expect("merged prompt");
+        assert!(merged.contains("Python 3.10"));
+        assert!(merged.contains("Python 3.11"));
+        assert!(merged.contains("\"python_version\":\"3.11\""));
+        assert!(merged.contains("overrides conflicting earlier details"));
+    }
+
+    #[test]
+    fn task_append_merge_includes_recent_generated_output_when_normalizer_reuses_active() {
+        let merged = merged_prompt_from_task_turn_analysis(
+            Some("Write one deployment note that mentions Python 3.11"),
+            Some("Deployment note: use Python 3.11."),
+            "Output only that sentence",
+            Some(&crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskAppend),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+                should_interrupt_active_run: false,
+                state_patch: None,
+                attachment_processing_required: false,
+            }),
+        )
+        .expect("merged prompt");
+        assert!(merged.contains("Most recent generated output"));
+        assert!(merged.contains("Deployment note: use Python 3.11."));
     }
 }

@@ -74,7 +74,9 @@ pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<DbPool> {
         .build(manager)
         .map_err(|e| anyhow::anyhow!("init db pool: {e}"))?;
 
-    let conn = pool.get().map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
+    let conn = pool
+        .get()
+        .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
     conn.execute_batch(crate::INIT_SQL)?;
     Ok(pool)
 }
@@ -201,9 +203,7 @@ pub(crate) fn migrate_audit_logs_from_main_db(
 
     // Best-effort: 清空主库 audit_logs 释放空间（数据已经在 audit_db 了）。
     if let Err(e) = main_conn.execute("DELETE FROM audit_logs", []) {
-        tracing::warn!(
-            "phase2.2-stage2: clearing main-db audit_logs after migration failed: {e}"
-        );
+        tracing::warn!("phase2.2-stage2: clearing main-db audit_logs after migration failed: {e}");
     }
     tracing::info!("phase2.2-stage2: migrated {} audit_logs row(s)", rows.len());
     Ok(())
@@ -342,6 +342,67 @@ pub(crate) fn ensure_memory_schema(db: &Connection) -> anyhow::Result<()> {
         "memories",
         "safety_flag",
         "ALTER TABLE memories ADD COLUMN safety_flag TEXT NOT NULL DEFAULT 'normal'",
+    )?;
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS followup_frames (
+            user_id        INTEGER NOT NULL,
+            chat_id        INTEGER NOT NULL,
+            user_key       TEXT NOT NULL,
+            frame_json     TEXT NOT NULL,
+            source_task_id TEXT NOT NULL,
+            updated_at_ts  INTEGER NOT NULL,
+            expires_at_ts  INTEGER NOT NULL,
+            PRIMARY KEY (user_id, chat_id, user_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_followup_frames_user_chat_updated_ts
+        ON followup_frames(user_id, chat_id, updated_at_ts);
+        CREATE INDEX IF NOT EXISTS idx_followup_frames_expires_at_ts
+        ON followup_frames(expires_at_ts);",
+    )?;
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS clarify_states (
+            user_id         INTEGER NOT NULL,
+            chat_id         INTEGER NOT NULL,
+            user_key        TEXT NOT NULL,
+            state_json      TEXT NOT NULL,
+            source_task_id  TEXT NOT NULL,
+            updated_at_ts   INTEGER NOT NULL,
+            expires_at_ts   INTEGER NOT NULL,
+            PRIMARY KEY (user_id, chat_id, user_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_clarify_states_user_chat_updated_ts
+        ON clarify_states(user_id, chat_id, updated_at_ts);
+        CREATE INDEX IF NOT EXISTS idx_clarify_states_expires_at_ts
+        ON clarify_states(expires_at_ts);",
+    )?;
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS observed_facts_states (
+            user_id         INTEGER NOT NULL,
+            chat_id         INTEGER NOT NULL,
+            user_key        TEXT NOT NULL,
+            facts_json      TEXT NOT NULL,
+            source_task_id  TEXT NOT NULL,
+            updated_at_ts   INTEGER NOT NULL,
+            expires_at_ts   INTEGER NOT NULL,
+            PRIMARY KEY (user_id, chat_id, user_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_observed_facts_states_user_chat_updated_ts
+        ON observed_facts_states(user_id, chat_id, updated_at_ts);
+        CREATE INDEX IF NOT EXISTS idx_observed_facts_states_expires_at_ts
+        ON observed_facts_states(expires_at_ts);",
+    )?;
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS conversation_states (
+            user_id         INTEGER NOT NULL,
+            chat_id         INTEGER NOT NULL,
+            user_key        TEXT NOT NULL,
+            state_json      TEXT NOT NULL,
+            last_task_id    TEXT NOT NULL,
+            updated_at_ts   INTEGER NOT NULL,
+            PRIMARY KEY (user_id, chat_id, user_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_conversation_states_user_chat_updated_ts
+        ON conversation_states(user_id, chat_id, updated_at_ts);",
     )?;
     Ok(())
 }

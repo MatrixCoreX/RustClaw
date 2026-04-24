@@ -30,7 +30,7 @@ pub(crate) use helpers::*;
 // === TASK 层（已物理位于 finalize/task.rs，Stage 2.2）===
 // 任务级编排：DB write / memory / 通知 / journal merge
 pub(crate) use task::{
-    finalize_ask_direct_success, finalize_ask_result, run_classifier_direct_reply,
+    finalize_ask_direct_success, finalize_ask_result, run_direct_classifier_reply,
     try_finalize_schedule_direct_success,
 };
 

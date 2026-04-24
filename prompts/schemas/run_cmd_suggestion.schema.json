@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/run_cmd_suggestion.schema.json",
+  "title": "RunCmdSuggestionPayload",
+  "description": "Schema for the inline NL2CMD suggestion prompt in crates/clawd/src/skills/builtin.rs::build_run_cmd_nl_prompt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command", "confidence", "reason"],
+  "properties": {
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Single-line executable bash command suggestion."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Model confidence for the suggested command."
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short explanation of why this command matches the request."
+    }
+  }
+}

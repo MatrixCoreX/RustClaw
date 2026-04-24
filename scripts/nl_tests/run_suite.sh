@@ -7,6 +7,9 @@ CASE_DIR="${SCRIPT_DIR}/cases"
 
 ALL_SUITES=(
   manual
+  compound_single
+  task_updates
+  multistep_mixed
   text_match
   full
   trace
@@ -32,6 +35,9 @@ Usage:
 
 Suites:
   manual
+  compound_single
+  task_updates
+  multistep_mixed
   text_match
   full
   trace
@@ -49,8 +55,9 @@ Suites:
 
 Categories:
   smoke         -> manual, clarify
-  single_turn   -> manual, text_match, full
-  multi_turn    -> clarify, clarify_hard, context_chain
+  single_turn   -> manual, compound_single, multistep_mixed, text_match, full
+  multi_turn    -> task_updates, clarify, clarify_hard, context_chain
+  multi_instruction -> compound_single, task_updates
   regression    -> trace, resume
   guard         -> dynamic_guard, sensitive_flows
   ops           -> ops_deterministic, long_tail_flows
@@ -59,6 +66,9 @@ Categories:
 
 Examples:
   bash scripts/nl_tests/run_suite.sh manual
+  bash scripts/nl_tests/run_suite.sh compound_single
+  bash scripts/nl_tests/run_suite.sh task_updates
+  bash scripts/nl_tests/run_suite.sh multistep_mixed
   bash scripts/nl_tests/run_suite.sh manual trace clarify
   bash scripts/nl_tests/run_suite.sh sensitive_flows
   bash scripts/nl_tests/run_suite.sh ops_deterministic
@@ -78,6 +88,9 @@ print_available() {
   cat <<'EOF'
 Available suites:
   - manual
+  - compound_single
+  - task_updates
+  - multistep_mixed
   - text_match
   - full
   - trace
@@ -97,6 +110,7 @@ Available categories:
   - smoke
   - single_turn
   - multi_turn
+  - multi_instruction
   - regression
   - guard
   - ops
@@ -139,6 +153,18 @@ run_mode_manual() {
     --case-file "${CASE_DIR}/nl_cases_manual.txt" \
     --log-root "${ROOT_DIR}/scripts/nl_suite_logs/manual" \
     "$@"
+}
+
+run_mode_compound_single() {
+  bash "${SCRIPT_DIR}/run_compound_single_suite.sh" "$@"
+}
+
+run_mode_task_updates() {
+  bash "${SCRIPT_DIR}/run_task_updates_suite.sh" "$@"
+}
+
+run_mode_multistep_mixed() {
+  bash "${SCRIPT_DIR}/run_multistep_mixed_suite.sh" "$@"
 }
 
 run_mode_text_match() {
@@ -272,25 +298,31 @@ suite_accepts_value_option() {
         manual|text_match|full|trace|resume|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
+        compound_single|task_updates)
+          return 0
+          ;;
+        multistep_mixed)
+          return 0
+          ;;
       esac
       ;;
     --wait-seconds)
       case "$suite" in
-        manual|text_match|full|trace|resume|self_extension|sensitive_flows|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        manual|compound_single|task_updates|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
       esac
       ;;
     --poll-seconds)
       case "$suite" in
-        manual|text_match|full|trace|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        manual|compound_single|task_updates|multistep_mixed|text_match|full|trace|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
       esac
       ;;
     --provider-retries|--provider-retry-sleep)
       case "$suite" in
-        manual|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        manual|compound_single|task_updates|multistep_mixed|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
       esac
@@ -305,14 +337,21 @@ suite_accepts_flag_option() {
   case "$option" in
     --no-llm-trace)
       case "$suite" in
-        manual|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        manual|compound_single|task_updates|multistep_mixed|text_match|full|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+          return 0
+          ;;
+      esac
+      ;;
+    --prompt-reply-only)
+      case "$suite" in
+        manual|compound_single|task_updates|multistep_mixed|text_match|full|clarify|clarify_hard|context_chain|clarify_context_prompt)
           return 0
           ;;
       esac
       ;;
     --reuse-chat-id-base)
       case "$suite" in
-        manual|text_match|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        manual|compound_single|task_updates|multistep_mixed|text_match|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
       esac
@@ -339,7 +378,7 @@ filter_pass_through_for_suite() {
         fi
         shift 2
         ;;
-      --no-llm-trace|--reuse-chat-id-base)
+      --no-llm-trace|--prompt-reply-only|--reuse-chat-id-base)
         if suite_accepts_flag_option "$suite" "$1"; then
           FILTERED_SUITE_ARGS+=("$1")
         fi
@@ -360,6 +399,15 @@ run_one_suite() {
   case "$suite" in
     manual)
       run_mode_manual "${FILTERED_SUITE_ARGS[@]}"
+      ;;
+    compound_single)
+      run_mode_compound_single "${FILTERED_SUITE_ARGS[@]}"
+      ;;
+    task_updates)
+      run_mode_task_updates "${FILTERED_SUITE_ARGS[@]}"
+      ;;
+    multistep_mixed)
+      run_mode_multistep_mixed "${FILTERED_SUITE_ARGS[@]}"
       ;;
     text_match)
       run_mode_text_match "${FILTERED_SUITE_ARGS[@]}"
@@ -425,7 +473,7 @@ add_suite() {
 expand_selector() {
   local selector="$1"
   case "$selector" in
-    manual|text_match|full|trace|resume|self_extension|sensitive_flows|ops_deterministic|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+    manual|compound_single|task_updates|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_deterministic|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
       add_suite "$selector"
       ;;
     smoke)
@@ -434,13 +482,20 @@ expand_selector() {
       ;;
     single_turn)
       add_suite manual
+      add_suite compound_single
+      add_suite multistep_mixed
       add_suite text_match
       add_suite full
       ;;
     multi_turn)
+      add_suite task_updates
       add_suite clarify
       add_suite clarify_hard
       add_suite context_chain
+      ;;
+    multi_instruction)
+      add_suite compound_single
+      add_suite task_updates
       ;;
     regression)
       add_suite trace
@@ -456,6 +511,8 @@ expand_selector() {
       ;;
     core)
       add_suite manual
+      add_suite compound_single
+      add_suite task_updates
       add_suite text_match
       add_suite trace
       add_suite resume
@@ -464,7 +521,7 @@ expand_selector() {
       ;;
     all)
       local suite
-      for suite in manual text_match full trace resume clarify clarify_hard context_chain dynamic_guard; do
+      for suite in manual compound_single task_updates multistep_mixed text_match full trace resume clarify clarify_hard context_chain dynamic_guard; do
         add_suite "$suite"
       done
       ;;
@@ -478,6 +535,17 @@ expand_selector() {
 
 SELECTORS=()
 PASS_THROUGH_ARGS=()
+
+pass_through_has_flag() {
+  local needle="$1"
+  local arg
+  for arg in "${PASS_THROUGH_ARGS[@]}"; do
+    if [[ "$arg" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -525,7 +593,9 @@ for selector in "${SELECTORS[@]}"; do
 done
 
 for suite in "${ORDERED_SUITES[@]}"; do
-  echo "============================================================"
-  echo "[SUITE] ${suite}"
+  if ! pass_through_has_flag --prompt-reply-only; then
+    echo "============================================================"
+    echo "[SUITE] ${suite}"
+  fi
   run_one_suite "$suite" "${PASS_THROUGH_ARGS[@]}"
 done

@@ -29,8 +29,11 @@ pub(super) fn resolve_batch_directory_delivery(
     ) {
         return None;
     }
-    let locator =
-        resolve_directory_locator_input(output_contract, user_request, &state.skill_rt.workspace_root)?;
+    let locator = resolve_directory_locator_input(
+        output_contract,
+        user_request,
+        &state.skill_rt.workspace_root,
+    )?;
     let resolved = resolve_directory_target(
         locator,
         Path::new("/"),
@@ -40,7 +43,10 @@ pub(super) fn resolve_batch_directory_delivery(
     );
     match resolved {
         DirectoryLookupResolution::Resolved(directory) => {
-            match list_current_level_files_for_delivery(&directory, state.skill_rt.locator_scan_max_files) {
+            match list_current_level_files_for_delivery(
+                &directory,
+                state.skill_rt.locator_scan_max_files,
+            ) {
                 CurrentLevelDeliveryEntriesResult::Ready(entries) => {
                     let subdir_hint = localize_delivery_message_for_request(
                         state,
@@ -186,6 +192,14 @@ pub(super) fn enforce_file_delivery_locator_contract(
     if !wants_file_delivery {
         return;
     }
+    if let Some(existing_token) =
+        canonical_existing_file_delivery_token(state, normalized_text, normalized_messages)
+    {
+        *normalized_text = existing_token.clone();
+        normalized_messages.clear();
+        normalized_messages.push(existing_token);
+        return;
+    }
     if let Some(batch) = resolve_batch_directory_delivery(state, user_request, output_contract) {
         match batch {
             BatchDirectoryDeliveryResolution::FileTokens(tokens_text) => {
@@ -258,6 +272,17 @@ pub(super) fn enforce_file_delivery_locator_contract(
                 .retain(|msg| crate::finalize::parse_delivery_file_token(msg).is_none());
         }
     }
+}
+
+fn canonical_existing_file_delivery_token(
+    state: &AppState,
+    normalized_text: &str,
+    normalized_messages: &[String],
+) -> Option<String> {
+    std::iter::once(normalized_text)
+        .chain(normalized_messages.iter().map(|msg| msg.as_str()))
+        .find_map(|candidate| super::message_media::normalize_delivery_message(state, candidate))
+        .filter(|normalized| crate::finalize::parse_delivery_file_token(normalized).is_some())
 }
 
 pub(super) fn resolve_file_delivery_target_with_hint(
@@ -386,7 +411,15 @@ pub(super) fn scan_filename_under_roots(
     );
     match project_outcome.result {
         FilenameScanResult::Found(path) => FileDeliveryTargetResolution::Resolved(path),
-        FilenameScanResult::Candidates(paths) => FileDeliveryTargetResolution::Candidates(paths),
+        FilenameScanResult::Candidates(paths) => {
+            if let Some(path) =
+                prefer_unique_direct_child_filename_candidate(project_root, &paths, file_name)
+            {
+                FileDeliveryTargetResolution::Resolved(path)
+            } else {
+                FileDeliveryTargetResolution::Candidates(paths)
+            }
+        }
         FilenameScanResult::TooManyEntries => {
             FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule3ScanTooMany)
         }
@@ -417,6 +450,41 @@ pub(super) fn scan_filename_under_roots(
             }
         }
     }
+}
+
+fn prefer_unique_direct_child_filename_candidate(
+    root: &Path,
+    candidates: &[PathBuf],
+    target: &str,
+) -> Option<PathBuf> {
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let want_stem_match = !target.contains('.');
+    let mut direct_hits = candidates
+        .iter()
+        .filter_map(|path| {
+            let parent = path.parent()?.to_path_buf();
+            let normalized_parent = parent.canonicalize().unwrap_or(parent);
+            if normalized_parent != canonical_root {
+                return None;
+            }
+            let file_name = path.file_name()?.to_str()?;
+            if file_name.eq_ignore_ascii_case(target) {
+                return Some(path.clone());
+            }
+            if want_stem_match
+                && path
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|value| value.eq_ignore_ascii_case(target))
+            {
+                return Some(path.clone());
+            }
+            None
+        })
+        .collect::<Vec<_>>();
+    direct_hits.sort();
+    direct_hits.dedup();
+    (direct_hits.len() == 1).then(|| direct_hits.remove(0))
 }
 
 fn ranked_candidate_paths(mut paths: Vec<PathBuf>, target: &str) -> Vec<PathBuf> {
@@ -678,6 +746,13 @@ fn scan_filename_matches_with_limit_internal(
         };
     }
     if exact_matches.len() > 1 {
+        if let Some(path) =
+            prefer_unique_direct_child_filename_candidate(project_root, &exact_matches, &target)
+        {
+            return FilenameScanOutcome {
+                result: FilenameScanResult::Found(path),
+            };
+        }
         return FilenameScanOutcome {
             result: FilenameScanResult::Candidates(ranked_candidate_paths(exact_matches, &target)),
         };
@@ -695,6 +770,13 @@ fn scan_filename_matches_with_limit_internal(
         };
     }
     if stem_matches.len() > 1 {
+        if let Some(path) =
+            prefer_unique_direct_child_filename_candidate(project_root, &stem_matches, &target)
+        {
+            return FilenameScanOutcome {
+                result: FilenameScanResult::Found(path),
+            };
+        }
         return FilenameScanOutcome {
             result: FilenameScanResult::Candidates(ranked_candidate_paths(stem_matches, &target)),
         };

@@ -1,8 +1,10 @@
 <!--
 Purpose: classify the user's follow-up intent after an interrupted task (`resume` / `abandon` / `defer`)
-Component: `clawd` (`crates/clawd/src/intent_router.rs`) function `classify_resume_followup_intent`
+Component: legacy overlay retained for audit/reference only. The active routing path now uses unified `intent_normalizer_prompt.md` in `crates/clawd/src/intent_router.rs`.
 Placeholders: __PERSONA_PROMPT__, __RESUME_CONTEXT__, __BINDING_CONTEXT__, __REQUEST__
 -->
+
+> Legacy note: this prompt is no longer called by the active ask-routing path. Keep it only as historical/audit reference until the prompt inventory is pruned.
 
 
 You are a classifier for follow-up messages after an interrupted multi-step task.

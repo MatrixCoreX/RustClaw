@@ -1,0 +1,24 @@
+task_updates_cn_plan_for_boss|帮我写个方案|面向老板|不要太技术，控制在 80 字内，只输出正文
+task_updates_cn_correct_version|帮我写一句部署说明，要求提到 Python 3.10|不对，不是 Python 3.10，是 Python 3.11|只输出那一句说明
+task_updates_cn_replace_goal|帮我写一篇关于 RustClaw 的长文|算了，别写长文了，改成三条短要点|只输出三行正文
+task_updates_cn_scope_shrink|帮我做一个测试计划|先只看登录模块|暂时不要管环境准备，只输出三个测试点
+task_updates_en_release_note|Write a short release note for RustClaw|Make it for non-technical users|Keep it under 60 words and output only the body
+task_updates_en_correct_runtime|Write one deployment note that mentions Python 3.10|Correction: it should be Python 3.11, not 3.10|Output only the final sentence
+task_updates_en_replace_goal|Write a long introduction for RustClaw|Actually change it into 3 short bullets|Only output the bullets
+task_updates_en_add_constraints|Summarize this repository for me|Make it beginner-friendly|Keep it to one sentence only
+task_updates_cn_intro_to_bullets|帮我写一段 RustClaw 项目介绍|面向新手|改成三条短要点，每条不超过 15 个字
+task_updates_cn_deploy_to_checklist|帮我写一段 RustClaw 部署说明|算了，改成上线前检查清单|只保留三条清单项
+task_updates_cn_runtime_correction_tone|帮我写一句运行环境说明，先写 Python 3.10 和 SQLite|不对，Python 改成 3.11|再口语化一点，只输出最后那一句
+task_updates_en_beginner_bullets|Write a short overview of RustClaw|Make it for beginners|Turn it into 3 bullets and keep each bullet under 12 words
+task_updates_en_runtime_correction_tone|Write one setup sentence mentioning Python 3.10 and SQLite|Correction: use Python 3.11 instead of 3.10|Make it more conversational and keep one sentence
+task_updates_en_intro_to_checklist|Write a short introduction for RustClaw|Actually switch it to a pre-release checklist|Only output 3 checklist bullets
+task_updates_cn_scope_then_bullets|帮我总结一下这个仓库|先只看 UI 部分|改成两条短要点，每条不超过 14 个字
+task_updates_cn_replace_then_style|帮我写一段发布说明|算了，改成上线前检查清单|面向新手，只保留三条
+task_updates_en_scope_then_tone|Summarize this repository|Focus only on the UI part|Make it beginner-friendly and keep it to one sentence
+task_updates_en_replace_then_steps|Write a troubleshooting guide for RustClaw|Actually change it into a 3-step checklist|Keep each step short and plain
+task_updates_cn_append_chain|帮我写一段 RustClaw 渠道接入说明|面向新手|不要太技术|控制在 60 字内，只输出正文
+task_updates_en_append_chain|Write a short RustClaw channel setup note|Make it for beginners|Keep it non-technical|Limit it to 40 words and output only the body
+task_updates_cn_append_scope_chain|帮我做一个登录模块测试计划|先只看密码登录|再加上一个异常场景|只输出三个测试点
+task_updates_en_append_scope_chain|Write a login-module test plan|Focus on password login first|Also include one failure scenario|Output exactly three bullets
+task_updates_cn_table_refinement|帮我总结一下这个仓库|面向新手|改成 markdown table 输出
+task_updates_en_table_refinement|Summarize this repository|Make it beginner-friendly|Output it as a markdown table

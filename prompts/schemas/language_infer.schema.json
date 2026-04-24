@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/schemas/language_infer.schema.json",
+  "title": "Language Infer Output",
+  "description": "Schema for the JSON object returned by `prompts/language_infer_prompt.md`. Used by `crates/skills/image_vision/src/main.rs::parse_language_choice_from_llm` to infer the preferred reply language from memory snippets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "language"
+  ],
+  "properties": {
+    "language": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Preferred reply language label, or `unknown` when no clear preference can be inferred."
+    }
+  }
+}

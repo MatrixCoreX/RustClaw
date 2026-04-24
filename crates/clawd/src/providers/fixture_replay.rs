@@ -2,7 +2,7 @@
 //!
 //! 用途：让 `cargo test --test intent_to_finalize_replay` 等离线测试在
 //! 不发任何真实 HTTP 请求的前提下，跑完 ask 全管线（normalizer / planner /
-//! repair / chat / classifier_direct / finalize）。
+//! repair / chat / delivery_classifier / finalize）。
 //!
 //! 设计要点：
 //!   * 通过 `[[llm_providers]] type = "fixture_replay"` 走 [`crate::providers::client::PROVIDER_IMPLS`]
@@ -44,6 +44,8 @@ pub(crate) const FIXTURE_LLM_ROOT_ENV: &str = "RUSTCLAW_FIXTURE_LLM_ROOT";
 
 /// 测试 harness 通过这个 env 指定当前 case 名（root 下的子目录）。
 pub(crate) const FIXTURE_LLM_CASE_ENV: &str = "RUSTCLAW_FIXTURE_CASE";
+/// 诊断开关：命中 / miss 时把当前 prompt hash 与前缀打印到 stderr。
+pub(crate) const FIXTURE_LLM_DEBUG_ENV: &str = "RUSTCLAW_FIXTURE_DEBUG";
 
 /// Fixture 文件名（位于 `<root>/<case>/<file>`）。
 pub(crate) const FIXTURE_CALLS_FILENAME: &str = "calls.jsonl";
@@ -79,6 +81,28 @@ static FIXTURE_TABLE_CACHE: std::sync::OnceLock<
 
 fn cache() -> &'static RwLock<HashMap<(PathBuf, String), Arc<HashMap<String, RecordedCall>>>> {
     FIXTURE_TABLE_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn fixture_debug_enabled() -> bool {
+    std::env::var(FIXTURE_LLM_DEBUG_ENV)
+        .ok()
+        .map(|v| {
+            let trimmed = v.trim().to_ascii_lowercase();
+            trimmed == "1" || trimmed == "true" || trimmed == "yes"
+        })
+        .unwrap_or(false)
+}
+
+fn debug_prompt_prefix(prompt: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (idx, ch) in prompt.chars().enumerate() {
+        if idx >= max_chars {
+            out.push_str("...(truncated)");
+            break;
+        }
+        out.push(ch);
+    }
+    out.replace('\n', "\\n")
 }
 
 /// 跨 toolchain 稳定的 64-bit FNV-1a，输出 16 字符小写 hex。
@@ -233,9 +257,8 @@ pub(crate) fn regen_fixture_from_log(
         })?;
         let mut body = String::with_capacity(records.len() * 256);
         for rec in &records {
-            let line = serde_json::to_string(rec).map_err(|e| {
-                format!("regen_fixture_from_log: serialize record failed: {e}")
-            })?;
+            let line = serde_json::to_string(rec)
+                .map_err(|e| format!("regen_fixture_from_log: serialize record failed: {e}"))?;
             body.push_str(&line);
             body.push('\n');
         }
@@ -291,9 +314,7 @@ pub(crate) fn clear_cache_for_test() {
 /// `#[cfg(test)]`：本函数仅供 [`regen_fixture_from_log`] 与 e2e harness 调用，
 /// 生产 bin 不需要 model_io.log → fixture 的转换路径。
 #[cfg(test)]
-pub(crate) fn convert_model_io_log_to_fixture(
-    log_text: &str,
-) -> Result<Vec<RecordedCall>, String> {
+pub(crate) fn convert_model_io_log_to_fixture(log_text: &str) -> Result<Vec<RecordedCall>, String> {
     // 用 Vec 维持首次出现顺序、HashMap 维护"同 hash 覆盖到最后一次"的下标。
     let mut latest_idx: HashMap<String, usize> = HashMap::new();
     let mut records: Vec<RecordedCall> = Vec::new();
@@ -377,15 +398,13 @@ pub(crate) fn convert_model_io_log_to_fixture(
             ));
         }
 
-        let usage = value
-            .get("usage")
-            .and_then(|v| {
-                if v.is_null() {
-                    None
-                } else {
-                    serde_json::from_value::<LlmUsageSnapshot>(v.clone()).ok()
-                }
-            });
+        let usage = value.get("usage").and_then(|v| {
+            if v.is_null() {
+                None
+            } else {
+                serde_json::from_value::<LlmUsageSnapshot>(v.clone()).ok()
+            }
+        });
 
         let rec = RecordedCall {
             prompt_hash: prompt_hash.clone(),
@@ -480,7 +499,17 @@ impl LlmProvider for FixtureReplayProvider {
             })?;
             match table.get(&prompt_hash) {
                 Some(rec) => {
-                    let raw = rec.raw_response.clone().unwrap_or_else(|| rec.clean_response.clone());
+                    if fixture_debug_enabled() {
+                        eprintln!(
+                            "[fixture_replay hit] case={case} prompt_hash={prompt_hash} prompt_chars={} prompt_prefix={}",
+                            prompt.chars().count(),
+                            debug_prompt_prefix(&prompt, 240)
+                        );
+                    }
+                    let raw = rec
+                        .raw_response
+                        .clone()
+                        .unwrap_or_else(|| rec.clean_response.clone());
                     Ok(LlmProviderResponse {
                         text: rec.clean_response.clone(),
                         request_payload: json!({
@@ -493,18 +522,27 @@ impl LlmProvider for FixtureReplayProvider {
                         usage: rec.usage.clone(),
                     })
                 }
-                None => Err(ProviderError::non_retryable(
-                    format!(
-                        "fixture_replay miss case={case} prompt_hash={prompt_hash} \
-                         prompt_chars={chars} (regen: RUSTCLAW_REGEN_FIXTURE={case} bash scripts/regen_fixture.sh)",
-                        chars = prompt.chars().count(),
-                    ),
-                    json!({
-                        "fixture_replay": true,
-                        "case": case,
-                        "prompt_hash": prompt_hash,
-                    }),
-                )),
+                None => {
+                    if fixture_debug_enabled() {
+                        eprintln!(
+                            "[fixture_replay miss] case={case} prompt_hash={prompt_hash} prompt_chars={} prompt_prefix={}",
+                            prompt.chars().count(),
+                            debug_prompt_prefix(&prompt, 240)
+                        );
+                    }
+                    Err(ProviderError::non_retryable(
+                        format!(
+                            "fixture_replay miss case={case} prompt_hash={prompt_hash} \
+                             prompt_chars={chars} (regen: RUSTCLAW_REGEN_FIXTURE={case} bash scripts/regen_fixture.sh)",
+                            chars = prompt.chars().count(),
+                        ),
+                        json!({
+                            "fixture_replay": true,
+                            "case": case,
+                            "prompt_hash": prompt_hash,
+                        }),
+                    ))
+                }
             }
         })
     }
@@ -621,11 +659,7 @@ mod tests {
 
         let runtime = make_runtime();
         let err = FixtureReplayProvider
-            .call(
-                runtime,
-                "anything".to_string(),
-                ChatRequestHints::default(),
-            )
+            .call(runtime, "anything".to_string(), ChatRequestHints::default())
             .await
             .expect_err("miss");
         assert!(!err.retryable, "miss must be non-retryable to fail loud");
@@ -734,9 +768,9 @@ mod tests {
         .to_string();
         let prompt = "p";
         let hash = fnv1a_64_hex(prompt);
-        let mut errored = serde_json::from_str::<serde_json::Value>(
-            &verbose_ok_line(&hash, prompt, "ignored", "x"),
-        )
+        let mut errored = serde_json::from_str::<serde_json::Value>(&verbose_ok_line(
+            &hash, prompt, "ignored", "x",
+        ))
         .unwrap();
         errored["status"] = serde_json::json!("error");
         let body = format!("{}\n{}\n", slim, errored);
@@ -761,7 +795,10 @@ mod tests {
         let line = v.to_string();
         let err = convert_model_io_log_to_fixture(&line).expect_err("must fail loud");
         assert!(err.contains("`prompt_hash`"), "err msg = {err}");
-        assert!(err.contains("pre-§7.5"), "err msg should hint upgrade: {err}");
+        assert!(
+            err.contains("pre-§7.5"),
+            "err msg should hint upgrade: {err}"
+        );
     }
 
     // ---------- §7.5 Step 3: regen_fixture_from_log ----------
@@ -781,8 +818,8 @@ mod tests {
     fn regen_writes_calls_jsonl_with_correct_records() {
         let tmp = ScopedTempDir::new("regen_basic");
         let log = make_log_with_n_records(3);
-        let summary = regen_fixture_from_log(&log, "case_a", tmp.path(), false, false)
-            .expect("regen ok");
+        let summary =
+            regen_fixture_from_log(&log, "case_a", tmp.path(), false, false).expect("regen ok");
         assert_eq!(summary.written_records, 3);
         assert!(!summary.dry_run);
         assert!(!summary.overwrote_existing);
@@ -802,8 +839,8 @@ mod tests {
     fn regen_dry_run_does_not_touch_disk() {
         let tmp = ScopedTempDir::new("regen_dry");
         let log = make_log_with_n_records(2);
-        let summary = regen_fixture_from_log(&log, "case_dry", tmp.path(), true, false)
-            .expect("dry-run ok");
+        let summary =
+            regen_fixture_from_log(&log, "case_dry", tmp.path(), true, false).expect("dry-run ok");
         assert_eq!(summary.written_records, 2);
         assert!(summary.dry_run);
         assert!(
@@ -835,8 +872,7 @@ mod tests {
         let tmp = ScopedTempDir::new("regen_force");
         let log_a = make_log_with_n_records(2);
         let log_b = make_log_with_n_records(5);
-        let s1 = regen_fixture_from_log(&log_a, "case_y", tmp.path(), false, false)
-            .expect("first");
+        let s1 = regen_fixture_from_log(&log_a, "case_y", tmp.path(), false, false).expect("first");
         assert!(!s1.overwrote_existing);
         let s2 = regen_fixture_from_log(&log_b, "case_y", tmp.path(), false, true)
             .expect("force overwrite ok");
@@ -938,11 +974,18 @@ mod tests {
 
         let runtime = make_runtime();
         let resp = FixtureReplayProvider
-            .call(runtime, good_prompt.to_string(), ChatRequestHints::default())
+            .call(
+                runtime,
+                good_prompt.to_string(),
+                ChatRequestHints::default(),
+            )
             .await
             .expect("good line should still load");
         assert_eq!(resp.text, "pong");
-        assert_eq!(resp.raw_response, "pong", "raw fallback to clean when absent");
+        assert_eq!(
+            resp.raw_response, "pong",
+            "raw fallback to clean when absent"
+        );
 
         std::env::remove_var(FIXTURE_LLM_ROOT_ENV);
         std::env::remove_var(FIXTURE_LLM_CASE_ENV);

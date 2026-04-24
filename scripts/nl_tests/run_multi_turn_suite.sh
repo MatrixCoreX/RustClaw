@@ -26,6 +26,7 @@ PROVIDER_RETRIES_VALUE="${PROVIDER_RETRIES:-2}"
 PROVIDER_RETRY_SLEEP_VALUE="${PROVIDER_RETRY_SLEEP_SECONDS:-3}"
 PRINT_LLM_TRACE_VALUE="${PRINT_LLM_TRACE:-1}"
 ISOLATE_CHAT_ID_BASE_VALUE="${ISOLATE_CHAT_ID_BASE:-1}"
+PROMPT_REPLY_ONLY=0
 
 usage() {
   cat <<'EOF'
@@ -50,6 +51,7 @@ Options:
   --provider-retry-sleep N
                         sleep seconds before provider retry (default: 3)
   --no-llm-trace        Do not print per-turn LLM request/response trace
+  --prompt-reply-only   Print only prompt and assistant reply for each turn
   -h, --help            show this help
 
 Built-in suites:
@@ -128,13 +130,14 @@ PY
 }
 
 print_turn_dialog() {
-  python3 - "$1" "$2" "$3" <<'PY'
+  python3 - "$1" "$2" "$3" "${4:-0}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 turn = sys.argv[2]
 prompt = sys.argv[3]
+prompt_reply_only = sys.argv[4] == "1"
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
@@ -152,12 +155,20 @@ if not text:
 if not text:
     text = "<empty>"
 
-print(f"  [USER{turn}]")
-for line in prompt.splitlines() or [""]:
-    print(f"    {line}")
-print(f"  [ASSISTANT{turn}]")
-for line in text.splitlines() or [""]:
-    print(f"    {line}")
+if prompt_reply_only:
+    print("[PROMPT]")
+    for line in prompt.splitlines() or [""]:
+        print(line)
+    print("[REPLY]")
+    for line in text.splitlines() or [""]:
+        print(line)
+else:
+    print(f"  [USER{turn}]")
+    for line in prompt.splitlines() or [""]:
+        print(f"    {line}")
+    print(f"  [ASSISTANT{turn}]")
+    for line in text.splitlines() or [""]:
+        print(f"    {line}")
 PY
 }
 
@@ -181,15 +192,20 @@ for item in messages:
 
 strong_markers = [
     "当前大模型服务暂时不可用",
+    "模型暂时不可用",
     "模型暂不可用",
     "selected model is at capacity",
     "usage limit exceeded",
     "rate limit",
     "rate_limit",
     "too many requests",
+    "http 401",
     "http 429",
     "http 529",
     "529 overloaded",
+    "authorized_error",
+    "login fail",
+    "鉴权失败",
     "missing choices[0].message.content",
     "timeout: error sending request for url",
     "error sending request for url",
@@ -219,15 +235,20 @@ def provider_like_final_text(text: str) -> bool:
         return False
     anchored_markers = [
         "当前大模型服务暂时不可用",
+        "模型暂时不可用",
         "模型暂不可用",
         "selected model is at capacity",
         "usage limit exceeded",
         "rate limit",
         "rate_limit",
         "too many requests",
+        "http 401",
         "http 429",
         "http 529",
         "529 overloaded",
+        "authorized_error",
+        "login fail",
+        "鉴权失败",
         "missing choices[0].message.content",
         "timeout: error sending request for url",
         "error sending request for url",
@@ -351,7 +372,9 @@ poll_until_terminal() {
     fi
     status="$(extract_status "$out_file")"
     if [[ "$status" != "$last_status" ]]; then
-      echo "  [status] ${last_status:-<none>} -> ${status:-<empty>}"
+      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+        echo "  [status] ${last_status:-<none>} -> ${status:-<empty>}"
+      fi
       last_status="$status"
     fi
     case "$status" in
@@ -505,6 +528,11 @@ while [[ $# -gt 0 ]]; do
       PRINT_LLM_TRACE_VALUE=0
       shift
       ;;
+    --prompt-reply-only)
+      PROMPT_REPLY_ONLY=1
+      PRINT_LLM_TRACE_VALUE=0
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -549,20 +577,26 @@ mkdir -p "$RUN_DIR"
 touch "$SUMMARY_JSONL"
 exec > >(tee -a "$RUN_LOG") 2>&1
 
-echo "NL multi-turn suite: ${SUITE}"
-echo "  run_dir:    ${RUN_DIR}"
-echo "  run_log:    ${RUN_LOG}"
-echo "  case_file:  ${CASE_FILE}"
-echo "  turn_count: ${TURN_COUNT}"
-echo "  base_url:   ${BASE_URL}"
-echo "  user_id:    ${USER_ID}"
-echo "  chat_id:    ${CHAT_ID}"
 BASE_CHAT_ID="$(compute_effective_chat_id_base "$CHAT_ID" "$ISOLATE_CHAT_ID_BASE")"
-echo "  run_chat_id_base: ${BASE_CHAT_ID}"
-echo "  provider_retry: ${PROVIDER_RETRIES} x ${PROVIDER_RETRY_SLEEP_SECONDS}s"
-echo
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  echo "NL multi-turn suite: ${SUITE}"
+  echo "  run_dir:    ${RUN_DIR}"
+  echo "  run_log:    ${RUN_LOG}"
+  echo "  case_file:  ${CASE_FILE}"
+  echo "  turn_count: ${TURN_COUNT}"
+  echo "  base_url:   ${BASE_URL}"
+  echo "  user_id:    ${USER_ID}"
+  echo "  chat_id:    ${CHAT_ID}"
+  echo "  run_chat_id_base: ${BASE_CHAT_ID}"
+  echo "  provider_retry: ${PROVIDER_RETRIES} x ${PROVIDER_RETRY_SLEEP_SECONDS}s"
+  echo
+fi
 
-health_check
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  health_check
+else
+  health_check >/dev/null
+fi
 
 index=0
 while IFS=$'\t' read -r -a parts; do
@@ -583,19 +617,23 @@ while IFS=$'\t' read -r -a parts; do
     prompts+=("${parts[$turn]}")
   done
 
-  echo "============================================================"
-  echo "[CASE]   ${index}"
-  echo "[NAME]   ${case_name}"
-  echo "[CHAT]   ${CHAT_ID}"
+  if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+    echo "============================================================"
+    echo "[CASE]   ${index}"
+    echo "[NAME]   ${case_name}"
+    echo "[CHAT]   ${CHAT_ID}"
+  fi
 
   for ((turn = 1; turn <= TURN_COUNT; turn++)); do
     prompt="${prompts[$((turn - 1))]}"
     submit_file="${case_dir}/turn${turn}_submit.json"
     final_file="${case_dir}/turn${turn}_final.json"
 
-    echo "[TURN${turn}]  ${prompt}"
-    echo "[USER${turn}]"
-    printf '  %s\n' "$prompt"
+    if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+      echo "[TURN${turn}]  ${prompt}"
+      echo "[USER${turn}]"
+      printf '  %s\n' "$prompt"
+    fi
     attempt=0
     effective_status=""
     while :; do
@@ -605,7 +643,9 @@ while IFS=$'\t' read -r -a parts; do
       raw="$(submit_task "$prompt")"
       printf '%s\n' "$raw" > "$submit_file"
       task_id="$(extract_submit_task_id "$raw")"
-      echo "[TASK${turn}]  ${task_id}"
+      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+        echo "[TASK${turn}]  ${task_id}"
+      fi
       # poll_until_terminal returns 1 on poll timeout; under `set -e` that would
       # tear down the whole multi-turn suite (and the parent run_suite). Wrap
       # with `if !` and synthesize a timeout final so the case is recorded as
@@ -615,21 +655,29 @@ while IFS=$'\t' read -r -a parts; do
         poll_failed=1
       fi
       if (( poll_failed != 0 )); then
-        echo "  [poll] timed out waiting for terminal status on turn ${turn}; marking turn as timeout"
+        if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+          echo "  [poll] timed out waiting for terminal status on turn ${turn}; marking turn as timeout"
+        fi
         if [[ ! -s "$final_file" ]]; then
           printf '%s\n' '{"data":{"status":"timeout","result_json":{"text":""},"error_text":"poll timeout"}}' > "$final_file"
         fi
         effective_status="timeout"
       fi
-      echo "[TEXT${turn}]  $(extract_result_text "$final_file")"
-      print_turn_dialog "$final_file" "$turn" "$prompt"
+      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+        echo "[TEXT${turn}]  $(extract_result_text "$final_file")"
+      fi
+      print_turn_dialog "$final_file" "$turn" "$prompt" "$PROMPT_REPLY_ONLY"
       if final_result_provider_unavailable "$final_file"; then
         if [[ "$attempt" -le "$PROVIDER_RETRIES" ]]; then
-          echo "  [model] provider unavailable; retry turn ${turn} (${attempt}/${PROVIDER_RETRIES}) after ${PROVIDER_RETRY_SLEEP_SECONDS}s"
+          if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+            echo "  [model] provider unavailable; retry turn ${turn} (${attempt}/${PROVIDER_RETRIES}) after ${PROVIDER_RETRY_SLEEP_SECONDS}s"
+          fi
           sleep "$PROVIDER_RETRY_SLEEP_SECONDS"
           continue
         fi
-        echo "  [model] provider unavailable after retries; mark turn ${turn} as inconclusive"
+        if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+          echo "  [model] provider unavailable after retries; mark turn ${turn} as inconclusive"
+        fi
         effective_status="provider_unavailable"
       fi
       break
@@ -671,10 +719,14 @@ while IFS=$'\t' read -r -a parts; do
     )
   done
   append_summary_jsonl "${summary_args[@]}"
-  echo
+  if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+    echo
+  fi
 done < <(load_cases "$CASE_FILE" "$TURN_COUNT")
 
-echo "Artifacts:"
-echo "  - $RUN_DIR"
-echo "  - $RUN_LOG"
-echo "  - $SUMMARY_JSONL"
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  echo "Artifacts:"
+  echo "  - $RUN_DIR"
+  echo "  - $RUN_LOG"
+  echo "  - $SUMMARY_JSONL"
+fi

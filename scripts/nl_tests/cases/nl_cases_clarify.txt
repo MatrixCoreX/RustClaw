@@ -2,6 +2,7 @@
 # Format: case_name|turn1|turn2
 
 clarify_send_file_by_name|把文件发给我|README.md
+clarify_delivery_from_session|把那个文件发给我|README.md
 clarify_send_file_by_path|把那个配置文件发给我|configs/config.toml
 clarify_read_scalar_from_which_file|读一下那个文件里的名字字段，只输出值|package.json
 clarify_count_which_dir|数一下那个目录里有多少个直接子项，只输出数字|scripts

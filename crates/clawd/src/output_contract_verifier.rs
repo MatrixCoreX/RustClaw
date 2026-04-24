@@ -5,7 +5,7 @@
 //! - 只拦"明显违反 contract"的最严重 anti-pattern，宁可漏拦也不要误拦合规答案
 //!   （由 [`OutputContractVerdict`] 的语义保证：Pass / Reshape / Reject 三态，没有
 //!   "Almost-Pass" 这种灰色态）。
-//! - **优先程序化 reshape** —— 比如 chat skill 已经在回复里给出了路径、只是缺
+//! - **优先程序化 reshape** —— 比如 runtime synthesis 已经在回复里给出了路径、只是缺
 //!   yes/no 前缀，这种能直接补；只有完全缺关键证据时才 Reject。
 //! - Reject 由调用方接 §7.2 [`crate::fallback::ClarifyFallbackSource::VerifyRejected`]
 //!   兜底，外加 tracing 事件保留判定原因，便于 inspect_task.sh 关联。
@@ -57,15 +57,49 @@ fn contains_existence_yes_token(text: &str) -> bool {
 fn contains_existence_no_token(text: &str) -> bool {
     let t = text.trim();
     let lower = t.to_ascii_lowercase();
-    const ASCII: &[&str] = &["no\n", "no.", "no,", "no ", "missing", "not found", "absent"];
+    const ASCII: &[&str] = &[
+        "no\n",
+        "no.",
+        "no,",
+        "no ",
+        "missing",
+        "not found",
+        "absent",
+    ];
     // 单独处理"裸 no"边界：结尾 / 全字符串。
-    if lower == "no" || lower.starts_with("no ") || lower.starts_with("no.") || lower.starts_with("no,") {
+    if lower == "no"
+        || lower.starts_with("no ")
+        || lower.starts_with("no.")
+        || lower.starts_with("no,")
+    {
         return true;
     }
     if ASCII.iter().any(|tok| lower.contains(tok)) {
         return true;
     }
     const ZH: &[&str] = &["没有", "不存在", "未找到", "找不到", "无此", "查无"];
+    ZH.iter().any(|tok| t.contains(tok))
+}
+
+fn contains_equality_same_token(text: &str) -> bool {
+    let t = text.trim();
+    let lower = t.to_ascii_lowercase();
+    const ASCII: &[&str] = &["same", "equal", "identical", "matches"];
+    if ASCII.iter().any(|tok| lower.contains(tok)) {
+        return true;
+    }
+    const ZH: &[&str] = &["一样", "相同", "一致", "相等"];
+    ZH.iter().any(|tok| t.contains(tok))
+}
+
+fn contains_equality_different_token(text: &str) -> bool {
+    let t = text.trim();
+    let lower = t.to_ascii_lowercase();
+    const ASCII: &[&str] = &["different", "not the same", "unequal", "does not match"];
+    if ASCII.iter().any(|tok| lower.contains(tok)) {
+        return true;
+    }
+    const ZH: &[&str] = &["不一样", "不同", "不相同", "不一致", "不相等"];
     ZH.iter().any(|tok| t.contains(tok))
 }
 
@@ -104,13 +138,25 @@ fn looks_like_description_paragraph(text: &str) -> bool {
         return false;
     }
     let lower = trimmed.to_ascii_lowercase();
-    const ASCII_MARKERS: &[&str] =
-        &["this is a", "appears to be", "looks like", "is a systemd", "is the "];
+    const ASCII_MARKERS: &[&str] = &[
+        "this is a",
+        "appears to be",
+        "looks like",
+        "is a systemd",
+        "is the ",
+    ];
     if ASCII_MARKERS.iter().any(|m| lower.contains(m)) {
         return true;
     }
     const ZH_MARKERS: &[&str] = &[
-        "是一个", "看起来像", "应该是", "这是", "是 systemd", "用于", "主要", "通常",
+        "是一个",
+        "看起来像",
+        "应该是",
+        "这是",
+        "是 systemd",
+        "用于",
+        "主要",
+        "通常",
     ];
     ZH_MARKERS.iter().any(|m| trimmed.contains(m))
 }
@@ -160,8 +206,7 @@ fn verify_existence_with_path(
 
     // 含路径不像段落，但既无 yes 也无 no —— Reshape 加 "有，"。
     OutputContractVerdict::Reshape {
-        reason: "existence_with_path: candidate missing yes/no token; auto-prepended"
-            .to_string(),
+        reason: "existence_with_path: candidate missing yes/no token; auto-prepended".to_string(),
         reshaped: format!("有，{}", text.trim()),
     }
 }
@@ -170,10 +215,7 @@ fn verify_existence_with_path(
 /// - 多行段落 → Reject；
 /// - 不含路径 marker → Reject；
 /// - 含路径 + 无关 prose → Reshape 抽出第一个 path-like token。
-fn verify_scalar_path_only(
-    contract: &IntentOutputContract,
-    text: &str,
-) -> OutputContractVerdict {
+fn verify_scalar_path_only(contract: &IntentOutputContract, text: &str) -> OutputContractVerdict {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return OutputContractVerdict::Reject {
@@ -203,7 +245,14 @@ fn verify_scalar_path_only(
 
 fn first_path_like_token(text: &str) -> Option<String> {
     text.split_whitespace()
-        .map(|s| s.trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | '(' | ')' | '。' | '，' | ',' | '.' | ';' | ':' | '：')))
+        .map(|s| {
+            s.trim_matches(|c: char| {
+                matches!(
+                    c,
+                    '"' | '\'' | '`' | '(' | ')' | '。' | '，' | ',' | '.' | ';' | ':' | '：'
+                )
+            })
+        })
         .find(|tok| !tok.is_empty() && (tok.contains('/') || tok.contains('\\')))
         .map(str::to_string)
 }
@@ -217,7 +266,9 @@ fn verify_scalar_count(text: &str) -> OutputContractVerdict {
             reason: "scalar_count: empty candidate".to_string(),
         };
     }
-    let first_int = trimmed.split(|c: char| !c.is_ascii_digit()).find(|s| !s.is_empty());
+    let first_int = trimmed
+        .split(|c: char| !c.is_ascii_digit())
+        .find(|s| !s.is_empty());
     let Some(int_lit) = first_int else {
         return OutputContractVerdict::Reject {
             reason: "scalar_count: candidate contains no integer literal".to_string(),
@@ -245,6 +296,19 @@ fn verify_yes_no_only(text: &str, kind_label: &str) -> OutputContractVerdict {
     OutputContractVerdict::Reject {
         reason: format!(
             "{kind_label}: candidate missing yes/no token; cannot be salvaged programmatically"
+        ),
+    }
+}
+
+fn verify_same_or_different_only(text: &str, kind_label: &str) -> OutputContractVerdict {
+    let has_same = contains_equality_same_token(text);
+    let has_different = contains_equality_different_token(text);
+    if has_same || has_different {
+        return OutputContractVerdict::Pass;
+    }
+    OutputContractVerdict::Reject {
+        reason: format!(
+            "{kind_label}: candidate missing same/different token; cannot be salvaged programmatically"
         ),
     }
 }
@@ -279,7 +343,7 @@ pub(crate) fn verify_output_contract(
             verify_yes_no_only(trimmed_candidate, "hidden_entries_check")
         }
         OutputSemanticKind::RecentScalarEqualityCheck => {
-            verify_yes_no_only(trimmed_candidate, "recent_scalar_equality_check")
+            verify_same_or_different_only(trimmed_candidate, "recent_scalar_equality_check")
         }
         OutputSemanticKind::ScalarCount => verify_scalar_count(trimmed_candidate),
         _ => OutputContractVerdict::Pass,
@@ -301,12 +365,25 @@ mod tests {
 
     #[test]
     fn pass_for_default_contract() {
-        let v = verify_output_contract(
-            &IntentOutputContract::default(),
-            "anything goes",
-            "what?",
-        );
+        let v = verify_output_contract(&IntentOutputContract::default(), "anything goes", "what?");
         assert_eq!(v, OutputContractVerdict::Pass);
+    }
+
+    #[test]
+    fn recent_scalar_equality_accepts_chinese_same_or_different_tokens() {
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::OneSentence,
+            semantic_kind: OutputSemanticKind::RecentScalarEqualityCheck,
+            ..IntentOutputContract::default()
+        };
+        assert_eq!(
+            verify_output_contract(&contract, "react-example、clawd、不一样", ""),
+            OutputContractVerdict::Pass
+        );
+        assert_eq!(
+            verify_output_contract(&contract, "前者和后者一样", ""),
+            OutputContractVerdict::Pass
+        );
     }
 
     #[test]
@@ -348,7 +425,10 @@ mod tests {
         match v {
             OutputContractVerdict::Reshape { reshaped, .. } => {
                 assert!(reshaped.starts_with("有，"), "reshaped: {reshaped}");
-                assert!(reshaped.contains("rustclaw.service"), "reshaped: {reshaped}");
+                assert!(
+                    reshaped.contains("rustclaw.service"),
+                    "reshaped: {reshaped}"
+                );
             }
             other => panic!("expected Reshape, got: {other:?}"),
         }

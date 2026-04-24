@@ -123,7 +123,8 @@ pub(crate) fn retrieve_indexed_memories(
         chat_id,
         &scope_user_key,
         state
-            .policy.memory
+            .policy
+            .memory
             .vector_candidate_limit
             .max(state.policy.memory.fts_candidate_limit)
             .max(12)
@@ -137,7 +138,8 @@ pub(crate) fn retrieve_indexed_memories(
                 legacy_chat_id,
                 &scope_user_key,
                 state
-                    .policy.memory
+                    .policy
+                    .memory
                     .vector_candidate_limit
                     .max(state.policy.memory.fts_candidate_limit)
                     .max(12)
@@ -255,7 +257,8 @@ pub(crate) fn retrieve_indexed_memories(
             }
             RETRIEVAL_KIND_EPISODIC_EVENT
                 if item.role.as_deref() != Some(MEMORY_ROLE_ASSISTANT)
-                    && recent_related_events.len() < state.policy.memory.prompt_recall_limit.max(2) =>
+                    && recent_related_events.len()
+                        < state.policy.memory.prompt_recall_limit.max(2) =>
             {
                 recent_related_events.push(item);
             }
@@ -801,13 +804,8 @@ fn truncate_block(block: &str, max_chars: usize) -> String {
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
-    
 
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
-    
-    
+    use claw_core::config::{AgentConfig, ToolsConfig};
 
     use super::{
         build_structured_memory_context_block, retrieve_indexed_memories, source_label_for_row,
@@ -815,10 +813,7 @@ mod tests {
     };
     use crate::db_init::ensure_memory_schema;
     use crate::memory::indexing::{ensure_retrieval_schema, upsert_knowledge_fact};
-    use crate::runtime::{
-        AgentRuntimeConfig, AppState,
-        SkillViewsSnapshot, ToolsPolicy,
-    };
+    use crate::runtime::{AgentRuntimeConfig, AppState, SkillViewsSnapshot, ToolsPolicy};
 
     fn item(text: &str) -> RetrievedMemoryItem {
         RetrievedMemoryItem {
@@ -838,17 +833,17 @@ mod tests {
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: None,
-                                skills_list: Arc::new(HashSet::new()),
-                            }))),
+                    registry: None,
+                    skills_list: Arc::new(HashSet::new()),
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 locator_scan_max_depth: 3,
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig::test_default(),

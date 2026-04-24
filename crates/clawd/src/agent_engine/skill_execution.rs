@@ -17,8 +17,11 @@ fn log_step_journal_summary(
     execution_recipe_summary: Option<&str>,
     step_execution: &crate::executor::StepExecutionResult,
 ) {
-    let mut journal =
-        crate::task_journal::TaskJournal::new(format!("step:{}", step_execution.skill));
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        &task.task_id,
+        "ask",
+        format!("step:{}", step_execution.skill),
+    );
     let mut summary = format!(
         "round={} step={} action_type={}",
         round_no, step_in_round, action_trace_kind
@@ -132,11 +135,9 @@ async fn handle_skill_step_success(
     validation_observation: crate::execution_recipe::ValidationObservation,
     write_file_effective_path: Option<&WriteFileEffectivePath>,
     read_file_requested_path: Option<&str>,
-    cache_publishable_chat_output: bool,
 ) -> Result<SkillActionOutcome, String> {
     ensure_task_running(state, task)?;
     remember_skill_metadata(loop_state, normalized_skill);
-    let mut publishable_chat_output = false;
     crate::execution_recipe::apply_target_scope_progress(
         &mut loop_state.execution_recipe,
         state,
@@ -160,17 +161,6 @@ async fn handle_skill_step_success(
             normalized_skill,
             crate::truncate_for_agent_trace(&contract_err)
         ));
-    }
-    // §3.4: skill_execution 阶段不再调 semantic_judge LLM；改用本地 deterministic
-    // guard 决定 "这份 chat 输出值不值得缓存为 finalize 兜底"。误缓存的会被
-    // finalize 层 (loop_finalize::observed_generic_finalize) 用 is_publishable_raw
-    // 二次过滤，不会出现"误投递"。
-    if cache_publishable_chat_output
-        && normalized_skill == "chat"
-        && crate::semantic_judge::is_publishable_raw_local(out)
-    {
-        loop_state.last_publishable_chat_output = Some(out.to_string());
-        publishable_chat_output = true;
     }
     if let Some((original_path, _effective_path, user_visible_path)) = write_file_effective_path {
         remember_written_file_alias(loop_state, original_path, user_visible_path);
@@ -343,9 +333,8 @@ async fn handle_skill_step_success(
         step_execution,
     );
     // Raw skill output is trace/evidence, not final user-visible delivery.
-    // Only publishable chat output counts as terminal user-visible output here.
     Ok(SkillActionOutcome {
-        ended_with_user_visible_output: publishable_chat_output,
+        ended_with_user_visible_output: false,
         stop_signal,
         continue_in_round: false,
     })
@@ -414,33 +403,6 @@ fn handle_skill_step_failure(
             .as_deref(),
         step_execution,
     );
-    let has_remaining_actions = actions
-        .iter()
-        .take(policy.max_steps.max(1))
-        .skip(idx + 1)
-        .any(|action| !matches!(action, crate::AgentAction::Think { .. }));
-    if normalized_skill.eq_ignore_ascii_case("chat")
-        && loop_state.has_tool_or_skill_output
-        && loop_state.delivery_messages.is_empty()
-        && !has_remaining_actions
-    {
-        register_failed_step_output(
-            loop_state,
-            global_step,
-            step_in_round,
-            &format!("skill.{normalized_skill}"),
-            &format!("skill({normalized_skill})"),
-            &user_visible_err,
-        );
-        loop_state.history_compact.push(format!(
-            "round={} step={} skill={} failed error={} finalize_from_observed=true",
-            loop_state.round_no,
-            step_in_round,
-            normalized_skill,
-            crate::truncate_for_agent_trace(&user_visible_err)
-        ));
-        return Ok(Some("recoverable_failure_finalize".to_string()));
-    }
     if let Some(stop_reason) = classify_skill_failure_recovery(
         state,
         actions,
@@ -503,7 +465,6 @@ pub(super) async fn execute_prepared_skill_action(
     read_file_requested_path: Option<String>,
     args_summary: String,
     action_trace_kind: &str,
-    cache_publishable_chat_output: bool,
 ) -> Result<SkillActionOutcome, String> {
     info!(
         "{} executor_step_execute task_id={} round={} step={} type={} skill={} args={}",
@@ -557,7 +518,6 @@ pub(super) async fn execute_prepared_skill_action(
                 validation_observation,
                 write_file_effective_path.as_ref(),
                 read_file_requested_path.as_deref(),
-                cache_publishable_chat_output,
             )
             .await?;
             Ok(outcome)
@@ -611,17 +571,13 @@ pub(super) async fn execute_prepared_skill_action(
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
-    
 
     use super::{handle_skill_step_success, LoopState};
     use crate::{
-        AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+        AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy,
+        DEFAULT_AGENT_ID,
     };
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
-    
-    
+    use claw_core::config::{AgentConfig, ToolsConfig};
 
     fn test_state() -> AppState {
         let db_pool = crate::db_init::test_pool();
@@ -650,17 +606,17 @@ mod tests {
                 db: db_pool,
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: None,
-                                skills_list: Arc::new(HashSet::new()),
-                            }))),
+                    registry: None,
+                    skills_list: Arc::new(HashSet::new()),
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 locator_scan_max_depth: 3,
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig::test_default(),
@@ -736,7 +692,6 @@ mod tests {
             crate::execution_recipe::ValidationObservation::Failed(detail.to_string()),
             None,
             None,
-            false,
         )
         .await
         .expect("skill step outcome");
@@ -828,7 +783,6 @@ mod tests {
             crate::execution_recipe::ValidationObservation::Failed("VALIDATION_FAILED".to_string()),
             None,
             None,
-            false,
         )
         .await
         .expect("skill step outcome");
@@ -895,7 +849,6 @@ mod tests {
             crate::execution_recipe::ValidationObservation::Passed,
             None,
             Some("/opt/other-project/main.rs"),
-            false,
         )
         .await
         .expect("skill step outcome");
@@ -937,7 +890,6 @@ mod tests {
             crate::execution_recipe::ValidationObservation::Passed,
             None,
             None,
-            false,
         )
         .await
         .expect("skill step outcome");

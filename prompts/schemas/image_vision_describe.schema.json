@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/schemas/image_vision_describe.schema.json",
+  "title": "Image Vision Describe Output",
+  "description": "Schema for the JSON object returned by `prompts/image_vision_action_describe.md` and consumed by `crates/skills/image_vision/src/main.rs::parse_structured_narrative_action_output` for the `describe` action.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "objects",
+    "visible_text",
+    "uncertainties"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "visible_text": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

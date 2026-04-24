@@ -28,6 +28,8 @@ mod bootstrap;
 mod capability_map;
 mod channel_send;
 mod clarify_followup;
+mod clarify_state;
+mod conversation_state;
 mod db_init;
 mod delivery_utils;
 mod execution_adapters;
@@ -37,17 +39,23 @@ mod fallback;
 mod finalize;
 #[cfg(test)]
 mod fixture_replay_e2e;
+mod followup_frame;
 mod http;
+mod intent;
 mod intent_router;
+mod language_policy;
+mod listing_limit_request;
 mod llm_gateway;
 mod log_utils;
 mod memory;
+mod observed_facts;
 mod output_contract_verifier;
 mod output_paths;
 mod pipeline_types;
 mod post_route_policy;
 mod prompt_utils;
 mod providers;
+mod read_range_request;
 mod repo;
 mod routing_context;
 mod runtime;
@@ -65,8 +73,8 @@ pub(crate) use app_helpers::{
     bilingual_t_with_default_vars, ensure_column_exists, i18n_t_with_default,
     i18n_t_with_default_vars, is_affirmation_click_text, main_flow_rules, mask_secret,
     normalize_affirmation_text, normalize_exchange_name, normalize_external_id_opt, now_ts,
-    now_ts_u64, parse_resume_context_error, parse_task_status, CLASSIFIER_DIRECT_SOURCES,
-    RESUME_CONTINUE_SOURCES, TASK_STATUS_QUEUED,
+    now_ts_u64, parse_resume_context_error, parse_task_status, RESUME_CONTINUE_SOURCES,
+    TASK_STATUS_QUEUED,
 };
 pub(crate) use ask_flow::{
     analyze_attached_images_for_ask, build_resume_continue_execute_prompt,
@@ -75,8 +83,7 @@ pub(crate) use ask_flow::{
 use bootstrap::{
     active_prompt_vendor_name, load_command_intent_runtime, load_feishu_send_config,
     load_lark_send_config, load_memory_runtime_config, load_persona_prompt,
-    load_prompt_template_for_state, load_prompt_template_for_state_with_meta,
-    load_prompt_template_for_vendor, load_schedule_runtime, load_wechat_send_config,
+    load_prompt_template_for_state, load_schedule_runtime, load_wechat_send_config,
     resolve_prompt_rel_path_for_vendor, resolve_ui_dist_dir,
 };
 use db_init::{
@@ -93,15 +100,16 @@ pub(crate) use log_utils::{
 pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
 pub(crate) use pipeline_types::{
-    plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, PlanKind, PlanResult, PlanStep, ResumeBehavior,
-    RiskCeiling, RouteResult, ScheduleKind, SelfExtensionContract, SelfExtensionMode,
-    SelfExtensionTrigger,
+    plan_step_from_agent_action, route_reason_is_any_deterministic_contract,
+    route_reason_starts_with_deterministic_contract, IntentOutputContract, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, PlanKind, PlanResult, PlanStep,
+    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind, SelfExtensionContract,
+    SelfExtensionMode, SelfExtensionTrigger,
 };
 pub(crate) use prompt_utils::{
-    extract_first_json_object_any, extract_first_json_value_any, log_prompt_render,
-    log_prompt_render_with_version, parse_agent_action_json_with_repair,
-    parse_llm_json_extract_or_any, parse_llm_json_raw_or_any, render_prompt_template,
+    extract_first_json_value_any, log_prompt_render, log_prompt_render_with_version,
+    parse_agent_action_json_with_repair, parse_llm_json_extract_or_any, parse_llm_json_raw_or_any,
+    render_prompt_template,
 };
 use providers::{
     append_model_io_log, call_provider_with_retry, call_provider_with_retry_with_hints,
@@ -137,9 +145,9 @@ pub(crate) use runtime::{
     AskStateRegistry, AskTransition, ChannelConfig, ChatEntryStrategy, ClaimedTask,
     CommandIntentRules, CommandIntentRuntime, CoreServices, LlmPromptBucket, LlmProviderRuntime,
     LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
-    RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
-    SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy, WhatsappDeliveryRoute,
-    WorkerConfig,
+    RouteGateKind, RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime,
+    ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy,
+    WhatsappDeliveryRoute, WorkerConfig,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
@@ -193,21 +201,9 @@ const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
 const LOG_CALL_WRAP: &str = "---- task-call ----";
 const DEFAULT_AGENT_ID: &str = "main";
 
-pub(crate) const CHAT_RESPONSE_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/chat_response_prompt.md");
 pub(crate) const CHAT_RESPONSE_PROMPT_LOGICAL_PATH: &str = "prompts/chat_response_prompt.md";
-pub(crate) const RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/resume_continue_execute_prompt.md");
-pub(crate) const RESUME_FOLLOWUP_DISCUSSION_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/resume_followup_discussion_prompt.md");
 pub(crate) const RESUME_FOLLOWUP_DISCUSSION_PROMPT_LOGICAL_PATH: &str =
     "prompts/resume_followup_discussion_prompt.md";
-const LONG_TERM_SUMMARY_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/long_term_summary_prompt.md");
-const SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT: &str =
-    include_str!("../../../prompts/layers/overlays/schedule_intent_prompt.md");
-const SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT: &str =
-    include_str!("../../../prompts/layers/overlays/schedule_intent_rules.md");
 
 /// 统一错误响应，避免重复手写 (StatusCode, Json(ApiResponse)).
 fn api_err<T: Serialize>(
@@ -236,6 +232,73 @@ fn api_ok<T: Serialize>(data: T) -> (StatusCode, Json<ApiResponse<T>>) {
     )
 }
 
+fn resolve_startup_config_path_from<I>(
+    args: I,
+    env_config_path: Option<String>,
+) -> anyhow::Result<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let mut cli_config_path: Option<String> = None;
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--config=") {
+            let value = value.trim();
+            if value.is_empty() {
+                anyhow::bail!("--config requires a non-empty path");
+            }
+            cli_config_path = Some(value.to_string());
+            continue;
+        }
+        if arg == "--config" {
+            let Some(value) = args.next() else {
+                anyhow::bail!("--config requires a path");
+            };
+            let value = value.trim();
+            if value.is_empty() {
+                anyhow::bail!("--config requires a non-empty path");
+            }
+            cli_config_path = Some(value.to_string());
+        }
+    }
+    Ok(cli_config_path
+        .or_else(|| env_config_path.map(|v| v.trim().to_string()))
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "configs/config.toml".to_string()))
+}
+
+fn resolve_startup_config_path() -> anyhow::Result<String> {
+    resolve_startup_config_path_from(
+        std::env::args().skip(1),
+        std::env::var("RUSTCLAW_CONFIG_PATH").ok(),
+    )
+}
+
+#[cfg(test)]
+mod startup_config_path_tests {
+    use super::resolve_startup_config_path_from;
+
+    #[test]
+    fn prefers_cli_config_path() {
+        let resolved = resolve_startup_config_path_from(
+            vec!["--config".to_string(), "/tmp/fixture.toml".to_string()],
+            Some("/tmp/env.toml".to_string()),
+        )
+        .expect("resolve config path");
+        assert_eq!(resolved, "/tmp/fixture.toml");
+    }
+
+    #[test]
+    fn falls_back_to_env_config_path() {
+        let resolved = resolve_startup_config_path_from(
+            Vec::<String>::new(),
+            Some("/tmp/env.toml".to_string()),
+        )
+        .expect("resolve config path");
+        assert_eq!(resolved, "/tmp/env.toml");
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -246,8 +309,10 @@ async fn main() -> anyhow::Result<()> {
         .compact()
         .init();
 
-    let config = AppConfig::load("configs/config.toml")?;
+    let config_path = resolve_startup_config_path()?;
+    let config = AppConfig::load(&config_path)?;
     let workspace_root = std::env::current_dir()?;
+    info!("startup config_path={}", config_path);
     let tools_policy = ToolsPolicy::from_config(&config.tools)
         .map_err(|err| anyhow::anyhow!("invalid tools config: {err}"))?;
     let db_pool = init_db(&config)?;
@@ -344,7 +409,7 @@ async fn main() -> anyhow::Result<()> {
         &workspace_root,
         &config.schedule,
         config.llm.selected_vendor.as_deref(),
-    );
+    )?;
     let routing = config.routing.clone();
     let persona_prompt = load_persona_prompt(
         &workspace_root,
@@ -622,7 +687,7 @@ async fn main() -> anyhow::Result<()> {
             lark_send_config,
         },
         reload_ctx: ReloadContext {
-            config_path_for_reload: "configs/config.toml".to_string(),
+            config_path_for_reload: config_path.clone(),
             registry_path_for_reload: config.skills.registry_path.clone(),
             skill_switches_for_reload: Arc::new(config.skills.skill_switches.clone()),
             initial_skills_list_for_reload: config.skills.skills_list.clone(),
@@ -983,9 +1048,6 @@ async fn get_task(
 fn classifier_source_allowed(source: &str) -> bool {
     let normalized = source.trim().to_ascii_lowercase();
     !normalized.is_empty()
-        && CLASSIFIER_DIRECT_SOURCES
-            .iter()
-            .any(|value| *value == normalized)
 }
 
 fn channel_kind_label(kind: ChannelKind) -> &'static str {
@@ -1040,7 +1102,7 @@ async fn classify_direct(
     if !classifier_source_allowed(&source) {
         return api_err::<DirectClassifyResponse>(
             StatusCode::BAD_REQUEST,
-            "source is not enabled for direct classifier",
+            "source is required for direct classifier",
         );
     }
     let text = req.text.trim();
@@ -1068,7 +1130,7 @@ async fn classify_direct(
         "direct_classifier_request task_id={} source={} user_id={} chat_id={}",
         task.task_id, source, task.user_id, task.chat_id
     );
-    let result = finalize::run_classifier_direct_reply(&state, &task, text).await;
+    let result = finalize::run_direct_classifier_reply(&state, &task, text).await;
     state.clear_task_llm_call_count(&task.task_id);
     match result {
         Ok(reply) => api_ok(DirectClassifyResponse {

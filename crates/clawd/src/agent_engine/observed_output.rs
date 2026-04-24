@@ -5,6 +5,7 @@ use serde::Deserialize;
 use super::{AgentRunContext, LoopState};
 use crate::{llm_gateway, AppState, ClaimedTask};
 
+#[cfg(test)]
 const OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/observed_answer_fallback_prompt.md");
 const OBSERVED_ANSWER_FALLBACK_PROMPT_LOGICAL_PATH: &str =
@@ -127,9 +128,20 @@ pub(crate) fn extract_latest_generic_successful_output(
         !body.is_empty()
             && (crate::finalize::classify_observed_content_status(body)
                 == crate::finalize::ObservedContentStatus::ContentAvailable
-                || structured_scalar_candidate(None, &step.skill, body, None, false).is_some()
+                || structured_scalar_candidate(
+                    None,
+                    None,
+                    &step.skill,
+                    body,
+                    None,
+                    None,
+                    false,
+                    false,
+                )
+                .is_some()
                 || structured_observed_body(&step.skill, body).is_some())
             || system_basic_info_value(&step.skill, body).is_some()
+            || system_basic_structured_doc_value(&step.skill, body).is_some()
             || system_basic_existence_with_path_value(&step.skill, body).is_some()
     })?;
     let step = &loop_state.executed_step_results[idx];
@@ -285,265 +297,51 @@ fn looks_like_shell_long_listing_line(line: &str) -> bool {
         && trimmed.split_whitespace().count() >= 9
 }
 
-fn parse_small_zh_number_prefix(text: &str) -> Option<(usize, usize)> {
-    fn digit_value(ch: char) -> Option<usize> {
-        match ch {
-            '零' => Some(0),
-            '一' => Some(1),
-            '二' | '两' => Some(2),
-            '三' => Some(3),
-            '四' => Some(4),
-            '五' => Some(5),
-            '六' => Some(6),
-            '七' => Some(7),
-            '八' => Some(8),
-            '九' => Some(9),
-            _ => None,
-        }
-    }
-
-    let chars = text.chars().collect::<Vec<_>>();
-    if chars.is_empty() {
-        return None;
-    }
-    if chars[0] == '十' {
-        let ones = chars.get(1).and_then(|ch| digit_value(*ch)).unwrap_or(0);
-        let consumed = if ones > 0 { 2 } else { 1 };
-        return Some((10 + ones, consumed));
-    }
-    let tens = digit_value(chars[0])?;
-    if chars.get(1) == Some(&'十') {
-        let ones = chars.get(2).and_then(|ch| digit_value(*ch)).unwrap_or(0);
-        let consumed = if ones > 0 { 3 } else { 2 };
-        return Some((tens * 10 + ones, consumed));
-    }
-    Some((tens, 1))
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn requested_listing_limit_from_intent(intent: &str) -> Option<usize> {
+    crate::listing_limit_request::requested_listing_limit_from_prompt(intent)
 }
 
-fn parse_small_en_number_prefix(text: &str) -> Option<(usize, usize)> {
-    const WORDS: [(&str, usize); 12] = [
-        ("twelve", 12),
-        ("eleven", 11),
-        ("ten", 10),
-        ("nine", 9),
-        ("eight", 8),
-        ("seven", 7),
-        ("six", 6),
-        ("five", 5),
-        ("four", 4),
-        ("three", 3),
-        ("two", 2),
-        ("one", 1),
-    ];
-
-    let trimmed = text.trim_start();
-    for (word, value) in WORDS {
-        let Some(rest) = trimmed.strip_prefix(word) else {
-            continue;
-        };
-        if rest
-            .chars()
-            .next()
-            .is_some_and(|ch| ch.is_ascii_alphabetic())
-        {
-            continue;
-        }
-        return Some((value, word.chars().count()));
-    }
-    None
-}
-
-fn parse_positive_number_prefix(text: &str) -> Option<usize> {
-    let trimmed = text.trim_start();
-    let digit_len = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).count();
-    if digit_len > 0 {
-        return trimmed[..digit_len]
-            .parse::<usize>()
-            .ok()
-            .filter(|n| *n > 0);
-    }
-    parse_small_zh_number_prefix(trimmed)
-        .map(|(value, _)| value)
-        .or_else(|| parse_small_en_number_prefix(trimmed).map(|(value, _)| value))
-        .filter(|n| *n > 0)
-}
-
-fn trim_listing_limit_token(token: &str) -> &str {
-    token.trim_matches(|ch: char| {
-        matches!(
-            ch,
-            '"' | '\''
-                | '`'
-                | ','
-                | '，'
-                | '。'
-                | ':'
-                | '：'
-                | ';'
-                | '；'
-                | '('
-                | ')'
-                | '（'
-                | '）'
-                | '['
-                | ']'
-                | '{'
-                | '}'
-                | '<'
-                | '>'
-                | '《'
-                | '》'
-        )
-    })
-}
-
-fn parse_number_prefix_with_suffix(token: &str) -> Option<(usize, &str)> {
-    let trimmed = trim_listing_limit_token(token);
-    if trimmed.is_empty() {
-        return None;
-    }
-    let digit_len = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).count();
-    if digit_len > 0 {
-        let value = trimmed[..digit_len]
-            .parse::<usize>()
-            .ok()
-            .filter(|n| *n > 0)?;
-        return Some((value, &trimmed[digit_len..]));
-    }
-    let (value, consumed_chars) = parse_small_zh_number_prefix(trimmed)?;
-    let suffix_start = trimmed
-        .char_indices()
-        .nth(consumed_chars)
-        .map(|(idx, _)| idx)
-        .unwrap_or(trimmed.len());
-    Some((value, &trimmed[suffix_start..]))
-}
-
-fn parse_number_like_prefix_with_suffix(token: &str) -> Option<(usize, &str)> {
-    parse_number_prefix_with_suffix(token).or_else(|| {
-        let trimmed = trim_listing_limit_token(token);
-        let (value, consumed_chars) = parse_small_en_number_prefix(trimmed)?;
-        let suffix_start = trimmed
-            .char_indices()
-            .nth(consumed_chars)
-            .map(|(idx, _)| idx)
-            .unwrap_or(trimmed.len());
-        Some((value, &trimmed[suffix_start..]))
-    })
-}
-
-fn token_starts_with_listing_limit_unit(token: &str) -> bool {
-    let trimmed = trim_listing_limit_token(token);
-    if trimmed.is_empty() {
-        return false;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    [
-        "个", "条", "项", "行", "份", "files", "file", "entries", "entry", "items", "item",
-        "lines", "line", "rows", "row",
-    ]
-    .iter()
-    .any(|needle| lower.starts_with(needle))
-}
-
-fn token_is_listing_limit_modifier(token: &str) -> bool {
-    let lower = trim_listing_limit_token(token).to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "the"
-            | "most"
-            | "more"
-            | "recent"
-            | "recently"
-            | "modified"
-            | "latest"
-            | "newest"
-            | "updated"
-            | "changed"
-            | "runtime"
-            | "run"
-            | "log"
-            | "logs"
-    )
-}
-
-fn suffix_has_listing_limit_unit(suffix: &str) -> bool {
-    let trimmed = suffix.trim_start();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if token_starts_with_listing_limit_unit(trimmed) {
-        return true;
-    }
-    let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
-    if tokens.is_empty() {
-        return false;
-    }
-    let mut modifiers_skipped = 0usize;
-    for token in tokens {
-        if token_starts_with_listing_limit_unit(token) {
-            return true;
-        }
-        if !token_is_listing_limit_modifier(token) {
-            return false;
-        }
-        modifiers_skipped += 1;
-        if modifiers_skipped >= 4 {
-            return false;
-        }
-    }
-    false
-}
-
-fn requested_listing_limit_from_intent(intent: &str) -> Option<usize> {
-    let trimmed = intent.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    for marker in ["top", "first"] {
-        if let Some(idx) = lower.find(marker) {
-            let suffix = &trimmed[idx + marker.len()..];
-            if let Some(limit) = parse_positive_number_prefix(suffix) {
-                return Some(limit);
-            }
-        }
-    }
-    for marker in ['前', '头'] {
-        if let Some(idx) = trimmed.find(marker) {
-            let suffix = &trimmed[idx + marker.len_utf8()..];
-            if let Some(limit) = parse_positive_number_prefix(suffix) {
-                return Some(limit);
-            }
-        }
-    }
-    let starts = std::iter::once(0usize).chain(trimmed.char_indices().skip(1).map(|(idx, _)| idx));
-    for idx in starts {
-        let prev = if idx == 0 {
-            None
-        } else {
-            trimmed[..idx].chars().next_back()
-        };
-        if prev.is_some_and(|ch| ch.is_ascii_alphanumeric()) {
-            continue;
-        }
-        let Some((limit, suffix)) = parse_number_like_prefix_with_suffix(&trimmed[idx..]) else {
-            continue;
-        };
-        if suffix_has_listing_limit_unit(suffix) {
-            return Some(limit);
-        }
-    }
-    None
+fn current_turn_request_text<'a>(
+    route: Option<&'a crate::RouteResult>,
+    agent_run_context: Option<&'a AgentRunContext>,
+) -> Option<&'a str> {
+    agent_run_context
+        .and_then(|ctx| ctx.user_request.as_deref())
+        .filter(|text| !text.trim().is_empty())
+        .or_else(|| {
+            route.map(|route| route.resolved_intent.as_str())
+                .filter(|text| !text.trim().is_empty())
+        })
 }
 
 fn requested_listing_limit(route: Option<&crate::RouteResult>) -> Option<usize> {
-    requested_listing_limit_from_intent(route?.resolved_intent.as_str())
+    crate::intent::surface_signals::requested_listing_limit_from_prompt_pair(
+        route.map(|value| value.resolved_intent.as_str()),
+        "",
+    )
+}
+
+fn current_turn_requested_listing_limit(
+    route: Option<&crate::RouteResult>,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<usize> {
+    current_turn_request_text(route, agent_run_context)
+        .and_then(requested_listing_limit_from_intent)
+        .or_else(|| requested_listing_limit(route))
 }
 
 fn route_requests_scalar_count(route: &crate::RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+}
+
+fn route_requests_limited_listing_names(
+    route: &crate::RouteResult,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    route_requests_scalar_count(route)
+        && current_turn_requested_listing_limit(Some(route), agent_run_context).is_some()
 }
 
 fn route_requests_hidden_entries_check(route: &crate::RouteResult) -> bool {
@@ -556,15 +354,18 @@ pub(crate) fn route_prefers_direct_observed_answer_for_scalar(route: &crate::Rou
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::ExistenceWithPath
                 | crate::OutputSemanticKind::HiddenEntriesCheck
+                | crate::OutputSemanticKind::QuantityComparison
         )
 }
 
 pub(crate) fn scalar_route_prefers_structured_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
         && (route_prefers_direct_observed_answer_for_scalar(route)
+            || route_requests_limited_listing_names(route, agent_run_context)
             || extract_latest_generic_successful_output(loop_state)
                 .is_some_and(|observed| observed.skill == "health_check"))
 }
@@ -575,6 +376,14 @@ fn route_requests_directory_purpose_summary(route: &crate::RouteResult) -> bool 
 
 fn route_requests_recent_artifacts_judgment(route: &crate::RouteResult) -> bool {
     route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentArtifactsJudgment
+}
+
+fn route_requests_excerpt_kind_judgment(route: &crate::RouteResult) -> bool {
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::ExcerptKindJudgment
+        && matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Free
+        )
 }
 
 fn route_requests_workspace_project_summary(route: &crate::RouteResult) -> bool {
@@ -599,10 +408,7 @@ fn health_check_request_prefers_summary(
     route: Option<&crate::RouteResult>,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let request_text = agent_run_context
-        .and_then(|ctx| ctx.user_request.as_deref())
-        .filter(|text| !text.trim().is_empty())
-        .or_else(|| route.map(|route| route.resolved_intent.as_str()))
+    let request_text = current_turn_request_text(route, agent_run_context)
         .unwrap_or_default()
         .to_ascii_lowercase();
     contains_any(
@@ -622,8 +428,14 @@ fn health_check_request_prefers_summary(
     )
 }
 
-fn route_allows_raw_listing_direct_answer(route: Option<&crate::RouteResult>) -> bool {
-    route.is_none_or(|route| !route.output_contract.requires_content_evidence)
+fn route_allows_raw_listing_direct_answer(
+    route: Option<&crate::RouteResult>,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    route.is_none_or(|route| {
+        !route.output_contract.requires_content_evidence
+            || route_requests_limited_listing_names(route, agent_run_context)
+    })
 }
 
 fn latest_list_dir_listing(loop_state: &LoopState) -> Option<String> {
@@ -1223,6 +1035,153 @@ fn value_scalar_text(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+fn normalized_scalar_equality_key(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+#[derive(Debug, Clone)]
+struct StructuredScalarObservation {
+    display_text: String,
+    normalized_key: String,
+    numeric_value: Option<f64>,
+}
+
+fn numeric_scalar_value(value: &serde_json::Value, display_text: &str) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|v| v as f64))
+        .or_else(|| value.as_u64().map(|v| v as f64))
+        .or_else(|| display_text.parse::<f64>().ok())
+}
+
+fn structured_scalar_observation_from_extract_item(
+    value: &serde_json::Value,
+) -> Option<StructuredScalarObservation> {
+    if !value
+        .get("exists")
+        .and_then(|item| item.as_bool())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let raw_value = value.get("value").unwrap_or(&serde_json::Value::Null);
+    let display_text = value
+        .get("value_text")
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| value_scalar_text(raw_value))?;
+    Some(StructuredScalarObservation {
+        normalized_key: normalized_scalar_equality_key(&display_text),
+        numeric_value: numeric_scalar_value(raw_value, &display_text),
+        display_text,
+    })
+}
+
+fn structured_scalar_observation_from_step(
+    step: &crate::executor::StepExecutionResult,
+) -> Option<StructuredScalarObservation> {
+    if !step.is_ok() || step.skill != "system_basic" {
+        return None;
+    }
+    let body = step.output.as_deref()?.trim();
+    if body.is_empty() {
+        return None;
+    }
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    match value.get("action").and_then(|item| item.as_str()) {
+        Some("extract_field") => structured_scalar_observation_from_extract_item(&value),
+        Some("extract_fields") => {
+            let results = value.get("results")?.as_array()?;
+            if results.len() != 1 {
+                return None;
+            }
+            structured_scalar_observation_from_extract_item(results.first()?)
+        }
+        _ => None,
+    }
+}
+
+fn recent_structured_scalar_observations(
+    loop_state: &LoopState,
+    limit: usize,
+) -> Vec<StructuredScalarObservation> {
+    let mut recent = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter_map(structured_scalar_observation_from_step)
+        .take(limit.max(1))
+        .collect::<Vec<_>>();
+    recent.reverse();
+    recent
+}
+
+fn structured_scalar_pair_direct_answer(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    prefer_english: bool,
+) -> Option<String> {
+    let observations = recent_structured_scalar_observations(loop_state, 2);
+    if observations.len() < 2 {
+        return None;
+    }
+    let left = &observations[0];
+    let right = &observations[1];
+    match route.output_contract.semantic_kind {
+        crate::OutputSemanticKind::RecentScalarEqualityCheck => {
+            Some(if left.normalized_key == right.normalized_key {
+                if prefer_english { "same" } else { "一样" }.to_string()
+            } else {
+                if prefer_english { "different" } else { "不一样" }.to_string()
+            })
+        }
+        crate::OutputSemanticKind::QuantityComparison => {
+            if let (Some(left_num), Some(right_num)) = (left.numeric_value, right.numeric_value) {
+                if (left_num - right_num).abs() < f64::EPSILON {
+                    return Some(if prefer_english {
+                        format!(
+                            "{} and {} are equal ({})",
+                            left.display_text, right.display_text, left.display_text
+                        )
+                    } else {
+                        format!(
+                            "{} 和 {} 一样，都是 {}",
+                            left.display_text, right.display_text, left.display_text
+                        )
+                    });
+                }
+                let (winner, loser) = if left_num > right_num {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                return Some(if prefer_english {
+                    format!(
+                        "{} is larger: {} vs {}",
+                        winner.display_text, winner.display_text, loser.display_text
+                    )
+                } else {
+                    format!(
+                        "{} 更大：{} 对 {}",
+                        winner.display_text, winner.display_text, loser.display_text
+                    )
+                });
+            }
+            Some(if left.normalized_key == right.normalized_key {
+                if prefer_english { "same" } else { "一样" }.to_string()
+            } else {
+                if prefer_english { "different" } else { "不一样" }.to_string()
+            })
+        }
+        _ => None,
+    }
+}
+
 fn text_contains_cjk(text: &str) -> bool {
     text.chars().any(|ch| {
         matches!(
@@ -1284,6 +1243,169 @@ fn db_basic_scalar_candidate(value: &serde_json::Value) -> Option<String> {
     }
     let row = value.get("rows")?.as_array()?.first()?.as_object()?;
     value_scalar_text(row.get(column)?)
+}
+
+fn db_basic_table_names(value: &serde_json::Value) -> Option<Vec<String>> {
+    let columns = value.get("columns")?.as_array()?;
+    let column_name = if columns.len() == 1 {
+        columns[0].as_str()?.trim()
+    } else if columns
+        .iter()
+        .any(|column| column.as_str().is_some_and(|name| name == "name"))
+    {
+        "name"
+    } else {
+        return None;
+    };
+    let rows = value.get("rows")?.as_array()?;
+    Some(
+        rows.iter()
+            .filter_map(|row| row.as_object())
+            .filter_map(|row| row.get(column_name))
+            .filter_map(value_scalar_text)
+            .collect(),
+    )
+}
+
+fn db_tables_looks_like_test_db(locator_hint: Option<&str>, table_names: &[String]) -> bool {
+    if table_names.is_empty() {
+        return true;
+    }
+    let lower_path = locator_hint.unwrap_or_default().to_ascii_lowercase();
+    if ["test", "fixture", "mock", "sample", "contract"]
+        .iter()
+        .any(|needle| lower_path.contains(needle))
+    {
+        return true;
+    }
+    let lower_names = table_names
+        .iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if lower_names.iter().any(|name| {
+        ["test", "fixture", "mock", "sample", "contract"]
+            .iter()
+            .any(|needle| name.contains(needle))
+    }) {
+        return true;
+    }
+    !lower_names.iter().any(|name| {
+        [
+            "auth_keys",
+            "user_preferences",
+            "tasks",
+            "scheduled_jobs",
+            "audit_logs",
+            "long_term_memories",
+            "memories",
+            "users",
+        ]
+        .iter()
+        .any(|needle| name == needle)
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SqliteTableObservedOutputKind {
+    Listing,
+    NamesOnly,
+    DatabaseKindJudgment,
+}
+
+fn sqlite_table_observed_output_kind(
+    route: &crate::RouteResult,
+) -> Option<SqliteTableObservedOutputKind> {
+    let locator_hint = route.output_contract.locator_hint.trim().to_ascii_lowercase();
+    if !(locator_hint.ends_with(".sqlite") || locator_hint.ends_with(".db")) {
+        return None;
+    }
+    match route.output_contract.semantic_kind {
+        crate::OutputSemanticKind::SqliteTableListing => Some(SqliteTableObservedOutputKind::Listing),
+        crate::OutputSemanticKind::SqliteTableNamesOnly => {
+            Some(SqliteTableObservedOutputKind::NamesOnly)
+        }
+        crate::OutputSemanticKind::SqliteDatabaseKindJudgment => {
+            Some(SqliteTableObservedOutputKind::DatabaseKindJudgment)
+        }
+        _ => None,
+    }
+}
+
+fn db_basic_tables_summary_candidate(
+    route: &crate::RouteResult,
+    body: &str,
+    prefer_english: bool,
+) -> Option<String> {
+    let observed_kind = sqlite_table_observed_output_kind(route)?;
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let table_names = db_basic_table_names(&value)?;
+    let looks_like_test = db_tables_looks_like_test_db(
+        Some(route.output_contract.locator_hint.as_str()),
+        &table_names,
+    );
+    if table_names.is_empty() {
+        return Some(if observed_kind == SqliteTableObservedOutputKind::DatabaseKindJudgment {
+            if prefer_english {
+                "This SQLite file currently has no tables, so it looks more like an empty or test DB.".to_string()
+            } else {
+                "这个 sqlite 文件里目前没有任何表，所以更像一个空白或测试库。".to_string()
+            }
+        } else if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
+            if prefer_english {
+                "This SQLite file currently has no tables.".to_string()
+            } else {
+                "这个 sqlite 文件里目前没有任何表。".to_string()
+            }
+        } else if prefer_english {
+            "This SQLite file currently has no tables.".to_string()
+        } else {
+            "这个 sqlite 文件里目前没有任何表。".to_string()
+        });
+    }
+    if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
+        return Some(table_names.join("\n"));
+    }
+    let preview = table_names
+        .iter()
+        .take(5)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(if prefer_english { ", " } else { "、" });
+    Some(if observed_kind == SqliteTableObservedOutputKind::DatabaseKindJudgment {
+        if prefer_english {
+            let kind = if looks_like_test { "test DB" } else { "app DB" };
+            format!("The tables include {preview}; overall this looks more like a {kind}.")
+        } else {
+            let kind = if looks_like_test {
+                "测试库"
+            } else {
+                "业务库"
+            };
+            format!("表包括 {preview}；整体更像{kind}。")
+        }
+    } else if prefer_english {
+        format!("The tables include {preview}.")
+    } else {
+        format!("表包括 {preview}。")
+    })
+}
+
+fn transform_skill_formatted_output_candidate(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let status_ok = value
+        .get("status")
+        .and_then(|value| value.as_str())
+        .map(|status| status.eq_ignore_ascii_case("ok"))
+        .unwrap_or(false);
+    if !status_ok {
+        return None;
+    }
+    value
+        .get("formatted")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|formatted| !formatted.is_empty())
+        .map(ToString::to_string)
 }
 
 fn service_control_summary_candidate(value: &serde_json::Value) -> Option<String> {
@@ -1350,7 +1472,7 @@ fn system_basic_info_summary_candidate(
 ) -> Option<String> {
     if !matches!(
         response_shape,
-        Some(crate::OutputResponseShape::OneSentence)
+        Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Free)
     ) {
         return None;
     }
@@ -1420,6 +1542,18 @@ fn system_basic_existence_with_path_value(skill: &str, body: &str) -> Option<ser
     matches!(
         value.get("action").and_then(|v| v.as_str()),
         Some("find_path" | "path_batch_facts" | "find_name")
+    )
+    .then_some(value)
+}
+
+fn system_basic_structured_doc_value(skill: &str, body: &str) -> Option<serde_json::Value> {
+    if skill != "system_basic" {
+        return None;
+    }
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    matches!(
+        value.get("action").and_then(|v| v.as_str()),
+        Some("extract_fields" | "structured_keys")
     )
     .then_some(value)
 }
@@ -1728,21 +1862,32 @@ fn recent_artifacts_judgment_direct_answer(
     state: Option<&AppState>,
     route: &crate::RouteResult,
     loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
     prefer_english: bool,
 ) -> Option<String> {
     if !route_requests_recent_artifacts_judgment(route) {
         return None;
     }
-    let names = extract_latest_generic_successful_output(loop_state).and_then(|observed| {
-        (observed.skill == "run_cmd")
-            .then(|| {
-                run_cmd_shell_listing_entry_names(
-                    &observed.body,
-                    requested_listing_limit(Some(route)),
-                )
-            })
-            .flatten()
-    })?;
+    let listing_limit =
+        current_turn_requested_listing_limit(Some(route), agent_run_context);
+    let names = extract_latest_generic_successful_output(loop_state)
+        .and_then(|observed| {
+            (observed.skill == "run_cmd")
+                .then(|| {
+                    run_cmd_shell_listing_entry_names(
+                        &observed.body,
+                        listing_limit,
+                    )
+                })
+                .flatten()
+        })
+        .or_else(|| {
+            latest_directory_listing_entries(
+                loop_state,
+                Some(route.output_contract.locator_hint.as_str()),
+                listing_limit,
+            )
+        })?;
     if names.is_empty() {
         return None;
     }
@@ -2108,6 +2253,38 @@ fn fs_search_find_name_results(
     Some((results, count, pattern))
 }
 
+fn fs_search_find_ext_results(value: &serde_json::Value) -> Option<(Vec<String>, usize, String)> {
+    let action = value.get("action").and_then(|v| v.as_str())?;
+    if !action.eq_ignore_ascii_case("find_ext") {
+        return None;
+    }
+    let results = value
+        .get("results")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let count = value
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(results.len() as u64) as usize;
+    let ext = value
+        .get("ext")
+        .or_else(|| value.get("extension"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?
+        .to_string();
+    Some((results, count, ext))
+}
+
 fn path_matches_find_name_pattern(path: &str, pattern: &str) -> bool {
     let path = Path::new(path);
     let Some(file_name) = path.file_name().and_then(|v| v.to_str()) else {
@@ -2220,6 +2397,8 @@ fn fs_search_scalar_candidate(
     state: Option<&AppState>,
     value: &serde_json::Value,
     locator_hint: Option<&str>,
+    auto_locator_path: Option<&str>,
+    prefer_full_path: bool,
     prefer_english: bool,
 ) -> Option<String> {
     let (results, count, pattern) = fs_search_find_name_results(value)?;
@@ -2233,11 +2412,53 @@ fn fs_search_scalar_candidate(
         ));
     }
     if results.len() == 1 {
+        let root = value
+            .get("root")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|root| !root.is_empty());
+        if prefer_full_path {
+            let resolved_path = Path::new(&results[0])
+                .is_absolute()
+                .then(|| canonical_existing_path(Path::new(&results[0])))
+                .or_else(|| {
+                    root.and_then(|root| {
+                        let candidate = Path::new(root).join(&results[0]);
+                        candidate
+                            .exists()
+                            .then(|| canonical_existing_path(&candidate))
+                    })
+                })
+                .or_else(|| resolve_listing_entry_full_path(&results[0], auto_locator_path))
+                .unwrap_or_else(|| results[0].clone());
+            return Some(resolved_path);
+        }
         return Some(results[0].clone());
     }
     let pattern = normalized_find_name_pattern(pattern.as_deref())
         .or_else(|| normalized_find_name_pattern(locator_hint))?;
-    preferred_fs_search_exact_match(&results, &pattern)
+    let preferred = preferred_fs_search_exact_match(&results, &pattern)?;
+    if !prefer_full_path {
+        return Some(preferred);
+    }
+    let root = value
+        .get("root")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|root| !root.is_empty());
+    Path::new(&preferred)
+        .is_absolute()
+        .then(|| canonical_existing_path(Path::new(&preferred)))
+        .or_else(|| {
+            root.and_then(|root| {
+                let candidate = Path::new(root).join(&preferred);
+                candidate
+                    .exists()
+                    .then(|| canonical_existing_path(&candidate))
+            })
+        })
+        .or_else(|| resolve_listing_entry_full_path(&preferred, auto_locator_path))
+        .or_else(|| Some(preferred))
 }
 
 fn fs_search_direct_answer_candidate(
@@ -2246,6 +2467,16 @@ fn fs_search_direct_answer_candidate(
     locator_hint: Option<&str>,
     prefer_english: bool,
 ) -> Option<String> {
+    if let Some((results, count, ext)) = fs_search_find_ext_results(value) {
+        if count == 0 || results.is_empty() {
+            return Some(if prefer_english {
+                format!("No .{ext} files found.")
+            } else {
+                format!("没有找到 .{ext} 文件")
+            });
+        }
+        return Some(results.join("\n"));
+    }
     let (results, count, pattern) = fs_search_find_name_results(value)?;
     if count == 0 || results.is_empty() {
         return Some(observed_t(
@@ -2639,13 +2870,39 @@ fn git_basic_status_summary_candidate(
         .filter(|line| !is_ignorable_shell_warning(line))
         .collect::<Vec<_>>();
     if lines.is_empty() {
-        return None;
+        return body.lines().any(|line| line.trim() == "exit=0").then(|| {
+            observed_t(
+                state,
+                "clawd.msg.git_clean",
+                "当前仓库没有未提交改动。",
+                "The current repository has no uncommitted changes.",
+                prefer_english,
+            )
+        });
     }
     let has_status_header = lines.iter().any(|line| line.starts_with("## "));
-    if !has_status_header {
+    let has_changes = lines.iter().any(|line| {
+        if line.starts_with("## ") {
+            return false;
+        }
+        let Some(token) = line.split_whitespace().next() else {
+            return false;
+        };
+        if token == "??" {
+            return true;
+        }
+        let mut chars = token.chars();
+        match (chars.next(), chars.next(), chars.next()) {
+            (Some(first), None, None) => "MADRCU!".contains(first),
+            (Some(first), Some(second), None) => {
+                "MADRCU?!".contains(first) && "MADRCU?!".contains(second)
+            }
+            _ => false,
+        }
+    });
+    if !has_status_header && !has_changes {
         return None;
     }
-    let has_changes = lines.iter().any(|line| !line.starts_with("## "));
     if has_changes {
         Some(observed_t(
             state,
@@ -2667,20 +2924,35 @@ fn git_basic_status_summary_candidate(
 
 fn structured_scalar_candidate(
     state: Option<&AppState>,
+    route: Option<&crate::RouteResult>,
     skill: &str,
     body: &str,
     locator_hint: Option<&str>,
+    auto_locator_path: Option<&str>,
+    prefer_full_path: bool,
     prefer_english: bool,
 ) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     if skill == "db_basic" {
+        if route.is_some_and(|route| {
+            route.output_contract.semantic_kind == crate::OutputSemanticKind::SqliteTableNamesOnly
+        }) {
+            return db_basic_table_names(&value).map(|names| names.join("\n"));
+        }
         return db_basic_scalar_candidate(&value);
     }
     if skill == "service_control" {
         return service_control_summary_candidate(&value);
     }
     if skill == "fs_search" {
-        return fs_search_scalar_candidate(state, &value, locator_hint, prefer_english);
+        return fs_search_scalar_candidate(
+            state,
+            &value,
+            locator_hint,
+            auto_locator_path,
+            prefer_full_path,
+            prefer_english,
+        );
     }
     if skill == "process_basic" {
         return process_basic_port_list_summary_candidate(state, body, prefer_english);
@@ -2690,6 +2962,37 @@ fn structured_scalar_candidate(
     }
     let action = value.get("action").and_then(|v| v.as_str())?;
     match action {
+        "inventory_dir" => {
+            let hidden_count_route = route.is_some_and(|route| {
+                crate::route_reason_starts_with_deterministic_contract(
+                    &route.route_reason,
+                    "current_workspace_hidden_entries_count",
+                )
+            });
+            if hidden_count_route {
+                value
+                    .get("counts")
+                    .and_then(|v| v.get("hidden"))
+                    .and_then(value_scalar_text)
+                    .or_else(|| {
+                        inventory_dir_names(&value).map(|names| {
+                            names
+                                .into_iter()
+                                .filter(|name| name.trim_start().starts_with('.'))
+                                .count()
+                                .to_string()
+                        })
+                    })
+            } else if route.is_some_and(route_requests_scalar_count) {
+                value
+                    .get("counts")
+                    .and_then(|v| v.get("total"))
+                    .and_then(value_scalar_text)
+                    .or_else(|| inventory_dir_names(&value).map(|names| names.len().to_string()))
+            } else {
+                None
+            }
+        }
         "extract_field" => {
             let field_path = value
                 .get("field_path")
@@ -2735,6 +3038,261 @@ fn structured_scalar_candidate(
     }
 }
 
+fn package_manager_summary_candidate(
+    state: Option<&AppState>,
+    body: &str,
+    response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
+) -> Option<String> {
+    let manager = body
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("package_manager="))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    match response_shape {
+        Some(crate::OutputResponseShape::Scalar) => Some(manager.to_string()),
+        Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Free)
+        | None => Some(observed_t_with_vars(
+            state,
+            "clawd.msg.package_manager_detected",
+            "当前识别到的包管理器是 {manager}，日常最可能直接用它。",
+            "The detected package manager is {manager}, so that is the most likely everyday default.",
+            prefer_english,
+            &[("manager", manager)],
+        )),
+        _ => None,
+    }
+}
+
+fn structured_field_display_line(
+    field_path: &str,
+    value: &serde_json::Value,
+    value_text: Option<&str>,
+    exists: bool,
+    prefer_english: bool,
+) -> String {
+    if !exists {
+        return if prefer_english {
+            format!("{field_path}: <missing>")
+        } else {
+            format!("{field_path}: 不存在")
+        };
+    }
+    let rendered = value_text
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| value_scalar_text(value))
+        .unwrap_or_else(|| {
+            serde_json::to_string(value).unwrap_or_else(|_| "<unrenderable>".to_string())
+        });
+    format!("{field_path}: {rendered}")
+}
+
+fn extract_fields_direct_answer_candidate(
+    value: &serde_json::Value,
+    response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
+) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("extract_fields") {
+        return None;
+    }
+    let results = value.get("results")?.as_array()?;
+    if results.is_empty() {
+        return None;
+    }
+    let lines = results
+        .iter()
+        .filter_map(|item| {
+            let field_path = item.get("field_path")?.as_str()?.trim();
+            if field_path.is_empty() {
+                return None;
+            }
+            Some(structured_field_display_line(
+                field_path,
+                item.get("value").unwrap_or(&serde_json::Value::Null),
+                item.get("value_text").and_then(|v| v.as_str()),
+                item.get("exists")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                prefer_english,
+            ))
+        })
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return None;
+    }
+    if matches!(
+        response_shape,
+        Some(crate::OutputResponseShape::OneSentence)
+    ) {
+        return Some(format!("{}.", lines.join("; ")));
+    }
+    Some(lines.join("\n"))
+}
+
+fn structured_keys_direct_answer_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
+) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("structured_keys") {
+        return None;
+    }
+    let field_path = value
+        .get("field_path")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    let exists = value
+        .get("exists")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !exists {
+        return Some(if field_path.is_empty() {
+            observed_t(
+                state,
+                "clawd.msg.structured_keys_root_missing",
+                "没有可列出的顶层键。",
+                "No top-level keys are available to list.",
+                prefer_english,
+            )
+        } else {
+            observed_t_with_vars(
+                state,
+                "clawd.msg.structured_keys_field_missing",
+                "{field_path} 字段不存在。",
+                "Field `{field_path}` does not exist.",
+                prefer_english,
+                &[("field_path", field_path)],
+            )
+        });
+    }
+    let container_type = value
+        .get("container_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    match container_type {
+        "object" => {
+            let keys = value
+                .get("keys")
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if keys.is_empty() {
+                return None;
+            }
+            if matches!(
+                response_shape,
+                Some(crate::OutputResponseShape::OneSentence)
+            ) {
+                let joined = if prefer_english {
+                    keys.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+                } else {
+                    keys.iter().take(5).cloned().collect::<Vec<_>>().join("、")
+                };
+                return Some(if field_path.is_empty() {
+                    observed_t_with_vars(
+                        state,
+                        "clawd.msg.structured_keys_root_one_sentence",
+                        "顶层键主要有 {keys}。",
+                        "The top-level keys include {keys}.",
+                        prefer_english,
+                        &[("keys", joined.as_str())],
+                    )
+                } else {
+                    observed_t_with_vars(
+                        state,
+                        "clawd.msg.structured_keys_field_one_sentence",
+                        "{field_path} 下的键有 {keys}。",
+                        "The keys under `{field_path}` are {keys}.",
+                        prefer_english,
+                        &[("field_path", field_path), ("keys", joined.as_str())],
+                    )
+                });
+            }
+            return Some(keys.join("\n"));
+        }
+        "array" => {
+            let indices = value
+                .get("indices_preview")
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.get("index").and_then(|v| v.as_u64()))
+                        .map(|idx| idx.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if indices.is_empty() {
+                return None;
+            }
+            let joined = if prefer_english {
+                indices.join(", ")
+            } else {
+                indices.join("、")
+            };
+            return Some(
+                if matches!(
+                    response_shape,
+                    Some(crate::OutputResponseShape::OneSentence)
+                ) {
+                    if field_path.is_empty() {
+                        observed_t_with_vars(
+                            state,
+                            "clawd.msg.structured_keys_array_root_one_sentence",
+                            "顶层是数组，当前索引预览有 {indices}。",
+                            "The root value is an array; current index preview is {indices}.",
+                            prefer_english,
+                            &[("indices", joined.as_str())],
+                        )
+                    } else {
+                        observed_t_with_vars(
+                            state,
+                            "clawd.msg.structured_keys_array_field_one_sentence",
+                            "{field_path} 是数组，当前索引预览有 {indices}。",
+                            "`{field_path}` is an array; current index preview is {indices}.",
+                            prefer_english,
+                            &[("field_path", field_path), ("indices", joined.as_str())],
+                        )
+                    }
+                } else {
+                    indices.join("\n")
+                },
+            );
+        }
+        _ => {}
+    }
+    Some(if field_path.is_empty() {
+        observed_t(
+            state,
+            "clawd.msg.structured_keys_non_container_root",
+            "这个位置不是对象或数组，没有可列出的键。",
+            "This value is not an object or array, so there are no keys to list.",
+            prefer_english,
+        )
+    } else {
+        observed_t_with_vars(
+            state,
+            "clawd.msg.structured_keys_non_container_field",
+            "{field_path} 不是对象或数组，没有可列出的键。",
+            "`{field_path}` is not an object or array, so there are no keys to list.",
+            prefer_english,
+            &[("field_path", field_path)],
+        )
+    })
+}
+
 fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
     let lines = excerpt
         .lines()
@@ -2753,6 +3311,677 @@ fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
     } else {
         Some(lines.join("\n"))
     }
+}
+
+#[derive(Debug, Clone)]
+struct ContentExcerptObserved {
+    path: Option<String>,
+    content: String,
+}
+
+fn route_requests_content_excerpt_summary(
+    route: &crate::RouteResult,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentExcerptSummary {
+        return false;
+    }
+    if matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::OneSentence
+    ) {
+        return true;
+    }
+    if !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Free
+    ) {
+        return false;
+    }
+    let Some(request_text) = current_turn_request_text(Some(route), agent_run_context) else {
+        return false;
+    };
+    let request_surface = crate::intent::surface_signals::analyze_prompt_surface(request_text);
+    request_surface.requested_sentence_count.is_some()
+        || matches!(
+            request_surface.output_compression_shape,
+            Some(crate::intent::surface_signals::OutputCompressionShape::Brief)
+        )
+}
+
+fn requested_summary_sentence_count(
+    route: &crate::RouteResult,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<usize> {
+    if matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::OneSentence
+    ) {
+        return Some(1);
+    }
+    current_turn_request_text(Some(route), agent_run_context).and_then(|request_text| {
+        crate::intent::surface_signals::analyze_prompt_surface(request_text).requested_sentence_count
+    })
+}
+
+fn route_allows_raw_read_range_direct_answer(
+    route: Option<&crate::RouteResult>,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    let Some(route) = route else {
+        return false;
+    };
+    route.output_contract.requires_content_evidence
+        && matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+        )
+        && crate::route_reason_starts_with_deterministic_contract(&route.route_reason, "generic_")
+        && route.route_reason.ends_with("_read_range")
+        && !route_requests_content_excerpt_summary(route, agent_run_context)
+}
+
+fn latest_content_excerpt_observed(
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+    locator_hint: Option<&str>,
+) -> Option<ContentExcerptObserved> {
+    let idx = latest_successful_step_index(loop_state, |step| {
+        matches!(step.skill.as_str(), "read_file" | "system_basic")
+    })?;
+    let step = &loop_state.executed_step_results[idx];
+    let body = step
+        .output
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())?;
+    match step.skill.as_str() {
+        "read_file" => Some(ContentExcerptObserved {
+            path: auto_locator_path
+                .or(locator_hint)
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(ToString::to_string),
+            content: body.to_string(),
+        }),
+        "system_basic" => {
+            let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+            let action = value.get("action").and_then(|v| v.as_str());
+            if action != Some("read_range") {
+                return None;
+            }
+            let content = value
+                .get("excerpt")
+                .and_then(|v| v.as_str())
+                .and_then(normalize_read_range_excerpt)?;
+            let path = value
+                .get("resolved_path")
+                .or_else(|| value.get("path"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(ToString::to_string)
+                .or_else(|| {
+                    auto_locator_path
+                        .or(locator_hint)
+                        .map(str::trim)
+                        .filter(|path| !path.is_empty())
+                        .map(ToString::to_string)
+                });
+            Some(ContentExcerptObserved { path, content })
+        }
+        _ => None,
+    }
+}
+
+fn excerpt_content_lines(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| {
+            !line.starts_with('#')
+                && !line.starts_with("//")
+                && !line.starts_with(';')
+                && !line.starts_with("/*")
+                && !line.starts_with('*')
+        })
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn excerpt_section_headers(content: &str) -> Vec<String> {
+    let mut sections = Vec::new();
+    for line in excerpt_content_lines(content) {
+        let trimmed = line.trim();
+        if !(trimmed.starts_with('[') && trimmed.ends_with(']')) {
+            continue;
+        }
+        let inner = trimmed.trim_start_matches('[').trim_end_matches(']').trim();
+        if inner.is_empty() {
+            continue;
+        }
+        if !sections.iter().any(|existing| existing == inner) {
+            sections.push(inner.to_string());
+        }
+    }
+    sections
+}
+
+fn excerpt_assignment_pairs(content: &str) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for line in excerpt_content_lines(content) {
+        let Some((lhs, rhs)) = line.split_once('=') else {
+            continue;
+        };
+        let key = lhs.trim();
+        let value = rhs.trim().trim_end_matches(',');
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        if !key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '-'))
+        {
+            continue;
+        }
+        pairs.push((key.to_string(), value.to_string()));
+    }
+    pairs
+}
+
+fn summary_value_token(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches('"').trim_matches('\'').trim();
+    if trimmed.is_empty() || trimmed.contains('\n') {
+        return None;
+    }
+    if trimmed.chars().count() > 32 {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn join_summary_names(names: &[String], prefer_english: bool) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first, second] => {
+            if prefer_english {
+                format!("{first} and {second}")
+            } else {
+                format!("{first}、{second}")
+            }
+        }
+        _ => {
+            let shown = names.iter().take(2).cloned().collect::<Vec<_>>();
+            if prefer_english {
+                format!("{} and more", shown.join(", "))
+            } else {
+                format!("{} 等", shown.join("、"))
+            }
+        }
+    }
+}
+
+fn path_looks_like_markdown(path: &str) -> bool {
+    let path = path.trim().to_ascii_lowercase();
+    path.ends_with(".md") || path.ends_with(".markdown") || path.ends_with(".mdx")
+}
+
+fn excerpt_comment_summary_line(content: &str) -> Option<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| {
+            let stripped = line
+                .strip_prefix('#')
+                .or_else(|| line.strip_prefix(';'))
+                .or_else(|| line.strip_prefix("//"))
+                .map(str::trim)?;
+            let stripped = stripped.trim_matches(|ch| matches!(ch, '[' | ']')).trim();
+            if stripped.is_empty()
+                || stripped.chars().all(|ch| !ch.is_alphanumeric())
+                    && !stripped.chars().any(
+                        |ch| matches!(ch as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF),
+                    )
+            {
+                return None;
+            }
+            Some(stripped.to_string())
+        })
+        .next()
+}
+
+fn excerpt_markdown_heading(observed: &ContentExcerptObserved) -> Option<String> {
+    let path_text = observed.path.as_deref().unwrap_or_default();
+    if !path_text.is_empty() && !path_looks_like_markdown(path_text) {
+        return None;
+    }
+    observed
+        .content
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| {
+            let hashes = line.chars().take_while(|&ch| ch == '#').count();
+            if hashes == 0 {
+                return None;
+            }
+            let rest = line.get(hashes..)?.trim();
+            if rest.is_empty()
+                || rest.chars().all(|ch| !ch.is_alphanumeric())
+                    && !rest.chars().any(
+                        |ch| matches!(ch as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF),
+                    )
+            {
+                return None;
+            }
+            Some(rest.to_string())
+        })
+        .next()
+}
+
+fn config_excerpt_summary_candidate(
+    state: Option<&AppState>,
+    observed: &ContentExcerptObserved,
+    prefer_english: bool,
+) -> Option<String> {
+    let sections = excerpt_section_headers(&observed.content);
+    let assignments = excerpt_assignment_pairs(&observed.content);
+    let path_text = observed.path.as_deref().unwrap_or_default();
+    let path_lower = path_text.to_ascii_lowercase();
+    let looks_like_config_path = path_lower.ends_with(".toml")
+        || path_lower.ends_with(".yaml")
+        || path_lower.ends_with(".yml")
+        || path_lower.ends_with(".json")
+        || path_lower.ends_with(".ini")
+        || path_lower.ends_with(".conf")
+        || path_lower.ends_with(".cfg");
+    let looks_like_config_excerpt = !sections.is_empty() || !assignments.is_empty();
+    if !looks_like_config_path && !looks_like_config_excerpt {
+        return None;
+    }
+
+    if sections.len() >= 2 {
+        let named_sections = join_summary_names(&sections[..2].to_vec(), prefer_english);
+        return Some(observed_t_with_vars(
+            state,
+            "clawd.msg.content_excerpt_config_sections_summary",
+            "这个配置文件主要在配置 {sections} 等运行参数。",
+            "This config file mainly covers runtime settings such as {sections}.",
+            prefer_english,
+            &[("sections", named_sections.as_str())],
+        ));
+    }
+
+    if let Some((key, value)) = assignments.first() {
+        let value_text = summary_value_token(value);
+        if let Some(value_text) = value_text {
+            return Some(observed_t_with_vars(
+                state,
+                "clawd.msg.content_excerpt_config_assignment_summary",
+                "这段主要是在设置 `{key}` 为 {value}。",
+                "This excerpt mainly sets `{key}` to {value}.",
+                prefer_english,
+                &[("key", key.as_str()), ("value", value_text.as_str())],
+            ));
+        }
+        return Some(observed_t_with_vars(
+            state,
+            "clawd.msg.content_excerpt_config_assignment_key_only_summary",
+            "这段主要是在配置 `{key}` 这项参数。",
+            "This excerpt mainly configures the `{key}` setting.",
+            prefer_english,
+            &[("key", key.as_str())],
+        ));
+    }
+
+    if let Some(section) = sections.first() {
+        return Some(observed_t_with_vars(
+            state,
+            "clawd.msg.content_excerpt_config_single_section_summary",
+            "这段主要是在配置 `{section}` 这一组参数。",
+            "This excerpt mainly covers the `{section}` config section.",
+            prefer_english,
+            &[("section", section.as_str())],
+        ));
+    }
+
+    if let Some(comment_line) = excerpt_comment_summary_line(&observed.content) {
+        let note = comment_line
+            .trim_end_matches(['。', '.', '!', '！'])
+            .trim()
+            .to_string();
+        if !note.is_empty() {
+            return Some(observed_t_with_vars(
+                state,
+                "clawd.msg.content_excerpt_config_comment_summary",
+                "这个配置文件开头主要在说明：{note}。",
+                "This config excerpt mainly notes: {note}.",
+                prefer_english,
+                &[("note", note.as_str())],
+            ));
+        }
+    }
+
+    None
+}
+
+fn markdown_excerpt_summary_candidate(
+    state: Option<&AppState>,
+    observed: &ContentExcerptObserved,
+    prefer_english: bool,
+) -> Option<String> {
+    let heading = excerpt_markdown_heading(observed)?;
+    Some(observed_t_with_vars(
+        state,
+        "clawd.msg.content_excerpt_heading_summary",
+        "这段内容主要是在说明“{heading}”相关内容。",
+        "This excerpt mainly explains {heading}.",
+        prefer_english,
+        &[("heading", heading.as_str())],
+    ))
+}
+
+fn markdown_excerpt_multi_sentence_summary_candidate(
+    _state: Option<&AppState>,
+    observed: &ContentExcerptObserved,
+    prefer_english: bool,
+    sentence_count: usize,
+) -> Option<String> {
+    if sentence_count < 2 {
+        return None;
+    }
+    let heading = excerpt_markdown_heading(observed)?;
+    let prose_lines = observed
+        .content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.starts_with('#'))
+        .filter(|line| !line.starts_with('<'))
+        .filter(|line| !line.starts_with('`'))
+        .filter(|line| {
+            line.chars().any(|ch| ch.is_ascii_alphabetic())
+                || line.chars().any(
+                    |ch| matches!(ch as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF),
+                )
+        })
+        .collect::<Vec<_>>();
+    let first_line = prose_lines.first().copied().unwrap_or_default();
+    let second_line = prose_lines.get(1).copied().unwrap_or_default();
+    if first_line.is_empty() || second_line.is_empty() {
+        return None;
+    }
+    let project_shape = if heading.eq_ignore_ascii_case("readme")
+        || observed
+            .path
+            .as_deref()
+            .map(|path| path.to_ascii_lowercase().contains("readme"))
+            .unwrap_or(false)
+    {
+        if prefer_english {
+            "Overall, this reads like the opening of a project README."
+        } else {
+            "整体看，这更像是一个项目 README 的开头说明。"
+        }
+    } else if prefer_english {
+        "Overall, this excerpt is an overview section for the project."
+    } else {
+        "整体看，这段更像是在做项目总览说明。"
+    };
+    let mut sentences = Vec::new();
+    sentences.push(if prefer_english {
+        format!("This excerpt opens with {heading}.")
+    } else {
+        format!("这段内容开头主要在介绍“{heading}”。")
+    });
+    let first_line = first_line.trim_end_matches('.');
+    sentences.push(if prefer_english {
+        format!("It says {first_line}.")
+    } else {
+        format!("它提到：{first_line}。")
+    });
+    if sentence_count >= 3 {
+        if !second_line.is_empty() {
+            let second_line = second_line.trim_end_matches('.');
+            sentences.push(if prefer_english {
+                format!("It also mentions {second_line}.")
+            } else {
+                format!("同时还提到：{second_line}。")
+            });
+        } else {
+            sentences.push(project_shape.to_string());
+        }
+    }
+    while sentences.len() < sentence_count {
+        sentences.push(project_shape.to_string());
+    }
+    Some(
+        sentences
+            .into_iter()
+            .take(sentence_count)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+fn log_excerpt_summary_candidate(
+    state: Option<&AppState>,
+    observed: &ContentExcerptObserved,
+    prefer_english: bool,
+) -> Option<String> {
+    let path_text = observed.path.as_deref().unwrap_or_default();
+    let path_lower = path_text.to_ascii_lowercase();
+    let lines = excerpt_content_lines(&observed.content);
+    let looks_like_log_excerpt = path_lower.ends_with(".log")
+        || lines.iter().any(|line| {
+            let upper = line.to_ascii_uppercase();
+            upper.contains("ERROR") || upper.contains("WARN")
+        });
+    if !looks_like_log_excerpt || lines.is_empty() {
+        return None;
+    }
+    if let Some(line) = lines.iter().rev().find(|line| {
+        let upper = line.to_ascii_uppercase();
+        upper.contains("ERROR")
+    }) {
+        return Some(observed_t_with_vars(
+            state,
+            "clawd.msg.content_excerpt_log_error_summary",
+            "最后几行里有 ERROR，最值得注意的是：{line}",
+            "The last few lines include an ERROR; the most notable one is: {line}",
+            prefer_english,
+            &[("line", line.as_str())],
+        ));
+    }
+    if let Some(line) = lines.iter().rev().find(|line| {
+        let upper = line.to_ascii_uppercase();
+        upper.contains("WARN")
+    }) {
+        return Some(observed_t_with_vars(
+            state,
+            "clawd.msg.content_excerpt_log_warn_summary",
+            "最后几行里有 WARN，最值得注意的是：{line}",
+            "The last few lines include a WARN; the most notable one is: {line}",
+            prefer_english,
+            &[("line", line.as_str())],
+        ));
+    }
+    Some(observed_t(
+        state,
+        "clawd.msg.content_excerpt_log_clean_summary",
+        "最后几行里没有明显的 ERROR 或 WARN。",
+        "The last few lines do not show any obvious ERROR or WARN.",
+        prefer_english,
+    ))
+}
+
+fn checklist_excerpt_summary_candidate(
+    state: Option<&AppState>,
+    observed: &ContentExcerptObserved,
+    prefer_english: bool,
+) -> Option<String> {
+    let checklist_items = observed
+        .content
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.starts_with("- [ ]")
+                || lower.starts_with("- [x]")
+                || lower.starts_with("* [ ]")
+                || lower.starts_with("* [x]")
+        })
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if checklist_items.len() < 2 {
+        return None;
+    }
+    Some(observed_t(
+        state,
+        "clawd.msg.content_excerpt_checklist_summary",
+        "这段主要是在列一组检查清单项。",
+        "This excerpt mainly lists a set of checklist items.",
+        prefer_english,
+    ))
+}
+
+fn excerpt_kind_judgment_direct_answer_candidate(
+    state: Option<&AppState>,
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+    prefer_english: bool,
+) -> Option<String> {
+    if !route_requests_excerpt_kind_judgment(route) {
+        return None;
+    }
+    let locator_hint = route.output_contract.locator_hint.as_str();
+    let observed = latest_content_excerpt_observed(
+        loop_state,
+        auto_locator_path,
+        (!locator_hint.trim().is_empty()).then_some(locator_hint),
+    )?;
+    let path_lower = observed
+        .path
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let lines = excerpt_content_lines(&observed.content);
+    let checklist_like = lines
+        .iter()
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.starts_with("- [ ]")
+                || lower.starts_with("- [x]")
+                || lower.starts_with("* [ ]")
+                || lower.starts_with("* [x]")
+        })
+        .count()
+        >= 2;
+    if checklist_like {
+        return Some(observed_t(
+            state,
+            "clawd.msg.content_excerpt_kind_checklist",
+            "这更像一段检查清单，不像运行日志。",
+            "This reads more like a checklist than a runtime log.",
+            prefer_english,
+        ));
+    }
+    let log_like = path_lower.ends_with(".log")
+        || lines.iter().any(|line| {
+            let upper = line.to_ascii_uppercase();
+            upper.contains("ERROR") || upper.contains("WARN") || upper.contains("INFO")
+        })
+        || observed.content.trim_start().starts_with('{')
+        || observed.content.trim_start().starts_with('[');
+    if log_like {
+        return Some(observed_t(
+            state,
+            "clawd.msg.content_excerpt_kind_log",
+            "这更像一段日志或运行记录，不像检查清单。",
+            "This reads more like a log or runtime record than a checklist.",
+            prefer_english,
+        ));
+    }
+    None
+}
+
+fn content_excerpt_summary_direct_answer_candidate(
+    state: Option<&AppState>,
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    auto_locator_path: Option<&str>,
+    prefer_english: bool,
+) -> Option<String> {
+    if !route_requests_content_excerpt_summary(route, agent_run_context) {
+        return None;
+    }
+    let sentence_count = requested_summary_sentence_count(route, agent_run_context).unwrap_or(1);
+    let locator_hint = route.output_contract.locator_hint.as_str();
+    let observed = latest_content_excerpt_observed(
+        loop_state,
+        auto_locator_path,
+        (!locator_hint.trim().is_empty()).then_some(locator_hint),
+    )?;
+    if sentence_count <= 1 {
+        return config_excerpt_summary_candidate(state, &observed, prefer_english)
+            .or_else(|| checklist_excerpt_summary_candidate(state, &observed, prefer_english))
+            .or_else(|| log_excerpt_summary_candidate(state, &observed, prefer_english))
+            .or_else(|| markdown_excerpt_summary_candidate(state, &observed, prefer_english));
+    }
+    markdown_excerpt_multi_sentence_summary_candidate(
+        state,
+        &observed,
+        prefer_english,
+        sentence_count,
+    )
+}
+
+fn compare_paths_direct_answer_candidate(body: &str, prefer_english: bool) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if value.get("action").and_then(|v| v.as_str()) != Some("compare_paths") {
+        return None;
+    }
+    let left = value.get("left")?;
+    let right = value.get("right")?;
+    let left_name = left
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(Path::new)
+        .and_then(|path| path.file_name().and_then(|name| name.to_str()))
+        .unwrap_or("left");
+    let right_name = right
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(Path::new)
+        .and_then(|path| path.file_name().and_then(|name| name.to_str()))
+        .unwrap_or("right");
+    let left_size = left.get("size_bytes").and_then(|v| v.as_u64())?;
+    let right_size = right.get("size_bytes").and_then(|v| v.as_u64())?;
+    if left_size == right_size {
+        return Some(if prefer_english {
+            format!("{left_name} and {right_name} are the same size ({left_size} bytes each).")
+        } else {
+            format!("{left_name} 和 {right_name} 一样大，都是 {left_size} 字节。")
+        });
+    }
+    let (winner_name, winner_size, loser_name, loser_size) = if left_size > right_size {
+        (left_name, left_size, right_name, right_size)
+    } else {
+        (right_name, right_size, left_name, left_size)
+    };
+    Some(if prefer_english {
+        format!(
+            "{winner_name} is larger: {winner_name} is {winner_size} bytes, while {loser_name} is {loser_size} bytes."
+        )
+    } else {
+        format!(
+            "{winner_name} 更大：{winner_name} 有 {winner_size} 字节，{loser_name} 有 {loser_size} 字节。"
+        )
+    })
 }
 
 fn read_range_observed_candidate(value: &serde_json::Value) -> Option<String> {
@@ -2847,6 +4076,16 @@ fn archive_basic_observed_candidate(value: &serde_json::Value) -> Option<String>
     ))
 }
 
+fn db_basic_observed_candidate(value: &serde_json::Value) -> Option<String> {
+    if let Some(table_names) = db_basic_table_names(value) {
+        if table_names.is_empty() {
+            return Some("db_tables=<empty>".to_string());
+        }
+        return Some(format!("db_tables={}", table_names.join(", ")));
+    }
+    db_basic_scalar_candidate(value).map(|text| format!("db_scalar={text}"))
+}
+
 fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     match skill {
@@ -2855,20 +4094,28 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
             match action {
                 "read_range" => read_range_observed_candidate(&value),
                 "inventory_dir" => inventory_dir_observed_candidate(&value),
+                "compare_paths" => compare_paths_direct_answer_candidate(body, false),
                 _ => None,
             }
         }
-        "db_basic" => db_basic_scalar_candidate(&value).map(|text| format!("db_scalar={text}")),
+        "db_basic" => db_basic_observed_candidate(&value),
         "service_control" => service_control_summary_candidate(&value),
         "fs_search" => fs_search_direct_answer_candidate(None, &value, None, false),
         "archive_basic" => archive_basic_observed_candidate(&value),
         "log_analyze" => compact_log_analyze_excerpt(&value),
+        "package_manager" => package_manager_summary_candidate(
+            None,
+            body,
+            Some(crate::OutputResponseShape::OneSentence),
+            false,
+        ),
         _ => None,
     }
 }
 
 fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     state: Option<&AppState>,
+    route: Option<&crate::RouteResult>,
     loop_state: &LoopState,
     locator_hint: Option<&str>,
     auto_locator_path: Option<&str>,
@@ -2891,9 +4138,12 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     let observed_output = extract_latest_generic_successful_output(loop_state)?;
     let answer = structured_scalar_candidate(
         state,
+        route,
         &observed_output.skill,
         &observed_output.body,
         locator_hint.filter(|hint| !hint.trim().is_empty()),
+        auto_locator_path,
+        prefer_full_path,
         prefer_english,
     )
     .or_else(|| normalized_scalar_candidate(&observed_output.body))?;
@@ -2914,6 +4164,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_with_locator_hint(
 ) -> Option<String> {
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         None,
+        None,
         loop_state,
         locator_hint,
         auto_locator_path,
@@ -2932,6 +4183,18 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         .filter(|path| !path.trim().is_empty());
     let prefer_full_path = route.is_some_and(route_requests_scalar_path_only);
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+        if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison {
+            if let Some(observed_output) = extract_latest_generic_successful_output(loop_state) {
+                if let Some(answer) =
+                    compare_paths_direct_answer_candidate(&observed_output.body, false)
+                {
+                    return Some(answer);
+                }
+            }
+        }
+        if let Some(answer) = structured_scalar_pair_direct_answer(route, loop_state, false) {
+            return Some(answer);
+        }
         if let Some(answer) = comparison_winner_from_route(route, loop_state) {
             return Some(answer);
         }
@@ -2942,6 +4205,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
     let locator_hint = route.map(|route| route.output_contract.locator_hint.as_str());
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         None,
+        route,
         loop_state,
         locator_hint,
         auto_locator_path,
@@ -2960,11 +4224,22 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
     let prefer_full_path = route.is_some_and(route_requests_scalar_path_only);
-    let prefer_english = route
-        .map(|route| route.resolved_intent.trim())
-        .filter(|intent| !intent.is_empty())
+    let prefer_english = current_turn_request_text(route, agent_run_context)
         .is_some_and(|intent| !text_contains_cjk(intent));
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+        if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison {
+            if let Some(observed_output) = extract_latest_generic_successful_output(loop_state) {
+                if let Some(answer) =
+                    compare_paths_direct_answer_candidate(&observed_output.body, prefer_english)
+                {
+                    return Some(answer);
+                }
+            }
+        }
+        if let Some(answer) = structured_scalar_pair_direct_answer(route, loop_state, prefer_english)
+        {
+            return Some(answer);
+        }
         if let Some(answer) = comparison_winner_from_route(route, loop_state) {
             return Some(answer);
         }
@@ -2975,6 +4250,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
     let locator_hint = route.map(|route| route.output_contract.locator_hint.as_str());
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         Some(state),
+        route,
         loop_state,
         locator_hint,
         auto_locator_path,
@@ -3042,20 +4318,18 @@ fn extract_direct_answer_from_generic_output_impl(
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     let response_shape = route.map(|route| route.output_contract.response_shape);
     let is_plain_act = route.is_some_and(|route| route.ask_mode.is_plain_act());
-    let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route);
-    let requested_listing_limit = requested_listing_limit(route);
+    let allow_raw_listing_direct_answer =
+        route_allows_raw_listing_direct_answer(route, agent_run_context);
+    let requested_listing_limit =
+        current_turn_requested_listing_limit(route, agent_run_context);
     let locator_hint = route
         .map(|route| route.output_contract.locator_hint.as_str())
         .filter(|hint| !hint.trim().is_empty());
     let auto_locator_path = agent_run_context
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
-    let request_language_hint = agent_run_context
-        .and_then(|ctx| ctx.user_request.as_deref())
+    let request_language_hint = current_turn_request_text(route, agent_run_context)
         .map(observed_request_language_hint)
-        .or_else(|| {
-            route.map(|route| observed_request_language_hint(route.resolved_intent.as_str()))
-        })
         .unwrap_or("config_default");
     let prefers_english_free_text = request_language_hint == "en";
     let prefers_english_presence_answer = route.is_some_and(|route| {
@@ -3112,6 +4386,26 @@ fn extract_direct_answer_from_generic_output_impl(
             state,
             route,
             loop_state,
+            agent_run_context,
+            prefers_english_free_text,
+        ) {
+            return Some(answer);
+        }
+        if let Some(answer) = excerpt_kind_judgment_direct_answer_candidate(
+            state,
+            route,
+            loop_state,
+            auto_locator_path,
+            prefers_english_free_text,
+        ) {
+            return Some(answer);
+        }
+        if let Some(answer) = content_excerpt_summary_direct_answer_candidate(
+            state,
+            route,
+            loop_state,
+            agent_run_context,
+            auto_locator_path,
             prefers_english_free_text,
         ) {
             return Some(answer);
@@ -3200,6 +4494,20 @@ fn extract_direct_answer_from_generic_output_impl(
                     &observed_output.body,
                     prefers_english_free_text,
                 ),
+                "db_basic" => route.and_then(|route| {
+                    db_basic_tables_summary_candidate(
+                        route,
+                        &observed_output.body,
+                        prefers_english_free_text,
+                    )
+                }),
+                "transform" => transform_skill_formatted_output_candidate(&observed_output.body),
+                "package_manager" => package_manager_summary_candidate(
+                    state,
+                    &observed_output.body,
+                    response_shape,
+                    prefers_english_free_text,
+                ),
                 "archive_basic" => route.and_then(|route| {
                     archive_basic_success_direct_answer_candidate(
                         state,
@@ -3225,21 +4533,39 @@ fn extract_direct_answer_from_generic_output_impl(
                         })?;
                     let action = value.get("action").and_then(|v| v.as_str());
                     if action == Some("read_range")
-                        && is_plain_act
-                        && !matches!(
-                            response_shape,
-                            Some(crate::OutputResponseShape::OneSentence)
-                        )
+                        && ((is_plain_act
+                            && !matches!(
+                                response_shape,
+                                Some(crate::OutputResponseShape::OneSentence)
+                            ))
+                            || route_allows_raw_read_range_direct_answer(
+                                route,
+                                agent_run_context,
+                            ))
                     {
                         value
                             .get("excerpt")
                             .and_then(|v| v.as_str())
                             .and_then(normalize_read_range_excerpt)
+                            .map(|text| text.trim_end().to_string())
                     } else if action == Some("inventory_dir")
                         && is_plain_act
                         && allow_raw_listing_direct_answer
                     {
                         inventory_dir_direct_answer_candidate(&value, requested_listing_limit)
+                    } else if action == Some("extract_fields") {
+                        extract_fields_direct_answer_candidate(
+                            &value,
+                            response_shape,
+                            prefers_english_free_text,
+                        )
+                    } else if action == Some("structured_keys") {
+                        structured_keys_direct_answer_candidate(
+                            state,
+                            &value,
+                            response_shape,
+                            prefers_english_free_text,
+                        )
                     } else if action == Some("info")
                         || (action.is_none() && system_basic_value_looks_like_info(&value))
                     {
@@ -3269,9 +4595,12 @@ fn extract_direct_answer_from_generic_output_impl(
             .or_else(|| {
                 structured_scalar_candidate(
                     state,
+                    route,
                     &observed_output.skill,
                     &observed_output.body,
                     locator_hint,
+                    auto_locator_path,
+                    prefer_full_path,
                     prefers_english_free_text,
                 )
             })
@@ -3308,6 +4637,9 @@ fn observed_step_body(step: &crate::executor::StepExecutionResult) -> Option<Str
         .filter(|text| !text.is_empty())?;
     if let Some(normalized) = structured_observed_body(&step.skill, body) {
         return Some(normalized);
+    }
+    if system_basic_structured_doc_value(&step.skill, body).is_some() {
+        return Some(body.to_string());
     }
     (crate::finalize::classify_observed_content_status(body)
         == crate::finalize::ObservedContentStatus::ContentAvailable)
@@ -3418,11 +4750,23 @@ pub(crate) async fn synthesize_answer_from_observed_output(
     }
     let observed_block = observed_entries.join("\n\n");
     let resolved_intent = resolved_user_intent(agent_run_context, user_text);
-    let (prompt_template, prompt_source) = crate::load_prompt_template_for_state(
-        state,
-        OBSERVED_ANSWER_FALLBACK_PROMPT_LOGICAL_PATH,
-        OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
-    );
+    let request_language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_text);
+    let (prompt_template, prompt_source) =
+        match crate::bootstrap::load_required_prompt_template_for_state(
+            state,
+            OBSERVED_ANSWER_FALLBACK_PROMPT_LOGICAL_PATH,
+        ) {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                tracing::warn!(
+                    "observed_answer_fallback prompt_missing task_id={} err={}",
+                    task.task_id,
+                    err
+                );
+                return None;
+            }
+        };
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
@@ -3437,10 +4781,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
                 "__CONFIG_RESPONSE_LANGUAGE__",
                 &state.policy.command_intent.default_locale,
             ),
-            (
-                "__REQUEST_LANGUAGE_HINT__",
-                observed_request_language_hint(user_text),
-            ),
+            ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
             (
                 "__RESPONSE_STYLE_HINT__",
                 observed_response_style_hint(agent_run_context),
@@ -3458,13 +4799,30 @@ pub(crate) async fn synthesize_answer_from_observed_output(
         llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &prompt_source)
             .await
             .ok()?;
-    let parsed_raw = serde_json::from_str::<ObservedAnswerFallbackOut>(llm_out.trim()).ok();
-    let parsed = parsed_raw
-        .or_else(|| {
-            crate::extract_first_json_object_any(&llm_out)
-                .and_then(|json| serde_json::from_str::<ObservedAnswerFallbackOut>(&json).ok())
-        })
-        .or_else(|| {
+    let parsed = match crate::prompt_utils::validate_against_schema::<ObservedAnswerFallbackOut>(
+        &llm_out,
+        crate::prompt_utils::PromptSchemaId::FinalizerOut,
+    ) {
+        Ok(validated) => {
+            if !validated.raw_parse_ok {
+                tracing::info!(
+                    "observed_answer_fallback schema_parse_recovery task_id={} schema_normalized={}",
+                    task.task_id,
+                    validated.schema_normalized
+                );
+            }
+            Some(validated.value)
+        }
+        Err(err) => {
+            tracing::info!(
+                "observed_answer_fallback schema_validation_failed task_id={} err={}",
+                task.task_id,
+                err
+            );
+            None
+        }
+    }
+    .or_else(|| {
             // F14: minimax 等 vendor 偶发不遵守 prompt 的 "Output JSON only" 契约，
             // 直接吐 markdown 文本（典型例：被多步 read 喂饱后给一段中文综述但没包成
             // JSON envelope）。原先 ObservedAnswerFallbackOut 解析失败 → 整个 fallback
@@ -3547,14 +4905,15 @@ mod tests {
     use super::super::LoopState;
     use super::{
         extract_direct_answer_from_generic_output, extract_direct_scalar_from_generic_output,
+        extract_direct_scalar_from_generic_output_i18n,
         extract_direct_scalar_from_generic_output_with_locator_hint, normalized_observed_listing,
         observed_contract_json, observed_output_entries, observed_request_language_hint,
-        observed_response_style_hint, requested_listing_limit_from_intent, AgentRunContext,
-        OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+        observed_response_style_hint, requested_listing_limit_from_intent,
+        structured_observed_body, AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
-        IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+        AppState, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
         OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
     };
 
@@ -3607,6 +4966,118 @@ mod tests {
         assert_eq!(
             extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
             Some("rustclaw")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_compares_recent_structured_scalar_outputs_as_different() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"extract_fields","path":"UI/package.json","resolved_path":"/tmp/UI/package.json","count":1,"results":[{"field_path":"name","exists":true,"value_type":"string","value_text":"react-example","value":"react-example"}]}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "system_basic",
+            r#"{"action":"extract_field","path":"crates/clawd/Cargo.toml","resolved_path":"/tmp/crates/clawd/Cargo.toml","field_path":"package.name","exists":true,"value_type":"string","value_text":"clawd","value":"clawd"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent:
+                "UI/package.json 里的 name 和 crates/clawd/Cargo.toml 里的 package.name 一样吗？只回答一样或不一样"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:compare_targets".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+                locator_hint: "UI/package.json|crates/clawd/Cargo.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("不一样")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_compares_recent_structured_scalar_outputs_as_same_for_equality_route() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"extract_field","field_path":"name","exists":true,"value_text":"RustClaw","value":"RustClaw","value_type":"string"}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "system_basic",
+            r#"{"action":"extract_field","field_path":"crate_name","exists":true,"value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "Are those two names the same? Answer same or different".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:same_or_different".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_scalar_from_generic_output_i18n(
+                &loop_state,
+                &AppState::test_default_with_fixture_provider(),
+                Some(&agent_run_context)
+            )
+            .as_deref(),
+            Some("same")
         );
     }
 
@@ -3683,6 +5154,20 @@ mod tests {
         assert_eq!(
             extract_direct_scalar_from_generic_output(&loop_state, None),
             None
+        );
+    }
+
+    #[test]
+    fn fs_search_find_ext_direct_answer_returns_paths_list() {
+        let value = serde_json::json!({
+            "action": "find_ext",
+            "ext": "toml",
+            "count": 3,
+            "results": ["Cargo.toml", "configs/config.toml", "configs/git_basic.toml"]
+        });
+        assert_eq!(
+            super::fs_search_direct_answer_candidate(None, &value, None, false).as_deref(),
+            Some("Cargo.toml\nconfigs/config.toml\nconfigs/git_basic.toml")
         );
     }
 
@@ -3929,6 +5414,655 @@ mod tests {
     }
 
     #[test]
+    fn direct_answer_summarizes_config_read_range_excerpt_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"12|# timeout note\n13|task_timeout_seconds = 3600\n14|# end"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "读取 /tmp/config.toml 最后 3 行，然后用一句话总结".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "/tmp/config.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这段主要是在设置 `task_timeout_seconds` 为 3600。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_config_read_file_sections_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "read_file",
+            r#"[command_intent]
+default_locale = "zh-CN"
+
+[database]
+sqlite_path = "data/rustclaw.db"
+"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "看一下 /tmp/config.toml，然后用一句大白话说它主要配置了什么"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "/tmp/config.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/config.toml".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这个配置文件主要在配置 command_intent、database 等运行参数。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_keeps_fallback_for_unstructured_content_excerpt_summary() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "read_file",
+            "RustClaw is deployed locally and keeps task state in sqlite.",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "看一下 /tmp/README.txt，然后用一句话总结".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "/tmp/README.txt".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/README.txt".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_markdown_excerpt_in_three_sentences_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|RustClaw is a local Rust agent runtime centered on clawd.\n4|It combines multi-channel chat access, task execution, memory, scheduling, and a browser UI."}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "看看 README.md 开头讲了什么，读前 20 行后用三句话总结".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:generic_filename_read_range".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Filename,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/README.md".to_string()),
+            ..AgentRunContext::default()
+        };
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("three-sentence summary");
+        assert!(answer.contains("RustClaw"));
+        assert_eq!(answer.matches('。').count(), 3);
+    }
+
+    #[test]
+    fn direct_answer_summarizes_brief_excerpt_request_without_local_phrase_table() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "read_file",
+            r#"[command_intent]
+default_locale = "zh-CN"
+
+[database]
+sqlite_path = "data/rustclaw.db"
+"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "看一下 /tmp/config.toml，简短说下它主要配置了什么".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer:chat_act".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "/tmp/config.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/config.toml".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这个配置文件主要在配置 command_intent、database 等运行参数。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_tailed_log_excerpt_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"/tmp/clawd.run.log","resolved_path":"/tmp/clawd.run.log","excerpt":"18|INFO startup complete\n19|WARN provider is warming up\n20|INFO retrying request"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "读取 /tmp/clawd.run.log 最后 3 行，然后用一句话总结".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:generic_explicit_path_read_range".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "/tmp/clawd.run.log".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/clawd.run.log".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("最后几行里有 WARN，最值得注意的是：WARN provider is warming up")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_checklist_excerpt_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "read_file",
+            "- [ ] verify backup\n- [x] restart clawd\n- [ ] confirm health endpoint\n",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "看一下 /tmp/release_checklist.md，然后用一句话总结".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:generic_explicit_path_single_read".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "/tmp/release_checklist.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/release_checklist.md".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这段主要是在列一组检查清单项。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_judges_log_vs_checklist_from_log_excerpt_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"/tmp/install_ops.log","resolved_path":"/tmp/install_ops.log","excerpt":"{\"command\":\"apt-get install -y missing-pkg\",\"exit_code\":100,\"output\":\"permission denied\"}"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "一句话说它更像日志还是清单".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ExcerptKindJudgment,
+                locator_hint: "/tmp/install_ops.log".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/install_ops.log".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这更像一段日志或运行记录，不像检查清单。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_passthroughs_contract_filename_read_range_excerpt_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "先读一下 README.md 前 4 行".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:generic_filename_read_range".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Filename,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/README.md".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />")
+        );
+    }
+
+    #[test]
+    fn direct_answer_does_not_passthrough_read_range_when_summary_is_requested() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|A tool runtime\n4|"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "先读一下 README.md 前 4 行，再用三句话总结".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:generic_filename_read_range".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Filename,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/README.md".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none(),
+            "summary-style read_range requests should fall back to synthesis instead of raw passthrough"
+        );
+    }
+
+    #[test]
+    fn direct_answer_prefers_current_turn_excerpt_summary_request_over_resolved_intent_drift() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|A tool runtime\n4|"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "先读一下 README.md 前 4 行".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:generic_filename_read_range".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Filename,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            user_request: Some("先读一下 README.md 前 4 行，再用三句话总结".to_string()),
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/README.md".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none(),
+            "current-turn summary/read-range request should still block raw passthrough even if resolved_intent drifted"
+        );
+    }
+
+    #[test]
+    fn direct_answer_formats_structured_keys_result_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "读 /tmp/package.json，告诉我 scripts 字段下都有哪些子键".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:generic_explicit_path_structured_keys"
+                .to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: "/tmp/package.json".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("build\ndev\nlint")
+        );
+    }
+
+    #[test]
+    fn direct_answer_formats_extract_fields_result_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/rustclaw.db","value":"data/rustclaw.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent:
+                "读取 /tmp/config.toml 里的 database.sqlite_path 和 tools.allow_sudo，告诉我两个字段的值"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:generic_explicit_path_extract_fields"
+                .to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: "/tmp/config.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("database.sqlite_path: data/rustclaw.db\ntools.allow_sudo: true")
+        );
+    }
+
+    #[test]
     fn direct_answer_uses_inventory_dir_names_for_system_basic() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -4021,6 +6155,106 @@ mod tests {
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("a\nb")
+        );
+    }
+
+    #[test]
+    fn direct_answer_prefers_current_turn_listing_limit_over_resolved_intent_drift() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"inventory_dir","path":"/tmp/logs","resolved_path":"/tmp/logs","names_only":true,"names":["a","b","c","d"]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "列出 logs 目录下的文件名".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer:chat_act".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
+                locator_hint: "logs".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            user_request: Some("列出 logs 目录下前 2 个文件名".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("a\nb")
+        );
+    }
+
+    #[test]
+    fn scalar_listing_gate_prefers_current_turn_limit_over_resolved_intent_drift() {
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "list_dir", "a\nb\nc\n"));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "列出 logs 目录下的文件名".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ScalarCount,
+                locator_hint: "logs".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            user_request: Some("列出 logs 目录下前 2 个文件名，只输出文件名".to_string()),
+            ..AgentRunContext::default()
+        };
+        let route = agent_run_context.route_result.as_ref().unwrap();
+        assert!(
+            super::scalar_route_prefers_structured_observed_answer(
+                route,
+                &loop_state,
+                Some(&agent_run_context),
+            ),
+            "scalar/listing gate should use current-turn request when resolved_intent lost the limit"
         );
     }
 
@@ -5015,6 +7249,28 @@ mod tests {
     }
 
     #[test]
+    fn requested_listing_limit_ignores_structured_field_queries() {
+        assert_eq!(
+            requested_listing_limit_from_intent(
+                "读取 /tmp/config.toml 里的 database.sqlite_path 和 tools.allow_sudo，告诉我两个字段的值"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn requested_listing_limit_ignores_one_sentence_summary_requests() {
+        assert_eq!(
+            requested_listing_limit_from_intent("把上一个结果再用一句话总结"),
+            None
+        );
+        assert_eq!(
+            requested_listing_limit_from_intent("Summarize the previous result in one sentence"),
+            None
+        );
+    }
+
+    #[test]
     fn direct_answer_classifies_recent_formal_artifacts_from_shell_listing_in_english() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5111,6 +7367,110 @@ mod tests {
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("The most recently modified files are model_io.log, act_plan.log, service_ops.log; these look more like runtime or test logs than formal deliverables.")
+        );
+    }
+
+    #[test]
+    fn direct_answer_classifies_recent_artifacts_from_inventory_dir_listing() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"inventory_dir","path":"logs","resolved_path":"/tmp/logs","names_only":true,"sort_by":"mtime_desc","names":["model_io.log","act_plan.log","service_ops.log"]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent:
+                "列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+                locator_hint: "logs".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("最近修改的文件是：model_io.log、act_plan.log、service_ops.log；这些更像运行或测试过程中产生的日志，不像正式交付产物。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_prefers_current_turn_recent_artifacts_limit_over_resolved_intent_drift() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"inventory_dir","path":"logs","resolved_path":"/tmp/logs","names_only":true,"sort_by":"mtime_desc","names":["model_io.log","act_plan.log","service_ops.log"]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent:
+                "列出 logs 目录最近修改的文件，再告诉我这更像是测试日志还是正式产物"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+                locator_hint: "logs".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            user_request: Some(
+                "列出 logs 目录最近修改的 2 个文件，再告诉我这更像是测试日志还是正式产物"
+                    .to_string(),
+            ),
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("最近修改的文件是：model_io.log、act_plan.log；这些更像运行或测试过程中产生的日志，不像正式交付产物。")
         );
     }
 
@@ -5311,6 +7671,56 @@ mod tests {
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("Hostname: rustclaw-test-host.local; system: macos (x86_64).")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_system_basic_info_for_free_shape_request() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent:
+                "show me the basic machine info here like hostname and system, keep it brief"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::RawCommandOutput,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("Hostname: ThinkPad-X1; system: linux (x86_64).")
         );
     }
 
@@ -5593,6 +8003,73 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_path_only_uses_rooted_full_path_for_unique_find_name_match() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-observed-output-find-name-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let file_path = temp_dir.join("Report.MD");
+        std::fs::write(&file_path, "hello").unwrap();
+
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_search",
+            &format!(
+                r#"{{"action":"find_name","pattern":"report.md","count":1,"results":["Report.MD"],"root":"{}"}}"#,
+                temp_dir.display()
+            ),
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "去 case_only 找 report.md，只输出路径".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+                locator_hint: "report.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
+            ..AgentRunContext::default()
+        };
+        let resolved = file_path
+            .canonicalize()
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some(resolved.as_str())
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn direct_scalar_does_not_passthrough_multiline_list_dir_listing() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5653,6 +8130,411 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_uses_inventory_dir_count_for_scalar_count() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"inventory_dir","path":"scripts","resolved_path":"/tmp/scripts","names_only":true,"names":["a","b","c"],"counts":{"total":3}}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "数一下 scripts 目录直接子项有多少个，只输出数字".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:current_workspace_scalar_count".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ScalarCount,
+                locator_hint: "scripts".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("3")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_uses_inventory_dir_hidden_count_for_hidden_entries_count_route() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"inventory_dir","path":".","resolved_path":"/tmp/workspace","include_hidden":true,"names_only":true,"names":[".git",".env","README.md"],"counts":{"total":3,"hidden":2}}"#,
+        ));
+        let route_result = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "数一下当前目录里以点开头的隐藏文件有几个，只输出数字".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:current_workspace_hidden_entries_count"
+                .to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ScalarCount,
+                locator_hint: ".".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("2")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_package_manager_detect_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "package_manager",
+            "package_manager=brew",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "看看当前机器识别到的包管理器，再一句话说最可能日常会用哪个"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:package_manager_detect_summary".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::None,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("当前识别到的包管理器是 brew，日常最可能直接用它。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_empty_sqlite_tables_as_test_db_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent:
+                "看看 data/db-basic-contract.sqlite 里有哪些表，再一句话说这更像业务库还是测试库"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer:chat_act".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+                locator_hint: "data/db-basic-contract.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这个 sqlite 文件里目前没有任何表，所以更像一个空白或测试库。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_empty_sqlite_tables_with_all_tables_wording_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent:
+                "查看 data/db-basic-contract.sqlite 中的所有表，并判断它更像业务库还是测试库"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer:chat_act".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+                locator_hint: "data/db-basic-contract.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这个 sqlite 文件里目前没有任何表，所以更像一个空白或测试库。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_lists_sqlite_table_names_without_llm_when_names_only_is_requested() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent:
+                "看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer:chat_act".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteTableNamesOnly,
+                locator_hint:
+                    "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("orders\nusers")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_lists_sqlite_table_names_when_names_only_contract_is_scalar() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent:
+                "看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer:act".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteTableNamesOnly,
+                locator_hint:
+                    "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("orders\nusers")
+        );
+    }
+
+    #[test]
+    fn structured_observed_body_preserves_db_table_inventory_instead_of_first_scalar_only() {
+        let body = r#"{"columns":["name"],"rows":[{"name":"users"},{"name":"orders"},{"name":"service_logs"}]}"#;
+        assert_eq!(
+            structured_observed_body("db_basic", body).as_deref(),
+            Some("db_tables=users, orders, service_logs")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_sqlite_table_listing_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "列一下 data/app.sqlite 里有哪些表".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer:chat_act".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteTableListing,
+                locator_hint: "data/app.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("表包括 orders、users。")
+        );
+    }
+
+    #[test]
     fn direct_scalar_uses_route_locator_hint_for_quantity_comparison() {
         let mut loop_state = LoopState::new(2);
         loop_state
@@ -5703,6 +8585,91 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_summarizes_compare_paths_result() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"compare_paths","left":{"path":"Cargo.toml","resolved_path":"/tmp/Cargo.toml","kind":"file","size_bytes":123},"right":{"path":"Cargo.lock","resolved_path":"/tmp/Cargo.lock","kind":"file","size_bytes":456},"comparison":{"same_kind":true,"same_name":false,"same_size":false,"size_delta_bytes":-333,"left_newer":null,"same_content":false}}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:compare_targets".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+                locator_hint: "Cargo.lock|Cargo.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("Cargo.lock 更大：Cargo.lock 有 456 字节，Cargo.toml 有 123 字节。")
+        );
+    }
+
+    #[test]
+    fn quantity_comparison_prefers_structured_observed_answer_path() {
+        let route = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:compare_targets".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+                locator_hint: "Cargo.lock|Cargo.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        assert!(super::route_prefers_direct_observed_answer_for_scalar(
+            &route
+        ));
+    }
+
+    #[test]
     fn direct_answer_summarizes_git_status_dirty_worktree() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5714,6 +8681,100 @@ mod tests {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "检查当前仓库是否存在未提交的改动，用一句话返回结果".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("当前仓库有未提交改动。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_git_status_clean_when_exit_only() {
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "git_basic", "exit=0\n"));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "看看这个仓库现在有没有未提交改动，用一句话告诉我".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: Default::default(),
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("当前仓库没有未提交改动。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_git_status_dirty_without_branch_header() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "git_basic",
+            " M Cargo.toml\n?? new_file.txt\n",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "看看这个仓库现在有没有未提交改动，用一句话告诉我".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
             route_reason: String::new(),
@@ -6342,7 +9403,7 @@ mod tests {
                     .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "llm_failed_fallback_router".to_string(),
+            route_reason: "llm_failed_safe_clarify".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,

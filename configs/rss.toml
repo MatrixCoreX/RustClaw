@@ -20,6 +20,63 @@ fallback = []
 output_language = "en-US"
 bilingual_summary = true
 
+[rss.categories.aggregator]
+sources = [
+    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+    "https://news.google.com/rss/search?q=crypto&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=web3&hl=en-US&gl=US&ceid=US:en",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "zh-CN"
+bilingual_summary = false
+
+[rss.categories.business]
+sources = [
+    "https://feeds.bloomberg.com/markets/news.rss",
+    "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+    "https://feeds.marketwatch.com/marketwatch/topstories/",
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "en-US"
+bilingual_summary = true
+
+[[rss.categories.business.source_entries]]
+url = "https://feeds.bloomberg.com/markets/news.rss"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.business.source_entries]]
+url = "https://feeds.a.dj.com/rss/RSSWorldNews.xml"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.business.source_entries]]
+url = "https://feeds.marketwatch.com/marketwatch/topstories/"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.business.source_entries]]
+url = "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.business.source_entries]]
+url = "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
 [rss.categories.general]
 sources = [
     "https://feeds.bbci.co.uk/news/rss.xml",
@@ -43,18 +100,63 @@ failure_count = 0
 last_error = ""
 last_failed_at = ""
 
-[rss.categories.aggregator]
+[rss.categories.crypto]
 sources = [
-    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-    "https://news.google.com/rss/search?q=crypto&hl=en-US&gl=US&ceid=US:en",
-    "https://news.google.com/rss/search?q=web3&hl=en-US&gl=US&ceid=US:en",
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://cointelegraph.com/rss",
+    "https://decrypt.co/feed",
+    "https://www.theblock.co/rss.xml",
+    "https://www.newsbtc.com/feed/",
 ]
 primary = []
 secondary = []
 fallback = []
 output_language = "zh-CN"
 bilingual_summary = false
+
+[[rss.categories.crypto.source_entries]]
+url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://cointelegraph.com/rss"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://decrypt.co/feed"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://www.theblock.co/rss.xml"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[[rss.categories.crypto.source_entries]]
+url = "https://www.newsbtc.com/feed/"
+failure_count = 0
+last_error = ""
+last_failed_at = ""
+
+[rss.categories.web3]
+sources = [
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://cointelegraph.com/rss",
+    "https://www.theblock.co/rss.xml",
+    "https://decrypt.co/feed",
+    "https://messari.io/rss",
+]
+primary = []
+secondary = []
+fallback = []
+output_language = "en-US"
+bilingual_summary = true
 
 [rss.categories.tech]
 sources = [
@@ -121,108 +223,6 @@ secondary = []
 fallback = []
 output_language = "zh-CN"
 bilingual_summary = false
-
-[rss.categories.web3]
-sources = [
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss",
-    "https://www.theblock.co/rss.xml",
-    "https://decrypt.co/feed",
-    "https://messari.io/rss",
-]
-primary = []
-secondary = []
-fallback = []
-output_language = "en-US"
-bilingual_summary = true
-
-[rss.categories.crypto]
-sources = [
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss",
-    "https://decrypt.co/feed",
-    "https://www.theblock.co/rss.xml",
-    "https://www.newsbtc.com/feed/",
-]
-primary = []
-secondary = []
-fallback = []
-output_language = "zh-CN"
-bilingual_summary = false
-
-[[rss.categories.crypto.source_entries]]
-url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.crypto.source_entries]]
-url = "https://cointelegraph.com/rss"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.crypto.source_entries]]
-url = "https://decrypt.co/feed"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.crypto.source_entries]]
-url = "https://www.theblock.co/rss.xml"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.crypto.source_entries]]
-url = "https://www.newsbtc.com/feed/"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[rss.categories.business]
-sources = [
-    "https://feeds.bloomberg.com/markets/news.rss",
-    "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
-    "https://feeds.marketwatch.com/marketwatch/topstories/",
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-    "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en",
-]
-primary = []
-secondary = []
-fallback = []
-output_language = "en-US"
-bilingual_summary = true
-
-[[rss.categories.business.source_entries]]
-url = "https://feeds.bloomberg.com/markets/news.rss"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.business.source_entries]]
-url = "https://feeds.a.dj.com/rss/RSSWorldNews.xml"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.business.source_entries]]
-url = "https://feeds.marketwatch.com/marketwatch/topstories/"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.business.source_entries]]
-url = "https://www.cnbc.com/id/100003114/device/rss/rss.html"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
-
-[[rss.categories.business.source_entries]]
-url = "https://news.google.com/rss/search?q=finance+markets&hl=en-US&gl=US&ceid=US:en"
-failure_count = 0
-last_error = ""
-last_failed_at = ""
 
 [[rss.deprecated.sources]]
 url = "https://www.reuters.com/world/rss"

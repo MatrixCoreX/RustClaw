@@ -26,8 +26,11 @@ pub(super) fn try_handle_directory_lookup_request(
     if !allow_directory_lookup || file_delivery_contract {
         return None;
     }
-    let request =
-        resolve_directory_locator_input(output_contract, user_request, &state.skill_rt.workspace_root)?;
+    let request = resolve_directory_locator_input(
+        output_contract,
+        user_request,
+        &state.skill_rt.workspace_root,
+    )?;
     let resolved = resolve_directory_target(
         request,
         Path::new("/"),
@@ -37,7 +40,8 @@ pub(super) fn try_handle_directory_lookup_request(
     );
     match resolved {
         DirectoryLookupResolution::Resolved(directory) => {
-            match list_directory_entries_for_user(&directory, state.skill_rt.locator_scan_max_files) {
+            match list_directory_entries_for_user(&directory, state.skill_rt.locator_scan_max_files)
+            {
                 DirectoryEntriesListResult::FilePaths(paths) => {
                     if paths.is_empty() {
                         Some(localize_delivery_message_for_request(

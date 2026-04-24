@@ -6,11 +6,8 @@ use claw_core::config::{CommandIntentConfig, MemoryConfig, ScheduleConfig};
 use toml::Value as TomlValue;
 use tracing::{info, warn};
 
-use crate::{
-    load_prompt_template_for_vendor, CommandIntentRules, CommandIntentRuntime,
-    MemoryConfigFileWrapper, ScheduleRuntime, SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT,
-    SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT,
-};
+use super::prompts::{load_required_prompt_template_for_vendor, RequiredPromptLoadError};
+use crate::{CommandIntentRules, CommandIntentRuntime, MemoryConfigFileWrapper, ScheduleRuntime};
 
 pub(crate) fn load_command_intent_runtime(
     workspace_root: &Path,
@@ -54,7 +51,7 @@ pub(crate) fn load_schedule_runtime(
     workspace_root: &Path,
     cfg: &ScheduleConfig,
     selected_vendor: Option<&str>,
-) -> ScheduleRuntime {
+) -> Result<ScheduleRuntime, RequiredPromptLoadError> {
     let timezone = if cfg.timezone.trim().is_empty() {
         "Asia/Shanghai".to_string()
     } else {
@@ -66,24 +63,22 @@ pub(crate) fn load_schedule_runtime(
     } else {
         cfg.intent_prompt_path.trim()
     };
-    let (intent_prompt_template, intent_prompt_source) = load_prompt_template_for_vendor(
+    let (intent_prompt_template, intent_prompt_source) = load_required_prompt_template_for_vendor(
         workspace_root,
         selected_vendor,
         intent_prompt_logical_path,
-        SCHEDULE_INTENT_PROMPT_TEMPLATE_DEFAULT,
-    );
+    )?;
 
     let intent_rules_logical_path = if cfg.intent_rules_path.trim().is_empty() {
         "prompts/schedule_intent_rules.md"
     } else {
         cfg.intent_rules_path.trim()
     };
-    let (intent_rules_template, _intent_rules_file) = load_prompt_template_for_vendor(
+    let (intent_rules_template, _intent_rules_file) = load_required_prompt_template_for_vendor(
         workspace_root,
         selected_vendor,
         intent_rules_logical_path,
-        SCHEDULE_INTENT_RULES_TEMPLATE_DEFAULT,
-    );
+    )?;
 
     let locale = if cfg.locale.trim().is_empty() {
         "zh-CN".to_string()
@@ -229,14 +224,14 @@ pub(crate) fn load_schedule_runtime(
         );
     }
 
-    ScheduleRuntime {
+    Ok(ScheduleRuntime {
         timezone,
         intent_prompt_template: Arc::new(RwLock::new(intent_prompt_template)),
         intent_prompt_source,
         intent_rules_template: Arc::new(RwLock::new(intent_rules_template)),
         locale,
         i18n_dict,
-    }
+    })
 }
 
 pub(crate) fn load_memory_runtime_config(

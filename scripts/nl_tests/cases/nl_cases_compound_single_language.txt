@@ -1,0 +1,24 @@
+compound|compound_cn_logs_recent_judge|cn,act,listing,summary|列出 logs 目录最近修改的 2 个文件名，再用一句中文告诉我这更像运行日志还是测试残留
+compound|compound_cn_pkg_compare_one_line|cn,act,compare,scalar|读取 UI/package.json 里的 name，再读取 crates/clawd/Cargo.toml 里的 package.name，最后只用一行输出：前者、后者、一样或不一样
+compound|compound_cn_workspace_partition|cn,act,listing,summary|先看当前目录顶层主要文件夹，再用一句适合新手的话解释这个仓库大概怎么分区
+compound|compound_cn_ports_priority|cn,act,summary|看看这台机器现在有哪些端口在监听，然后只挑最值得注意的几个，用 3 行内说明白
+compound|compound_en_logs_recent_judge|en,act,listing,summary|list the 2 most recently modified files under logs and then say in one short sentence whether they look more like runtime logs or test leftovers
+compound|compound_en_system_user_line|en,act,summary|show me the hostname and current user, then write one short sentence saying who is using which machine
+compound|compound_en_readme_agents_compare|en,act,compare,summary|compare README.md and AGENTS.md by size, then explain in one plain English sentence why that is probably normal
+compound|compound_en_hidden_files_role|en,act,summary|check whether the current directory has hidden files, then explain in one short sentence what such files are usually for
+compound|compound_cn_readme_agents_role|cn,act,file,summary|先读 README.md 开头，再读 AGENTS.md 开头，最后只用一句中文说前者更像给用户看的项目介绍，还是给协作者看的规则说明
+compound|compound_cn_logs_tail_startup|cn,act,logs,summary|先列出 logs 目录里和 clawd 相关的文件名，再读 clawd.run.log 最后 20 行，最后只用一句中文说服务更像正常启动还是刚遇到报错
+compound|compound_cn_pkg_and_readme_project_kind|cn,act,file,summary|先读 Cargo.toml 里的 package.name，再读 UI/package.json 里的 name，再看 README.md 开头，最后用一句中文说这更像前后端混合项目还是单一脚本仓库
+compound|compound_en_readme_agents_audience|en,act,file,summary|read the opening section of README.md, then read the opening section of AGENTS.md, and say in one short English sentence which one is for end users versus contributors
+compound|compound_en_release_checklist_vs_metadata|en,act,file,summary|read the first 12 lines of scripts/nl_tests/fixtures/device_local/docs/release_checklist.md, then read scripts/nl_tests/fixtures/device_local/package.json, and say in one short English sentence which one is an operator checklist versus a metadata file
+compound|compound_en_git_branch_dirty_state|en,act,summary|show the current git branch, then say in one plain English sentence whether the worktree looks clean or mid-edit
+compound|compound_cn_git_branch_dirty_reason|cn,act,summary|先看当前 git 分支，再看工作区有没有未提交修改，最后只用一句中文说现在更像正在开发中还是干净基线
+compound|compound_cn_ui_and_workspace_role|cn,act,file,summary|先看顶层有哪些主要目录，再读 UI/package.json 里的 name，最后用一句中文说这个仓库里 UI 更像独立前端还是附属面板
+compound|compound_cn_generic_dir_glance|cn,act,listing,summary|看看 docs 目录，先基于目录内容给我一个简短概览，不要跳成整个仓库总结
+compound|compound_cn_dir_listing_then_purpose|cn,act,listing,summary|列出 docs 目录最近修改的两个文件，再判断这些文档主要是干什么的
+compound|compound_cn_raw_command_pwd|cn,act,command,raw|请执行 pwd，只输出命令结果
+compound|compound_cn_command_then_explain_pwd|cn,act,command,summary|执行 pwd，然后用一句话解释这个路径大概是什么
+compound|compound_en_clawd_port_health|en,act,summary|check whether clawd is listening on port 8787, then say in one short English sentence whether the local service looks reachable
+compound|compound_en_crates_vs_skills_layout|en,act,listing,summary|count how many entries are directly under crates, then count how many are under crates/skills, and explain in one short English sentence what that suggests about the repo layout
+compound|compound_en_generic_dir_glance|en,act,listing,summary|look at the docs folder and give me a short concrete overview grounded in that directory, not a whole-repo summary
+compound|compound_en_dir_listing_then_purpose|en,act,listing,summary|list the 2 most recently modified files under docs and then say what these docs are mainly for

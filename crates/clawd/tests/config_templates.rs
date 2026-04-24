@@ -1,5 +1,6 @@
 use claw_core::secrets::{provision_secret_envs, SecretValue, SecretsBroker, SecretsError};
 use claw_core::skill_registry::{Capability, SkillsRegistry, REQUIRED_BUILTIN_SKILLS};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -35,6 +36,40 @@ fn prompts_strict_validation(value: &toml::Value) -> bool {
     value["prompts"]["strict_validation_at_startup"]
         .as_bool()
         .expect("prompts.strict_validation_at_startup")
+}
+
+fn strict_json_overlay_prompt_files() -> BTreeSet<String> {
+    let overlay_dir = workspace_root().join("prompts/layers/overlays");
+    let markers = [
+        "Output JSON only",
+        "Return JSON only",
+        "strict JSON only",
+        "Always output valid JSON",
+        "Return valid JSON only",
+        "valid JSON only",
+        "return compact valid JSON",
+        "return valid JSON matching this schema",
+    ];
+    let mut hits = BTreeSet::new();
+
+    for entry in fs::read_dir(&overlay_dir).expect("read overlay dir") {
+        let entry = entry.expect("overlay entry");
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+            continue;
+        }
+        let raw = fs::read_to_string(&path).expect("read overlay prompt");
+        if markers.iter().any(|marker| raw.contains(marker)) {
+            hits.insert(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("overlay file name")
+                    .to_string(),
+            );
+        }
+    }
+
+    hits
 }
 
 #[test]
@@ -78,6 +113,53 @@ fn prompt_validation_templates_enable_strict_startup_gate_consistently() {
         prompts_strict_validation(&root_config),
         prompts_strict_validation(&docker_config),
         "root and docker prompt validation strictness should stay aligned",
+    );
+}
+
+/// §3.5c-D14 守底：所有带“strict JSON / JSON only”输出约束的 overlay prompt
+/// 都必须被显式归类为：
+/// 1. 已有固定 schema 守底；或
+/// 2. 明确排除（legacy / 动态 user-schema / 混合 dispatcher）。
+///
+/// 这样后续新增 prompt 时，如果它落入“严格 JSON 输出”集合但没人更新 schema
+/// inventory / 计划口径，CI 会直接红，避免 §3.5c backlog 再次漂移。
+#[test]
+fn strict_json_overlay_prompts_are_classified_in_schema_inventory() {
+    let observed = strict_json_overlay_prompt_files();
+
+    let schema_backed: BTreeSet<String> = [
+        "image_reference_resolver_prompt.md",
+        "image_vision_action_compare.md",
+        "image_vision_action_describe.md",
+        "image_vision_action_screenshot_summary.md",
+        "language_infer_prompt.md",
+        "observed_answer_fallback_prompt.md",
+        "schedule_intent_prompt.md",
+        "voice_mode_intent_prompt.md",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+
+    let intentionally_excluded: BTreeSet<String> = [
+        "image_vision_action_extract_default.md",
+        "image_vision_action_extract_with_schema.md",
+        "image_vision_action_fallback.md",
+        "image_vision_prompt.md",
+        "resume_followup_intent_prompt.md",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+
+    let classified = schema_backed
+        .union(&intentionally_excluded)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        observed, classified,
+        "strict-JSON overlay inventory drifted; every matching prompt must be classified as schema-backed or intentionally excluded.\nobserved={observed:?}\nclassified={classified:?}"
     );
 }
 
@@ -142,11 +224,6 @@ fn registry_covers_all_legacy_hardcoded_aliases() {
         ("crypto_trade", "crypto"),
         ("market_data", "crypto"),
         ("crypto_market", "crypto"),
-        // chat 簇
-        ("talk", "chat"),
-        ("smalltalk", "chat"),
-        ("joke", "chat"),
-        ("chitchat", "chat"),
         // 单别名 → *_basic 簇
         ("git", "git_basic"),
         ("http", "http_basic"),
@@ -236,8 +313,6 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
     let expected_with_caps: &[(&str, &[&str])] = &[
         // 注意 sort 顺序：`fs.write` < `llm` < `net` < `secrets.*`（按字典序）。
         // 新增 vendor 段时（openai/google/qwen/...），同步加 secrets.<usage>_<vendor>_api_key。
-        // chat 当前是 builtin（kind="builtin" 不走 spawn path），所以不在本表里 ——
-        // 它的凭证由 clawd 主路径 selected_openai_api_key forge，broker 注入跳过。
         (
             "image_edit",
             &[
@@ -303,6 +378,27 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
                  add it to the test allowlist if intentional",
                 path.display(),
                 caps.iter().map(Capability::as_token).collect::<Vec<_>>(),
+            );
+        }
+    }
+}
+
+/// planner-first 收敛：已移除的技能不应再通过 registry 重新暴露。
+#[test]
+fn removed_skill_stubs_are_absent_from_registries() {
+    let registry_paths = [
+        workspace_root().join("configs/skills_registry.toml"),
+        workspace_root().join("docker/config/skills_registry.toml"),
+    ];
+    let removed_skills = ["chat"];
+
+    for path in registry_paths.iter() {
+        let registry = SkillsRegistry::load_from_path(path).expect("load registry");
+        for removed in removed_skills {
+            assert!(
+                registry.get(removed).is_none(),
+                "{}: removed skill `{removed}` must not be reintroduced as a registry stub",
+                path.display()
             );
         }
     }

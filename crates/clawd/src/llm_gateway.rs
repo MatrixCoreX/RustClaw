@@ -27,7 +27,9 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
     } else if s.contains("single_step_planner") || s.contains("plan_") {
         "plan"
     } else if s.contains("delivery_text_classifier") {
-        "classifier_direct"
+        "delivery_classifier"
+    } else if s.contains("direct_classifier") {
+        "direct_classifier"
     } else if s.contains("observed_answer_fallback") || s.contains("observed_") {
         "observed"
     } else if s.contains("clarify_question") {
@@ -399,22 +401,6 @@ pub(crate) async fn run_with_fallback_with_prompt_source(
     .await
 }
 
-/// Phase 2.2: chat 风格调用入口。与 [`run_with_fallback_with_prompt_source`]
-/// 完全同源（fallback / circuit breaker / 预算 / model_io.log），唯一区别是
-/// 透传 `temperature` / `max_tokens` 给底层 provider。
-///
-/// builtin chat 会用这个入口，让"闲聊/创作"调用享受 gateway 治理同时保留
-/// 原 chat-skill 的温度与长度控制。
-pub(crate) async fn run_with_fallback_chat(
-    state: &AppState,
-    task: &ClaimedTask,
-    prompt: &str,
-    prompt_source: &str,
-    hints: crate::ChatRequestHints,
-) -> Result<String, String> {
-    run_with_fallback_with_hints(state, task, prompt, prompt_source, hints).await
-}
-
 async fn run_with_fallback_with_hints(
     state: &AppState,
     task: &ClaimedTask,
@@ -706,13 +692,25 @@ mod tests {
 
     use claw_core::config::AppConfig;
 
-    use super::{matches_provider_override, synthesize_llm_providers};
+    use super::{classify_prompt_source, matches_provider_override, synthesize_llm_providers};
 
     fn repo_config_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../configs/config.toml")
             .canonicalize()
             .expect("repo config path should resolve")
+    }
+
+    #[test]
+    fn classify_prompt_source_uses_specific_classifier_labels() {
+        assert_eq!(
+            classify_prompt_source("prompts/delivery_text_classifier_prompt.md"),
+            "delivery_classifier"
+        );
+        assert_eq!(
+            classify_prompt_source("inline:direct_classifier"),
+            "direct_classifier"
+        );
     }
 
     #[test]

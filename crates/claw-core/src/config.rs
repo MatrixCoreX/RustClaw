@@ -1295,7 +1295,6 @@ pub fn base_skill_names() -> &'static [&'static str] {
 /// 不含 run_cmd/read_file/write_file/list_dir/make_dir/remove_file：这六项为可关闭的 builtin skill，遵守 skills_list + skill_switches。
 pub fn core_skills_always_enabled() -> &'static [&'static str] {
     &[
-        "chat",
         "system_basic",
         "process_basic",
         "config_guard",
@@ -1337,7 +1336,6 @@ fn default_skills_list() -> Vec<String> {
         "config_guard".to_string(),
         "map_merchant".to_string(),
         "crypto".to_string(),
-        "chat".to_string(),
         "stock".to_string(),
         "weather".to_string(),
         "doc_parse".to_string(),

@@ -42,7 +42,6 @@ use claw_core::types::{
 };
 use claw_core::{prompt_layers, skill_registry::SkillKind};
 
-const UI_HIDDEN_SKILLS: &[&str] = &["chat"];
 const TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS: i64 = 45;
 const FEISHU_BIND_SESSION_DEFAULT_TTL_SECONDS: u64 = 600;
 const FEISHU_BIND_SESSION_MIN_TTL_SECONDS: u64 = 60;
@@ -92,9 +91,8 @@ text_chunk_chars = 4000
 "#;
 const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
 
-fn hide_skill_in_ui(state: &AppState, name: &str) -> bool {
-    let canonical = state.resolve_canonical_skill_name(name);
-    UI_HIDDEN_SKILLS.iter().any(|s| *s == canonical)
+fn hide_skill_in_ui(_state: &AppState, _name: &str) -> bool {
+    false
 }
 
 fn read_telegram_bot_statuses(
@@ -182,15 +180,24 @@ fn current_unix_ts() -> i64 {
 }
 
 fn telegram_config_path(state: &AppState) -> PathBuf {
-    state.skill_rt.workspace_root.join("configs/channels/telegram.toml")
+    state
+        .skill_rt
+        .workspace_root
+        .join("configs/channels/telegram.toml")
 }
 
 fn wechat_config_path(state: &AppState) -> PathBuf {
-    state.skill_rt.workspace_root.join("configs/channels/wechat.toml")
+    state
+        .skill_rt
+        .workspace_root
+        .join("configs/channels/wechat.toml")
 }
 
 fn feishu_config_path(state: &AppState) -> PathBuf {
-    state.skill_rt.workspace_root.join("configs/channels/feishu.toml")
+    state
+        .skill_rt
+        .workspace_root
+        .join("configs/channels/feishu.toml")
 }
 
 fn read_telegram_config_value(state: &AppState) -> anyhow::Result<toml::Value> {
@@ -1067,7 +1074,8 @@ async fn maybe_complete_feishu_official_scan(
         write_feishu_generated_credentials(state, client_id, client_secret)?;
         if let Err(err) = start_service_if_needed(state, "feishud").await {
             let mut db = state
-                .core.db
+                .core
+                .db
                 .get()
                 .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
             return mark_pending_channel_bind_session_failed(&mut db, session.id, &err.to_string());
@@ -1091,7 +1099,8 @@ async fn maybe_complete_feishu_official_scan(
         .map(|detail| format!("{error_code}: {detail}"))
         .unwrap_or_else(|| error_code.to_string());
     let mut db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     match error_code {
@@ -2375,7 +2384,10 @@ fn load_wechat_config_response(state: &AppState) -> anyhow::Result<WechatConfigR
         .and_then(|v| v.as_table())
         .cloned()
         .unwrap_or_default();
-    let session_path = state.skill_rt.workspace_root.join("data/wechatd/session.json");
+    let session_path = state
+        .skill_rt
+        .workspace_root
+        .join("data/wechatd/session.json");
     let bot_token = wechat
         .get("bot_token")
         .and_then(|v| v.as_str())
@@ -3198,7 +3210,8 @@ fn canonical_bound_channel_name(raw: &str) -> String {
 
 fn auth_user_summary_counts(state: &AppState) -> anyhow::Result<(usize, usize, Vec<String>)> {
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let user_count: i64 = db.query_row(
@@ -3289,7 +3302,8 @@ fn task_access_meta_for_debug(
     task_id: &str,
 ) -> anyhow::Result<Option<(Option<String>, String)>> {
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.query_row(
@@ -3532,7 +3546,8 @@ fn usage_search_matches(query: Option<&str>, record: &UsageHistoryRecordSummary)
 
 fn task_usage_meta(state: &AppState, task_id: &str) -> anyhow::Result<Option<UsageTaskMeta>> {
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.query_row(
@@ -3571,7 +3586,8 @@ async fn recent_robot_tasks(
 
     let read_result = (|| -> anyhow::Result<Vec<RecentRobotTaskSummary>> {
         let db = state
-            .core.db
+            .core
+            .db
             .get()
             .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
         let mut stmt = db.prepare(
@@ -3644,7 +3660,11 @@ async fn usage_records(
     let search = query.search.as_deref();
     let channel = query.channel.as_deref().filter(|value| *value != "all");
     let status = query.status.as_deref().filter(|value| *value != "all");
-    let log_path = state.skill_rt.workspace_root.join("logs").join("model_io.log");
+    let log_path = state
+        .skill_rt
+        .workspace_root
+        .join("logs")
+        .join("model_io.log");
     if !log_path.exists() {
         return (
             StatusCode::OK,
@@ -3895,7 +3915,11 @@ async fn usage_record_detail(
 }
 
 fn read_task_debug_entries(state: &AppState, task_id: &str) -> anyhow::Result<Vec<TaskDebugEntry>> {
-    let path = state.skill_rt.workspace_root.join("logs").join("model_io.log");
+    let path = state
+        .skill_rt
+        .workspace_root
+        .join("logs")
+        .join("model_io.log");
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -4629,10 +4653,15 @@ async fn health(
     let larkd_memory_rss_bytes_raw = larkd_stats.map(|(_, rss_bytes)| rss_bytes);
     let (user_count, bound_channel_count, bound_channels) =
         auth_user_summary_counts(&state).unwrap_or_default();
-    let telegram_configured_bot_names =
-        state.channels.telegram_configured_bot_names.as_ref().clone();
-    let telegram_bot_statuses =
-        read_telegram_bot_statuses(&state.skill_rt.workspace_root, &telegram_configured_bot_names);
+    let telegram_configured_bot_names = state
+        .channels
+        .telegram_configured_bot_names
+        .as_ref()
+        .clone();
+    let telegram_bot_statuses = read_telegram_bot_statuses(
+        &state.skill_rt.workspace_root,
+        &telegram_configured_bot_names,
+    );
     let mut gateway_instance_statuses_by_scope =
         read_gateway_instance_statuses(&state.skill_rt.workspace_root);
     let whatsapp_cloud_gateway_healthy = gateway_instance_statuses_by_scope
@@ -6016,7 +6045,10 @@ fn write_runtime_config_file(state: &AppState, raw: &str) -> std::io::Result<()>
 }
 
 fn read_skills_registry_file(state: &AppState) -> std::io::Result<String> {
-    let path = state.skill_rt.workspace_root.join("configs/skills_registry.toml");
+    let path = state
+        .skill_rt
+        .workspace_root
+        .join("configs/skills_registry.toml");
     match std::fs::read_to_string(path) {
         Ok(raw) => Ok(raw),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -6025,14 +6057,18 @@ fn read_skills_registry_file(state: &AppState) -> std::io::Result<String> {
 }
 
 fn write_skills_registry_file(state: &AppState, raw: &str) -> std::io::Result<()> {
-    let active_path = state.skill_rt.workspace_root.join("configs/skills_registry.toml");
+    let active_path = state
+        .skill_rt
+        .workspace_root
+        .join("configs/skills_registry.toml");
     if let Some(parent) = active_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&active_path, raw)?;
 
     let mounted_path = state
-        .skill_rt.workspace_root
+        .skill_rt
+        .workspace_root
         .join("docker/config/skills_registry.toml");
     if let Some(parent) = mounted_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -6600,7 +6636,10 @@ fn finalize_imported_bundle(
         }
     };
 
-    let prompt_body_path = state.skill_rt.workspace_root.join(&plan.prompt_body_rel_path);
+    let prompt_body_path = state
+        .skill_rt
+        .workspace_root
+        .join(&plan.prompt_body_rel_path);
     if let Some(parent) = prompt_body_path.parent() {
         if let Err(err) = std::fs::create_dir_all(parent) {
             return (
@@ -6720,7 +6759,8 @@ async fn materialize_import_source(
     }
 
     let res = state
-        .core.http_client
+        .core
+        .http_client
         .get(&normalized)
         .send()
         .await
@@ -8088,7 +8128,8 @@ async fn wechat_login_qr_start(
     };
     let url = format!("{}/login/qr/start", base.trim_end_matches('/'));
     let resp = match state
-        .core.http_client
+        .core
+        .http_client
         .post(&url)
         .json(&json!({ "force": req.force }))
         .send()
@@ -8156,7 +8197,8 @@ async fn wechat_login_qr_wait(
     };
     let url = format!("{}/login/qr/wait", base.trim_end_matches('/'));
     let resp = match state
-        .core.http_client
+        .core
+        .http_client
         .post(&url)
         .json(&json!({
             "session_key": req.session_key,

@@ -204,13 +204,10 @@ pub(crate) fn is_quota_exhausted_429(body_text: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
-/// Phase 2.2: chat 风格调用的可选 hint（temperature / max_tokens）。
+/// Optional per-call generation hints (`temperature` / `max_tokens`).
 ///
 /// 旧调用点（plan/normalizer 等）走默认 `ChatRequestHints::default()`：
 /// 不主动设置 temperature/max_tokens，让 provider 走自己的默认值，与原行为一致。
-///
-/// chat 这种"闲聊/创作"调用走显式 hints：温度调低、按文本长度选 max_tokens
-/// 上限，等价 chat-skill 子进程里原来的逻辑。
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ChatRequestHints {
     pub(crate) temperature: Option<f64>,

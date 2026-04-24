@@ -6,7 +6,7 @@
 # 切换、prompt 改版）跑完这一组应保持稳定，否则即视为回归。
 #
 # 设计原则：
-#   * 8 条尽量覆盖不同 prompt label（normalizer / chat / plan / classifier_direct
+#   * 8 条尽量覆盖不同 prompt label（normalizer / chat / plan / delivery_classifier
 #     / observed / schedule / memory / clarify），方便 task_journal 的
 #     by_prompt 维度看到不同链路的开销分布。
 #   * 短任务为主，单轮跑完不超过 ~6 min；带 expect 的硬断言尽量挑跨 vendor
@@ -17,13 +17,13 @@
 #
 # Format: suite|name|tags|prompt|expect=<substring>
 
-# --- chat: 闲聊，走 builtin chat skill；prompt label 应以 chat / normalizer 为主 ---
+# --- chat: 闲聊，走 normal ask/respond 路径；prompt label 应以 chat / normalizer 为主 ---
 chat|golden_chat_intro|golden,chat|你好，请用一句话介绍一下你自己
 
-# --- 多语言：中英混杂，chat skill；验证 normalizer 不被语种切换搞挂 ---
+# --- 多语言：中英混杂，验证 normalizer / respond 不被语种切换搞挂 ---
 chat|golden_chat_bilingual|golden,chat,bilingual|Briefly tell me 你是谁，回答用中文
 
-# --- 单转 act：极短读类任务；走 plan + classifier_direct，验证 B1 + 占位符 guard 仍生效 ---
+# --- 单转 act：极短读类任务；走 plan + delivery_classifier，验证 B1 + 占位符 guard 仍生效 ---
 act|golden_act_hostname|golden,act,short|只输出当前机器 hostname，不要解释
 
 # --- 多步 act：需要 list + 二次摘取；验证 multi-step planner + observed 链路 ---

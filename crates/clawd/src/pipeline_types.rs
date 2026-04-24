@@ -74,6 +74,7 @@ pub(crate) enum OutputSemanticKind {
     HiddenEntriesCheck,
     DirectoryPurposeSummary,
     ContentExcerptSummary,
+    ExcerptKindJudgment,
     RecentArtifactsJudgment,
     WorkspaceProjectSummary,
     ScalarCount,
@@ -81,6 +82,9 @@ pub(crate) enum OutputSemanticKind {
     ScalarPathOnly,
     ExistenceWithPath,
     RecentScalarEqualityCheck,
+    SqliteTableListing,
+    SqliteTableNamesOnly,
+    SqliteDatabaseKindJudgment,
 }
 
 impl OutputSemanticKind {
@@ -92,6 +96,7 @@ impl OutputSemanticKind {
             Self::HiddenEntriesCheck => "hidden_entries_check",
             Self::DirectoryPurposeSummary => "directory_purpose_summary",
             Self::ContentExcerptSummary => "content_excerpt_summary",
+            Self::ExcerptKindJudgment => "excerpt_kind_judgment",
             Self::RecentArtifactsJudgment => "recent_artifacts_judgment",
             Self::WorkspaceProjectSummary => "workspace_project_summary",
             Self::ScalarCount => "scalar_count",
@@ -99,6 +104,9 @@ impl OutputSemanticKind {
             Self::ScalarPathOnly => "scalar_path_only",
             Self::ExistenceWithPath => "existence_with_path",
             Self::RecentScalarEqualityCheck => "recent_scalar_equality_check",
+            Self::SqliteTableListing => "sqlite_table_listing",
+            Self::SqliteTableNamesOnly => "sqlite_table_names_only",
+            Self::SqliteDatabaseKindJudgment => "sqlite_database_kind_judgment",
         }
     }
 }
@@ -190,12 +198,18 @@ impl ScheduleKind {
 pub(crate) enum RiskCeiling {
     #[default]
     Unknown,
+    Low,
+    Medium,
+    High,
 }
 
 impl RiskCeiling {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Unknown => "Unknown",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
         }
     }
 }
@@ -205,9 +219,8 @@ impl RiskCeiling {
 pub(crate) struct RouteResult {
     pub(crate) routed_mode: RoutedMode,
     /// Phase 3.2 Stage B：与 `routed_mode` 双轨并存。
-    /// 此字段只反映 `RoutedMode` 维度的折叠，不携带
-    /// `classifier_direct_mode` / `direct_resume_*` 这些 worker 层 flag；
-    /// 那些信息在 `worker::ask_prepare::PreparedAskRouting::ask_mode` 里合并。
+    /// 此字段只反映 `RoutedMode` 维度的折叠，不携带 worker 层 resume flag；
+    /// resume 信息在 `worker::ask_prepare::PreparedAskRouting::ask_mode` 里合并。
     pub(crate) ask_mode: AskMode,
     pub(crate) resolved_intent: String,
     pub(crate) needs_clarify: bool,
@@ -228,6 +241,54 @@ pub(crate) struct RouteResult {
     /// `chat_response_prompt` LLM。未命中时为空串/0.0，链路照旧。
     pub(crate) direct_reply_candidate: String,
     pub(crate) direct_reply_confidence: f64,
+}
+
+pub(crate) const DETERMINISTIC_CONTRACT_REASON_PREFIX: &str = "deterministic_contract:";
+
+pub(crate) fn route_reason_starts_with_deterministic_contract(
+    route_reason: &str,
+    contract_prefix: &str,
+) -> bool {
+    route_reason
+        .strip_prefix(DETERMINISTIC_CONTRACT_REASON_PREFIX)
+        .is_some_and(|tail| tail.starts_with(contract_prefix))
+}
+
+pub(crate) fn route_reason_is_any_deterministic_contract(route_reason: &str) -> bool {
+    route_reason.starts_with(DETERMINISTIC_CONTRACT_REASON_PREFIX)
+}
+
+impl RouteResult {
+    pub(crate) fn set_routed_mode(&mut self, mode: RoutedMode) {
+        self.routed_mode = mode;
+        self.ask_mode = AskMode::from_routed_mode(mode);
+    }
+
+    pub(crate) fn gate_kind(&self) -> crate::RouteGateKind {
+        let ask_gate = self.ask_mode.gate_kind();
+        let routed_gate = match self.routed_mode {
+            RoutedMode::Chat => crate::RouteGateKind::Chat,
+            RoutedMode::AskClarify => crate::RouteGateKind::Clarify,
+            RoutedMode::Act | RoutedMode::ChatAct => crate::RouteGateKind::Execute,
+        };
+        if ask_gate == routed_gate {
+            ask_gate
+        } else {
+            routed_gate
+        }
+    }
+
+    pub(crate) fn is_chat_gate(&self) -> bool {
+        matches!(self.gate_kind(), crate::RouteGateKind::Chat)
+    }
+
+    pub(crate) fn is_execute_gate(&self) -> bool {
+        matches!(self.gate_kind(), crate::RouteGateKind::Execute)
+    }
+
+    pub(crate) fn is_clarify_gate(&self) -> bool {
+        matches!(self.gate_kind(), crate::RouteGateKind::Clarify)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -289,6 +350,19 @@ impl PlanStep {
                     .unwrap_or_default()
                     .to_string(),
             }),
+            "synthesize_answer" => Some(AgentAction::SynthesizeAnswer {
+                evidence_refs: self
+                    .args
+                    .get("evidence_refs")
+                    .and_then(|v| v.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }),
             "think" => Some(AgentAction::Think {
                 content: self
                     .args
@@ -308,6 +382,7 @@ impl PlanResult {
             .iter()
             .map(|step| match step.action_type.as_str() {
                 "respond" => "respond".to_string(),
+                "synthesize_answer" => "synthesize_answer".to_string(),
                 "think" => "think".to_string(),
                 "call_tool" => format!("tool({})", step.skill),
                 _ => format!("skill({})", step.skill),
@@ -347,6 +422,14 @@ pub(crate) fn plan_step_from_agent_action(
             depends_on,
             why,
         },
+        AgentAction::SynthesizeAnswer { evidence_refs } => PlanStep {
+            step_id,
+            action_type: "synthesize_answer".to_string(),
+            skill: "synthesize_answer".to_string(),
+            args: json!({ "evidence_refs": evidence_refs }),
+            depends_on,
+            why,
+        },
         AgentAction::Think { content } => PlanStep {
             step_id,
             action_type: "think".to_string(),
@@ -355,5 +438,47 @@ pub(crate) fn plan_step_from_agent_action(
             depends_on,
             why,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{plan_step_from_agent_action, AgentAction, PlanStep};
+    use serde_json::json;
+
+    #[test]
+    fn plan_step_to_agent_action_parses_synthesize_answer() {
+        let step = PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "synthesize_answer".to_string(),
+            skill: "synthesize_answer".to_string(),
+            args: json!({ "evidence_refs": ["last_output", "step_1"] }),
+            depends_on: vec![],
+            why: "synthesize".to_string(),
+        };
+
+        assert!(matches!(
+            step.to_agent_action(),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == vec!["last_output".to_string(), "step_1".to_string()]
+        ));
+    }
+
+    #[test]
+    fn plan_step_from_agent_action_serializes_synthesize_answer() {
+        let action = AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        };
+        let step = plan_step_from_agent_action(
+            &action,
+            "step_2".to_string(),
+            vec!["step_1".to_string()],
+            "why".to_string(),
+        );
+
+        assert_eq!(step.action_type, "synthesize_answer");
+        assert_eq!(step.skill, "synthesize_answer");
+        assert_eq!(step.args, json!({ "evidence_refs": ["last_output"] }));
+        assert_eq!(step.depends_on, vec!["step_1".to_string()]);
     }
 }

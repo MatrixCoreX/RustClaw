@@ -15,9 +15,8 @@ mod skill_execution;
 mod support;
 
 use self::arg_resolver::{
-    attach_recent_execution_context_to_chat_args, resolve_arg_string, resolve_arg_value,
-    rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
-    rewrite_tool_path_with_written_aliases,
+    resolve_arg_string, resolve_arg_value, rewrite_args_with_auto_locator_path,
+    rewrite_run_cmd_with_written_aliases, rewrite_tool_path_with_written_aliases,
 };
 use self::dispatch_support::{classify_skill_failure_recovery, dispatch_round_action};
 use self::execution_loop::execute_actions_once;
@@ -37,17 +36,10 @@ use self::support::{
 
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
 
-const AGENT_TOOL_SPEC_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/agent_tool_spec.md");
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
-const SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/single_plan_execution_prompt.md");
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
-const LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/loop_incremental_plan_prompt.md");
+const LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/lightweight_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
-const PLAN_REPAIR_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/plan_repair_prompt.md");
 const PLAN_REPAIR_PROMPT_LOGICAL_PATH: &str = "prompts/plan_repair_prompt.md";
 pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
 
@@ -175,9 +167,11 @@ fn build_single_plan_prompt(
     prompt_template: &str,
     user_request: &str,
     goal: &str,
+    turn_analysis: &str,
     tool_spec: &str,
     skill_playbooks: &str,
     recent_assistant_replies: &str,
+    request_language_hint: &str,
     config_response_language: &str,
     runtime_os: &str,
     runtime_shell: &str,
@@ -188,14 +182,42 @@ fn build_single_plan_prompt(
         &[
             ("__USER_REQUEST__", user_request),
             ("__GOAL__", goal),
+            ("__TURN_ANALYSIS__", turn_analysis),
             ("__TOOL_SPEC__", tool_spec),
             ("__SKILL_PLAYBOOKS__", skill_playbooks),
             ("__RECENT_ASSISTANT_REPLIES__", recent_assistant_replies),
+            ("__REQUEST_LANGUAGE_HINT__", request_language_hint),
             ("__CONFIG_RESPONSE_LANGUAGE__", config_response_language),
             ("__RUNTIME_OS__", runtime_os),
             ("__RUNTIME_SHELL__", runtime_shell),
             ("__WORKSPACE_ROOT__", workspace_root),
         ],
+    )
+}
+
+fn build_turn_analysis_prompt_block(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> String {
+    let Some(analysis) = turn_analysis else {
+        return "<none>".to_string();
+    };
+    let turn_type = analysis
+        .turn_type
+        .map(crate::intent_router::TurnType::as_str)
+        .unwrap_or("none");
+    let target_task_policy = analysis
+        .target_task_policy
+        .map(crate::intent_router::TargetTaskPolicy::as_str)
+        .unwrap_or("none");
+    let state_patch = analysis
+        .state_patch
+        .as_ref()
+        .and_then(|value| serde_json::to_string(value).ok())
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "- turn_type={turn_type}\n- target_task_policy={target_task_policy}\n- should_interrupt_active_run={}\n- attachment_processing_required={}\n- state_patch={state_patch}",
+        analysis.should_interrupt_active_run,
+        analysis.attachment_processing_required,
     )
 }
 
@@ -230,20 +252,20 @@ pub(crate) struct LoopState {
     pub(crate) last_written_file_path: Option<String>,
     /// Last user-visible respond text (final or publishable). Used when delivery_messages was not filled so we do not fall back to subtask summary.
     pub(crate) last_user_visible_respond: Option<String>,
-    /// Last publishable chat-skill output. Prefer this over LLM finalization when no explicit respond was emitted.
-    pub(crate) last_publishable_chat_output: Option<String>,
+    /// Last publishable runtime synthesis output. Prefer this over generic finalization when no explicit respond was emitted.
+    pub(crate) last_publishable_synthesis_output: Option<String>,
     pub(crate) executed_step_results: Vec<crate::executor::StepExecutionResult>,
     pub(crate) round_traces: Vec<crate::task_journal::TaskJournalRoundTrace>,
     pub(crate) execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
     pub(crate) last_recipe_progress_phase: Option<crate::execution_recipe::ExecutionRecipePhase>,
-    pub(crate) last_recipe_progress_scope: Option<crate::execution_recipe::ExecutionRecipeTargetScope>,
+    pub(crate) last_recipe_progress_scope:
+        Option<crate::execution_recipe::ExecutionRecipeTargetScope>,
     pub(crate) recipe_scope_ready_hint_sent: bool,
     /// §7.1 output_contract 贯穿全链：normalizer 已经在 RouteResult.output_contract
     /// 里给出了 response_shape / semantic_kind / locator_hint 等 answer-shape spec；
-    /// 但下游 chat skill 历史上完全看不到这些字段，造成"normalizer 标了
-    /// existence_with_path，chat 却答成段落描述"的根因型失败（典型：
-    /// act_find_service_file）。把契约挂到 LoopState 上由 chat-args 注入端
-    /// 透传到 chat 上下文，并在 finalize verifier 拦截违规候选。
+    /// 下游 synthesis/finalize 必须看见这些字段，否则容易把 normalizer 标出的
+    /// existence_with_path / scalar / file_token 契约答成自由段落。把契约挂到
+    /// LoopState 上，由 runtime synthesis 和 finalize verifier 共同使用。
     /// 默认 None：测试与不走 RouteResult 的 ad-hoc 路径保持向后兼容。
     pub(crate) output_contract: Option<crate::IntentOutputContract>,
 }
@@ -279,8 +301,8 @@ fn seed_loop_state_from_agent_context(
             "route_locator_kind".to_string(),
             route.output_contract.locator_kind.as_str().to_string(),
         );
-        // §7.1: 把 normalizer 算出的 output_contract 挂到 loop 上，让 chat-args
-        // 注入端能拼出 verbatim contract 字段、finalize verifier 能拿到判定依据。
+        // §7.1: 把 normalizer 算出的 output_contract 挂到 loop 上，让 synthesis/finalize
+        // 能拿到判定依据。
         // clone 因为 RouteResult 跨 await 共享，loop 内部要独立可写。
         loop_state.output_contract = Some(route.output_contract.clone());
     }
@@ -324,11 +346,12 @@ struct RoundOutcome {
 pub(crate) struct AgentRunContext {
     pub(crate) route_result: Option<crate::RouteResult>,
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) auto_locator_path: Option<String>,
     pub(crate) user_request: Option<String>,
     /// Cross-turn recent execution context (rendered by routing_context::build_recent_execution_context).
-    /// Used by chat skill bridging so the chat-skill LLM can see prior turns' outputs (file content,
+    /// Used by runtime synthesis/planning so the LLM can see prior turns' outputs (file content,
     /// list_dir results, alias bindings, etc.) when the current turn references "上一个文件 / 上上个 /
     /// 那个文件 / 甲 / 乙" or asks to compare/relate prior outputs.
     pub(crate) cross_turn_recent_execution_context: Option<String>,
@@ -559,6 +582,13 @@ fn plan_step_label(action: &AgentAction) -> String {
         // LEGACY: CallTool shown as skill for unified capability view.
         AgentAction::CallTool { tool, .. } => format!("skill:{tool}"),
         AgentAction::CallSkill { skill, .. } => format!("skill:{skill}"),
+        AgentAction::SynthesizeAnswer { evidence_refs } => {
+            if evidence_refs.is_empty() {
+                "synthesize_answer".to_string()
+            } else {
+                format!("synthesize_answer:{}", evidence_refs.join(","))
+            }
+        }
         AgentAction::Respond { content } => {
             let trimmed = content.trim();
             if trimmed.is_empty() {
@@ -632,7 +662,8 @@ fn build_resume_context_error(
         "hint": "LLM should infer continuation from resume context and user follow-up."
     });
     let prefer_english = state
-        .policy.command_intent
+        .policy
+        .command_intent
         .default_locale
         .to_ascii_lowercase()
         .starts_with("en");
@@ -873,9 +904,7 @@ mod tests {
     #[test]
     fn test_normalize_user_visible_text_strips_inline_subtask_prefix() {
         assert_eq!(
-            crate::finalize::normalize_user_visible_text(
-                "subtask#1 skill(run_cmd): success testuser"
-            ),
+            crate::finalize::normalize_user_visible_text("subtask#1 skill(run_cmd): success testuser"),
             "testuser"
         );
     }
@@ -1002,8 +1031,7 @@ mod tests {
     #[test]
     fn test_finalizer_schema_answer_parse_ok() {
         let raw = r#"{"answer":"hello","completion_ok":true,"grounded_ok":true,"format_ok":true,"needs_clarify":false,"confidence":0.9,"used_evidence_ids":["E1"]}"#;
-        let (answer, schema) =
-            crate::finalize::finalizer_schema_answer(raw).expect("schema parse");
+        let (answer, schema) = crate::finalize::finalizer_schema_answer(raw).expect("schema parse");
         assert_eq!(answer, "hello");
         assert!(crate::finalize::finalizer_contract_ok(&schema));
     }
@@ -1146,9 +1174,7 @@ mod tests {
             used_evidence_ids: vec!["E1".to_string()],
             evidence_quotes: vec!["NL regression test artifacts".to_string()],
         };
-        assert!(crate::finalize::observed_quotes_grounded(
-            &schema, observed
-        ));
+        assert!(crate::finalize::observed_quotes_grounded(&schema, observed));
 
         let bad = crate::finalize::FinalizerSchemaOut {
             evidence_quotes: vec!["high-performance distributed scheduler".to_string()],

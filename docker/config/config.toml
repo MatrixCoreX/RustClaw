@@ -302,7 +302,6 @@ skills_list = [
     "config_guard",
     "map_merchant",
     "crypto",
-    "chat",
     "stock",
     "weather",
     "doc_parse",

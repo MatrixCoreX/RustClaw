@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/schemas/image_reference_resolver.schema.json",
+  "title": "Image Reference Resolver Output",
+  "description": "Schema for the JSON object returned by `prompts/image_reference_resolver_prompt.md`. Used by `crates/skills/image_edit/src/main.rs::parse_llm_selected_index` to resolve one candidate image from recent context.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "selected_index"
+  ],
+  "properties": {
+    "selected_index": {
+      "type": "integer",
+      "minimum": -1,
+      "description": "Zero-based candidate index. Use -1 when there is no confident match."
+    }
+  }
+}

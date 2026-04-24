@@ -859,21 +859,16 @@ pub(crate) fn verify_plan(
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
-    
 
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
+    use claw_core::config::{AgentConfig, ToolsConfig};
     use claw_core::skill_registry::SkillsRegistry;
-    
+
     use serde_json::json;
-    
 
     use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
     use crate::{
-        AgentRuntimeConfig, AppState, ClaimedTask, PlanKind, PlanResult,
-        PlanStep, RouteResult, RoutedMode, ScheduleKind,
-        SkillViewsSnapshot, ToolsPolicy,
+        AgentRuntimeConfig, AppState, ClaimedTask, PlanKind, PlanResult, PlanStep, RouteResult,
+        RoutedMode, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
     };
 
     fn test_registry() -> SkillsRegistry {
@@ -940,17 +935,17 @@ primary_fallback_role = "fallback"
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: Some(registry),
-                                skills_list,
-                            }))),
+                    registry: Some(registry),
+                    skills_list,
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 locator_scan_max_depth: 3,
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig::test_default(),

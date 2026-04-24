@@ -1,9 +1,8 @@
 use tracing::info;
 
 use super::{
-    ensure_task_running, execute_actions_once, load_agent_loop_guard_policy,
-    prepare_round_actions, push_round_trace, AgentLoopGuardPolicy, AgentRunContext, LoopState,
-    RoundOutcome,
+    ensure_task_running, execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions,
+    push_round_trace, AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
 };
 use crate::{AgentAction, AppState, AskReply, ClaimedTask, RouteResult};
 
@@ -15,7 +14,7 @@ fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
             .map(str::trim)
             .is_some_and(|text| !text.is_empty())
         || loop_state
-            .last_publishable_chat_output
+            .last_publishable_synthesis_output
             .as_deref()
             .map(str::trim)
             .is_some_and(|text| !text.is_empty())
@@ -33,11 +32,9 @@ fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
 
 fn has_discussion_followup_action(actions: &[AgentAction]) -> bool {
     actions.iter().any(|action| match action {
-        AgentAction::Respond { .. } => true,
-        AgentAction::CallSkill { skill, .. } | AgentAction::CallTool { tool: skill, .. } => {
-            skill.eq_ignore_ascii_case("chat")
-        }
+        AgentAction::Respond { .. } | AgentAction::SynthesizeAnswer { .. } => true,
         AgentAction::Think { .. } => false,
+        AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => false,
     })
 }
 
@@ -45,7 +42,9 @@ fn has_executable_observation_or_action(actions: &[AgentAction]) -> bool {
     actions.iter().any(|action| {
         matches!(
             action,
-            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+            AgentAction::CallSkill { .. }
+                | AgentAction::CallTool { .. }
+                | AgentAction::SynthesizeAnswer { .. }
         )
     })
 }
@@ -109,6 +108,26 @@ fn should_stop_for_observed_finalize(
         return false;
     }
     let required_success_marker = requested_success_marker(agent_run_context);
+    let has_direct_observed_answer =
+        super::observed_output::extract_direct_answer_from_generic_output(
+            loop_state,
+            agent_run_context,
+        )
+        .is_some();
+    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        && has_direct_observed_answer
+    {
+        return required_success_marker.is_none_or(|marker| {
+            observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
+        });
+    }
+    if has_direct_observed_answer
+        && route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
+    {
+        return required_success_marker.is_none_or(|marker| {
+            observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
+        });
+    }
     if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
         if super::observed_output::extract_direct_scalar_from_generic_output(
             loop_state,
@@ -127,6 +146,7 @@ fn should_stop_for_observed_finalize(
         if super::observed_output::scalar_route_prefers_structured_observed_answer(
             route_result,
             loop_state,
+            agent_run_context,
         ) && super::observed_output::extract_direct_answer_from_generic_output(
             loop_state,
             agent_run_context,
@@ -250,8 +270,17 @@ async fn run_agent_round(
     .await?;
     push_round_trace(loop_state, goal, &prepared_round);
     let actions = prepared_round.actions;
-    let mut outcome =
-        execute_actions_once(state, task, goal, user_text, &actions, loop_state, policy).await?;
+    let mut outcome = execute_actions_once(
+        state,
+        task,
+        goal,
+        user_text,
+        &actions,
+        loop_state,
+        policy,
+        agent_run_context,
+    )
+    .await?;
     if outcome.stop_signal.is_none()
         && should_stop_for_observed_finalize(agent_run_context, loop_state, &actions)
     {
@@ -323,7 +352,8 @@ pub(super) async fn run_agent_with_loop(
             break;
         }
     }
-    crate::finalize::finalize_loop_reply(state, task, user_text, loop_state, agent_run_context).await
+    crate::finalize::finalize_loop_reply(state, task, user_text, loop_state, agent_run_context)
+        .await
 }
 
 #[cfg(test)]
@@ -461,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    fn hidden_entries_scalar_output_can_stop_before_chat_followup() {
+    fn hidden_entries_scalar_output_can_stop_before_synthesis_followup() {
         let mut loop_state = LoopState::new(2);
         loop_state.has_tool_or_skill_output = true;
         loop_state.executed_step_results.push(ok_step(
@@ -480,11 +510,95 @@ mod tests {
                 skill: "list_dir".to_string(),
                 args: json!({"path":"."}),
             },
-            AgentAction::CallSkill {
-                skill: "chat".to_string(),
-                args: json!({"text":"summarize hidden entries"}),
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
             },
         ];
+        assert!(should_stop_for_observed_finalize(
+            Some(&AgentRunContext {
+                route_result: Some(route),
+                ..Default::default()
+            }),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn existence_with_path_free_output_can_stop_before_second_round() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":1190},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}"#,
+        ));
+        let mut route = route_result(OutputResponseShape::Free);
+        route.resolved_intent =
+            "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径".to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_hint = "rustclaw.service".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action":"path_batch_facts","paths":["/home/guagua/rustclaw/rustclaw.service"]}),
+        }];
+        assert!(should_stop_for_observed_finalize(
+            Some(&AgentRunContext {
+                route_result: Some(route),
+                ..Default::default()
+            }),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn structured_keys_free_output_can_stop_before_second_round() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
+        ));
+        let mut route = route_result(OutputResponseShape::Free);
+        route.route_reason =
+            "deterministic_contract:generic_explicit_path_structured_keys".to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/package.json".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action":"structured_keys","path":"/tmp/package.json","field_path":"scripts"}),
+        }];
+        assert!(should_stop_for_observed_finalize(
+            Some(&AgentRunContext {
+                route_result: Some(route),
+                ..Default::default()
+            }),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn extract_fields_free_output_can_stop_before_second_round() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/rustclaw.db","value":"data/rustclaw.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
+        ));
+        let mut route = route_result(OutputResponseShape::Free);
+        route.route_reason =
+            "deterministic_contract:generic_explicit_path_extract_fields".to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/config.toml".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action":"extract_fields","path":"/tmp/config.toml","field_paths":["database.sqlite_path","tools.allow_sudo"]}),
+        }];
         assert!(should_stop_for_observed_finalize(
             Some(&AgentRunContext {
                 route_result: Some(route),

@@ -39,8 +39,9 @@
    - Else optional OpenAI-compatible **`/v1/chat/completions`** inference using `prompts/language_infer_prompt.md` over `args._memory.context` when that block is non-empty and not `<none>`
    - Else default neutral language hints (no forced target language)
 3. **Prompt:** The vision request is built with `prompts/image_vision_language_hint_with_target.md` or `image_vision_language_hint_default.md` so the multimodal model is instructed in the chosen language (or default neutral hint when no target is resolved).
-4. **Optional same-turn rewrite (narrative actions only):** For `describe`, `compare`, and `screenshot_summary`, when a target language is set, the skill may run an additional OpenAI-compatible **`/v1/chat/completions`** pass using `prompts/image_output_rewrite_prompt.md` to align the final text with `__TARGET_LANGUAGE__`, preserving facts. If that step fails or returns empty output, the skill returns the vision model’s text unchanged.
-5. **`extract`:** Relies on the vision prompt + language hints only (no separate rewrite pass), so structured extraction stays stable.
+4. **Narrative action schema guard:** For `describe`, `compare`, and `screenshot_summary`, the skill validates the model JSON against authored in-repo schemas before using it. When validation succeeds, the structured payload is exposed under `extra.structured`, and `text` is rendered from that structured result instead of forwarding raw JSON directly.
+5. **Optional same-turn rewrite (narrative actions only):** For `describe`, `compare`, and `screenshot_summary`, when a target language is set, the skill may run an additional OpenAI-compatible **`/v1/chat/completions`** pass using `prompts/image_output_rewrite_prompt.md` to align the final rendered text with `__TARGET_LANGUAGE__`, preserving facts. If that step fails or returns empty output, the skill returns the schema-rendered text unchanged.
+6. **`extract`:** Relies on the vision prompt + language hints only (no separate rewrite pass), so structured extraction stays stable.
 
 **Note:** Steps that read `args._memory` require `[memory].skill_memory_enabled` (and non-`chat` skills) so the host injects the generic `_memory` blob; when memory injection is off, only explicit args, runner `context`, and defaults apply.
 

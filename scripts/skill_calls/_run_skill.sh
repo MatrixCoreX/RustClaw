@@ -67,7 +67,6 @@ skill_bin_name() {
     service_control) echo "service-control-skill" ;;
     config_guard) echo "config-guard-skill" ;;
     crypto) echo "crypto-skill" ;;
-    chat) echo "chat-skill" ;;
     stock) echo "stock-skill" ;;
     weather) echo "weather-skill" ;;
     doc_parse) echo "doc-parse-skill" ;;

@@ -3,13 +3,12 @@ use std::path::Path;
 use tracing::{debug, info};
 
 use super::{
-    append_delivery_message, append_progress_hint, attach_recent_execution_context_to_chat_args,
-    build_safe_skill_args_summary, encode_progress_i18n, execute_prepared_skill_action,
-    register_step_output, resolve_arg_string, resolve_arg_value,
-    rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
-    rewrite_tool_path_with_written_aliases, ActionLoopDecision, AgentLoopGuardPolicy, AppState,
-    ClaimedTask, LoopState, RespondActionOutcome, SkillActionOutcome, WriteFileEffectivePath,
-    PROGRESS_ARGS_SUMMARY_MAX_LEN,
+    append_delivery_message, append_progress_hint, build_safe_skill_args_summary,
+    encode_progress_i18n, execute_prepared_skill_action, register_step_output, resolve_arg_string,
+    resolve_arg_value, rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
+    rewrite_tool_path_with_written_aliases, ActionLoopDecision, AgentLoopGuardPolicy,
+    AgentRunContext, AppState, ClaimedTask, LoopState, RespondActionOutcome, SkillActionOutcome,
+    WriteFileEffectivePath, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 use crate::AgentAction;
 
@@ -84,6 +83,39 @@ fn rewrite_response_with_written_aliases(text: &str, loop_state: &LoopState) -> 
     out
 }
 
+fn rewrite_bounded_list_dir_last_output_placeholder(
+    content: &str,
+    loop_state: &LoopState,
+) -> String {
+    if !content.contains("{{last_output}}") {
+        return content.to_string();
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(content);
+    let Some(limit) = surface.requested_listing_limit else {
+        return content.to_string();
+    };
+    let Some(last_ok_step) = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find(|step| step.is_ok())
+    else {
+        return content.to_string();
+    };
+    if last_ok_step.skill != "list_dir" {
+        return content.to_string();
+    }
+    let Some(listing) = loop_state.last_output.as_deref() else {
+        return content.to_string();
+    };
+    let Some(trimmed_listing) =
+        crate::agent_engine::observed_output::normalized_observed_listing(listing, Some(limit))
+    else {
+        return content.to_string();
+    };
+    content.replace("{{last_output}}", &trimmed_listing)
+}
+
 fn has_remaining_action_after(
     actions: &[AgentAction],
     current_idx: usize,
@@ -97,7 +129,6 @@ fn has_remaining_action_after(
 }
 
 fn remaining_actions_are_discussion_only(
-    state: &AppState,
     actions: &[AgentAction],
     current_idx: usize,
     max_steps: usize,
@@ -110,11 +141,7 @@ fn remaining_actions_are_discussion_only(
         .collect::<Vec<_>>();
     !remaining.is_empty()
         && remaining.iter().all(|action| match action {
-            AgentAction::Respond { .. } => true,
-            AgentAction::CallSkill { skill, .. } => state
-                .resolve_canonical_skill_name(skill)
-                .eq_ignore_ascii_case("chat"),
-            AgentAction::Think { .. } => true,
+            AgentAction::Respond { .. } | AgentAction::SynthesizeAnswer { .. } => true,
             _ => false,
         })
 }
@@ -140,7 +167,7 @@ pub(super) fn classify_skill_failure_recovery(
         if has_remaining_action_after(actions, current_idx, max_steps) {
             return Some("recoverable_failure_continue_in_round");
         }
-        if remaining_actions_are_discussion_only(state, actions, current_idx, max_steps) {
+        if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
             return Some("recoverable_failure_continue_in_round");
         }
     }
@@ -151,7 +178,7 @@ pub(super) fn classify_skill_failure_recovery(
     {
         return Some("recoverable_failure_continue_in_round");
     }
-    if remaining_actions_are_discussion_only(state, actions, current_idx, max_steps) {
+    if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
         return Some("recoverable_failure_continue_in_round");
     }
     None
@@ -162,17 +189,18 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::path::Path;
     use std::sync::{Arc, RwLock};
-    
 
-    use super::classify_skill_failure_recovery;
+    use super::{
+        classify_skill_failure_recovery, rewrite_bounded_list_dir_last_output_placeholder,
+    };
+    use crate::agent_engine::LoopState;
+    use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
-        AgentAction, AgentRuntimeConfig, AppState, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+        AgentAction, AgentRuntimeConfig, AppState, SkillViewsSnapshot, ToolsPolicy,
+        DEFAULT_AGENT_ID,
     };
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
+    use claw_core::config::{AgentConfig, ToolsConfig};
     use claw_core::skill_registry::SkillsRegistry;
-    
 
     fn test_state_with_registry() -> AppState {
         let agents_by_id = HashMap::from([(
@@ -185,16 +213,16 @@ mod tests {
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: Some(Arc::new(registry)),
-                                skills_list: Arc::new(HashSet::new()),
-                            }))),
+                    registry: Some(Arc::new(registry)),
+                    skills_list: Arc::new(HashSet::new()),
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig::test_default(),
@@ -233,6 +261,49 @@ mod tests {
             None
         );
     }
+
+    fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
+        StepExecutionResult {
+            step_id: step_id.to_string(),
+            skill: skill.to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(output.to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        }
+    }
+
+    #[test]
+    fn bounded_list_dir_placeholder_rewrite_truncates_to_requested_limit() {
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "list_dir", "a\nb\nc\nd\n"));
+        loop_state.last_output = Some("a\nb\nc\nd\n".to_string());
+
+        let rewritten = rewrite_bounded_list_dir_last_output_placeholder(
+            "logs 目录下前 2 个文件名：\n{{last_output}}",
+            &loop_state,
+        );
+
+        assert_eq!(rewritten, "logs 目录下前 2 个文件名：\na\nb");
+    }
+
+    #[test]
+    fn bounded_list_dir_placeholder_rewrite_ignores_non_listing_outputs() {
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "read_file", "alpha\nbeta\n"));
+        loop_state.last_output = Some("alpha\nbeta\n".to_string());
+
+        let content = "前 2 行：\n{{last_output}}";
+        assert_eq!(
+            rewrite_bounded_list_dir_last_output_placeholder(content, &loop_state),
+            content
+        );
+    }
 }
 
 fn is_read_only_skill_invocation(state: &AppState, normalized_skill: &str, args: &Value) -> bool {
@@ -242,7 +313,7 @@ fn is_read_only_skill_invocation(state: &AppState, normalized_skill: &str, args:
     match normalized_skill {
         "read_file" | "list_dir" | "fs_search" | "system_basic" | "log_analyze" | "doc_parse"
         | "git_basic" | "http_basic" | "stock" | "weather" | "web_search_extract"
-        | "health_check" | "task_control" | "chat" => true,
+        | "health_check" | "task_control" => true,
         "db_basic" => args
             .get("action")
             .and_then(|v| v.as_str())
@@ -292,8 +363,11 @@ pub(super) fn handle_respond_action(
     fingerprint: &str,
     content: &str,
 ) -> RespondActionOutcome {
+    let rewritten_content = rewrite_bounded_list_dir_last_output_placeholder(content, loop_state);
     let text = rewrite_response_with_written_aliases(
-        &resolve_arg_string(content, loop_state).trim().to_string(),
+        &resolve_arg_string(&rewritten_content, loop_state)
+            .trim()
+            .to_string(),
         loop_state,
     )
     .trim()
@@ -389,7 +463,12 @@ fn write_file_effective_path(
         let user_visible = if Path::new(&effective).is_absolute() {
             effective.clone()
         } else {
-            state.skill_rt.workspace_root.join(&effective).display().to_string()
+            state
+                .skill_rt
+                .workspace_root
+                .join(&effective)
+                .display()
+                .to_string()
         };
         (path.to_string(), effective, user_visible)
     })
@@ -462,17 +541,6 @@ pub(super) async fn handle_call_tool_action(
             crate::truncate_for_log(&resolved_args.to_string())
         );
     }
-    if normalized_skill == "chat" {
-        // §7.1: 透传 loop_state.output_contract（normalizer 算出的 answer-shape spec）
-        // 给 chat skill。None 表示当前 loop 没绑定 contract（典型：测试用 ::new 起的
-        // ad-hoc loop 或 RouteResult 缺失），保持向后兼容不注入。
-        attach_recent_execution_context_to_chat_args(
-            &mut resolved_args,
-            loop_state,
-            user_text,
-            loop_state.output_contract.as_ref(),
-        );
-    }
     let read_file_requested_path = read_file_requested_path(tool, &resolved_args);
     let write_file_effective_path =
         write_file_effective_path(state, &normalized_skill, &resolved_args);
@@ -517,7 +585,6 @@ pub(super) async fn handle_call_tool_action(
         read_file_requested_path,
         args_summary,
         "call_skill(legacy_tool)",
-        true,
     )
     .await?;
     Ok(apply_skill_action_outcome(
@@ -571,15 +638,6 @@ pub(super) async fn handle_call_skill_action(
     let read_file_requested_path = read_file_requested_path(&normalized_skill, &resolved_args);
     let write_file_effective_path =
         write_file_effective_path(state, &normalized_skill, &resolved_args);
-    if normalized_skill == "chat" {
-        // §7.1: 同 handle_call_tool_action —— 把 normalizer contract 透传给 chat skill。
-        attach_recent_execution_context_to_chat_args(
-            &mut resolved_args,
-            loop_state,
-            user_text,
-            loop_state.output_contract.as_ref(),
-        );
-    }
     let args_summary = build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
     let skill_outcome = execute_prepared_skill_action(
         state,
@@ -602,7 +660,6 @@ pub(super) async fn handle_call_skill_action(
         read_file_requested_path,
         args_summary,
         "call_skill",
-        false,
     )
     .await?;
     Ok(apply_skill_action_outcome(
@@ -611,6 +668,127 @@ pub(super) async fn handle_call_skill_action(
         ended_with_user_visible_output,
         skill_outcome,
     ))
+}
+
+pub(super) async fn handle_synthesize_answer_action(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut LoopState,
+    action: &AgentAction,
+    global_step: usize,
+    step_in_round: usize,
+    executed_actions: &mut usize,
+    ended_with_user_visible_output: &mut bool,
+    agent_run_context: Option<&AgentRunContext>,
+    evidence_refs: &[String],
+) -> Result<ActionLoopDecision, String> {
+    loop_state.tool_calls_total += 1;
+    let refs_summary = if evidence_refs.is_empty() {
+        "last_output".to_string()
+    } else {
+        evidence_refs.join(",")
+    };
+    info!(
+        "{} executor_step_execute task_id={} round={} step={} type=synthesize_answer refs={}",
+        crate::highlight_tag("llm"),
+        task.task_id,
+        loop_state.round_no,
+        step_in_round,
+        crate::truncate_for_log(&refs_summary)
+    );
+    let step_execution =
+        crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
+            crate::agent_engine::observed_output::synthesize_answer_from_observed_output(
+                state,
+                task,
+                user_text,
+                loop_state,
+                agent_run_context,
+            )
+            .await
+            .map(|(answer, _summary)| answer)
+            .filter(|answer| !answer.trim().is_empty())
+            .ok_or_else(|| {
+                if loop_state.executed_step_results.is_empty() {
+                    "synthesize_answer has no observed execution evidence".to_string()
+                } else {
+                    "synthesize_answer could not produce a grounded publishable answer".to_string()
+                }
+            })
+        })
+        .await;
+    match step_execution
+        .output
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        Some(answer) => {
+            let answer = answer.to_string();
+            crate::append_subtask_result(
+                &mut loop_state.subtask_results,
+                global_step,
+                "synthesize_answer",
+                true,
+                &answer,
+            );
+            register_step_output(
+                loop_state,
+                global_step,
+                step_in_round,
+                "synthesize_answer",
+                &answer,
+            );
+            loop_state.last_publishable_synthesis_output = Some(answer.clone());
+            loop_state.history_compact.push(format!(
+                "round={} step={} synthesize_answer ok refs={}",
+                loop_state.round_no,
+                step_in_round,
+                crate::truncate_for_agent_trace(&refs_summary)
+            ));
+            info!(
+                "executor_result_ok task_id={} round={} step={} type=synthesize_answer output={} trace_only=raw_not_delivery",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                crate::truncate_for_log(&answer)
+            );
+            loop_state.executed_step_results.push(step_execution);
+            let outcome = SkillActionOutcome {
+                ended_with_user_visible_output: true,
+                stop_signal: None,
+                continue_in_round: false,
+            };
+            Ok(apply_skill_action_outcome(
+                loop_state,
+                executed_actions,
+                ended_with_user_visible_output,
+                outcome,
+            ))
+        }
+        None => {
+            let err = step_execution
+                .error
+                .clone()
+                .unwrap_or_else(|| "synthesize_answer failed".to_string());
+            crate::append_subtask_result(
+                &mut loop_state.subtask_results,
+                global_step,
+                "synthesize_answer",
+                false,
+                &err,
+            );
+            loop_state.history_compact.push(format!(
+                "round={} step={} synthesize_answer failed error={}",
+                loop_state.round_no,
+                step_in_round,
+                crate::truncate_for_agent_trace(&err)
+            ));
+            loop_state.executed_step_results.push(step_execution);
+            Err(err)
+        }
+    }
 }
 
 pub(super) async fn dispatch_round_action(
@@ -629,6 +807,7 @@ pub(super) async fn dispatch_round_action(
     step_in_round: usize,
     executed_actions: &mut usize,
     ended_with_user_visible_output: &mut bool,
+    agent_run_context: Option<&AgentRunContext>,
 ) -> Result<ActionLoopDecision, String> {
     match action {
         AgentAction::CallTool { tool, args } => {
@@ -672,6 +851,22 @@ pub(super) async fn dispatch_round_action(
                 ended_with_user_visible_output,
                 skill,
                 args,
+            )
+            .await
+        }
+        AgentAction::SynthesizeAnswer { evidence_refs } => {
+            handle_synthesize_answer_action(
+                state,
+                task,
+                user_text,
+                loop_state,
+                action,
+                global_step,
+                step_in_round,
+                executed_actions,
+                ended_with_user_visible_output,
+                agent_run_context,
+                evidence_refs,
             )
             .await
         }

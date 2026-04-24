@@ -1,7 +1,7 @@
 <!--
 Purpose: generate one short clarification message when context is insufficient.
 Component: clawd (`crates/clawd/src/intent_router.rs`) function `generate_clarify_question`
-Placeholders: __PERSONA_PROMPT__, __REQUEST__, __RESOLVER_REASON__, __CONFIG_RESPONSE_LANGUAGE__, __CANDIDATE_CONTEXT__
+Placeholders: __PERSONA_PROMPT__, __REQUEST__, __RESOLVER_REASON__, __REQUEST_LANGUAGE_HINT__, __CONFIG_RESPONSE_LANGUAGE__, __CANDIDATE_CONTEXT__
 -->
 
 
@@ -18,7 +18,8 @@ Input:
 Rules:
 1) Output exactly one concise clarification message, ideally as one short sentence.
 2) Ask for the missing target/scope only.
-3) Language policy (strict): use __CONFIG_RESPONSE_LANGUAGE__ as the authoritative default for all user-visible text. If it indicates Chinese (for example `zh`, `zh-CN`, `zh-Hans`), output Chinese. If it indicates another configured language/locale, output that language by default. Do not switch languages just because the request contains foreign names, paths, commands, codes, city spellings, or examples. Only switch when the user explicitly asks for another output language in the current turn.
+3) Language policy (strict): follow `__REQUEST_LANGUAGE_HINT__` when it is clear (`zh-CN`, `en`, or `mixed`), and use `__CONFIG_RESPONSE_LANGUAGE__` only as the fallback default when the hint is `config_default` or otherwise unclear. If the hint is `mixed`, follow the dominant surrounding sentence language from the current user request and do not switch languages just because names, paths, commands, codes, city spellings, or examples are written in another language.
+3.1) Do not let `Candidate context` or resolver-internal scaffolding override the selected clarification language. Those blocks may contain normalized or older content in another language and are only there to help resolve the target.
 4) No markdown, no bullet points, no explanation.
 5) Do not answer the original task.
 6) Never ask the user to prioritize among multiple requests when those requests are already explicit and self-contained.

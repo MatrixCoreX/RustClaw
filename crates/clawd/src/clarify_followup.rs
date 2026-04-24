@@ -1,58 +1,44 @@
-// §7.3 clarify reply / locator follow-up shortpath.
+// §7.3 clarify reply / locator follow-up rewrite.
 //
 // 触发证据 (2026-04-19)：multi-turn case clarify_sqlite_schema_version_fixture /
 // context_alias_switch_archive_chain / clarify_find_which_script 一类 ——
 // turn N-1 系统问 "请提供路径"，turn N 用户只贴一个 path/单文件名，按理说
-// normalizer 完全没必要再跑一次，因为：
+// normalizer 需要拿到上一轮缺失 slot 的上下文，因为：
 //   1. "上一轮要 clarify 什么" 已经写在 last_turn_full / [clarification_requested]
 //   2. "用户回了什么" 可以靠 prompt_looks_like_clarify_target_only 判定
-// normalizer 那次 LLM 调用就是纯延迟（3-5s）+ token 预算，且偶尔自己抖手把
-// 续答当成新请求降级 clarify_fallback。
 //
-// V1 故意收窄：
-//   - 只跳过 normalizer LLM；不跳 planner（属于 §7.4 范畴）
+// 2026-04-23 planner-first 改造后，这里不再跳过 normalizer，也不本地合成
+// RouteResult；只把 prior + current 合并成 normalizer 输入，让 LLM 继续做语义规划。
+//
+// V1 仍然故意收窄：
 //   - 不 resolve alias-deictic（"那个文件"指 X 已绑定）；alias 走 retrieval
 //     型 fact，没有 KV，要做需要扩 schema/扩 retrieval，留 follow-up
-//   - output_contract 取默认；§7.1 verifier 在出口兜底形态规范
-//
-// 收益：clarify 续答场景 normalizer 省一次 LLM；命中可观测（tracing），
-// 不命中走原路（不破坏现有逻辑）。
+//   - 不决定 act/chat，也不决定 output_contract；这些继续交给 normalizer/planner。
 
-use crate::{
-    AskMode, IntentOutputContract, ResumeBehavior, RiskCeiling, RoutedMode, RouteResult,
-    ScheduleKind,
-};
-
-/// Shortpath 探针命中后的最小路由信息。调用方据此构造 RouteResult。
+/// Clarify 续答命中后的 normalizer rewrite 信息。
 #[derive(Debug, Clone)]
-pub(crate) struct ClarifyShortpathHit {
-    /// 拼接后的下游 prompt：prior + current（与 clarify_followup_routing_prompt 同样式）。
+pub(crate) struct ClarifyLocatorReplyRewrite {
+    /// 拼接后的 normalizer 输入：prior + current。
     pub(crate) resolved_intent: String,
     /// 上一轮用户原话（取 last_turn_full 第一段 "User: ..." 行）。
     pub(crate) prior_user_text: String,
     /// 本轮用户原话（trim 后的 prompt）。
     pub(crate) current_user_text: String,
-    /// 命中原因 label（用于 route_reason + tracing）。
-    pub(crate) reason: ShortpathReason,
+    /// 命中原因 label（用于 tracing）。
+    pub(crate) reason: ClarifyRewriteReason,
 }
 
 /// 命中原因细分。V1 只有一种；预留位置给未来 alias-deictic / single-word fill。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShortpathReason {
+pub(crate) enum ClarifyRewriteReason {
     /// 上一轮 clarify + 当前消息明显是 locator/path/单文件名续答。
     ClarifyLocatorReply,
 }
 
-impl ShortpathReason {
+impl ClarifyRewriteReason {
     pub(crate) fn as_metric_label(self) -> &'static str {
         match self {
-            ShortpathReason::ClarifyLocatorReply => "clarify_locator_reply",
-        }
-    }
-
-    fn route_reason_text(self) -> &'static str {
-        match self {
-            ShortpathReason::ClarifyLocatorReply => "clarify_followup_shortpath_locator_reply_v1",
+            ClarifyRewriteReason::ClarifyLocatorReply => "clarify_locator_reply",
         }
     }
 }
@@ -79,7 +65,7 @@ pub(crate) fn extract_prior_user_text(last_turn_full: &str) -> Option<String> {
 ///
 /// 故意比 ask_prepare::prompt_looks_like_clarify_target_only 更严：那个口径只
 /// 判 "prompt 中含 locator token"（用来增强 normalizer 输入，错了代价小），
-/// shortpath 跳 normalizer 错了代价大，必须 "整段都是 locator-like token"。
+/// rewrite 错了代价大，必须 "整段都是 locator-like token"。
 ///
 /// 命中规则（任一即可）：
 ///   1. 整段是合法 inline JSON value（结构化续答）
@@ -108,8 +94,7 @@ pub(crate) fn prompt_looks_like_locator_only(prompt: &str) -> bool {
         if cleaned.is_empty() {
             return false;
         }
-        let explicit =
-            cleaned.contains('/') || cleaned.contains('\\') || is_url_like(cleaned);
+        let explicit = cleaned.contains('/') || cleaned.contains('\\') || is_url_like(cleaned);
         let filename_like = looks_like_filename_token(cleaned);
         let bare_stem = looks_like_bare_uppercase_stem(cleaned);
         if !(explicit || filename_like || bare_stem) {
@@ -134,9 +119,32 @@ fn trim_locator_punct(token: &str) -> &str {
     token.trim_matches(|ch: char| {
         matches!(
             ch,
-            '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
-                | '“' | '”' | '‘' | '’' | '《' | '》' | '【' | '】'
-                | '。' | '！' | '？' | '!' | '?' | ':' | '：' | '.'
+            '`' | '"'
+                | '\''
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '“'
+                | '”'
+                | '‘'
+                | '’'
+                | '《'
+                | '》'
+                | '【'
+                | '】'
+                | '。'
+                | '！'
+                | '？'
+                | '!'
+                | '?'
+                | ':'
+                | '：'
+                | '.'
         )
     })
 }
@@ -185,7 +193,7 @@ fn looks_like_bare_uppercase_stem(token: &str) -> bool {
     token.chars().any(|ch| ch.is_ascii_uppercase())
 }
 
-/// V1 入口：判断当前 (prompt, last_turn_full) 是否能走 clarify shortpath。
+/// V1 入口：判断当前 (prompt, last_turn_full) 是否能改写 clarify 续答。
 ///
 /// 命中条件（全部满足）：
 ///   1. 上一轮 [clarification_requested]
@@ -193,10 +201,10 @@ fn looks_like_bare_uppercase_stem(token: &str) -> bool {
 ///   3. 上一轮能解析出非空的 User 原话（extract_prior_user_text Some）
 ///
 /// 返回 None 时，调用方按原路径继续走 normalizer。
-pub(crate) fn try_clarify_reply_shortpath(
+pub(crate) fn try_clarify_reply_rewrite(
     prompt: &str,
     last_turn_full: &str,
-) -> Option<ClarifyShortpathHit> {
+) -> Option<ClarifyLocatorReplyRewrite> {
     if !last_turn_was_clarify(last_turn_full) {
         return None;
     }
@@ -210,56 +218,23 @@ pub(crate) fn try_clarify_reply_shortpath(
         prior_user_text.trim(),
         current_user_text
     );
-    Some(ClarifyShortpathHit {
+    Some(ClarifyLocatorReplyRewrite {
         resolved_intent,
         prior_user_text,
         current_user_text,
-        reason: ShortpathReason::ClarifyLocatorReply,
+        reason: ClarifyRewriteReason::ClarifyLocatorReply,
     })
-}
-
-/// 命中后构造最小 RouteResult，跳过 normalizer。
-///
-/// 字段策略（与 direct_classifier_route_result 风格对齐）：
-///   - routed_mode = Act：clarify 续答几乎全部是"现在去做 X"，给 chat 兜底既无证据又
-///     违反 plan §7.1 verifier；保守拍 Act 让 planner 出 read/run/list/find 计划
-///   - needs_clarify = false：明确不再追问
-///   - resolved_intent = hit.resolved_intent：拼好的 prior+current 喂给 planner
-///   - output_contract = default：§7.1 verifier 出口兜底（典型 case 是 free shape）
-///   - 其它字段都按 default / 0 / "" / None，让现有 post_route / auto_locator /
-///     guard 链自然接管
-pub(crate) fn synthesize_route_result_from_hit(hit: &ClarifyShortpathHit) -> RouteResult {
-    RouteResult {
-        routed_mode: RoutedMode::Act,
-        ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
-        resolved_intent: hit.resolved_intent.clone(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: hit.reason.route_reason_text().to_string(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract::default(),
-        direct_reply_candidate: String::new(),
-        direct_reply_confidence: 0.0,
-    }
 }
 
 /// 命中时的 tracing 事件 —— 与 fallback.rs 的结构化字段风格对齐，便于
 /// inspect_task.sh / 日志管道按 event name 过滤。
-pub(crate) fn emit_shortpath_hit_event(task_id: &str, hit: &ClarifyShortpathHit) {
+pub(crate) fn emit_clarify_rewrite_event(task_id: &str, hit: &ClarifyLocatorReplyRewrite) {
     tracing::info!(
         task_id = %task_id,
-        shortpath_reason = hit.reason.as_metric_label(),
+        rewrite_reason = hit.reason.as_metric_label(),
         prior_user_text = %crate::truncate_for_log(&hit.prior_user_text),
         current_user_text = %crate::truncate_for_log(&hit.current_user_text),
-        "clarify_shortpath_hit"
+        "clarify_locator_reply_rewrite"
     );
 }
 
@@ -331,7 +306,7 @@ mod tests {
 
     #[test]
     fn prompt_looks_like_locator_only_rejects_full_sentence() {
-        // 一个长描述不像单纯 locator 续答，绝不能命中 shortpath
+        // 一个长描述不像单纯 locator 续答，绝不能命中 rewrite
         assert!(!prompt_looks_like_locator_only(
             "我现在想知道我们项目里有几个 service 文件，你给我列一下"
         ));
@@ -340,14 +315,12 @@ mod tests {
     }
 
     #[test]
-    fn try_shortpath_hits_when_prior_clarify_and_current_is_path() {
-        let last_turn = last_turn_with_clarify(
-            "看一下那个 sqlite 文件的 schema version",
-        );
+    fn try_locator_reply_rewrite_hits_when_prior_clarify_and_current_is_path() {
+        let last_turn = last_turn_with_clarify("看一下那个 sqlite 文件的 schema version");
         let prompt = "scripts/nl_tests/fixtures/test_contract.sqlite";
-        let hit = try_clarify_reply_shortpath(prompt, &last_turn)
-            .expect("should hit shortpath when prior clarify + current path");
-        assert_eq!(hit.reason, ShortpathReason::ClarifyLocatorReply);
+        let hit = try_clarify_reply_rewrite(prompt, &last_turn)
+            .expect("should rewrite when prior clarify + current path");
+        assert_eq!(hit.reason, ClarifyRewriteReason::ClarifyLocatorReply);
         assert_eq!(hit.current_user_text, prompt);
         assert!(hit.prior_user_text.contains("schema version"));
         assert!(
@@ -359,62 +332,40 @@ mod tests {
     }
 
     #[test]
-    fn try_shortpath_misses_when_prior_was_not_clarify() {
+    fn try_locator_reply_rewrite_misses_when_prior_was_not_clarify() {
         let last_turn = last_turn_normal("你好", "你好，需要帮助吗？");
         let prompt = "Cargo.toml";
         assert!(
-            try_clarify_reply_shortpath(prompt, &last_turn).is_none(),
-            "上一轮不是 clarify 时 shortpath 必须 miss，避免误吃新请求"
+            try_clarify_reply_rewrite(prompt, &last_turn).is_none(),
+            "上一轮不是 clarify 时 rewrite 必须 miss，避免误吃新请求"
         );
     }
 
     #[test]
-    fn try_shortpath_misses_when_current_is_full_sentence() {
+    fn try_locator_reply_rewrite_misses_when_current_is_full_sentence() {
         let last_turn = last_turn_with_clarify("看一下那个文件");
         let prompt = "请帮我读一下整个 README 然后总结成 5 条要点";
         assert!(
-            try_clarify_reply_shortpath(prompt, &last_turn).is_none(),
-            "完整描述句不能命中 shortpath，否则跳过 normalizer 后 plan 会乱"
+            try_clarify_reply_rewrite(prompt, &last_turn).is_none(),
+            "完整描述句不能命中 rewrite，否则 normalizer 输入会被错误合并"
         );
     }
 
     #[test]
-    fn try_shortpath_misses_when_no_prior_user_line() {
+    fn try_locator_reply_rewrite_misses_when_no_prior_user_line() {
         let last_turn = "[LAST_TURN_FULL]\nAssistant: [clarification_requested]\n";
         let prompt = "Cargo.toml";
         assert!(
-            try_clarify_reply_shortpath(prompt, last_turn).is_none(),
+            try_clarify_reply_rewrite(prompt, last_turn).is_none(),
             "拿不到 prior user text 时不能命中，否则 resolved_intent 会丢上下文"
         );
     }
 
     #[test]
-    fn synthesize_route_result_uses_act_mode_and_clean_clarify_state() {
-        let hit = ClarifyShortpathHit {
-            resolved_intent: "Continue ...".to_string(),
-            prior_user_text: "看一下".to_string(),
-            current_user_text: "Cargo.toml".to_string(),
-            reason: ShortpathReason::ClarifyLocatorReply,
-        };
-        let route = synthesize_route_result_from_hit(&hit);
-        assert_eq!(route.routed_mode, RoutedMode::Act);
-        assert!(!route.needs_clarify);
-        assert!(route.clarify_question.is_empty());
-        assert_eq!(route.resolved_intent, "Continue ...");
-        assert_eq!(
-            route.route_reason,
-            "clarify_followup_shortpath_locator_reply_v1"
-        );
-        assert_eq!(route.route_confidence, Some(1.0));
-        assert_eq!(route.resume_behavior, ResumeBehavior::None);
-        assert_eq!(route.schedule_kind, ScheduleKind::None);
-    }
-
-    #[test]
-    fn shortpath_reason_metric_label_is_stable() {
+    fn clarify_rewrite_reason_metric_label_is_stable() {
         // 一旦发布就不能改 —— metric / log query 会 hard-code 它
         assert_eq!(
-            ShortpathReason::ClarifyLocatorReply.as_metric_label(),
+            ClarifyRewriteReason::ClarifyLocatorReply.as_metric_label(),
             "clarify_locator_reply"
         );
     }

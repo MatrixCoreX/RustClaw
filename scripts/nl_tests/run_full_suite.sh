@@ -24,6 +24,7 @@ WITH_TRACE=0
 WITH_RESUME=0
 WITH_SELF_EXTENSION=0
 FULL_TEXT=0
+PROMPT_REPLY_ONLY=0
 RESUME_DIR=""
 RESUME_LINE=""
 
@@ -55,6 +56,7 @@ Options:
                        alias of --model-sleep for unified suite entry
   --provider-retries N alias of --model-retries for unified suite entry
   --no-llm-trace       accepted for compatibility with unified suite entry; ignored here
+  --prompt-reply-only  Print only prompt and assistant reply for each case
   --full-text           pass through to child NL runner
   --resume-dir PATH     existing child run dir for the main NL runner
   --resume-line N       continue after this tested source line in the main case file
@@ -140,6 +142,10 @@ while [[ $# -gt 0 ]]; do
     --no-llm-trace)
       shift
       ;;
+    --prompt-reply-only)
+      PROMPT_REPLY_ONLY=1
+      shift
+      ;;
     --full-text)
       FULL_TEXT=1
       shift
@@ -189,26 +195,28 @@ fi
 mkdir -p "$RUN_DIR"
 exec > >(tee -a "$RUN_LOG") 2>&1
 
-echo "NL full regression suite"
-echo "  run_dir:          $RUN_DIR"
-echo "  case_file:        $CASE_FILE"
-echo "  trace_case_file:  $TRACE_CASE_FILE"
-echo "  base_url:         $BASE_URL_VALUE"
-echo "  user_id:          $USER_ID_VALUE"
-echo "  chat_id:          $CHAT_ID_VALUE"
-echo "  user_key:         ${USER_KEY_VALUE:-<auto-detect admin key>}"
-echo "  wait:             ${WAIT_SECONDS_VALUE}s"
-echo "  poll:             ${POLL_SECONDS_VALUE}s"
-echo "  net_retries:      ${NETWORK_RETRY_COUNT_VALUE}"
-echo "  net_sleep:        ${NETWORK_RETRY_SLEEP_SECONDS_VALUE}s"
-echo "  model_sleep:      ${MODEL_EXHAUST_SLEEP_SECONDS_VALUE}s"
-echo "  model_retries:    ${MODEL_EXHAUST_MAX_RETRIES_VALUE}"
-echo "  resume_dir:       ${RESUME_DIR:-<new run>}"
-echo "  resume_line:      ${RESUME_LINE:-<none>}"
-echo "  with_trace:       $WITH_TRACE"
-echo "  with_resume:      $WITH_RESUME"
-echo "  with_self_ext:    $WITH_SELF_EXTENSION"
-echo
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  echo "NL full regression suite"
+  echo "  run_dir:          $RUN_DIR"
+  echo "  case_file:        $CASE_FILE"
+  echo "  trace_case_file:  $TRACE_CASE_FILE"
+  echo "  base_url:         $BASE_URL_VALUE"
+  echo "  user_id:          $USER_ID_VALUE"
+  echo "  chat_id:          $CHAT_ID_VALUE"
+  echo "  user_key:         ${USER_KEY_VALUE:-<auto-detect admin key>}"
+  echo "  wait:             ${WAIT_SECONDS_VALUE}s"
+  echo "  poll:             ${POLL_SECONDS_VALUE}s"
+  echo "  net_retries:      ${NETWORK_RETRY_COUNT_VALUE}"
+  echo "  net_sleep:        ${NETWORK_RETRY_SLEEP_SECONDS_VALUE}s"
+  echo "  model_sleep:      ${MODEL_EXHAUST_SLEEP_SECONDS_VALUE}s"
+  echo "  model_retries:    ${MODEL_EXHAUST_MAX_RETRIES_VALUE}"
+  echo "  resume_dir:       ${RESUME_DIR:-<new run>}"
+  echo "  resume_line:      ${RESUME_LINE:-<none>}"
+  echo "  with_trace:       $WITH_TRACE"
+  echo "  with_resume:      $WITH_RESUME"
+  echo "  with_self_ext:    $WITH_SELF_EXTENSION"
+  echo
+fi
 
 simple_cmd=(
   bash "${SCRIPT_DIR}/run_manual_test.sh"
@@ -230,6 +238,9 @@ fi
 if [[ "$FULL_TEXT" -eq 1 ]]; then
   simple_cmd+=(--full-text)
 fi
+if [[ "$PROMPT_REPLY_ONLY" -eq 1 ]]; then
+  simple_cmd+=(--prompt-reply-only)
+fi
 if [[ -n "$RESUME_DIR" ]]; then
   simple_cmd+=(--resume-dir "$RESUME_DIR")
 fi
@@ -237,7 +248,9 @@ if [[ -n "$RESUME_LINE" ]]; then
   simple_cmd+=(--resume-line "$RESUME_LINE")
 fi
 
-echo "== Section 1/3: comprehensive NL cases =="
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  echo "== Section 1/3: comprehensive NL cases =="
+fi
 "${simple_cmd[@]}" | tee "${RUN_DIR}/simple_nl.log"
 
 if [[ "$WITH_TRACE" -eq 1 ]]; then
@@ -258,8 +271,10 @@ if [[ "$WITH_TRACE" -eq 1 ]]; then
     trace_cmd+=(--full-text)
   fi
 
-  echo
-  echo "== Section 2/3: focused trace ask cases =="
+  if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+    echo
+    echo "== Section 2/3: focused trace ask cases =="
+  fi
   "${trace_cmd[@]}" | tee "${RUN_DIR}/trace_ask.log"
 fi
 
@@ -272,8 +287,10 @@ if [[ "$WITH_RESUME" -eq 1 ]]; then
     --wait-seconds "$WAIT_SECONDS_VALUE"
   )
 
-  echo
-  echo "== Section 3/3: resume / continue flow =="
+  if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+    echo
+    echo "== Section 3/3: resume / continue flow =="
+  fi
   "${resume_cmd[@]}" | tee "${RUN_DIR}/resume_continue.log"
 fi
 
@@ -286,21 +303,25 @@ if [[ "$WITH_SELF_EXTENSION" -eq 1 ]]; then
     self_extension_cmd+=(--clawd-bin "${ROOT_DIR}/target/debug/clawd")
   fi
 
-  echo
-  echo "== Self-extension regressions =="
+  if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+    echo
+    echo "== Self-extension regressions =="
+  fi
   "${self_extension_cmd[@]}" | tee "${RUN_DIR}/self_extension.log"
 fi
 
-echo
-echo "Artifacts:"
-echo "  - $RUN_LOG"
-echo "  - ${RUN_DIR}/simple_nl.log"
-if [[ "$WITH_TRACE" -eq 1 ]]; then
-  echo "  - ${RUN_DIR}/trace_ask.log"
-fi
-if [[ "$WITH_RESUME" -eq 1 ]]; then
-  echo "  - ${RUN_DIR}/resume_continue.log"
-fi
-if [[ "$WITH_SELF_EXTENSION" -eq 1 ]]; then
-  echo "  - ${RUN_DIR}/self_extension.log"
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  echo
+  echo "Artifacts:"
+  echo "  - $RUN_LOG"
+  echo "  - ${RUN_DIR}/simple_nl.log"
+  if [[ "$WITH_TRACE" -eq 1 ]]; then
+    echo "  - ${RUN_DIR}/trace_ask.log"
+  fi
+  if [[ "$WITH_RESUME" -eq 1 ]]; then
+    echo "  - ${RUN_DIR}/resume_continue.log"
+  fi
+  if [[ "$WITH_SELF_EXTENSION" -eq 1 ]]; then
+    echo "  - ${RUN_DIR}/self_extension.log"
+  fi
 fi

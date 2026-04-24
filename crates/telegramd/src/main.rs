@@ -372,7 +372,7 @@ async fn detect_voice_mode_intent_with_llm(
         VOICE_MODE_INTENT_PROMPT_LOGICAL_PATH
     );
     let prompt = render_voice_mode_intent_prompt(&state.voice_mode_intent_prompt_template, text);
-    let direct_out = match classify_direct_text_via_clawd(
+    let out = match classify_direct_text_via_clawd(
         state,
         bound_user_key_for_chat(state, chat_id).as_deref(),
         chat_id,
@@ -381,43 +381,10 @@ async fn detect_voice_mode_intent_with_llm(
     )
     .await
     {
-        Ok(out) => Some(out),
+        Ok(out) => out,
         Err(err) => {
-            warn!("voice mode direct classify failed, fallback to task flow: {err}");
-            None
-        }
-    };
-    let out = if let Some(out) = direct_out {
-        out
-    } else {
-        let task_id = match submit_task_only(
-            state,
-            user_id,
-            chat_id,
-            TaskKind::Ask,
-            json!({ "text": prompt, "agent_mode": false, "source": "voice_mode_intent_detect" }),
-        )
-        .await
-        {
-            Ok(id) => id,
-            Err(err) => {
-                warn!("voice mode llm detect submit failed: {err}");
-                return None;
-            }
-        };
-        match poll_task_result(
-            state,
-            &task_id,
-            bound_user_key_for_chat(state, chat_id).as_deref(),
-            Some(12),
-        )
-        .await
-        {
-            Ok(v) => v.into_iter().next().unwrap_or_default(),
-            Err(err) => {
-                warn!("voice mode llm detect poll failed: {err}");
-                return None;
-            }
+            warn!("voice mode direct classify failed: {err}");
+            return None;
         }
     };
     let decision = parse_voice_mode_intent_decision(&out);
@@ -5741,10 +5708,20 @@ selected_model = "gpt-4o-mini"
 #[cfg(test)]
 mod bind_gate_tests {
     use super::{extract_bind_key_candidate, is_unbound_allowed_command};
+    use claw_core::channel_commands::ChannelCommandCatalog;
+
+    fn default_catalog() -> ChannelCommandCatalog {
+        ChannelCommandCatalog::default()
+    }
 
     #[test]
     fn unbound_plain_text_requires_key_binding() {
-        assert!(!is_unbound_allowed_command("hello rustclaw"));
+        let catalog = default_catalog();
+        assert!(!is_unbound_allowed_command(
+            &catalog,
+            "telegram",
+            "hello rustclaw"
+        ));
         assert_eq!(extract_bind_key_candidate("hello rustclaw", false), None);
     }
 
@@ -5758,8 +5735,9 @@ mod bind_gate_tests {
 
     #[test]
     fn bound_gate_allows_help_commands() {
-        assert!(is_unbound_allowed_command("/start"));
-        assert!(is_unbound_allowed_command("/help"));
+        let catalog = default_catalog();
+        assert!(is_unbound_allowed_command(&catalog, "telegram", "/start"));
+        assert!(is_unbound_allowed_command(&catalog, "telegram", "/help"));
     }
 
     #[test]
@@ -5778,7 +5756,8 @@ mod bind_gate_tests {
 
     #[test]
     fn unbound_media_like_empty_text_requires_binding_prompt() {
-        assert!(!is_unbound_allowed_command(""));
+        let catalog = default_catalog();
+        assert!(!is_unbound_allowed_command(&catalog, "telegram", ""));
         assert_eq!(extract_bind_key_candidate("", false), None);
     }
 }

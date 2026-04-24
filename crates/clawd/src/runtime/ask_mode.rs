@@ -1,7 +1,7 @@
 //! Phase 3.2 路由模式二元收敛（mode collapse）。
 //!
-//! 把原来散落的 `RoutedMode` (Chat/Act/ChatAct/AskClarify) 与三个独立 bool flag
-//! (`classifier_direct_mode` / `direct_resume_discussion` / `direct_resume_execution`)
+//! 把原来散落的 `RoutedMode` (Chat/Act/ChatAct/AskClarify) 与两个 resume flag
+//! (`direct_resume_discussion` / `direct_resume_execution`)
 //! 收敛成一个二元 `AskMode` 枚举：
 //!
 //! - `ClarifyOrChat { entry }` —— 所有"对用户输出文本"的入口
@@ -11,12 +11,12 @@
 //!
 //! Stage A 只引入抽象 + 转换函数，**不改任何现有调用面**；Stage B 起在
 //! `RouteResult` / `PreparedAskRouting` 双轨携带，Stage C 逐文件切换 match，
-//! Stage D 最终删除 `routed_mode` / `classifier_direct_mode` / `direct_resume_*`。
+//! Stage D 最终删除 `routed_mode` / `direct_resume_*`。
 
 // Stage A 期间所有公开 API 都还没人调用；Stage B 起会被 RouteResult 等使用。
 #![allow(dead_code)]
 
-use super::types::RoutedMode;
+use super::types::{RouteGateKind, RoutedMode};
 
 /// 二元收敛后的 ask 模式。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,11 +34,6 @@ pub(crate) enum ChatEntryStrategy {
     NormalizerThenChat,
     /// 原 `RoutedMode::AskClarify`：normalizer 标 needs_clarify=true，走反问。
     NormalizerThenClarify,
-    /// 原 `classifier_direct_mode=true`：跳 normalizer，单 LLM 一次性出最终回复。
-    ///
-    /// `source` 记录是哪个入口触发的（来自 `CLASSIFIER_DIRECT_SOURCES` 静态名单），
-    /// 仅用于日志/审计。
-    ClassifierDirect { source: String },
     /// 原 `direct_resume_discussion=true`：resume 上下文 + followup discussion prompt。
     ResumeFollowupDiscussion,
 }
@@ -55,7 +50,7 @@ pub(crate) enum ActFinalizeStyle {
 }
 
 impl AskMode {
-    /// 从历史的 (RoutedMode, 三个 bool flag) 组合构造 `AskMode`。
+    /// 从历史的 (RoutedMode, resume flag) 组合构造 `AskMode`。
     ///
     /// 在 Stage B 双轨期，`intent_router` 与 `worker/ask_prepare` 计算完旧字段后
     /// 立即调用此函数填充 `ask_mode` 字段。
@@ -63,16 +58,13 @@ impl AskMode {
     /// 优先级（高 → 低，互斥）：
     /// 1. `direct_resume_execution=true` → `Act { ResumeContinue }`
     /// 2. `direct_resume_discussion=true` → `ClarifyOrChat { ResumeFollowupDiscussion }`
-    /// 3. `classifier_direct_mode=true` → `ClarifyOrChat { ClassifierDirect { source } }`
-    /// 4. 否则按 `RoutedMode` 直接映射
+    /// 3. 否则按 `RoutedMode` 直接映射
     ///
     /// Plan §3.2 映射表见 [proposal §等价映射表](../../../../docs/p32_mode_collapse_proposal.md)。
     pub(crate) fn from_legacy(
         routed: RoutedMode,
-        classifier_direct_mode: bool,
         direct_resume_discussion: bool,
         direct_resume_execution: bool,
-        classifier_direct_source: Option<&str>,
     ) -> Self {
         if direct_resume_execution {
             return AskMode::Act {
@@ -82,13 +74,6 @@ impl AskMode {
         if direct_resume_discussion {
             return AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ResumeFollowupDiscussion,
-            };
-        }
-        if classifier_direct_mode {
-            return AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ClassifierDirect {
-                    source: classifier_direct_source.unwrap_or("").to_string(),
-                },
             };
         }
         AskMode::from_routed_mode(routed)
@@ -123,11 +108,6 @@ impl AskMode {
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::NormalizerThenClarify,
             } => RoutedMode::AskClarify,
-            // classifier_direct 历史上跟 RoutedMode::Chat 共存（route_reason="classifier_direct_source"），
-            // 反向投影到 Chat 保持兼容。
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ClassifierDirect { .. },
-            } => RoutedMode::Chat,
             // resume_followup_discussion 历史上跟 RoutedMode::Chat 共存。
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ResumeFollowupDiscussion,
@@ -147,7 +127,29 @@ impl AskMode {
     }
 
     pub(crate) fn is_act(&self) -> bool {
-        matches!(self, AskMode::Act { .. })
+        self.is_execute_gate()
+    }
+
+    pub(crate) fn gate_kind(&self) -> RouteGateKind {
+        match self {
+            AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::NormalizerThenClarify,
+            } => RouteGateKind::Clarify,
+            AskMode::ClarifyOrChat { .. } => RouteGateKind::Chat,
+            AskMode::Act { .. } => RouteGateKind::Execute,
+        }
+    }
+
+    pub(crate) fn is_execute_gate(&self) -> bool {
+        matches!(self.gate_kind(), RouteGateKind::Execute)
+    }
+
+    pub(crate) fn is_chat_gate(&self) -> bool {
+        matches!(self.gate_kind(), RouteGateKind::Chat)
+    }
+
+    pub(crate) fn is_clarify_gate(&self) -> bool {
+        matches!(self.gate_kind(), RouteGateKind::Clarify)
     }
 
     /// 等价于历史 `route.routed_mode == RoutedMode::Act`：
@@ -171,22 +173,13 @@ impl AskMode {
     }
 
     /// 等价于历史 `route.routed_mode == RoutedMode::Chat`：
-    /// 仅命中 `ClarifyOrChat { NormalizerThenChat }`，不命中 ClassifierDirect /
-    /// ResumeFollowupDiscussion 这些"形式上也算 Chat 但语义不同"的 entry。
+    /// 仅命中 `ClarifyOrChat { NormalizerThenChat }`，不命中
+    /// ResumeFollowupDiscussion 这种"形式上也算 Chat 但语义不同"的 entry。
     pub(crate) fn is_normalizer_chat(&self) -> bool {
         matches!(
             self,
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::NormalizerThenChat,
-            }
-        )
-    }
-
-    pub(crate) fn is_classifier_direct(&self) -> bool {
-        matches!(
-            self,
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ClassifierDirect { .. },
             }
         )
     }
@@ -228,9 +221,6 @@ impl AskMode {
                 entry: ChatEntryStrategy::NormalizerThenClarify,
             } => "clarify_or_chat:normalizer_clarify",
             AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ClassifierDirect { .. },
-            } => "clarify_or_chat:classifier_direct",
-            AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ResumeFollowupDiscussion,
             } => "clarify_or_chat:resume_followup_discussion",
             AskMode::Act {
@@ -252,7 +242,7 @@ mod tests {
 
     #[test]
     fn legacy_chat_maps_to_normalizer_chat() {
-        let m = AskMode::from_legacy(RoutedMode::Chat, false, false, false, None);
+        let m = AskMode::from_legacy(RoutedMode::Chat, false, false);
         assert_eq!(
             m,
             AskMode::ClarifyOrChat {
@@ -264,7 +254,7 @@ mod tests {
 
     #[test]
     fn legacy_ask_clarify_maps_to_normalizer_clarify() {
-        let m = AskMode::from_legacy(RoutedMode::AskClarify, false, false, false, None);
+        let m = AskMode::from_legacy(RoutedMode::AskClarify, false, false);
         assert_eq!(
             m,
             AskMode::ClarifyOrChat {
@@ -277,33 +267,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_classifier_direct_wins_over_routed_mode() {
-        // classifier_direct=true 的 short-circuit 路径在 worker/ask_prepare 里
-        // 会把 routed_mode 设成 Chat，但即使万一 normalizer 也跑了一次,
-        // 这里仍然以 classifier_direct 为准。
-        let m = AskMode::from_legacy(RoutedMode::Chat, true, false, false, Some("voice_mode"));
-        assert!(m.is_classifier_direct());
-        if let AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::ClassifierDirect { source },
-        } = &m
-        {
-            assert_eq!(source, "voice_mode");
-        } else {
-            panic!("unexpected mode {m:?}");
-        }
-        assert_eq!(m.to_routed_mode(), RoutedMode::Chat);
-    }
-
-    #[test]
-    fn legacy_resume_discussion_wins_over_classifier_direct() {
-        // resume_discussion 优先于 classifier_direct（设计选择，避免歧义）。
-        let m = AskMode::from_legacy(
-            RoutedMode::Chat,
-            true,  // classifier_direct_mode
-            true,  // direct_resume_discussion
-            false, // direct_resume_execution
-            Some("voice_mode"),
-        );
+    fn legacy_resume_discussion_wins_over_routed_mode() {
+        let m = AskMode::from_legacy(RoutedMode::Chat, true, false);
         assert!(m.is_resume_discussion());
         assert_eq!(m.to_routed_mode(), RoutedMode::Chat);
     }
@@ -311,13 +276,7 @@ mod tests {
     #[test]
     fn legacy_resume_execution_wins_over_everything() {
         // resume_execution 优先级最高，因为它是"复用上次 plan，立刻执行"。
-        let m = AskMode::from_legacy(
-            RoutedMode::Chat,
-            true, // classifier_direct
-            true, // direct_resume_discussion
-            true, // direct_resume_execution
-            Some("anything"),
-        );
+        let m = AskMode::from_legacy(RoutedMode::Chat, true, true);
         assert!(m.resume_execution());
         assert!(m.is_act());
         assert_eq!(m.to_routed_mode(), RoutedMode::Act);
@@ -325,7 +284,7 @@ mod tests {
 
     #[test]
     fn legacy_act_maps_to_plain() {
-        let m = AskMode::from_legacy(RoutedMode::Act, false, false, false, None);
+        let m = AskMode::from_legacy(RoutedMode::Act, false, false);
         assert_eq!(
             m,
             AskMode::Act {
@@ -339,7 +298,7 @@ mod tests {
 
     #[test]
     fn legacy_chat_act_maps_to_chat_wrapped() {
-        let m = AskMode::from_legacy(RoutedMode::ChatAct, false, false, false, None);
+        let m = AskMode::from_legacy(RoutedMode::ChatAct, false, false);
         assert_eq!(
             m,
             AskMode::Act {
@@ -349,19 +308,6 @@ mod tests {
         assert!(m.is_act());
         assert!(m.finalize_chat_wrapped());
         assert_eq!(m.to_routed_mode(), RoutedMode::ChatAct);
-    }
-
-    #[test]
-    fn classifier_direct_with_no_source_produces_empty_string() {
-        let m = AskMode::from_legacy(RoutedMode::Chat, true, false, false, None);
-        if let AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::ClassifierDirect { source },
-        } = m
-        {
-            assert_eq!(source, "");
-        } else {
-            panic!("expected classifier_direct entry");
-        }
     }
 
     #[test]
@@ -401,7 +347,11 @@ mod tests {
             RoutedMode::AskClarify,
         ] {
             let m = AskMode::from_routed_mode(routed);
-            assert_eq!(m.to_routed_mode(), routed, "round trip failed for {routed:?}");
+            assert_eq!(
+                m.to_routed_mode(),
+                routed,
+                "round trip failed for {routed:?}"
+            );
         }
     }
 
@@ -423,12 +373,9 @@ mod tests {
             AskMode::from_routed_mode(RoutedMode::ChatAct).as_str(),
             "act:chat_wrapped"
         );
-        let cd =
-            AskMode::from_legacy(RoutedMode::Chat, true, false, false, Some("classifier_test"));
-        assert_eq!(cd.as_str(), "clarify_or_chat:classifier_direct");
-        let rd = AskMode::from_legacy(RoutedMode::Chat, false, true, false, None);
+        let rd = AskMode::from_legacy(RoutedMode::Chat, true, false);
         assert_eq!(rd.as_str(), "clarify_or_chat:resume_followup_discussion");
-        let re = AskMode::from_legacy(RoutedMode::Chat, false, false, true, None);
+        let re = AskMode::from_legacy(RoutedMode::Chat, false, true);
         assert_eq!(re.as_str(), "act:resume_continue");
     }
 
@@ -438,7 +385,7 @@ mod tests {
         assert!(!AskMode::from_routed_mode(RoutedMode::ChatAct).is_plain_act());
         assert!(!AskMode::from_routed_mode(RoutedMode::Chat).is_plain_act());
         assert!(!AskMode::from_routed_mode(RoutedMode::AskClarify).is_plain_act());
-        let resume = AskMode::from_legacy(RoutedMode::Act, false, false, true, None);
+        let resume = AskMode::from_legacy(RoutedMode::Act, false, true);
         assert!(!resume.is_plain_act(), "ResumeContinue must not be plain");
         assert!(resume.is_act());
     }
@@ -450,16 +397,12 @@ mod tests {
             AskMode::from_routed_mode(RoutedMode::AskClarify),
             AskMode::from_routed_mode(RoutedMode::Act),
             AskMode::from_routed_mode(RoutedMode::ChatAct),
-            AskMode::from_legacy(RoutedMode::Chat, true, false, false, Some("s")),
-            AskMode::from_legacy(RoutedMode::Chat, false, true, false, None),
-            AskMode::from_legacy(RoutedMode::Chat, false, false, true, None),
+            AskMode::from_legacy(RoutedMode::Chat, true, false),
+            AskMode::from_legacy(RoutedMode::Chat, false, true),
         ];
         for m in &cases {
             let mut hits = 0;
             if m.is_clarify_only() {
-                hits += 1;
-            }
-            if m.is_classifier_direct() {
                 hits += 1;
             }
             if m.is_resume_discussion() {
@@ -474,5 +417,37 @@ mod tests {
             // 普通 Chat / Plain Act 0 个谓词命中；其他正好命中 1 个。
             assert!(hits <= 1, "predicate overlap on {m:?} (hits={hits})");
         }
+    }
+
+    #[test]
+    fn gate_kind_collapses_legacy_modes_to_three_gates() {
+        assert_eq!(
+            AskMode::from_routed_mode(RoutedMode::Chat).gate_kind(),
+            RouteGateKind::Chat
+        );
+        assert_eq!(
+            AskMode::from_routed_mode(RoutedMode::AskClarify).gate_kind(),
+            RouteGateKind::Clarify
+        );
+        assert_eq!(
+            AskMode::from_routed_mode(RoutedMode::Act).gate_kind(),
+            RouteGateKind::Execute
+        );
+        assert_eq!(
+            AskMode::from_routed_mode(RoutedMode::ChatAct).gate_kind(),
+            RouteGateKind::Execute
+        );
+    }
+
+    #[test]
+    fn legacy_shortcuts_map_to_expected_gate_kinds() {
+        assert_eq!(
+            AskMode::from_legacy(RoutedMode::Chat, true, false).gate_kind(),
+            RouteGateKind::Chat
+        );
+        assert_eq!(
+            AskMode::from_legacy(RoutedMode::Chat, false, true).gate_kind(),
+            RouteGateKind::Execute
+        );
     }
 }

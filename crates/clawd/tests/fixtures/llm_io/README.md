@@ -37,6 +37,32 @@ Use `_example/` to ship sample fixtures without polluting the e2e test matrix.
 Fixture without `expected.json` is allowed (becomes a "smoke" fixture: the
 harness only verifies the LLM-I/O wiring, no business assertions).
 
+## Legacy planner recordings
+
+Phase 7 `§7.4` has already moved the runtime toward the internal
+`SynthesizeAnswer` node, but a few older `calls.jsonl` records still contain
+pre-migration planner outputs such as:
+
+- `call_skill(chat)` evidence-transform steps
+- terminal `respond "{{last_output}}"` placeholder plans
+
+Those legacy records are now tracked by the planning test suite with an explicit
+inventory. The current state is:
+
+- all committed pre-`SynthesizeAnswer` planner recordings are
+  `RuntimeRewritable`
+- no committed case currently remains `LiveMigrationRequired`
+
+In practice this means today's `normalize_planned_actions(...)` can already
+upgrade every known legacy terminal formatter shape into a runtime-owned
+`SynthesizeAnswer` flow, so replay remains valid even before a real re-record.
+Future live re-recording is still useful cleanup, but no longer a hard blocker
+for running NL regression.
+
+If you add or re-record a case and it changes that inventory, update the
+corresponding planning tests in `crates/clawd/src/agent_engine/planning.rs`
+instead of letting the debt grow silently.
+
 ## `expected.json` schema
 
 All assertion fields are **optional** — start with the smallest constraint
@@ -52,6 +78,7 @@ parse with a clear error.
 | `freeze_now`                           | `String`       | yes      | Wallclock injected via `RUSTCLAW_TEST_FREEZE_NOW`. **Must match recording time** (otherwise normalizer prompt's `__NOW__` field shifts the FNV-1a hash and fixture misses). RFC-3339 (e.g. `2026-04-19T12:00:00+08:00`) or `%Y-%m-%d %H:%M:%S %:z`. |
 | `user_id`                              | `i64`          | no, default `1`  | Seeded into the `tasks` row. |
 | `chat_id`                              | `i64`          | no, default `1`  | Seeded into the `tasks` row. |
+| `prior_turns`                          | `Vec<Object>`  | no       | Optional synthetic history for clarify/context follow-ups. Each item seeds one succeeded prior `ask` row before replaying the current turn. Fields: `user_text` (required), `assistant_text` (required), `updated_at` (required exact timestamp from recording, because it is rendered into recent-execution context and therefore affects `prompt_hash`), `final_status` (optional, default `success`). |
 | `expected_final_answer_contains`       | `Vec<String>`  | no       | All listed substrings must appear in the final answer (case-sensitive). |
 | `expected_final_answer_not_contains`   | `Vec<String>`  | no       | None of the listed substrings may appear in the final answer. |
 | `expected_llm_call_count`              | `u32?`         | no       | Exact LLM-call count. Use only if stable across runs. |
@@ -67,6 +94,9 @@ parse with a clear error.
 1. **Record once with a real LLM** (`scripts/regen_fixture.sh <case>
    /tmp/<case>.model_io.log`). Make sure `[routing] debug_log_prompt = true`
    is on so the per-call `prompt_hash` field is emitted.
+   For clarify/context follow-ups, record only the **final** turn's
+   `model_io.log` slice, then copy the prior turn(s)' user text, assistant
+   text, and `tasks.updated_at` into `prior_turns`.
 2. **Author `expected.json`** alongside the generated `calls.jsonl`. Start
    with at minimum: `case`, `user_text`, `freeze_now`, and one
    `expected_final_answer_contains` entry that names the regression you want

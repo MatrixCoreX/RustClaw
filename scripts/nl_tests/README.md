@@ -8,6 +8,9 @@ Primary entry point:
 
 - `bash scripts/nl_tests/run_suite.sh --list`
 - `bash scripts/nl_tests/run_suite.sh manual`
+- `bash scripts/nl_tests/run_suite.sh compound_single`
+- `bash scripts/nl_tests/run_suite.sh task_updates`
+- `bash scripts/nl_tests/run_suite.sh multistep_mixed`
 - `bash scripts/nl_tests/run_suite.sh manual trace clarify`
 - `bash scripts/nl_tests/run_suite.sh self_extension`
 - `bash scripts/nl_tests/run_suite.sh sensitive_flows`
@@ -88,6 +91,9 @@ Notes for `ops_http_repair`:
 
 - `run_suite.sh` is now the preferred user-facing tool script.
 - `bash scripts/nl_tests/run_manual_test.sh`
+- `bash scripts/nl_tests/run_compound_single_suite.sh`
+- `bash scripts/nl_tests/run_task_updates_suite.sh`
+- `bash scripts/nl_tests/run_multistep_mixed_suite.sh`
 - `bash scripts/nl_tests/run_full_suite.sh`
 - `bash scripts/nl_tests/run_multi_turn_suite.sh`
 - `bash scripts/regression_self_extension_suite.sh`
@@ -106,6 +112,9 @@ Notes for `ops_http_repair`:
   - `nl_cases_full.txt`
   - `nl_cases_trace.txt`
   - `nl_cases_text_match.txt`
+  - `nl_cases_compound_single_language.txt`
+  - `nl_cases_task_updates_single_language.txt`
+  - `nl_cases_multistep_mixed_language.txt`
   - `nl_cases_clarify.txt`
   - `nl_cases_clarify_hard.txt`
   - `nl_cases_context_chain.txt`
@@ -125,12 +134,8 @@ suite|name|tags|prompt|expect=<substring>
 - 5th field (`expect=...`) is **optional** and asserts the final response text
   contains the literal substring AND status=succeeded. Missing/failed → marked
   `assertion=fail` in the summary.
-- `tags` is comma-separated. Special tags:
-  - `chat_force` — submit as `kind=run_skill skill_name=chat`, bypassing the
-    intent_router. **Required** to actually exercise the builtin chat skill,
-    because intent_router will short-circuit most chat prompts via
-    `direct_reply_candidate`.
-  - `natural` / `cn` — informational, used by triage tooling.
+- `tags` is comma-separated. `natural` / `cn` are informational and used by
+  triage tooling.
 - Lines starting with `#` are comments; blank lines are ignored.
 - 4-field rows (`suite|name|tags|prompt`) remain backward compatible.
 - Additional test text files now also live here:

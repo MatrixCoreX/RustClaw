@@ -43,7 +43,8 @@ fn build_verifier_gate_response(
     verify_result: &crate::verifier::VerifyResult,
 ) -> String {
     let prefer_english = state
-        .policy.command_intent
+        .policy
+        .command_intent
         .default_locale
         .to_ascii_lowercase()
         .starts_with("en");
@@ -120,6 +121,7 @@ pub(super) async fn prepare_round_actions(
         planner_user_text,
         policy,
         loop_state,
+        agent_run_context.and_then(|ctx| ctx.turn_analysis.as_ref()),
         agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
         agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
     )
@@ -171,7 +173,7 @@ pub(super) async fn prepare_round_actions(
             crate::truncate_for_log(&issue.detail)
         );
     }
-    let mut journal = crate::task_journal::TaskJournal::new(user_text);
+    let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", user_text);
     if let Some(route_result) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
         journal.record_route_result(route_result);
     }

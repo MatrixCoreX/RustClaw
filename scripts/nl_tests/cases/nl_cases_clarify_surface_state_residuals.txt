@@ -1,0 +1,13 @@
+# Focused two-turn clarify regressions for surface/state refactors.
+# Format: case_name|turn1|turn2
+
+clarify_fixture_sqlite_schema_version|看一下那个 sqlite 的 schema version 是多少|scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
+clarify_fixture_sqlite_tables|看一下那个 sqlite 里有哪些表|scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite
+clarify_fixture_config_app_name|去那个配置里找 app.name，只把值给我|scripts/nl_tests/fixtures/device_local/configs/app_config.toml
+clarify_fixture_release_delivery|把那个 release checklist 发给我|scripts/nl_tests/fixtures/device_local/docs/release_checklist.md
+clarify_fixture_archive_listing|看看那个 archive 目录里有什么|scripts/nl_tests/fixtures/device_local/docs/archive
+clarify_fixture_readme_head|读一下那个 README 开头 3 行|scripts/nl_tests/fixtures/device_local/README.md
+clarify_fixture_package_name|去那个 package 文件里找 name，只输出值|scripts/nl_tests/fixtures/device_local/package.json
+clarify_locator_case_insensitive_dir|去那个 case_only 目录里找 report.md，只输出路径|scripts/nl_tests/fixtures/locator_smart/case_only
+clarify_locator_unique_stem_dir|去那个 stem_unique 目录里找 abcd，只输出路径|scripts/nl_tests/fixtures/locator_smart/stem_unique
+clarify_fixture_release_delivery_missing|把那个 release checklist 发给我|scripts/nl_tests/fixtures/device_local/docs/not_exists_release_checklist.md

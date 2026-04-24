@@ -282,7 +282,6 @@ skill_to_bin() {
 	service_control) echo "service-control-skill" ;;
 	config_guard) echo "config-guard-skill" ;;
 	crypto) echo "crypto-skill" ;;
-	chat) echo "chat-skill" ;;
 	*) echo "" ;;
 	esac
 }

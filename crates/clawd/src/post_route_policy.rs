@@ -19,6 +19,32 @@ pub(crate) enum LocatorResolution {
     Fuzzy(Vec<String>),
 }
 
+pub(crate) fn fuzzy_locator_candidates_from_route_reason(route_reason: &str) -> Vec<String> {
+    let Some((_, tail)) = route_reason.rsplit_once("fuzzy_locator_candidates=") else {
+        return Vec::new();
+    };
+    tail.split(" | ")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+pub(crate) const SAME_TURN_GENERATED_ANCHOR_REASON_TAG: &str =
+    "same_turn_generated_anchor=execution_output";
+
+fn append_route_reason_tag(route_reason: &mut String, tag: &str) {
+    if route_reason.contains(tag) {
+        return;
+    }
+    if route_reason.trim().is_empty() {
+        route_reason.push_str(tag);
+    } else {
+        route_reason.push(';');
+        route_reason.push_str(tag);
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct PostRoutePolicyResult {
@@ -37,11 +63,10 @@ pub(crate) fn enforce_content_evidence_execution_mode(
     contract: &IntentOutputContract,
     needs_clarify: bool,
 ) -> RoutedMode {
-    if needs_clarify
-        || mode != RoutedMode::Chat
-        || !contract.requires_content_evidence
-        || matches!(contract.locator_kind, OutputLocatorKind::None)
-    {
+    if needs_clarify || !mode.eq(&RoutedMode::Chat) || !contract.requires_content_evidence {
+        return mode;
+    }
+    if matches!(contract.locator_kind, OutputLocatorKind::None) {
         return mode;
     }
     if matches!(
@@ -65,27 +90,14 @@ fn locator_kind_requires_path_binding(kind: OutputLocatorKind) -> bool {
     )
 }
 
-fn path_is_existing_file(path: &str) -> bool {
-    let trimmed = path.trim();
-    !trimmed.is_empty() && Path::new(trimmed).is_file()
+fn semantic_locator_hint_satisfies_non_path_binding(route_result: &RouteResult) -> bool {
+    route_result.output_contract.semantic_kind == OutputSemanticKind::ServiceStatus
+        && !route_result.output_contract.locator_hint.trim().is_empty()
 }
 
 fn path_is_existing_directory(path: &str) -> bool {
     let trimmed = path.trim();
     !trimmed.is_empty() && Path::new(trimmed).is_dir()
-}
-
-fn locator_hint_looks_file_like(locator_hint: &str) -> bool {
-    let trimmed = locator_hint.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let path = Path::new(trimmed);
-    path.extension().is_some()
-        || path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case("readme"))
 }
 
 /// 检查 normalizer 给的 `locator_hint` 字段里是否含有任意一个**真实存在**的绝对路径。
@@ -105,8 +117,8 @@ fn locator_hint_contains_existing_absolute_path(locator_hint: &str) -> bool {
     // 用一个宽松的拆分：按空白 / 逗号 / 分号 / 中文分号 / 冒号 / 中文冒号 切，
     // 然后挑出以 '/' 开头的 token，去掉首尾标点，逐个测 exists。
     let separators: &[char] = &[
-        ' ', '\t', '\n', '\r', ',', '，', ';', '；', ':', '：', '"', '“', '”', '\'', '‘', '’',
-        '(', ')', '（', '）', '[', ']', '【', '】',
+        ' ', '\t', '\n', '\r', ',', '，', ';', '；', ':', '：', '"', '“', '”', '\'', '‘', '’', '(',
+        ')', '（', '）', '[', ']', '【', '】',
     ];
     for token in trimmed.split(separators) {
         let token = token.trim_matches(|c: char| {
@@ -119,36 +131,9 @@ fn locator_hint_contains_existing_absolute_path(locator_hint: &str) -> bool {
     false
 }
 
-fn should_default_to_content_excerpt_summary(
+fn should_force_content_evidence_for_directory_purpose_request(
     route_result: &RouteResult,
-    direct_locator_path: Option<&str>,
-) -> bool {
-    if route_result.output_contract.semantic_kind != OutputSemanticKind::None
-        || route_result.output_contract.delivery_required
-        || !route_result.output_contract.requires_content_evidence
-        || !matches!(
-            route_result.output_contract.response_shape,
-            OutputResponseShape::Free | OutputResponseShape::OneSentence
-        )
-    {
-        return false;
-    }
-
-    match route_result.output_contract.locator_kind {
-        OutputLocatorKind::Filename => true,
-        OutputLocatorKind::CurrentWorkspace => {
-            direct_locator_path.is_some_and(path_is_existing_file)
-        }
-        OutputLocatorKind::Path => {
-            direct_locator_path.is_some_and(path_is_existing_file)
-                || locator_hint_looks_file_like(&route_result.output_contract.locator_hint)
-        }
-        _ => false,
-    }
-}
-
-fn should_default_to_directory_purpose_summary(
-    route_result: &RouteResult,
+    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     direct_locator_path: Option<&str>,
 ) -> bool {
     if route_result.output_contract.semantic_kind != OutputSemanticKind::None
@@ -157,6 +142,10 @@ fn should_default_to_directory_purpose_summary(
         || !matches!(
             route_result.output_contract.response_shape,
             OutputResponseShape::Free | OutputResponseShape::OneSentence
+        )
+        || !matches!(
+            request_surface.workspace_child_request_shape,
+            Some(crate::intent::surface_signals::WorkspaceChildRequestShape::DirectoryPurposeSummary)
         )
     {
         return false;
@@ -170,8 +159,203 @@ fn should_default_to_directory_purpose_summary(
     }
 }
 
-pub(crate) fn apply_post_route_policy(
+fn should_clear_scalar_count_for_bounded_listing(
+    route_result: &RouteResult,
+    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    direct_locator_path: Option<&str>,
+) -> bool {
+    route_result.output_contract.semantic_kind == OutputSemanticKind::ScalarCount
+        && matches!(
+            route_result.output_contract.response_shape,
+            OutputResponseShape::Free | OutputResponseShape::OneSentence
+        )
+        && !route_result.output_contract.delivery_required
+        && request_surface.requested_listing_limit.is_some()
+        && direct_locator_path.is_some_and(path_is_existing_directory)
+}
+
+fn should_relax_scalar_contract_for_bounded_listing_names(
+    route_result: &RouteResult,
+    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    direct_locator_path: Option<&str>,
+) -> bool {
+    route_result.output_contract.semantic_kind == OutputSemanticKind::ScalarCount
+        && route_result.output_contract.response_shape == OutputResponseShape::Scalar
+        && !route_result.output_contract.delivery_required
+        && request_surface.requested_listing_limit.is_some()
+        && matches!(
+            request_surface.workspace_child_request_shape,
+            Some(crate::intent::surface_signals::WorkspaceChildRequestShape::Listing)
+        )
+        && !matches!(
+            request_surface.semantic_request_shape,
+            Some(crate::intent::surface_signals::PromptSemanticRequestShape::ScalarCount)
+        )
+        && direct_locator_path.is_some_and(path_is_existing_directory)
+}
+
+fn token_looks_like_dotted_field_selector(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c: char| {
+        !c.is_alphanumeric() && c != '.' && c != '_' && c != '-' && c != '$'
+    });
+    if trimmed.is_empty() || trimmed.contains('/') || trimmed.contains('\\') {
+        return false;
+    }
+    let mut parts = trimmed.split('.');
+    let Some(first) = parts.next() else {
+        return false;
+    };
+    if first.is_empty() {
+        return false;
+    }
+    let mut saw_dot_segment = false;
+    for part in parts {
+        if part.is_empty() {
+            return false;
+        }
+        if !part
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '$'))
+        {
+            return false;
+        }
+        saw_dot_segment = true;
+    }
+    saw_dot_segment
+        && first
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '$'))
+}
+
+fn should_clear_scalar_path_only_for_scalar_extract(
+    route_result: &RouteResult,
+    direct_locator_path: Option<&str>,
+) -> bool {
+    if route_result.output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
+        || route_result.output_contract.response_shape != OutputResponseShape::Scalar
+        || route_result.output_contract.delivery_required
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            OutputLocatorKind::Path
+                | OutputLocatorKind::CurrentWorkspace
+                | OutputLocatorKind::Filename
+        )
+    {
+        return false;
+    }
+
+    let mut scrubbed = route_result.resolved_intent.clone();
+    let locator_hint = route_result.output_contract.locator_hint.trim();
+    if !locator_hint.is_empty() {
+        scrubbed = scrubbed.replace(locator_hint, " ");
+    }
+    if let Some(path) = direct_locator_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        scrubbed = scrubbed.replace(path, " ");
+    }
+
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(&scrubbed);
+    surface.field_selector_count > 0
+        || surface.field_read_prompt_shape.is_some()
+        || scrubbed
+            .split_whitespace()
+            .any(token_looks_like_dotted_field_selector)
+}
+
+fn should_clear_scalar_path_only_for_bounded_listing(
+    route_result: &RouteResult,
+    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    direct_locator_path: Option<&str>,
+) -> bool {
+    if route_result.output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
+        || route_result.output_contract.delivery_required
+        || matches!(
+            route_result.output_contract.response_shape,
+            OutputResponseShape::FileToken
+        )
+    {
+        return false;
+    }
+    request_surface.requested_listing_limit.is_some()
+        && matches!(
+            request_surface.workspace_child_request_shape,
+            Some(crate::intent::surface_signals::WorkspaceChildRequestShape::Listing)
+        )
+        && direct_locator_path.is_some_and(path_is_existing_directory)
+}
+
+fn should_clear_scalar_path_only_without_locator_binding(route_result: &RouteResult) -> bool {
+    if route_result.output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
+        || route_result.output_contract.response_shape != OutputResponseShape::Scalar
+        || route_result.output_contract.delivery_required
+    {
+        return false;
+    }
+    if crate::route_reason_starts_with_deterministic_contract(
+        &route_result.route_reason,
+        "pwd_only_current_workspace",
+    ) {
+        return false;
+    }
+    route_result.output_contract.locator_kind == OutputLocatorKind::None
+        && route_result.output_contract.locator_hint.trim().is_empty()
+}
+
+fn should_clear_scalar_path_only_for_git_scalar_query(route_result: &RouteResult) -> bool {
+    if route_result.output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
+        || route_result.output_contract.response_shape != OutputResponseShape::Scalar
+        || route_result.output_contract.delivery_required
+        || route_result.output_contract.requires_content_evidence
+    {
+        return false;
+    }
+    crate::intent::deterministic_gate::route_is_git_scalar_query(route_result)
+}
+
+fn should_clear_raw_command_output_for_contract_mismatch(
+    route_result: &RouteResult,
+    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    if route_result.output_contract.semantic_kind != OutputSemanticKind::RawCommandOutput
+        || route_result.output_contract.delivery_required
+    {
+        return false;
+    }
+    if matches!(
+        request_surface.output_request_shape,
+        Some(
+            crate::intent::surface_signals::OutputRequestShape::Compare
+                | crate::intent::surface_signals::OutputRequestShape::ExcerptKindJudgment
+                | crate::intent::surface_signals::OutputRequestShape::StructuredKeys
+        )
+    ) {
+        return true;
+    }
+    if request_surface.requested_sentence_count.is_some()
+        || matches!(
+            route_result.output_contract.response_shape,
+            OutputResponseShape::OneSentence
+        )
+    {
+        return true;
+    }
+    matches!(
+        request_surface.output_compression_shape,
+        Some(crate::intent::surface_signals::OutputCompressionShape::Brief)
+    ) && !matches!(
+        route_result.output_contract.response_shape,
+        OutputResponseShape::Scalar | OutputResponseShape::FileToken
+    ) && !matches!(
+        request_surface.path_output_prompt_shape,
+        Some(crate::intent::surface_signals::PathOutputPromptShape::ScalarOnly)
+    )
+}
+
+pub(crate) fn apply_post_route_policy_with_surface(
     route_result: RouteResult,
+    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     raw_has_concrete_locator_hint: bool,
     resolved_has_concrete_locator_hint: bool,
     raw_has_explicit_path_locator_hint: bool,
@@ -182,7 +366,8 @@ pub(crate) fn apply_post_route_policy(
 ) -> PostRoutePolicyResult {
     let mut execution_route_result = route_result.clone();
     let path_scoped_content_request = route_result.output_contract.requires_content_evidence
-        && locator_kind_requires_path_binding(route_result.output_contract.locator_kind);
+        && locator_kind_requires_path_binding(route_result.output_contract.locator_kind)
+        && !semantic_locator_hint_satisfies_non_path_binding(&route_result);
     let mut auto_locator_path = None;
     let mut auto_locator_hint = None;
     let mut auto_locator_resolved_direct = false;
@@ -221,18 +406,53 @@ pub(crate) fn apply_post_route_policy(
         LocatorResolution::None => {}
     }
 
-    if should_default_to_content_excerpt_summary(
+    if should_clear_scalar_count_for_bounded_listing(
+        &execution_route_result,
+        request_surface,
+        auto_locator_path.as_deref(),
+    ) {
+        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
+    }
+    if should_relax_scalar_contract_for_bounded_listing_names(
+        &execution_route_result,
+        request_surface,
+        auto_locator_path.as_deref(),
+    ) {
+        execution_route_result.output_contract.response_shape = OutputResponseShape::Free;
+        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
+    }
+    if should_clear_scalar_path_only_for_bounded_listing(
+        &execution_route_result,
+        request_surface,
+        auto_locator_path.as_deref(),
+    ) {
+        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
+    } else if should_clear_scalar_path_only_for_scalar_extract(
         &execution_route_result,
         auto_locator_path.as_deref(),
     ) {
-        execution_route_result.output_contract.semantic_kind =
-            OutputSemanticKind::ContentExcerptSummary;
-    } else if should_default_to_directory_purpose_summary(
+        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
+    } else if should_clear_scalar_path_only_for_git_scalar_query(&execution_route_result) {
+        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
+    } else if should_clear_scalar_path_only_without_locator_binding(&execution_route_result) {
+        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
+    }
+    if should_clear_raw_command_output_for_contract_mismatch(
         &execution_route_result,
+        request_surface,
+    ) {
+        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
+        append_route_reason_tag(
+            &mut execution_route_result.route_reason,
+            SAME_TURN_GENERATED_ANCHOR_REASON_TAG,
+        );
+    }
+
+    if should_force_content_evidence_for_directory_purpose_request(
+        &execution_route_result,
+        request_surface,
         auto_locator_path.as_deref(),
     ) {
-        execution_route_result.output_contract.semantic_kind =
-            OutputSemanticKind::DirectoryPurposeSummary;
         execution_route_result
             .output_contract
             .requires_content_evidence = true;
@@ -240,29 +460,28 @@ pub(crate) fn apply_post_route_policy(
 
     if auto_locator_resolved_direct && path_scoped_content_request {
         execution_route_result.needs_clarify = false;
-        if matches!(
-            execution_route_result.routed_mode,
-            RoutedMode::AskClarify | RoutedMode::Chat
-        ) {
-            execution_route_result.routed_mode = if matches!(
-                execution_route_result.output_contract.response_shape,
-                OutputResponseShape::Scalar | OutputResponseShape::FileToken
-            ) {
-                RoutedMode::Act
-            } else {
-                RoutedMode::ChatAct
-            };
+        if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
+            execution_route_result.set_routed_mode(
+                if matches!(
+                    execution_route_result.output_contract.response_shape,
+                    OutputResponseShape::Scalar | OutputResponseShape::FileToken
+                ) {
+                    RoutedMode::Act
+                } else {
+                    RoutedMode::ChatAct
+                },
+            );
         }
     }
 
     let inherited_operation_with_direct_locator = auto_locator_resolved_direct
         && resolved_intent_inherits_prior_operation
         && immediate_prior_turn_was_clarify
-        && matches!(execution_route_result.routed_mode, RoutedMode::AskClarify)
+        && execution_route_result.is_clarify_gate()
         && execution_route_result.needs_clarify;
     if inherited_operation_with_direct_locator {
         execution_route_result.needs_clarify = false;
-        execution_route_result.routed_mode =
+        execution_route_result.set_routed_mode(
             if matches!(
                 execution_route_result.output_contract.response_shape,
                 OutputResponseShape::Scalar | OutputResponseShape::FileToken
@@ -276,44 +495,43 @@ pub(crate) fn apply_post_route_policy(
                 RoutedMode::ChatAct
             } else {
                 RoutedMode::Act
-            };
+            },
+        );
     }
 
-    let explicit_path_requires_execution =
-        matches!(execution_route_result.routed_mode, RoutedMode::AskClarify)
-            && execution_route_result.needs_clarify
-            && !auto_locator_resolved_direct
-            && locator_kind_requires_path_binding(
-                execution_route_result.output_contract.locator_kind,
-            )
-            && (raw_has_explicit_path_locator_hint || resolved_has_explicit_path_locator_hint)
-            && (resolved_intent_inherits_prior_operation
-                || execution_route_result
-                    .output_contract
-                    .requires_content_evidence
-                || execution_route_result.output_contract.delivery_required
-                || matches!(
-                    execution_route_result.output_contract.response_shape,
-                    OutputResponseShape::Scalar
-                ));
-    if explicit_path_requires_execution {
-        execution_route_result.needs_clarify = false;
-        execution_route_result.routed_mode = if execution_route_result
-            .output_contract
-            .delivery_required
+    let explicit_path_requires_execution = execution_route_result.is_clarify_gate()
+        && execution_route_result.needs_clarify
+        && !auto_locator_resolved_direct
+        && locator_kind_requires_path_binding(execution_route_result.output_contract.locator_kind)
+        && (raw_has_explicit_path_locator_hint || resolved_has_explicit_path_locator_hint)
+        && (resolved_intent_inherits_prior_operation
+            || execution_route_result
+                .output_contract
+                .requires_content_evidence
+            || execution_route_result.output_contract.delivery_required
             || matches!(
                 execution_route_result.output_contract.response_shape,
-                OutputResponseShape::Scalar | OutputResponseShape::FileToken
-            ) {
-            RoutedMode::Act
-        } else if execution_route_result
-            .output_contract
-            .requires_content_evidence
-        {
-            RoutedMode::ChatAct
-        } else {
-            RoutedMode::Act
-        };
+                OutputResponseShape::Scalar
+            ));
+    if explicit_path_requires_execution {
+        execution_route_result.needs_clarify = false;
+        execution_route_result.set_routed_mode(
+            if execution_route_result.output_contract.delivery_required
+                || matches!(
+                    execution_route_result.output_contract.response_shape,
+                    OutputResponseShape::Scalar | OutputResponseShape::FileToken
+                )
+            {
+                RoutedMode::Act
+            } else if execution_route_result
+                .output_contract
+                .requires_content_evidence
+            {
+                RoutedMode::ChatAct
+            } else {
+                RoutedMode::Act
+            },
+        );
     }
 
     let fuzzy_locator_requires_clarify = !fuzzy_locator_suggestions.is_empty()
@@ -321,13 +539,13 @@ pub(crate) fn apply_post_route_policy(
             execution_route_result.output_contract.locator_kind,
             OutputLocatorKind::Path | OutputLocatorKind::Filename
         );
-    let force_clarify = matches!(execution_route_result.routed_mode, RoutedMode::AskClarify)
+    let force_clarify = execution_route_result.is_clarify_gate()
         || (execution_route_result.needs_clarify && !auto_locator_resolved_direct)
         || missing_locator_for_path_scoped_content
         || fuzzy_locator_requires_clarify;
     if force_clarify {
         execution_route_result.needs_clarify = true;
-        execution_route_result.routed_mode = RoutedMode::AskClarify;
+        execution_route_result.set_routed_mode(RoutedMode::AskClarify);
     }
 
     let (clarify_reason, clarify_reason_kind) = if missing_locator_for_path_scoped_content {
@@ -378,6 +596,32 @@ pub(crate) fn apply_post_route_policy(
         clarify_reason,
         clarify_reason_kind,
     }
+}
+
+#[cfg(test)]
+pub(crate) fn apply_post_route_policy(
+    route_result: RouteResult,
+    raw_has_concrete_locator_hint: bool,
+    resolved_has_concrete_locator_hint: bool,
+    raw_has_explicit_path_locator_hint: bool,
+    resolved_has_explicit_path_locator_hint: bool,
+    resolved_intent_inherits_prior_operation: bool,
+    immediate_prior_turn_was_clarify: bool,
+    locator_resolution: LocatorResolution,
+) -> PostRoutePolicyResult {
+    let request_surface =
+        crate::intent::surface_signals::analyze_prompt_surface(&route_result.resolved_intent);
+    apply_post_route_policy_with_surface(
+        route_result,
+        &request_surface,
+        raw_has_concrete_locator_hint,
+        resolved_has_concrete_locator_hint,
+        raw_has_explicit_path_locator_hint,
+        resolved_has_explicit_path_locator_hint,
+        resolved_intent_inherits_prior_operation,
+        immediate_prior_turn_was_clarify,
+        locator_resolution,
+    )
 }
 
 #[cfg(test)]
@@ -481,6 +725,33 @@ mod tests {
     }
 
     #[test]
+    fn service_status_locator_hint_does_not_force_path_clarify() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "telegramd".to_string();
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert!(matches!(
+            result.execution_route_result.routed_mode,
+            RoutedMode::ChatAct
+        ));
+        assert!(!result.execution_route_result.needs_clarify);
+        assert!(!result.missing_locator_for_path_scoped_content);
+    }
+
+    #[test]
     fn filename_scope_with_direct_auto_locator_escalates_back_to_execution() {
         let mut route = route_result();
         route.routed_mode = RoutedMode::AskClarify;
@@ -556,6 +827,10 @@ mod tests {
             result.execution_route_result.routed_mode,
             RoutedMode::ChatAct
         ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::from_routed_mode(RoutedMode::ChatAct)
+        );
     }
 
     #[test]
@@ -580,6 +855,10 @@ mod tests {
             result.execution_route_result.routed_mode,
             RoutedMode::Act
         ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::from_routed_mode(RoutedMode::Act)
+        );
     }
 
     #[test]
@@ -607,7 +886,7 @@ mod tests {
     }
 
     #[test]
-    fn file_like_content_request_defaults_to_content_excerpt_summary_for_filename_locator() {
+    fn file_like_content_request_keeps_semantic_kind_none_for_filename_locator() {
         let mut route = route_result();
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.locator_kind = OutputLocatorKind::Filename;
@@ -624,7 +903,7 @@ mod tests {
         );
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
-            OutputSemanticKind::ContentExcerptSummary
+            OutputSemanticKind::None
         );
     }
 
@@ -658,8 +937,9 @@ mod tests {
     }
 
     #[test]
-    fn directory_like_chat_act_request_defaults_to_directory_purpose_summary() {
+    fn directory_like_chat_act_request_requires_content_evidence_without_forcing_semantic_kind() {
         let mut route = route_result();
+        route.resolved_intent = "列出 docs 目录最近修改的两个文件，再判断这些是干什么的".to_string();
         route.routed_mode = RoutedMode::ChatAct;
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = false;
@@ -683,13 +963,45 @@ mod tests {
         );
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
-            OutputSemanticKind::DirectoryPurposeSummary
+            OutputSemanticKind::None
         );
         assert!(
             result
                 .execution_route_result
                 .output_contract
                 .requires_content_evidence
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn generic_directory_chat_act_request_no_longer_defaults_to_directory_purpose_summary() {
+        let mut route = route_result();
+        route.resolved_intent = "看看 docs 目录".to_string();
+        route.routed_mode = RoutedMode::ChatAct;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "docs".to_string();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-post-route-policy-generic-dir-summary-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
         );
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -725,7 +1037,342 @@ mod tests {
     }
 
     #[test]
-    fn explicit_file_path_hint_defaults_to_content_excerpt_summary_without_auto_locator() {
+    fn bounded_directory_listing_clears_misclassified_scalar_count_contract() {
+        let mut route = route_result();
+        route.resolved_intent = "列出 document 目录下前 5 个文件名".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-post-route-policy-bounded-list-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn scalar_count_contract_stays_for_true_scalar_shape() {
+        let mut route = route_result();
+        route.resolved_intent = "当前目录下有几个文件".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-post-route-policy-true-count-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::ScalarCount
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn bounded_filename_listing_relaxes_misclassified_scalar_contract() {
+        let mut route = route_result();
+        route.resolved_intent = "列出 logs 目录最近修改的 2 个文件名，只输出文件名".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "logs".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-post-route-policy-listing-names-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.response_shape,
+            OutputResponseShape::Free
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn scalar_path_only_contract_is_cleared_for_dotted_field_extract_request() {
+        let mut route = route_result();
+        route.resolved_intent =
+            "读取 /tmp/config.toml 中的 tools.allow_sudo 字段值，并只输出该值".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/config.toml".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            LocatorResolution::Direct("/tmp/config.toml".to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+    }
+
+    #[test]
+    fn scalar_path_only_free_contract_is_cleared_for_bounded_listing() {
+        let mut route = route_result();
+        route.resolved_intent = "列出 logs 目录最近修改的 2 个文件名，只输出文件名".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "logs".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "clawd-post-route-policy-scalar-path-listing-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn scalar_path_only_contract_stays_for_real_path_only_request() {
+        let mut route = route_result();
+        route.resolved_intent = "只输出 /tmp/config.toml 的绝对路径，不要解释".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/config.toml".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        let result = apply_post_route_policy(
+            route,
+            true,
+            true,
+            true,
+            true,
+            false,
+            false,
+            LocatorResolution::Direct("/tmp/config.toml".to_string()),
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::ScalarPathOnly
+        );
+    }
+
+    #[test]
+    fn scalar_path_only_contract_is_cleared_when_no_locator_binding_exists() {
+        let mut route = route_result();
+        route.resolved_intent = "只输出当前机器 hostname".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.locator_kind = OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+    }
+
+    #[test]
+    fn scalar_path_only_contract_stays_for_pwd_contract_without_locator_binding() {
+        let mut route = route_result();
+        route.resolved_intent = "只输出当前工作目录的绝对路径，不要解释".to_string();
+        route.route_reason = "deterministic_contract:pwd_only_current_workspace".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.locator_kind = OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::ScalarPathOnly
+        );
+    }
+
+    #[test]
+    fn scalar_path_only_contract_is_cleared_for_git_branch_scalar_query() {
+        let mut route = route_result();
+        route.resolved_intent = "output only the current git branch name".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+    }
+
+    #[test]
+    fn one_sentence_command_plus_explanation_clears_raw_command_output() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.resolved_intent =
+            "执行 pwd 命令获取当前工作目录路径，然后用一句话简要解释这个路径大概是什么（只输出一句话）"
+                .to_string();
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+        assert!(result
+            .execution_route_result
+            .route_reason
+            .contains(SAME_TURN_GENERATED_ANCHOR_REASON_TAG));
+    }
+
+    #[test]
+    fn direct_scalar_command_result_keeps_raw_command_output() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::Act);
+        route.resolved_intent = "执行 pwd，只输出当前路径，不要解释".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::RawCommandOutput
+        );
+    }
+
+    #[test]
+    fn brief_command_explanation_clears_raw_command_output_without_sentence_shape() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.resolved_intent =
+            "run pwd, then briefly explain what this path is".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::None,
+        );
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+    }
+
+    #[test]
+    fn explicit_file_path_hint_keeps_semantic_kind_none_without_auto_locator() {
         let mut route = route_result();
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -743,12 +1390,12 @@ mod tests {
         );
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
-            OutputSemanticKind::ContentExcerptSummary
+            OutputSemanticKind::None
         );
     }
 
     #[test]
-    fn current_workspace_file_resolution_defaults_to_content_excerpt_summary() {
+    fn current_workspace_file_resolution_keeps_semantic_kind_none() {
         let mut route = route_result();
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -780,7 +1427,7 @@ mod tests {
         );
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
-            OutputSemanticKind::ContentExcerptSummary
+            OutputSemanticKind::None
         );
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

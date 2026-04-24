@@ -32,6 +32,7 @@ PROVIDER_RETRY_SLEEP_VALUE="${PROVIDER_RETRY_SLEEP_SECONDS:-3}"
 PRINT_LLM_TRACE_VALUE="${PRINT_LLM_TRACE:-1}"
 ISOLATE_CHAT_ID_BASE_VALUE="${ISOLATE_CHAT_ID_BASE:-1}"
 FULL_TEXT=0
+PROMPT_REPLY_ONLY=0
 # 0 = 不启用；>0 = 连续这么多个 case 走到 timeout / provider_unavailable / network
 # 失败后中断剩余测试，避免上游真挂时还把 60 个 case 都跑完。
 FAIL_FAST_VALUE="${NL_TEST_FAIL_FAST:-0}"
@@ -72,15 +73,12 @@ Options:
                         Also reads NL_TEST_FAIL_FAST env var.
   --no-llm-trace        Do not print per-task LLM request/response trace
   --full-text           Print full response text
+  --prompt-reply-only   Print only prompt and assistant reply for each case
   -h, --help            Show this help
 
 Case file format:
   suite|name|tags|prompt
   suite|name|tags|prompt|expect=<substring>     # 5th field optional, asserts response contains substring
-
-  Special tags:
-    chat_force        Force the case to use kind=run_skill skill_name=chat
-                      (bypasses intent_router; required to actually exercise builtin chat).
 
 Case format:
   suite|name|tags|prompt
@@ -213,13 +211,6 @@ for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1
 PY
 }
 
-# Returns 0 if `,$tags,` contains `,$needle,`.
-case_has_tag() {
-  local tags="$1"
-  local needle="$2"
-  [[ ",${tags}," == *,${needle},* ]]
-}
-
 sanitize_name() {
   local raw="${1:-}"
   python3 - "$raw" <<'PY'
@@ -276,12 +267,13 @@ PY
 }
 
 print_user_visible_dialog() {
-  python3 - "$1" "$2" <<'PY'
+  python3 - "$1" "$2" "${3:-0}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 prompt = sys.argv[2]
+prompt_reply_only = sys.argv[3] == "1"
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
@@ -299,12 +291,20 @@ if not text:
 if not text:
     text = "<empty>"
 
-print("  [user]")
-for line in prompt.splitlines() or [""]:
-    print(f"    {line}")
-print("  [assistant]")
-for line in text.splitlines() or [""]:
-    print(f"    {line}")
+if prompt_reply_only:
+    print("[PROMPT]")
+    for line in prompt.splitlines() or [""]:
+        print(line)
+    print("[REPLY]")
+    for line in text.splitlines() or [""]:
+        print(line)
+else:
+    print("  [user]")
+    for line in prompt.splitlines() or [""]:
+        print(f"    {line}")
+    print("  [assistant]")
+    for line in text.splitlines() or [""]:
+        print(f"    {line}")
 PY
 }
 
@@ -328,12 +328,17 @@ for item in messages:
 text = "\n".join(parts).lower()
 markers = [
     "当前大模型服务暂时不可用",
+    "模型暂时不可用",
     "selected model is at capacity",
     "usage limit exceeded",
     "rate limit",
     "rate_limit",
     "too many requests",
     "http 429",
+    "http 401",
+    "authorized_error",
+    "login fail",
+    "鉴权失败",
 ]
 if any(m in text for m in markers):
     print("[model] unavailable/capacity/rate-limit message observed in final result")
@@ -360,15 +365,20 @@ for item in messages:
 
 strong_markers = [
     "当前大模型服务暂时不可用",
+    "模型暂时不可用",
     "模型暂不可用",
     "selected model is at capacity",
     "usage limit exceeded",
     "rate limit",
     "rate_limit",
     "too many requests",
+    "http 401",
     "http 429",
     "http 529",
     "529 overloaded",
+    "authorized_error",
+    "login fail",
+    "鉴权失败",
     "missing choices[0].message.content",
     "timeout: error sending request for url",
     "error sending request for url",
@@ -398,15 +408,20 @@ def provider_like_final_text(text: str) -> bool:
         return False
     anchored_markers = [
         "当前大模型服务暂时不可用",
+        "模型暂时不可用",
         "模型暂不可用",
         "selected model is at capacity",
         "usage limit exceeded",
         "rate limit",
         "rate_limit",
         "too many requests",
+        "http 401",
         "http 429",
         "http 529",
         "529 overloaded",
+        "authorized_error",
+        "login fail",
+        "鉴权失败",
         "missing choices[0].message.content",
         "timeout: error sending request for url",
         "error sending request for url",
@@ -543,7 +558,9 @@ poll_until_terminal() {
     fi
     status="$(extract_status "$out_file")"
     if [[ "$status" != "$last_status" ]]; then
-      echo "  [status] ${last_status:-<none>} -> ${status:-<empty>}"
+      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+        echo "  [status] ${last_status:-<none>} -> ${status:-<empty>}"
+      fi
       last_status="$status"
     fi
     case "$status" in
@@ -686,30 +703,26 @@ run_one_case() {
   CHAT_ID="$chat_id"
   started_at="$(date +%s)"
 
-  # A5: chat_force tag → 改用 kind=run_skill skill_name=chat，绕开 intent_router
-  # 的 direct_reply 短路。如果不带 chat_force，仍然走默认 kind=ask。
-  if case_has_tag "$tags" "chat_force"; then
-    mode="run_skill:chat"
-  else
-    mode="ask"
-  fi
+  mode="ask"
 
   echo
-  echo "============================================================"
-  echo "[CASE]        $ordinal"
-  echo "[SOURCE_LINE] $source_line"
-  echo "[NAME]        $case_name"
-  if [[ -n "$tags" ]]; then
-    echo "[TAGS]        $tags"
+  if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+    echo "============================================================"
+    echo "[CASE]        $ordinal"
+    echo "[SOURCE_LINE] $source_line"
+    echo "[NAME]        $case_name"
+    if [[ -n "$tags" ]]; then
+      echo "[TAGS]        $tags"
+    fi
+    echo "[MODE]        $mode"
+    echo "[CHAT]        $CHAT_ID"
+    if [[ -n "$expect_substr" ]]; then
+      echo "[EXPECT]      ${expect_substr}"
+    fi
+    echo "[PROMPT]      $prompt"
+    echo "[USER]"
+    printf '  %s\n' "$prompt"
   fi
-  echo "[MODE]        $mode"
-  echo "[CHAT]        $CHAT_ID"
-  if [[ -n "$expect_substr" ]]; then
-    echo "[EXPECT]      ${expect_substr}"
-  fi
-  echo "[PROMPT]      $prompt"
-  echo "[USER]"
-  printf '  %s\n' "$prompt"
 
   local attempt=0
   local effective_status=""
@@ -720,13 +733,7 @@ run_one_case() {
     init_llm_trace_offset "$llm_offset_file"
     err_file="$(mktemp)"
     set +e
-    if [[ "$mode" == "run_skill:chat" ]]; then
-      # Pass user prompt as chat-skill text arg.
-      skill_args="$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}, ensure_ascii=False))' "$prompt")"
-      raw="$(submit_run_skill_task "chat" "$skill_args" 2>"$err_file")"
-    else
-      raw="$(submit_task "$prompt" 2>"$err_file")"
-    fi
+    raw="$(submit_task "$prompt" 2>"$err_file")"
     rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then
@@ -742,7 +749,9 @@ run_one_case() {
     rm -f "$err_file"
     printf '%s\n' "$raw" > "$submit_file"
     task_id="$(extract_submit_task_id "$raw")"
-    echo "[TASK]        $task_id"
+    if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+      echo "[TASK]        $task_id"
+    fi
 
     # poll_until_terminal returns non-zero on poll timeout; under `set -e`
     # that would tear down the whole run mid-suite. (poll_until_terminal
@@ -753,28 +762,36 @@ run_one_case() {
       poll_failed=1
     fi
     if (( poll_failed != 0 )); then
-      echo "  [poll] timed out waiting for terminal status; marking case as timeout"
+      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+        echo "  [poll] timed out waiting for terminal status; marking case as timeout"
+      fi
       effective_status="timeout"
       if [[ ! -s "$final_file" ]]; then
         printf '%s\n' '{"data":{"status":"timeout","result_json":{"text":""},"error_text":"poll timeout"}}' > "$final_file"
       fi
     fi
 
-    echo "[RESULT]"
-    if [[ "$FULL_TEXT" -eq 1 ]]; then
-      extract_result_summary "$final_file" "full"
-    else
-      extract_result_summary "$final_file" "summary"
+    if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+      echo "[RESULT]"
+      if [[ "$FULL_TEXT" -eq 1 ]]; then
+        extract_result_summary "$final_file" "full"
+      else
+        extract_result_summary "$final_file" "summary"
+      fi
     fi
-    print_user_visible_dialog "$final_file" "$prompt"
+    print_user_visible_dialog "$final_file" "$prompt" "$PROMPT_REPLY_ONLY"
 
     if final_result_provider_unavailable "$final_file"; then
       if [[ "$attempt" -le "$PROVIDER_RETRIES" ]]; then
-        echo "  [model] provider unavailable; retrying (${attempt}/${PROVIDER_RETRIES}) after ${PROVIDER_RETRY_SLEEP_SECONDS}s"
+        if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+          echo "  [model] provider unavailable; retrying (${attempt}/${PROVIDER_RETRIES}) after ${PROVIDER_RETRY_SLEEP_SECONDS}s"
+        fi
         sleep "$PROVIDER_RETRY_SLEEP_SECONDS"
         continue
       fi
-      echo "  [model] provider unavailable after retries; mark as inconclusive"
+      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+        echo "  [model] provider unavailable after retries; mark as inconclusive"
+      fi
       effective_status="provider_unavailable"
     fi
     break
@@ -805,7 +822,9 @@ run_one_case() {
       CONSECUTIVE_BAD=0
       ;;
   esac
-  echo "  [stats] wall=$((ended_at - started_at))s consecutive_bad=${CONSECUTIVE_BAD}"
+  if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+    echo "  [stats] wall=$((ended_at - started_at))s consecutive_bad=${CONSECUTIVE_BAD}"
+  fi
 
   LAST_COMPLETED_LINE="$source_line"
   CURRENT_SOURCE_LINE=0
@@ -971,6 +990,11 @@ while [[ $# -gt 0 ]]; do
       FULL_TEXT=1
       shift
       ;;
+    --prompt-reply-only)
+      PROMPT_REPLY_ONLY=1
+      PRINT_LLM_TRACE_VALUE=0
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -1038,34 +1062,42 @@ USER_KEY="$USER_KEY_VALUE"
 
 prepare_run_dir
 
-echo "Natural-language manual regression"
-echo "  case_file:     $CASE_FILE"
-echo "  run_dir:       $RUN_DIR"
-echo "  run_log:       $RUN_LOG"
-echo "  summary_jsonl: $SUMMARY_JSONL"
-echo "  base_url:      $BASE_URL"
-echo "  user_id:       $USER_ID"
-echo "  chat_id:       $CHAT_ID"
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  echo "Natural-language manual regression"
+  echo "  case_file:     $CASE_FILE"
+  echo "  run_dir:       $RUN_DIR"
+  echo "  run_log:       $RUN_LOG"
+  echo "  summary_jsonl: $SUMMARY_JSONL"
+  echo "  base_url:      $BASE_URL"
+  echo "  user_id:       $USER_ID"
+  echo "  chat_id:       $CHAT_ID"
+fi
 BASE_CHAT_ID="$(compute_effective_chat_id_base "$CHAT_ID" "$ISOLATE_CHAT_ID_BASE")"
-echo "  run_chat_id_base: $BASE_CHAT_ID"
-echo "  user_key:      ${USER_KEY:+<set>}"
-echo "  wait:          ${MAX_WAIT_SECONDS}s"
-echo "  poll:          ${POLL_INTERVAL_SECONDS}s"
-echo "  provider_retry:${PROVIDER_RETRIES} x ${PROVIDER_RETRY_SLEEP_SECONDS}s"
-if (( FAIL_FAST_THRESHOLD > 0 )); then
-  echo "  fail_fast:     abort after ${FAIL_FAST_THRESHOLD} consecutive bad cases"
-else
-  echo "  fail_fast:     disabled"
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  echo "  run_chat_id_base: $BASE_CHAT_ID"
+  echo "  user_key:      ${USER_KEY:+<set>}"
+  echo "  wait:          ${MAX_WAIT_SECONDS}s"
+  echo "  poll:          ${POLL_INTERVAL_SECONDS}s"
+  echo "  provider_retry:${PROVIDER_RETRIES} x ${PROVIDER_RETRY_SLEEP_SECONDS}s"
+  if (( FAIL_FAST_THRESHOLD > 0 )); then
+    echo "  fail_fast:     abort after ${FAIL_FAST_THRESHOLD} consecutive bad cases"
+  else
+    echo "  fail_fast:     disabled"
+  fi
+  if [[ -n "$RESUME_DIR" ]]; then
+    echo "  resume_dir:    $RESUME_DIR"
+    echo "  resume_line:   $RESUME_LINE"
+  fi
+  echo
 fi
-if [[ -n "$RESUME_DIR" ]]; then
-  echo "  resume_dir:    $RESUME_DIR"
-  echo "  resume_line:   $RESUME_LINE"
-fi
-echo
 
-health_check
-check_binary_freshness
-echo
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  health_check
+  check_binary_freshness
+  echo
+else
+  health_check >/dev/null
+fi
 
 array_from_command_lines CASE_ROWS load_case_rows "$CASE_FILE"
 if [[ "${#CASE_ROWS[@]}" -eq 0 ]]; then
@@ -1082,7 +1114,9 @@ for row in "${CASE_ROWS[@]}"; do
 
   if (( source_line <= RESUME_LINE )); then
     LAST_COMPLETED_LINE="$source_line"
-    echo "[SKIP] source_line=${source_line} name=${case_name} already covered by --resume-line ${RESUME_LINE}"
+    if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+      echo "[SKIP] source_line=${source_line} name=${case_name} already covered by --resume-line ${RESUME_LINE}"
+    fi
     continue
   fi
 
@@ -1095,20 +1129,25 @@ for row in "${CASE_ROWS[@]}"; do
   run_one_case "$ordinal" "$source_line" "$case_name" "$tags" "$prompt" "$expect_substr" "$chat_id_for_case"
 
   if (( FAIL_FAST_THRESHOLD > 0 )) && (( CONSECUTIVE_BAD >= FAIL_FAST_THRESHOLD )); then
-    echo
-    echo "[FAIL_FAST] reached ${CONSECUTIVE_BAD} consecutive bad cases >= threshold ${FAIL_FAST_THRESHOLD}; aborting remaining cases."
+    if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+      echo
+      echo "[FAIL_FAST] reached ${CONSECUTIVE_BAD} consecutive bad cases >= threshold ${FAIL_FAST_THRESHOLD}; aborting remaining cases."
+    fi
     ABORTED_FAIL_FAST=1
   fi
 done
 
 if (( run_count == 0 )); then
-  echo "No remaining cases after --resume-line ${RESUME_LINE}."
+  if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+    echo "No remaining cases after --resume-line ${RESUME_LINE}."
+  fi
 fi
 
-print_final_summary
-
-echo
-echo "Artifacts:"
-echo "  - $RUN_DIR"
-echo "  - $RUN_LOG"
-echo "  - $SUMMARY_JSONL"
+if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+  print_final_summary
+  echo
+  echo "Artifacts:"
+  echo "  - $RUN_DIR"
+  echo "  - $RUN_LOG"
+  echo "  - $SUMMARY_JSONL"
+fi

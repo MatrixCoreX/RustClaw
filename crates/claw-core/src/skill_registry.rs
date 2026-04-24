@@ -133,8 +133,16 @@ impl Capability {
                     // 必须按 `<用途>_<vendor>_api_key` 命名（如
                     // `secrets.image_generation_minimax_api_key`）。
                     const KNOWN_VENDORS: &[&str] = &[
-                        "openai", "google", "gemini", "anthropic", "claude", "grok", "xai",
-                        "deepseek", "qwen", "minimax",
+                        "openai",
+                        "google",
+                        "gemini",
+                        "anthropic",
+                        "claude",
+                        "grok",
+                        "xai",
+                        "deepseek",
+                        "qwen",
+                        "minimax",
                     ];
                     for vendor in KNOWN_VENDORS {
                         if name == &format!("{vendor}_api_key") || name == *vendor {
@@ -588,9 +596,8 @@ impl SkillsRegistry {
                 }
             }
 
-            let has_write_or_exec = has(&Capability::FsWrite)
-                || has(&Capability::Exec)
-                || has(&Capability::ExecSudo);
+            let has_write_or_exec =
+                has(&Capability::FsWrite) || has(&Capability::Exec) || has(&Capability::ExecSudo);
             if has_write_or_exec && entry.side_effect == Some(false) {
                 violations.push(format!(
                     "skill `{name}` declares fs.write/exec/exec.sudo but `side_effect = false` is set explicitly (R3)"
@@ -637,10 +644,6 @@ pub const REQUIRED_BUILTIN_SKILLS: &[&str] = &[
     "make_dir",
     "remove_file",
     "schedule",
-    // chat 在 §P2.2 后被搬进 clawd 内（享受 LLM gateway 治理：fallback /
-    // circuit breaker / per-task budget / model_io.log）。registry 里仍
-    // 标 kind=builtin，是这条记录的真相来源。
-    "chat",
 ];
 
 /// §P4.1 收尾：registry 完整性校验报告，便于启动期 / CI 一次性输出全部漂移点。
@@ -771,11 +774,6 @@ kind = "runner"   # 故意写错 kind，应该被 wrong_kind 抓到
             "missing should include uncovered builtins, got {:?}",
             report.missing
         );
-        assert!(
-            report.missing.contains(&"chat".to_string()),
-            "missing should include chat, got {:?}",
-            report.missing
-        );
         assert_eq!(report.wrong_kind, vec!["read_file".to_string()]);
 
         let human = report.into_human_message().unwrap();
@@ -809,10 +807,7 @@ kind = "runner"   # 故意写错 kind，应该被 wrong_kind 抓到
     #[test]
     fn capability_parse_is_case_insensitive_but_normalizes_to_lowercase() {
         assert_eq!(Capability::parse("LLM").unwrap(), Capability::Llm);
-        assert_eq!(
-            Capability::parse("FS.Write").unwrap(),
-            Capability::FsWrite
-        );
+        assert_eq!(Capability::parse("FS.Write").unwrap(), Capability::FsWrite);
         assert_eq!(
             Capability::parse("Secrets.Image_Generation_MiniMax_Api_Key").unwrap(),
             Capability::Secrets("image_generation_minimax_api_key".to_string())
@@ -1014,8 +1009,8 @@ capabilities = ["fs.write"]
 "#;
         let path = std::env::temp_dir().join("test_shape_consistency_clean.toml");
         std::fs::write(&path, toml).unwrap();
-        let reg = SkillsRegistry::load_from_path(&path)
-            .expect("registry with proper shape should load");
+        let reg =
+            SkillsRegistry::load_from_path(&path).expect("registry with proper shape should load");
         assert!(reg.validate_shape_consistency().is_empty());
         let _ = std::fs::remove_file(path);
     }
@@ -1034,8 +1029,14 @@ capabilities = ["llm", "wifi"]
         let err = SkillsRegistry::load_from_path(&path)
             .err()
             .expect("expected load to fail on unknown capability token");
-        assert!(err.contains("`foo`"), "error should mention skill name: {err}");
-        assert!(err.contains("wifi"), "error should mention bad token: {err}");
+        assert!(
+            err.contains("`foo`"),
+            "error should mention skill name: {err}"
+        );
+        assert!(
+            err.contains("wifi"),
+            "error should mention bad token: {err}"
+        );
         let _ = std::fs::remove_file(path);
     }
 

@@ -1,0 +1,10 @@
+mixed|mixed_logs_recent_judge_cn_en|cn,en,act,listing,summary|列出 logs 目录最近修改的 2 个文件名, then 用一句中文告诉我这更像 runtime logs 还是 test leftovers
+mixed|mixed_logs_recent_one_line_en_cn|en,cn,act,listing,summary|list the 3 most recently modified files under logs, 然后用一句中文说这些更像运行日志还是临时产物，控制在一行
+mixed|mixed_ports_priority_en_cn|en,cn,act,summary|look at the listening ports on this machine，然后只挑最值得注意的几个，用中文控制在 3 行内
+mixed|mixed_system_user_signature|cn,en,act,summary|先看一下这台机器的 hostname 和当前用户, then write one short Chinese line saying who is using which machine
+mixed|mixed_pkg_compare_cn_en|cn,en,act,compare,scalar|读取 package.json 里的 name，再读取 Cargo.toml 里的 package.name，then 只用一行输出“前者 | 后者 | 一样/不一样”
+mixed|mixed_readme_agents_compare_cn_en|cn,en,act,compare,summary|比较 README.md 和 AGENTS.md 哪个更大, then 用一句 English explain why that is probably normal
+mixed|mixed_sqlite_kind_cn_en|cn,en,act,db,summary|看看 data/db-basic-contract.sqlite 里有哪些表, then 用一句中文说这更像 business db 还是 test db
+mixed|mixed_workspace_partition_cn_en|cn,en,act,listing,summary|先看看当前目录顶层主要文件夹, then 用一句给新手看的中文解释 this repo is roughly organized how
+mixed|mixed_release_pkg_contrast_cn_en|cn,en,act,file,compare,summary|读一下 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md 开头，再看 scripts/nl_tests/fixtures/device_local/package.json，then 用一句中文说前者更像操作清单还是元数据文件
+mixed|mixed_hidden_files_role_en_cn|en,cn,act,summary|check whether the current directory has hidden files，然后用一句中文解释这类文件 usually exist for what

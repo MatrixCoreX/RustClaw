@@ -14,6 +14,6 @@ pub(crate) use state::{
 };
 pub(crate) use types::{
     AgentAction, AskReply, CommandIntentRules, CommandIntentRuntime, LocalInteractionContext,
-    MemoryConfigFileWrapper, RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime,
-    ScheduledJobDue, WhatsappDeliveryRoute,
+    MemoryConfigFileWrapper, RouteGateKind, RoutedMode, RuntimeChannel, ScheduleIntentOutput,
+    ScheduleRuntime, ScheduledJobDue, WhatsappDeliveryRoute,
 };

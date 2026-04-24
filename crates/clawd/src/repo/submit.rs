@@ -89,7 +89,8 @@ pub(crate) fn submit_task_audit_detail(
 
 pub(crate) fn task_count_by_status(state: &AppState, status: &str) -> anyhow::Result<usize> {
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
@@ -248,7 +249,8 @@ pub(crate) fn channel_allows_public_access(channel: ChannelKind) -> bool {
 pub(crate) fn upsert_public_channel_user(state: &AppState, user_id: i64) -> anyhow::Result<()> {
     let now = now_ts();
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.execute(
@@ -287,7 +289,8 @@ pub(crate) fn check_submit_task_limits(
 ) -> Result<(), SubmitTaskLimitError> {
     let limit_result = {
         let mut limiter = state
-            .policy.rate_limiter
+            .policy
+            .rate_limiter
             .lock()
             .map_err(|_| SubmitTaskLimitError::RateLimiterPoisoned)?;
         limiter.check_and_record(effective_user_id)
@@ -492,7 +495,8 @@ pub(crate) fn insert_submitted_task(
 ) -> anyhow::Result<()> {
     let now = now_ts();
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 

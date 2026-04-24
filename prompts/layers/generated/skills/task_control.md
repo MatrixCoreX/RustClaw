@@ -50,7 +50,7 @@ Response text example:
 ```text
 当前未完成任务（2 个）：
 1. [running][ask] 查看最近币圈新闻（已运行 18s）
-2. [queued][run_skill] run_skill:chat（已运行 3s）
+2. [queued][run_skill] run_skill:stock（已运行 3s）
 ```
 
 ### cancel_all

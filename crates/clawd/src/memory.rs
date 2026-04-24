@@ -238,11 +238,12 @@ pub(crate) fn insert_memory(
         }
     }
     let trimmed = utf8_safe_prefix(&normalized, keep).to_string();
-    let extracted_prefs = if role == MEMORY_ROLE_USER && state.policy.memory.enable_preference_extraction {
-        extract_user_preferences(content, &state.policy.memory)
-    } else {
-        Vec::new()
-    };
+    let extracted_prefs =
+        if role == MEMORY_ROLE_USER && state.policy.memory.enable_preference_extraction {
+            extract_user_preferences(content, &state.policy.memory)
+        } else {
+            Vec::new()
+        };
     let should_skip = state.policy.memory.write_filter_enabled
         && should_skip_memory_write(
             &trimmed,
@@ -362,7 +363,9 @@ pub(crate) fn recall_recent_memories(
     let rows = query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, limit)?;
     let mut out = Vec::new();
     for (role, content, safety_flag) in rows {
-        if state.policy.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        if state.policy.memory.safety_filter_enabled
+            && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE
+        {
             out.push((role, "[safety_signal content omitted]".to_string()));
             continue;
         }
@@ -959,6 +962,11 @@ fn classify_assistant_context_reply_kind(
     if final_status.eq_ignore_ascii_case("clarify") {
         return AssistantContextReplyKind::ClarifyPlaceholder;
     }
+    let route_gate_kind = summary
+        .and_then(|value| value.get("route_result"))
+        .and_then(|value| value.get("route_gate_kind"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let routed_mode = summary
         .and_then(|value| value.get("route_result"))
         .and_then(|value| value.get("routed_mode"))
@@ -969,7 +977,10 @@ fn classify_assistant_context_reply_kind(
         .and_then(|value| value.get("needs_clarify"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    if routed_mode.eq_ignore_ascii_case("AskClarify") || needs_clarify {
+    if route_gate_kind.eq_ignore_ascii_case("clarify")
+        || routed_mode.eq_ignore_ascii_case("AskClarify")
+        || needs_clarify
+    {
         return AssistantContextReplyKind::ClarifyPlaceholder;
     }
     AssistantContextReplyKind::Normal
@@ -994,11 +1005,9 @@ fn extract_last_turn_assistant_text_from_task(
         None
     };
     let assistant_text = assistant_text.unwrap_or_else(|| result_json.to_string());
-    match classify_assistant_context_reply_kind(
-        parsed.as_ref(),
-        &assistant_text,
-        |t| crate::fallback::is_known_clarify_fallback_text(state, t),
-    ) {
+    match classify_assistant_context_reply_kind(parsed.as_ref(), &assistant_text, |t| {
+        crate::fallback::is_known_clarify_fallback_text(state, t)
+    }) {
         AssistantContextReplyKind::Normal => Some(assistant_text),
         AssistantContextReplyKind::ClarifyPlaceholder => {
             Some(clarify_assistant_placeholder().to_string())
@@ -1121,12 +1130,13 @@ fn format_last_turn_full_context(
 ) -> String {
     let user_safety = classify_memory_safety_flag(user_content, &state.policy.memory);
     let assistant_safety = classify_memory_safety_flag(assistant_content, &state.policy.memory);
-    let user_text =
-        if state.policy.memory.safety_filter_enabled && user_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
-            "[safety_signal content omitted]".to_string()
-        } else {
-            utf8_safe_prefix(user_content.trim(), max_segment_chars).to_string()
-        };
+    let user_text = if state.policy.memory.safety_filter_enabled
+        && user_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
+    {
+        "[safety_signal content omitted]".to_string()
+    } else {
+        utf8_safe_prefix(user_content.trim(), max_segment_chars).to_string()
+    };
     let assistant_text = if state.policy.memory.safety_filter_enabled
         && assistant_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
     {
@@ -1310,7 +1320,9 @@ pub(crate) fn build_recent_assistant_replies_context(
         if role != MEMORY_ROLE_ASSISTANT {
             continue;
         }
-        if state.policy.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        if state.policy.memory.safety_filter_enabled
+            && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE
+        {
             continue;
         }
         let trimmed_content = content.trim();
@@ -1382,7 +1394,9 @@ pub(crate) fn read_recent_assistant_reply_texts(
         if role != MEMORY_ROLE_ASSISTANT {
             continue;
         }
-        if state.policy.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        if state.policy.memory.safety_filter_enabled
+            && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE
+        {
             continue;
         }
         let trimmed = content.trim();
@@ -1819,18 +1833,14 @@ fn score_memory_relevance(role: &str, content: &str, keywords: &[String]) -> f32
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
-    
 
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
-    
+    use claw_core::config::{AgentConfig, ToolsConfig};
+
     use rusqlite::{params, Connection};
-    
 
     use crate::runtime::policy::ToolsPolicy;
     use crate::runtime::state::SkillViewsSnapshot;
-    
+
     use crate::{AgentRuntimeConfig, AppState};
 
     use super::{
@@ -1855,17 +1865,17 @@ mod tests {
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: None,
-                                skills_list: Arc::new(HashSet::new()),
-                            }))),
+                    registry: None,
+                    skills_list: Arc::new(HashSet::new()),
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 locator_scan_max_depth: 3,
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig::test_default(),
@@ -1944,6 +1954,7 @@ mod tests {
                 "summary": {
                     "final_status": "clarify",
                     "route_result": {
+                        "route_gate_kind": "clarify",
                         "routed_mode": "AskClarify",
                         "needs_clarify": true
                     }
@@ -1975,11 +1986,7 @@ mod tests {
         let target = target_text.to_string();
         let is_target_fallback = move |t: &str| t.trim() == target.trim();
         assert_eq!(
-            classify_assistant_context_reply_kind(
-                Some(&parsed),
-                target_text,
-                is_target_fallback,
-            ),
+            classify_assistant_context_reply_kind(Some(&parsed), target_text, is_target_fallback,),
             AssistantContextReplyKind::ProviderUnavailablePlaceholder
         );
         assert_eq!(
@@ -1996,11 +2003,7 @@ mod tests {
         // §7.2: 普通答案 + 任意 fallback 集合都不命中 → Normal。
         let never_fallback = |_: &str| false;
         assert_eq!(
-            classify_assistant_context_reply_kind(
-                Some(&parsed),
-                "README.md",
-                never_fallback,
-            ),
+            classify_assistant_context_reply_kind(Some(&parsed), "README.md", never_fallback,),
             AssistantContextReplyKind::Normal
         );
     }
