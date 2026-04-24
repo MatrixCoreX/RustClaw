@@ -199,7 +199,7 @@ pub(crate) async fn is_meta_respond_instruction(
         .unwrap_or(false)
 }
 
-fn is_publishable_raw_deterministic_guard(s: &str) -> bool {
+fn is_publishable_raw_local_guard(s: &str) -> bool {
     let t = s.trim();
     if t.is_empty() || t.len() <= 2 {
         return false;
@@ -215,22 +215,22 @@ fn is_publishable_raw_deterministic_guard(s: &str) -> bool {
     true
 }
 
-/// §3.4 本地启发式：纯确定性的 "可对外发布" 预判，**不调 LLM**。
+/// §3.4 本地启发式："可对外发布" 基础预判，**不调 LLM**。
 ///
 /// 给非 finalize 层（planning / skill_execution / agent loop 缓存）使用，
 /// 用来决定 "这段输出值不值得缓存 / 让进 plan 步骤"。漏判（误判为可发布）
 /// 会在 finalize 层被 [`is_publishable_raw`] 二次过滤；过滤过严（误判为
 /// 不可发布）则跳过本地缓存，finalize 层照常生成兜底输出，行为正确仅是少
-/// 享受一次 fast-path。
+/// 享受一次本地缓存。
 ///
-/// 与 `is_publishable_raw` 的关系：本函数 = 前者的"deterministic guard 部分"，
-/// 即不含长度短路（>180 字直接 true）也不发任何 LLM 请求。
+/// 与 `is_publishable_raw` 的关系：本函数 = 前者的本地 guard 部分，
+/// 即不含长度短路（>180 字直接 true），也不发任何 LLM 请求。
 #[cfg(test)]
 fn is_publishable_raw_local(s: &str) -> bool {
-    is_publishable_raw_deterministic_guard(s)
+    is_publishable_raw_local_guard(s)
 }
 
-/// §3.4 本地启发式：纯确定性的 "看起来像 meta-respond 指令" 预判，**不调 LLM**。
+/// §3.4 本地启发式："看起来像 meta-respond 指令" 预判，**不调 LLM**。
 ///
 /// 覆盖 `delivery_text_classifier_prompt.md` 中文档化的高发模式（中英）。
 /// 给 planning 阶段过滤明显的 "请告诉用户 ... / tell the user ..." 类
@@ -354,7 +354,7 @@ pub(crate) fn looks_like_meta_respond_directive_local(text: &str) -> bool {
 /// 其它层（planning / skill_execution / 缓存）应使用
 /// [`is_publishable_raw_local`] 作为本地启发。
 pub(crate) async fn is_publishable_raw(state: &AppState, task: &ClaimedTask, s: &str) -> bool {
-    if !is_publishable_raw_deterministic_guard(s) {
+    if !is_publishable_raw_local_guard(s) {
         return false;
     }
     let trimmed = s.trim();
