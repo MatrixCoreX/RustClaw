@@ -13,6 +13,8 @@
 /data/
 /release-bin/
 /skills_output/
+/docs/
+/document/
 /scripts/nl_suite_logs/
 /skill_develop/.cache/
 **/*.log
