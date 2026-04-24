@@ -50,7 +50,7 @@
 5. **Optional same-turn rewrite (narrative actions only):** For `describe`, `compare`, and `screenshot_summary`, when a target language is set, the skill may run an additional OpenAI-compatible **`/v1/chat/completions`** pass using `prompts/image_output_rewrite_prompt.md` to align the final rendered text with `__TARGET_LANGUAGE__`, preserving facts. If that step fails or returns empty output, the skill returns the schema-rendered text unchanged.
 6. **`extract`:** Relies on the vision prompt + language hints only (no separate rewrite pass), so structured extraction stays stable.
 
-**Note:** Steps that read `args._memory` require `[memory].skill_memory_enabled` (and non-`chat` skills) so the host injects the generic `_memory` blob; when memory injection is off, only explicit args, runner `context`, and defaults apply.
+**Note:** Steps that read `args._memory` require `[memory].skill_memory_enabled` and a runner skill that supports generic memory injection so the host injects the `_memory` blob; when memory injection is off, only explicit args, runner `context`, and defaults apply.
 
 ## Error Contract (from interface)
 - Missing/empty `images` input array.
