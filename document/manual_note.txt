@@ -1,1 +1,0 @@
-RustClaw manual test note
