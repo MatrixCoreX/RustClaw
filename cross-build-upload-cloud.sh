@@ -46,16 +46,16 @@ REMOTE_BINDGEN_ENV='GCC_INCLUDE_DIR="$(aarch64-linux-gnu-gcc -print-file-name=in
 # 统计并打印拉回产物大小（目录或单个文件）
 print_pull_stats() {
 	local dest="$1"
-	local label="${2:-拉回}"
+	local label="${2:-pullback}"
 	if [[ ! -e "$dest" ]]; then
-		echo "[$(date)] ${label}: 路径不存在 $dest"
+		echo "[$(date)] ${label}: path does not exist: $dest"
 		return
 	fi
 	if [[ -d "$dest" ]]; then
 		local total
 		total=$(du -sh "$dest" 2>/dev/null | cut -f1)
-		echo "[$(date)] ${label} 总大小: ${total}"
-		echo "[$(date)] 文件列表（不含 deps/build/*.rlib/*.d）:"
+		echo "[$(date)] ${label} total size: ${total}"
+		echo "[$(date)] file list (excluding deps/build/*.rlib/*.d):"
 		find "$dest" -maxdepth 1 -type f \( ! -name '*.rlib' ! -name '*.d' \) -exec ls -lh {} \; 2>/dev/null | while read -r line; do echo "  $line"; done
 	else
 		ls -lh "$dest" 2>/dev/null | while read -r line; do echo "[$(date)] ${label}: $line"; done
@@ -65,20 +65,20 @@ print_pull_stats() {
 pull_remote_file_direct() {
 	local remote_path="$1"
 	local local_path="$2"
-	local label="${3:-拉回}"
+	local label="${3:-pullback}"
 	local local_dir remote_bytes tmp_local_path
 
 	local_dir="$(dirname "$local_path")"
 	mkdir -p "$local_dir"
 	remote_bytes=$(ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "stat -c %s $(printf '%q' "$remote_path")" 2>/dev/null || echo 0)
-	echo "[$(date)] ${label} 预计拉回大小: $(format_mib "$remote_bytes") MiB"
+	echo "[$(date)] ${label} estimated download size: $(format_mib "$remote_bytes") MiB"
 
 	tmp_local_path="${local_path}.tmp.$$"
 	rm -f "$tmp_local_path"
 	scp "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}:${remote_path}" "$tmp_local_path"
 	mv -f "$tmp_local_path" "$local_path"
 
-	echo "[$(date)] ${label} 保存到: $(abs_path "$local_path")"
+	echo "[$(date)] ${label} saved to: $(abs_path "$local_path")"
 	print_pull_stats "$local_path" "$label"
 }
 
@@ -110,8 +110,8 @@ pull_remote_release_executables() {
 		((total_bytes += bin_size))
 	done
 
-	echo "[$(date)] ${label} 预计拉回大小: $(format_mib "$total_bytes") MiB"
-	echo "[$(date)] 直接同步可执行 bin 到本地 target (${#remote_bins[@]} files)..."
+	echo "[$(date)] ${label} estimated download size: $(format_mib "$total_bytes") MiB"
+	echo "[$(date)] syncing executable bins directly to local target (${#remote_bins[@]} files)..."
 	stage_dir="${local_release_dir}/.pull-stage.$$"
 	rm -rf "$stage_dir"
 	mkdir -p "$stage_dir"
@@ -125,7 +125,7 @@ pull_remote_release_executables() {
 	done
 	rmdir "$stage_dir" 2>/dev/null || true
 
-	echo "[$(date)] ${label} 保存到: $(abs_path "$local_release_dir")"
+	echo "[$(date)] ${label} saved to: $(abs_path "$local_release_dir")"
 	print_pull_stats "$local_release_dir" "$label"
 }
 
@@ -133,21 +133,21 @@ ensure_remote_env() {
 	if [[ -n "$SKIP_REMOTE_ENV" ]]; then
 		return 0
 	fi
-	echo "[$(date)] 检测远程环境并安装缺失依赖..."
+	echo "[$(date)] checking remote environment and installing missing dependencies..."
 	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "bash -s" <<REMOTE_SCRIPT
 set -e
 export PATH="\$HOME/.cargo/bin:\$PATH"
 if ! command -v cargo &>/dev/null; then
-  echo "[remote] 未检测到 cargo，正在安装 rustup..."
+  echo "[remote] cargo not found, installing rustup..."
   curl -sSf https://sh.rustup.rs | sh -s -- -y -q --default-toolchain stable
   source "\$HOME/.cargo/env"
 fi
 if ! rustup target list --installed 2>/dev/null | grep -q '${TARGET}'; then
-  echo "[remote] 添加 target ${TARGET}..."
+  echo "[remote] adding target ${TARGET}..."
   rustup target add ${TARGET}
 fi
 if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
-  echo "[remote] 未检测到 aarch64-linux-gnu-gcc，正在安装..."
+  echo "[remote] aarch64-linux-gnu-gcc not found, installing..."
   if command -v apt-get &>/dev/null; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq && apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross
@@ -156,14 +156,14 @@ if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
   elif command -v yum &>/dev/null; then
     yum install -y gcc-aarch64-linux-gnu
   else
-    echo "[remote] 无法自动安装 gcc-aarch64-linux-gnu，请手动安装后重试"
+    echo "[remote] cannot auto-install gcc-aarch64-linux-gnu; install it manually and retry"
     exit 1
   fi
 fi
 # openssl-sys vendored 构建需要 perl、make
 for cmd in perl make; do
   if ! command -v \$cmd &>/dev/null; then
-    echo "[remote] 未检测到 \$cmd（openssl vendored 需要），正在安装..."
+    echo "[remote] \$cmd not found (required by vendored openssl); installing..."
     if command -v apt-get &>/dev/null; then
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq && apt-get install -y -qq \$cmd
@@ -174,7 +174,7 @@ for cmd in perl make; do
     fi
   fi
 done
-echo "[remote] 环境就绪"
+echo "[remote] environment ready"
 REMOTE_SCRIPT
 }
 
@@ -208,18 +208,19 @@ skill_to_bin() {
 
 usage() {
 	local exit_code="${1:-1}"
-	echo "用法: $0 [all|skill <技能名>|crate <包名>|dir]"
-	echo "  默认仅远程编译，并把 release 中的 bin 直接覆盖回本地 target/release（不拉非 release/非 bin 产物）。"
-	echo "  当前主机平台: ${HOST_OS}/${HOST_ARCH}，交叉目标: ${TARGET}"
-	echo "  all            - 编译整个 workspace"
-	echo "  skill <name>   - 仅编译指定技能，如: skill health_check"
-	echo "  crate <name>   - 仅编译指定包，如: crate clawd"
-	echo "  dir            - 指定目录上传/拉回，需环境变量："
-	echo "      UPLOAD_PATHS  本机相对路径，空格分隔"
-	echo "      BUILD_CMD    远程编译命令"
-	echo "      PULL_REMOTE  要拉回的远程路径（相对 REMOTE_DIR）"
-	echo "      PULL_LOCAL   保存到本机路径"
-	echo "  拉完整 release 产物: CROSS_PULL_ALL_ARTIFACTS=1 $0 all"
+	# zh: 打印云端远程交叉编译脚本的英文用法；中文说明保留在维护注释中。
+	echo "Usage: $0 [all|skill <skill-name>|crate <package-name>|dir]"
+	echo "  By default, builds remotely and copies release bins back to local target/release only."
+	echo "  Host platform: ${HOST_OS}/${HOST_ARCH}; cross target: ${TARGET}"
+	echo "  all            - build the whole workspace"
+	echo "  skill <name>   - build one skill, e.g. skill health_check"
+	echo "  crate <name>   - build one package, e.g. crate clawd"
+	echo "  dir            - upload/pull selected paths; requires environment variables:"
+	echo "      UPLOAD_PATHS  local relative paths, space-separated"
+	echo "      BUILD_CMD     remote build command"
+	echo "      PULL_REMOTE   remote path to pull back, relative to REMOTE_DIR"
+	echo "      PULL_LOCAL    local destination path"
+	echo "  Pull the full release artifacts: CROSS_PULL_ALL_ARTIFACTS=1 $0 all"
 	exit "$exit_code"
 }
 
@@ -228,14 +229,14 @@ PKG="$2"
 
 do_upload() {
 	if [[ -n "${UPLOAD_PATHS}" ]]; then
-		echo "[$(date)] 上传（仅指定路径）: ${UPLOAD_PATHS}"
+		echo "[$(date)] uploading selected paths only: ${UPLOAD_PATHS}"
 		cd "${LOCAL_SOURCE}"
 		rsync -az -R -e "${RSYNC_SSH}" \
 			"${RSYNC_PROGRESS_OPTS[@]}" \
 			$(for p in ${UPLOAD_PATHS}; do echo "./${p}"; done) \
 			"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 	else
-		echo "[$(date)] 上传（全部，排除 target/.git/UI/services/根 node_modules）"
+		echo "[$(date)] uploading full repo (excluding target/.git/UI/services/root node_modules)"
 		rsync -az --delete -e "${RSYNC_SSH}" \
 			"${RSYNC_PROGRESS_OPTS[@]}" \
 			--exclude 'target' \
@@ -251,7 +252,7 @@ do_upload() {
 case "$MODE" in
 all | skill | crate | dir)
 	if [[ "${CLEAN_REMOTE_TMP_FIRST}" != "0" ]]; then
-		echo "[$(date)] 清理远端临时构建目录: ${REMOTE_DIR}/target"
+		echo "[$(date)] cleaning remote temporary build directory: ${REMOTE_DIR}/target"
 		ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" \
 			"mkdir -p '${REMOTE_DIR}' && rm -rf '${REMOTE_DIR}/target' '${REMOTE_DIR}/tmp' '${REMOTE_DIR}/.cargo-lock' '${REMOTE_DIR}/.rustc_info.json'"
 	fi
@@ -269,7 +270,7 @@ all)
 	if [[ -n "${CROSS_PULL_ALL_ARTIFACTS}" ]]; then
 		RSYNC_EXCLUDE=(--exclude='deps/' --exclude='build/' --exclude='incremental/' --exclude='*.rlib' --exclude='*.d')
 		REMOTE_RELEASE_BYTES=$(ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "du -sb $(printf '%q' "${REMOTE_DIR}/target/${TARGET}/release") | cut -f1" 2>/dev/null || echo 0)
-		echo "[$(date)] release 预计拉回大小: $(format_mib "$REMOTE_RELEASE_BYTES") MiB"
+		echo "[$(date)] release estimated download size: $(format_mib "$REMOTE_RELEASE_BYTES") MiB"
 			echo "[$(date)] pulling full release directory (slower)..."
 			rsync -az -e "${RSYNC_SSH}" "${RSYNC_PROGRESS_OPTS[@]}" "${RSYNC_EXCLUDE[@]}" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/target/${TARGET}/release/" "${RELEASE_DIR}/"
 			echo "[$(date)] full release pull completed."
@@ -281,17 +282,17 @@ all)
 	;;
 skill)
 	[[ -z "$PKG" ]] && {
-		echo "错误: 请指定技能名"
+		echo "Error: skill name is required"
 		usage
 	}
 	BIN_NAME=$(skill_to_bin "$PKG")
 	[[ -z "$BIN_NAME" ]] && {
-		echo "错误: 未知技能名: $PKG"
+		echo "Error: unknown skill name: $PKG"
 		exit 1
 	}
-	echo "[$(date)] 远程交叉编译技能 ${BIN_NAME}（仅 release）..."
+	echo "[$(date)] remote cross-building skill ${BIN_NAME} (release only)..."
 	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && cargo build -p ${BIN_NAME} --release --target ${TARGET}"
-	echo "[$(date)] 正在拉取 release: ${BIN_NAME} ..."
+	echo "[$(date)] pulling release: ${BIN_NAME} ..."
 	pull_remote_file_direct \
 		"${REMOTE_DIR}/target/${TARGET}/release/${BIN_NAME}" \
 		"${LOCAL_RELEASE_DIR}/${BIN_NAME}" \
@@ -299,12 +300,12 @@ skill)
 	;;
 crate)
 	[[ -z "$PKG" ]] && {
-		echo "错误: 请指定包名"
+		echo "Error: package name is required"
 		usage
 	}
-	echo "[$(date)] 远程交叉编译 ${PKG}（仅 release）..."
+	echo "[$(date)] remote cross-building ${PKG} (release only)..."
 	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && cargo build -p ${PKG} --release --target ${TARGET}"
-	echo "[$(date)] 正在拉取 release: ${PKG} ..."
+	echo "[$(date)] pulling release: ${PKG} ..."
 	pull_remote_file_direct \
 		"${REMOTE_DIR}/target/${TARGET}/release/${PKG}" \
 		"${LOCAL_RELEASE_DIR}/${PKG}" \
@@ -312,10 +313,10 @@ crate)
 	;;
 dir)
 	[[ -z "${BUILD_CMD}" ]] && {
-		echo "错误: dir 模式必须设置 BUILD_CMD"
+		echo "Error: dir mode requires BUILD_CMD"
 		usage
 	}
-	echo "[$(date)] 远程执行: ${BUILD_CMD}"
+	echo "[$(date)] remote command: ${BUILD_CMD}"
 	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "${REMOTE_CARGO_ENV}${REMOTE_BINDGEN_ENV}cd ${REMOTE_DIR} && ${BUILD_CMD}"
 	if [[ -n "${PULL_REMOTE}" ]]; then
 		PULL_TO="${PULL_LOCAL:-.}"
@@ -326,13 +327,13 @@ dir)
 					"${RSYNC_PROGRESS_OPTS[@]}" \
 					"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${PULL_REMOTE}/" \
 					"${PULL_TO}/"
-				echo "[$(date)] 保存到: $(abs_path "${PULL_TO}")"
-			print_pull_stats "${PULL_TO}" "拉回"
+				echo "[$(date)] saved to: $(abs_path "${PULL_TO}")"
+			print_pull_stats "${PULL_TO}" "pullback"
 		else
 			pull_remote_file_direct \
 				"${REMOTE_DIR}/${PULL_REMOTE}" \
 				"${PULL_TO}" \
-				"拉回"
+				"pullback"
 		fi
 	fi
 	;;
@@ -340,7 +341,7 @@ dir)
 	usage 0
 	;;
 *)
-	echo "错误: 未知模式: $MODE"
+	echo "Error: unknown mode: $MODE"
 	usage
 	;;
 esac
