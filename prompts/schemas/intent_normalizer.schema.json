@@ -188,6 +188,7 @@
         "target_scope": {
           "type": "string",
           "enum": [
+            "none",
             "unknown",
             "system",
             "host",

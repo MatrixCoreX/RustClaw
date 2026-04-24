@@ -10,6 +10,7 @@ Primary entry point:
 - `bash scripts/nl_tests/run_suite.sh manual`
 - `bash scripts/nl_tests/run_suite.sh compound_single`
 - `bash scripts/nl_tests/run_suite.sh task_updates`
+- `bash scripts/nl_tests/run_suite.sh task_updates4`
 - `bash scripts/nl_tests/run_suite.sh multistep_mixed`
 - `bash scripts/nl_tests/run_suite.sh manual trace clarify`
 - `bash scripts/nl_tests/run_suite.sh self_extension`
@@ -38,6 +39,10 @@ Shared options are passed through to the underlying runners, for example:
 
 - `bash scripts/nl_tests/run_suite.sh manual --base-url http://127.0.0.1:8787`
 - `bash scripts/nl_tests/run_suite.sh --category multi_turn --chat-id 3000000`
+
+Runner output prints each user instruction and assistant answer as `PROMPT` / `REPLY`
+blocks by default. Use `--prompt-reply-only` when you want to suppress most
+diagnostic output and keep only those dialog blocks.
 
 Self-extension regressions:
 
@@ -114,6 +119,7 @@ Notes for `ops_http_repair`:
   - `nl_cases_text_match.txt`
   - `nl_cases_compound_single_language.txt`
   - `nl_cases_task_updates_single_language.txt`
+  - `nl_cases_task_updates_four_turn.txt`
   - `nl_cases_multistep_mixed_language.txt`
   - `nl_cases_clarify.txt`
   - `nl_cases_clarify_hard.txt`
@@ -138,6 +144,9 @@ suite|name|tags|prompt|expect=<substring>
   triage tooling.
 - Lines starting with `#` are comments; blank lines are ignored.
 - 4-field rows (`suite|name|tags|prompt`) remain backward compatible.
+- Multi-turn case files use `case_name|turn1|turn2|...`; use
+  `run_multi_turn_suite.sh --turn-count N` for custom turn counts such as
+  `nl_cases_task_updates_four_turn.txt`.
 - Additional test text files now also live here:
   - `regression_trace_ask_cases_real.txt`
   - `regression_trace_ask_cases_minimax_think.txt`

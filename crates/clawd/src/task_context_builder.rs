@@ -387,18 +387,17 @@ fn route_uses_structured_content_read(
     route_result: &RouteResult,
     intent_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> bool {
+    let has_concrete_locator = match route_result.output_contract.locator_kind {
+        crate::OutputLocatorKind::Filename
+        | crate::OutputLocatorKind::Path
+        | crate::OutputLocatorKind::Url => true,
+        crate::OutputLocatorKind::CurrentWorkspace => false,
+        crate::OutputLocatorKind::None => intent_surface.has_any_locator_reference(),
+    };
+
     route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
-        && matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::CurrentWorkspace
-                | crate::OutputLocatorKind::Url
-        )
-        || (route_result.output_contract.requires_content_evidence
-            && !route_result.output_contract.delivery_required
-            && intent_surface.has_any_locator_reference())
+        && has_concrete_locator
 }
 
 pub(crate) fn uses_light_execution_context_budget(
@@ -445,6 +444,11 @@ fn route_uses_structured_chat_wrapped_light_budget(
     if !route_result.ask_mode.finalize_chat_wrapped()
         || route_result.output_contract.delivery_required
         || !route_result.output_contract.requires_content_evidence
+    {
+        return false;
+    }
+    if route_result.output_contract.semantic_kind
+        == crate::OutputSemanticKind::WorkspaceProjectSummary
     {
         return false;
     }
@@ -1584,6 +1588,23 @@ mod tests {
     }
 
     #[test]
+    fn light_execution_budget_skips_workspace_project_summary() {
+        let mut route = base_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.resolved_intent =
+            "Summarize the current repository, focusing only on the UI components".to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+        assert!(!uses_light_execution_context_budget(
+            &route,
+            &route.resolved_intent
+        ));
+    }
+
+    #[test]
     fn light_execution_budget_detects_clarify_rewrite_bound_reads() {
         let mut route = base_route_result();
         route.resolved_intent = "Continue the previous request that was waiting for clarification: 读一下那个文件里的名字字段，只输出值\nUser now provides the missing target/content: package.json".to_string();
@@ -1624,6 +1645,43 @@ mod tests {
         assert!(!uses_light_execution_context_budget(
             &clarify,
             &clarify.resolved_intent
+        ));
+    }
+
+    #[test]
+    fn light_execution_budget_skips_unscoped_current_workspace_drafting_evidence() {
+        let mut route = base_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.resolved_intent =
+            "Write a short setup note grounded in the current workspace docs".to_string();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_hint.clear();
+
+        assert!(!uses_light_execution_context_budget(
+            &route,
+            &route.resolved_intent
+        ));
+    }
+
+    #[test]
+    fn light_execution_budget_skips_generic_current_workspace_hint_drafting_evidence() {
+        let mut route = base_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.resolved_intent =
+            "Write a short RustClaw setup note for the current workspace project".to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_hint = "rustclaw workspace".to_string();
+
+        assert!(!uses_light_execution_context_budget(
+            &route,
+            &route.resolved_intent
         ));
     }
 }

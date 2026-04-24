@@ -299,10 +299,10 @@ if prompt_reply_only:
     for line in text.splitlines() or [""]:
         print(line)
 else:
-    print("  [user]")
+    print("  [PROMPT]")
     for line in prompt.splitlines() or [""]:
         print(f"    {line}")
-    print("  [assistant]")
+    print("  [REPLY]")
     for line in text.splitlines() or [""]:
         print(f"    {line}")
 PY
@@ -720,7 +720,7 @@ run_one_case() {
       echo "[EXPECT]      ${expect_substr}"
     fi
     echo "[PROMPT]      $prompt"
-    echo "[USER]"
+    echo "[PROMPT]"
     printf '  %s\n' "$prompt"
   fi
 
