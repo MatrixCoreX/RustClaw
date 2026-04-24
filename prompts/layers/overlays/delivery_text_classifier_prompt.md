@@ -19,7 +19,7 @@ Decision policy:
 2) `is_meta_instruction=false` when the text is substantive user-facing content, a concrete result, grounded not-found outcome, file token, or explicit completion result.
 3) `publishable=true` when the text carries meaningful user-facing information: concrete result, explanation, extracted value(s), structured output, file token, or actionable outcome.
 4) `publishable=false` when the text is mostly trivial acknowledgement/status filler, planner/internal artifact, or non-informative completion noise.
-5) Judge by semantics and communicative role, not by deterministic keyword matching.
+5) Judge by semantics and communicative role, not by fixed keyword matching.
 6) Be conservative:
    - if uncertain about `is_meta_instruction`, prefer `false`
    - if uncertain about `publishable`, prefer `true`

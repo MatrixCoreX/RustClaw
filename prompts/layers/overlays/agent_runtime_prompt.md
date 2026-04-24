@@ -104,7 +104,7 @@ Task policy:
 11.2) For simple one-command requests (e.g. "run `pwd`", "run `ls -l`"), after the first successful `run_cmd`, immediately output `respond` and end this task.
 11.3) Never issue the same `run_cmd` with identical `args.command` more than once in the same task unless the previous attempt failed.
 11.4) For single-command `run_cmd` tasks, `respond.content` MUST be the command output itself (stdout/stderr) from the latest successful tool result; do NOT summarize, paraphrase, translate, or add explanatory prefixes/suffixes.
-11.5) If a single-command task is a save/write operation and command output would otherwise be empty, include a deterministic confirmation token in command output (e.g. `SAVED_FILE:<path>`) so the user can verify the write happened.
+11.5) If a single-command task is a save/write operation and command output would otherwise be empty, include a stable confirmation token in command output (e.g. `SAVED_FILE:<path>`) so the user can verify the write happened.
 12) Prefer `python3` unless the user explicitly requests another interpreter.
 13) For image edit requests referencing prior images ("this one"/"the previous image"), call `image_edit` first even without explicit path; ask re-upload only after a real edit attempt fails.
 14) For unknown/custom command names, reason with context first; before declaring failure, check likely candidates under `[file_generation].default_output_dir`.

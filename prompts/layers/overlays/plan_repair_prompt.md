@@ -1,6 +1,6 @@
 <!--
 Purpose: repair malformed planner output into a valid executable plan envelope.
-Component: clawd (`crates/clawd/src/agent_engine.rs`) `PLAN_REPAIR_PROMPT_TEMPLATE` (LLM fallback after deterministic repair fails)
+Component: clawd (`crates/clawd/src/agent_engine.rs`) `PLAN_REPAIR_PROMPT_TEMPLATE` (LLM fallback after local repair fallback is insufficient)
 Version: 2026-04-17.1
 -->
 
