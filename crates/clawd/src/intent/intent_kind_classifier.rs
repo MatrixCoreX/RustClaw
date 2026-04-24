@@ -38,7 +38,7 @@ pub(crate) fn classify_inline_structured_transform_with_surface(
         FallbackIntentKindClassification {
             routed_mode: RoutedMode::Act,
             wants_file_delivery: false,
-            reason: "deterministic_inline_structured_transform",
+            reason: "surface_inline_structured_transform",
             source: IntentKindDecisionSource::Structured,
         },
     )
@@ -78,7 +78,7 @@ pub(crate) fn classify_explicit_locator_fallback_with_surface(
     FallbackIntentKindClassification {
         routed_mode,
         wants_file_delivery,
-        reason: "deterministic_explicit_locator_fallback",
+        reason: "surface_explicit_locator_fallback",
         source,
     }
 }
@@ -233,7 +233,7 @@ mod tests {
         )
         .expect("inline structured transform should classify");
         assert_eq!(out.routed_mode, RoutedMode::Act);
-        assert_eq!(out.reason, "deterministic_inline_structured_transform");
+        assert_eq!(out.reason, "surface_inline_structured_transform");
         assert_eq!(out.source, IntentKindDecisionSource::Structured);
         assert!(!out.wants_file_delivery);
     }

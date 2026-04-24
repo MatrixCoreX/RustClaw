@@ -2608,12 +2608,12 @@ pub(super) async fn plan_round_actions(
             "plan_repair_required task_id={} round={} reason={}",
             task.task_id, loop_state.round_no, repair_reason
         );
-        // Phase 1.1: LLM 修复之前先尝试确定性兜底
+        // Phase 1.1: LLM 修复之前先尝试本地兜底
         // (`synthesize_plan_repair_fallback_actions`)。命中时直接复用，避免
         // 一次（可能两次）的 `plan_repair_prompt` LLM 调用。
-        // 只有在确定性合成"找不到可用模式"或产物仍被判定需要修复时，
+        // 只有在本地兜底找不到可用模式或产物仍被判定需要修复时，
         // 才回退到原先的 LLM 修复链路。
-        let deterministic_hit = synthesize_plan_repair_fallback_actions(
+        let local_fallback_hit = synthesize_plan_repair_fallback_actions(
             loop_state,
             route_result,
             user_text,
@@ -2635,15 +2635,15 @@ pub(super) async fn plan_round_actions(
         .filter(|(actions, _)| {
             !should_force_actionable_plan_repair(state, route_result, loop_state, actions)
         });
-        if let Some((deterministic_actions, deterministic_raw_plan)) = deterministic_hit {
+        if let Some((local_fallback_actions, local_fallback_raw_plan)) = local_fallback_hit {
             info!(
-                "plan_repair_deterministic_hit task_id={} round={} reason={}",
+                "plan_repair_local_fallback_hit task_id={} round={} reason={}",
                 task.task_id, loop_state.round_no, repair_reason
             );
             (
-                deterministic_actions,
+                local_fallback_actions,
                 PlanKind::Repair,
-                deterministic_raw_plan,
+                local_fallback_raw_plan,
             )
         } else {
             match repair_plan_actions(

@@ -412,7 +412,7 @@ pub(crate) fn uses_light_execution_context_budget(
     }
     let intent = route_result.resolved_intent.trim();
     let intent_surface = crate::intent::surface_signals::analyze_prompt_surface(intent);
-    if route_uses_deterministic_chat_wrapped_light_budget(route_result, &intent_surface) {
+    if route_uses_structured_chat_wrapped_light_budget(route_result, &intent_surface) {
         return true;
     }
     if !route_result.ask_mode.is_plain_act() {
@@ -440,7 +440,7 @@ pub(crate) fn uses_light_execution_context_budget(
         || has_requested_slice_or_count
 }
 
-fn route_uses_deterministic_chat_wrapped_light_budget(
+fn route_uses_structured_chat_wrapped_light_budget(
     route_result: &RouteResult,
     intent_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> bool {
@@ -1552,7 +1552,7 @@ mod tests {
     }
 
     #[test]
-    fn light_execution_budget_detects_deterministic_chat_wrapped_content_reads() {
+    fn light_execution_budget_detects_structured_chat_wrapped_content_reads() {
         let mut read_range = base_route_result();
         read_range.routed_mode = crate::RoutedMode::ChatAct;
         read_range.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
@@ -1598,7 +1598,7 @@ mod tests {
     }
 
     #[test]
-    fn light_execution_budget_skips_non_deterministic_chat_wrapped_or_clarify_routes() {
+    fn light_execution_budget_skips_non_structured_chat_wrapped_or_clarify_routes() {
         let mut chat_act = base_route_result();
         chat_act.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
         chat_act.resolved_intent = "比较这两个文件大小，然后一句话总结".to_string();
