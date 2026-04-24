@@ -13,7 +13,7 @@ SHOW_RSYNC_PROGRESS="${SHOW_RSYNC_PROGRESS:-1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
-REMOTE_USER="${REMOTE_USER:-testuser}"
+REMOTE_USER="${REMOTE_USER:-${USER:-rustclaw}}"
 REMOTE_HOST="${REMOTE_HOST:-192.168.31.162}"
 if [[ -z "${REMOTE_SSH_KEY}" ]]; then
 	if [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
@@ -22,7 +22,7 @@ if [[ -z "${REMOTE_SSH_KEY}" ]]; then
 		REMOTE_SSH_KEY="${HOME}/.ssh/id_rsa"
 	fi
 fi
-REMOTE_DIR="${REMOTE_DIR:-/tmp/rustclaw-cross-build}"
+REMOTE_DIR="${REMOTE_DIR:-${HOME}/rust_cross_build}"
 LOCAL_SOURCE="${SCRIPT_DIR}"
 LOCAL_OUTPUT="${SCRIPT_DIR}"
 TARGET="${TARGET:-${RUSTCLAW_CROSS_TARGET:-aarch64-unknown-linux-gnu}}"

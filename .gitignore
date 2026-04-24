@@ -16,6 +16,8 @@
 /scripts/nl_suite_logs/
 /skill_develop/.cache/
 **/*.log
+__pycache__/
+*.pyc
 
 # =============================================================================
 # Node / frontend

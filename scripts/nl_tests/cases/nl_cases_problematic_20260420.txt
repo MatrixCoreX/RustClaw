@@ -44,7 +44,7 @@ manual|followup_switch_dir_then_ordinal_first|count_overrun,list_limit|先列出
 
 # Fixed on 2026-04-21.
 # Original symptom: turn1 internal normalizer still tried to bind "那个 model io log" to stale
-# historical path `/tmp/rustclaw-workspace/.../model_io.log`, then only after runtime guard
+# historical local workspace path ending in `/model_io.log`, then only after runtime guard
 # backed off to clarify.
 # Root cause and fix:
 # - fresh deictic clarify guard already prevented wrong user-visible execution

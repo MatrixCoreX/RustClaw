@@ -257,7 +257,7 @@ mod tests {
             pid: 1,
             rss_bytes: Some(1024),
             comm: "feishud".to_string(),
-            args: "/Users/test/git_upload/target/release/feishud".to_string(),
+            args: "/tmp/rustclaw-workspace/target/release/feishud".to_string(),
         };
         assert!(process_name_matches(&direct, "feishud"));
 
@@ -286,7 +286,7 @@ mod tests {
                 pid: 41,
                 rss_bytes: Some(1024),
                 comm: "telegramd".to_string(),
-                args: "/Users/test/git_upload/target/release/telegramd".to_string(),
+                args: "/tmp/rustclaw-workspace/target/release/telegramd".to_string(),
             },
             ProcessSnapshot {
                 pid: 42,
@@ -299,7 +299,7 @@ mod tests {
                 pid: 43,
                 rss_bytes: Some(1024),
                 comm: "telegramd".to_string(),
-                args: "/Users/test/git_upload/target/release/telegramd".to_string(),
+                args: "/tmp/rustclaw-workspace/target/release/telegramd".to_string(),
             },
         ];
 

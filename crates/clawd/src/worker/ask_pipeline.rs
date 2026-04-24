@@ -620,14 +620,7 @@ fn current_workspace_locator_resolution(
 }
 
 fn should_attempt_auto_locator(route_result: &crate::RouteResult) -> bool {
-    if route_result.needs_clarify
-        && (route_result
-            .route_reason
-            .starts_with("fresh_deictic_missing_locator:")
-            || route_result
-                .route_reason
-                .starts_with("stateful_ordered_entry_ambiguous_clarify:"))
-    {
+    if route_result.needs_clarify {
         return false;
     }
     matches!(
@@ -1176,13 +1169,13 @@ mod tests {
     }
 
     #[test]
-    fn auto_locator_skips_fresh_deictic_clarify_routes() {
+    fn auto_locator_skips_clarify_routes() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::AskClarify,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
             resolved_intent: "读一下那个 README 开头，然后一句话总结".to_string(),
             needs_clarify: true,
-            route_reason: "fresh_deictic_missing_locator:content_read".to_string(),
+            route_reason: "normalizer requested clarification before execution".to_string(),
             route_confidence: Some(0.95),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
