@@ -113,7 +113,7 @@ Options:
   --dir <path>     Install to custom directory
   --deploy-ui-nginx [path]   Deploy UI to path (default: auto-detect per OS), configure nginx, reload nginx
   --no-deploy-ui   Skip nginx config and UI deploy (launcher only)
-  --pi-app         Configure Pi App: desktop shortcut + autostart on login (RustClaw 小屏)
+  --pi-app         Configure Pi App: desktop shortcut + autostart on login (RustClaw small screen)
   -h, --help       Show this help
 
 Default: install launcher and deploy UI to nginx (config nginx, copy UI, reload nginx). Default path is auto-detected per OS. Use --no-deploy-ui to skip UI/nginx.
@@ -928,12 +928,14 @@ echo "  bash uninstall-rustclaw-cmd.sh [--user|--dir <path>]"
 if [[ "$CONFIGURE_PI_APP" == "1" ]]; then
   PI_APP_DIR="$SCRIPT_DIR/pi_app"
   if [[ -d "$PI_APP_DIR" && -x "$PI_APP_DIR/install-desktop.sh" && -x "$PI_APP_DIR/enable-autostart.sh" ]]; then
+    # zh: 可选安装树莓派小屏桌面入口和开机自启。
     echo
     echo "Configuring Pi App: desktop shortcut + autostart..."
     (cd "$PI_APP_DIR" && bash install-desktop.sh)
     (cd "$PI_APP_DIR" && bash enable-autostart.sh)
-    echo "Pi App: 桌面快捷方式已创建，开机自启已启用。"
+    echo "Pi App: desktop shortcut created and autostart enabled."
   else
+    # zh: pi_app 脚本不存在或不可执行时，只跳过小屏集成，不影响主命令安装。
     echo "Skip Pi App: $PI_APP_DIR not found or scripts not executable."
   fi
 fi

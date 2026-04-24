@@ -134,21 +134,8 @@ for bin in "${REQUIRED_BINS[@]}"; do
   cp -R "$(resolve_release_bin "$bin")" "$STAGE_PROJECT_DIR/target/release/$bin"
 done
 
-echo "[4.5/6] Add usage note (开盒即用)..."
-cat > "$STAGE_PROJECT_DIR/使用说明.txt" <<'USAGE'
-RustClaw 运行时包 — 解压即用
-
-1) 解压后进入本目录。
-2) 首次运行前请根据 configs/ 配置渠道（如 Telegram/WhatsApp）与模型等。
-3) 启动方式任选其一：
-   - ./start-all.sh <vendor> <model> release [channels]
-     例：./start-all.sh openai gpt-4o release telegram
-   - ./rustclaw -start release all --quick
-   - 仅后端：./start-all-bin.sh release
-4) 停止：./stop-rustclaw.sh
-5) 数据与日志：data/（数据库）、logs/（运行日志）。
-6) 树莓派小屏（可选）：见 pi_app/ 内脚本与 README；也可用 ./install-rustclaw-cmd.sh --pi-app 配置桌面与自启。
-USAGE
+# zh: 发布包内只生成英文 USAGE.txt，避免运行时/交付物混用多语言输出。
+echo "[4.5/6] Add usage note (ready to run)..."
 cat > "$STAGE_PROJECT_DIR/USAGE.txt" <<'USAGE_EN'
 RustClaw runtime package — ready to run
 

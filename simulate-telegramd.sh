@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# zh: 本地模拟 telegramd 向 clawd 提交 ask/run_skill 任务，便于手动调试通道请求。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,13 +16,14 @@ WAIT_SECONDS="60"
 BASE_URL=""
 
 usage() {
+# zh: 打印模拟请求脚本的参数说明；运行时保持英文输出。
   cat <<'EOF'
 Usage:
   ./simulate-telegramd.sh [options]
 
 Modes:
   1) Ask mode (default):
-     ./simulate-telegramd.sh --text "帮我生成一个拟人小龙虾矿工挖矿的图片"
+     ./simulate-telegramd.sh --text "Generate an image of a cartoon lobster miner digging in a mine"
 
   2) Run-skill mode:
      ./simulate-telegramd.sh --kind run_skill --skill image_generate --skill-args '{"prompt":"A lobster miner","size":"1024x1024"}'

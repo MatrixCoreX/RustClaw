@@ -79,7 +79,7 @@ log_list() {
 	local -a items=("$@")
 	local item
 	if [[ "${#items[@]}" -eq 0 ]]; then
-		log "${label}: 无"
+		log "${label}: none"
 		return 0
 	fi
 	log "${label} (${#items[@]}):"
@@ -106,7 +106,7 @@ abs_path() {
 
 require_command() {
 	local cmd="$1"
-	command -v "$cmd" >/dev/null 2>&1 || die "缺少命令: $cmd"
+	command -v "$cmd" >/dev/null 2>&1 || die "missing command: $cmd"
 }
 
 configure_rsync_progress_opts() {
@@ -131,38 +131,38 @@ PY
 		RSYNC_PROGRESS_OPTS=(--info=progress2 --human-readable)
 	else
 		RSYNC_PROGRESS_OPTS=(--progress)
-		warn "检测到较老版本 rsync，进度显示已降级为 --progress"
+		warn "older rsync detected; progress display downgraded to --progress"
 	fi
 }
 
 usage() {
 	local exit_code="${1:-1}"
 	cat <<EOF
-用法: $0 [选项] [all|crate <package>|dir <repo-relative-dir>]
+Usage: $0 [options] [all|crate <package>|dir <repo-relative-dir>]
 
-模式:
-  all             本机交叉编译整个 workspace，并上传运行目录到树莓派
-  crate <package> 本机交叉编译指定 package，并上传运行目录到树莓派
-  dir <dir>       上传指定目录，并附带运行/测试常用依赖文件
+Modes:
+  all             Cross-build the whole workspace locally and upload runtime files to Raspberry Pi
+  crate <package> Cross-build one package locally and upload runtime files to Raspberry Pi
+  dir <dir>       Upload a selected directory with common runtime/test dependencies
 
-命令行选项:
-  --user USER          远端用户名
-  --host HOST          远端地址
-  --key PATH           可选，手动指定 SSH 私钥路径
-  --remote-dir DIR     远端部署目录
+Options:
+  --user USER          Remote username
+  --host HOST          Remote host
+  --key PATH           Optional SSH private key path
+  --remote-dir DIR     Remote deployment directory
 
-常用环境变量:
+Common environment variables:
   REMOTE_USER/REMOTE_HOST/REMOTE_SSH_KEY/REMOTE_DIR
-  BUILD_CMD               dir 模式下，本机额外执行的构建命令
-  BINARIES                需一并上传到远端 target/release 的二进制，支持空格/换行与 shell 引号
-  EXTRA_INCLUDE_PATHS     额外上传的 repo 相对路径，支持空格/换行与 shell 引号
-  SYNC_SKILL_DOCS_BEFORE_BUILD=0  all 模式下关闭技能文档同步
-  BUILD_UI_DIST_BEFORE_UPLOAD=0   all 模式下关闭 UI/dist 构建
-  SHOW_RSYNC_PROGRESS=0   关闭 rsync 进度
-  SYNC_DELETE=1           上传时对远端执行 rsync --delete
-  SKIP_UI_DIST=1          不构建也不上传 UI/dist
+  BUILD_CMD               Extra local build command for dir mode
+  BINARIES                Binaries to upload to remote target/release; supports spaces/newlines and shell quoting
+  EXTRA_INCLUDE_PATHS     Extra repo-relative paths to upload; supports spaces/newlines and shell quoting
+  SYNC_SKILL_DOCS_BEFORE_BUILD=0  Disable skill-doc sync in all mode
+  BUILD_UI_DIST_BEFORE_UPLOAD=0   Disable UI/dist build in all mode
+  SHOW_RSYNC_PROGRESS=0   Disable rsync progress
+  SYNC_DELETE=1           Run rsync --delete on remote upload
+  SKIP_UI_DIST=1          Do not build or upload UI/dist
 
-示例:
+Examples:
   $0 all
   $0 crate clawd
   BUILD_CMD='cargo build -p clawd --release --target ${TARGET}' BINARIES='clawd' $0 dir crates/clawd
@@ -174,22 +174,22 @@ parse_args() {
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 		--user)
-			[[ $# -ge 2 ]] || die "--user 需要参数"
+			[[ $# -ge 2 ]] || die "--user requires an argument"
 			REMOTE_USER="$2"
 			shift 2
 			;;
 		--host)
-			[[ $# -ge 2 ]] || die "--host 需要参数"
+			[[ $# -ge 2 ]] || die "--host requires an argument"
 			REMOTE_HOST="$2"
 			shift 2
 			;;
 		--key)
-			[[ $# -ge 2 ]] || die "--key 需要参数"
+			[[ $# -ge 2 ]] || die "--key requires an argument"
 			REMOTE_SSH_KEY="$2"
 			shift 2
 			;;
 		--remote-dir)
-			[[ $# -ge 2 ]] || die "--remote-dir 需要参数"
+			[[ $# -ge 2 ]] || die "--remote-dir requires an argument"
 			REMOTE_DIR="$2"
 			shift 2
 			;;
@@ -200,14 +200,14 @@ parse_args() {
 			MODE="$1"
 			shift
 			if [[ "${MODE}" == "crate" || "${MODE}" == "dir" ]]; then
-				[[ $# -ge 1 ]] || die "${MODE} 模式缺少参数"
+				[[ $# -ge 1 ]] || die "${MODE} mode requires an argument"
 				ARG2="$1"
 				shift
 			fi
 			break
 			;;
 		*)
-			die "未知参数: $1"
+			die "unknown argument: $1"
 			;;
 		esac
 	done
@@ -228,25 +228,25 @@ ensure_cargo() {
 	if command -v cargo >/dev/null 2>&1; then
 		return 0
 	fi
-	log "本机未检测到 cargo，正在安装 rustup..."
+	log "cargo not found locally, installing rustup..."
 	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 	if [[ -f "${HOME}/.cargo/env" ]]; then
 		# shellcheck source=/dev/null
 		source "${HOME}/.cargo/env"
 	fi
-	command -v cargo >/dev/null 2>&1 || die "cargo 安装失败，请手动执行: source \$HOME/.cargo/env"
+	command -v cargo >/dev/null 2>&1 || die "cargo installation failed; run manually: source \$HOME/.cargo/env"
 }
 
 ensure_npm() {
 	if command -v npm >/dev/null 2>&1; then
 		return 0
 	fi
-	die "未检测到 npm，请先安装 Node.js/npm，或设置 BUILD_UI_DIST_BEFORE_UPLOAD=0 / SKIP_UI_DIST=1"
+	die "npm not found; install Node.js/npm first, or set BUILD_UI_DIST_BEFORE_UPLOAD=0 / SKIP_UI_DIST=1"
 }
 
 ensure_rust_target() {
 	if ! rustup target list --installed 2>/dev/null | grep -q "^${TARGET}\$"; then
-		log "添加 Rust target: ${TARGET}"
+		log "adding Rust target: ${TARGET}"
 		rustup target add "${TARGET}"
 	fi
 }
@@ -260,7 +260,7 @@ ensure_homebrew() {
 	elif [[ -x /usr/local/bin/brew ]]; then
 		eval "$(/usr/local/bin/brew shellenv)"
 	fi
-	command -v brew >/dev/null 2>&1 || die "macOS 需要先安装 Homebrew"
+	command -v brew >/dev/null 2>&1 || die "Homebrew must be installed on macOS"
 }
 
 brew_install_if_missing() {
@@ -276,10 +276,10 @@ ensure_ubuntu_packages() {
 	local -a packages=("$@")
 	local sudo_cmd=()
 	if [[ "${EUID}" -ne 0 ]]; then
-		command -v sudo >/dev/null 2>&1 || die "Ubuntu 安装依赖需要 sudo"
+		command -v sudo >/dev/null 2>&1 || die "sudo is required to install dependencies on Ubuntu"
 		sudo_cmd=(sudo)
 	fi
-	log "安装 Ubuntu 交叉编译依赖: ${packages[*]}"
+	log "installing Ubuntu cross-build dependencies: ${packages[*]}"
 	"${sudo_cmd[@]}" apt-get update -qq
 	"${sudo_cmd[@]}" apt-get install -y -qq "${packages[@]}"
 }
@@ -297,54 +297,54 @@ ensure_local_cross_dependencies() {
 	macos)
 		ensure_homebrew
 		if ! xcode-select -p >/dev/null 2>&1; then
-			die "macOS 需要先安装 Xcode Command Line Tools"
+			die "Xcode Command Line Tools must be installed on macOS"
 		fi
 		brew tap messense/macos-cross-toolchains >/dev/null 2>&1 || true
 		brew_install_if_missing aarch64-unknown-linux-gnu
 		brew_install_if_missing perl
 		;;
 	linux)
-		command -v apt-get >/dev/null 2>&1 || die "当前仅自动支持 Ubuntu/Debian 安装交叉编译依赖"
+		command -v apt-get >/dev/null 2>&1 || die "automatic cross-build dependency installation currently supports only Ubuntu/Debian"
 		ensure_ubuntu_packages gcc-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config make perl clang libclang-dev
 		;;
 	*)
-		die "不支持的本机系统: $HOST_OS"
+		die "unsupported local OS: $HOST_OS"
 		;;
 	esac
 }
 
 prepare_runtime_assets() {
-	log_phase "1/6 准备运行资源"
+	log_phase "1/6 Prepare runtime assets"
 
 	if [[ "${MODE}" != "all" ]]; then
-		log "当前模式不是 all，跳过完整运行资源准备"
+		log "mode is not all; skipping full runtime asset preparation"
 		return 0
 	fi
 
 	if [[ "${SYNC_SKILL_DOCS_BEFORE_BUILD}" == "1" ]]; then
-		log "同步技能文档: scripts/sync_skill_docs.py"
+		log "syncing skill docs: scripts/sync_skill_docs.py"
 		python3 "${SCRIPT_DIR}/scripts/sync_skill_docs.py"
 	else
-		log "已按配置跳过技能文档同步"
+		log "skill-doc sync skipped by configuration"
 	fi
 
 	if [[ "${SKIP_UI_DIST}" == "1" ]]; then
-		log "已按配置跳过 UI/dist 构建与上传"
+		log "UI/dist build and upload skipped by configuration"
 		return 0
 	fi
 
 	if [[ "${BUILD_UI_DIST_BEFORE_UPLOAD}" != "1" ]]; then
-		log "已按配置跳过 UI/dist 构建，将直接使用现有产物"
+		log "UI/dist build skipped by configuration; using existing artifacts"
 		return 0
 	fi
 
 	if [[ ! -d "${SCRIPT_DIR}/UI" ]]; then
-		warn "UI 目录不存在，已跳过 UI/dist 构建"
+		warn "UI directory does not exist; skipped UI/dist build"
 		return 0
 	fi
 
 	ensure_npm
-	log "构建 UI/dist: build-ui-nginx.sh --build"
+	log "building UI/dist: build-ui-nginx.sh --build"
 	bash "${SCRIPT_DIR}/build-ui-nginx.sh" --build
 }
 
@@ -369,8 +369,8 @@ detect_cross_gcc() {
 
 setup_cross_env() {
 	local cross_gcc cross_bin_dir cross_bin_prefix gcc_include_dir gcc_sysroot target_include_dir extra_args
-	cross_gcc="$(detect_cross_gcc)" || die "未找到 aarch64 交叉编译 gcc，请先安装依赖"
-	log "交叉编译工具链: ${cross_gcc}"
+	cross_gcc="$(detect_cross_gcc)" || die "aarch64 cross-build gcc not found; install dependencies first"
+	log "cross-build toolchain: ${cross_gcc}"
 
 	export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${cross_gcc}"
 	export CC_aarch64_unknown_linux_gnu="${cross_gcc}"
@@ -407,8 +407,8 @@ setup_cross_env() {
 		export BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu="${extra_args}"
 	fi
 
-	log "交叉编译环境已设置: host=${HOST_OS}/${HOST_ARCH}, target=${TARGET}, profile=${BUILD_PROFILE}"
-	log "本地产物目录: ${LOCAL_TARGET_RELEASE_DIR}"
+	log "cross-build environment configured: host=${HOST_OS}/${HOST_ARCH}, target=${TARGET}, profile=${BUILD_PROFILE}"
+	log "local artifact directory: ${LOCAL_TARGET_RELEASE_DIR}"
 }
 
 load_cargo_metadata() {
@@ -417,7 +417,7 @@ load_cargo_metadata() {
 	fi
 	mkdir -p "${SCRIPT_DIR}/target"
 	RUSTCLAW_CARGO_METADATA_FILE="$(mktemp "${SCRIPT_DIR}/target/local-cross-build-cargo-metadata.XXXXXX")"
-	log "生成 cargo metadata 缓存: ${RUSTCLAW_CARGO_METADATA_FILE}"
+	log "generating cargo metadata cache: ${RUSTCLAW_CARGO_METADATA_FILE}"
 	cargo metadata --format-version 1 > "${RUSTCLAW_CARGO_METADATA_FILE}"
 }
 
@@ -474,7 +474,7 @@ for pkg in data.get("packages", []):
         print(name)
     sys.exit(0)
 
-print(f"未找到 package: {package_name}", file=sys.stderr)
+print(f"package not found: {package_name}", file=sys.stderr)
 sys.exit(1)
 PY
 }
@@ -504,7 +504,7 @@ for pkg in data.get("packages", []):
         break
 
 if start_id is None:
-    print(f"未找到 package: {package_name}", file=sys.stderr)
+    print(f"package not found: {package_name}", file=sys.stderr)
     sys.exit(1)
 
 stack = [start_id]
@@ -579,13 +579,13 @@ copy_repo_rel_into_stage() {
 	local dest_parent
 
 	if [[ ! -e "${src}" ]]; then
-		warn "跳过缺失路径: ${repo_rel}"
+		warn "skipping missing path: ${repo_rel}"
 		return 0
 	fi
 
 	dest_parent="${STAGE_ROOT}/RustClaw/$(dirname "${repo_rel}")"
 	mkdir -p "${dest_parent}"
-	log "加入 staging: ${repo_rel}"
+	log "adding to staging: ${repo_rel}"
 	rsync -a "${src}" "${dest_parent}/"
 }
 
@@ -601,7 +601,7 @@ raw = os.environ.get("LIST_RAW", "")
 try:
     items = shlex.split(raw, posix=True)
 except ValueError as exc:
-    print(f"列表解析失败: {exc}", file=sys.stderr)
+    print(f"list parsing failed: {exc}", file=sys.stderr)
     raise SystemExit(1)
 
 for item in items:
@@ -624,9 +624,9 @@ ensure_repo_relative_dir() {
 	local abs_input repo_prefix
 	abs_input="$(abs_path "${SCRIPT_DIR}/${input_path}")"
 	repo_prefix="${SCRIPT_DIR}/"
-	[[ -d "${abs_input}" ]] || die "目录不存在: ${input_path}"
+	[[ -d "${abs_input}" ]] || die "directory does not exist: ${input_path}"
 	if [[ "${abs_input}" != "${SCRIPT_DIR}" && "${abs_input}" != ${repo_prefix}* ]]; then
-		die "dir 模式只接受仓库内目录: ${input_path}"
+		die "dir mode only accepts directories inside the repository: ${input_path}"
 	fi
 }
 
@@ -634,15 +634,15 @@ copy_binaries_into_stage() {
 	local -a binaries=("$@")
 	local bin
 	if [[ "${#binaries[@]}" -eq 0 ]]; then
-		log "无需附带二进制"
+		log "no binaries to include"
 		return 0
 	fi
 
 	mkdir -p "${STAGE_ROOT}/RustClaw/target/release"
 	for bin in "${binaries[@]}"; do
 		[[ -n "${bin}" ]] || continue
-		[[ -x "${LOCAL_TARGET_RELEASE_DIR}/${bin}" ]] || die "缺少交叉编译产物: ${LOCAL_TARGET_RELEASE_DIR}/${bin}"
-		log "加入二进制: ${bin}"
+		[[ -x "${LOCAL_TARGET_RELEASE_DIR}/${bin}" ]] || die "missing cross-build artifact: ${LOCAL_TARGET_RELEASE_DIR}/${bin}"
+		log "adding binary: ${bin}"
 		rsync -a "${LOCAL_TARGET_RELEASE_DIR}/${bin}" "${STAGE_ROOT}/RustClaw/target/release/${bin}"
 	done
 }
@@ -650,7 +650,7 @@ copy_binaries_into_stage() {
 prepare_stage_root() {
 	STAGE_ROOT="$(mktemp -d)"
 	mkdir -p "${STAGE_ROOT}/RustClaw"
-	log "创建 staging 目录: ${STAGE_ROOT}"
+	log "creating staging directory: ${STAGE_ROOT}"
 }
 
 copy_runtime_base_paths() {
@@ -688,11 +688,11 @@ copy_runtime_base_paths() {
 	local path
 
 	if [[ "${INCLUDE_RUNTIME_BASE}" != "1" ]]; then
-		log "已跳过运行基础文件集"
+		log "runtime base file set skipped"
 		return 0
 	fi
 
-	log "加入运行基础文件集"
+	log "adding runtime base file set"
 	for path in "${paths[@]}"; do
 		copy_repo_rel_into_stage "${path}"
 	done
@@ -701,10 +701,10 @@ copy_runtime_base_paths() {
 		if [[ -f "${SCRIPT_DIR}/UI/dist/index.html" ]]; then
 			copy_repo_rel_into_stage "UI/dist"
 		else
-			warn "UI/dist 不存在，已跳过前端构建产物"
+			warn "UI/dist does not exist; skipped frontend build artifacts"
 		fi
 	else
-		log "已按配置跳过 UI/dist"
+		log "UI/dist skipped by configuration"
 	fi
 }
 
@@ -714,22 +714,22 @@ sync_stage_to_remote() {
 		rsync_delete_opt=(--delete)
 	fi
 
-	log_phase "5/6 上传到远端"
+	log_phase "5/6 Upload to remote"
 
-	log "确保远端目录存在: ${REMOTE_DIR}"
+	log "ensuring remote directory exists: ${REMOTE_DIR}"
 	remote_exec "mkdir -p $(printf '%q' "${REMOTE_DIR}")"
 
-	log "同步 staging 到树莓派: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}"
+	log "syncing staging to Raspberry Pi: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}"
 	rsync -az -e "${RSYNC_SSH}" \
 		"${RSYNC_PROGRESS_OPTS[@]}" \
 		"${rsync_delete_opt[@]}" \
 		"${STAGE_ROOT}/RustClaw/" \
 		"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 
-	log_phase "6/6 远端检查"
-	log "远端目录大小:"
+	log_phase "6/6 Remote verification"
+	log "remote directory size:"
 	remote_exec "du -sh $(printf '%q' "${REMOTE_DIR}") 2>/dev/null || true"
-	log "远端 target/release 内容:"
+	log "remote target/release contents:"
 	remote_exec "ls -lh $(printf '%q' "${REMOTE_DIR}/target/release") 2>/dev/null || true"
 }
 
@@ -750,36 +750,36 @@ main() {
 	fi
 	configure_rsync_progress_opts
 
-	log_phase "0/6 任务概览"
-	log "部署参数: mode=${MODE}, host=${REMOTE_USER}@${REMOTE_HOST}, remote_dir=${REMOTE_DIR}"
-	log "构建参数: target=${TARGET}, profile=${BUILD_PROFILE}, host_os=${HOST_OS}, host_arch=${HOST_ARCH}"
-	log "上传选项: include_runtime_base=${INCLUDE_RUNTIME_BASE}, auto_include_workspace_deps=${AUTO_INCLUDE_WORKSPACE_DEPS}, skip_ui_dist=${SKIP_UI_DIST}, sync_delete=${SYNC_DELETE}"
-	log "完整部署选项: sync_skill_docs_before_build=${SYNC_SKILL_DOCS_BEFORE_BUILD}, build_ui_dist_before_upload=${BUILD_UI_DIST_BEFORE_UPLOAD}"
+	log_phase "0/6 Task overview"
+	log "deployment options: mode=${MODE}, host=${REMOTE_USER}@${REMOTE_HOST}, remote_dir=${REMOTE_DIR}"
+	log "build options: target=${TARGET}, profile=${BUILD_PROFILE}, host_os=${HOST_OS}, host_arch=${HOST_ARCH}"
+	log "upload options: include_runtime_base=${INCLUDE_RUNTIME_BASE}, auto_include_workspace_deps=${AUTO_INCLUDE_WORKSPACE_DEPS}, skip_ui_dist=${SKIP_UI_DIST}, sync_delete=${SYNC_DELETE}"
+	log "full deployment options: sync_skill_docs_before_build=${SYNC_SKILL_DOCS_BEFORE_BUILD}, build_ui_dist_before_upload=${BUILD_UI_DIST_BEFORE_UPLOAD}"
 	if [[ -n "${REMOTE_SSH_KEY}" ]]; then
-		log "SSH 私钥: ${REMOTE_SSH_KEY}"
+		log "SSH private key: ${REMOTE_SSH_KEY}"
 	fi
 
 	prepare_runtime_assets
 
 	case "${MODE}" in
 	all)
-		log_phase "2/6 检查依赖与环境"
+		log_phase "2/6 Check dependencies and environment"
 		ensure_local_cross_dependencies
 		setup_cross_env
-		log_phase "3/6 执行构建"
-		log "本机交叉编译整个 workspace (${TARGET})..."
+		log_phase "3/6 Run build"
+		log "cross-building the whole workspace locally (${TARGET})..."
 		cargo build --workspace --release --target "${TARGET}"
 		bins_raw="$(workspace_bins_raw)"
 		array_from_string_lines binaries "${bins_raw}"
 		;;
 	crate)
-		[[ -n "${ARG2}" ]] || die "crate 模式必须指定 package 名"
+		[[ -n "${ARG2}" ]] || die "crate mode requires a package name"
 		package_name="${ARG2}"
-		log_phase "2/6 检查依赖与环境"
+		log_phase "2/6 Check dependencies and environment"
 		ensure_local_cross_dependencies
 		setup_cross_env
-		log_phase "3/6 执行构建"
-		log "本机交叉编译 package: ${package_name} (${TARGET})..."
+		log_phase "3/6 Run build"
+		log "cross-building package locally: ${package_name} (${TARGET})..."
 		cargo build -p "${package_name}" --release --target "${TARGET}"
 		bins_raw="$(package_bins_raw "${package_name}")"
 		array_from_string_lines binaries "${bins_raw}"
@@ -789,17 +789,17 @@ main() {
 		fi
 		;;
 	dir)
-		[[ -n "${ARG2}" ]] || die "dir 模式必须指定仓库内目录"
+		[[ -n "${ARG2}" ]] || die "dir mode requires a repository directory"
 		repo_rel_dir="${ARG2}"
 		ensure_repo_relative_dir "${repo_rel_dir}"
 
 		build_cmd="${BUILD_CMD:-}"
 		if [[ -n "${build_cmd}" ]]; then
-			log_phase "2/6 检查依赖与环境"
+			log_phase "2/6 Check dependencies and environment"
 			ensure_local_cross_dependencies
 			setup_cross_env
-			log_phase "3/6 执行构建"
-			log "执行本机构建命令: ${build_cmd}"
+			log_phase "3/6 Run build"
+			log "running local build command: ${build_cmd}"
 			(
 				cd "${SCRIPT_DIR}"
 				eval "${build_cmd}"
@@ -814,27 +814,27 @@ main() {
 		if [[ "${AUTO_INCLUDE_WORKSPACE_DEPS}" == "1" ]]; then
 			package_from_dir="$(package_name_for_dir "${repo_rel_dir}")"
 			if [[ -n "${package_from_dir}" ]]; then
-				log "dir 模式自动识别 package: ${package_from_dir}"
+				log "dir mode auto-detected package: ${package_from_dir}"
 				dep_dirs_raw="$(package_workspace_dirs_raw "${package_from_dir}")"
 				array_from_string_lines dep_dirs "${dep_dirs_raw}"
 			fi
 		fi
 		;;
 	*)
-		die "未知模式: ${MODE}"
+		die "unknown mode: ${MODE}"
 		;;
 	esac
 
-	log_list "待上传二进制" "${binaries[@]}"
-	log_list "自动附带的 workspace 目录" "${dep_dirs[@]}"
+	log_list "binaries to upload" "${binaries[@]}"
+	log_list "auto-included workspace directories" "${dep_dirs[@]}"
 	if [[ -n "${repo_rel_dir}" ]]; then
-		log "显式上传目录: ${repo_rel_dir}"
+		log "explicit upload directory: ${repo_rel_dir}"
 	fi
 	if [[ -n "${EXTRA_INCLUDE_PATHS:-}" ]]; then
-		log "额外附带路径: ${EXTRA_INCLUDE_PATHS}"
+		log "extra included paths: ${EXTRA_INCLUDE_PATHS}"
 	fi
 
-	log_phase "4/6 打包 staging"
+	log_phase "4/6 Package staging"
 	prepare_stage_root
 	copy_runtime_base_paths
 
@@ -854,7 +854,7 @@ main() {
 	copy_binaries_into_stage "${binaries[@]}"
 	sync_stage_to_remote
 
-	log "完成。远端目录: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}"
+	log "done. Remote directory: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}"
 }
 
 main "$@"

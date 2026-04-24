@@ -55,16 +55,16 @@ remote_exec() {
 # 统计并打印拉回产物大小（目录或单个文件）
 print_pull_stats() {
 	local dest="$1"
-	local label="${2:-拉回}"
+	local label="${2:-pullback}"
 	if [[ ! -e "$dest" ]]; then
-		echo "[$(date)] ${label}: 路径不存在 $dest"
+		echo "[$(date)] ${label}: path does not exist: $dest"
 		return
 	fi
 	if [[ -d "$dest" ]]; then
 		local total
 		total=$(du -sh "$dest" 2>/dev/null | cut -f1)
-		echo "[$(date)] ${label} 总大小: ${total}"
-		echo "[$(date)] 文件列表（不含 deps/build/*.rlib/*.d）:"
+		echo "[$(date)] ${label} total size: ${total}"
+		echo "[$(date)] file list (excluding deps/build/*.rlib/*.d):"
 		find "$dest" -maxdepth 1 -type f \( ! -name '*.rlib' ! -name '*.d' \) -exec ls -lh {} \; 2>/dev/null | while read -r line; do echo "  $line"; done
 	else
 		ls -lh "$dest" 2>/dev/null | while read -r line; do echo "[$(date)] ${label}: $line"; done
@@ -74,17 +74,17 @@ print_pull_stats() {
 pull_remote_file_direct() {
 	local remote_path="$1"
 	local local_path="$2"
-	local label="${3:-拉回}"
+	local label="${3:-pullback}"
 	local local_dir remote_bytes
 
 	local_dir="$(dirname "$local_path")"
 	mkdir -p "$local_dir"
 	remote_bytes=$(remote_exec "if [[ \"\$(uname -s)\" == \"Darwin\" ]]; then stat -f %z $(printf '%q' "$remote_path"); else stat -c %s $(printf '%q' "$remote_path"); fi" 2>/dev/null || echo 0)
-	echo "[$(date)] ${label} 预计拉回大小: $(format_mib "$remote_bytes") MiB"
+	echo "[$(date)] ${label} estimated download size: $(format_mib "$remote_bytes") MiB"
 
 	scp "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}:${remote_path}" "$local_path"
 
-	echo "[$(date)] ${label} 保存到: $(abs_path "$local_path")"
+	echo "[$(date)] ${label} saved to: $(abs_path "$local_path")"
 	print_pull_stats "$local_path" "$label"
 }
 
@@ -116,20 +116,20 @@ pull_remote_release_executables() {
 		((total_bytes += bin_size))
 	done
 
-	echo "[$(date)] ${label} 预计拉回大小: $(format_mib "$total_bytes") MiB"
-	echo "[$(date)] 直接同步可执行 bin 到本地 target (${#remote_bins[@]} files)..."
+	echo "[$(date)] ${label} estimated download size: $(format_mib "$total_bytes") MiB"
+	echo "[$(date)] syncing executable bins directly to local target (${#remote_bins[@]} files)..."
 	rsync -az -e "${RSYNC_SSH}" \
 		"${RSYNC_PROGRESS_OPTS[@]}" \
 		--files-from=<(printf '%s\n' "${remote_bins[@]}") \
 		"${REMOTE_USER}@${REMOTE_HOST}:${remote_release_dir}/" \
 		"${local_release_dir}/"
 
-	echo "[$(date)] ${label} 保存到: $(abs_path "$local_release_dir")"
+	echo "[$(date)] ${label} saved to: $(abs_path "$local_release_dir")"
 	print_pull_stats "$local_release_dir" "$label"
 }
 
 ensure_remote_dir() {
-	echo "[$(date)] 确保远端构建目录存在: ${REMOTE_DIR}"
+	echo "[$(date)] ensuring remote build directory exists: ${REMOTE_DIR}"
 	remote_exec "mkdir -p $(printf '%q' "${REMOTE_DIR}")"
 }
 
@@ -137,7 +137,7 @@ ensure_remote_env() {
 	if [[ -n "$SKIP_REMOTE_ENV" ]]; then
 		return 0
 	fi
-	echo "[$(date)] 检测远程环境并安装缺失依赖..."
+	echo "[$(date)] checking remote environment and installing missing dependencies..."
 	ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "bash -s" <<REMOTE_SCRIPT
 set -e
 export PATH="\$HOME/.cargo/bin:\$PATH"
@@ -151,7 +151,7 @@ if [[ "\$REMOTE_OS" == "Darwin" ]]; then
     fi
   fi
 fi
-echo "[remote] 检测到系统: \$REMOTE_OS"
+echo "[remote] detected OS: \$REMOTE_OS"
 brew_install_with_lock_retry() {
   local formula="\$1"
   local max_attempts="\${2:-30}"
@@ -162,11 +162,11 @@ brew_install_with_lock_retry() {
   local log_file=""
   while (( attempt <= max_attempts )); do
     if brew list --versions "\$formula" >/dev/null 2>&1; then
-      echo "[remote] brew 包已存在: \$formula"
+      echo "[remote] brew package already installed: \$formula"
       return 0
     fi
     echo "[remote] brew install \$formula (attempt \$attempt/\$max_attempts)"
-    echo "[remote] 以下为 brew 实时输出："
+    echo "[remote] streaming brew output:"
     log_file="\$(mktemp)"
     set +e
     brew install "\$formula" 2>&1 | tee "\$log_file"
@@ -180,7 +180,7 @@ brew_install_with_lock_retry() {
     fi
     if grep -qi 'already locked' <<<"\$output"; then
       wait_total=\$((wait_total + sleep_seconds))
-      echo "[remote] Homebrew 正在被其他进程占用（已等待 \${wait_total}s，重试 \$attempt/\$max_attempts），\${sleep_seconds}s 后继续..."
+      echo "[remote] Homebrew is locked by another process (waited \${wait_total}s, retry \$attempt/\$max_attempts); retrying in \${sleep_seconds}s..."
       sleep "\$sleep_seconds"
       ((attempt += 1))
       continue
@@ -188,27 +188,27 @@ brew_install_with_lock_retry() {
     printf '%s\n' "\$output" >&2
     return \$status
   done
-  echo "[remote] brew install \$formula 超时：长时间被其他 Homebrew 进程占用，疑似卡死。" >&2
-  echo "[remote] 请到远端检查 brew 进程是否卡住，例如：" >&2
+  echo "[remote] brew install \$formula timed out because Homebrew stayed locked for too long." >&2
+  echo "[remote] Check whether a brew process is stuck on the remote host, for example:" >&2
   echo "[remote]   ps aux | grep '[b]rew'" >&2
-  echo "[remote] 如果确认是僵死/卡死进程，先结束它，再重新运行脚本。" >&2
+  echo "[remote] If the process is stuck, terminate it first and rerun this script." >&2
   [[ -n "\$log_file" && -f "\$log_file" ]] && rm -f "\$log_file"
   return 1
 }
 if ! command -v cargo &>/dev/null; then
-  echo "[remote] 未检测到 cargo，正在安装 rustup..."
+  echo "[remote] cargo not found, installing rustup..."
   curl -sSf https://sh.rustup.rs | sh -s -- -y -q --default-toolchain stable
   source "\$HOME/.cargo/env"
 fi
 if ! rustup target list --installed 2>/dev/null | grep -q '${TARGET}'; then
-  echo "[remote] 添加 target ${TARGET}..."
+  echo "[remote] adding target ${TARGET}..."
   rustup target add ${TARGET}
 fi
 if ! command -v aarch64-linux-gnu-gcc &>/dev/null && ! command -v aarch64-unknown-linux-gnu-gcc &>/dev/null; then
-  echo "[remote] 未检测到 aarch64-linux-gnu-gcc，正在安装..."
+  echo "[remote] aarch64-linux-gnu-gcc not found, installing..."
   if [[ "\$REMOTE_OS" == "Darwin" ]]; then
     if ! command -v brew &>/dev/null; then
-      echo "[remote] macOS 未检测到 Homebrew，请先安装 brew 后重试"
+      echo "[remote] Homebrew not found on macOS; install brew and retry"
       exit 1
     fi
     brew tap messense/macos-cross-toolchains
@@ -225,23 +225,23 @@ if ! command -v aarch64-linux-gnu-gcc &>/dev/null && ! command -v aarch64-unknow
   elif command -v yum &>/dev/null; then
     yum install -y gcc-aarch64-linux-gnu
   else
-    echo "[remote] 无法自动安装 gcc-aarch64-linux-gnu，请手动安装后重试"
+    echo "[remote] cannot auto-install gcc-aarch64-linux-gnu; install it manually and retry"
     exit 1
   fi
 fi
 if ! command -v aarch64-linux-gnu-gcc &>/dev/null && ! command -v aarch64-unknown-linux-gnu-gcc &>/dev/null; then
-  echo "[remote] 依赖安装完成后仍未找到 aarch64-linux-gnu-gcc，请检查交叉工具链 PATH"
+  echo "[remote] aarch64-linux-gnu-gcc is still missing after dependency installation; check cross-toolchain PATH"
   exit 1
 fi
 # openssl-sys vendored 构建需要 perl、make
 for cmd in perl make; do
   if ! command -v \$cmd &>/dev/null; then
-    echo "[remote] 未检测到 \$cmd（openssl vendored 需要），正在安装..."
+    echo "[remote] \$cmd not found (required by vendored openssl); installing..."
     if [[ "\$REMOTE_OS" == "Darwin" ]]; then
       if [[ "\$cmd" == "perl" ]]; then
         brew_install_with_lock_retry perl
       else
-        echo "[remote] macOS 未找到 \$cmd，请先安装 Xcode Command Line Tools 或手动补齐后重试"
+        echo "[remote] \$cmd not found on macOS; install Xcode Command Line Tools or provide it manually and retry"
         exit 1
       fi
     elif command -v apt-get &>/dev/null; then
@@ -254,7 +254,7 @@ for cmd in perl make; do
     fi
   fi
 done
-echo "[remote] 环境就绪"
+echo "[remote] environment ready"
 REMOTE_SCRIPT
 }
 
@@ -344,25 +344,26 @@ for manifest in manifests:
         print(name)
     sys.exit(0)
 
-print(f"错误: 未找到 crate/package: {package_name}", file=sys.stderr)
+print(f"Error: crate/package not found: {package_name}", file=sys.stderr)
 sys.exit(1)
 PY
 }
 
 usage() {
 	local exit_code="${1:-1}"
-	echo "用法: $0 [all|skill <技能名>|crate <包名>|dir]"
-	echo "  默认仅远程编译，并把 release 中的 bin 直接覆盖回本地 target/release（不拉非 release/非 bin 产物）。"
-	echo "  当前主机平台: ${HOST_OS}/${HOST_ARCH}，交叉目标: ${TARGET}"
-	echo "  all            - 编译整个 workspace"
-	echo "  skill <name>   - 仅编译指定技能，如: skill health_check"
-	echo "  crate <name>   - 仅编译指定包，如: crate clawd"
-	echo "  dir            - 指定目录上传/拉回，需环境变量："
-	echo "      UPLOAD_PATHS  本机相对路径，空格分隔"
-	echo "      BUILD_CMD    远程编译命令"
-	echo "      PULL_REMOTE  要拉回的远程路径（相对 REMOTE_DIR）"
-	echo "      PULL_LOCAL   保存到本机路径"
-	echo "  拉完整 release 产物: CROSS_PULL_ALL_ARTIFACTS=1 $0 all"
+	# zh: 打印远程交叉编译脚本的英文用法；中文说明保留在维护注释中。
+	echo "Usage: $0 [all|skill <skill-name>|crate <package-name>|dir]"
+	echo "  By default, builds remotely and copies release bins back to local target/release only."
+	echo "  Host platform: ${HOST_OS}/${HOST_ARCH}; cross target: ${TARGET}"
+	echo "  all            - build the whole workspace"
+	echo "  skill <name>   - build one skill, e.g. skill health_check"
+	echo "  crate <name>   - build one package, e.g. crate clawd"
+	echo "  dir            - upload/pull selected paths; requires environment variables:"
+	echo "      UPLOAD_PATHS  local relative paths, space-separated"
+	echo "      BUILD_CMD     remote build command"
+	echo "      PULL_REMOTE   remote path to pull back, relative to REMOTE_DIR"
+	echo "      PULL_LOCAL    local destination path"
+	echo "  Pull the full release artifacts: CROSS_PULL_ALL_ARTIFACTS=1 $0 all"
 	exit "$exit_code"
 }
 
@@ -372,14 +373,14 @@ PKG="$2"
 do_upload() {
 	ensure_remote_dir
 	if [[ -n "${UPLOAD_PATHS}" ]]; then
-		echo "[$(date)] 上传（仅指定路径）: ${UPLOAD_PATHS}"
+		echo "[$(date)] uploading selected paths only: ${UPLOAD_PATHS}"
 		cd "${LOCAL_SOURCE}"
 		rsync -az -R -e "${RSYNC_SSH}" \
 			"${RSYNC_PROGRESS_OPTS[@]}" \
 			$(for p in ${UPLOAD_PATHS}; do echo "./${p}"; done) \
 			"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 	else
-		echo "[$(date)] 上传（全部，排除 target/.git/UI/services/根 node_modules）"
+		echo "[$(date)] uploading full repo (excluding target/.git/UI/services/root node_modules)"
 		rsync -az --delete -e "${RSYNC_SSH}" \
 			"${RSYNC_PROGRESS_OPTS[@]}" \
 			--exclude 'target' \
@@ -395,7 +396,7 @@ do_upload() {
 case "$MODE" in
 all | skill | crate | dir)
 	if [[ "${CLEAN_REMOTE_TMP_FIRST}" != "0" ]]; then
-		echo "[$(date)] 清理远端临时构建目录: ${REMOTE_DIR}/target"
+		echo "[$(date)] cleaning remote temporary build directory: ${REMOTE_DIR}/target"
 		remote_exec "mkdir -p $(printf '%q' "${REMOTE_DIR}") && rm -rf $(printf '%q' "${REMOTE_DIR}/target") $(printf '%q' "${REMOTE_DIR}/tmp") $(printf '%q' "${REMOTE_DIR}/.cargo-lock") $(printf '%q' "${REMOTE_DIR}/.rustc_info.json")"
 	fi
 	do_upload
@@ -412,7 +413,7 @@ all)
 	if [[ -n "${CROSS_PULL_ALL_ARTIFACTS}" ]]; then
 		RSYNC_EXCLUDE=(--exclude='deps/' --exclude='build/' --exclude='incremental/' --exclude='*.rlib' --exclude='*.d')
 		REMOTE_RELEASE_BYTES=$(remote_exec "if du -sb $(printf '%q' "${REMOTE_DIR}/target/${TARGET}/release") >/dev/null 2>&1; then du -sb $(printf '%q' "${REMOTE_DIR}/target/${TARGET}/release") | cut -f1; else du -sk $(printf '%q' "${REMOTE_DIR}/target/${TARGET}/release") | awk '{print \$1 * 1024}'; fi" 2>/dev/null || echo 0)
-		echo "[$(date)] release 预计拉回大小: $(format_mib "$REMOTE_RELEASE_BYTES") MiB"
+		echo "[$(date)] release estimated download size: $(format_mib "$REMOTE_RELEASE_BYTES") MiB"
 			echo "[$(date)] pulling full release directory (slower)..."
 			rsync -az -e "${RSYNC_SSH}" "${RSYNC_PROGRESS_OPTS[@]}" "${RSYNC_EXCLUDE[@]}" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/target/${TARGET}/release/" "${RELEASE_DIR}/"
 			echo "[$(date)] full release pull completed."
@@ -424,17 +425,17 @@ all)
 	;;
 skill)
 	[[ -z "$PKG" ]] && {
-		echo "错误: 请指定技能名"
+		echo "Error: skill name is required"
 		usage
 	}
 	BIN_NAME=$(skill_to_bin "$PKG")
 	[[ -z "$BIN_NAME" ]] && {
-		echo "错误: 未知技能名: $PKG"
+		echo "Error: unknown skill name: $PKG"
 		exit 1
 	}
-	echo "[$(date)] 远程交叉编译技能 ${BIN_NAME}（仅 release）..."
+	echo "[$(date)] remote cross-building skill ${BIN_NAME} (release only)..."
 	remote_exec "${REMOTE_CARGO_ENV}${REMOTE_TOOLCHAIN_ENV}${REMOTE_BINDGEN_ENV}cd $(printf '%q' "${REMOTE_DIR}") && cargo build -p ${BIN_NAME} --release --target ${TARGET}"
-	echo "[$(date)] 正在拉取 release: ${BIN_NAME} ..."
+	echo "[$(date)] pulling release: ${BIN_NAME} ..."
 	pull_remote_file_direct \
 		"${REMOTE_DIR}/target/${TARGET}/release/${BIN_NAME}" \
 		"${LOCAL_RELEASE_DIR}/${BIN_NAME}" \
@@ -442,18 +443,18 @@ skill)
 	;;
 crate)
 	[[ -z "$PKG" ]] && {
-		echo "错误: 请指定包名"
+		echo "Error: package name is required"
 		usage
 	}
 	BIN_NAMES_RAW="$(crate_to_bins "$PKG")"
 	array_from_string_lines BIN_NAMES "$BIN_NAMES_RAW"
 	[[ "${#BIN_NAMES[@]}" -eq 0 ]] && {
-		echo "错误: crate ${PKG} 没有可拉回的 bin 目标"
+		echo "Error: crate ${PKG} has no binary target to pull back"
 		exit 1
 	}
-	echo "[$(date)] 远程交叉编译 ${PKG}（仅 release）..."
+	echo "[$(date)] remote cross-building ${PKG} (release only)..."
 	remote_exec "${REMOTE_CARGO_ENV}${REMOTE_TOOLCHAIN_ENV}${REMOTE_BINDGEN_ENV}cd $(printf '%q' "${REMOTE_DIR}") && cargo build -p ${PKG} --release --target ${TARGET}"
-	echo "[$(date)] 正在拉取 crate ${PKG} 的 release bin: ${BIN_NAMES[*]} ..."
+	echo "[$(date)] pulling release bins for crate ${PKG}: ${BIN_NAMES[*]} ..."
 	for bin_name in "${BIN_NAMES[@]}"; do
 		pull_remote_file_direct \
 			"${REMOTE_DIR}/target/${TARGET}/release/${bin_name}" \
@@ -463,10 +464,10 @@ crate)
 	;;
 dir)
 	[[ -z "${BUILD_CMD}" ]] && {
-		echo "错误: dir 模式必须设置 BUILD_CMD"
+		echo "Error: dir mode requires BUILD_CMD"
 		usage
 	}
-	echo "[$(date)] 远程执行: ${BUILD_CMD}"
+	echo "[$(date)] remote command: ${BUILD_CMD}"
 	remote_exec "${REMOTE_CARGO_ENV}${REMOTE_TOOLCHAIN_ENV}${REMOTE_BINDGEN_ENV}cd $(printf '%q' "${REMOTE_DIR}") && ${BUILD_CMD}"
 	if [[ -n "${PULL_REMOTE}" ]]; then
 		PULL_TO="${PULL_LOCAL:-.}"
@@ -477,13 +478,13 @@ dir)
 					"${RSYNC_PROGRESS_OPTS[@]}" \
 					"${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${PULL_REMOTE}/" \
 					"${PULL_TO}/"
-				echo "[$(date)] 保存到: $(abs_path "${PULL_TO}")"
-			print_pull_stats "${PULL_TO}" "拉回"
+				echo "[$(date)] saved to: $(abs_path "${PULL_TO}")"
+			print_pull_stats "${PULL_TO}" "pullback"
 		else
 			pull_remote_file_direct \
 				"${REMOTE_DIR}/${PULL_REMOTE}" \
 				"${PULL_TO}" \
-				"拉回"
+				"pullback"
 		fi
 	fi
 	;;
@@ -491,7 +492,7 @@ dir)
 	usage 0
 	;;
 *)
-	echo "错误: 未知模式: $MODE"
+	echo "Error: unknown mode: $MODE"
 	usage
 	;;
 esac

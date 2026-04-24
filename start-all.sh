@@ -82,18 +82,18 @@ cfg = tomllib.loads(raw)
 llm = cfg.get("llm") or {}
 section = llm.get(vendor)
 if not isinstance(section, dict):
-    print(f"Error: 配置中未找到 [llm.{vendor}]", file=sys.stderr)
+    print(f"Error: [llm.{vendor}] not found in config", file=sys.stderr)
     sys.exit(1)
 
 model = model_arg or str(section.get("model") or "").strip()
 if not model:
-    print(f"Error: [llm.{vendor}] 的 model 为空", file=sys.stderr)
+    print(f"Error: [llm.{vendor}] model is empty", file=sys.stderr)
     sys.exit(1)
 
 llm_section_re = re.compile(r"^\[llm\]\s*$", re.MULTILINE)
 match = llm_section_re.search(raw)
 if not match:
-    print("Error: 未找到 [llm] 段", file=sys.stderr)
+    print("Error: [llm] section not found", file=sys.stderr)
     sys.exit(1)
 
 start = match.end()

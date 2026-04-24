@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# zh: 启动 clawd 并使用已构建的 UI 资源；适合本地快速打开 Web 控制台。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,6 +18,7 @@ case "$PROFILE" in
   release)
     ;;
   *)
+    # zh: 目前只支持 release 模式，避免用户误以为会自动构建 debug 产物。
     echo "Usage: ./start-clawd-ui.sh [release]"
     exit 1
     ;;
