@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "archive-basic-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -194,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "audio-synthesize-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "audio-transcribe-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "browser-web-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -531,7 +531,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claw-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "config",
  "regex",
@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "clawcli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "clap 4.6.0",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "clawd"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "argon2",
@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "config-guard-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "crypto-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -787,7 +787,7 @@ checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
 name = "db-basic-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -852,7 +852,7 @@ dependencies = [
 
 [[package]]
 name = "doc-parse-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "regex",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "docker-basic-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -958,7 +958,7 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "extension-manager-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "claw-core",
@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "feishud"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -1063,7 +1063,7 @@ dependencies = [
 
 [[package]]
 name = "fs-search-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -1211,7 +1211,7 @@ dependencies = [
 
 [[package]]
 name = "git-basic-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -1288,7 +1288,7 @@ dependencies = [
 
 [[package]]
 name = "health-check-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -1357,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "http-basic-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -1663,7 +1663,7 @@ dependencies = [
 
 [[package]]
 name = "image-edit-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "image-generate-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1693,7 +1693,7 @@ dependencies = [
 
 [[package]]
 name = "image-vision-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1727,7 +1727,7 @@ dependencies = [
 
 [[package]]
 name = "install-module-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -1821,7 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "kb-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "claw-core",
@@ -1844,7 +1844,7 @@ dependencies = [
 
 [[package]]
 name = "larkd"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -1943,7 +1943,7 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "log-analyze-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -1958,7 +1958,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "map-merchant-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -2189,7 +2189,7 @@ dependencies = [
 
 [[package]]
 name = "package-manager-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -2321,7 +2321,7 @@ dependencies = [
 
 [[package]]
 name = "photo-organize-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2432,7 +2432,7 @@ dependencies = [
 
 [[package]]
 name = "process-basic-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -2881,7 +2881,7 @@ dependencies = [
 
 [[package]]
 name = "rss-fetch-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -3289,7 +3289,7 @@ dependencies = [
 
 [[package]]
 name = "service-control-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -3370,7 +3370,7 @@ checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
 name = "skill-runner"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -3424,7 +3424,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stock-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "encoding_rs",
@@ -3526,7 +3526,7 @@ dependencies = [
 
 [[package]]
 name = "system-basic-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -3570,7 +3570,7 @@ checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
 
 [[package]]
 name = "task-control-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -3581,7 +3581,7 @@ dependencies = [
 
 [[package]]
 name = "telegramd"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "claw-core",
@@ -4057,7 +4057,7 @@ dependencies = [
 
 [[package]]
 name = "transform-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -4380,7 +4380,7 @@ dependencies = [
 
 [[package]]
 name = "weather-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -4392,7 +4392,7 @@ dependencies = [
 
 [[package]]
 name = "web-search-extract-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "regex",
@@ -4424,7 +4424,7 @@ dependencies = [
 
 [[package]]
 name = "webd"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -4456,7 +4456,7 @@ dependencies = [
 
 [[package]]
 name = "wechat-ilink"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "aes",
  "axum",
@@ -4475,7 +4475,7 @@ dependencies = [
 
 [[package]]
 name = "wechatd"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -4496,7 +4496,7 @@ dependencies = [
 
 [[package]]
 name = "whatsapp_webd"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -4509,7 +4509,7 @@ dependencies = [
 
 [[package]]
 name = "whatsappd"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -4973,7 +4973,7 @@ checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
 
 [[package]]
 name = "x-skill"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "serde",
