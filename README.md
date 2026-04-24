@@ -297,7 +297,7 @@ Useful endpoints:
 
 Focused long-tail closed-loop entries:
 
-- `bash scripts/nl_tests/run_suite.sh ops_deterministic`
+- `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
 - `bash scripts/nl_tests/run_suite.sh long_tail_flows`
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
 
@@ -336,7 +336,7 @@ RustClaw currently ships a broad skill set. Representative groups:
 - files and developer tools: `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
 - network and content: `http_basic`, `rss_fetch`, `browser_web`, `doc_parse`, `transform`, `web_search_extract`
 - multimodal: `image_generate`, `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize`
-- domain skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`, `chat`, `x`
+- domain skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`, `x`
 
 If you need to answer “how is this skill configured / bound / enabled, and what prerequisite is missing”, start with `prompts/references/skill_setup_guide.md`.
 
@@ -384,7 +384,7 @@ It reads health status from `clawd`, so start the backend first.
 - if you only want to refresh the static UI site, use `build-ui-nginx.sh` or `deploy-ui-nginx.sh`
 - if you are integrating skills, run `python3 scripts/sync_skill_docs.py` explicitly; startup scripts no longer sync skill docs for you
 - many helper and regression scripts live in `scripts/`
-- for the deterministic local `ops_closed_loop` regression stack, run `bash scripts/regression_ops_closed_loop_deterministic.sh`
+- for the local `ops_closed_loop` regression stack, run `bash scripts/regression_ops_closed_loop.sh`
 
 ## License
 

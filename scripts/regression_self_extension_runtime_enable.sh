@@ -27,7 +27,7 @@ Usage:
   bash scripts/regression_self_extension_runtime_enable.sh [--workspace-root DIR] [--port PORT] [--wait-seconds N] [--keep-workspace] [--clawd-bin PATH]
 
 This regression creates an isolated temporary workspace, enables developer-mode
-self-extension gates there, then verifies the deterministic backend chain:
+self-extension gates there, then verifies the local backend chain:
 
   scaffold_external_skill -> validate_external_skill -> register_external_skill
   -> enable_external_skill -> admin reload-skills -> run_skill(new skill)

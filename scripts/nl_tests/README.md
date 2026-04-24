@@ -14,7 +14,7 @@ Primary entry point:
 - `bash scripts/nl_tests/run_suite.sh manual trace clarify`
 - `bash scripts/nl_tests/run_suite.sh self_extension`
 - `bash scripts/nl_tests/run_suite.sh sensitive_flows`
-- `bash scripts/nl_tests/run_suite.sh ops_deterministic`
+- `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
 - `bash scripts/nl_tests/run_suite.sh long_tail_flows`
 - `bash scripts/nl_tests/run_suite.sh --category multi_turn`
@@ -47,7 +47,7 @@ Self-extension regressions:
 
 Notes for `self_extension`:
 
-- Stage 1 is deterministic and does not depend on provider availability.
+- Stage 1 is local backend validation and does not depend on provider availability.
 - Stage 2 verifies natural-language `ask -> self_extension` handoff.
 - If the provider is unavailable, stage 2 is reported as `SKIP` instead of a product failure.
 
@@ -64,12 +64,12 @@ Notes for `sensitive_flows`:
 
 Long-tail regressions:
 
-- `bash scripts/nl_tests/run_suite.sh ops_deterministic`
+- `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
 - `bash scripts/nl_tests/run_suite.sh long_tail_flows`
 - `bash scripts/regression_long_tail_nl_flows.sh`
 - `bash scripts/regression_ops_http_repair_nl_flows.sh`
-- `bash scripts/regression_ops_closed_loop_deterministic.sh`
+- `bash scripts/regression_ops_closed_loop.sh`
 
 Notes for `long_tail_flows`:
 
@@ -77,8 +77,8 @@ Notes for `long_tail_flows`:
 - Keeps source-controlled NL examples in `scripts/nl_tests/cases/nl_cases_long_tail_flows.txt`.
 - Uses an isolated temp workspace plus a temporary local HTTP demo service, then cleans the process and workspace after the run.
 - Logs are written under `scripts/nl_suite_logs/long_tail_flows/<timestamp>/`.
-- `scripts/regression_ops_closed_loop_deterministic.sh` is the complementary local deterministic suite for the same closed-loop stack; it does not depend on provider availability.
-- Category `ops` now runs both `ops_deterministic` and `long_tail_flows`.
+- `scripts/regression_ops_closed_loop.sh` is the complementary local backend suite for the same closed-loop stack; it does not depend on provider availability.
+- Category `ops` now runs both `ops_closed_loop` and `long_tail_flows`.
 
 Notes for `ops_http_repair`:
 
@@ -99,7 +99,7 @@ Notes for `ops_http_repair`:
 - `bash scripts/regression_self_extension_suite.sh`
 - `bash scripts/regression_sensitive_nl_flows.sh`
 - `bash scripts/regression_ops_http_repair_nl_flows.sh`
-- `bash scripts/regression_ops_closed_loop_deterministic.sh`
+- `bash scripts/regression_ops_closed_loop.sh`
 - `bash scripts/regression_long_tail_nl_flows.sh`
 
 ## Cases
@@ -155,7 +155,7 @@ suite|name|tags|prompt|expect=<substring>
 - `scripts/nl_suite_logs/text_match/<timestamp>/`
 - `scripts/nl_suite_logs/clarify/<timestamp>/`
 - `scripts/nl_suite_logs/context_chain/<timestamp>/`
-- `scripts/nl_suite_logs/ops_deterministic/<timestamp>/`
+- `scripts/nl_suite_logs/ops_closed_loop/<timestamp>/`
 - `scripts/nl_suite_logs/ops_http_repair/<timestamp>/`
 - `scripts/nl_suite_logs/sensitive_flows/<timestamp>/`
 - `scripts/nl_suite_logs/long_tail_flows/<timestamp>/`
