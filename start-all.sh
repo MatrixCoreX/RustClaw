@@ -3,6 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/scripts/version_info.sh"
+print_rustclaw_version "$SCRIPT_DIR"
 
 if [[ -f "$HOME/.cargo/env" ]]; then
 	. "$HOME/.cargo/env"
