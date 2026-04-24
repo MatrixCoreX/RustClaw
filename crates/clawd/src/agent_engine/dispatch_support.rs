@@ -711,9 +711,9 @@ pub(super) async fn handle_synthesize_answer_action(
             .filter(|answer| !answer.trim().is_empty())
             .ok_or_else(|| {
                 if loop_state.executed_step_results.is_empty() {
-                    "synthesize_answer has no observed execution evidence".to_string()
+                    "没有可用于生成答案的执行结果".to_string()
                 } else {
-                    "synthesize_answer could not produce a grounded publishable answer".to_string()
+                    "已经拿到执行结果，但没有整理出可直接交付的答案".to_string()
                 }
             })
         })

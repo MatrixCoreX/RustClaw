@@ -603,9 +603,7 @@ fn execution_recipe_closeout_note(
     loop_state: &LoopState,
 ) -> Option<String> {
     let recipe = loop_state.execution_recipe;
-    if !recipe.is_active()
-        || (!recipe.saw_inspect && !recipe.saw_mutation && !recipe.saw_validation)
-    {
+    if !recipe.is_active() || !recipe.saw_validation {
         return None;
     }
 
@@ -1741,6 +1739,7 @@ mod tests {
             inspect_first: true,
             validation_required: true,
             saw_inspect: true,
+            saw_validation: true,
             ..Default::default()
         };
         let ctx = crate::agent_engine::AgentRunContext {
@@ -1828,7 +1827,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_recipe_closeout_note_allows_apply_phase_when_recipe_already_progressed() {
+    fn execution_recipe_closeout_note_skips_apply_phase_without_validation() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -1841,13 +1840,12 @@ mod tests {
             ..Default::default()
         };
 
-        let note = execution_recipe_closeout_note(
+        assert!(execution_recipe_closeout_note(
             None,
             "Repair the system service and validate it.",
             &loop_state,
         )
-        .expect("closeout note");
-        assert!(note.contains("system scope"));
+        .is_none());
     }
 
     #[test]
