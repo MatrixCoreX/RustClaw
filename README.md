@@ -19,6 +19,80 @@ Current repository highlights:
 - local browser UI in `UI/`
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 
+## Planner-First Architecture
+
+RustClaw's main natural-language path is moving toward a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: normalize the turn, bind it to session state, let the planner/runtime loop decide whether to clarify, execute, delegate, or answer, and only use post-route guards for safety and contract checks.
+
+### Runtime Flow
+
+```mermaid
+flowchart TD
+    A[User input] --> B[Channel / API ingress]
+    B --> C[Session binding]
+    C --> D[Turn taxonomy]
+    D --> E[Normalizer]
+    E --> F{Ask gate}
+    F -->|clarify| G[Clarify question]
+    F -->|chat / execute| H[Planner / runtime loop]
+    H --> I[Read state]
+    H --> J[Build working context]
+    H --> K[Read durable memory]
+    H --> L{Planner action}
+    L -->|respond| M[Synthesize / respond]
+    L -->|tool / skill| N[Tool / skill execution]
+    L -->|delegate| O[Subtask / child loop]
+    L -->|clarify| G
+    N --> P[Observed facts]
+    O --> P
+    P --> H
+    M --> Q[Post-route safety guard]
+    Q --> R[User reply]
+    R --> S[Update session state / task journal]
+```
+
+- `Session binding`: attaches each turn to the active conversation instead of treating every message as a standalone task.
+- `Turn taxonomy`: classifies run-control, task updates, corrections, status queries, attachments, and similar turn types without replacing planner reasoning.
+- `Normalizer`: extracts structured signals such as `turn_type`, `target_task_policy`, `output_contract`, and execution hints.
+- `Ask gate`: keeps only a thin `clarify / chat / execute` split and avoids becoming a semantic fast path.
+- `Planner / runtime loop`: the authoritative loop that decides whether to clarify, call tools or skills, delegate, synthesize, or respond.
+- `State`, `Working context`, and `Durable memory`: separate run control, current task context, and long-lived preferences so memory cannot override the latest user instruction.
+- `Observed facts`: stores tool, skill, and child-loop results as grounded evidence for the next planner step.
+- `Post-route safety guard`: validates safety and output contracts without taking over normal semantic routing.
+
+### LLM Request Flow
+
+```mermaid
+flowchart TD
+    A[Current user input] --> B[Build normalizer prompt]
+    B --> C[LLM request 1<br/>Intent normalizer]
+    C --> D[Parse JSON]
+    D --> E{Structured result}
+    E -->|needs_clarify=true| F[Generate clarify question]
+    E -->|mode=chat| G[Build chat / planner prompt]
+    E -->|mode=act or chat_act| H[Build planner prompt]
+    G --> I[LLM request 2<br/>Chat or planner]
+    H --> I
+    I --> J[Parse planner / chat output]
+    J --> K{Action type}
+    K -->|respond| L[Direct response]
+    K -->|tool / skill| M[Execute tool or skill]
+    K -->|clarify| F
+    K -->|delegate| N[Subtask / child loop]
+    M --> O[Write observed facts]
+    N --> O
+    O --> P{Need another planning round?}
+    P -->|yes| H
+    P -->|no| Q[Build synthesize prompt]
+    Q --> R[LLM request 3<br/>Synthesize answer]
+    R --> S[Final response]
+```
+
+- `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer.
+- `Build chat / planner prompt`: combines mode, session state, working context, and output contract for the second-layer request.
+- `LLM request 2`: chat handles direct conversational answers; planner produces native actions such as `respond`, `clarify`, `tool-skill`, or `delegate`.
+- `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened.
+- `LLM request 3 / Synthesize answer`: turns grounded observed facts into the final user-facing answer after execution.
+
 ## Main Components
 
 - `crates/clawd`: core runtime, HTTP API, routing, memory, scheduling, auth, task queue
