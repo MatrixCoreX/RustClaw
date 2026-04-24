@@ -209,11 +209,12 @@
     },
     "direct_reply_candidate": {
       "type": "string",
-      "description": "Phase 1.5: optional `chat`-mode direct-reply shortcut payload. Empty string disables the shortcut.",
+      "description": "Deprecated planner-first compatibility field. The runtime ignores it; omit it or leave it empty.",
       "default": ""
     },
     "direct_reply_confidence": {
       "type": "number",
+      "description": "Deprecated planner-first compatibility field. The runtime ignores it; omit it or leave it at 0.0.",
       "minimum": 0.0,
       "maximum": 1.0,
       "default": 0.0
