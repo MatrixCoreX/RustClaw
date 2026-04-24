@@ -563,8 +563,7 @@ mod tests {
             r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
         ));
         let mut route = route_result(OutputResponseShape::Free);
-        route.route_reason =
-            "route_contract:generic_explicit_path_structured_keys".to_string();
+        route.route_reason = "route_contract:generic_explicit_path_structured_keys".to_string();
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.locator_hint = "/tmp/package.json".to_string();
         let actions = vec![AgentAction::CallSkill {
@@ -591,8 +590,7 @@ mod tests {
             r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/rustclaw.db","value":"data/rustclaw.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
         ));
         let mut route = route_result(OutputResponseShape::Free);
-        route.route_reason =
-            "route_contract:generic_explicit_path_extract_fields".to_string();
+        route.route_reason = "route_contract:generic_explicit_path_extract_fields".to_string();
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.locator_hint = "/tmp/config.toml".to_string();
         let actions = vec![AgentAction::CallSkill {

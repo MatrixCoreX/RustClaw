@@ -8,15 +8,7 @@ pub(crate) enum ClarifyFollowupResolution {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FreshDeicticClarifyKind {
-    Delivery,
-    ScalarRead,
-    ContentRead,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FreshDeicticClarifyDecision {
-    pub(crate) kind: FreshDeicticClarifyKind,
     pub(crate) reason: &'static str,
     pub(crate) question_i18n_key: &'static str,
     pub(crate) default_question: &'static str,
@@ -213,10 +205,12 @@ pub(crate) fn resolve_fresh_deictic_clarify_guard_with_surface(
     {
         return None;
     }
+    if !deictic_filename_wrapper {
+        return None;
+    }
 
     if route_result.wants_file_delivery {
         return Some(FreshDeicticClarifyDecision {
-            kind: FreshDeicticClarifyKind::Delivery,
             reason: "fresh_delivery_deictic_requires_locator",
             question_i18n_key: "clawd.msg.clarify_missing_file_locator",
             default_question: "Please provide the specific file name or path.",
@@ -240,14 +234,12 @@ pub(crate) fn resolve_fresh_deictic_clarify_guard_with_surface(
 
     match route_result.output_contract.response_shape {
         crate::OutputResponseShape::Scalar => Some(FreshDeicticClarifyDecision {
-            kind: FreshDeicticClarifyKind::ScalarRead,
             reason: "fresh_scalar_deictic_requires_locator",
             question_i18n_key: "clawd.msg.clarify_missing_read_target",
             default_question: "Please provide the specific file name or path to read.",
         }),
         crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence => {
             Some(FreshDeicticClarifyDecision {
-                kind: FreshDeicticClarifyKind::ContentRead,
                 reason: "fresh_content_deictic_requires_locator",
                 question_i18n_key: "clawd.msg.clarify_missing_read_target",
                 default_question: "Please provide the specific file name or path to read.",
@@ -297,6 +289,9 @@ pub(crate) fn fresh_deictic_guard_needs_recent_assistant_probe_with_surface(
         || route_has_current_turn_filename_anchor(route_result, surface)
         || (surface_has_current_turn_locator(surface) && !deictic_filename_wrapper)
     {
+        return false;
+    }
+    if !deictic_filename_wrapper {
         return false;
     }
     if route_result.wants_file_delivery {
@@ -364,57 +359,6 @@ fn surface_has_current_turn_locator(
         || !surface.filename_candidates.is_empty()
 }
 
-#[allow(dead_code)]
-pub(crate) fn prompt_contains_deictic_reference(prompt: &str) -> bool {
-    super::surface_signals::analyze_prompt_surface(prompt).has_deictic_reference()
-}
-
-fn session_snapshot_has_file_like_context(
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-) -> bool {
-    let Some(snapshot) = session_snapshot else {
-        return false;
-    };
-    snapshot
-        .active_followup_frame
-        .as_ref()
-        .is_some_and(|frame| {
-            frame
-                .bound_target
-                .as_deref()
-                .is_some_and(|target| !target.trim().is_empty())
-                || !frame.ordered_entries.is_empty()
-                || crate::conversation_state::output_shape_hint_prefers_file_delivery(
-                    frame.output_shape.as_deref(),
-                )
-        })
-        || snapshot
-            .active_clarify_state
-            .as_ref()
-            .is_some_and(|clarify| {
-                clarify.missing_slot == crate::clarify_state::ClarifyMissingSlot::Locator
-                    && (!clarify.candidate_targets.is_empty()
-                        || clarify.delivery_required
-                        || crate::conversation_state::output_shape_hint_prefers_file_delivery(
-                            clarify.output_shape.as_deref(),
-                        ))
-            })
-        || snapshot
-            .active_observed_facts
-            .as_ref()
-            .is_some_and(|facts| {
-                facts
-                    .bound_target
-                    .as_deref()
-                    .is_some_and(|target| !target.trim().is_empty())
-                    || !facts.ordered_entries.is_empty()
-                    || !facts.delivery_targets.is_empty()
-                    || crate::conversation_state::output_shape_hint_prefers_file_delivery(
-                        facts.output_shape.as_deref(),
-                    )
-            })
-}
-
 pub(crate) fn session_contains_immediate_locator_anchor(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
 ) -> bool {
@@ -463,12 +407,13 @@ pub(crate) fn prompt_looks_like_deictic_filename_wrapper_with_surface(
     }
     let has_explicit_filename_anchor = surface.has_single_filename_candidate()
         || surface.single_bare_filename_stem_candidate.is_some();
-    if has_explicit_filename_anchor
-        && !matches!(
-            surface.deictic_prompt_shape,
-            Some(super::surface_signals::DeicticPromptShape::ObjectTarget)
-        )
-    {
+    if !has_explicit_filename_anchor {
+        return false;
+    }
+    if !matches!(
+        surface.deictic_prompt_shape,
+        Some(super::surface_signals::DeicticPromptShape::ObjectTarget)
+    ) {
         return false;
     }
     if surface.workspace_child_directory_hint.is_some() || surface.compare_target_pair.is_some() {
@@ -481,27 +426,8 @@ pub(crate) fn prompt_looks_like_deictic_filename_wrapper_with_surface(
     {
         return false;
     }
-    if session_snapshot_has_file_like_context(session_snapshot)
-        && !surface.looks_like_locator_only_reply()
-        && surface.token_count <= 8
-    {
-        return true;
-    }
-    match surface.deictic_prompt_shape {
-        Some(super::surface_signals::DeicticPromptShape::ObjectTarget) => {
-            surface.has_concrete_locator_hint() || surface.has_generic_or_fileish_reference()
-        }
-        Some(super::surface_signals::DeicticPromptShape::FreshReference) => {
-            surface.has_generic_or_fileish_reference()
-        }
-        Some(super::surface_signals::DeicticPromptShape::GeneralReference) | None => false,
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) fn prompt_looks_like_clarify_target_only_reply(prompt: &str) -> bool {
-    let surface = super::surface_signals::analyze_prompt_surface(prompt.trim());
-    prompt_looks_like_clarify_target_only_with_surface(&surface)
+    let _ = session_snapshot;
+    surface.has_concrete_locator_hint() || surface.has_generic_or_fileish_reference()
 }
 
 #[allow(dead_code)]
@@ -569,13 +495,6 @@ fn synthesize_clarify_state_reply_resolution_with_surface(
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-#[allow(dead_code)]
-fn prompt_looks_like_clarify_target_only(prompt: &str) -> bool {
-    let surface = super::surface_signals::analyze_prompt_surface(prompt.trim());
-    prompt_looks_like_clarify_target_only_with_surface(&surface)
-}
-
 pub(crate) fn prompt_looks_like_clarify_target_only_with_surface(
     surface: &super::surface_signals::PromptSurfaceSignals,
 ) -> bool {
@@ -594,7 +513,7 @@ mod tests {
         context_contains_immediate_locator_anchor, immediate_prior_turn_was_clarify,
         prompt_looks_like_active_clarify_reply, prompt_looks_like_deictic_filename_wrapper,
         resolve_clarify_followup, resolve_clarify_followup_from_session,
-        resolve_fresh_deictic_clarify_guard, ClarifyFollowupResolution, FreshDeicticClarifyKind,
+        resolve_fresh_deictic_clarify_guard, ClarifyFollowupResolution,
     };
 
     #[test]
@@ -620,18 +539,6 @@ mod tests {
         assert!(!prompt_looks_like_deictic_filename_wrapper(
             "先看看当前目录有哪些顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么组织",
             None,
-        ));
-    }
-
-    #[test]
-    fn deictic_reference_helper_uses_normalized_phrase_matching() {
-        assert!(super::prompt_contains_deictic_reference("Use THIS log."));
-        assert!(super::prompt_contains_deictic_reference(
-            "看看那个日志最后 5 行"
-        ));
-        assert!(super::prompt_contains_deictic_reference("把该文件发给我"));
-        assert!(!super::prompt_contains_deictic_reference(
-            "thisness should not match"
         ));
     }
 
@@ -872,7 +779,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_delivery_deictic_without_immediate_anchor_requires_locator() {
+    fn fresh_delivery_deictic_without_immediate_anchor_stays_with_normalizer() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
@@ -902,16 +809,17 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        let out = resolve_fresh_deictic_clarify_guard(
-            &route,
-            "把那个文件发给我",
-            None,
-            "<none>",
-            "<none>",
-        )
-        .expect("delivery deictic should require clarify");
-        assert_eq!(out.kind, FreshDeicticClarifyKind::Delivery);
-        assert_eq!(out.reason, "fresh_delivery_deictic_requires_locator");
+        assert!(
+            resolve_fresh_deictic_clarify_guard(
+                &route,
+                "把那个文件发给我",
+                None,
+                "<none>",
+                "<none>",
+            )
+            .is_none(),
+            "generic deictic delivery without an immediate anchor should stay on the normalizer/planner path"
+        );
     }
 
     #[test]
@@ -958,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_content_deictic_without_immediate_anchor_requires_locator() {
+    fn fresh_content_deictic_without_immediate_anchor_stays_with_normalizer() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
@@ -988,16 +896,17 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        let out = resolve_fresh_deictic_clarify_guard(
-            &route,
-            "看看那个模型日志最后 5 行",
-            None,
-            "<none>",
-            "<none>",
-        )
-        .expect("content deictic should require clarify");
-        assert_eq!(out.kind, FreshDeicticClarifyKind::ContentRead);
-        assert_eq!(out.reason, "fresh_content_deictic_requires_locator");
+        assert!(
+            resolve_fresh_deictic_clarify_guard(
+                &route,
+                "看看那个模型日志最后 5 行",
+                None,
+                "<none>",
+                "<none>",
+            )
+            .is_none(),
+            "generic deictic content requests should not be hard-routed by continuation_resolver"
+        );
     }
 
     #[test]
@@ -1040,7 +949,6 @@ mod tests {
             "<none>",
         )
         .expect("deictic filename wrapper should still require clarify");
-        assert_eq!(out.kind, FreshDeicticClarifyKind::ContentRead);
         assert_eq!(out.reason, "fresh_content_deictic_requires_locator");
     }
 
@@ -1075,16 +983,14 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(
-            resolve_fresh_deictic_clarify_guard(
-                &route,
-                "你先翻一下 README 开头那一小段，然后用 3 句话告诉我这个项目大概是干什么的",
-                None,
-                "<none>",
-                "<none>",
-            )
-            .is_none()
-        );
+        assert!(resolve_fresh_deictic_clarify_guard(
+            &route,
+            "你先翻一下 README 开头那一小段，然后用 3 句话告诉我这个项目大概是干什么的",
+            None,
+            "<none>",
+            "<none>",
+        )
+        .is_none());
     }
 
     #[test]
@@ -1214,16 +1120,14 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(
-            resolve_fresh_deictic_clarify_guard(
-                &route,
-                route.resolved_intent.as_str(),
-                None,
-                "<none>",
-                "<none>",
-            )
-            .is_none()
-        );
+        assert!(resolve_fresh_deictic_clarify_guard(
+            &route,
+            route.resolved_intent.as_str(),
+            None,
+            "<none>",
+            "<none>",
+        )
+        .is_none());
         assert!(!super::fresh_deictic_guard_needs_recent_assistant_probe(
             &route,
             route.resolved_intent.as_str(),
@@ -1282,7 +1186,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_deictic_probe_requests_recent_assistant_lookup_without_any_anchor() {
+    fn fresh_deictic_probe_does_not_request_recent_assistant_lookup_for_generic_deictic() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
@@ -1312,7 +1216,7 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        assert!(super::fresh_deictic_guard_needs_recent_assistant_probe(
+        assert!(!super::fresh_deictic_guard_needs_recent_assistant_probe(
             &route,
             "看看那个模型日志最后 5 行",
             None,

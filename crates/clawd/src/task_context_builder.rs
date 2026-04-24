@@ -223,9 +223,7 @@ fn build_request_surface_hints(
     }
 }
 
-fn render_requested_read_range(
-    range: crate::read_range_request::RequestedReadRange,
-) -> String {
+fn render_requested_read_range(range: crate::read_range_request::RequestedReadRange) -> String {
     match range {
         crate::read_range_request::RequestedReadRange::Head { n } => format!("head:{n}"),
         crate::read_range_request::RequestedReadRange::Tail { n } => format!("tail:{n}"),
@@ -846,8 +844,9 @@ mod tests {
 
     #[test]
     fn request_surface_hints_include_requested_sentence_count() {
-        let surface =
-            crate::intent::surface_signals::analyze_prompt_surface("读一下 README.md，然后用三句话总结");
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(
+            "读一下 README.md，然后用三句话总结",
+        );
         let rendered = build_request_surface_hints(&surface);
         assert!(rendered.contains("### REQUEST_SURFACE_HINTS"));
         assert!(rendered.contains("requested_sentence_count: 3"));
@@ -865,8 +864,9 @@ mod tests {
 
     #[test]
     fn request_surface_hints_include_compare_target_pair() {
-        let surface =
-            crate::intent::surface_signals::analyze_prompt_surface("比较 README.md 和 AGENTS.md 哪个更大");
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(
+            "比较 README.md 和 AGENTS.md 哪个更大",
+        );
         let rendered = build_request_surface_hints(&surface);
         assert!(rendered.contains("### REQUEST_SURFACE_HINTS"));
         assert!(rendered.contains("compare_target_pair:"));

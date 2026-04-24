@@ -145,7 +145,9 @@ fn should_force_content_evidence_for_directory_purpose_request(
         )
         || !matches!(
             request_surface.workspace_child_request_shape,
-            Some(crate::intent::surface_signals::WorkspaceChildRequestShape::DirectoryPurposeSummary)
+            Some(
+                crate::intent::surface_signals::WorkspaceChildRequestShape::DirectoryPurposeSummary
+            )
         )
     {
         return false;
@@ -944,7 +946,8 @@ mod tests {
     #[test]
     fn directory_like_chat_act_request_requires_content_evidence_without_forcing_semantic_kind() {
         let mut route = route_result();
-        route.resolved_intent = "列出 docs 目录最近修改的两个文件，再判断这些是干什么的".to_string();
+        route.resolved_intent =
+            "列出 docs 目录最近修改的两个文件，再判断这些是干什么的".to_string();
         route.routed_mode = RoutedMode::ChatAct;
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = false;
@@ -1354,8 +1357,7 @@ mod tests {
         let mut route = route_result();
         route.routed_mode = RoutedMode::ChatAct;
         route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
-        route.resolved_intent =
-            "run pwd, then briefly explain what this path is".to_string();
+        route.resolved_intent = "run pwd, then briefly explain what this path is".to_string();
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.requires_content_evidence = true;
         route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;

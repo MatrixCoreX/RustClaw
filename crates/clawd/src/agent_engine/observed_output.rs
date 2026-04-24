@@ -310,7 +310,8 @@ fn current_turn_request_text<'a>(
         .and_then(|ctx| ctx.user_request.as_deref())
         .filter(|text| !text.trim().is_empty())
         .or_else(|| {
-            route.map(|route| route.resolved_intent.as_str())
+            route
+                .map(|route| route.resolved_intent.as_str())
                 .filter(|text| !text.trim().is_empty())
         })
 }
@@ -1137,7 +1138,12 @@ fn structured_scalar_pair_direct_answer(
             Some(if left.normalized_key == right.normalized_key {
                 if prefer_english { "same" } else { "一样" }.to_string()
             } else {
-                if prefer_english { "different" } else { "不一样" }.to_string()
+                if prefer_english {
+                    "different"
+                } else {
+                    "不一样"
+                }
+                .to_string()
             })
         }
         crate::OutputSemanticKind::QuantityComparison => {
@@ -1175,7 +1181,12 @@ fn structured_scalar_pair_direct_answer(
             Some(if left.normalized_key == right.normalized_key {
                 if prefer_english { "same" } else { "一样" }.to_string()
             } else {
-                if prefer_english { "different" } else { "不一样" }.to_string()
+                if prefer_english {
+                    "different"
+                } else {
+                    "不一样"
+                }
+                .to_string()
             })
         }
         _ => None,
@@ -1315,12 +1326,18 @@ enum SqliteTableObservedOutputKind {
 fn sqlite_table_observed_output_kind(
     route: &crate::RouteResult,
 ) -> Option<SqliteTableObservedOutputKind> {
-    let locator_hint = route.output_contract.locator_hint.trim().to_ascii_lowercase();
+    let locator_hint = route
+        .output_contract
+        .locator_hint
+        .trim()
+        .to_ascii_lowercase();
     if !(locator_hint.ends_with(".sqlite") || locator_hint.ends_with(".db")) {
         return None;
     }
     match route.output_contract.semantic_kind {
-        crate::OutputSemanticKind::SqliteTableListing => Some(SqliteTableObservedOutputKind::Listing),
+        crate::OutputSemanticKind::SqliteTableListing => {
+            Some(SqliteTableObservedOutputKind::Listing)
+        }
         crate::OutputSemanticKind::SqliteTableNamesOnly => {
             Some(SqliteTableObservedOutputKind::NamesOnly)
         }
@@ -1344,23 +1361,25 @@ fn db_basic_tables_summary_candidate(
         &table_names,
     );
     if table_names.is_empty() {
-        return Some(if observed_kind == SqliteTableObservedOutputKind::DatabaseKindJudgment {
-            if prefer_english {
-                "This SQLite file currently has no tables, so it looks more like an empty or test DB.".to_string()
-            } else {
-                "这个 sqlite 文件里目前没有任何表，所以更像一个空白或测试库。".to_string()
-            }
-        } else if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
-            if prefer_english {
+        return Some(
+            if observed_kind == SqliteTableObservedOutputKind::DatabaseKindJudgment {
+                if prefer_english {
+                    "This SQLite file currently has no tables, so it looks more like an empty or test DB.".to_string()
+                } else {
+                    "这个 sqlite 文件里目前没有任何表，所以更像一个空白或测试库。".to_string()
+                }
+            } else if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
+                if prefer_english {
+                    "This SQLite file currently has no tables.".to_string()
+                } else {
+                    "这个 sqlite 文件里目前没有任何表。".to_string()
+                }
+            } else if prefer_english {
                 "This SQLite file currently has no tables.".to_string()
             } else {
                 "这个 sqlite 文件里目前没有任何表。".to_string()
-            }
-        } else if prefer_english {
-            "This SQLite file currently has no tables.".to_string()
-        } else {
-            "这个 sqlite 文件里目前没有任何表。".to_string()
-        });
+            },
+        );
     }
     if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
         return Some(table_names.join("\n"));
@@ -1371,23 +1390,25 @@ fn db_basic_tables_summary_candidate(
         .cloned()
         .collect::<Vec<_>>()
         .join(if prefer_english { ", " } else { "、" });
-    Some(if observed_kind == SqliteTableObservedOutputKind::DatabaseKindJudgment {
-        if prefer_english {
-            let kind = if looks_like_test { "test DB" } else { "app DB" };
-            format!("The tables include {preview}; overall this looks more like a {kind}.")
-        } else {
-            let kind = if looks_like_test {
-                "测试库"
+    Some(
+        if observed_kind == SqliteTableObservedOutputKind::DatabaseKindJudgment {
+            if prefer_english {
+                let kind = if looks_like_test { "test DB" } else { "app DB" };
+                format!("The tables include {preview}; overall this looks more like a {kind}.")
             } else {
-                "业务库"
-            };
-            format!("表包括 {preview}；整体更像{kind}。")
-        }
-    } else if prefer_english {
-        format!("The tables include {preview}.")
-    } else {
-        format!("表包括 {preview}。")
-    })
+                let kind = if looks_like_test {
+                    "测试库"
+                } else {
+                    "业务库"
+                };
+                format!("表包括 {preview}；整体更像{kind}。")
+            }
+        } else if prefer_english {
+            format!("The tables include {preview}.")
+        } else {
+            format!("表包括 {preview}。")
+        },
+    )
 }
 
 fn transform_skill_formatted_output_candidate(body: &str) -> Option<String> {
@@ -1868,17 +1889,11 @@ fn recent_artifacts_judgment_direct_answer(
     if !route_requests_recent_artifacts_judgment(route) {
         return None;
     }
-    let listing_limit =
-        current_turn_requested_listing_limit(Some(route), agent_run_context);
+    let listing_limit = current_turn_requested_listing_limit(Some(route), agent_run_context);
     let names = extract_latest_generic_successful_output(loop_state)
         .and_then(|observed| {
             (observed.skill == "run_cmd")
-                .then(|| {
-                    run_cmd_shell_listing_entry_names(
-                        &observed.body,
-                        listing_limit,
-                    )
-                })
+                .then(|| run_cmd_shell_listing_entry_names(&observed.body, listing_limit))
                 .flatten()
         })
         .or_else(|| {
@@ -3360,7 +3375,8 @@ fn requested_summary_sentence_count(
         return Some(1);
     }
     current_turn_request_text(Some(route), agent_run_context).and_then(|request_text| {
-        crate::intent::surface_signals::analyze_prompt_surface(request_text).requested_sentence_count
+        crate::intent::surface_signals::analyze_prompt_surface(request_text)
+            .requested_sentence_count
     })
 }
 
@@ -4236,7 +4252,8 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
                 }
             }
         }
-        if let Some(answer) = structured_scalar_pair_direct_answer(route, loop_state, prefer_english)
+        if let Some(answer) =
+            structured_scalar_pair_direct_answer(route, loop_state, prefer_english)
         {
             return Some(answer);
         }
@@ -4320,8 +4337,7 @@ fn extract_direct_answer_from_generic_output_impl(
     let is_plain_act = route.is_some_and(|route| route.ask_mode.is_plain_act());
     let allow_raw_listing_direct_answer =
         route_allows_raw_listing_direct_answer(route, agent_run_context);
-    let requested_listing_limit =
-        current_turn_requested_listing_limit(route, agent_run_context);
+    let requested_listing_limit = current_turn_requested_listing_limit(route, agent_run_context);
     let locator_hint = route
         .map(|route| route.output_contract.locator_hint.as_str())
         .filter(|hint| !hint.trim().is_empty());
@@ -4538,10 +4554,7 @@ fn extract_direct_answer_from_generic_output_impl(
                                 response_shape,
                                 Some(crate::OutputResponseShape::OneSentence)
                             ))
-                            || route_allows_raw_read_range_direct_answer(
-                                route,
-                                agent_run_context,
-                            ))
+                            || route_allows_raw_read_range_direct_answer(route, agent_run_context))
                     {
                         value
                             .get("excerpt")
@@ -4913,8 +4926,9 @@ mod tests {
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
-        AppState, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-        OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+        AppState, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+        OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult,
+        ScheduleKind,
     };
 
     fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
@@ -5976,8 +5990,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "读 /tmp/package.json，告诉我 scripts 字段下都有哪些子键".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:generic_explicit_path_structured_keys"
-                .to_string(),
+            route_reason: "route_contract:generic_explicit_path_structured_keys".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -7431,9 +7444,8 @@ sqlite_path = "data/rustclaw.db"
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent:
-                "列出 logs 目录最近修改的文件，再告诉我这更像是测试日志还是正式产物"
-                    .to_string(),
+            resolved_intent: "列出 logs 目录最近修改的文件，再告诉我这更像是测试日志还是正式产物"
+                .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
             route_reason: String::new(),
@@ -8191,8 +8203,7 @@ sqlite_path = "data/rustclaw.db"
             resolved_intent: "数一下当前目录里以点开头的隐藏文件有几个，只输出数字".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:current_workspace_hidden_entries_count"
-                .to_string(),
+            route_reason: "route_contract:current_workspace_hidden_entries_count".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
