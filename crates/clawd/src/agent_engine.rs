@@ -601,6 +601,34 @@ fn plan_step_label(action: &AgentAction) -> String {
     }
 }
 
+fn user_safe_step_error(err: &str) -> String {
+    let trimmed = err.trim();
+    if trimmed.is_empty() {
+        return "执行失败，但没有返回明确原因".to_string();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("rate limit") || lower.contains("限流") {
+        return "模型请求触发限流，请稍后重试".to_string();
+    }
+    if lower.contains("synthesize_answer")
+        || lower.contains("publishable")
+        || lower.contains("repair plan")
+        || lower.contains("non-actionable")
+        || lower.contains("non_actionable")
+    {
+        return "已经拿到部分结果，但没有形成可直接交付的答案".to_string();
+    }
+    if lower.contains("paths is required")
+        || lower.contains("unknown action")
+        || lower.contains("missing field")
+        || lower.contains("expected")
+        || lower.contains("required")
+    {
+        return "工具调用参数不完整或与能力契约不匹配".to_string();
+    }
+    crate::truncate_for_agent_trace(trimmed)
+}
+
 fn build_resume_context_error(
     state: &AppState,
     actions: &[AgentAction],
@@ -668,6 +696,7 @@ fn build_resume_context_error(
         .to_ascii_lowercase()
         .starts_with("en");
     let failed_index_text = failed_index.to_string();
+    let safe_err = user_safe_step_error(err);
     let user_error = if resume_context
         .get("remaining_actions")
         .and_then(|v| v.as_array())
@@ -677,26 +706,26 @@ fn build_resume_context_error(
         crate::bilingual_t_with_default_vars(
             state,
             "clawd.msg.resume_step_failed_with_remaining",
-            "step {failed_index} failed ({failed_action}): {err}. Remaining steps are interrupted. 你可以回复“继续”来执行剩余步骤。",
-            "Step {failed_index} failed ({failed_action}): {err}. Remaining steps were interrupted. Reply \"continue\" to run the remaining steps.",
+            "第 {failed_index} 步未完成：{err}。后续步骤已暂停，你可以回复“继续”来执行剩余步骤。",
+            "Step {failed_index} could not be completed: {err}. Remaining steps were paused. Reply \"continue\" to run them.",
             prefer_english,
             &[
                 ("failed_index", &failed_index_text),
                 ("failed_action", failed_action),
-                ("err", err),
+                ("err", &safe_err),
             ],
         )
     } else {
         crate::bilingual_t_with_default_vars(
             state,
             "clawd.msg.resume_step_failed_no_remaining",
-            "step {failed_index} failed ({failed_action}): {err}",
-            "Step {failed_index} failed ({failed_action}): {err}",
+            "第 {failed_index} 步未完成：{err}",
+            "Step {failed_index} could not be completed: {err}",
             prefer_english,
             &[
                 ("failed_index", &failed_index_text),
                 ("failed_action", failed_action),
-                ("err", err),
+                ("err", &safe_err),
             ],
         )
     };
@@ -1151,6 +1180,20 @@ mod tests {
                     | crate::finalize::PlannerArtifactKind::PlannerObject
             )
         ));
+    }
+
+    #[test]
+    fn test_user_safe_step_error_hides_internal_engine_details() {
+        assert_eq!(
+            user_safe_step_error(
+                "synthesize_answer could not produce a grounded publishable answer"
+            ),
+            "已经拿到部分结果，但没有形成可直接交付的答案"
+        );
+        assert_eq!(
+            user_safe_step_error("unknown action: read; allowed: info|inventory_dir"),
+            "工具调用参数不完整或与能力契约不匹配"
+        );
     }
 
     #[test]

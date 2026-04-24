@@ -1460,8 +1460,7 @@ fn normalize_planned_actions(
     let actions = rewrite_extract_field_alias_args(actions);
     let actions = prune_optional_extract_field_actions_for_workspace_summary(route_result, actions);
     let actions = prune_unscoped_workspace_summary_evidence_for_scope(route_result, actions);
-    let actions =
-        strip_unrequested_workspace_artifact_mutations(route_result, loop_state, actions);
+    let actions = strip_unrequested_workspace_artifact_mutations(route_result, loop_state, actions);
     let actions = inject_unscoped_workspace_text_evidence_reads(state, route_result, actions);
     let actions = append_synthesize_for_unscoped_workspace_text_evidence(route_result, actions);
     let actions = append_synthesize_answer_for_structured_scalar_compare(route_result, actions);
@@ -1788,7 +1787,6 @@ fn route_needs_unscoped_workspace_text_evidence(route: &RouteResult) -> bool {
         && route.output_contract.requires_content_evidence
         && route_expects_terminal_user_answer(route)
         && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
-        && route.output_contract.locator_hint.trim().is_empty()
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
 }
 
@@ -4650,6 +4648,71 @@ mod tests {
     }
 
     #[test]
+    fn unscoped_workspace_evidence_treats_generic_workspace_hint_as_scope_not_document() {
+        let root = TempDirGuard::new("workspace_text_evidence_generic_hint");
+        fs::write(
+            root.path.join("README.md"),
+            "# RustClaw\n\nUse the documented installer",
+        )
+        .expect("write README");
+        fs::write(
+            root.path.join("USAGE.md"),
+            "# Usage\n\nRun documented steps",
+        )
+        .expect("write USAGE");
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint = "rustclaw workspace".to_string();
+        route.resolved_intent =
+            "Write a short RustClaw setup note for the current workspace project".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: json!({"path": root.path.display().to_string()}),
+            },
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({
+                    "action": "tree_summary",
+                    "path": root.path.display().to_string(),
+                    "max_depth": 2
+                }),
+            },
+        ];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+        let injected_paths = normalized
+            .iter()
+            .filter_map(|action| match action {
+                AgentAction::CallSkill { skill, args }
+                    if skill == "system_basic"
+                        && args.get("action").and_then(|value| value.as_str())
+                            == Some("read_range") =>
+                {
+                    args.get("path").and_then(|value| value.as_str())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(injected_paths, vec!["README.md", "USAGE.md"]);
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == &vec!["step_3".to_string(), "step_4".to_string()]
+        ));
+    }
+
+    #[test]
     fn unscoped_workspace_evidence_injects_doc_reads_before_terminal_synthesis() {
         let root = TempDirGuard::new("workspace_text_evidence_synthesis");
         fs::write(root.path.join("README.md"), "# RustClaw\n\nSetup notes").expect("write README");
@@ -4784,8 +4847,11 @@ mod tests {
     #[test]
     fn unscoped_workspace_text_answer_strips_unrequested_file_artifact_plan() {
         let root = TempDirGuard::new("workspace_text_evidence_no_artifact");
-        fs::write(root.path.join("README.md"), "# RustClaw\n\nUse the documented installer")
-            .expect("write README");
+        fs::write(
+            root.path.join("README.md"),
+            "# RustClaw\n\nUse the documented installer",
+        )
+        .expect("write README");
         let mut state = test_state();
         state.skill_rt.workspace_root = root.path.clone();
         let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
