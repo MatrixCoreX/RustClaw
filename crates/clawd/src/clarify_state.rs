@@ -514,7 +514,7 @@ mod tests {
     fn clarify_candidate_targets_fall_back_to_fuzzy_locator_route_candidates() {
         let route = crate::RouteResult {
             route_reason:
-                "deterministic_contract:generic_filename_scalar_extract; fuzzy_locator_candidates=/tmp/a/Cargo.toml | /tmp/b/Cargo.toml"
+                "route_contract:generic_filename_scalar_extract; fuzzy_locator_candidates=/tmp/a/Cargo.toml | /tmp/b/Cargo.toml"
                     .to_string(),
             ..route_result_stub()
         };

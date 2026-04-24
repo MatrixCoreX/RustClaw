@@ -2716,7 +2716,7 @@ mod tests {
         route.resolved_intent =
             "check which package manager is recognized and briefly say the everyday default"
                 .to_string();
-        route.route_reason = "deterministic_contract:package_manager_detect_summary".to_string();
+        route.route_reason = "route_contract:package_manager_detect_summary".to_string();
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = true;
         let agent_run_context = crate::agent_engine::AgentRunContext {

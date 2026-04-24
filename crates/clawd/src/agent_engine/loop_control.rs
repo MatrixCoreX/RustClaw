@@ -564,7 +564,7 @@ mod tests {
         ));
         let mut route = route_result(OutputResponseShape::Free);
         route.route_reason =
-            "deterministic_contract:generic_explicit_path_structured_keys".to_string();
+            "route_contract:generic_explicit_path_structured_keys".to_string();
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.locator_hint = "/tmp/package.json".to_string();
         let actions = vec![AgentAction::CallSkill {
@@ -592,7 +592,7 @@ mod tests {
         ));
         let mut route = route_result(OutputResponseShape::Free);
         route.route_reason =
-            "deterministic_contract:generic_explicit_path_extract_fields".to_string();
+            "route_contract:generic_explicit_path_extract_fields".to_string();
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.locator_hint = "/tmp/config.toml".to_string();
         let actions = vec![AgentAction::CallSkill {

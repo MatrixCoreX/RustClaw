@@ -1,7 +1,7 @@
 use crate::{OutputResponseShape, RouteResult};
 
-// Legacy module name retained for call-site compatibility. It no longer
-// synthesizes execution plans; planner-first execution owns planning.
+// Surface helper only. This module does not synthesize plans or route requests;
+// planner-first execution owns semantic planning.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GitScalarQueryKind {
@@ -54,11 +54,11 @@ fn detect_git_scalar_query_kind(
     detect_git_scalar_query_kind_from_text(combined)
 }
 
-pub(crate) fn route_is_git_scalar_query(route_result: &RouteResult) -> bool {
+pub(crate) fn route_has_git_scalar_surface(route_result: &RouteResult) -> bool {
     detect_git_scalar_query_kind(route_result, "").is_some()
 }
 
-pub(crate) fn text_looks_like_git_scalar_query(user_text: &str) -> bool {
+pub(crate) fn text_has_git_scalar_surface(user_text: &str) -> bool {
     detect_git_scalar_query_kind_from_text(user_text).is_some()
 }
 
@@ -94,25 +94,25 @@ mod tests {
     }
 
     #[test]
-    fn git_scalar_helper_recognizes_branch_and_recent_commit_subject() {
-        assert!(text_looks_like_git_scalar_query(
+    fn git_scalar_surface_recognizes_branch_and_recent_commit_subject() {
+        assert!(text_has_git_scalar_surface(
             "what is the current git branch"
         ));
-        assert!(text_looks_like_git_scalar_query("最近一次提交标题是什么"));
-        assert!(route_is_git_scalar_query(&scalar_route(
+        assert!(text_has_git_scalar_surface("最近一次提交标题是什么"));
+        assert!(route_has_git_scalar_surface(&scalar_route(
             "git branch name only"
         )));
-        assert!(route_is_git_scalar_query(&scalar_route(
+        assert!(route_has_git_scalar_surface(&scalar_route(
             "latest git commit subject"
         )));
     }
 
     #[test]
-    fn git_scalar_helper_does_not_claim_non_scalar_routes() {
+    fn git_scalar_surface_does_not_claim_non_scalar_routes() {
         let mut route = scalar_route("latest git commit subject");
         route.output_contract.response_shape = OutputResponseShape::Free;
-        assert!(!route_is_git_scalar_query(&route));
-        assert!(!text_looks_like_git_scalar_query(
+        assert!(!route_has_git_scalar_surface(&route));
+        assert!(!text_has_git_scalar_surface(
             "summarize the repository"
         ));
     }
