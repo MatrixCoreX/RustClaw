@@ -16,7 +16,7 @@ ALL_SUITES=(
   resume
   self_extension
   sensitive_flows
-  ops_deterministic
+  ops_closed_loop
   ops_http_repair
   long_tail_flows
   clarify
@@ -44,7 +44,7 @@ Suites:
   resume
   self_extension
   sensitive_flows
-  ops_deterministic
+  ops_closed_loop
   ops_http_repair
   long_tail_flows
   clarify
@@ -60,7 +60,7 @@ Categories:
   multi_instruction -> compound_single, task_updates
   regression    -> trace, resume
   guard         -> dynamic_guard, sensitive_flows
-  ops           -> ops_deterministic, long_tail_flows
+  ops           -> ops_closed_loop, long_tail_flows
   core          -> manual, text_match, trace, resume, clarify, context_chain
   all           -> manual, text_match, full, trace, resume, clarify, clarify_hard, context_chain, dynamic_guard
 
@@ -71,7 +71,7 @@ Examples:
   bash scripts/nl_tests/run_suite.sh multistep_mixed
   bash scripts/nl_tests/run_suite.sh manual trace clarify
   bash scripts/nl_tests/run_suite.sh sensitive_flows
-  bash scripts/nl_tests/run_suite.sh ops_deterministic
+  bash scripts/nl_tests/run_suite.sh ops_closed_loop
   bash scripts/nl_tests/run_suite.sh ops_http_repair
   bash scripts/nl_tests/run_suite.sh long_tail_flows
   bash scripts/nl_tests/run_suite.sh --category multi_turn
@@ -97,7 +97,7 @@ Available suites:
   - resume
   - self_extension
   - sensitive_flows
-  - ops_deterministic
+  - ops_closed_loop
   - ops_http_repair
   - long_tail_flows
   - clarify
@@ -212,10 +212,10 @@ run_mode_sensitive_flows() {
     "$@"
 }
 
-run_mode_ops_deterministic() {
+run_mode_ops_closed_loop() {
   run_wrapped_suite \
-    "ops_deterministic" \
-    bash "${ROOT_DIR}/scripts/regression_ops_closed_loop_deterministic.sh" \
+    "ops_closed_loop" \
+    bash "${ROOT_DIR}/scripts/regression_ops_closed_loop.sh" \
     "$@"
 }
 
@@ -427,8 +427,8 @@ run_one_suite() {
     sensitive_flows)
       run_mode_sensitive_flows "${FILTERED_SUITE_ARGS[@]}"
       ;;
-    ops_deterministic)
-      run_mode_ops_deterministic "${FILTERED_SUITE_ARGS[@]}"
+    ops_closed_loop|ops_deterministic)
+      run_mode_ops_closed_loop "${FILTERED_SUITE_ARGS[@]}"
       ;;
     ops_http_repair)
       run_mode_ops_http_repair "${FILTERED_SUITE_ARGS[@]}"
@@ -473,7 +473,7 @@ add_suite() {
 expand_selector() {
   local selector="$1"
   case "$selector" in
-    manual|compound_single|task_updates|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_deterministic|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+    manual|compound_single|task_updates|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_deterministic|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
       add_suite "$selector"
       ;;
     smoke)
@@ -506,7 +506,7 @@ expand_selector() {
       add_suite sensitive_flows
       ;;
     ops)
-      add_suite ops_deterministic
+      add_suite ops_closed_loop
       add_suite long_tail_flows
       ;;
     core)
