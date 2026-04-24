@@ -243,12 +243,9 @@ pub(crate) struct RouteResult {
 }
 
 pub(crate) const ROUTE_CONTRACT_REASON_PREFIX: &str = "route_contract:";
-const LEGACY_DETERMINISTIC_CONTRACT_REASON_PREFIX: &str = "deterministic_contract:";
 
 fn route_contract_tail(route_reason: &str) -> Option<&str> {
-    route_reason
-        .strip_prefix(ROUTE_CONTRACT_REASON_PREFIX)
-        .or_else(|| route_reason.strip_prefix(LEGACY_DETERMINISTIC_CONTRACT_REASON_PREFIX))
+    route_reason.strip_prefix(ROUTE_CONTRACT_REASON_PREFIX)
 }
 
 pub(crate) fn route_reason_starts_with_route_contract(
@@ -490,20 +487,16 @@ mod tests {
     }
 
     #[test]
-    fn route_contract_reason_helpers_accept_new_and_legacy_prefixes() {
+    fn route_contract_reason_helpers_accept_route_contract_prefix_only() {
         assert!(route_reason_starts_with_route_contract(
             "route_contract:generic_filename_scalar_extract",
-            "generic_"
-        ));
-        assert!(route_reason_starts_with_route_contract(
-            "deterministic_contract:generic_filename_scalar_extract",
             "generic_"
         ));
         assert!(route_reason_is_any_route_contract(
             "route_contract:current_workspace_scalar_count"
         ));
-        assert!(route_reason_is_any_route_contract(
-            "deterministic_contract:current_workspace_scalar_count"
+        assert!(!route_reason_is_any_route_contract(
+            "old_contract:current_workspace_scalar_count"
         ));
         assert!(!route_reason_is_any_route_contract("normalizer:execute"));
     }
