@@ -1459,6 +1459,11 @@ fn normalize_planned_actions(
     );
     let actions = rewrite_extract_field_alias_args(actions);
     let actions = prune_optional_extract_field_actions_for_workspace_summary(route_result, actions);
+    let actions = prune_unscoped_workspace_summary_evidence_for_scope(route_result, actions);
+    let actions =
+        strip_unrequested_workspace_artifact_mutations(route_result, loop_state, actions);
+    let actions = inject_unscoped_workspace_text_evidence_reads(state, route_result, actions);
+    let actions = append_synthesize_for_unscoped_workspace_text_evidence(route_result, actions);
     let actions = append_synthesize_answer_for_structured_scalar_compare(route_result, actions);
     let actions = rewrite_pre_observation_concrete_respond_to_placeholder(loop_state, actions);
     let actions = rewrite_terminal_placeholder_respond_to_synthesize_answer(loop_state, actions);
@@ -1777,16 +1782,297 @@ fn action_is_workspace_summary_evidence(action: &AgentAction) -> bool {
     }
 }
 
-fn action_is_optional_extract_field(action: &AgentAction) -> bool {
-    matches!(
-        action,
-        AgentAction::CallSkill { skill, args }
-            if skill == "system_basic"
+fn route_needs_unscoped_workspace_text_evidence(route: &RouteResult) -> bool {
+    !route.needs_clarify
+        && !route.output_contract.delivery_required
+        && route.output_contract.requires_content_evidence
+        && route_expects_terminal_user_answer(route)
+        && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && route.output_contract.locator_hint.trim().is_empty()
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+}
+
+fn route_disallows_unrequested_workspace_artifact_mutation(
+    route: &RouteResult,
+    loop_state: &LoopState,
+) -> bool {
+    route_needs_unscoped_workspace_text_evidence(route)
+        && !route.wants_file_delivery
+        && route.output_contract.delivery_intent == crate::OutputDeliveryIntent::None
+        && !loop_state.execution_recipe.is_active()
+}
+
+fn strip_unrequested_workspace_artifact_mutations(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !route_disallows_unrequested_workspace_artifact_mutation(route, loop_state)
+        || !actions.iter().any(action_is_likely_mutating)
+    {
+        return actions;
+    }
+
+    let original_len = actions.len();
+    let mut removed_mutations = 0usize;
+    let mut removed_discussion = 0usize;
+    let stripped = actions
+        .into_iter()
+        .filter(|action| {
+            if action_is_likely_mutating(action) {
+                removed_mutations += 1;
+                return false;
+            }
+            if is_discussion_followup_action(action) {
+                removed_discussion += 1;
+                return false;
+            }
+            true
+        })
+        .collect::<Vec<_>>();
+    if removed_mutations > 0 {
+        info!(
+            "plan_strip_unrequested_workspace_artifact_mutations removed_mutations={} removed_discussion={} kept={}",
+            removed_mutations,
+            removed_discussion,
+            original_len.saturating_sub(removed_mutations + removed_discussion)
+        );
+    }
+    stripped
+}
+
+fn action_reads_workspace_text_content(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, .. } | AgentAction::CallTool { tool: skill, .. }
+            if skill.eq_ignore_ascii_case("read_file")
+                || skill.eq_ignore_ascii_case("doc_parse") =>
+        {
+            true
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("system_basic") =>
+        {
+            args.get("action")
+                .and_then(|value| value.as_str())
+                .is_some_and(|action| action.trim().eq_ignore_ascii_case("read_range"))
+        }
+        AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::CallSkill { .. }
+        | AgentAction::CallTool { .. } => false,
+    }
+}
+
+fn action_workspace_text_path(action: &AgentAction) -> Option<&str> {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("read_file")
+                || skill.eq_ignore_ascii_case("doc_parse") =>
+        {
+            args.get("path").and_then(|value| value.as_str())
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("system_basic")
                 && args
                     .get("action")
                     .and_then(|value| value.as_str())
-                    .is_some_and(|action| action.eq_ignore_ascii_case("extract_field"))
-    )
+                    .is_some_and(|action| action.trim().eq_ignore_ascii_case("read_range")) =>
+        {
+            args.get("path").and_then(|value| value.as_str())
+        }
+        _ => None,
+    }
+}
+
+fn text_path_matches_candidate(path: &str, candidate: &str) -> bool {
+    let path = path.trim().trim_end_matches(['/', '\\']);
+    let candidate = candidate.trim().trim_end_matches(['/', '\\']);
+    !path.is_empty()
+        && !candidate.is_empty()
+        && (path == candidate
+            || path.ends_with(&format!("/{candidate}"))
+            || path.ends_with(&format!("\\{candidate}")))
+}
+
+fn workspace_text_evidence_candidate_docs(state: &AppState) -> Vec<&'static str> {
+    const CANDIDATES: &[&str] = &[
+        "README.md",
+        "README.zh-CN.md",
+        "USAGE.md",
+        "docs/README.md",
+        "docs/setup.md",
+        "docs/deployment.md",
+    ];
+    CANDIDATES
+        .iter()
+        .copied()
+        .filter(|path| state.skill_rt.workspace_root.join(path).is_file())
+        .take(3)
+        .collect()
+}
+
+fn workspace_doc_read_range_action(path: &str) -> AgentAction {
+    AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: json!({
+            "action": "read_range",
+            "path": path,
+            "mode": "head",
+            "n": 220
+        }),
+    }
+}
+
+fn inject_unscoped_workspace_text_evidence_reads(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !route_needs_unscoped_workspace_text_evidence(route) {
+        return actions;
+    }
+    let already_read_paths = actions
+        .iter()
+        .filter_map(action_workspace_text_path)
+        .collect::<Vec<_>>();
+    let candidate_docs = workspace_text_evidence_candidate_docs(state)
+        .into_iter()
+        .filter(|candidate| {
+            !already_read_paths
+                .iter()
+                .any(|path| text_path_matches_candidate(path, candidate))
+        })
+        .collect::<Vec<_>>();
+    if candidate_docs.is_empty() {
+        return actions;
+    }
+
+    let mut prefix = actions;
+    let mut terminal = Vec::new();
+    while prefix.last().is_some_and(is_discussion_followup_action) {
+        if let Some(action) = prefix.pop() {
+            terminal.push(action);
+        }
+    }
+    let first_inserted_step = prefix.len() + 1;
+    let inserted = candidate_docs
+        .iter()
+        .map(|path| workspace_doc_read_range_action(path))
+        .collect::<Vec<_>>();
+    let inserted_paths = candidate_docs.join(",");
+    let inserted_count = inserted.len();
+    prefix.extend(inserted);
+    let inserted_refs = (first_inserted_step..first_inserted_step + inserted_count)
+        .map(|idx| format!("step_{idx}"))
+        .collect::<Vec<_>>();
+    terminal.reverse();
+    for action in &mut terminal {
+        if let AgentAction::SynthesizeAnswer { evidence_refs } = action {
+            for reference in &inserted_refs {
+                if !evidence_refs.iter().any(|value| value == reference) {
+                    evidence_refs.push(reference.clone());
+                }
+            }
+        }
+    }
+    prefix.extend(terminal);
+    info!("plan_inject_unscoped_workspace_text_evidence paths={inserted_paths}");
+    prefix
+}
+
+fn append_synthesize_for_unscoped_workspace_text_evidence(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !route_needs_unscoped_workspace_text_evidence(route)
+        || has_discussion_followup_action(&actions)
+    {
+        return actions;
+    }
+    let evidence_refs = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, action)| {
+            action_reads_workspace_text_content(action).then(|| format!("step_{}", idx + 1))
+        })
+        .collect::<Vec<_>>();
+    if evidence_refs.is_empty() {
+        return actions;
+    }
+    let mut rewritten = actions;
+    let refs_log = evidence_refs.join(",");
+    rewritten.push(AgentAction::SynthesizeAnswer { evidence_refs });
+    info!("plan_append_unscoped_workspace_text_evidence_synthesis refs={refs_log}");
+    rewritten
+}
+
+fn action_workspace_summary_path(action: &AgentAction) -> Option<&str> {
+    match action {
+        AgentAction::CallSkill { skill, args } if skill == "list_dir" || skill == "read_file" => {
+            args.get("path").and_then(|value| value.as_str())
+        }
+        AgentAction::CallSkill { skill, args } if skill == "system_basic" => args
+            .get("action")
+            .and_then(|value| value.as_str())
+            .filter(|action| {
+                matches!(
+                    action.trim().to_ascii_lowercase().as_str(),
+                    "inventory_dir" | "read_range" | "workspace_glance" | "tree_summary"
+                )
+            })
+            .and_then(|_| {
+                args.get("path")
+                    .or_else(|| args.get("root"))
+                    .and_then(|value| value.as_str())
+            }),
+        _ => None,
+    }
+}
+
+fn path_matches_workspace_scope_hint(path: &str, scope_hint: &str) -> bool {
+    let path = path.trim().trim_end_matches(['/', '\\']);
+    let scope_hint = scope_hint.trim().trim_end_matches(['/', '\\']);
+    if path.is_empty()
+        || scope_hint.is_empty()
+        || matches!(path, "." | "./" | "/" | "")
+        || matches!(scope_hint, "." | "./" | "/" | "")
+    {
+        return false;
+    }
+    let path_lower = path.to_ascii_lowercase();
+    let hint_lower = scope_hint.to_ascii_lowercase();
+    if path_lower == hint_lower {
+        return true;
+    }
+    Path::new(path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case(scope_hint))
+}
+
+fn action_is_optional_extract_field(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } if skill == "system_basic" => args
+            .get("action")
+            .and_then(|value| value.as_str())
+            .is_some_and(|action| {
+                matches!(
+                    action.trim().to_ascii_lowercase().as_str(),
+                    "extract_field" | "extract_fields"
+                )
+            }),
+        _ => false,
+    }
 }
 
 fn route_requests_structured_scalar_compare(route: &RouteResult) -> bool {
@@ -1890,6 +2176,51 @@ fn prune_optional_extract_field_actions_for_workspace_summary(
     if pruned.len() != original_len {
         info!(
             "plan_prune_workspace_summary_extract_fields removed={}",
+            original_len.saturating_sub(pruned.len())
+        );
+    }
+    pruned
+}
+
+fn prune_unscoped_workspace_summary_evidence_for_scope(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    let scope_hint = route.output_contract.locator_hint.trim();
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::WorkspaceProjectSummary
+        || scope_hint.is_empty()
+    {
+        return actions;
+    }
+    let has_scoped_evidence = actions.iter().any(|action| {
+        action_is_workspace_summary_evidence(action)
+            && action_workspace_summary_path(action)
+                .is_some_and(|path| path_matches_workspace_scope_hint(path, scope_hint))
+    });
+    if !has_scoped_evidence {
+        return actions;
+    }
+    let original_len = actions.len();
+    let pruned = actions
+        .into_iter()
+        .filter(|action| {
+            !action_is_workspace_summary_evidence(action)
+                || action_workspace_summary_path(action)
+                    .is_some_and(|path| path_matches_workspace_scope_hint(path, scope_hint))
+        })
+        .collect::<Vec<_>>();
+    if pruned.is_empty() {
+        return pruned;
+    }
+    if pruned.len() != original_len {
+        info!(
+            "plan_prune_workspace_summary_unscoped_evidence scope={} removed={}",
+            scope_hint,
             original_len.saturating_sub(pruned.len())
         );
     }
@@ -3099,6 +3430,30 @@ mod tests {
     }
 
     #[test]
+    fn planning_prompt_class_keeps_open_planning_for_current_workspace_drafting() {
+        let mut route = base_route_result();
+        route.routed_mode = RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.resolved_intent =
+            "Write a short RustClaw setup note for the current workspace project".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint = "rustclaw workspace".to_string();
+
+        assert_eq!(
+            classify_planning_prompt_class(
+                Some(&route),
+                &route.resolved_intent,
+                &LoopState::default()
+            )
+            .as_str(),
+            "open_planning"
+        );
+    }
+
+    #[test]
     fn round1_prompt_spec_switches_to_lightweight_prompt_for_light_class() {
         assert_eq!(
             round1_prompt_spec_for_class(PlanningPromptClass::OpenPlanning),
@@ -4165,6 +4520,370 @@ mod tests {
         assert!(pruned
             .iter()
             .all(|action| !super::action_is_optional_extract_field(action)));
+    }
+
+    #[test]
+    fn workspace_summary_prunes_multi_extract_fields_when_read_evidence_exists() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: serde_json::json!({ "path": "." }),
+            },
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: serde_json::json!({ "path": "README.md" }),
+            },
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "extract_fields",
+                    "path": "Cargo.toml",
+                    "field_paths": [
+                        "package.name",
+                        "package.version",
+                        "package.description",
+                        "workspace.package.description"
+                    ]
+                }),
+            },
+        ];
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+        route.resolved_intent = "帮我总结这个仓库".to_string();
+
+        let pruned = super::prune_optional_extract_field_actions_for_workspace_summary(
+            Some(&route),
+            actions,
+        );
+        assert_eq!(pruned.len(), 2);
+        assert!(pruned
+            .iter()
+            .all(|action| !super::action_is_optional_extract_field(action)));
+    }
+
+    #[test]
+    fn workspace_summary_with_scope_prunes_sibling_evidence() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: serde_json::json!({ "path": "UI" }),
+            },
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: serde_json::json!({ "path": "pi_app" }),
+            },
+        ];
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+        route.output_contract.locator_hint = "UI".to_string();
+        route.resolved_intent = "Summarize only the UI part of this repository".to_string();
+
+        let pruned =
+            super::prune_unscoped_workspace_summary_evidence_for_scope(Some(&route), actions);
+        assert_eq!(pruned.len(), 1);
+        match &pruned[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "list_dir");
+                assert_eq!(
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some("UI")
+                );
+            }
+            other => panic!("expected scoped UI list_dir action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unscoped_workspace_evidence_injects_doc_reads_after_search_only_plan() {
+        let root = TempDirGuard::new("workspace_text_evidence");
+        fs::write(root.path.join("README.md"), "# RustClaw\n\nSetup notes").expect("write README");
+        fs::write(
+            root.path.join("USAGE.md"),
+            "# Usage\n\nRun documented steps",
+        )
+        .expect("write USAGE");
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint.clear();
+        route.resolved_intent = "帮我写一段当前项目安装说明".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: json!({"path":"."}),
+            },
+            AgentAction::CallSkill {
+                skill: "fs_search".to_string(),
+                args: json!({"action":"find_name","pattern":"README"}),
+            },
+        ];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+        let injected_paths = normalized
+            .iter()
+            .filter_map(|action| match action {
+                AgentAction::CallSkill { skill, args }
+                    if skill == "system_basic"
+                        && args.get("action").and_then(|value| value.as_str())
+                            == Some("read_range") =>
+                {
+                    args.get("path").and_then(|value| value.as_str())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(injected_paths, vec!["README.md", "USAGE.md"]);
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == &vec!["step_3".to_string(), "step_4".to_string()]
+        ));
+    }
+
+    #[test]
+    fn unscoped_workspace_evidence_injects_doc_reads_before_terminal_synthesis() {
+        let root = TempDirGuard::new("workspace_text_evidence_synthesis");
+        fs::write(root.path.join("README.md"), "# RustClaw\n\nSetup notes").expect("write README");
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint.clear();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "process_basic".to_string(),
+                args: json!({"action":"list","filter":"rustclaw"}),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(2),
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::SynthesizeAnswer { .. })
+        ));
+        assert!(matches!(
+            normalized.get(normalized.len().saturating_sub(2)),
+            Some(AgentAction::CallSkill { skill, args })
+                if skill == "system_basic"
+                    && args.get("action").and_then(|value| value.as_str()) == Some("read_range")
+                    && args.get("path").and_then(|value| value.as_str()) == Some("README.md")
+        ));
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == &vec!["last_output".to_string(), "step_2".to_string()]
+        ));
+    }
+
+    #[test]
+    fn unscoped_workspace_evidence_appends_synthesis_after_existing_text_read_plan() {
+        let root = TempDirGuard::new("workspace_text_evidence_existing");
+        fs::write(root.path.join("README.md"), "# RustClaw").expect("write README");
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint.clear();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "read_file".to_string(),
+            args: json!({"path":"README.md"}),
+        }];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+        assert_eq!(normalized.len(), 2);
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, .. } if skill == "read_file"
+        ));
+        assert!(matches!(
+            &normalized[1],
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs == &vec!["step_1".to_string()]
+        ));
+    }
+
+    #[test]
+    fn unscoped_workspace_evidence_supplements_existing_read_with_unread_docs() {
+        let root = TempDirGuard::new("workspace_text_evidence_supplement");
+        fs::write(root.path.join("README.md"), "# RustClaw").expect("write README");
+        fs::write(root.path.join("README.zh-CN.md"), "# RustClaw 中文").expect("write zh README");
+        fs::write(root.path.join("USAGE.md"), "# Usage").expect("write USAGE");
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint.clear();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "read_file".to_string(),
+            args: json!({"path": root.path.join("README.md").display().to_string()}),
+        }];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+        let injected_paths = normalized
+            .iter()
+            .filter_map(|action| match action {
+                AgentAction::CallSkill { skill, args }
+                    if skill == "system_basic"
+                        && args.get("action").and_then(|value| value.as_str())
+                            == Some("read_range") =>
+                {
+                    args.get("path").and_then(|value| value.as_str())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(injected_paths, vec!["README.zh-CN.md", "USAGE.md"]);
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs
+                    == &vec![
+                        "step_1".to_string(),
+                        "step_2".to_string(),
+                        "step_3".to_string()
+                    ]
+        ));
+    }
+
+    #[test]
+    fn unscoped_workspace_text_answer_strips_unrequested_file_artifact_plan() {
+        let root = TempDirGuard::new("workspace_text_evidence_no_artifact");
+        fs::write(root.path.join("README.md"), "# RustClaw\n\nUse the documented installer")
+            .expect("write README");
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.delivery_required = false;
+        route.wants_file_delivery = false;
+        route.resolved_intent = "Write a short RustClaw setup note".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: json!({"path":"Cargo.toml"}),
+            },
+            AgentAction::CallSkill {
+                skill: "write_file".to_string(),
+                args: json!({
+                    "path":"document/SETUP_NOTE.md",
+                    "content":"# RustClaw Setup Note\n"
+                }),
+            },
+            AgentAction::Respond {
+                content: "FILE:/home/guagua/rustclaw/document/SETUP_NOTE.md".to_string(),
+            },
+        ];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+        assert!(normalized.iter().all(|action| {
+            !matches!(
+                action,
+                AgentAction::CallSkill { skill, .. } if skill == "write_file"
+            )
+        }));
+        assert!(normalized
+            .iter()
+            .all(|action| !matches!(action, AgentAction::Respond { .. })));
+        assert!(normalized.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::CallSkill { skill, args }
+                    if skill == "system_basic"
+                        && args.get("action").and_then(|value| value.as_str())
+                            == Some("read_range")
+                        && args.get("path").and_then(|value| value.as_str())
+                            == Some("README.md")
+            )
+        }));
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::SynthesizeAnswer { .. })
+        ));
+    }
+
+    #[test]
+    fn active_execution_recipe_keeps_workspace_file_mutation_plan() {
+        let root = TempDirGuard::new("workspace_text_evidence_recipe_mutation");
+        fs::write(root.path.join("README.md"), "# RustClaw").expect("write README");
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint.clear();
+        let mut loop_state = LoopState::new(1);
+        loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+            kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+            phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
+            ..Default::default()
+        };
+        let actions = vec![AgentAction::CallSkill {
+            skill: "write_file".to_string(),
+            args: json!({
+                "path":"document/SETUP_NOTE.md",
+                "content":"# RustClaw Setup Note\n"
+            }),
+        }];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &loop_state,
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+        assert!(normalized.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::CallSkill { skill, .. } if skill == "write_file"
+            )
+        }));
     }
 
     #[test]

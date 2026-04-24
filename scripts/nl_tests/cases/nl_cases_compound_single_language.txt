@@ -22,3 +22,9 @@ compound|compound_en_clawd_port_health|en,act,summary|check whether clawd is lis
 compound|compound_en_crates_vs_skills_layout|en,act,listing,summary|count how many entries are directly under crates, then count how many are under crates/skills, and explain in one short English sentence what that suggests about the repo layout
 compound|compound_en_generic_dir_glance|en,act,listing,summary|look at the docs folder and give me a short concrete overview grounded in that directory, not a whole-repo summary
 compound|compound_en_dir_listing_then_purpose|en,act,listing,summary|list the 2 most recently modified files under docs and then say what these docs are mainly for
+compound|compound_cn_fixture_list_then_read|cn,act,listing,file,summary|先列出 scripts/nl_tests/fixtures/device_local/docs 目录里的文件名，再读取 release_checklist.md 开头，最后用一句中文说它更像操作清单还是普通说明
+compound|compound_cn_two_commands_raw_lines|cn,act,command,raw|请依次执行 pwd 和 whoami，直接输出两个命令结果，每个结果一行，不要总结
+compound|compound_cn_count_then_compare|cn,act,listing,compare,summary|先数 scripts/nl_tests/fixtures/device_local/docs 直接子项数量，再数 scripts/nl_tests/fixtures/device_local/logs 直接子项数量，最后一句中文说哪个更多
+compound|compound_en_fixture_list_then_read|en,act,listing,file,summary|list the file names under scripts/nl_tests/fixtures/device_local/docs, then read the opening of release_checklist.md, and say in one short English sentence whether it is an operator checklist or a general note
+compound|compound_en_two_commands_raw_lines|en,act,command,raw|run pwd and whoami in order, then output only the two command results, one per line, with no summary
+compound|compound_en_count_then_compare|en,act,listing,compare,summary|count direct children under scripts/nl_tests/fixtures/device_local/docs, then count direct children under scripts/nl_tests/fixtures/device_local/logs, and say in one short English sentence which has more

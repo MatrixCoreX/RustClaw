@@ -11,6 +11,7 @@ This prompt is only for bounded first-round requests such as:
 - one bounded local field extraction
 - one bounded existence check
 - one bounded local listing
+- one bounded workspace-grounded writing setup where the normalizer already required current-workspace evidence
 
 Goal/context:
 __GOAL__
@@ -52,6 +53,7 @@ Core rules:
 - Prefer one direct observation step, or at most one bounded locator-resolution step plus one direct observation step.
 - Do not inspect unrelated files, repository history, extra directories, or extra skills.
 - Do not fabricate file paths, directory entries, counts, field values, or command output.
+- For project/product-specific setup notes, deployment notes, onboarding notes, checklists, tutorials, or user guides that require current-workspace evidence, a top-level directory listing alone is not enough evidence for concrete setup instructions. Plan a bounded docs observation before synthesis: first list/inventory the workspace root if needed, then read a stable setup source such as root `README.md`, `USAGE.md`, `DEPLOYMENT.md`, or a clearly named setup/deploy doc visible in the listing. Prefer `system_basic.read_range` with a bounded head/range over broad repo exploration. If no such doc is visible, finish conservatively without concrete commands.
 - Use only exact enabled skill names from the contract.
 - If `Goal/context` already contains one explicit resolved path or `auto_locator_path`, treat it as authoritative.
 - If the current request already contains an explicit path, filename, URL, or inline structured literal, do not ask for it again.
@@ -59,6 +61,7 @@ Core rules:
 
 Execution preferences:
 - For explicit file-content ranges such as first N lines / last N lines / head / tail, prefer `system_basic` with `action="read_range"`.
+- For bounded setup/deployment/onboarding evidence from root docs, prefer `system_basic` with `action="read_range"`, `mode="head"`, and a bounded `n` large enough to include setup sections without reading the whole repo.
 - For structured local field extraction, prefer `system_basic` with `action="extract_field"`.
 - For `system_basic.extract_field`, the canonical argument name is `field_path` (not `field`).
 - For `system_basic.extract_field`, the canonical file target argument name is `path` (not `file_path` or `target`).
@@ -75,6 +78,7 @@ Terminal-step rule:
   2) `{"type":"synthesize_answer","evidence_refs":[...]}`
   3) `{"type":"respond","content":"{{last_output}}"}`
 - Do not use a chat skill just to rewrite local evidence into prose.
+- For setup/deployment/onboarding deliverables, do not let fallback synthesize from only a directory listing. Include the doc-read step in the same plan whenever concrete setup wording is requested.
 
 Output-shape guard:
 - Respect the requested output shape strictly: only path, only value, only number, only filename list, only final answer, one sentence, etc.

@@ -1457,10 +1457,18 @@ pub(crate) fn prompt_requests_structured_keys_shape(prompt: &str) -> bool {
 
 pub(crate) fn prompt_requests_brief_shape(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
-    ["keep it brief", "briefly", "brief "]
-        .iter()
-        .any(|needle| lower.contains(needle))
-        || ["简短", "简要", "简洁", "brief"]
+    [
+        "keep it brief",
+        "briefly",
+        "brief ",
+        "short ",
+        "shortly",
+        "short note",
+        "short setup note",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+        || ["简短", "简要", "简洁", "一段", "brief"]
             .iter()
             .any(|needle| prompt.contains(needle))
 }
@@ -2722,7 +2730,11 @@ mod tests {
     #[test]
     fn detects_brief_shape() {
         assert!(prompt_requests_brief_shape("briefly explain this"));
+        assert!(prompt_requests_brief_shape(
+            "Write a short RustClaw setup note"
+        ));
         assert!(prompt_requests_brief_shape("简短说明一下"));
+        assert!(prompt_requests_brief_shape("帮我写一段 RustClaw 安装说明"));
     }
 
     #[test]
