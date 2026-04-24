@@ -303,7 +303,9 @@ fn should_clear_scalar_path_only_without_locator_binding(route_result: &RouteRes
         && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
-fn should_clear_scalar_path_only_for_git_scalar_query(route_result: &RouteResult) -> bool {
+fn should_clear_scalar_path_only_for_workspace_scope_without_locator(
+    route_result: &RouteResult,
+) -> bool {
     if route_result.output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
         || route_result.output_contract.response_shape != OutputResponseShape::Scalar
         || route_result.output_contract.delivery_required
@@ -311,7 +313,8 @@ fn should_clear_scalar_path_only_for_git_scalar_query(route_result: &RouteResult
     {
         return false;
     }
-    crate::intent::git_scalar_surface::route_has_git_scalar_surface(route_result)
+    route_result.output_contract.locator_kind == OutputLocatorKind::CurrentWorkspace
+        && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
 fn should_clear_raw_command_output_for_contract_mismatch(
@@ -432,7 +435,9 @@ pub(crate) fn apply_post_route_policy_with_surface(
         auto_locator_path.as_deref(),
     ) {
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
-    } else if should_clear_scalar_path_only_for_git_scalar_query(&execution_route_result) {
+    } else if should_clear_scalar_path_only_for_workspace_scope_without_locator(
+        &execution_route_result,
+    ) {
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
     } else if should_clear_scalar_path_only_without_locator_binding(&execution_route_result) {
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
@@ -1263,9 +1268,9 @@ mod tests {
     }
 
     #[test]
-    fn scalar_path_only_contract_is_cleared_for_git_branch_scalar_query() {
+    fn scalar_path_only_contract_is_cleared_for_workspace_scope_without_locator() {
         let mut route = route_result();
-        route.resolved_intent = "output only the current git branch name".to_string();
+        route.resolved_intent = "output only the current workspace scalar value".to_string();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.requires_content_evidence = false;
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;

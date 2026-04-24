@@ -1,5 +1,4 @@
 pub(crate) mod continuation_resolver;
-pub(crate) mod git_scalar_surface;
 pub(crate) mod intent_kind_classifier;
 pub(crate) mod locator_extractor;
 pub(crate) mod response_shape_classifier;

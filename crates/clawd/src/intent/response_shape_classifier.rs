@@ -24,16 +24,15 @@ pub(crate) fn classify_fallback_response_shape(
 ) -> ResponseShapeClassification {
     let trimmed = user_request.trim();
     let surface_signals = analyze_prompt_surface(trimmed);
-    classify_fallback_response_shape_with_surface(trimmed, delivery_required, &surface_signals)
+    classify_fallback_response_shape_with_surface(delivery_required, &surface_signals)
 }
 
 pub(crate) fn classify_fallback_response_shape_with_surface(
-    user_request: &str,
     delivery_required: bool,
     surface_signals: &PromptSurfaceSignals,
 ) -> ResponseShapeClassification {
     if let Some((shape, reason)) =
-        classify_structured_response_shape(user_request, delivery_required, surface_signals)
+        classify_structured_response_shape(delivery_required, surface_signals)
     {
         return ResponseShapeClassification {
             response_shape: shape,
@@ -65,7 +64,6 @@ pub(crate) fn classify_fallback_response_shape_with_surface(
 }
 
 fn classify_structured_response_shape(
-    user_request: &str,
     delivery_required: bool,
     surface_signals: &PromptSurfaceSignals,
 ) -> Option<(OutputResponseShape, &'static str)> {
@@ -89,9 +87,6 @@ fn classify_structured_response_shape(
             OutputResponseShape::Scalar,
             "structured_field_selector_scalar",
         ));
-    }
-    if crate::intent::git_scalar_surface::text_has_git_scalar_surface(user_request) {
-        return Some((OutputResponseShape::Scalar, "structured_git_scalar_query"));
     }
     if surface_signals.requested_sentence_count == Some(1) {
         return Some((
@@ -185,26 +180,6 @@ mod tests {
         );
         assert_eq!(out.response_shape, OutputResponseShape::Scalar);
         assert_eq!(out.reason, "structured_path_output_scalar");
-        assert_eq!(out.source, ResponseShapeDecisionSource::Structured);
-    }
-
-    #[test]
-    fn git_branch_query_prefers_structured_scalar() {
-        let out =
-            classify_fallback_response_shape("output only the current git branch name", false);
-        assert_eq!(out.response_shape, OutputResponseShape::Scalar);
-        assert_eq!(out.reason, "structured_git_scalar_query");
-        assert_eq!(out.source, ResponseShapeDecisionSource::Structured);
-    }
-
-    #[test]
-    fn git_recent_commit_query_prefers_structured_scalar() {
-        let out = classify_fallback_response_shape(
-            "tell me only the title of the most recent git commit",
-            false,
-        );
-        assert_eq!(out.response_shape, OutputResponseShape::Scalar);
-        assert_eq!(out.reason, "structured_git_scalar_query");
         assert_eq!(out.source, ResponseShapeDecisionSource::Structured);
     }
 
