@@ -1944,8 +1944,7 @@ mod tests {
             RoutedMode::Act,
             "读取 /home/guagua/rustclaw/configs/config.toml 里的 tools.allow_sudo，只输出值",
         );
-        route.route_reason =
-            "route_contract:generic_explicit_path_scalar_extract".to_string();
+        route.route_reason = "route_contract:generic_explicit_path_scalar_extract".to_string();
         let spec =
             detect_execution_recipe(Some(&route), &route.resolved_intent, &route.resolved_intent);
         assert_eq!(spec.kind, ExecutionRecipeKind::None);

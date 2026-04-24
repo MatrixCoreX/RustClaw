@@ -1453,8 +1453,7 @@ mod tests {
     use super::{
         attach_execution_recipe_closeout_to_delivery, auto_requested_success_marker,
         direct_non_builtin_skill_raw_answer, direct_publishable_observed_answer,
-        direct_scalar_observed_answer,
-        direct_structured_observed_answer,
+        direct_scalar_observed_answer, direct_structured_observed_answer,
         discard_raw_passthrough_delivery_when_structured_answer_available,
         ensure_requested_success_marker_visible, execution_recipe_closeout_note,
         finalize_loop_reply, finalizer_requires_clarify, has_missing_file_search_evidence,
@@ -2373,16 +2372,14 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(
-            direct_publishable_observed_answer(
-                &state,
-                &task,
-                &loop_state,
-                Some(&agent_run_context)
-            )
-            .await
-            .is_none()
-        );
+        assert!(direct_publishable_observed_answer(
+            &state,
+            &task,
+            &loop_state,
+            Some(&agent_run_context)
+        )
+        .await
+        .is_none());
     }
 
     #[test]

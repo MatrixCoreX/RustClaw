@@ -828,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_delivery_deictic_without_immediate_anchor_forces_clarify() {
+    fn fresh_delivery_deictic_without_immediate_anchor_stays_with_normalizer() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
@@ -858,17 +858,16 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        let out = crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
-            &route,
-            "把那个文件发给我",
-            None,
-            "<none>",
-            "<none>",
-        )
-        .expect("delivery deictic should require clarify");
-        assert_eq!(
-            out.kind,
-            crate::intent::continuation_resolver::FreshDeicticClarifyKind::Delivery
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "把那个文件发给我",
+                None,
+                "<none>",
+                "<none>",
+            )
+            .is_none(),
+            "generic deictic delivery should stay on the normalizer/planner path"
         );
     }
 
@@ -931,7 +930,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_scalar_deictic_without_immediate_anchor_forces_clarify() {
+    fn fresh_scalar_deictic_without_immediate_anchor_stays_with_normalizer() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
@@ -961,17 +960,16 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        let out = crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
-            &route,
-            "读一下那个文件里的名字字段，只输出值",
-            None,
-            "<none>",
-            "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=好的，我来读取 has_code_block=false\n- turn_id=assistant[-2] short_preview=package.json has_code_block=false",
-        )
-        .expect("scalar deictic should require clarify");
-        assert_eq!(
-            out.kind,
-            crate::intent::continuation_resolver::FreshDeicticClarifyKind::ScalarRead
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "读一下那个文件里的名字字段，只输出值",
+                None,
+                "<none>",
+                "### RECENT_ASSISTANT_REPLIES\n- turn_id=assistant[-1] short_preview=好的，我来读取 has_code_block=false\n- turn_id=assistant[-2] short_preview=package.json has_code_block=false",
+            )
+            .is_none(),
+            "generic deictic scalar reads should not be hard-routed by ask_prepare"
         );
     }
 
@@ -1019,7 +1017,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_content_deictic_without_immediate_anchor_forces_clarify() {
+    fn fresh_content_deictic_without_immediate_anchor_stays_with_normalizer() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
@@ -1049,17 +1047,16 @@ mod tests {
             direct_reply_candidate: String::new(),
             direct_reply_confidence: 0.0,
         };
-        let out = crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
-            &route,
-            "看看那个模型日志最后 5 行",
-            None,
-            "<none>",
-            "<none>",
-        )
-        .expect("content deictic should require clarify");
-        assert_eq!(
-            out.kind,
-            crate::intent::continuation_resolver::FreshDeicticClarifyKind::ContentRead
+        assert!(
+            crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
+                &route,
+                "看看那个模型日志最后 5 行",
+                None,
+                "<none>",
+                "<none>",
+            )
+            .is_none(),
+            "generic deictic content reads should stay on the normalizer/planner path"
         );
     }
 
