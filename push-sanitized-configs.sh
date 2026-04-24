@@ -6,8 +6,10 @@ set -euo pipefail
 # 2) sanitize configs/**/*.toml (redact secrets + channels enabled=false)
 # 3) git add configs && git commit && git push
 # 4) restore local configs/ exactly as before
+# zh: 将脱敏后的 configs 提交并推送；本地真实配置会先备份，结束后原样恢复。
 
 usage() {
+# zh: 打印命令用法；运行时保持英文输出。
   cat <<'EOF'
 Usage:
   push-sanitized-configs.sh -m "commit message" [-r origin] [-b branch]

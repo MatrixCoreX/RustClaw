@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# zh: 单独启动 Lark 渠道服务；通常由 start-all.sh 统一调度。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,6 +21,7 @@ case "$PROFILE" in
   release)
     ;;
   *)
+    # zh: 目前只支持 release 模式启动已编译二进制。
     echo "Usage: ./start-larkd.sh [release]"
     exit 1
     ;;

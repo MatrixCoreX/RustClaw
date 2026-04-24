@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# zh: 构建整个 RustClaw 工作区；运行时提示保持英文，中文说明仅作为维护注释。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,6 +8,7 @@ cd "$SCRIPT_DIR"
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 
 # ----- Ensure Cargo (Rust) is installed -----
+# zh: 确保本机已有 Rust/Cargo；缺失时尝试自动安装 rustup。
 ensure_cargo() {
 	if command -v cargo >/dev/null 2>&1; then
 		return 0
@@ -23,6 +25,7 @@ ensure_cargo() {
 	echo "Rust toolchain installed."
 }
 
+# zh: 确保 protobuf 编译器可用，供依赖生成代码。
 ensure_protoc() {
 	if command -v protoc >/dev/null 2>&1; then
 		export PROTOC
@@ -116,6 +119,7 @@ detect_libclang_dir() {
 	return 1
 }
 
+# zh: 确保 bindgen 所需 clang/libclang 可用。
 ensure_bindgen_toolchain() {
 	local libclang_dir=""
 	local need_install=0
@@ -184,6 +188,7 @@ ensure_protoc
 ensure_bindgen_toolchain
 
 # ----- Ensure npm is installed (only needed when UI exists) -----
+# zh: 仅在需要构建 UI 时检查 npm。
 ensure_npm() {
 	if command -v npm >/dev/null 2>&1; then
 		return 0

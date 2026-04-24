@@ -10,13 +10,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
 usage() {
-	echo "用法: $0 [--path DIR]"
+	# zh: 打印树莓派 nginx 部署脚本的英文用法。
+	echo "Usage: $0 [--path DIR]"
 	echo ""
-	echo "说明:"
-	echo "  使用现有 UI/dist 部署 nginx，不执行 npm build。"
-	echo "  默认站点根目录沿用 build-ui-nginx.sh 在 Linux 下的默认值。"
+	echo "Description:"
+	echo "  Deploy the existing UI/dist to nginx without running npm build."
+	echo "  The default site root follows build-ui-nginx.sh's Linux default."
 	echo ""
-	echo "示例:"
+	echo "Examples:"
 	echo "  $0"
 	echo "  $0 --path /var/www/html/rustclaw"
 }
@@ -24,7 +25,8 @@ usage() {
 for arg in "$@"; do
 	case "$arg" in
 	--build)
-		echo "错误: $0 只负责部署 nginx，不负责构建 UI。请先确保 UI/dist 已存在。" >&2
+		# zh: 该脚本只部署已有 UI/dist，不负责构建前端。
+		echo "Error: $0 only deploys nginx and does not build the UI. Make sure UI/dist already exists." >&2
 		exit 1
 		;;
 	-h|--help)
@@ -35,8 +37,9 @@ for arg in "$@"; do
 done
 
 if [[ ! -f "${SCRIPT_DIR}/UI/dist/index.html" ]]; then
-	echo "错误: 未找到 ${SCRIPT_DIR}/UI/dist/index.html" >&2
-	echo "请先在其他机器构建并同步 UI/dist，或先执行 ./build-ui-nginx.sh --build" >&2
+	# zh: 缺少已构建前端产物时，提示用户先构建或同步 UI/dist。
+	echo "Error: ${SCRIPT_DIR}/UI/dist/index.html not found" >&2
+	echo "Build and sync UI/dist first, or run ./build-ui-nginx.sh --build" >&2
 	exit 1
 fi
 
