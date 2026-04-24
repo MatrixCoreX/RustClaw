@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::OnceLock;
 
-use crate::{AppState, ClaimedTask, OutputResponseShape};
+use crate::{AppState, ClaimedTask};
 
 const MAX_SESSION_ALIAS_BINDINGS: usize = 12;
 
@@ -46,23 +46,6 @@ pub(crate) struct ActiveSessionPointers {
     pub(crate) active_followup_task_id: Option<String>,
     pub(crate) active_clarify_task_id: Option<String>,
     pub(crate) active_observed_facts_task_id: Option<String>,
-}
-
-pub(crate) fn parse_output_shape_hint(value: Option<&str>) -> Option<OutputResponseShape> {
-    match value?.trim().to_ascii_lowercase().as_str() {
-        "one_sentence" => Some(OutputResponseShape::OneSentence),
-        "scalar" => Some(OutputResponseShape::Scalar),
-        "file_token" => Some(OutputResponseShape::FileToken),
-        "free" => Some(OutputResponseShape::Free),
-        _ => None,
-    }
-}
-
-pub(crate) fn output_shape_hint_prefers_file_delivery(value: Option<&str>) -> bool {
-    matches!(
-        parse_output_shape_hint(value),
-        Some(OutputResponseShape::FileToken)
-    )
 }
 
 fn effective_user_key(task: &ClaimedTask) -> String {

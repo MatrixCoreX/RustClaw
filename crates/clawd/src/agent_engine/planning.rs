@@ -1446,11 +1446,8 @@ fn normalize_planned_actions(
     let actions = rewrite_http_probe_actions(route_result, actions);
     let actions = rewrite_sqlite3_run_cmd_to_db_basic(actions);
     let actions = rewrite_path_batch_size_facts_to_compare_paths(route_result, actions);
-    let actions = rewrite_recent_artifacts_list_dir_to_inventory_dir(
-        route_result,
-        &request_surface,
-        actions,
-    );
+    let actions =
+        rewrite_recent_artifacts_list_dir_to_inventory_dir(route_result, &request_surface, actions);
     let actions = rewrite_overbroad_list_dir_to_compare_paths(route_result, actions);
     let actions =
         rewrite_single_target_file_read_to_auto_locator(route_result, auto_locator_path, actions);
@@ -1663,9 +1660,7 @@ fn single_list_dir_like_action_index_path(actions: &[AgentAction]) -> Option<(us
         })
 }
 
-fn compare_target_pair_from_locator_hint(
-    route_result: &RouteResult,
-) -> Option<(String, String)> {
+fn compare_target_pair_from_locator_hint(route_result: &RouteResult) -> Option<(String, String)> {
     if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison {
         return None;
     }
@@ -3114,8 +3109,7 @@ mod tests {
     #[test]
     fn lightweight_tool_spec_includes_contract_and_auto_locator() {
         let mut route = base_route_result();
-        route.route_reason =
-            "route_contract:generic_explicit_path_scalar_extract".to_string();
+        route.route_reason = "route_contract:generic_explicit_path_scalar_extract".to_string();
         route.resolved_intent = "读取 UI/package.json 里的 name 字段，只输出值".to_string();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
