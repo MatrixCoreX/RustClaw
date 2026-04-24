@@ -680,6 +680,22 @@ fn detect_execution_recipe_target_scope(
     }
 }
 
+fn inherited_clarify_rewrite_request_text(route: &RouteResult) -> Option<String> {
+    let prefix = "Continue the previous request that was waiting for clarification:";
+    let suffix = "\nUser now provides the missing target/content:";
+    let rest = route.resolved_intent.trim().strip_prefix(prefix)?.trim();
+    let prior_request = rest
+        .split_once(suffix)
+        .map(|(left, _)| left)
+        .unwrap_or(rest);
+    let trimmed = prior_request.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 pub(crate) fn detect_execution_recipe(
     route_result: Option<&RouteResult>,
     goal: &str,
@@ -688,12 +704,46 @@ pub(crate) fn detect_execution_recipe(
     let Some(route) = route_result else {
         return ExecutionRecipeSpec::default();
     };
-    if route.needs_clarify || !route.ask_mode.is_act() {
+    if route.needs_clarify || !route.is_execute_gate() {
+        return ExecutionRecipeSpec::default();
+    }
+    if crate::route_reason_is_any_deterministic_contract(&route.route_reason) {
+        return ExecutionRecipeSpec::default();
+    }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ExistenceWithPath
+            | crate::OutputSemanticKind::ScalarCount
+            | crate::OutputSemanticKind::ServiceStatus
+    ) {
         return ExecutionRecipeSpec::default();
     }
 
-    let joined =
-        format!("{}\n{}\n{}", route.resolved_intent, goal, user_text.trim()).to_ascii_lowercase();
+    let detection_text = {
+        if let Some(inherited_request) = inherited_clarify_rewrite_request_text(route) {
+            inherited_request
+        } else {
+            let resolved_intent = route.resolved_intent.trim();
+            let user_text = user_text.trim();
+            if !resolved_intent.is_empty() && !user_text.is_empty() {
+                if resolved_intent == user_text {
+                    resolved_intent.to_string()
+                } else {
+                    format!("{resolved_intent}\n{user_text}")
+                }
+            } else if !resolved_intent.is_empty() {
+                resolved_intent.to_string()
+            } else if !user_text.is_empty() {
+                user_text.to_string()
+            } else {
+                goal.trim().to_string()
+            }
+        }
+    };
+    // `goal` 在 runtime 里往往是带 memory / recent_execution_context / auto-locator
+    // 的大 prompt，不是纯语义意图。recipe 检测如果把整段 goal 拼进来，极易被
+    // 历史上下文或结构块里的噪声词误升级成 ops_closed_loop。
+    let joined = detection_text.to_ascii_lowercase();
     let has_until_clause = contains_any(&joined, &["until it works", "直到", "跑通", "生效"]);
     let mutation_request = looks_mutation_request(&joined);
     let validation_request = looks_validation_request(&joined);
@@ -1802,17 +1852,13 @@ mod tests {
         ExecutionRecipeSpec, ExecutionRecipeTargetScope, ValidationObservation,
     };
     use crate::{
-        AgentRuntimeConfig, AppState, RouteResult, RoutedMode,
-        ScheduleKind, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+        AgentRuntimeConfig, AppState, RouteResult, RoutedMode, ScheduleKind, SkillViewsSnapshot,
+        ToolsPolicy, DEFAULT_AGENT_ID,
     };
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
+    use claw_core::config::{AgentConfig, ToolsConfig};
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
-    
-    
 
     fn test_state() -> AppState {
         let agents_by_id = HashMap::from([(
@@ -1823,16 +1869,16 @@ mod tests {
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: None,
-                                skills_list: Arc::new(HashSet::new()),
-                            }))),
+                    registry: None,
+                    skills_list: Arc::new(HashSet::new()),
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig::test_default(),
@@ -1889,6 +1935,19 @@ mod tests {
     fn read_only_request_does_not_trigger_recipe() {
         let route = route_result(RoutedMode::Act, "check current working directory");
         let spec = detect_execution_recipe(Some(&route), "check current working directory", "pwd");
+        assert_eq!(spec.kind, ExecutionRecipeKind::None);
+    }
+
+    #[test]
+    fn deterministic_contract_scalar_extract_does_not_trigger_recipe() {
+        let mut route = route_result(
+            RoutedMode::Act,
+            "读取 /home/guagua/rustclaw/configs/config.toml 里的 tools.allow_sudo，只输出值",
+        );
+        route.route_reason =
+            "deterministic_contract:generic_explicit_path_scalar_extract".to_string();
+        let spec =
+            detect_execution_recipe(Some(&route), &route.resolved_intent, &route.resolved_intent);
         assert_eq!(spec.kind, ExecutionRecipeKind::None);
     }
 
@@ -1954,6 +2013,44 @@ mod tests {
         assert_eq!(spec.kind, ExecutionRecipeKind::OpsClosedLoop);
         assert_eq!(spec.profile, ExecutionRecipeProfile::CodeChange);
         assert_eq!(spec.target_scope, ExecutionRecipeTargetScope::Greenfield);
+    }
+
+    #[test]
+    fn clarify_rewrite_read_request_ignores_noisy_goal_when_detecting_recipe() {
+        let route = route_result(
+            RoutedMode::Act,
+            "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target/content: scripts/nl_tests/fixtures/device_local/logs/model_io.log",
+        );
+        let noisy_goal = "### RECENT_EXECUTION_CONTEXT\nconfigs/config.toml verify restart until it works\n\n[AUTO_LOCATOR]\nResolved concrete path from default locator directory: /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/model_io.log";
+        let spec = detect_execution_recipe(
+            Some(&route),
+            noisy_goal,
+            "scripts/nl_tests/fixtures/device_local/logs/model_io.log",
+        );
+        assert_eq!(spec.kind, ExecutionRecipeKind::None);
+    }
+
+    #[test]
+    fn existence_semantic_kind_short_circuits_recipe_detection() {
+        let mut route = route_result(
+            RoutedMode::Act,
+            "Continue the previous request that was waiting for clarification: 看看那个重启脚本在不在\nUser now provides the missing target/content: restart_clawd_latest.sh",
+        );
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        let spec = detect_execution_recipe(
+            Some(&route),
+            "restart service and verify until it works",
+            "restart_clawd_latest.sh",
+        );
+        assert_eq!(spec.kind, ExecutionRecipeKind::None);
+    }
+
+    #[test]
+    fn scalar_count_semantic_kind_short_circuits_recipe_detection() {
+        let mut route = route_result(RoutedMode::Act, "数一下那个目录里有多少个文件");
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let spec = detect_execution_recipe(Some(&route), "", "数一下那个目录里有多少个文件");
+        assert_eq!(spec.kind, ExecutionRecipeKind::None);
     }
 
     #[test]

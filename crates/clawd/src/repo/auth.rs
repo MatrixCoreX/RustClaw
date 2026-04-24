@@ -446,7 +446,8 @@ pub(crate) struct AuthKeyListRow {
 
 pub(crate) fn list_auth_keys(state: &AppState) -> anyhow::Result<Vec<AuthKeyListRow>> {
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = db.prepare(
@@ -607,7 +608,8 @@ pub(crate) fn get_auth_key_value_by_id(
     key_id: i64,
 ) -> anyhow::Result<Option<String>> {
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     get_auth_key_value_by_id_from_db(&db, key_id)
@@ -617,7 +619,8 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
     let role = normalize_auth_key_role(role)?;
     let user_key = generate_user_key();
     let mut db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     if role == "admin" {
@@ -1505,7 +1508,8 @@ pub(crate) fn update_auth_key_by_id(
     let enabled_i64 = enabled.map(|v| if v { 1_i64 } else { 0_i64 });
 
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let target = db.query_row(
@@ -1571,7 +1575,8 @@ pub(crate) fn delete_auth_key_by_id(
     actor_user_key: &str,
 ) -> anyhow::Result<bool> {
     let mut db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let target = db.query_row(
@@ -1663,7 +1668,8 @@ pub(crate) fn exchange_credential_status_for_user_key(
         return Ok(Vec::new());
     }
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut out = Vec::new();
@@ -1721,7 +1727,8 @@ pub(crate) fn upsert_exchange_credential_for_user_key(
     let passphrase = passphrase.map(str::trim).filter(|v| !v.is_empty());
     let now = now_ts();
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     db.execute(
@@ -1769,7 +1776,8 @@ pub(crate) fn resolve_auth_identity_by_key(
         return Ok(None);
     }
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let row = db
@@ -1803,7 +1811,8 @@ pub(crate) fn resolve_channel_binding_identity(
         return Ok(None);
     }
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let row = if external_user_id.is_some() && external_chat_id.is_some() {
@@ -1874,7 +1883,8 @@ pub(crate) fn has_channel_binding_for_user_key(
         return Ok(false);
     }
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let count: i64 = db.query_row(
@@ -1899,7 +1909,8 @@ pub(crate) fn reset_channel_binding_state_for_user_key(
         return Ok(());
     }
     let mut db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let tx = db.transaction()?;
@@ -1936,7 +1947,8 @@ pub(crate) fn bind_channel_identity(
         return Ok(None);
     }
     let mut db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     upsert_channel_binding_row(

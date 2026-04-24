@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/delivery_text_classifier.schema.json",
+  "title": "DeliveryTextClassifierOut",
+  "description": "Schema for the JSON object returned by `prompts/delivery_text_classifier_prompt.md`. Mirrors `DeliveryTextClassifierOut` in `crates/clawd/src/semantic_judge.rs` and is enforced by `delivery_text_classifier_schema_drift` in the same file.\n\nThis classifier judges a candidate final-facing text on two axes at once: whether it is still a meta/process fragment, and whether it is publishable as meaningful user-facing content. All six fields are expected on every successful JSON reply; runtime clamps confidence into [0,1] after schema validation.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "is_meta_instruction",
+    "meta_reason",
+    "meta_confidence",
+    "publishable",
+    "publishable_reason",
+    "publishable_confidence"
+  ],
+  "properties": {
+    "is_meta_instruction": {
+      "type": "boolean",
+      "description": "True when the text is primarily process guidance, placeholder text, or reopens target/permission collection."
+    },
+    "meta_reason": {
+      "type": "string",
+      "description": "Short stable rationale such as `process_guidance_fragment`, `user_facing_result`, or `delivery_token`."
+    },
+    "meta_confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Self-rated confidence in the meta-instruction classification."
+    },
+    "publishable": {
+      "type": "boolean",
+      "description": "True when the text carries meaningful user-facing information and can be delivered directly."
+    },
+    "publishable_reason": {
+      "type": "string",
+      "description": "Short stable rationale such as `meaningful_result`, `trivial_ack`, or `planner_artifact`."
+    },
+    "publishable_confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Self-rated confidence in the publishable classification."
+    }
+  }
+}

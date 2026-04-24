@@ -14,3 +14,5 @@ context_release_then_package_chain|先读一下 /home/guagua/rustclaw/scripts/nl
 context_db_then_model_log_chain|先看一下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 有哪些表|再看一下 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/model_io.log 最后 4 行|一句话说哪边更像运行期证据
 context_alias_switch_archive_chain|先记一下“甲目录”是 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/archive|再记一下“乙文件”是 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md|列一下甲目录里的名字，再顺手说乙文件主要在提醒什么
 context_missing_after_rebind_chain|先记一下“那个文件”是 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md|再记一下“那个文件”改成 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/not_exists_case_004.md|把那个文件发给我
+context_repeat_delivery_after_bound_target|先读一下 README.md 前 4 行|把这个文件发给我|再发一次
+context_basename_after_delivery|先读一下 README.md 前 4 行|把这个文件发给我|只说文件名

@@ -137,7 +137,8 @@ fn insert_ask_memory_pair(
     } else {
         answer_messages.join("\n")
     };
-    let assistant_memory_text = if is_llm_reply && state.policy.memory.mark_llm_reply_in_short_term {
+    let assistant_memory_text = if is_llm_reply && state.policy.memory.mark_llm_reply_in_short_term
+    {
         format!(
             "{}{}",
             crate::memory::LLM_SHORT_TERM_MEMORY_PREFIX,
@@ -331,12 +332,12 @@ pub(crate) async fn finalize_ask_direct_success(
     Ok(())
 }
 
-pub(crate) async fn run_classifier_direct_reply(
+pub(crate) async fn run_direct_classifier_reply(
     state: &AppState,
     task: &crate::ClaimedTask,
     resolved_prompt_for_execution: &str,
 ) -> Result<crate::AskReply, String> {
-    const CLASSIFIER_DIRECT_PROMPT_LABEL: &str = "inline:classifier_direct";
+    const DIRECT_CLASSIFIER_PROMPT_LABEL: &str = "inline:direct_classifier";
     let prompt = format!(
         "You are producing the final user-facing reply directly.\n\nLanguage policy (strict): use {} as the highest-priority default for user-visible text. Override to English only when the current user request is fully English with no meaningful non-English content. Do not switch languages just because names, paths, commands, code, or other normalized values are in English.\n\nReturn only the user-facing reply.\n\n{}",
         state.policy.command_intent.default_locale,
@@ -345,15 +346,15 @@ pub(crate) async fn run_classifier_direct_reply(
     crate::log_prompt_render(
         state,
         &task.task_id,
-        "classifier_direct",
-        CLASSIFIER_DIRECT_PROMPT_LABEL,
+        "direct_classifier",
+        DIRECT_CLASSIFIER_PROMPT_LABEL,
         None,
     );
     crate::llm_gateway::run_with_fallback_with_prompt_source(
         state,
         task,
         &prompt,
-        CLASSIFIER_DIRECT_PROMPT_LABEL,
+        DIRECT_CLASSIFIER_PROMPT_LABEL,
     )
     .await
     .map(|s| crate::AskReply::llm(s.trim().to_string()))
@@ -401,6 +402,7 @@ pub(crate) async fn finalize_ask_result(
     context_bundle_summary: &str,
     resolved_prompt_for_execution: &str,
     route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     result: Result<crate::AskReply, String>,
 ) -> Result<()> {
     // §3.1: ask 状态机 — 进入 finalize。
@@ -411,11 +413,17 @@ pub(crate) async fn finalize_ask_result(
         &task.task_id,
         None,
         crate::AskState::Finalizing,
-        &format!("finalize_ask_result_entry mode={}", route_result.ask_mode.as_str()),
+        &format!(
+            "finalize_ask_result_entry mode={}",
+            route_result.ask_mode.as_str()
+        ),
         None,
     );
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", prompt);
     journal.transitions.push(finalize_entry_transition);
+    if let Some(turn_analysis) = turn_analysis {
+        journal.record_turn_analysis(turn_analysis);
+    }
     journal.record_route_result(route_result);
     journal.record_context_bundle_summary(format!(
         "{} needs_clarify={} resolved_prompt={}",
@@ -447,35 +455,34 @@ pub(crate) async fn finalize_ask_result(
             let failure_reply = answer.should_fail_task;
             let missing_file_delivery_reply =
                 missing_file_delivery_reply_text(state, route_result, &answer);
-            let (answer_text, answer_messages) = if failure_reply
-                || route_result.ask_mode.is_clarify_only()
-            {
-                (
-                    crate::intercept_response_text_for_delivery(&answer.text),
-                    answer
-                        .messages
-                        .into_iter()
-                        .map(|message| message.trim().to_string())
-                        .filter(|message| !message.is_empty())
-                        .collect(),
-                )
-            } else if let Some(reply_text) = missing_file_delivery_reply {
-                (reply_text.clone(), vec![reply_text])
-            } else {
-                crate::intercept_response_payload_for_delivery(
-                    state,
-                    // Delivery interception must stay grounded in the original user request.
-                    // The execution prompt may contain injected runtime hints such as
-                    // [AUTO_LOCATOR], which are useful for planning/execution but must not be
-                    // reinterpreted as fresh user-provided locator input during final delivery
-                    // normalization.
-                    prompt,
-                    route_result.wants_file_delivery,
-                    &route_result.output_contract,
-                    answer.text,
-                    answer.messages,
-                )
-            };
+            let (answer_text, answer_messages) =
+                if failure_reply || route_result.ask_mode.is_clarify_only() {
+                    (
+                        crate::intercept_response_text_for_delivery(&answer.text),
+                        answer
+                            .messages
+                            .into_iter()
+                            .map(|message| message.trim().to_string())
+                            .filter(|message| !message.is_empty())
+                            .collect(),
+                    )
+                } else if let Some(reply_text) = missing_file_delivery_reply {
+                    (reply_text.clone(), vec![reply_text])
+                } else {
+                    crate::intercept_response_payload_for_delivery(
+                        state,
+                        // Delivery interception must stay grounded in the original user request.
+                        // The execution prompt may contain injected runtime hints such as
+                        // [AUTO_LOCATOR], which are useful for planning/execution but must not be
+                        // reinterpreted as fresh user-provided locator input during final delivery
+                        // normalization.
+                        prompt,
+                        route_result.wants_file_delivery,
+                        &route_result.output_contract,
+                        answer.text,
+                        answer.messages,
+                    )
+                };
             journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
             journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
@@ -528,6 +535,19 @@ pub(crate) async fn finalize_ask_result(
                     &journal,
                 )
                 .await?;
+                crate::conversation_state::update_active_session_from_ask_outcome(
+                    state,
+                    task,
+                    Some(payload),
+                    prompt,
+                    route_result,
+                    turn_analysis,
+                    resolved_prompt_for_execution,
+                    &answer_text,
+                    &answer_messages,
+                    semantic_clarify,
+                    &journal,
+                );
                 if semantic_clarify {
                     insert_unfinished_goal_memory(state, task, prompt, &answer_text);
                 }
@@ -637,19 +657,14 @@ mod tests {
     use super::journal_has_missing_file_search_evidence;
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
-    
 
-    
     use serde_json::json;
-    
 
     use crate::{
         runtime::{AgentRuntimeConfig, SkillViewsSnapshot},
         AppState, CommandIntentRuntime, ScheduleRuntime, ToolsPolicy,
     };
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
+    use claw_core::config::{AgentConfig, ToolsConfig};
 
     fn test_state() -> AppState {
         let agents_by_id = HashMap::from([(
@@ -660,33 +675,33 @@ mod tests {
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: None,
-                                skills_list: Arc::new(HashSet::new()),
-                            }))),
+                    registry: None,
+                    skills_list: Arc::new(HashSet::new()),
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 locator_scan_max_depth: 3,
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig {
                 command_intent: CommandIntentRuntime {
-                                all_result_suffixes: Vec::new(),
-                                default_locale: "en".to_string(),
-                                verify_enforce_enabled: false,
-                            },
+                    all_result_suffixes: Vec::new(),
+                    default_locale: "en".to_string(),
+                    verify_enforce_enabled: false,
+                },
                 schedule: ScheduleRuntime {
-                                timezone: "Asia/Shanghai".to_string(),
-                                intent_prompt_template: Arc::new(RwLock::new(String::new())),
-                                intent_prompt_source: String::new(),
-                                intent_rules_template: Arc::new(RwLock::new(String::new())),
-                                locale: "en".to_string(),
-                                i18n_dict: HashMap::new(),
-                            },
+                    timezone: "Asia/Shanghai".to_string(),
+                    intent_prompt_template: Arc::new(RwLock::new(String::new())),
+                    intent_prompt_source: String::new(),
+                    intent_rules_template: Arc::new(RwLock::new(String::new())),
+                    locale: "en".to_string(),
+                    i18n_dict: HashMap::new(),
+                },
                 ..crate::PolicyConfig::test_default()
             },
             worker: crate::WorkerConfig::test_default(),

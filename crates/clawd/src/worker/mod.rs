@@ -262,9 +262,14 @@ pub(crate) async fn process_ask_task(
     let agent_run_context = Some(crate::agent_engine::AgentRunContext {
         route_result: Some(prepared_flow.route_result.clone()),
         execution_recipe_hint: prepared_flow.execution_recipe_hint,
+        turn_analysis: prepared_flow.turn_analysis.clone(),
         context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
         auto_locator_path: prepared_flow.auto_locator_path.clone(),
-        user_request: Some(prompt.clone()),
+        // Execution-time context should prefer the resolved prompt that already incorporates
+        // alias bindings / clarify completions / locator stabilization. Otherwise planner and
+        // observed synthesis can fall back to stale raw phrasing and let memory override the
+        // current session state.
+        user_request: Some(prepared_flow.resolved_prompt_for_execution.clone()),
         cross_turn_recent_execution_context,
     });
 
@@ -299,6 +304,7 @@ pub(crate) async fn process_ask_task(
         &prepared_flow.context_bundle_summary,
         &prepared_flow.resolved_prompt_for_execution,
         &prepared_flow.route_result,
+        prepared_flow.turn_analysis.as_ref(),
         result,
     )
     .await

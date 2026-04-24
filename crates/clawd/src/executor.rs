@@ -44,6 +44,7 @@ fn action_subject(action: &AgentAction) -> String {
     match action {
         AgentAction::CallSkill { skill, .. } => skill.clone(),
         AgentAction::CallTool { tool, .. } => tool.clone(),
+        AgentAction::SynthesizeAnswer { .. } => "synthesize_answer".to_string(),
         AgentAction::Respond { .. } => "respond".to_string(),
         AgentAction::Think { .. } => "think".to_string(),
     }

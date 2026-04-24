@@ -1,26 +1,30 @@
-use serde_json::Value;
+use regex::Regex;
+use serde_json::{json, Value};
+use std::path::Path;
+use std::sync::OnceLock;
 use tracing::{debug, info, warn};
 
 use super::{
     build_loop_history_compact, build_single_plan_prompt, build_skill_playbooks_text,
-    build_skill_quick_index_text, plan_step_label, AgentLoopGuardPolicy, LoopState,
-    SinglePlanEnvelope, AGENT_TOOL_SPEC_PATH, AGENT_TOOL_SPEC_TEMPLATE,
-    LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH, LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE,
-    PLAN_REPAIR_PROMPT_LOGICAL_PATH, PLAN_REPAIR_PROMPT_TEMPLATE,
-    SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH, SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE,
+    build_skill_quick_index_text, build_turn_analysis_prompt_block, plan_step_label,
+    AgentLoopGuardPolicy, LoopState, SinglePlanEnvelope, AGENT_TOOL_SPEC_PATH,
+    LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH, LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH,
+    PLAN_REPAIR_PROMPT_LOGICAL_PATH, SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
 };
 use crate::{
-    llm_gateway, plan_step_from_agent_action, AgentAction, AppState, ClaimedTask, PlanKind,
-    PlanResult, RouteResult,
+    llm_gateway, plan_step_from_agent_action, read_range_request::RequestedReadRange, AgentAction,
+    AppState, ClaimedTask, PlanKind, PlanResult, RouteResult,
 };
 
 fn build_incremental_plan_prompt(
     prompt_template: &str,
     user_request: &str,
     goal: &str,
+    turn_analysis: &str,
     tool_spec: &str,
     skill_playbooks: &str,
     recent_assistant_replies: &str,
+    request_language_hint: &str,
     config_response_language: &str,
     round: usize,
     history_compact: &str,
@@ -34,9 +38,11 @@ fn build_incremental_plan_prompt(
         &[
             ("__USER_REQUEST__", user_request),
             ("__GOAL__", goal),
+            ("__TURN_ANALYSIS__", turn_analysis),
             ("__TOOL_SPEC__", tool_spec),
             ("__SKILL_PLAYBOOKS__", skill_playbooks),
             ("__RECENT_ASSISTANT_REPLIES__", recent_assistant_replies),
+            ("__REQUEST_LANGUAGE_HINT__", request_language_hint),
             ("__CONFIG_RESPONSE_LANGUAGE__", config_response_language),
             ("__ROUND__", &round.to_string()),
             ("__HISTORY_COMPACT__", history_compact),
@@ -67,6 +73,105 @@ fn runtime_shell_label() -> String {
                 .filter(|v| !v.trim().is_empty())
         })
         .unwrap_or_else(|| "(unknown shell)".to_string())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlanningPromptClass {
+    OpenPlanning,
+    LightweightExecution,
+}
+
+impl PlanningPromptClass {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenPlanning => "open_planning",
+            Self::LightweightExecution => "lightweight_execution",
+        }
+    }
+}
+
+fn classify_planning_prompt_class(
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    loop_state: &LoopState,
+) -> PlanningPromptClass {
+    if loop_state.round_no <= 1
+        && route_result.is_some_and(|route| {
+            crate::task_context_builder::uses_light_execution_context_budget(route, user_text)
+        })
+    {
+        PlanningPromptClass::LightweightExecution
+    } else {
+        PlanningPromptClass::OpenPlanning
+    }
+}
+
+fn build_lightweight_tool_spec(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> String {
+    let mut lines = vec![
+        "### LIGHT_EXECUTION_RULES".to_string(),
+        "- planning_class=lightweight_execution".to_string(),
+        "- Prefer one bounded local observation or direct runtime-owned step over broad multi-step planning.".to_string(),
+        "- Do not inspect unrelated files, repository history, or extra skills unless the user explicitly asks for that scope.".to_string(),
+        "- Prefer system_basic/fs_search style actions for explicit local targets and simple existence/read/list/extract requests.".to_string(),
+    ];
+    if let Some(route) = route_result {
+        lines.push(format!(
+            "- routed_mode={} response_shape={} semantic_kind={} locator_kind={}",
+            route.routed_mode.as_str(),
+            route.output_contract.response_shape.as_str(),
+            route.output_contract.semantic_kind.as_str(),
+            route.output_contract.locator_kind.as_str(),
+        ));
+        if !route.output_contract.locator_hint.trim().is_empty() {
+            lines.push(format!(
+                "- locator_hint={}",
+                route.output_contract.locator_hint.trim()
+            ));
+        }
+    }
+    if let Some(path) = auto_locator_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(format!("- auto_locator_path={path}"));
+    }
+    lines.join("\n")
+}
+
+fn build_lightweight_skill_playbooks_text() -> String {
+    [
+        "### system_basic",
+        "- Use for bounded local reads, line ranges, directory listings, field extraction, and path_batch_facts.",
+        "### fs_search",
+        "- Use only when the user is asking to find a file by basename or locate a path.",
+    ]
+    .join("\n")
+}
+
+fn build_lightweight_skill_quick_index_text() -> String {
+    [
+        "- system_basic: bounded local read/list/extract/existence actions",
+        "- fs_search: basename lookup only when target path is still missing",
+    ]
+    .join("\n")
+}
+
+fn round1_prompt_spec_for_class(
+    planning_class: PlanningPromptClass,
+) -> (&'static str, &'static str) {
+    match planning_class {
+        PlanningPromptClass::OpenPlanning => (
+            "single_plan_execution_prompt",
+            SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
+        ),
+        PlanningPromptClass::LightweightExecution => (
+            "lightweight_execution_prompt",
+            LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH,
+        ),
+    }
 }
 
 fn parse_plan_action_step(step: &Value, state: &AppState) -> Option<AgentAction> {
@@ -190,8 +295,17 @@ async fn parse_single_plan_actions(
     task: &ClaimedTask,
 ) -> Option<Vec<AgentAction>> {
     let mut step_values = Vec::new();
-    if let Some(value) = crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw) {
-        match value {
+    if let Ok(validated) = crate::prompt_utils::validate_against_schema::<Value>(
+        raw,
+        crate::prompt_utils::PromptSchemaId::PlanResult,
+    ) {
+        if !validated.raw_parse_ok || validated.schema_normalized {
+            info!(
+                "plan_result schema_parse_recovery task_id={} raw_parse_ok={} schema_normalized={}",
+                task.task_id, validated.raw_parse_ok, validated.schema_normalized
+            );
+        }
+        match validated.value {
             Value::Object(map) => {
                 if let Some(steps) = map.get("steps").and_then(|v| v.as_array()) {
                     step_values.extend(steps.iter().cloned());
@@ -201,6 +315,23 @@ async fn parse_single_plan_actions(
             }
             Value::Array(arr) => step_values.extend(arr),
             other => step_values.push(other),
+        }
+    }
+    if step_values.is_empty() {
+        if let Some(value) =
+            crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
+        {
+            match value {
+                Value::Object(map) => {
+                    if let Some(steps) = map.get("steps").and_then(|v| v.as_array()) {
+                        step_values.extend(steps.iter().cloned());
+                    } else {
+                        step_values.push(Value::Object(map));
+                    }
+                }
+                Value::Array(arr) => step_values.extend(arr),
+                other => step_values.push(other),
+            }
         }
     }
     if step_values.is_empty() {
@@ -292,28 +423,70 @@ fn has_executable_observation_or_action(actions: &[AgentAction]) -> bool {
     actions.iter().any(|action| {
         matches!(
             action,
-            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+            AgentAction::CallSkill { .. }
+                | AgentAction::CallTool { .. }
+                | AgentAction::SynthesizeAnswer { .. }
         )
+    })
+}
+
+fn planned_action_skill_name(action: &AgentAction) -> Option<&str> {
+    match action {
+        AgentAction::CallSkill { skill, .. } => Some(skill.as_str()),
+        AgentAction::CallTool { tool, .. } => Some(tool.as_str()),
+        AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => None,
+    }
+}
+
+fn contains_unavailable_skill_action(state: &AppState, actions: &[AgentAction]) -> bool {
+    let enabled_skills = state.get_skills_list();
+    if enabled_skills.is_empty() {
+        return false;
+    }
+    actions.iter().any(|action| {
+        let Some(skill) = planned_action_skill_name(action) else {
+            return false;
+        };
+        let canonical = state.resolve_canonical_skill_name(skill);
+        canonical.trim().is_empty() || !enabled_skills.contains(&canonical)
     })
 }
 
 fn has_discussion_followup_action(actions: &[AgentAction]) -> bool {
     actions.iter().any(|action| match action {
         AgentAction::Respond { .. } => true,
-        AgentAction::CallSkill { skill, .. } | AgentAction::CallTool { tool: skill, .. } => {
-            skill.eq_ignore_ascii_case("chat")
-        }
-        AgentAction::Think { .. } => false,
+        AgentAction::SynthesizeAnswer { .. } => true,
+        AgentAction::CallSkill { .. }
+        | AgentAction::CallTool { .. }
+        | AgentAction::Think { .. } => false,
     })
 }
 
 fn is_discussion_followup_action(action: &AgentAction) -> bool {
     match action {
         AgentAction::Respond { .. } => true,
-        AgentAction::CallSkill { skill, .. } | AgentAction::CallTool { tool: skill, .. } => {
-            skill.eq_ignore_ascii_case("chat")
+        AgentAction::SynthesizeAnswer { .. } => true,
+        AgentAction::CallSkill { .. }
+        | AgentAction::CallTool { .. }
+        | AgentAction::Think { .. } => false,
+    }
+}
+
+fn synthesize_answer_requires_runtime_execution(evidence_refs: &[String]) -> bool {
+    evidence_refs.len() > 1
+        || evidence_refs
+            .iter()
+            .any(|reference| reference.trim() != "last_output")
+}
+
+fn should_preserve_terminal_followup_for_observed_finalize(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::SynthesizeAnswer { evidence_refs } => {
+            synthesize_answer_requires_runtime_execution(evidence_refs)
         }
-        AgentAction::Think { .. } => false,
+        _ => false,
     }
 }
 
@@ -325,7 +498,7 @@ fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
             .map(str::trim)
             .is_some_and(|text| !text.is_empty())
         || loop_state
-            .last_publishable_chat_output
+            .last_publishable_synthesis_output
             .as_deref()
             .map(str::trim)
             .is_some_and(|text| !text.is_empty())
@@ -379,8 +552,12 @@ fn action_supports_direct_observed_finalize(
     match action {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
             let canonical = state.resolve_canonical_skill_name(skill);
-            if canonical == "run_cmd" && route_explicitly_requests_raw_command_output(route_result) {
+            if canonical == "run_cmd" && route_explicitly_requests_raw_command_output(route_result)
+            {
                 return true;
+            }
+            if canonical == "process_basic" {
+                return false;
             }
             if !state.is_builtin_skill(&canonical) {
                 return true;
@@ -400,6 +577,7 @@ fn action_supports_direct_observed_finalize(
                 _ => false,
             }
         }
+        AgentAction::SynthesizeAnswer { .. } => false,
         AgentAction::Respond { .. } | AgentAction::Think { .. } => false,
     }
 }
@@ -431,6 +609,12 @@ fn strip_terminal_discussion_for_observed_finalize(
     loop_state: &LoopState,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
+    if should_prefer_observed_finalize(route_result, loop_state)
+        && has_executable_observation_or_action(&actions)
+        && has_discussion_followup_action(&actions)
+    {
+        return actions;
+    }
     if !should_prefer_observed_finalize(route_result, loop_state)
         || loop_state.has_tool_or_skill_output
         || !has_executable_observation_or_action(&actions)
@@ -440,9 +624,26 @@ fn strip_terminal_discussion_for_observed_finalize(
     }
     let mut stripped = actions.clone();
     while stripped.last().is_some_and(is_discussion_followup_action) {
+        if stripped
+            .last()
+            .is_some_and(should_preserve_terminal_followup_for_observed_finalize)
+        {
+            break;
+        }
         stripped.pop();
     }
-    if has_executable_observation_or_action(&stripped) && !has_discussion_followup_action(&stripped)
+    let trailing_preserved_synthesize = stripped
+        .last()
+        .is_some_and(should_preserve_terminal_followup_for_observed_finalize);
+    let prefix_without_terminal = if trailing_preserved_synthesize {
+        &stripped[..stripped.len().saturating_sub(1)]
+    } else {
+        &stripped[..]
+    };
+    if has_executable_observation_or_action(&stripped)
+        && (!has_discussion_followup_action(&stripped)
+            || (trailing_preserved_synthesize
+                && !has_discussion_followup_action(prefix_without_terminal)))
     {
         stripped
     } else {
@@ -480,6 +681,26 @@ fn strip_terminal_discussion_for_direct_skill_passthrough(
     }
 }
 
+fn delivery_success_terminal_reply(state: &AppState, actions: &[AgentAction]) -> bool {
+    let Some(content) = is_plain_respond_only_plan(actions) else {
+        return false;
+    };
+    let Some((_kind, raw_path)) = crate::finalize::parse_delivery_file_token(content) else {
+        return false;
+    };
+    let path = raw_path.trim();
+    if path.is_empty() || path.contains('\n') {
+        return false;
+    }
+    let candidate = Path::new(path);
+    let resolved = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        state.skill_rt.workspace_root.join(candidate)
+    };
+    resolved.is_file()
+}
+
 fn should_rewrite_service_status_run_cmd_probe(
     route_result: Option<&RouteResult>,
     actions: &[AgentAction],
@@ -489,7 +710,7 @@ fn should_rewrite_service_status_run_cmd_probe(
     };
     if route_result.needs_clarify
         || route_result.output_contract.delivery_required
-        || !route_result.ask_mode.is_act()
+        || !route_result.is_execute_gate()
     {
         return false;
     }
@@ -813,11 +1034,7 @@ fn observation_only_plan_missing_user_answer(
     actions: &[AgentAction],
 ) -> bool {
     if should_prefer_observed_finalize(Some(route_result), loop_state)
-        || observation_only_plan_can_finalize_from_direct_output(
-            state,
-            Some(route_result),
-            actions,
-        )
+        || observation_only_plan_can_finalize_from_direct_output(state, Some(route_result), actions)
     {
         return false;
     }
@@ -870,6 +1087,7 @@ fn action_is_likely_mutating(action: &AgentAction) -> bool {
                 _ => false,
             }
         }
+        AgentAction::SynthesizeAnswer { .. } => false,
         AgentAction::Respond { .. } | AgentAction::Think { .. } => false,
     }
 }
@@ -888,6 +1106,7 @@ fn action_satisfies_recipe_profile_validation(
                 args,
             )
         }
+        AgentAction::SynthesizeAnswer { .. } => false,
         AgentAction::Respond { .. } | AgentAction::Think { .. } => false,
     }
 }
@@ -945,6 +1164,7 @@ fn actions_violate_recipe_target_scope(
                         args,
                     )
                 }
+                AgentAction::SynthesizeAnswer { .. } => false,
                 AgentAction::Respond { .. } | AgentAction::Think { .. } => false,
             })
         }
@@ -969,6 +1189,7 @@ fn actions_violate_recipe_target_scope(
                             saw_scope_conflict = true;
                         }
                     }
+                    AgentAction::SynthesizeAnswer { .. } => {}
                     AgentAction::Respond { .. } | AgentAction::Think { .. } => {}
                 }
             }
@@ -983,6 +1204,7 @@ fn actions_violate_recipe_target_scope(
                             state, skill, args,
                         )
                     }
+                    AgentAction::SynthesizeAnswer { .. } => false,
                     AgentAction::Respond { .. } | AgentAction::Think { .. } => false,
                 })
         }
@@ -1009,6 +1231,12 @@ fn should_force_actionable_plan_repair(
     {
         return false;
     }
+    if route_result.output_contract.delivery_required
+        && !loop_state.has_tool_or_skill_output
+        && delivery_success_terminal_reply(state, actions)
+    {
+        return false;
+    }
     if loop_state.execution_recipe.is_active()
         && matches!(
             loop_state.execution_recipe.phase,
@@ -1024,6 +1252,18 @@ fn should_force_actionable_plan_repair(
     if actions_violate_recipe_target_scope(state, loop_state, actions) {
         return true;
     }
+    if contains_unavailable_skill_action(state, actions) {
+        return true;
+    }
+    let lightweight_route_has_executable_plan =
+        route_qualifies_for_lightweight_repair_skip(Some(route_result))
+            && !loop_state.has_tool_or_skill_output
+            && has_executable_observation_or_action(actions);
+    if lightweight_route_has_executable_plan
+        && !observation_only_plan_missing_user_answer(state, route_result, loop_state, actions)
+    {
+        return false;
+    }
     if observation_only_plan_missing_user_answer(state, route_result, loop_state, actions) {
         return true;
     }
@@ -1034,14 +1274,24 @@ fn should_force_actionable_plan_repair(
         return false;
     }
     let requires_action_before_reply =
-        !loop_state.has_tool_or_skill_output && route_result.ask_mode.is_act();
+        !loop_state.has_tool_or_skill_output && route_result.is_execute_gate();
     route_result.output_contract.requires_content_evidence || requires_action_before_reply
+}
+
+fn route_qualifies_for_lightweight_repair_skip(route_result: Option<&RouteResult>) -> bool {
+    route_result.is_some_and(|route| {
+        crate::task_context_builder::uses_light_execution_context_budget(
+            route,
+            &route.resolved_intent,
+        )
+    })
 }
 
 async fn repair_plan_actions(
     state: &AppState,
     task: &ClaimedTask,
     goal: &str,
+    turn_analysis: &str,
     user_text: &str,
     repair_reason: &str,
     tool_spec: &str,
@@ -1052,22 +1302,26 @@ async fn repair_plan_actions(
     let runtime_os = runtime_os_label();
     let runtime_shell = runtime_shell_label();
     let workspace_root = state.skill_rt.workspace_root.display().to_string();
-    let resolved_prompt = crate::load_prompt_template_for_state_with_meta(
+    let resolved_prompt = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
         state,
         PLAN_REPAIR_PROMPT_LOGICAL_PATH,
-        PLAN_REPAIR_PROMPT_TEMPLATE,
-    );
+    )
+    .map_err(|e| e.to_string())?;
     let prompt_template = resolved_prompt.template;
     let prompt_source = resolved_prompt.source;
     let prompt_version = resolved_prompt.version;
+    let request_language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_text);
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
             ("__GOAL__", goal),
+            ("__TURN_ANALYSIS__", turn_analysis),
             ("__USER_REQUEST__", user_text),
             ("__REPAIR_REASON__", repair_reason),
             ("__TOOL_SPEC__", tool_spec),
             ("__SKILL_PLAYBOOKS__", skill_playbooks),
+            ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
             (
                 "__CONFIG_RESPONSE_LANGUAGE__",
                 &state.policy.command_intent.default_locale,
@@ -1147,6 +1401,9 @@ fn plan_repair_reason(
             _ => "ops_closed_loop_requires_validation",
         };
     }
+    if contains_unavailable_skill_action(state, actions) {
+        return "unavailable_skill_requires_replan";
+    }
     let Some(route_result) = route_result else {
         return "non_actionable_plan_for_current_route";
     };
@@ -1157,6 +1414,7 @@ fn plan_repair_reason(
 }
 
 fn can_fallback_to_initial_plan_after_repair_failure(
+    state: &AppState,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
     actions: &[AgentAction],
@@ -1166,6 +1424,7 @@ fn can_fallback_to_initial_plan_after_repair_failure(
     };
     !route_result.needs_clarify
         && !loop_state.has_tool_or_skill_output
+        && !contains_unavailable_skill_action(state, actions)
         && has_executable_observation_or_action(actions)
         && !has_discussion_followup_action(actions)
 }
@@ -1175,16 +1434,724 @@ fn normalize_planned_actions(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
     user_text: &str,
+    auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
+    let request_surface = crate::intent::surface_signals::analyze_prompt_surface(user_text);
     let actions =
         strip_terminal_discussion_for_observed_finalize(route_result, loop_state, actions);
     let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = rewrite_service_status_probe_actions(route_result, actions);
     let actions = rewrite_http_probe_actions(route_result, actions);
+    let actions = rewrite_sqlite3_run_cmd_to_db_basic(actions);
+    let actions = rewrite_path_batch_size_facts_to_compare_paths(route_result, actions);
+    let actions = rewrite_recent_artifacts_list_dir_to_inventory_dir(
+        route_result,
+        &request_surface,
+        actions,
+    );
+    let actions = rewrite_overbroad_list_dir_to_compare_paths(route_result, actions);
+    let actions =
+        rewrite_single_target_file_read_to_auto_locator(route_result, auto_locator_path, actions);
+    let actions = rewrite_explicit_read_file_range_requests(
+        route_result,
+        &request_surface,
+        user_text,
+        actions,
+    );
+    let actions = rewrite_extract_field_alias_args(actions);
+    let actions = prune_optional_extract_field_actions_for_workspace_summary(route_result, actions);
+    let actions = append_synthesize_answer_for_structured_scalar_compare(route_result, actions);
     let actions = rewrite_pre_observation_concrete_respond_to_placeholder(loop_state, actions);
-    inject_chat_transform_for_bare_placeholder_respond(actions, user_text)
+    let actions = rewrite_terminal_placeholder_respond_to_synthesize_answer(loop_state, actions);
+    inject_synthesize_answer_for_bare_placeholder_respond(actions, user_text)
+}
+
+fn rewrite_sqlite3_run_cmd_to_db_basic(actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args } if skill == "run_cmd" => {
+                let command = args
+                    .get("command")
+                    .or_else(|| args.get("cmd"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default();
+                sqlite3_command_to_db_basic_args(command)
+                    .map(|args| AgentAction::CallSkill {
+                        skill: "db_basic".to_string(),
+                        args,
+                    })
+                    .unwrap_or(AgentAction::CallSkill { skill, args })
+            }
+            other => other,
+        })
+        .collect()
+}
+
+fn shell_word(input: &str) -> Option<(&str, &str)> {
+    let input = input.trim_start();
+    if input.is_empty() {
+        return None;
+    }
+    let mut chars = input.char_indices();
+    let (_, first) = chars.next()?;
+    if first == '"' || first == '\'' {
+        let quote = first;
+        for (idx, ch) in chars {
+            if ch == quote {
+                return Some((&input[1..idx], &input[idx + ch.len_utf8()..]));
+            }
+        }
+        return None;
+    }
+    for (idx, ch) in input.char_indices() {
+        if ch.is_whitespace() {
+            return Some((&input[..idx], &input[idx..]));
+        }
+    }
+    Some((input, ""))
+}
+
+fn trim_shell_quotes(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.len() >= 2 {
+        let first = trimmed.as_bytes()[0] as char;
+        let last = trimmed.as_bytes()[trimmed.len() - 1] as char;
+        if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+            return trimmed[1..trimmed.len() - 1].trim().to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+fn sqlite3_command_to_db_basic_args(command: &str) -> Option<serde_json::Value> {
+    let lower = command.to_ascii_lowercase();
+    let sqlite_idx = lower.find("sqlite3")?;
+    let mut rest = &command[sqlite_idx + "sqlite3".len()..];
+    loop {
+        let (word, next) = shell_word(rest)?;
+        if !word.starts_with('-') {
+            rest = rest.trim_start();
+            break;
+        }
+        rest = next;
+    }
+    let (db_path, query_rest) = shell_word(rest)?;
+    let db_lower = db_path.to_ascii_lowercase();
+    if !(db_lower.ends_with(".sqlite") || db_lower.ends_with(".db")) {
+        return None;
+    }
+    let query = trim_shell_quotes(query_rest);
+    let sql = if query == ".tables" {
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name".to_string()
+    } else {
+        let query_lower = query.trim_start().to_ascii_lowercase();
+        if !(query_lower.starts_with("select")
+            || query_lower.starts_with("pragma")
+            || query_lower.starts_with("with"))
+        {
+            return None;
+        }
+        query.trim_end_matches(';').trim().to_string()
+    };
+    Some(serde_json::json!({
+        "action": "sqlite_query",
+        "db_path": db_path,
+        "sql": sql,
+    }))
+}
+
+fn rewrite_path_batch_size_facts_to_compare_paths(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let route_requests_quantity_comparison = route_result.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+    });
+    actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args } if skill == "system_basic" => {
+                let action_name = args
+                    .get("action")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default();
+                if action_name != "path_batch_facts" {
+                    return AgentAction::CallSkill { skill, args };
+                }
+                let paths = args
+                    .get("paths")
+                    .and_then(|value| value.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|value| value.as_str())
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let asks_size = args
+                    .get("facts")
+                    .and_then(|value| value.as_array())
+                    .is_some_and(|items| {
+                        items.iter().any(|value| {
+                            value
+                                .as_str()
+                                .is_some_and(|item| item.eq_ignore_ascii_case("size"))
+                        })
+                    });
+                if paths.len() == 2 && (asks_size || route_requests_quantity_comparison) {
+                    AgentAction::CallSkill {
+                        skill,
+                        args: serde_json::json!({
+                            "action": "compare_paths",
+                            "left_path": paths[0],
+                            "right_path": paths[1],
+                        }),
+                    }
+                } else {
+                    AgentAction::CallSkill { skill, args }
+                }
+            }
+            other => other,
+        })
+        .collect()
+}
+
+fn single_list_dir_like_action_index_path(actions: &[AgentAction]) -> Option<(usize, String)> {
+    let executable_count = actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+            )
+        })
+        .count();
+    if executable_count != 1 {
+        return None;
+    }
+    actions
+        .iter()
+        .enumerate()
+        .find_map(|(idx, action)| match action {
+            AgentAction::CallSkill { skill, args } if skill == "list_dir" => args
+                .get("path")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|path| (idx, path.to_string())),
+            AgentAction::CallSkill { skill, args } if skill == "system_basic" => args
+                .get("action")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|action| {
+                    matches!(
+                        action.to_ascii_lowercase().as_str(),
+                        "list_dir" | "inventory_dir"
+                    )
+                })
+                .and_then(|_| args.get("path").and_then(|value| value.as_str()))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|path| (idx, path.to_string())),
+            _ => None,
+        })
+}
+
+fn compare_target_pair_from_locator_hint(
+    route_result: &RouteResult,
+) -> Option<(String, String)> {
+    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison {
+        return None;
+    }
+    let locator_hint = route_result.output_contract.locator_hint.trim();
+    if locator_hint.is_empty() {
+        return None;
+    }
+    [",", "，", "|", ";", "；", "\n"]
+        .into_iter()
+        .find_map(|separator| {
+            let parts = locator_hint
+                .split(separator)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>();
+            (parts.len() == 2).then(|| (parts[0].to_string(), parts[1].to_string()))
+        })
+}
+
+fn rewrite_recent_artifacts_list_dir_to_inventory_dir(
+    route_result: Option<&RouteResult>,
+    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::RecentArtifactsJudgment
+    {
+        return actions;
+    }
+    let Some(limit) = request_surface.requested_listing_limit else {
+        return actions;
+    };
+    let Some((idx, path)) = single_list_dir_like_action_index_path(&actions) else {
+        return actions;
+    };
+    let mut rewritten = actions;
+    rewritten[idx] = AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: json!({
+            "action": "inventory_dir",
+            "path": path,
+            "sort_by": "mtime_desc",
+            "max_entries": limit,
+            "names_only": true,
+        }),
+    };
+    info!("plan_rewrite_recent_artifacts_to_inventory_dir limit={limit}");
+    rewritten
+}
+
+fn rewrite_overbroad_list_dir_to_compare_paths(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    let route_requests_quantity_comparison =
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison;
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || !route_requests_quantity_comparison
+    {
+        return actions;
+    }
+    let Some((left, right)) = compare_target_pair_from_locator_hint(route) else {
+        return actions;
+    };
+    let Some((idx, _path)) = single_list_dir_like_action_index_path(&actions) else {
+        return actions;
+    };
+    let mut rewritten = actions;
+    rewritten[idx] = AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: json!({
+            "action": "compare_paths",
+            "left_path": left,
+            "right_path": right,
+        }),
+    };
+    info!(
+        "plan_rewrite_list_dir_to_compare_paths left={} right={}",
+        left, right
+    );
+    rewritten
+}
+
+fn requested_read_range(
+    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    user_text: &str,
+) -> Option<RequestedReadRange> {
+    request_surface.requested_read_range.or_else(|| {
+        crate::intent::surface_signals::requested_read_range_from_prompt_pair(None, user_text)
+    })
+}
+
+fn action_is_workspace_summary_evidence(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, .. } if skill == "list_dir" || skill == "read_file" => true,
+        AgentAction::CallSkill { skill, args } if skill == "system_basic" => args
+            .get("action")
+            .and_then(|value| value.as_str())
+            .is_some_and(|action| {
+                matches!(
+                    action.trim().to_ascii_lowercase().as_str(),
+                    "inventory_dir" | "read_range" | "workspace_glance" | "tree_summary"
+                )
+            }),
+        _ => false,
+    }
+}
+
+fn action_is_optional_extract_field(action: &AgentAction) -> bool {
+    matches!(
+        action,
+        AgentAction::CallSkill { skill, args }
+            if skill == "system_basic"
+                && args
+                    .get("action")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|action| action.eq_ignore_ascii_case("extract_field"))
+    )
+}
+
+fn route_requests_structured_scalar_compare(route: &RouteResult) -> bool {
+    !route.needs_clarify
+        && !route.output_contract.delivery_required
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::QuantityComparison
+                | crate::OutputSemanticKind::RecentScalarEqualityCheck
+        )
+        && matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
+        )
+}
+
+fn action_is_scalar_structured_extract(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill == "system_basic" =>
+        {
+            match args
+                .get("action")
+                .and_then(|value| value.as_str())
+                .map(|action| action.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                Some("extract_field") => true,
+                Some("extract_fields") => args
+                    .get("field_paths")
+                    .and_then(|value| value.as_array())
+                    .is_none_or(|field_paths| field_paths.len() <= 1),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+fn append_synthesize_answer_for_structured_scalar_compare(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !route_requests_structured_scalar_compare(route)
+        || actions.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::Respond { .. } | AgentAction::SynthesizeAnswer { .. }
+            )
+        })
+    {
+        return actions;
+    }
+    let evidence_refs = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, action)| {
+            action_is_scalar_structured_extract(action).then(|| format!("step_{}", idx + 1))
+        })
+        .collect::<Vec<_>>();
+    if evidence_refs.len() < 2 {
+        return actions;
+    }
+    let mut rewritten = actions;
+    rewritten.push(AgentAction::SynthesizeAnswer {
+        evidence_refs: evidence_refs.clone(),
+    });
+    info!(
+        "plan_append_synthesize_answer_for_structured_scalar_compare refs={}",
+        evidence_refs.join(",")
+    );
+    rewritten
+}
+
+fn prune_optional_extract_field_actions_for_workspace_summary(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::WorkspaceProjectSummary
+        || !actions.iter().any(action_is_workspace_summary_evidence)
+        || !actions.iter().any(action_is_optional_extract_field)
+    {
+        return actions;
+    }
+    let original_len = actions.len();
+    let pruned = actions
+        .into_iter()
+        .filter(|action| !action_is_optional_extract_field(action))
+        .collect::<Vec<_>>();
+    if !pruned.iter().any(action_is_workspace_summary_evidence) {
+        return pruned;
+    }
+    if pruned.len() != original_len {
+        info!(
+            "plan_prune_workspace_summary_extract_fields removed={}",
+            original_len.saturating_sub(pruned.len())
+        );
+    }
+    pruned
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SingleFileReadActionKind {
+    ReadFile,
+    SystemBasicReadRange,
+}
+
+fn single_file_read_action(
+    actions: &[AgentAction],
+) -> Option<(usize, SingleFileReadActionKind, String)> {
+    let mut candidate: Option<(usize, SingleFileReadActionKind, String)> = None;
+    for (idx, action) in actions.iter().enumerate() {
+        match action {
+            AgentAction::Think { .. }
+            | AgentAction::Respond { .. }
+            | AgentAction::SynthesizeAnswer { .. } => {}
+            AgentAction::CallSkill { skill, args } if skill.eq_ignore_ascii_case("read_file") => {
+                let Some(path) = args.get("path").and_then(|value| value.as_str()) else {
+                    return None;
+                };
+                if candidate.is_some() {
+                    return None;
+                }
+                candidate = Some((
+                    idx,
+                    SingleFileReadActionKind::ReadFile,
+                    path.trim().to_string(),
+                ));
+            }
+            AgentAction::CallSkill { skill, args }
+                if skill.eq_ignore_ascii_case("system_basic")
+                    && args
+                        .get("action")
+                        .and_then(|value| value.as_str())
+                        .is_some_and(|action| action.eq_ignore_ascii_case("read_range")) =>
+            {
+                let Some(path) = args.get("path").and_then(|value| value.as_str()) else {
+                    return None;
+                };
+                if candidate.is_some() {
+                    return None;
+                }
+                candidate = Some((
+                    idx,
+                    SingleFileReadActionKind::SystemBasicReadRange,
+                    path.trim().to_string(),
+                ));
+            }
+            _ => return None,
+        }
+    }
+    candidate
+}
+
+fn rewrite_single_target_file_read_to_auto_locator(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route_result) = route_result else {
+        return actions;
+    };
+    if route_result.needs_clarify || route_result.output_contract.delivery_required {
+        return actions;
+    }
+    let Some(auto_locator_path) = auto_locator_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return actions;
+    };
+    let auto_locator = std::path::Path::new(auto_locator_path);
+    if !auto_locator.is_file() {
+        return actions;
+    }
+    let Some((idx, kind, current_path)) = single_file_read_action(&actions) else {
+        return actions;
+    };
+    if current_path == auto_locator_path {
+        return actions;
+    }
+
+    // 当前轮 route/ordinal/auto-locator 已解析成一个具体文件时，这个路径比 LLM
+    // 在厚上下文里“顺手抄到的旧文件路径”更权威。这里只在单目标读文件链路上收口，
+    // 避免把多文件 read 计划错误折叠成同一个 target。
+    let mut rewritten = actions;
+    let Some(action) = rewritten.get_mut(idx) else {
+        return rewritten;
+    };
+    match action {
+        AgentAction::CallSkill { args, .. } => {
+            if let Some(obj) = args.as_object_mut() {
+                obj.insert(
+                    "path".to_string(),
+                    Value::String(auto_locator_path.to_string()),
+                );
+            }
+        }
+        _ => return rewritten,
+    }
+    info!(
+        "plan_rewrite_single_target_file_read_to_auto_locator idx={} kind={:?} from={} to={}",
+        idx, kind, current_path, auto_locator_path
+    );
+    rewritten
+}
+
+fn rewrite_explicit_read_file_range_requests(
+    _route_result: Option<&RouteResult>,
+    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    user_text: &str,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(range_request) = requested_read_range(request_surface, user_text) else {
+        return actions;
+    };
+
+    let mut read_file_idx = None;
+    let mut read_file_path = None;
+    for (idx, action) in actions.iter().enumerate() {
+        match action {
+            AgentAction::Think { .. }
+            | AgentAction::Respond { .. }
+            | AgentAction::SynthesizeAnswer { .. } => {}
+            AgentAction::CallSkill { skill, args }
+                if skill.eq_ignore_ascii_case("system_basic")
+                    && args
+                        .get("action")
+                        .and_then(|value| value.as_str())
+                        .is_some_and(|action| action.eq_ignore_ascii_case("read_range")) =>
+            {
+                return actions;
+            }
+            AgentAction::CallSkill { skill, args } if skill.eq_ignore_ascii_case("read_file") => {
+                let Some(path) = args.get("path").and_then(|value| value.as_str()) else {
+                    return actions;
+                };
+                if read_file_idx.is_some() {
+                    return actions;
+                }
+                read_file_idx = Some(idx);
+                read_file_path = Some(path.trim().to_string());
+            }
+            _ => return actions,
+        }
+    }
+
+    let Some(idx) = read_file_idx else {
+        return actions;
+    };
+    let Some(path) = read_file_path.filter(|value| !value.is_empty()) else {
+        return actions;
+    };
+
+    let read_range_args = match range_request {
+        RequestedReadRange::Head { n } => {
+            json!({ "action": "read_range", "path": path, "mode": "head", "n": n })
+        }
+        RequestedReadRange::Tail { n } => {
+            json!({ "action": "read_range", "path": path, "mode": "tail", "n": n })
+        }
+        RequestedReadRange::Range {
+            start_line,
+            end_line,
+        } => json!({
+            "action": "read_range",
+            "path": path,
+            "mode": "range",
+            "start_line": start_line,
+            "end_line": end_line
+        }),
+    };
+
+    let mut rewritten = actions;
+    rewritten[idx] = AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: read_range_args,
+    };
+    info!(
+        "plan_rewrite_explicit_read_file_range_request idx={} request={:?}",
+        idx, range_request
+    );
+    rewritten
+}
+
+fn rewrite_extract_field_alias_args(actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    let mut rewritten = actions;
+    for (idx, action) in rewritten.iter_mut().enumerate() {
+        let AgentAction::CallSkill { skill, args } = action else {
+            continue;
+        };
+        if !skill.eq_ignore_ascii_case("system_basic") {
+            continue;
+        }
+        let Some(obj) = args.as_object_mut() else {
+            continue;
+        };
+        let is_extract_field = obj
+            .get("action")
+            .and_then(|value| value.as_str())
+            .is_some_and(|action| action.eq_ignore_ascii_case("extract_field"));
+        if !is_extract_field || obj.contains_key("field_path") {
+        } else if let Some(field_value) = obj.remove("field") {
+            let Value::String(field_path) = field_value else {
+                obj.insert("field".to_string(), field_value);
+                continue;
+            };
+            let trimmed = field_path.trim();
+            if trimmed.is_empty() {
+                obj.insert("field".to_string(), Value::String(field_path));
+                continue;
+            }
+            obj.insert("field_path".to_string(), Value::String(trimmed.to_string()));
+            info!(
+                "plan_rewrite_extract_field_alias idx={} alias=field canonical=field_path",
+                idx
+            );
+        }
+        if !obj.contains_key("path") {
+            if let Some(path_value) = obj.remove("file_path") {
+                match path_value {
+                    Value::String(path) if !path.trim().is_empty() => {
+                        obj.insert("path".to_string(), Value::String(path.trim().to_string()));
+                        info!(
+                            "plan_rewrite_extract_field_alias idx={} alias=file_path canonical=path",
+                            idx
+                        );
+                    }
+                    other => {
+                        obj.insert("file_path".to_string(), other);
+                    }
+                }
+            }
+        }
+        if !obj.contains_key("path") {
+            if let Some(path_value) = obj.remove("target") {
+                match path_value {
+                    Value::String(path) if !path.trim().is_empty() => {
+                        obj.insert("path".to_string(), Value::String(path.trim().to_string()));
+                        info!(
+                            "plan_rewrite_extract_field_alias idx={} alias=target canonical=path",
+                            idx
+                        );
+                    }
+                    other => {
+                        obj.insert("target".to_string(), other);
+                    }
+                }
+            }
+        }
+    }
+    rewritten
 }
 
 /// 检测 `respond.content` 是否是裸的 `{{last_output}}` / `{{last_output.xxx}}` /
@@ -1200,14 +2167,30 @@ fn is_bare_last_output_placeholder(content: &str) -> bool {
     }
     let inner = trimmed[2..trimmed.len() - 2].trim();
     let lower = inner.to_ascii_lowercase();
-    lower == "last_output"
-        || lower.starts_with("last_output.")
-        || lower.starts_with("last_output[")
+    lower == "last_output" || lower.starts_with("last_output.") || lower.starts_with("last_output[")
 }
 
-/// §F1：检测「未观测先编造」的幻觉 Respond，把内容改写为 `{{last_output}}` 占位
-/// 让下游 [`inject_chat_transform_for_bare_placeholder_respond`] 把它包成 chat 转
-/// 换步，从而在执行完上游观测步后再用真实输出生成回复。
+fn extract_output_placeholder_evidence_refs(text: &str) -> Vec<String> {
+    static PLACEHOLDER_RE: OnceLock<Regex> = OnceLock::new();
+    let re = PLACEHOLDER_RE.get_or_init(|| {
+        Regex::new(r"\{\{\s*(last_output|s\d+\.output)\s*\}\}").expect("output placeholder regex")
+    });
+    let mut refs = Vec::new();
+    for captures in re.captures_iter(text) {
+        let Some(matched) = captures.get(1) else {
+            continue;
+        };
+        let token = matched.as_str().trim().to_ascii_lowercase();
+        if !refs.iter().any(|existing| existing == &token) {
+            refs.push(token);
+        }
+    }
+    refs
+}
+
+/// §F1：检测「未观测先编造」的幻觉 Respond，把内容改写为 `{{last_output}}` 占位，
+/// 让下游 [`inject_synthesize_answer_for_bare_placeholder_respond`] 把它包成
+/// `synthesize_answer` 节点，从而在执行完上游观测步后再用真实输出生成回复。
 ///
 /// 触发条件（必须**全部**满足）：
 /// 1. `loop_state` 仍是 round-1 状态：`executed_step_results` 为空（没有任何
@@ -1273,6 +2256,65 @@ fn rewrite_pre_observation_concrete_respond_to_placeholder(
     rewritten
 }
 
+fn rewrite_terminal_placeholder_respond_to_synthesize_answer(
+    loop_state: &LoopState,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if actions.len() < 2 || !loop_state.executed_step_results.is_empty() {
+        return actions;
+    }
+    if loop_state
+        .last_output
+        .as_deref()
+        .map(|text| !text.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return actions;
+    }
+    let last_idx = actions.len() - 1;
+    let respond_content = match &actions[last_idx] {
+        AgentAction::Respond { content } => content.as_str(),
+        _ => return actions,
+    };
+    if is_bare_last_output_placeholder(respond_content) {
+        return actions;
+    }
+    let evidence_refs = extract_output_placeholder_evidence_refs(respond_content);
+    if evidence_refs.is_empty() {
+        return actions;
+    }
+    let Some(previous_action) = actions[..last_idx]
+        .iter()
+        .rev()
+        .find(|candidate| !matches!(candidate, AgentAction::Think { .. }))
+    else {
+        return actions;
+    };
+    if !matches!(
+        previous_action,
+        AgentAction::CallSkill { .. }
+            | AgentAction::CallTool { .. }
+            | AgentAction::SynthesizeAnswer { .. }
+    ) {
+        return actions;
+    }
+    let mut rewritten = actions;
+    rewritten[last_idx] = AgentAction::Respond {
+        content: "{{last_output}}".to_string(),
+    };
+    rewritten.insert(
+        last_idx,
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: evidence_refs.clone(),
+        },
+    );
+    info!(
+        "plan_rewrite_terminal_placeholder_respond_to_synthesize_answer refs={}",
+        evidence_refs.join(",")
+    );
+    rewritten
+}
+
 /// §F1 启发式：判断 Respond.content 是否是「未观测就编造」的具体内容形态。
 ///
 /// 命中任意一条即视为可疑：
@@ -1298,7 +2340,10 @@ fn looks_like_pre_observation_hallucinated_concrete_content(content: &str) -> bo
         while idx < bytes.len() && bytes[idx].is_ascii_digit() {
             idx += 1;
         }
-        if idx + 1 < bytes.len() && bytes[idx] == b'.' && (bytes[idx + 1] == b' ' || bytes[idx + 1] == b'\t') {
+        if idx + 1 < bytes.len()
+            && bytes[idx] == b'.'
+            && (bytes[idx + 1] == b' ' || bytes[idx + 1] == b'\t')
+        {
             return true;
         }
     }
@@ -1329,22 +2374,22 @@ fn looks_like_pre_observation_hallucinated_concrete_content(content: &str) -> bo
 }
 
 /// 当 plan 末尾是 `respond.content="{{last_output}}"` 这种裸 placeholder 时，
-/// runtime 主动在 `respond` 之前注入一个 `call_skill(chat)` 转换步骤，
+/// runtime 主动在 `respond` 之前注入一个 `synthesize_answer` 节点，
 /// 把原始观察输出（命令 stdout / 文件内容 / 列表 / JSON / 错误信息）转成
 /// 自然语言再交给 respond。这样 respond 拿到的 `{{last_output}}` 已经是
-/// chat 步骤产出的自然语言，能通过 `delivery_text_classifier` 的 publishable 检查。
+/// synthesize 节点产出的自然语言，能通过 `delivery_text_classifier` 的 publishable 检查。
 ///
-/// 设计动机（v2 patch + runtime guard 双保险）：
-/// * v2 vendor patch 已经在 prompt 层告诉 minimax "MUST insert call_skill(chat)"，
-///   但实测 minimax 服从率不是 100%，仍偶发回退到裸 placeholder。
-/// * Runtime 这一道兜底不依赖 LLM 是否听话，能 100% 关掉 placeholder 死循环。
-/// * 不破坏正确 plan：仅当末尾是裸 placeholder Respond 且其前一步不是 chat 时才注入。
-fn inject_chat_transform_for_bare_placeholder_respond(
+/// 设计动机：
+/// * Runtime 这一道兜底把证据归纳交给 `SynthesizeAnswer`，避免 planner 生成
+///   只有 `{{last_output}}` 的不可发布回复。
+/// * 不破坏正确 plan：仅当末尾是裸 placeholder Respond 且其前一步不是
+///   `synthesize_answer` 时才注入。
+fn inject_synthesize_answer_for_bare_placeholder_respond(
     actions: Vec<AgentAction>,
-    user_text: &str,
+    _user_text: &str,
 ) -> Vec<AgentAction> {
     if actions.len() < 2 {
-        // 只有一个 Respond 时，前面没有 observation 可供 chat 消化，不动。
+        // 只有一个 Respond 时，前面没有 observation 可供 synthesis 使用，不动。
         return actions;
     }
     let last_idx = actions.len() - 1;
@@ -1355,28 +2400,20 @@ fn inject_chat_transform_for_bare_placeholder_respond(
     if !needs_inject {
         return actions;
     }
-    if let AgentAction::CallSkill { skill, .. } = &actions[last_idx - 1] {
-        if skill.eq_ignore_ascii_case("chat") {
-            // 已经有 chat 转换步在前面，placeholder 是合法的（指 chat 的输出），不重复注入。
+    match &actions[last_idx - 1] {
+        AgentAction::SynthesizeAnswer { .. } => {
             return actions;
         }
+        _ => {}
     }
     let mut rewritten = actions;
-    let chat_text = format!(
-        "请用一句简短自然的话回答用户问题：「{}」\n\
-         依据下面这条观察输出（可能是命令输出 / 文件内容 / 列表 / JSON / 错误信息），\
-         用用户的语言（中文优先）直接给出最终回答本身，不要解释推理过程：\n\
-         {{{{last_output}}}}",
-        user_text.trim()
-    );
-    let chat_step = AgentAction::CallSkill {
-        skill: "chat".to_string(),
-        args: serde_json::json!({ "text": chat_text }),
+    let synth_step = AgentAction::SynthesizeAnswer {
+        evidence_refs: vec!["last_output".to_string()],
     };
     let respond = rewritten.pop().expect("non-empty checked above");
-    rewritten.push(chat_step);
+    rewritten.push(synth_step);
     rewritten.push(respond);
-    info!("plan_inject_chat_transform_for_bare_placeholder_respond user_text_len={}", user_text.len());
+    info!("plan_inject_synthesize_answer_for_bare_placeholder_respond");
     rewritten
 }
 
@@ -1387,54 +2424,77 @@ pub(super) async fn plan_round_actions(
     user_text: &str,
     policy: &AgentLoopGuardPolicy,
     loop_state: &LoopState,
+    turn_analysis_for_prompt: Option<&crate::intent_router::TurnAnalysis>,
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
 ) -> Result<PlanResult, String> {
     let runtime_os = runtime_os_label();
     let runtime_shell = runtime_shell_label();
     let workspace_root = state.skill_rt.workspace_root.display().to_string();
-    let recent_assistant_replies = crate::memory::build_recent_assistant_replies_context(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        3,
-        220,
-    );
-    let skill_playbooks = build_skill_playbooks_text(state, task);
-    let skill_quick_index = build_skill_quick_index_text(state, task);
-    let (tool_spec_template, _) = crate::load_prompt_template_for_state(
-        state,
-        AGENT_TOOL_SPEC_PATH,
-        AGENT_TOOL_SPEC_TEMPLATE,
-    );
-    let (prompt_name, prompt_source, prompt_version, prompt_text) = if loop_state.round_no <= 1 {
-        let resolved = crate::load_prompt_template_for_state_with_meta(
+    let planning_class = classify_planning_prompt_class(route_result, user_text, loop_state);
+    let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
+        crate::memory::build_recent_assistant_replies_context(
             state,
-            SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
-            SINGLE_PLAN_EXECUTION_PROMPT_TEMPLATE,
-        );
-        (
-            "single_plan_execution_prompt",
-            resolved.source,
-            resolved.version,
-            format!(
-                "{}\n\n## Skill Quick Index (first-round routing hint)\nGoal: reduce misclassification while minimizing avoidable extra rounds.\n- Do NOT end round-1 with a generic chat-style final answer when a skill might be relevant.\n- In round-1, prioritize intent classification + missing-slot check, but finish immediately when one bounded resolution/current-runtime step can already complete the request safely.\n- Ask one concise clarification only when safe completion is truly blocked after current-turn text, immediate context, and bounded resolution/default inference have been used.\n- Use immediate `call_skill` in round-1 whenever intent is clear or can be completed by one bounded resolution/current-runtime step.\n{}\n",
-                build_single_plan_prompt(
-                    &resolved.template,
-                    user_text,
-                    goal,
-                    &tool_spec_template,
-                    &skill_playbooks,
-                    &recent_assistant_replies,
-                    &state.policy.command_intent.default_locale,
-                    &runtime_os,
-                    &runtime_shell,
-                    &workspace_root,
-                ),
-                skill_quick_index
-            ),
+            task.user_key.as_deref(),
+            task.user_id,
+            task.chat_id,
+            3,
+            220,
         )
+    } else {
+        "<omitted: lightweight_execution>".to_string()
+    };
+    let skill_playbooks = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
+        build_skill_playbooks_text(state, task)
+    } else {
+        build_lightweight_skill_playbooks_text()
+    };
+    let skill_quick_index = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
+        build_skill_quick_index_text(state, task)
+    } else {
+        build_lightweight_skill_quick_index_text()
+    };
+    let tool_spec_template = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
+        crate::bootstrap::load_required_prompt_template_for_state(state, AGENT_TOOL_SPEC_PATH)
+            .map_err(|e| e.to_string())?
+            .0
+    } else {
+        build_lightweight_tool_spec(route_result, auto_locator_path)
+    };
+    let turn_analysis = build_turn_analysis_prompt_block(turn_analysis_for_prompt);
+    let request_language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_text);
+    let (prompt_name, prompt_source, prompt_version, prompt_text) = if loop_state.round_no <= 1 {
+        let (prompt_name, prompt_logical_path) = round1_prompt_spec_for_class(planning_class);
+        let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
+            state,
+            prompt_logical_path,
+        )
+        .map_err(|e| e.to_string())?;
+        (prompt_name, resolved.source, resolved.version, {
+            let mut prompt = build_single_plan_prompt(
+                &resolved.template,
+                user_text,
+                goal,
+                &turn_analysis,
+                &tool_spec_template,
+                &skill_playbooks,
+                &recent_assistant_replies,
+                &request_language_hint,
+                &state.policy.command_intent.default_locale,
+                &runtime_os,
+                &runtime_shell,
+                &workspace_root,
+            );
+            if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
+                prompt.push_str(
+                        "\n\n## Skill Quick Index (first-round routing hint)\nGoal: reduce misclassification while minimizing avoidable extra rounds.\n- Do NOT end round-1 with a generic chat-style final answer when a skill might be relevant.\n- In round-1, prioritize intent classification + missing-slot check, but finish immediately when one bounded resolution/current-runtime step can already complete the request safely.\n- Ask one concise clarification only when safe completion is truly blocked after current-turn text, immediate context, and bounded resolution/default inference have been used.\n- Use immediate `call_skill` in round-1 whenever intent is clear or can be completed by one bounded resolution/current-runtime step.\n",
+                    );
+                prompt.push_str(&skill_quick_index);
+                prompt.push('\n');
+            }
+            prompt
+        })
     } else {
         let history_compact = build_loop_history_compact(loop_state);
         // Phase 3.3 / minimax-fs_search regression fix:
@@ -1454,11 +2514,11 @@ pub(super) async fn plan_round_actions(
             .map(|s| crate::truncate_for_log(s))
             .or_else(|| loop_state.delivery_messages.last().cloned())
             .unwrap_or_else(|| "(none)".to_string());
-        let resolved = crate::load_prompt_template_for_state_with_meta(
+        let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
             state,
             LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH,
-            LOOP_INCREMENTAL_PLAN_PROMPT_TEMPLATE,
-        );
+        )
+        .map_err(|e| e.to_string())?;
         (
             "loop_incremental_plan_prompt",
             resolved.source,
@@ -1467,9 +2527,11 @@ pub(super) async fn plan_round_actions(
                 &resolved.template,
                 user_text,
                 goal,
+                &turn_analysis,
                 &tool_spec_template,
                 &skill_playbooks,
                 &recent_assistant_replies,
+                &request_language_hint,
                 &state.policy.command_intent.default_locale,
                 loop_state.round_no,
                 &history_compact,
@@ -1498,9 +2560,14 @@ pub(super) async fn plan_round_actions(
         policy.multi_round_enabled
     );
     info!(
-        "plan_llm_request task_id={} round={} user_request={}",
+        "plan_llm_request task_id={} round={} planning_class={} prompt_chars={} tool_spec_chars={} playbooks_chars={} recent_replies_chars={} user_request={}",
         task.task_id,
         loop_state.round_no,
+        planning_class.as_str(),
+        prompt_text.chars().count(),
+        tool_spec_template.chars().count(),
+        skill_playbooks.chars().count(),
+        recent_assistant_replies.chars().count(),
         crate::truncate_for_log(user_text)
     );
     let plan_raw = llm_gateway::run_with_fallback_with_prompt_source(
@@ -1518,7 +2585,16 @@ pub(super) async fn plan_round_actions(
     );
     let initial_actions = parse_single_plan_actions(&plan_raw, state, task)
         .await
-        .map(|actions| normalize_planned_actions(state, route_result, loop_state, user_text, actions));
+        .map(|actions| {
+            normalize_planned_actions(
+                state,
+                route_result,
+                loop_state,
+                user_text,
+                auto_locator_path,
+                actions,
+            )
+        });
     let needs_repair = match initial_actions.as_ref() {
         Some(actions) => {
             should_force_actionable_plan_repair(state, route_result, loop_state, actions)
@@ -1545,7 +2621,14 @@ pub(super) async fn plan_round_actions(
         )
         .map(|(actions, raw_plan)| {
             (
-                normalize_planned_actions(state, route_result, loop_state, user_text, actions),
+                normalize_planned_actions(
+                    state,
+                    route_result,
+                    loop_state,
+                    user_text,
+                    auto_locator_path,
+                    actions,
+                ),
                 raw_plan,
             )
         })
@@ -1557,184 +2640,199 @@ pub(super) async fn plan_round_actions(
                 "plan_repair_deterministic_hit task_id={} round={} reason={}",
                 task.task_id, loop_state.round_no, repair_reason
             );
-            (deterministic_actions, PlanKind::Repair, deterministic_raw_plan)
+            (
+                deterministic_actions,
+                PlanKind::Repair,
+                deterministic_raw_plan,
+            )
         } else {
             match repair_plan_actions(
-            state,
-            task,
-            goal,
-            user_text,
-            repair_reason,
-            &tool_spec_template,
-            &skill_playbooks,
-            &plan_raw,
-            loop_state.round_no,
-        )
-        .await
-        {
-            Ok(repaired) => {
-                let repaired_actions =
-                    parse_single_plan_actions(&repaired, state, task)
+                state,
+                task,
+                goal,
+                &turn_analysis,
+                user_text,
+                repair_reason,
+                &tool_spec_template,
+                &skill_playbooks,
+                &plan_raw,
+                loop_state.round_no,
+            )
+            .await
+            {
+                Ok(repaired) => {
+                    let repaired_actions = parse_single_plan_actions(&repaired, state, task)
                         .await
                         .map(|actions| {
-                            normalize_planned_actions(state, route_result, loop_state, user_text, actions)
-                        });
-                match repaired_actions {
-                    Some(actions)
-                        if !should_force_actionable_plan_repair(
-                            state,
-                            route_result,
-                            loop_state,
-                            &actions,
-                        ) =>
-                    {
-                        (actions, PlanKind::Repair, repaired)
-                    }
-                    Some(actions) => {
-                        let second_repair_reason =
-                            plan_repair_reason(state, route_result, loop_state, Some(&actions));
-                        warn!(
-                            "plan_repair_still_invalid task_id={} round={} reason={}",
-                            task.task_id, loop_state.round_no, second_repair_reason
-                        );
-                        let second_repaired = repair_plan_actions(
-                            state,
-                            task,
-                            goal,
-                            user_text,
-                            second_repair_reason,
-                            &tool_spec_template,
-                            &skill_playbooks,
-                            &repaired,
-                            loop_state.round_no,
-                        )
-                        .await?;
-                        let second_repaired_actions =
-                            parse_single_plan_actions(&second_repaired, state, task)
-                                .await
-                                .map(|actions| {
-                                    normalize_planned_actions(
-                                        state,
-                                        route_result,
-                                        loop_state,
-                                        user_text,
-                                        actions,
-                                    )
-                                });
-                        match second_repaired_actions {
-                            Some(second_actions)
-                                if !should_force_actionable_plan_repair(
-                                    state,
-                                    route_result,
-                                    loop_state,
-                                    &second_actions,
-                                ) =>
-                            {
-                                (second_actions, PlanKind::Repair, second_repaired)
-                            }
-                            Some(_) => {
-                                if let Some((fallback_actions, fallback_raw_plan)) =
-                                    synthesize_plan_repair_fallback_actions(
-                                        loop_state,
-                                        route_result,
-                                        user_text,
-                                        auto_locator_path,
-                                    )
-                                {
-                                    warn!(
-                                        "plan_repair_synthesized_fallback task_id={} round={}",
-                                        task.task_id, loop_state.round_no
-                                    );
-                                    (fallback_actions, PlanKind::Repair, fallback_raw_plan)
-                                } else {
-                                    return Err(
-                                        "repair plan still non-actionable after second repair"
-                                            .to_string(),
-                                    );
-                                }
-                            }
-                            None => {
-                                if let Some((fallback_actions, fallback_raw_plan)) =
-                                    synthesize_plan_repair_fallback_actions(
-                                        loop_state,
-                                        route_result,
-                                        user_text,
-                                        auto_locator_path,
-                                    )
-                                {
-                                    warn!(
-                                        "plan_repair_synthesized_fallback_after_parse_fail task_id={} round={}",
-                                        task.task_id, loop_state.round_no
-                                    );
-                                    (fallback_actions, PlanKind::Repair, fallback_raw_plan)
-                                } else {
-                                    return Err(
-                                        "second repair plan parser failed: no executable steps"
-                                            .to_string(),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        let fallback_actions = initial_actions.as_ref().filter(|actions| {
-                            can_fallback_to_initial_plan_after_repair_failure(
+                            normalize_planned_actions(
+                                state,
                                 route_result,
                                 loop_state,
+                                user_text,
+                                auto_locator_path,
                                 actions,
                             )
                         });
-                        if let Some(actions) = fallback_actions {
+                    match repaired_actions {
+                        Some(actions)
+                            if !should_force_actionable_plan_repair(
+                                state,
+                                route_result,
+                                loop_state,
+                                &actions,
+                            ) =>
+                        {
+                            (actions, PlanKind::Repair, repaired)
+                        }
+                        Some(actions) => {
+                            let second_repair_reason =
+                                plan_repair_reason(state, route_result, loop_state, Some(&actions));
                             warn!(
-                                "plan_repair_parse_failed_fallback_to_initial task_id={} round={}",
-                                task.task_id, loop_state.round_no
+                                "plan_repair_still_invalid task_id={} round={} reason={}",
+                                task.task_id, loop_state.round_no, second_repair_reason
                             );
-                            (
-                                actions.clone(),
-                                if loop_state.round_no <= 1 {
-                                    PlanKind::Single
-                                } else {
-                                    PlanKind::Incremental
-                                },
-                                plan_raw.clone(),
+                            let second_repaired = repair_plan_actions(
+                                state,
+                                task,
+                                goal,
+                                &turn_analysis,
+                                user_text,
+                                second_repair_reason,
+                                &tool_spec_template,
+                                &skill_playbooks,
+                                &repaired,
+                                loop_state.round_no,
                             )
-                        } else {
-                            return Err(
-                                "single plan parser failed: no executable steps".to_string()
-                            );
+                            .await?;
+                            let second_repaired_actions =
+                                parse_single_plan_actions(&second_repaired, state, task)
+                                    .await
+                                    .map(|actions| {
+                                        normalize_planned_actions(
+                                            state,
+                                            route_result,
+                                            loop_state,
+                                            user_text,
+                                            auto_locator_path,
+                                            actions,
+                                        )
+                                    });
+                            match second_repaired_actions {
+                                Some(second_actions)
+                                    if !should_force_actionable_plan_repair(
+                                        state,
+                                        route_result,
+                                        loop_state,
+                                        &second_actions,
+                                    ) =>
+                                {
+                                    (second_actions, PlanKind::Repair, second_repaired)
+                                }
+                                Some(_) => {
+                                    if let Some((fallback_actions, fallback_raw_plan)) =
+                                        synthesize_plan_repair_fallback_actions(
+                                            loop_state,
+                                            route_result,
+                                            user_text,
+                                            auto_locator_path,
+                                        )
+                                    {
+                                        warn!(
+                                            "plan_repair_synthesized_fallback task_id={} round={}",
+                                            task.task_id, loop_state.round_no
+                                        );
+                                        (fallback_actions, PlanKind::Repair, fallback_raw_plan)
+                                    } else {
+                                        return Err(
+                                            "repair plan still non-actionable after second repair"
+                                                .to_string(),
+                                        );
+                                    }
+                                }
+                                None => {
+                                    if let Some((fallback_actions, fallback_raw_plan)) =
+                                        synthesize_plan_repair_fallback_actions(
+                                            loop_state,
+                                            route_result,
+                                            user_text,
+                                            auto_locator_path,
+                                        )
+                                    {
+                                        warn!(
+                                            "plan_repair_synthesized_fallback_after_parse_fail task_id={} round={}",
+                                            task.task_id, loop_state.round_no
+                                        );
+                                        (fallback_actions, PlanKind::Repair, fallback_raw_plan)
+                                    } else {
+                                        return Err(
+                                            "second repair plan parser failed: no executable steps"
+                                                .to_string(),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            let fallback_actions = initial_actions.as_ref().filter(|actions| {
+                                can_fallback_to_initial_plan_after_repair_failure(
+                                    state,
+                                    route_result,
+                                    loop_state,
+                                    actions,
+                                )
+                            });
+                            if let Some(actions) = fallback_actions {
+                                warn!(
+                                    "plan_repair_parse_failed_fallback_to_initial task_id={} round={}",
+                                    task.task_id, loop_state.round_no
+                                );
+                                (
+                                    actions.clone(),
+                                    if loop_state.round_no <= 1 {
+                                        PlanKind::Single
+                                    } else {
+                                        PlanKind::Incremental
+                                    },
+                                    plan_raw.clone(),
+                                )
+                            } else {
+                                return Err(
+                                    "single plan parser failed: no executable steps".to_string()
+                                );
+                            }
                         }
                     }
                 }
-            }
-            Err(err) => {
-                let fallback_actions = initial_actions.as_ref().filter(|actions| {
-                    can_fallback_to_initial_plan_after_repair_failure(
-                        route_result,
-                        loop_state,
-                        actions,
-                    )
-                });
-                if let Some(actions) = fallback_actions {
-                    warn!(
-                        "plan_repair_llm_failed_fallback_to_initial task_id={} round={} error={}",
-                        task.task_id,
-                        loop_state.round_no,
-                        crate::truncate_for_log(&err)
-                    );
-                    (
-                        actions.clone(),
-                        if loop_state.round_no <= 1 {
-                            PlanKind::Single
-                        } else {
-                            PlanKind::Incremental
-                        },
-                        plan_raw.clone(),
-                    )
-                } else {
-                    return Err(err);
+                Err(err) => {
+                    let fallback_actions = initial_actions.as_ref().filter(|actions| {
+                        can_fallback_to_initial_plan_after_repair_failure(
+                            state,
+                            route_result,
+                            loop_state,
+                            actions,
+                        )
+                    });
+                    if let Some(actions) = fallback_actions {
+                        warn!(
+                            "plan_repair_llm_failed_fallback_to_initial task_id={} round={} error={}",
+                            task.task_id,
+                            loop_state.round_no,
+                            crate::truncate_for_log(&err)
+                        );
+                        (
+                            actions.clone(),
+                            if loop_state.round_no <= 1 {
+                                PlanKind::Single
+                            } else {
+                                PlanKind::Incremental
+                            },
+                            plan_raw.clone(),
+                        )
+                    } else {
+                        return Err(err);
+                    }
                 }
             }
-        }
         }
     } else {
         (
@@ -1761,30 +2859,61 @@ pub(super) async fn plan_round_actions(
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
+    use std::fs;
+    use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
-    
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
-    
+    use claw_core::config::{AgentConfig, ToolsConfig};
 
     use super::{
-        inject_chat_transform_for_bare_placeholder_respond, is_bare_last_output_placeholder,
-        looks_health_check_request, looks_like_pre_observation_hallucinated_concrete_content,
-        plan_repair_reason, rewrite_http_probe_actions, rewrite_pre_observation_concrete_respond_to_placeholder,
-        rewrite_service_status_probe_actions, should_force_actionable_plan_repair,
+        build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
+        classify_planning_prompt_class, inject_synthesize_answer_for_bare_placeholder_respond,
+        is_bare_last_output_placeholder, looks_health_check_request,
+        looks_like_pre_observation_hallucinated_concrete_content, normalize_planned_actions,
+        plan_repair_reason, rewrite_extract_field_alias_args, rewrite_http_probe_actions,
+        rewrite_path_batch_size_facts_to_compare_paths,
+        rewrite_pre_observation_concrete_respond_to_placeholder,
+        rewrite_service_status_probe_actions, rewrite_sqlite3_run_cmd_to_db_basic,
+        rewrite_terminal_placeholder_respond_to_synthesize_answer, round1_prompt_spec_for_class,
+        should_force_actionable_plan_repair,
         strip_terminal_discussion_for_direct_skill_passthrough,
         strip_terminal_discussion_for_observed_finalize, synthesize_health_check_fallback_actions,
-        synthesize_ops_http_repair_fallback_actions, LoopState,
+        synthesize_ops_http_repair_fallback_actions, LoopState, PlanningPromptClass,
     };
     use crate::{
-        AgentAction, AgentRuntimeConfig, AppState, IntentOutputContract,
-        OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ResumeBehavior,
-        RiskCeiling, RouteResult, RoutedMode, ScheduleKind, SkillViewsSnapshot,
-        ToolsPolicy, DEFAULT_AGENT_ID,
+        AgentAction, AgentRuntimeConfig, AppState, IntentOutputContract, OutputLocatorKind,
+        OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult,
+        RoutedMode, ScheduleKind, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
     };
     use serde_json::json;
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time before unix epoch")
+                .as_nanos();
+            path.push(format!(
+                "clawd_planning_{prefix}_{}_{}",
+                std::process::id(),
+                nanos
+            ));
+            fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     fn test_state() -> AppState {
         let agents_by_id = HashMap::from([(
@@ -1795,16 +2924,16 @@ mod tests {
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: None,
-                                skills_list: Arc::new(HashSet::new()),
-                            }))),
+                    registry: None,
+                    skills_list: Arc::new(HashSet::new()),
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig::test_default(),
@@ -1813,6 +2942,285 @@ mod tests {
             channels: crate::ChannelConfig::default(),
             reload_ctx: crate::ReloadContext::default(),
             ask_states: crate::AskStateRegistry::default(),
+        }
+    }
+
+    fn test_state_with_enabled_skills(skills: &[&str]) -> AppState {
+        let state = test_state();
+        let enabled: HashSet<String> = skills.iter().map(|skill| (*skill).to_string()).collect();
+        *state
+            .core
+            .skill_views_snapshot
+            .write()
+            .expect("skill snapshot lock") = Arc::new(SkillViewsSnapshot {
+            registry: None,
+            skills_list: Arc::new(enabled),
+        });
+        state
+    }
+
+    fn base_route_result() -> RouteResult {
+        RouteResult {
+            routed_mode: RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(RoutedMode::Act),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Low,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract::default(),
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        }
+    }
+
+    #[test]
+    fn planning_prompt_class_uses_lightweight_execution_for_scalar_contract() {
+        let mut route = base_route_result();
+        route.route_reason = "deterministic_contract:generic_filename_scalar_extract".to_string();
+        route.resolved_intent = "读取 UI/package.json 里的 name 字段，只输出值".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "package.json".to_string();
+        assert_eq!(
+            classify_planning_prompt_class(
+                Some(&route),
+                &route.resolved_intent,
+                &LoopState::default()
+            )
+            .as_str(),
+            "lightweight_execution"
+        );
+    }
+
+    #[test]
+    fn planning_prompt_class_uses_lightweight_execution_for_generic_scalar_path_read() {
+        let mut route = base_route_result();
+        route.resolved_intent =
+            "读取 /home/guagua/rustclaw/configs/config.toml 中的 tools.allow_sudo 配置项的值，并仅输出该值"
+                .to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "/home/guagua/rustclaw/configs/config.toml".to_string();
+        assert_eq!(
+            classify_planning_prompt_class(
+                Some(&route),
+                &route.resolved_intent,
+                &LoopState::default()
+            )
+            .as_str(),
+            "lightweight_execution"
+        );
+    }
+
+    #[test]
+    fn planning_prompt_class_uses_lightweight_execution_for_pwd_only_route() {
+        let mut route = base_route_result();
+        route.route_reason = "deterministic_contract:pwd_only_current_workspace".to_string();
+        route.resolved_intent = "只输出当前工作目录的绝对路径，不要解释".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        assert_eq!(
+            classify_planning_prompt_class(
+                Some(&route),
+                &route.resolved_intent,
+                &LoopState::default()
+            )
+            .as_str(),
+            "lightweight_execution"
+        );
+    }
+
+    #[test]
+    fn planning_prompt_class_uses_lightweight_execution_for_content_evidence_reads() {
+        let mut route = base_route_result();
+        route.routed_mode = RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.route_reason = "deterministic_contract:generic_filename_read_range".to_string();
+        route.resolved_intent = "先读一下 README.md 前 4 行".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        assert_eq!(
+            classify_planning_prompt_class(
+                Some(&route),
+                &route.resolved_intent,
+                &LoopState::default()
+            )
+            .as_str(),
+            "lightweight_execution"
+        );
+    }
+
+    #[test]
+    fn planning_prompt_class_keeps_open_planning_for_chat_act_or_later_rounds() {
+        let mut route = base_route_result();
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.resolved_intent = "比较这两个文件大小，然后一句话总结".to_string();
+        assert_eq!(
+            classify_planning_prompt_class(
+                Some(&route),
+                &route.resolved_intent,
+                &LoopState::default()
+            )
+            .as_str(),
+            "open_planning"
+        );
+
+        let mut scalar = base_route_result();
+        scalar.route_reason = "deterministic_contract:generic_filename_scalar_extract".to_string();
+        scalar.resolved_intent = "读取 UI/package.json 里的 name 字段，只输出值".to_string();
+        scalar.output_contract.response_shape = OutputResponseShape::Scalar;
+        scalar.output_contract.requires_content_evidence = true;
+        scalar.output_contract.locator_kind = OutputLocatorKind::Filename;
+        scalar.output_contract.locator_hint = "package.json".to_string();
+        let mut round2 = LoopState::default();
+        round2.round_no = 2;
+        assert_eq!(
+            classify_planning_prompt_class(Some(&scalar), &scalar.resolved_intent, &round2)
+                .as_str(),
+            "open_planning"
+        );
+    }
+
+    #[test]
+    fn round1_prompt_spec_switches_to_lightweight_prompt_for_light_class() {
+        assert_eq!(
+            round1_prompt_spec_for_class(PlanningPromptClass::OpenPlanning),
+            (
+                "single_plan_execution_prompt",
+                "prompts/single_plan_execution_prompt.md",
+            )
+        );
+        assert_eq!(
+            round1_prompt_spec_for_class(PlanningPromptClass::LightweightExecution),
+            (
+                "lightweight_execution_prompt",
+                "prompts/lightweight_execution_prompt.md",
+            )
+        );
+    }
+
+    #[test]
+    fn lightweight_tool_spec_includes_contract_and_auto_locator() {
+        let mut route = base_route_result();
+        route.route_reason =
+            "deterministic_contract:generic_explicit_path_scalar_extract".to_string();
+        route.resolved_intent = "读取 UI/package.json 里的 name 字段，只输出值".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.locator_hint = "UI/package.json".to_string();
+        let rendered = build_lightweight_tool_spec(Some(&route), Some("/tmp/UI/package.json"));
+        assert!(rendered.contains("planning_class=lightweight_execution"));
+        assert!(rendered.contains("response_shape=scalar"));
+        assert!(rendered.contains("locator_hint=UI/package.json"));
+        assert!(rendered.contains("auto_locator_path=/tmp/UI/package.json"));
+    }
+
+    #[test]
+    fn rewrite_extract_field_field_alias_to_field_path() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "extract_field",
+                "path": "/tmp/config.toml",
+                "field": "tools.allow_sudo"
+            }),
+        }];
+        let out = rewrite_extract_field_alias_args(actions);
+        match &out[0] {
+            AgentAction::CallSkill { args, .. } => {
+                assert_eq!(
+                    args.get("field_path").and_then(|value| value.as_str()),
+                    Some("tools.allow_sudo")
+                );
+                assert!(args.get("field").is_none());
+            }
+            other => panic!("expected call_skill, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rewrite_extract_field_keeps_existing_field_path() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "extract_field",
+                "path": "/tmp/config.toml",
+                "field": "tools.allow_sudo",
+                "field_path": "tools.allow_path_outside_workspace"
+            }),
+        }];
+        let out = rewrite_extract_field_alias_args(actions);
+        match &out[0] {
+            AgentAction::CallSkill { args, .. } => {
+                assert_eq!(
+                    args.get("field_path").and_then(|value| value.as_str()),
+                    Some("tools.allow_path_outside_workspace")
+                );
+                assert_eq!(
+                    args.get("field").and_then(|value| value.as_str()),
+                    Some("tools.allow_sudo")
+                );
+            }
+            other => panic!("expected call_skill, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rewrite_extract_field_file_path_alias_to_path() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "extract_field",
+                "file_path": "/tmp/config.toml",
+                "field_path": "tools.allow_sudo"
+            }),
+        }];
+        let out = rewrite_extract_field_alias_args(actions);
+        match &out[0] {
+            AgentAction::CallSkill { args, .. } => {
+                assert_eq!(
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some("/tmp/config.toml")
+                );
+                assert!(args.get("file_path").is_none());
+            }
+            other => panic!("expected call_skill, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rewrite_extract_field_target_alias_to_path() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "extract_field",
+                "target": "/tmp/config.toml",
+                "field_path": "tools.allow_sudo"
+            }),
+        }];
+        let out = rewrite_extract_field_alias_args(actions);
+        match &out[0] {
+            AgentAction::CallSkill { args, .. } => {
+                assert_eq!(
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some("/tmp/config.toml")
+                );
+                assert!(args.get("target").is_none());
+            }
+            other => panic!("expected call_skill, got {other:?}"),
         }
     }
 
@@ -2006,6 +3414,46 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_skill_plan_forces_repair() {
+        let state = test_state_with_enabled_skills(&["run_cmd", "read_file"]);
+        let loop_state = LoopState::new(2);
+        let actions = vec![AgentAction::CallSkill {
+            skill: "disabled_writer".to_string(),
+            args: json!({ "path": "out.txt" }),
+        }];
+        let route = route_result(RoutedMode::ChatAct, false, OutputResponseShape::Free);
+
+        assert!(should_force_actionable_plan_repair(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
+        ));
+        assert_eq!(
+            plan_repair_reason(&state, Some(&route), &loop_state, Some(&actions)),
+            "unavailable_skill_requires_replan"
+        );
+    }
+
+    #[test]
+    fn repair_failure_does_not_fallback_to_unavailable_skill_plan() {
+        let state = test_state_with_enabled_skills(&["run_cmd", "read_file"]);
+        let loop_state = LoopState::new(2);
+        let actions = vec![AgentAction::CallSkill {
+            skill: "disabled_reader".to_string(),
+            args: json!({ "path": "README.md" }),
+        }];
+        let route = route_result(RoutedMode::ChatAct, false, OutputResponseShape::Free);
+
+        assert!(!can_fallback_to_initial_plan_after_repair_failure(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
+        ));
+    }
+
+    #[test]
     fn actionable_route_allows_respond_only_after_observation_exists() {
         let mut loop_state = LoopState::new(2);
         loop_state.has_tool_or_skill_output = true;
@@ -2042,7 +3490,291 @@ mod tests {
     }
 
     #[test]
-    fn content_evidence_route_strips_terminal_discussion_followup_before_observation() {
+    fn lightweight_act_route_keeps_observation_only_plan_without_repair() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_range",
+                "path": "/tmp/device_local/logs/model_io.log",
+                "mode": "tail",
+                "n": 4
+            }),
+        }];
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+        route.resolved_intent = "读取 /tmp/device_local/logs/model_io.log 最后 4 行".to_string();
+        route.output_contract.locator_hint = "/tmp/device_local/logs/model_io.log".to_string();
+        assert!(!should_force_plan_repair(
+            Some(&route),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn lightweight_route_rejects_unavailable_followup_skill() {
+        let state = test_state_with_enabled_skills(&["read_file"]);
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: serde_json::json!({ "path": "README.md" }),
+            },
+            AgentAction::CallSkill {
+                skill: "formatter".to_string(),
+                args: serde_json::json!({ "text": "用一句话总结 {{last_output}}" }),
+            },
+        ];
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.route_reason = "deterministic_contract:generic_filename_single_read".to_string();
+        route.resolved_intent = "看一下 README.md，然后一句话说它主要讲了什么".to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "README.md".to_string();
+        assert!(should_force_actionable_plan_repair(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions,
+        ));
+        assert_eq!(
+            plan_repair_reason(&state, Some(&route), &loop_state, Some(&actions)),
+            "unavailable_skill_requires_replan"
+        );
+    }
+
+    #[test]
+    fn clarify_followup_tail_request_rewrites_single_read_file_to_read_range() {
+        let state = test_state();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+        route.resolved_intent = "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target/content: scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: json!({
+                    "path": "scripts/nl_tests/fixtures/device_local/logs/model_io.log"
+                }),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(2),
+            "scripts/nl_tests/fixtures/device_local/logs/model_io.log",
+            None,
+            actions,
+        );
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("read_range")
+                );
+                assert_eq!(
+                    args.get("mode").and_then(|value| value.as_str()),
+                    Some("tail")
+                );
+                assert_eq!(args.get("n").and_then(|value| value.as_u64()), Some(5));
+            }
+            other => panic!("expected read_range rewrite, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_range_single_read_keeps_read_file_plan() {
+        let state = test_state();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+        route.resolved_intent =
+            "看看 scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "read_file".to_string(),
+            args: json!({
+                "path": "scripts/nl_tests/fixtures/device_local/logs/model_io.log"
+            }),
+        }];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(2),
+            "scripts/nl_tests/fixtures/device_local/logs/model_io.log",
+            None,
+            actions,
+        );
+
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, .. } if skill == "read_file"
+        ));
+    }
+
+    #[test]
+    fn single_target_read_file_prefers_auto_locator_file_over_stale_existing_path() {
+        let state = test_state();
+        let root = TempDirGuard::new("single_target_read_file");
+        let stale = root.path.join("stale.log");
+        let current = root.path.join("clawd.log");
+        fs::write(&stale, "stale\n").expect("write stale file");
+        fs::write(&current, "fresh\n").expect("write current file");
+        let stale_path = stale.display().to_string();
+        let current_path = current.display().to_string();
+
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+        route.resolved_intent = format!("读取 {} 的内容", current_path);
+        route.output_contract.locator_hint = current_path.clone();
+
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: json!({ "path": stale_path }),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(2),
+            "第二个的内容",
+            Some(current_path.as_str()),
+            actions,
+        );
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "read_file");
+                assert_eq!(
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some(current_path.as_str())
+                );
+            }
+            other => panic!("expected read_file action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_target_read_range_prefers_auto_locator_file_over_stale_existing_path() {
+        let state = test_state();
+        let root = TempDirGuard::new("single_target_read_range");
+        let stale = root.path.join("hello_from_manual_test.sh");
+        let current = root.path.join("clawd.log");
+        fs::write(&stale, "#!/bin/bash\necho stale\n").expect("write stale file");
+        fs::write(&current, "line1\nline2\n").expect("write current file");
+        let stale_path = stale.display().to_string();
+        let current_path = current.display().to_string();
+
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+        route.resolved_intent = format!("查看 {} 最后 2 行", current_path);
+        route.output_contract.locator_hint = current_path.clone();
+
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({
+                    "action": "read_range",
+                    "path": stale_path,
+                    "mode": "tail",
+                    "n": 2
+                }),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(2),
+            "第二个的最后 2 行",
+            Some(current_path.as_str()),
+            actions,
+        );
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some(current_path.as_str())
+                );
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("read_range")
+                );
+            }
+            other => panic!("expected system_basic read_range, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn auto_locator_file_does_not_collapse_multi_read_plan() {
+        let state = test_state();
+        let root = TempDirGuard::new("multi_read_preserve");
+        let alpha = root.path.join("alpha.log");
+        let beta = root.path.join("beta.log");
+        fs::write(&alpha, "alpha\n").expect("write alpha");
+        fs::write(&beta, "beta\n").expect("write beta");
+        let alpha_path = alpha.display().to_string();
+        let beta_path = beta.display().to_string();
+
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.resolved_intent = "对比两个文件".to_string();
+
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: json!({ "path": alpha_path.clone() }),
+            },
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: json!({ "path": beta_path.clone() }),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(2),
+            "对比 alpha 和 beta",
+            Some(beta_path.as_str()),
+            actions,
+        );
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "read_file");
+                assert_eq!(
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some(alpha_path.as_str())
+                );
+            }
+            other => panic!("expected first read_file action, got {other:?}"),
+        }
+        match &normalized[1] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "read_file");
+                assert_eq!(
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some(beta_path.as_str())
+                );
+            }
+            other => panic!("expected second read_file action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn content_evidence_route_keeps_terminal_discussion_followup_for_planned_synthesis() {
         let loop_state = LoopState::new(2);
         let actions = vec![
             AgentAction::CallSkill {
@@ -2054,25 +3786,381 @@ mod tests {
                     "n": 20
                 }),
             },
-            AgentAction::CallSkill {
-                skill: "chat".to_string(),
-                args: json!({ "text": "summarize {{last_output}}" }),
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
             },
         ];
-        let stripped = strip_terminal_discussion_for_observed_finalize(
+        let kept = strip_terminal_discussion_for_observed_finalize(
             Some(&route_result(
                 RoutedMode::ChatAct,
                 true,
                 OutputResponseShape::Free,
             )),
             &loop_state,
-            actions,
+            actions.clone(),
         );
-        assert_eq!(stripped.len(), 1);
+        assert_eq!(kept.len(), 2);
         assert!(matches!(
-            &stripped[0],
+            &kept[0],
             AgentAction::CallSkill { skill, .. } if skill == "system_basic"
         ));
+        assert!(matches!(
+            &kept[1],
+            AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn content_evidence_route_keeps_terminal_synthesize_followup_for_planned_synthesis() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "read_range",
+                    "path": "README.md",
+                    "mode": "head",
+                    "n": 20
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+        let kept = strip_terminal_discussion_for_observed_finalize(
+            Some(&route_result(
+                RoutedMode::ChatAct,
+                true,
+                OutputResponseShape::Free,
+            )),
+            &loop_state,
+            actions.clone(),
+        );
+        assert_eq!(kept.len(), 2);
+        assert!(matches!(
+            &kept[0],
+            AgentAction::CallSkill { skill, .. } if skill == "system_basic"
+        ));
+        assert!(matches!(
+            &kept[1],
+            AgentAction::SynthesizeAnswer { evidence_refs } if evidence_refs == &vec!["last_output".to_string()]
+        ));
+    }
+
+    #[test]
+    fn content_evidence_route_keeps_multi_evidence_synthesize_followup() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "read_range",
+                    "path": "service_notes.md",
+                    "mode": "head",
+                    "n": 20
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: serde_json::json!({ "path": "README.md" }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["s1".to_string(), "s2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let kept = strip_terminal_discussion_for_observed_finalize(
+            Some(&route_result(
+                RoutedMode::ChatAct,
+                true,
+                OutputResponseShape::Free,
+            )),
+            &loop_state,
+            actions.clone(),
+        );
+        assert_eq!(kept.len(), 4);
+        assert!(matches!(
+            &kept[0],
+            AgentAction::CallSkill { skill, .. } if skill == "system_basic"
+        ));
+        assert!(matches!(
+            &kept[1],
+            AgentAction::CallSkill { skill, .. } if skill == "read_file"
+        ));
+        assert!(matches!(
+            &kept[2],
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs == &vec!["s1".to_string(), "s2".to_string()]
+        ));
+        assert!(matches!(
+            &kept[3],
+            AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn sqlite3_run_cmd_is_rewritten_to_db_basic_query() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({
+                "command": "sqlite3 data/db-basic-contract.sqlite \"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;\""
+            }),
+        }];
+
+        let rewritten = rewrite_sqlite3_run_cmd_to_db_basic(actions);
+        assert_eq!(rewritten.len(), 1);
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "db_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("sqlite_query")
+                );
+                assert_eq!(
+                    args.get("db_path").and_then(|value| value.as_str()),
+                    Some("data/db-basic-contract.sqlite")
+                );
+                assert_eq!(
+                    args.get("sql").and_then(|value| value.as_str()),
+                    Some("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                );
+            }
+            other => panic!("expected db_basic sqlite_query action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn path_batch_size_facts_is_rewritten_to_compare_paths() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "path_batch_facts",
+                "paths": ["README.md", "AGENTS.md"],
+                "facts": ["size"]
+            }),
+        }];
+
+        let rewritten = rewrite_path_batch_size_facts_to_compare_paths(None, actions);
+        assert_eq!(rewritten.len(), 1);
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("compare_paths")
+                );
+                let left = args.get("left_path").and_then(|value| value.as_str());
+                let right = args.get("right_path").and_then(|value| value.as_str());
+                let pair = [left, right];
+                assert!(pair.contains(&Some("README.md")));
+                assert!(pair.contains(&Some("AGENTS.md")));
+            }
+            other => panic!("expected system_basic compare_paths action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quantity_comparison_route_rewrites_path_batch_facts_without_explicit_size_fact() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "path_batch_facts",
+                "paths": ["README.md", "AGENTS.md"],
+            }),
+        }];
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.resolved_intent = "比较 README.md 和 AGENTS.md 哪个更大".to_string();
+
+        let rewritten = rewrite_path_batch_size_facts_to_compare_paths(Some(&route), actions);
+        assert_eq!(rewritten.len(), 1);
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("compare_paths")
+                );
+                let left = args.get("left_path").and_then(|value| value.as_str());
+                let right = args.get("right_path").and_then(|value| value.as_str());
+                let pair = [left, right];
+                assert!(pair.contains(&Some("README.md")));
+                assert!(pair.contains(&Some("AGENTS.md")));
+            }
+            other => panic!("expected system_basic compare_paths action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recent_artifacts_route_rewrites_bare_list_dir_to_inventory_dir() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: serde_json::json!({ "path": "logs" }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentArtifactsJudgment;
+        route.resolved_intent =
+            "列出 logs 目录最近修改的 2 个文件名，再用一句中文告诉我这更像运行日志还是测试残留"
+                .to_string();
+        let request_surface =
+            crate::intent::surface_signals::analyze_prompt_surface(&route.resolved_intent);
+
+        let rewritten = super::rewrite_recent_artifacts_list_dir_to_inventory_dir(
+            Some(&route),
+            &request_surface,
+            actions,
+        );
+        assert_eq!(rewritten.len(), 2);
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("inventory_dir")
+                );
+                assert_eq!(
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some("logs")
+                );
+                assert_eq!(
+                    args.get("sort_by").and_then(|value| value.as_str()),
+                    Some("mtime_desc")
+                );
+                assert_eq!(
+                    args.get("max_entries").and_then(|value| value.as_u64()),
+                    Some(2)
+                );
+                assert_eq!(
+                    args.get("names_only").and_then(|value| value.as_bool()),
+                    Some(true)
+                );
+            }
+            other => panic!("expected system_basic inventory_dir action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quantity_comparison_route_rewrites_bare_list_dir_to_compare_paths() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: serde_json::json!({ "path": "." }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_hint = "README.md, AGENTS.md".to_string();
+        route.resolved_intent = "keep the answer brief".to_string();
+
+        let rewritten = super::rewrite_overbroad_list_dir_to_compare_paths(Some(&route), actions);
+        assert_eq!(rewritten.len(), 2);
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("compare_paths")
+                );
+                let left = args.get("left_path").and_then(|value| value.as_str());
+                let right = args.get("right_path").and_then(|value| value.as_str());
+                let pair = [left, right];
+                assert!(pair.contains(&Some("README.md")));
+                assert!(pair.contains(&Some("AGENTS.md")));
+            }
+            other => panic!("expected system_basic compare_paths action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn structured_scalar_compare_plan_appends_synthesize_answer() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "extract_fields",
+                    "path": "UI/package.json",
+                    "field_paths": ["name"]
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "extract_field",
+                    "path": "crates/clawd/Cargo.toml",
+                    "field_path": "package.name"
+                }),
+            },
+        ];
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Scalar);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.resolved_intent =
+            "UI/package.json 里的 name 和 crates/clawd/Cargo.toml 里的 package.name 一样吗？只回答一样或不一样"
+                .to_string();
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+        assert_eq!(normalized.len(), 3);
+        assert!(matches!(
+            &normalized[2],
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs
+                    == &vec!["step_1".to_string(), "step_2".to_string()]
+        ));
+    }
+
+    #[test]
+    fn workspace_summary_prunes_optional_extract_field_steps_when_read_evidence_exists() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: serde_json::json!({ "path": "." }),
+            },
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "read_range",
+                    "path": "README.md",
+                    "mode": "head",
+                    "n": 20
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "extract_field",
+                    "path": "Cargo.toml",
+                    "field_path": "package.name"
+                }),
+            },
+        ];
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+        route.resolved_intent = "Summarize this repository for me".to_string();
+
+        let pruned = super::prune_optional_extract_field_actions_for_workspace_summary(
+            Some(&route),
+            actions,
+        );
+        assert_eq!(pruned.len(), 2);
+        assert!(pruned
+            .iter()
+            .all(|action| !super::action_is_optional_extract_field(action)));
     }
 
     #[test]
@@ -2101,6 +4189,49 @@ mod tests {
         assert!(matches!(
             &stripped[0],
             AgentAction::CallSkill { skill, .. } if skill == "crypto"
+        ));
+    }
+
+    #[test]
+    fn process_basic_port_list_keeps_terminal_discussion_followup() {
+        let state = test_state();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "process_basic".to_string(),
+                args: serde_json::json!({ "action": "port_list" }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let kept = strip_terminal_discussion_for_direct_skill_passthrough(
+            &state,
+            Some(&route_result(
+                RoutedMode::ChatAct,
+                false,
+                OutputResponseShape::Free,
+            )),
+            actions.clone(),
+        );
+        assert_eq!(kept.len(), 3);
+        assert!(matches!(
+            &kept[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "process_basic"
+                    && args.get("action").and_then(|value| value.as_str()) == Some("port_list")
+        ));
+        assert!(matches!(
+            &kept[1],
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs == &vec!["last_output".to_string()]
+        ));
+        assert!(matches!(
+            &kept[2],
+            AgentAction::Respond { content } if content == "{{last_output}}"
         ));
     }
 
@@ -2141,7 +4272,8 @@ mod tests {
     }
 
     #[test]
-    fn chat_act_route_keeps_observation_plus_chat_followup_plan() {
+    fn chat_act_route_repairs_observation_plus_unavailable_followup_plan() {
+        let state = test_state_with_enabled_skills(&["run_cmd"]);
         let loop_state = LoopState::new(2);
         let actions = vec![
             AgentAction::CallSkill {
@@ -2149,8 +4281,33 @@ mod tests {
                 args: serde_json::json!({ "command": "ls -l Cargo.toml Cargo.lock" }),
             },
             AgentAction::CallSkill {
-                skill: "chat".to_string(),
+                skill: "formatter".to_string(),
                 args: serde_json::json!({ "text": "explain {{last_output}}" }),
+            },
+        ];
+        let route = route_result(RoutedMode::ChatAct, false, OutputResponseShape::Free);
+        assert!(should_force_actionable_plan_repair(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
+        ));
+        assert_eq!(
+            plan_repair_reason(&state, Some(&route), &loop_state, Some(&actions)),
+            "unavailable_skill_requires_replan"
+        );
+    }
+
+    #[test]
+    fn chat_act_route_keeps_observation_plus_synthesize_followup_plan() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({ "command": "ls -l Cargo.toml Cargo.lock" }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
             },
         ];
         assert!(!should_force_plan_repair(
@@ -2909,9 +5066,9 @@ mod tests {
         );
     }
 
-    // ---------- inject_chat_transform_for_bare_placeholder_respond ----------
+    // ---------- inject_synthesize_answer_for_bare_placeholder_respond ----------
     // 见函数 doc：runtime 兜底，把 minimax 偶发吐出的裸 placeholder respond 注入
-    // 一个 chat 转换步，关掉 v2 prompt patch 仍然救不回来的死循环。
+    // 一个 synthesize_answer 节点，关掉裸 placeholder 导致的死循环。
 
     #[test]
     fn detects_bare_last_output_placeholder_variants() {
@@ -2925,7 +5082,9 @@ mod tests {
 
     #[test]
     fn rejects_non_bare_placeholder_content() {
-        assert!(!is_bare_last_output_placeholder("hostname is {{last_output}}"));
+        assert!(!is_bare_last_output_placeholder(
+            "hostname is {{last_output}}"
+        ));
         assert!(!is_bare_last_output_placeholder("当前用户是 root"));
         assert!(!is_bare_last_output_placeholder(""));
         assert!(!is_bare_last_output_placeholder("{{other}}"));
@@ -2935,7 +5094,7 @@ mod tests {
     }
 
     #[test]
-    fn injects_chat_transform_when_respond_is_bare_placeholder() {
+    fn injects_synthesize_answer_when_respond_is_bare_placeholder() {
         let actions = vec![
             AgentAction::CallSkill {
                 skill: "run_cmd".to_string(),
@@ -2945,26 +5104,24 @@ mod tests {
                 content: "{{last_output}}".to_string(),
             },
         ];
-        let out = inject_chat_transform_for_bare_placeholder_respond(
+        let out = inject_synthesize_answer_for_bare_placeholder_respond(
             actions,
             "只输出当前用户名，不要解释",
         );
-        assert_eq!(out.len(), 3, "should insert exactly one chat step");
+        assert_eq!(out.len(), 3, "should insert exactly one synth step");
         assert!(matches!(
             &out[0],
             AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
         ));
         match &out[1] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "chat");
-                let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                assert!(
-                    text.contains("{{last_output}}"),
-                    "chat text must reference last_output: {text}"
+            AgentAction::SynthesizeAnswer { evidence_refs } => {
+                assert_eq!(
+                    evidence_refs,
+                    &vec!["last_output".to_string()],
+                    "synthesize step should point at last_output by default"
                 );
-                assert!(text.contains("只输出当前用户名"), "chat text should restate user request");
             }
-            _ => panic!("expected chat call_skill at index 1, got {:?}", out[1]),
+            _ => panic!("expected synthesize_answer at index 1, got {:?}", out[1]),
         }
         assert!(matches!(
             &out[2],
@@ -2977,26 +5134,25 @@ mod tests {
     }
 
     #[test]
-    fn injection_is_idempotent_when_chat_already_precedes_respond() {
+    fn injection_is_idempotent_when_synthesize_already_precedes_respond() {
         let actions = vec![
             AgentAction::CallSkill {
                 skill: "run_cmd".to_string(),
                 args: json!({ "command": "whoami" }),
             },
-            AgentAction::CallSkill {
-                skill: "chat".to_string(),
-                args: json!({ "text": "...prior chat transform..." }),
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
             },
             AgentAction::Respond {
                 content: "{{last_output}}".to_string(),
             },
         ];
         let before = actions_as_json(&actions);
-        let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
+        let out = inject_synthesize_answer_for_bare_placeholder_respond(actions, "x");
         assert_eq!(
             actions_as_json(&out),
             before,
-            "should not re-inject when chat already precedes respond"
+            "should not re-inject when synthesize_answer already precedes respond"
         );
     }
 
@@ -3012,7 +5168,7 @@ mod tests {
             },
         ];
         let before = actions_as_json(&actions);
-        let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
+        let out = inject_synthesize_answer_for_bare_placeholder_respond(actions, "x");
         assert_eq!(actions_as_json(&out), before);
     }
 
@@ -3022,7 +5178,7 @@ mod tests {
             content: "{{last_output}}".to_string(),
         }];
         let before = actions_as_json(&actions);
-        let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
+        let out = inject_synthesize_answer_for_bare_placeholder_respond(actions, "x");
         assert_eq!(
             actions_as_json(&out),
             before,
@@ -3037,7 +5193,7 @@ mod tests {
             args: json!({ "command": "ls" }),
         }];
         let before = actions_as_json(&actions);
-        let out = inject_chat_transform_for_bare_placeholder_respond(actions, "x");
+        let out = inject_synthesize_answer_for_bare_placeholder_respond(actions, "x");
         assert_eq!(actions_as_json(&out), before);
     }
 
@@ -3046,7 +5202,9 @@ mod tests {
     fn looks_hallucinated_concrete_content_recognizes_listing_shapes() {
         // 真实 adv08 复现：list_dir 还没跑，respond 编出 5 行 numbered 列表 + 路径。
         let adv08 = "prompts 目录前 5 个文件名：\n1. prompts/skills\n2. prompts/agents\n3. prompts/system\n4. prompts/user\n5. prompts/layers";
-        assert!(looks_like_pre_observation_hallucinated_concrete_content(adv08));
+        assert!(looks_like_pre_observation_hallucinated_concrete_content(
+            adv08
+        ));
 
         // 多行 + 文件后缀，但没编号。
         let multi_paths = "Cargo.toml\nCargo.lock\nREADME.md\nLICENSE";
@@ -3063,12 +5221,14 @@ mod tests {
         assert!(!looks_like_pre_observation_hallucinated_concrete_content(
             "好的，正在查询，请稍候。"
         ));
-        // {{last_output}} 占位符 → 不命中（应由 inject_chat_transform_for_bare 处理）。
+        // {{last_output}} 占位符 → 不命中（应由 synthesize 注入兜底处理）。
         assert!(!looks_like_pre_observation_hallucinated_concrete_content(
             "{{last_output}}"
         ));
         // 只有一行短回复 → 不命中。
-        assert!(!looks_like_pre_observation_hallucinated_concrete_content("yes"));
+        assert!(!looks_like_pre_observation_hallucinated_concrete_content(
+            "yes"
+        ));
     }
 
     /// §F1：rewrite 触发条件 —— round 1 + 上一步 CallSkill + Respond 含枚举。
@@ -3125,8 +5285,7 @@ mod tests {
             },
         ];
         let before = actions.clone();
-        let after =
-            rewrite_pre_observation_concrete_respond_to_placeholder(&loop_state, actions);
+        let after = rewrite_pre_observation_concrete_respond_to_placeholder(&loop_state, actions);
         assert_eq!(actions_as_json(&before), actions_as_json(&after));
     }
 
@@ -3156,13 +5315,59 @@ mod tests {
         }
     }
 
+    #[test]
+    fn rewrite_terminal_placeholder_respond_inserts_synthesize_answer() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({
+                    "action": "read_range",
+                    "path": "service_notes.md",
+                    "mode": "head",
+                    "n": 20
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: json!({ "path": "README.md" }),
+            },
+            AgentAction::Respond {
+                content: "先看 {{s1.output}}，再说明 {{s2.output}} 的作用".to_string(),
+            },
+        ];
+
+        let rewritten =
+            rewrite_terminal_placeholder_respond_to_synthesize_answer(&loop_state, actions);
+
+        assert_eq!(rewritten.len(), 4);
+        assert!(matches!(
+            &rewritten[0],
+            AgentAction::CallSkill { skill, .. } if skill == "system_basic"
+        ));
+        assert!(matches!(
+            &rewritten[1],
+            AgentAction::CallSkill { skill, .. } if skill == "read_file"
+        ));
+        assert!(matches!(
+            &rewritten[2],
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs.as_slice()
+                    == ["s1.output".to_string(), "s2.output".to_string()].as_slice()
+        ));
+        assert!(matches!(
+            &rewritten[3],
+            AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
     /// §D2.a：plan_result schema 与 `AgentAction` enum / `SinglePlanEnvelope` 漂移检查。
     ///
     /// 校验内容：
     /// 1. `prompts/schemas/plan_result.schema.json` 是合法 JSON 且为 object schema；
     /// 2. envelope 顶层 required 含 `steps`；
-    /// 3. `$defs/AgentAction.oneOf` 必须正好覆盖 4 个 variant：think / call_skill /
-    ///    call_tool / respond（与 `AgentAction` enum 一一对应）；
+    /// 3. `$defs/AgentAction.oneOf` 必须正好覆盖 5 个 variant：think / call_skill /
+    ///    call_tool / synthesize_answer / respond（与 `AgentAction` enum 一一对应）；
     /// 4. 每个 variant 的 `type` const 必须是 snake_case 的 variant 名；
     /// 5. 每个 variant 的 required 字段必须 ⊇ `AgentAction` 该 variant 的非空字段；
     /// 6. 完整性闭环：把每个 variant 的最小合法实例 round-trip
@@ -3198,10 +5403,17 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("AgentAction must be a oneOf union");
 
-        // 期望与 `AgentAction` enum 完全对齐：think / call_skill / call_tool / respond
-        let expected: HashSet<&str> = ["think", "call_skill", "call_tool", "respond"]
-            .into_iter()
-            .collect();
+        // 期望与 `AgentAction` enum 完全对齐：think / call_skill / call_tool /
+        // synthesize_answer / respond
+        let expected: HashSet<&str> = [
+            "think",
+            "call_skill",
+            "call_tool",
+            "synthesize_answer",
+            "respond",
+        ]
+        .into_iter()
+        .collect();
         let mut actual: HashSet<String> = HashSet::new();
         for entry in one_of {
             let ref_path = entry
@@ -3237,6 +5449,10 @@ mod tests {
             (
                 "call_tool",
                 json!({"type": "call_tool", "tool": "read_file", "args": {}}),
+            ),
+            (
+                "synthesize_answer",
+                json!({"type": "synthesize_answer", "evidence_refs": ["last_output"]}),
             ),
             ("respond", json!({"type": "respond", "content": "ok"})),
         ];

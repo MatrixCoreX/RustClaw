@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,16 @@ const PERMANENT_EXTENSION_SYSTEM_PROMPT: &str = include_str!(
 const SKILL_IMPLEMENTATION_SYSTEM_PROMPT: &str = include_str!(
     "../../../../prompts/layers/overlays/extension_manager_skill_implementation_system_prompt.md"
 );
+const TEMPORARY_FIX_PLAN_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/temporary_fix_plan.schema.json");
+const PERMANENT_EXTENSION_PLAN_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/permanent_extension_plan.schema.json");
+const EXTERNAL_SKILL_IMPLEMENTATION_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/external_skill_implementation.schema.json");
+
+static TEMPORARY_FIX_PLAN_SCHEMA: OnceLock<Value> = OnceLock::new();
+static PERMANENT_EXTENSION_PLAN_SCHEMA: OnceLock<Value> = OnceLock::new();
+static EXTERNAL_SKILL_IMPLEMENTATION_SCHEMA: OnceLock<Value> = OnceLock::new();
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -547,9 +558,8 @@ async fn llm_generate_temporary_fix_plan(request: &str) -> Result<String, String
         .ok()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-    let api_key = env::var("OPENAI_API_KEY")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
+    let api_key = claw_core::secrets::env_non_empty_resolved("OPENAI_API_KEY")
+        .map_err(|err| format!("resolve OPENAI_API_KEY failed: {err}"))?
         .ok_or_else(|| "OPENAI_API_KEY is empty".to_string())?;
     let model = env::var("EXTENSION_MANAGER_MODEL")
         .ok()
@@ -621,9 +631,8 @@ async fn llm_generate_permanent_extension_plan(request: &str) -> Result<String, 
         .ok()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-    let api_key = env::var("OPENAI_API_KEY")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
+    let api_key = claw_core::secrets::env_non_empty_resolved("OPENAI_API_KEY")
+        .map_err(|err| format!("resolve OPENAI_API_KEY failed: {err}"))?
         .ok_or_else(|| "OPENAI_API_KEY is empty".to_string())?;
     let model = env::var("EXTENSION_MANAGER_MODEL")
         .ok()
@@ -702,9 +711,8 @@ async fn llm_generate_external_skill_implementation(
         .ok()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-    let api_key = env::var("OPENAI_API_KEY")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
+    let api_key = claw_core::secrets::env_non_empty_resolved("OPENAI_API_KEY")
+        .map_err(|err| format!("resolve OPENAI_API_KEY failed: {err}"))?
         .ok_or_else(|| "OPENAI_API_KEY is empty".to_string())?;
     let model = env::var("EXTENSION_MANAGER_MODEL")
         .ok()
@@ -777,27 +785,18 @@ async fn llm_generate_external_skill_implementation(
 }
 
 fn parse_temporary_fix_plan_from_text(raw: &str) -> Result<TemporaryFixPlan, String> {
-    let candidate = if let Ok(value) = serde_json::from_str::<Value>(raw) {
-        value
-    } else {
-        let extracted = extract_json_object(raw)
-            .ok_or_else(|| "temporary fix plan is not valid JSON".to_string())?;
-        serde_json::from_str::<Value>(&extracted)
-            .map_err(|err| format!("temporary fix plan JSON parse failed: {err}"))?
-    };
+    let candidate =
+        parse_schema_validated_json_object(raw, temporary_fix_plan_schema(), "temporary fix plan")?;
     serde_json::from_value(candidate)
         .map_err(|err| format!("temporary fix plan shape invalid: {err}"))
 }
 
 fn parse_permanent_extension_plan_from_text(raw: &str) -> Result<PermanentExtensionPlan, String> {
-    let candidate = if let Ok(value) = serde_json::from_str::<Value>(raw) {
-        value
-    } else {
-        let extracted = extract_json_object(raw)
-            .ok_or_else(|| "permanent extension plan is not valid JSON".to_string())?;
-        serde_json::from_str::<Value>(&extracted)
-            .map_err(|err| format!("permanent extension plan JSON parse failed: {err}"))?
-    };
+    let candidate = parse_schema_validated_json_object(
+        raw,
+        permanent_extension_plan_schema(),
+        "permanent extension plan",
+    )?;
     serde_json::from_value(candidate)
         .map_err(|err| format!("permanent extension plan shape invalid: {err}"))
 }
@@ -805,16 +804,131 @@ fn parse_permanent_extension_plan_from_text(raw: &str) -> Result<PermanentExtens
 fn parse_external_skill_implementation_from_text(
     raw: &str,
 ) -> Result<ExternalSkillImplementation, String> {
+    let candidate = parse_schema_validated_json_object(
+        raw,
+        external_skill_implementation_schema(),
+        "external skill implementation",
+    )?;
+    serde_json::from_value(candidate)
+        .map_err(|err| format!("external skill implementation shape invalid: {err}"))
+}
+
+fn temporary_fix_plan_schema() -> &'static Value {
+    TEMPORARY_FIX_PLAN_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(TEMPORARY_FIX_PLAN_SCHEMA_RAW)
+            .expect("temporary_fix_plan schema must be valid JSON")
+    })
+}
+
+fn permanent_extension_plan_schema() -> &'static Value {
+    PERMANENT_EXTENSION_PLAN_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(PERMANENT_EXTENSION_PLAN_SCHEMA_RAW)
+            .expect("permanent_extension_plan schema must be valid JSON")
+    })
+}
+
+fn external_skill_implementation_schema() -> &'static Value {
+    EXTERNAL_SKILL_IMPLEMENTATION_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(EXTERNAL_SKILL_IMPLEMENTATION_SCHEMA_RAW)
+            .expect("external_skill_implementation schema must be valid JSON")
+    })
+}
+
+fn parse_schema_validated_json_object(
+    raw: &str,
+    schema: &Value,
+    label: &str,
+) -> Result<Value, String> {
     let candidate = if let Ok(value) = serde_json::from_str::<Value>(raw) {
         value
     } else {
-        let extracted = extract_json_object(raw)
-            .ok_or_else(|| "external skill implementation is not valid JSON".to_string())?;
+        let extracted =
+            extract_json_object(raw).ok_or_else(|| format!("{label} is not valid JSON"))?;
         serde_json::from_str::<Value>(&extracted)
-            .map_err(|err| format!("external skill implementation JSON parse failed: {err}"))?
+            .map_err(|err| format!("{label} JSON parse failed: {err}"))?
     };
-    serde_json::from_value(candidate)
-        .map_err(|err| format!("external skill implementation shape invalid: {err}"))
+    validate_value_against_schema(&candidate, schema, "$")
+        .map_err(|err| format!("{label} schema invalid: {err}"))?;
+    Ok(candidate)
+}
+
+fn validate_value_against_schema(value: &Value, schema: &Value, path: &str) -> Result<(), String> {
+    if let Some(kind) = schema.get("type").and_then(|v| v.as_str()) {
+        match kind {
+            "object" => {
+                let object = value
+                    .as_object()
+                    .ok_or_else(|| format!("{path}: expected object"))?;
+                let declared_fields = schema_declared_fields(schema);
+                if !schema_allows_additional_properties(schema) {
+                    let declared = declared_fields
+                        .ok_or_else(|| format!("{path}: schema missing properties"))?;
+                    if let Some(extra) = object.keys().find(|key| !declared.contains_key(*key)) {
+                        return Err(format!("{path}.{extra}: unexpected field"));
+                    }
+                }
+                if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
+                    for field in required.iter().filter_map(|v| v.as_str()) {
+                        if !object.contains_key(field) {
+                            return Err(format!("{path}.{field}: missing required field"));
+                        }
+                    }
+                }
+                if let Some(properties) = declared_fields {
+                    for (key, property_schema) in properties {
+                        if let Some(child) = object.get(key) {
+                            validate_value_against_schema(
+                                child,
+                                property_schema,
+                                &format!("{path}.{key}"),
+                            )?;
+                        }
+                    }
+                }
+            }
+            "array" => {
+                let array = value
+                    .as_array()
+                    .ok_or_else(|| format!("{path}: expected array"))?;
+                if let Some(item_schema) = schema.get("items") {
+                    for (idx, item) in array.iter().enumerate() {
+                        validate_value_against_schema(
+                            item,
+                            item_schema,
+                            &format!("{path}[{idx}]"),
+                        )?;
+                    }
+                }
+            }
+            "string" => {
+                let s = value
+                    .as_str()
+                    .ok_or_else(|| format!("{path}: expected string"))?;
+                let min_length = schema
+                    .get("minLength")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                if s.chars().count() < min_length {
+                    return Err(format!(
+                        "{path}: string shorter than minLength={min_length}"
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn schema_declared_fields(schema: &Value) -> Option<&serde_json::Map<String, Value>> {
+    schema.get("properties")?.as_object()
+}
+
+fn schema_allows_additional_properties(schema: &Value) -> bool {
+    schema
+        .get("additionalProperties")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
 }
 
 fn normalize_plan(
@@ -2410,6 +2524,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_temporary_fix_plan_accepts_schema_valid_json_object() {
+        let raw = r#"{
+            "summary":"Create a disposable scaffold.",
+            "notes":["manual follow-up may still be required"]
+        }"#;
+        let plan = parse_temporary_fix_plan_from_text(raw).expect("parse temporary fix plan");
+        assert_eq!(plan.summary, "Create a disposable scaffold.");
+        assert_eq!(
+            plan.notes,
+            vec!["manual follow-up may still be required".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_temporary_fix_plan_rejects_extra_fields() {
+        let raw = r#"{
+            "summary":"Create a disposable scaffold.",
+            "unexpected":"drift"
+        }"#;
+        let err = parse_temporary_fix_plan_from_text(raw).expect_err("schema should reject");
+        assert!(err.contains("unexpected field"), "unexpected error: {err}");
+    }
+
+    #[test]
     fn parse_permanent_extension_plan_accepts_json_object() {
         let raw = r#"{
             "skill_name":"pdf_compare",
@@ -2423,6 +2561,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_permanent_extension_plan_rejects_extra_fields() {
+        let raw = r#"{
+            "skill_name":"pdf_compare",
+            "capability_summary":"Compare two PDF files and summarize differences.",
+            "rationale":"Reusable document comparison capability.",
+            "unexpected":"drift"
+        }"#;
+        let err = parse_permanent_extension_plan_from_text(raw).expect_err("schema should reject");
+        assert!(err.contains("unexpected field"), "unexpected error: {err}");
+    }
+
+    #[test]
     fn parse_external_skill_implementation_accepts_json_object() {
         let raw = r##"{
             "readme_md":"# demo\n\nGenerated.",
@@ -2433,6 +2583,33 @@ mod tests {
             parse_external_skill_implementation_from_text(raw).expect("parse implementation");
         assert!(implementation.readme_md.contains("Generated"));
         assert!(implementation.main_rs.contains("fn main"));
+    }
+
+    #[test]
+    fn parse_external_skill_implementation_rejects_missing_required_field() {
+        let raw = r##"{
+            "readme_md":"# demo\n\nGenerated.",
+            "interface_md":"# demo Interface Spec\n\n## Capability Summary\n- demo"
+        }"##;
+        let err =
+            parse_external_skill_implementation_from_text(raw).expect_err("schema should reject");
+        assert!(
+            err.contains("missing required field"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_external_skill_implementation_rejects_extra_fields() {
+        let raw = r##"{
+            "readme_md":"# demo\n\nGenerated.",
+            "interface_md":"# demo Interface Spec\n\n## Capability Summary\n- demo",
+            "main_rs":"fn main() {}",
+            "unexpected":"drift"
+        }"##;
+        let err =
+            parse_external_skill_implementation_from_text(raw).expect_err("schema should reject");
+        assert!(err.contains("unexpected field"), "unexpected error: {err}");
     }
 
     #[test]

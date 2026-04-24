@@ -190,6 +190,7 @@ fn plan_trace_json(plan: &crate::PlanResult) -> Value {
 
 fn route_result_json(route: &crate::RouteResult) -> Value {
     json!({
+        "route_gate_kind": route.gate_kind().as_str(),
         "routed_mode": route.routed_mode.as_str(),
         "needs_clarify": route.needs_clarify,
         "should_refresh_long_term_memory": route.should_refresh_long_term_memory,
@@ -201,6 +202,18 @@ fn route_result_json(route: &crate::RouteResult) -> Value {
             "trigger": route.output_contract.self_extension.trigger.as_str(),
             "execute_now": route.output_contract.self_extension.execute_now,
         },
+    })
+}
+
+fn turn_analysis_json(analysis: &crate::intent_router::TurnAnalysis) -> Value {
+    json!({
+        "turn_type": analysis.turn_type.map(crate::intent_router::TurnType::as_str),
+        "target_task_policy": analysis
+            .target_task_policy
+            .map(crate::intent_router::TargetTaskPolicy::as_str),
+        "should_interrupt_active_run": analysis.should_interrupt_active_run,
+        "has_state_patch": analysis.state_patch.is_some(),
+        "attachment_processing_required": analysis.attachment_processing_required,
     })
 }
 
@@ -283,6 +296,7 @@ pub(crate) struct TaskJournal {
     pub(crate) kind: Option<String>,
     pub(crate) input_text: String,
     pub(crate) context_bundle_summary: Option<String>,
+    pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(crate) route_result: Option<crate::RouteResult>,
     pub(crate) plan_result: Option<crate::PlanResult>,
     pub(crate) verify_result: Option<TaskJournalVerifySummary>,
@@ -349,6 +363,13 @@ impl TaskJournal {
 
     pub(crate) fn record_context_bundle_summary(&mut self, summary: impl Into<String>) {
         self.context_bundle_summary = Some(summary.into());
+    }
+
+    pub(crate) fn record_turn_analysis(
+        &mut self,
+        turn_analysis: &crate::intent_router::TurnAnalysis,
+    ) {
+        self.turn_analysis = Some(turn_analysis.clone());
     }
 
     pub(crate) fn record_route_result(&mut self, route_result: &crate::RouteResult) {
@@ -449,6 +470,9 @@ impl TaskJournal {
         if self.context_bundle_summary.is_none() {
             self.context_bundle_summary = other.context_bundle_summary.clone();
         }
+        if self.turn_analysis.is_none() {
+            self.turn_analysis = other.turn_analysis.clone();
+        }
         if self.route_result.is_none() {
             self.route_result = other.route_result.clone();
         }
@@ -520,6 +544,7 @@ impl TaskJournal {
             "final_status": self.final_status.map(TaskJournalFinalStatus::as_str),
             "input_text": crate::truncate_for_log(&self.input_text),
             "context_bundle_summary": self.context_bundle_summary.as_deref().map(crate::truncate_for_log),
+            "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "route_result": self.route_result.as_ref().map(route_result_json),
             "latest_execution_recipe_summary": self
                 .rounds
@@ -536,6 +561,9 @@ impl TaskJournal {
 
     pub(crate) fn to_trace_json(&self) -> Value {
         json!({
+            "task_id": self.task_id.as_deref(),
+            "kind": self.kind.as_deref(),
+            "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "rounds": self.rounds.iter().map(|round| {
                 json!({
                     "round_no": round.round_no,
@@ -557,6 +585,8 @@ impl TaskJournal {
 
     pub(crate) fn to_log_json(&self) -> Value {
         json!({
+            "task_id": self.task_id.as_deref(),
+            "kind": self.kind.as_deref(),
             "summary": self.to_summary_json(),
             "trace": self.to_trace_json(),
         })
@@ -736,5 +766,10 @@ mod tests {
                 "kind=ops_closed_loop profile=code_change target_scope=external_workspace phase=validate inspect_first=true validation_required=true repair_count=1 max_repairs=3 saw_inspect=true saw_mutation=true saw_validation=false saw_external_target=true saw_greenfield_creation=false"
             )
         );
+        assert_eq!(trace.get("task_id").and_then(Value::as_str), Some("task-2"));
+        assert_eq!(trace.get("kind").and_then(Value::as_str), Some("ask"));
+        let log = journal.to_log_json();
+        assert_eq!(log.get("task_id").and_then(Value::as_str), Some("task-2"));
+        assert_eq!(log.get("kind").and_then(Value::as_str), Some("ask"));
     }
 }

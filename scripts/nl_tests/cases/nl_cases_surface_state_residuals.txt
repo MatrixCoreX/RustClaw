@@ -1,0 +1,23 @@
+# Focused single-turn regressions for surface/state refactors.
+# Format: suite|name|tags|prompt|expect=<substring>
+
+chat_act|fixture_package_name_scalar|cn|去 scripts/nl_tests/fixtures/device_local/package.json 里找 name，只把值给我|expect=rustclaw-nl-fixture
+chat_act|fixture_config_app_name_scalar|cn|去 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 里找 app.name，只把值给我|expect=RustClaw NL Fixture
+chat_act|fixture_sqlite_tables_list|cn|看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名|expect=users
+chat_act|fixture_sqlite_schema_version_scalar|cn|看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema version，只输出数字|expect=3
+chat_act|fixture_readme_head_read|cn|读一下 scripts/nl_tests/fixtures/device_local/README.md 开头 3 行|expect=# Device Local Fixture
+chat_act|inline_json_markdown_table_focus|cn|把这个 JSON 数组按 score 从高到低排一下，再转成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]|expect=| beta | 12 |
+chat_act|compare_cargo_files_focus|cn|比较 Cargo.toml 和 Cargo.lock 哪个更大，只说结论|expect=Cargo.lock
+chat_act|locator_case_insensitive_report|cn|去 scripts/nl_tests/fixtures/locator_smart/case_only 找 report.md，只输出路径|expect=Report.MD
+chat_act|locator_unique_bare_stem_abcd|cn|去 scripts/nl_tests/fixtures/locator_smart/stem_unique 找 abcd，只输出路径|expect=ABCD.txt
+chat_act|locator_case_insensitive_report_where_is|cn|在 scripts/nl_tests/fixtures/locator_smart/case_only 里查一下 report.md 在哪，路径就行|expect=Report.MD
+chat_act|locator_unique_bare_stem_abcd_path_only_variant|cn|去 scripts/nl_tests/fixtures/locator_smart/stem_unique 里面找 abcd，给我路径就行|expect=ABCD.txt
+chat_act|locator_case_insensitive_report_where_is_en|en|In scripts/nl_tests/fixtures/locator_smart/case_only, where is report.md? just output the path|expect=Report.MD
+chat_act|locator_unique_bare_stem_abcd_where_is_en|en|In scripts/nl_tests/fixtures/locator_smart/stem_unique, where is abcd? just the path|expect=ABCD.txt
+chat_act|locator_case_insensitive_report_wheres_only_path_en|en|In scripts/nl_tests/fixtures/locator_smart/case_only, where's report.md? only the path|expect=Report.MD
+chat_act|locator_unique_bare_stem_abcd_return_only_path_en|en|Inside scripts/nl_tests/fixtures/locator_smart/stem_unique, find abcd and return only the path|expect=ABCD.txt
+chat_act|locator_case_insensitive_report_return_only_path_en|en|Inside scripts/nl_tests/fixtures/locator_smart/case_only, find report.md and return only the path|expect=Report.MD
+chat_act|locator_unique_bare_stem_abcd_give_path_en|en|In scripts/nl_tests/fixtures/locator_smart/stem_unique, where is abcd? just give the path|expect=ABCD.txt
+chat_act|fixture_docs_child_count|cn|数一下 scripts/nl_tests/fixtures/device_local/docs 目录直接子项有几个，只输出数字|expect=3
+chat_act|fixture_archive_listing|cn|看看 scripts/nl_tests/fixtures/device_local/docs/archive 里有什么，只输出名字|expect=README.txt
+chat_act|fixture_release_delivery_explicit|cn|把 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md 发给我|expect=FILE:

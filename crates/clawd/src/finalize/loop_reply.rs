@@ -23,15 +23,15 @@ fn backfill_delivery_from_last_outputs(task: &ClaimedTask, loop_state: &mut Loop
     }
 
     if loop_state.delivery_messages.is_empty() {
-        if let Some(ref last_chat_output) = loop_state.last_publishable_chat_output {
-            if !last_chat_output.trim().is_empty() {
+        if let Some(ref last_synthesis_output) = loop_state.last_publishable_synthesis_output {
+            if !last_synthesis_output.trim().is_empty() {
                 append_delivery_message(
                     &task.task_id,
                     &mut loop_state.delivery_messages,
-                    last_chat_output.clone(),
+                    last_synthesis_output.clone(),
                 );
                 info!(
-                    "final_result_use_chat_output task_id={} (delivery was empty)",
+                    "final_result_use_synthesis_output task_id={} (delivery was empty)",
                     task.task_id
                 );
             }
@@ -342,7 +342,9 @@ fn should_drop_passthrough_delivery_for_content_evidence(
     let raw_passthrough = loop_state
         .executed_step_results
         .iter()
-        .rfind(|step| step.is_ok() && !matches!(step.skill.as_str(), "chat" | "respond"))
+        .rfind(|step| {
+            step.is_ok() && !matches!(step.skill.as_str(), "respond" | "synthesize_answer")
+        })
         .and_then(|step| {
             let body = step.output.as_deref()?.trim();
             if body.is_empty() {
@@ -352,15 +354,14 @@ fn should_drop_passthrough_delivery_for_content_evidence(
                 return Some(true);
             }
             (step.skill == "list_dir"
-                && crate::agent_engine::observed_output::normalized_observed_listing(body, None).is_some_and(
-                    |listing| {
+                && crate::agent_engine::observed_output::normalized_observed_listing(body, None)
+                    .is_some_and(|listing| {
                         listing.trim() == respond
                             || listing
                                 .lines()
                                 .map(str::trim)
                                 .any(|entry| !entry.is_empty() && entry == respond)
-                    },
-                ))
+                    }))
             .then_some(true)
         })
         .unwrap_or(false);
@@ -393,7 +394,9 @@ fn discard_raw_passthrough_delivery_when_structured_answer_available(
     let raw_passthrough = loop_state
         .executed_step_results
         .iter()
-        .rfind(|step| step.is_ok() && !matches!(step.skill.as_str(), "chat" | "respond"))
+        .rfind(|step| {
+            step.is_ok() && !matches!(step.skill.as_str(), "respond" | "synthesize_answer")
+        })
         .and_then(|step| {
             let body = step.output.as_deref()?.trim();
             if body.is_empty() {
@@ -429,10 +432,13 @@ fn direct_scalar_observed_answer(
     if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
         return None;
     }
-    let answer = if crate::agent_engine::observed_output::scalar_route_prefers_structured_observed_answer(
-        route, loop_state,
-    ) {
-        state
+    let answer =
+        if crate::agent_engine::observed_output::scalar_route_prefers_structured_observed_answer(
+            route,
+            loop_state,
+            agent_run_context,
+        ) {
+            state
             .and_then(|state| {
                 crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
                     loop_state,
@@ -461,8 +467,8 @@ fn direct_scalar_observed_answer(
                     agent_run_context,
                 )
             })?
-    } else {
-        state
+        } else {
+            state
             .and_then(|state| {
                 crate::agent_engine::observed_output::extract_direct_scalar_from_generic_output_i18n(
                     loop_state,
@@ -476,7 +482,7 @@ fn direct_scalar_observed_answer(
                     agent_run_context,
                 )
             })?
-    };
+        };
     if crate::finalize::looks_like_planner_artifact(&answer)
         || crate::finalize::looks_like_internal_trace_artifact(&answer)
     {
@@ -515,7 +521,8 @@ fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
         (true, false) => false,
         (false, true) => true,
         _ => state
-            .policy.command_intent
+            .policy
+            .command_intent
             .default_locale
             .to_ascii_lowercase()
             .starts_with("en"),
@@ -693,7 +700,8 @@ fn can_attach_execution_recipe_closeout(
             .map(|route| route.output_contract.response_shape),
         Some(crate::OutputResponseShape::Scalar)
     );
-    !is_scalar || crate::agent_engine::loop_control::requested_success_marker(agent_run_context).is_some()
+    !is_scalar
+        || crate::agent_engine::loop_control::requested_success_marker(agent_run_context).is_some()
 }
 
 fn attach_execution_recipe_closeout_to_delivery(
@@ -712,7 +720,9 @@ fn attach_execution_recipe_closeout_to_delivery(
     let Some(mut note) = execution_recipe_closeout_note(state, user_text, loop_state) else {
         return;
     };
-    if let Some(marker) = crate::agent_engine::loop_control::requested_success_marker(agent_run_context) {
+    if let Some(marker) =
+        crate::agent_engine::loop_control::requested_success_marker(agent_run_context)
+    {
         if !note.contains(marker) {
             note = format!("{note}\n\n{marker}");
         }
@@ -724,7 +734,9 @@ fn ensure_requested_success_marker_visible(
     agent_run_context: Option<&AgentRunContext>,
     delivery_messages: &mut Vec<String>,
 ) {
-    let Some(marker) = crate::agent_engine::loop_control::requested_success_marker(agent_run_context) else {
+    let Some(marker) =
+        crate::agent_engine::loop_control::requested_success_marker(agent_run_context)
+    else {
         return;
     };
     if delivery_messages.iter().any(|item| item.contains(marker)) {
@@ -838,6 +850,11 @@ fn direct_non_builtin_skill_raw_answer(
         .map(str::trim)
         .filter(|text| !text.is_empty())?
         .to_string();
+    if direct_structured_observed_answer(None, loop_state, agent_run_context)
+        .is_some_and(|(structured_answer, _)| structured_answer.trim() != answer.trim())
+    {
+        return None;
+    }
     if crate::finalize::looks_like_planner_artifact(&answer)
         || crate::finalize::looks_like_internal_trace_artifact(&answer)
         || (looks_like_structured_machine_output(&answer)
@@ -877,13 +894,17 @@ async fn direct_publishable_observed_answer(
     {
         return None;
     }
-    let observed = crate::agent_engine::observed_output::extract_latest_generic_successful_output(loop_state)?;
+    let observed =
+        crate::agent_engine::observed_output::extract_latest_generic_successful_output(loop_state)?;
     let answer = observed.body.trim().to_string();
     if answer.is_empty()
         || crate::finalize::looks_like_planner_artifact(&answer)
         || crate::finalize::looks_like_internal_trace_artifact(&answer)
         || looks_like_structured_machine_output(&answer)
     {
+        return None;
+    }
+    if observed.skill == "run_cmd" && !route_explicitly_requests_command_result(route) {
         return None;
     }
     if looks_like_raw_command_snapshot(&answer)
@@ -919,6 +940,8 @@ fn looks_like_raw_command_snapshot(answer: &str) -> bool {
         && trimmed.contains('\n')
         && (trimmed.contains("\nCOMMAND ")
             || trimmed.contains("(LISTEN)")
+            || trimmed.contains("\nLISTEN ")
+            || trimmed.contains("State  Recv-Q")
             || trimmed.contains("%CPU")
             || trimmed.contains("PID PPID"))
 }
@@ -944,15 +967,17 @@ fn pending_confirmation_resume_payload(
         .find(|issue| issue.kind == crate::verifier::VerifyIssueKind::ConfirmationRequired)
         .map(|issue| issue.detail.as_str())
         .unwrap_or("current plan requires explicit confirmation");
-    Some(crate::agent_engine::build_confirmation_required_resume_context(
-        state,
-        &plan.steps,
-        user_text,
-        &round.goal,
-        &loop_state.subtask_results,
-        &loop_state.delivery_messages,
-        detail,
-    ))
+    Some(
+        crate::agent_engine::build_confirmation_required_resume_context(
+            state,
+            &plan.steps,
+            user_text,
+            &round.goal,
+            &loop_state.subtask_results,
+            &loop_state.delivery_messages,
+            detail,
+        ),
+    )
 }
 
 fn verify_summary_requires_resume_confirmation(
@@ -1177,15 +1202,14 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if loop_state.delivery_messages.is_empty() {
-        if let Some((answer, summary)) =
-            crate::finalize::synthesize_answer_from_observed_output(
-                state,
-                task,
-                user_text,
-                &loop_state,
-                agent_run_context,
-            )
-            .await
+        if let Some((answer, summary)) = crate::finalize::synthesize_answer_from_observed_output(
+            state,
+            task,
+            user_text,
+            &loop_state,
+            agent_run_context,
+        )
+        .await
         {
             if matches!(
                 summary.disposition,
@@ -1423,15 +1447,17 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, RwLock};
-    
+
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
         attach_execution_recipe_closeout_to_delivery, auto_requested_success_marker,
-        direct_non_builtin_skill_raw_answer, direct_scalar_observed_answer,
+        direct_non_builtin_skill_raw_answer, direct_publishable_observed_answer,
+        direct_scalar_observed_answer,
+        direct_structured_observed_answer,
         discard_raw_passthrough_delivery_when_structured_answer_available,
         ensure_requested_success_marker_visible, execution_recipe_closeout_note,
-        finalizer_requires_clarify, has_missing_file_search_evidence,
+        finalize_loop_reply, finalizer_requires_clarify, has_missing_file_search_evidence,
         looks_like_raw_command_snapshot, looks_like_structured_machine_output,
         missing_requested_success_marker, normalize_file_token_delivery_from_auto_locator,
         resolve_file_token_from_auto_locator_answer,
@@ -1440,15 +1466,11 @@ mod tests {
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
-        AgentRuntimeConfig, AppState, ClaimedTask, IntentOutputContract,
-        OutputLocatorKind, OutputResponseShape, ResumeBehavior, RiskCeiling,
-        RouteResult, RoutedMode, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
-        DEFAULT_AGENT_ID,
+        AgentRuntimeConfig, AppState, ClaimedTask, IntentOutputContract, OutputLocatorKind,
+        OutputResponseShape, ResumeBehavior, RiskCeiling, RouteResult, RoutedMode, ScheduleKind,
+        SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
     };
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
-    
+    use claw_core::config::{AgentConfig, ToolsConfig};
 
     struct TempDirGuard {
         path: PathBuf,
@@ -1498,20 +1520,20 @@ mod tests {
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: None,
-                                skills_list: Arc::new(
-                                    ["crypto".to_string(), "stock".to_string()]
-                                        .into_iter()
-                                        .collect::<HashSet<_>>(),
-                                ),
-                            }))),
+                    registry: None,
+                    skills_list: Arc::new(
+                        ["crypto".to_string(), "stock".to_string()]
+                            .into_iter()
+                            .collect::<HashSet<_>>(),
+                    ),
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig::test_default(),
@@ -2147,6 +2169,40 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_finalize_prefers_limited_listing_names_over_drifted_scalar_count() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"inventory_dir","path":"logs","resolved_path":"/tmp/logs","names_only":true,"sort_by":"mtime_desc","names":["clawd.run.log","model_io.log","act_plan.log"],"counts":{"total":3}}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = scalar_route_result();
+        route.resolved_intent = "列出 logs 目录最近修改的 2 个文件名，只输出文件名".to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "logs".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let (answer, summary) =
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("limited listing scalar fallback should succeed");
+        assert_eq!(answer, "clawd.run.log\nmodel_io.log");
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
     fn direct_structured_finalize_uses_existence_with_path_answer_when_shape_drifted_free() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
@@ -2243,6 +2299,89 @@ mod tests {
         assert!(
             direct_non_builtin_skill_raw_answer(&state, &loop_state, Some(&agent_run_context))
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_uses_publishable_synthesis_output() {
+        let state = test_state();
+        let task = claimed_task("task-synth-finalize");
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("rustclaw.service".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("有，路径：/tmp/rustclaw.service".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.last_publishable_synthesis_output =
+            Some("有，路径：/tmp/rustclaw.service".to_string());
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(scalar_route_result()),
+            ..Default::default()
+        };
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "检查 rustclaw.service 是否存在并给出路径",
+            loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("finalize should succeed");
+
+        assert_eq!(reply.text, "有，路径：/tmp/rustclaw.service");
+        assert_eq!(reply.messages, vec!["有，路径：/tmp/rustclaw.service"]);
+        assert!(!reply.should_fail_task);
+        assert!(!reply.is_llm_reply);
+    }
+
+    #[tokio::test]
+    async fn direct_publishable_observed_answer_skips_run_cmd_without_explicit_raw_contract() {
+        let state = test_state();
+        let task = claimed_task("task-no-raw-run-cmd-passthrough");
+        let mut loop_state = crate::agent_engine::LoopState::new(1);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("/home/guagua/rustclaw\n".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(
+            direct_publishable_observed_answer(
+                &state,
+                &task,
+                &loop_state,
+                Some(&agent_run_context)
+            )
+            .await
+            .is_none()
         );
     }
 
@@ -2552,6 +2691,91 @@ mod tests {
             "exit=0\nCOMMAND PID USER\nclawd 4498 testuser TCP *:8787 (LISTEN)\n"
         ));
         assert!(!looks_like_raw_command_snapshot("testuser"));
+    }
+
+    #[test]
+    fn structured_observed_answer_beats_non_builtin_raw_passthrough() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("last_skill_name".to_string(), "package_manager".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "package_manager".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("package_manager=brew".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let mut route = free_route_result();
+        route.routed_mode = RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.resolved_intent =
+            "check which package manager is recognized and briefly say the everyday default"
+                .to_string();
+        route.route_reason = "deterministic_contract:package_manager_detect_summary".to_string();
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let structured =
+            direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("structured observed answer");
+        assert!(structured.0.contains("package manager"));
+
+        assert!(
+            direct_non_builtin_skill_raw_answer(&state, &loop_state, Some(&agent_run_context))
+                .is_none(),
+            "raw non-builtin passthrough should yield to structured observed answer"
+        );
+    }
+
+    #[test]
+    fn git_status_structured_observed_answer_beats_non_builtin_raw_passthrough() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("last_skill_name".to_string(), "git_basic".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "git_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                "exit=0\n## main...origin/main\n M Cargo.toml\n?? new_file.txt\n".to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let mut route = free_route_result();
+        route.routed_mode = RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::Act);
+        route.resolved_intent = "检查当前仓库是否有未提交改动，用一句话告诉我".to_string();
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let structured =
+            direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("structured observed answer");
+        assert_eq!(structured.0, "当前仓库有未提交改动。");
+
+        assert!(
+            direct_non_builtin_skill_raw_answer(&state, &loop_state, Some(&agent_run_context))
+                .is_none(),
+            "git status raw passthrough should yield to structured observed answer"
+        );
     }
 
     #[test]

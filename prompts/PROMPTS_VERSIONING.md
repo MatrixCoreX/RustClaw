@@ -8,11 +8,12 @@
 * **必须**带版本号的 prompt（核心审计基线）：
   * `intent_normalizer_prompt.md`
   * `chat_response_prompt.md`
-  * `agent_runtime_prompt.md`
   * `single_plan_execution_prompt.md`
+  * `lightweight_execution_prompt.md`
   * `loop_incremental_plan_prompt.md`
   * `plan_repair_prompt.md`
   * `delivery_text_classifier_prompt.md`
+  * `observed_answer_fallback_prompt.md`
 * **建议**带版本号的 prompt：
   * 其他 overlay prompt、skill prompt、reference prompt、persona prompt——
     任何修改频次>0 / 输出契约稳定的都建议加。
@@ -95,5 +96,6 @@ prompt body...
 
 ## 7. 接入历史
 
-* §3.5a (2026-04-17)：建立基线，给 7 个核心审计 prompt 加 `Version: 2026-04-17.1`，
-  调用面同步迁移到 with_meta API。其余 32 个 overlay 留待后续按需加。
+* §3.5a (2026-04-17)：建立基线，给核心审计 prompt 加 `Version: 2026-04-17.1`，
+  调用面同步迁移到 with_meta API。后续若某 prompt 退出主链，应及时从“核心审计基线”
+  中移除，避免继续把 legacy overlay 当成活跃 contract 维护。

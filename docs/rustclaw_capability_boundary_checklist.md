@@ -81,7 +81,7 @@
 
 - `crates/clawd/src/capability_map.rs`
   - 扩展统一能力地图。
-- `prompts/layers/overlays/agent_runtime_prompt.md`
+- `prompts/layers/overlays/{single_plan_execution,loop_incremental_plan,plan_repair}_prompt.md`
   - 补“不能硬凑 skill”“不能把做不到包装成已完成总结”。
 - `prompts/layers/overlays/agent_tool_spec.md`
   - 补 `chat` 只能用于解释/改写/讨论，不能冒充执行完成。

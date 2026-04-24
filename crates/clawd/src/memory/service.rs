@@ -58,38 +58,81 @@ pub(crate) struct PromptMemoryContext {
     pub(crate) recent_related_events: Vec<RetrievedMemoryItem>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PromptMemoryBudgetMode {
+    Full,
+    Light,
+}
+
+#[allow(dead_code)]
 pub(crate) fn prepare_prompt_with_memory(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
     chat_memory_budget_chars: usize,
 ) -> PromptMemoryContext {
-    let structured = recall_structured_memory_context(
+    prepare_prompt_with_memory_for_mode(
+        state,
+        task,
+        prompt,
+        chat_memory_budget_chars,
+        PromptMemoryBudgetMode::Full,
+    )
+}
+
+pub(crate) fn prepare_prompt_with_memory_for_mode(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+    chat_memory_budget_chars: usize,
+    mode: PromptMemoryBudgetMode,
+) -> PromptMemoryContext {
+    let recent_limit = match mode {
+        PromptMemoryBudgetMode::Full => state.policy.memory.prompt_recall_limit.max(1),
+        PromptMemoryBudgetMode::Light => 0,
+    };
+    let include_long_term = matches!(mode, PromptMemoryBudgetMode::Full);
+    let include_preferences = matches!(mode, PromptMemoryBudgetMode::Full);
+    let include_indexed = matches!(mode, PromptMemoryBudgetMode::Full);
+    let structured = recall_structured_memory_context_with_options(
         state,
         task.user_key.as_deref(),
         task.user_id,
         task.chat_id,
         prompt,
-        state.policy.memory.prompt_recall_limit.max(1),
-        true,
-        true,
+        recent_limit,
+        include_long_term,
+        include_preferences,
+        include_indexed,
     );
-    let prompt_with_memory = structured_memory_context_block(
-        &structured,
-        MemoryContextMode::Planner,
-        state
-            .policy.memory
+    let planner_budget = match mode {
+        PromptMemoryBudgetMode::Full => state
+            .policy
+            .memory
             .agent_memory_budget_chars
             .max(512)
             .min(state.policy.memory.prompt_max_chars.max(512)),
-    );
-    let chat_prompt_context = structured_memory_context_block(
-        &structured,
-        MemoryContextMode::Chat,
-        chat_memory_budget_chars
+        PromptMemoryBudgetMode::Light => state
+            .policy
+            .memory
+            .agent_memory_budget_chars
+            .max(512)
+            .min(768)
+            .min(state.policy.memory.prompt_max_chars.max(512)),
+    };
+    let chat_budget = match mode {
+        PromptMemoryBudgetMode::Full => chat_memory_budget_chars
             .max(384)
             .min(state.policy.memory.prompt_max_chars.max(384)),
-    );
+        PromptMemoryBudgetMode::Light => chat_memory_budget_chars
+            .max(384)
+            .min(640)
+            .min(state.policy.memory.prompt_max_chars.max(384)),
+    };
+    let prompt_with_memory =
+        structured_memory_context_block(&structured, MemoryContextMode::Planner, planner_budget);
+    let chat_prompt_context =
+        structured_memory_context_block(&structured, MemoryContextMode::Chat, chat_budget);
     PromptMemoryContext {
         chat_prompt_context,
         long_term_summary: structured.long_term_summary.clone(),
@@ -112,10 +155,36 @@ pub(crate) fn recall_structured_memory_context(
     include_long_term: bool,
     include_preferences: bool,
 ) -> StructuredMemoryContext {
+    recall_structured_memory_context_with_options(
+        state,
+        user_key,
+        user_id,
+        chat_id,
+        anchor_prompt,
+        recent_limit,
+        include_long_term,
+        include_preferences,
+        true,
+    )
+}
+
+fn recall_structured_memory_context_with_options(
+    state: &AppState,
+    user_key: Option<&str>,
+    user_id: i64,
+    chat_id: i64,
+    anchor_prompt: &str,
+    recent_limit: usize,
+    include_long_term: bool,
+    include_preferences: bool,
+    include_indexed: bool,
+) -> StructuredMemoryContext {
     let long_term_summary = if include_long_term && state.policy.memory.long_term_enabled {
         crate::memory::recall_long_term_summary(state, user_key, user_id, chat_id)
             .unwrap_or(None)
-            .map(|s| crate::truncate_text(&s, state.policy.memory.long_term_recall_max_chars.max(256)))
+            .map(|s| {
+                crate::truncate_text(&s, state.policy.memory.long_term_recall_max_chars.max(256))
+            })
     } else {
         None
     };
@@ -142,13 +211,17 @@ pub(crate) fn recall_structured_memory_context(
         crate::memory::select_relevant_memories_for_prompt(
             recalled_recent,
             anchor_prompt,
-            state.policy.memory.recent_relevance_min_score.clamp(0.0, 1.0),
+            state
+                .policy
+                .memory
+                .recent_relevance_min_score
+                .clamp(0.0, 1.0),
         )
     } else {
         recalled_recent
     };
 
-    let indexed = if state.policy.memory.hybrid_recall_enabled {
+    let indexed = if include_indexed && state.policy.memory.hybrid_recall_enabled {
         crate::memory::retrieval::retrieve_indexed_memories(
             state,
             user_key,
@@ -385,7 +458,9 @@ pub(crate) async fn maybe_refresh_long_term_summary(
 
     let mut convo_lines = Vec::new();
     for (_, role, content, safety_flag) in &entries {
-        if state.policy.memory.safety_filter_enabled && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
+        if state.policy.memory.safety_filter_enabled
+            && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE
+        {
             convo_lines.push(format!("{role}: [safety_signal content omitted]"));
             continue;
         }
@@ -394,11 +469,21 @@ pub(crate) async fn maybe_refresh_long_term_summary(
     if convo_lines.is_empty() {
         return Ok(());
     }
-    let (summary_template, summary_prompt_source) = crate::load_prompt_template_for_state(
-        state,
-        "prompts/long_term_summary_prompt.md",
-        crate::LONG_TERM_SUMMARY_PROMPT_TEMPLATE,
-    );
+    let (summary_template, summary_prompt_source) =
+        match crate::bootstrap::load_required_prompt_template_for_state(
+            state,
+            "prompts/long_term_summary_prompt.md",
+        ) {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                tracing::warn!(
+                    "long_term_summary prompt_missing task_id={} err={}",
+                    task.task_id,
+                    err
+                );
+                return Ok(());
+            }
+        };
     let summary_prompt = crate::render_prompt_template(
         &summary_template,
         &[
@@ -421,7 +506,16 @@ pub(crate) async fn maybe_refresh_long_term_summary(
         &summary_prompt_source,
     )
     .await?;
-    let parsed = parse_long_term_refresh_llm_out(&summary);
+    let parsed = match try_parse_long_term_refresh_llm_out_with_schema(&summary) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            info!(
+                "long_term_summary schema_validation_failed task_id={} err={}",
+                task.task_id, err
+            );
+            parse_long_term_refresh_llm_out_legacy(&summary)
+        }
+    };
     let trimmed = crate::truncate_text(
         &parsed.summary,
         state.policy.memory.long_term_summary_max_chars.max(512),
@@ -440,18 +534,46 @@ pub(crate) async fn maybe_refresh_long_term_summary(
     Ok(())
 }
 
-fn parse_long_term_refresh_llm_out(raw: &str) -> LongTermRefreshLlmOut {
+fn normalize_long_term_refresh_llm_out(
+    mut parsed: LongTermRefreshLlmOut,
+) -> Option<LongTermRefreshLlmOut> {
+    parsed.summary = parsed.summary.trim().to_string();
+    if parsed.summary.is_empty() {
+        None
+    } else {
+        Some(parsed)
+    }
+}
+
+fn try_parse_long_term_refresh_llm_out_with_schema(
+    raw: &str,
+) -> Result<LongTermRefreshLlmOut, String> {
+    crate::prompt_utils::validate_against_schema::<LongTermRefreshLlmOut>(
+        raw,
+        crate::prompt_utils::PromptSchemaId::LongTermSummary,
+    )
+    .map(|validated| validated.value)
+    .map_err(|err| err.to_string())
+    .and_then(|parsed| {
+        normalize_long_term_refresh_llm_out(parsed)
+            .ok_or_else(|| "long_term_summary empty summary after normalize".to_string())
+    })
+}
+
+fn parse_long_term_refresh_llm_out_legacy(raw: &str) -> LongTermRefreshLlmOut {
     crate::parse_llm_json_extract_or_any::<LongTermRefreshLlmOut>(raw)
         .or_else(|| crate::parse_llm_json_raw_or_any::<LongTermRefreshLlmOut>(raw))
-        .map(|mut parsed| {
-            parsed.summary = parsed.summary.trim().to_string();
-            parsed
-        })
-        .filter(|parsed| !parsed.summary.is_empty())
+        .and_then(normalize_long_term_refresh_llm_out)
         .unwrap_or_else(|| LongTermRefreshLlmOut {
             summary: raw.trim().to_string(),
             knowledge_candidates: Vec::new(),
         })
+}
+
+#[cfg(test)]
+fn parse_long_term_refresh_llm_out(raw: &str) -> LongTermRefreshLlmOut {
+    try_parse_long_term_refresh_llm_out_with_schema(raw)
+        .unwrap_or_else(|_| parse_long_term_refresh_llm_out_legacy(raw))
 }
 
 fn persist_valid_knowledge_candidates(
@@ -472,7 +594,8 @@ fn persist_valid_knowledge_candidates(
         return Ok(());
     }
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     for candidate in candidates {
@@ -617,15 +740,144 @@ pub(crate) fn insert_memory_with_kind(
 mod tests {
     use super::{
         knowledge_source_ref, parse_long_term_refresh_llm_out, validate_knowledge_candidate,
-        KnowledgeCandidateLlmOut, KNOWLEDGE_NAMESPACE_PROJECT_FACTS,
+        KnowledgeCandidateLlmOut, KNOWLEDGE_KIND_PROJECT_FACT, KNOWLEDGE_KIND_RULE,
+        KNOWLEDGE_KIND_TRANSIENT, KNOWLEDGE_KIND_USER_PREFERENCE, KNOWLEDGE_KIND_USER_PROFILE_FACT,
+        KNOWLEDGE_NAMESPACE_NONE, KNOWLEDGE_NAMESPACE_PROJECT_FACTS,
         KNOWLEDGE_NAMESPACE_USER_PROFILE,
     };
+    use serde_json::Value;
+    use std::collections::HashSet;
 
     #[test]
     fn parse_long_term_refresh_output_falls_back_to_plain_summary() {
         let parsed = parse_long_term_refresh_llm_out("plain summary");
         assert_eq!(parsed.summary, "plain summary");
         assert!(parsed.knowledge_candidates.is_empty());
+    }
+
+    #[test]
+    fn parse_long_term_refresh_output_falls_back_to_legacy_parse_on_schema_mismatch() {
+        let raw = serde_json::json!({
+            "summary": "durable summary",
+            "knowledge_candidates": [
+                {
+                    "should_persist": true,
+                    "kind": "oops_kind",
+                    "namespace": "user_profile",
+                    "fact": "some fact",
+                    "confidence": 0.9,
+                    "reason": "bad enum"
+                }
+            ]
+        })
+        .to_string();
+        let parsed = parse_long_term_refresh_llm_out(&raw);
+        assert_eq!(parsed.summary, "durable summary");
+        assert_eq!(parsed.knowledge_candidates.len(), 1);
+        assert_eq!(parsed.knowledge_candidates[0].kind, "oops_kind");
+    }
+
+    #[test]
+    fn long_term_summary_schema_drift() {
+        const SCHEMA_RAW: &str =
+            include_str!("../../../../prompts/schemas/long_term_summary.schema.json");
+        let schema: Value = serde_json::from_str(SCHEMA_RAW)
+            .expect("long_term_summary.schema.json must be valid JSON");
+        let properties = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema.properties must be an object");
+        for field in ["summary", "knowledge_candidates"] {
+            assert!(
+                properties.contains_key(field),
+                "schema missing parser field `{field}` under properties — sync prompts/schemas/long_term_summary.schema.json with LongTermRefreshLlmOut",
+            );
+        }
+
+        let candidate_props = properties
+            .get("knowledge_candidates")
+            .and_then(|v| v.get("items"))
+            .and_then(|v| v.get("properties"))
+            .and_then(|v| v.as_object())
+            .expect("knowledge_candidates.items.properties must be an object");
+        for field in [
+            "should_persist",
+            "kind",
+            "namespace",
+            "fact",
+            "confidence",
+            "reason",
+        ] {
+            assert!(
+                candidate_props.contains_key(field),
+                "schema missing parser field `{field}` under candidate properties",
+            );
+        }
+
+        let kind_enum = candidate_props
+            .get("kind")
+            .and_then(|v| v.get("enum"))
+            .and_then(|v| v.as_array())
+            .expect("kind enum must exist");
+        let kind_tokens: HashSet<String> = kind_enum
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::to_string)
+            .collect();
+        let expected_kinds = HashSet::from([
+            KNOWLEDGE_KIND_USER_PREFERENCE.to_string(),
+            KNOWLEDGE_KIND_USER_PROFILE_FACT.to_string(),
+            KNOWLEDGE_KIND_PROJECT_FACT.to_string(),
+            KNOWLEDGE_KIND_RULE.to_string(),
+            KNOWLEDGE_KIND_TRANSIENT.to_string(),
+        ]);
+        assert_eq!(kind_tokens, expected_kinds, "kind enum drifted");
+
+        let namespace_enum = candidate_props
+            .get("namespace")
+            .and_then(|v| v.get("enum"))
+            .and_then(|v| v.as_array())
+            .expect("namespace enum must exist");
+        let namespace_tokens: HashSet<String> = namespace_enum
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::to_string)
+            .collect();
+        let expected_namespaces = HashSet::from([
+            KNOWLEDGE_NAMESPACE_USER_PROFILE.to_string(),
+            KNOWLEDGE_NAMESPACE_PROJECT_FACTS.to_string(),
+            KNOWLEDGE_NAMESPACE_NONE.to_string(),
+        ]);
+        assert_eq!(
+            namespace_tokens, expected_namespaces,
+            "namespace enum drifted"
+        );
+
+        let probe = serde_json::json!({
+            "summary": "durable summary",
+            "knowledge_candidates": [
+                {
+                    "should_persist": true,
+                    "kind": "user_profile_fact",
+                    "namespace": "user_profile",
+                    "fact": "用户长期偏好中文回复",
+                    "confidence": 0.93,
+                    "reason": "explicit long-term preference"
+                }
+            ]
+        });
+        let validated = crate::prompt_utils::validate_against_schema::<Value>(
+            &probe.to_string(),
+            crate::prompt_utils::PromptSchemaId::LongTermSummary,
+        )
+        .expect("long_term summary probe should validate");
+        assert_eq!(
+            validated
+                .value
+                .pointer("/knowledge_candidates/0/kind")
+                .and_then(|v| v.as_str()),
+            Some("user_profile_fact")
+        );
     }
 
     #[test]

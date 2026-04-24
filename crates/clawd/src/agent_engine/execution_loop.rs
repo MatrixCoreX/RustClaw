@@ -2,7 +2,7 @@ use tracing::info;
 
 use super::{
     dispatch_round_action, ensure_task_running, plan_step_label, ActionLoopDecision,
-    AgentLoopGuardPolicy, LoopState, RoundOutcome,
+    AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
 };
 use crate::{AgentAction, AppState, ClaimedTask};
 
@@ -55,6 +55,7 @@ fn repeated_successful_action_is_allowed_for_active_recipe(
     let (skill_name, args) = match action {
         AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
         AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        AgentAction::SynthesizeAnswer { .. } => return false,
         AgentAction::Respond { .. } | AgentAction::Think { .. } => return false,
     };
     let normalized_skill = state.resolve_canonical_skill_name(skill_name);
@@ -137,6 +138,7 @@ pub(super) async fn execute_actions_once(
     actions: &[AgentAction],
     loop_state: &mut LoopState,
     policy: &AgentLoopGuardPolicy,
+    agent_run_context: Option<&AgentRunContext>,
 ) -> Result<RoundOutcome, String> {
     ensure_task_running(state, task)?;
     let mut executed_actions = 0usize;
@@ -188,6 +190,7 @@ pub(super) async fn execute_actions_once(
             step_in_round,
             &mut executed_actions,
             &mut ended_with_user_visible_output,
+            agent_run_context,
         )
         .await?
         {

@@ -5,10 +5,11 @@ ROOT_DIR="/home/guagua/rustclaw"
 RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-$HOME/runtime_env_filled.sh}"
 CONFIG_PATH="${RUSTCLAW_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
 PID_FILE="${ROOT_DIR}/.pids/clawd.pid"
-LOG_FILE="${TMPDIR:-/tmp}/clawd.out"
+LOG_FILE="${RUSTCLAW_CLAWD_LOG_FILE:-${ROOT_DIR}/logs/clawd.run.log}"
 
 cd "${ROOT_DIR}"
 mkdir -p "$(dirname "${PID_FILE}")"
+mkdir -p "$(dirname "${LOG_FILE}")"
 
 if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
   # shellcheck source=/dev/null

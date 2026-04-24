@@ -38,7 +38,7 @@ def trim_slash(s: str) -> str:
 
 
 def strip_think_blocks(raw: str) -> str:
-    """与 crates/skills/chat/src/main.rs 中 strip_think_blocks 一致（前缀匹配 + 闭合标签）。"""
+    """Mirror clawd provider output cleanup for leading think blocks."""
     s = raw
     # Rust: rest.find("<think") … after_start.find("</think>")
     open_mark = "`" + "think"

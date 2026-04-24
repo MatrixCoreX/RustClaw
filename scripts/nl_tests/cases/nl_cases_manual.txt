@@ -5,10 +5,6 @@
 #     final response text contains the literal substring AND status=succeeded.
 #     Missing or failed → assertion=fail in the summary.
 #   - tags is comma-separated. Special tags:
-#       chat_force   — submit as kind=run_skill skill_name=chat (bypasses
-#                      intent_router; the only way to actually exercise the
-#                      builtin chat skill, since intent_router will short-circuit
-#                      most chat prompts via direct_reply_candidate).
 #       natural      — phrased loosely, tests model robustness to fuzzy intent.
 #       cn           — Simplified Chinese prompt.
 #       missing_file_graceful / write_and_deliver — legacy assertion hints used
@@ -18,21 +14,13 @@
 #   - Removed 15+ near-duplicate `act_xxx` vs `natural_xxx_cn` pairs (legacy
 #     file kept at nl_cases_manual.legacy.txt for reference).
 #   - Promoted 12 cases to hard assertions via `expect=...`.
-#   - Added explicit chat_force cases (B5) — the legacy file had ZERO cases
-#     that actually entered the chat skill code path.
 #   - Added more failure cases (B4): missing_dir, outside_workspace.
 
-# ---------- chat (intent_router short-circuit path) ----------
-# These two are KNOWN to be served by intent_normalizer's direct_reply_candidate
-# in most runs. They validate the short-circuit user-visible quality, NOT the
-# chat skill itself. For the chat skill, see chat_force_* below.
+# ---------- chat / direct respond path ----------
+# Chat-like requests now stay on the normal ask path. Runtime replies are owned
+# by planner/respond or chat_response fallback, not by a run_skill chat bypass.
 chat|chat_weather_joke||今天天气先别查，给我讲一个简短冷笑话
 chat|chat_translate_simple||把这句话翻成英文：现在服务已经恢复了|expect=service
-
-# ---------- chat (FORCE builtin chat skill — bypasses normalizer) ----------
-chat|chat_force_explain_law|chat_force|用一句话解释牛顿第二定律|expect=力
-chat|chat_force_translate_back|chat_force|把这句话翻成英文：今天的部署一切顺利|expect=deploy
-chat|chat_force_short_advice|chat_force|用一句话告诉新手为什么要写单元测试|expect=测试
 
 # ---------- act (precise commands, hard-asserted where possible) ----------
 act|act_pwd_only||只输出当前工作目录的绝对路径，不要解释|expect=/

@@ -4,12 +4,18 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use encoding_rs::GBK;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+const STOCK_ALIAS_CHOICE_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/stock_alias_choice.schema.json");
+
+static STOCK_ALIAS_CHOICE_SCHEMA: OnceLock<Value> = OnceLock::new();
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -676,15 +682,8 @@ fn parse_llm_alias_response(content: &str) -> Result<String, String> {
         .trim_end_matches("```")
         .trim();
     if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
-        if let Some(alias) = v
-            .get("alias")
-            .or_else(|| v.get("name"))
-            .or_else(|| v.get("result"))
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            return Ok(alias.to_string());
+        if let Some(alias) = parse_alias_from_json_value(&v) {
+            return Ok(alias);
         }
     }
     let line = trimmed.lines().next().unwrap_or("").trim();
@@ -692,6 +691,66 @@ fn parse_llm_alias_response(content: &str) -> Result<String, String> {
         return Err("LLM 名称纠错返回空别名".to_string());
     }
     Ok(line.trim_matches('"').to_string())
+}
+
+fn stock_alias_choice_schema() -> &'static Value {
+    STOCK_ALIAS_CHOICE_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(STOCK_ALIAS_CHOICE_SCHEMA_RAW)
+            .expect("stock_alias_choice schema must be valid JSON")
+    })
+}
+
+fn schema_requires_field(schema: &Value, name: &str) -> bool {
+    schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|fields| fields.iter().any(|field| field.as_str() == Some(name)))
+        .unwrap_or(false)
+}
+
+fn schema_declared_fields(schema: &Value) -> Option<&serde_json::Map<String, Value>> {
+    schema.get("properties")?.as_object()
+}
+
+fn schema_allows_additional_properties(schema: &Value) -> bool {
+    schema
+        .get("additionalProperties")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+fn schema_string_is_valid(schema: &Value, name: &str, value: &str) -> bool {
+    let property = match schema.get("properties").and_then(|v| v.get(name)) {
+        Some(property) => property,
+        None => return false,
+    };
+    if property.get("type").and_then(|v| v.as_str()) != Some("string") {
+        return false;
+    }
+    let min_length = property
+        .get("minLength")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    value.chars().count() >= min_length
+}
+
+fn parse_alias_from_json_value(value: &Value) -> Option<String> {
+    let schema = stock_alias_choice_schema();
+    let object = value.as_object()?;
+    if !schema_allows_additional_properties(schema) {
+        let declared_fields = schema_declared_fields(schema)?;
+        if object.keys().any(|key| !declared_fields.contains_key(key)) {
+            return None;
+        }
+    }
+    if schema_requires_field(schema, "alias") && !object.contains_key("alias") {
+        return None;
+    }
+    let alias = object.get("alias")?.as_str()?.trim();
+    if !schema_string_is_valid(schema, "alias", alias) {
+        return None;
+    }
+    Some(alias.to_string())
 }
 
 fn correction_note(input: &str, matched_name: &str, used_llm: bool) -> Option<String> {
@@ -736,4 +795,33 @@ fn levenshtein(a: &str, b: &str) -> usize {
         prev.clone_from(&curr);
     }
     prev[b_chars.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_llm_alias_response_accepts_schema_valid_json() {
+        assert_eq!(
+            parse_llm_alias_response(r#"{"alias":"中国移动"}"#).unwrap(),
+            "中国移动"
+        );
+    }
+
+    #[test]
+    fn parse_llm_alias_response_rejects_extra_fields_before_falling_back() {
+        assert_eq!(
+            parse_llm_alias_response(r#"{"alias":"中国移动","reason":"extra"}"#).unwrap(),
+            r#"{"alias":"中国移动","reason":"extra"}"#
+        );
+    }
+
+    #[test]
+    fn parse_llm_alias_response_rejects_name_field_json_fallback() {
+        assert_eq!(
+            parse_llm_alias_response(r#"{"name":"中国移动"}"#).unwrap(),
+            r#"{"name":"中国移动"}"#
+        );
+    }
 }

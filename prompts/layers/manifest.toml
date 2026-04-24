@@ -13,6 +13,15 @@ overlay = ["prompts/layers/overlays/single_plan_execution_prompt.md"]
 vendor_patch = "execution/common.md"
 
 [[prompts]]
+logical_path = "prompts/lightweight_execution_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/execution/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/lightweight_execution_prompt.md"]
+vendor_patch = "execution/common.md"
+
+[[prompts]]
 logical_path = "prompts/loop_incremental_plan_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",
@@ -119,18 +128,6 @@ base = [
 ]
 overlay = ["prompts/layers/overlays/voice_mode_intent_prompt.md"]
 vendor_patch = "routing/common.md"
-
-[[prompts]]
-logical_path = "prompts/chat_skill_system_prompt.md"
-base = ["prompts/layers/base/system_truth.md"]
-overlay = ["prompts/layers/overlays/chat_skill_system_prompt.md"]
-vendor_patch = "text/common.md"
-
-[[prompts]]
-logical_path = "prompts/chat_skill_joke_system_prompt.md"
-base = ["prompts/layers/base/system_truth.md"]
-overlay = ["prompts/layers/overlays/chat_skill_joke_system_prompt.md"]
-vendor_patch = "text/common.md"
 
 [[prompts]]
 logical_path = "prompts/audio_transcribe_prompt.md"

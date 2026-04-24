@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/schemas/temporary_fix_plan.schema.json",
+  "title": "Temporary Fix Plan Output",
+  "description": "Schema for the JSON object returned by `extension_manager_temporary_fix_system_prompt.md` and consumed by `crates/skills/extension_manager/src/main.rs::parse_temporary_fix_plan_from_text`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_root": {
+      "type": "string"
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ecosystem",
+          "modules"
+        ],
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modules": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "content"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runtime",
+          "script_path"
+        ],
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "minLength": 1
+          },
+          "script_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "cwd": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

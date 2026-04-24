@@ -2,35 +2,6 @@ use serde_json::{json, Value};
 
 use crate::{AppState, AskReply, ClaimedTask, RoutedMode};
 
-fn text_contains_cjk(text: &str) -> bool {
-    text.chars().any(|ch| {
-        matches!(
-            ch as u32,
-            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
-        )
-    })
-}
-
-fn text_contains_ascii_alpha(text: &str) -> bool {
-    text.chars().any(|ch| ch.is_ascii_alphabetic())
-}
-
-fn chat_request_language_hint(user_text: &str) -> &'static str {
-    let trimmed = user_text.trim();
-    if trimmed.is_empty() {
-        return "config_default";
-    }
-    match (
-        text_contains_cjk(trimmed),
-        text_contains_ascii_alpha(trimmed),
-    ) {
-        (true, false) => "zh-CN",
-        (false, true) => "en",
-        (true, true) => "mixed",
-        (false, false) => "config_default",
-    }
-}
-
 fn canonicalize_recent_scalar_reply(text: &str) -> String {
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
@@ -79,80 +50,22 @@ fn direct_chat_answer_from_recent_replies(
         2,
     );
     let prefer_english = state
-        .policy.command_intent
+        .policy
+        .command_intent
         .default_locale
         .to_ascii_lowercase()
         .starts_with("en");
     direct_same_or_different_answer_from_recent_replies(prefer_english, &recent_assistant_replies)
 }
 
-/// Phase 1.5: normalizer 顺手给出的 chat 模式直接回复候选。命中 4 条护栏
-/// 时直接复用，跳过第二次 `chat_response_prompt` LLM 调用。
-/// 护栏：
-///   G1 `routed_mode == Chat && !needs_clarify`
-///   G2 `direct_reply_confidence >= 0.75`
-///   G3 `!requires_content_evidence`（内容依赖任务走完整链路，不能 one-shot）
-///   G4 候选文本非空、<= 800 字符、无 skill/tool/file_token 字面标记
-///      （避免 LLM 把"需要调用 xxx"这种元指令当成成品回复复用出去）
-fn direct_chat_reply_from_normalizer(
-    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
-) -> Option<String> {
-    const MIN_CONFIDENCE: f64 = 0.75;
-    const MAX_LEN: usize = 800;
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    // G1: 只在 chat 主路径启用；act / chat_act / ask_clarify 不走这里。
-    // is_normalizer_chat() 严格等价旧 routed_mode == Chat（不接受 classifier_direct
-    // / resume_followup_discussion 这两个"形式上也算 Chat"的 entry，它们走单独入口）。
-    if !route.ask_mode.is_normalizer_chat() || route.needs_clarify {
-        return None;
-    }
-    // G2
-    if route.direct_reply_confidence < MIN_CONFIDENCE {
-        return None;
-    }
-    // G3
-    if route.output_contract.requires_content_evidence {
-        return None;
-    }
-    // G4
-    let candidate = route.direct_reply_candidate.trim();
-    if candidate.is_empty() || candidate.chars().count() > MAX_LEN {
-        return None;
-    }
-    let lower = candidate.to_ascii_lowercase();
-    // 任何一个迹象就判定该候选是 "计划类/元指令" 而不是成品回复。
-    const META_MARKERS: &[&str] = &[
-        "file:",
-        "call_skill",
-        "call skill",
-        "execute_skill",
-        "run_skill",
-        "```tool",
-        "```skill",
-        "<tool_call>",
-        "function_call",
-        "tool_call",
-    ];
-    if META_MARKERS.iter().any(|m| lower.contains(m)) {
-        return None;
-    }
-    // 文件发送 / file_token / scalar 等强约束 shape 同样不复用，保持原链路。
-    if matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
-    ) {
-        return None;
-    }
-    Some(candidate.to_string())
-}
-
 fn build_resume_continue_execute_prompt_from_parts(
     state: &AppState,
+    task: &ClaimedTask,
     user_text: &str,
     resume_context: &Value,
     resume_instruction: &str,
     resume_steps: Option<&Value>,
-) -> String {
+) -> Result<String, crate::bootstrap::RequiredPromptLoadError> {
     let resume_steps = resume_steps
         .cloned()
         .filter(|v| v.as_array().map(|arr| !arr.is_empty()).unwrap_or(false))
@@ -173,31 +86,34 @@ fn build_resume_continue_execute_prompt_from_parts(
     let resume_steps_json =
         serde_json::to_string_pretty(&resume_steps).unwrap_or_else(|_| resume_steps.to_string());
 
-    let (prompt_template, _) = crate::bootstrap::load_prompt_template_for_state(
+    let (prompt_template, _) = crate::bootstrap::load_required_prompt_template_for_state(
         state,
         "prompts/resume_continue_execute_prompt.md",
-        crate::RESUME_CONTINUE_EXECUTE_PROMPT_TEMPLATE,
-    );
-    crate::render_prompt_template(
+    )?;
+    let request_language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_text);
+    Ok(crate::render_prompt_template(
         &prompt_template,
         &[
             ("__USER_TEXT__", user_text),
             ("__RESUME_CONTEXT__", &resume_context_json),
             ("__RESUME_STEPS__", &resume_steps_json),
             ("__RESUME_INSTRUCTION__", resume_instruction),
+            ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
             (
                 "__CONFIG_RESPONSE_LANGUAGE__",
                 &state.policy.command_intent.default_locale,
             ),
         ],
-    )
+    ))
 }
 
 pub(crate) fn build_resume_continue_execute_prompt(
     state: &AppState,
+    task: &ClaimedTask,
     payload: &Value,
     fallback_user_text: &str,
-) -> String {
+) -> Result<String, crate::bootstrap::RequiredPromptLoadError> {
     let user_text = payload
         .get("resume_user_text")
         .and_then(|v| v.as_str())
@@ -213,6 +129,7 @@ pub(crate) fn build_resume_continue_execute_prompt(
     let resume_steps = payload.get("resume_steps");
     build_resume_continue_execute_prompt_from_parts(
         state,
+        task,
         user_text,
         &resume_context,
         resume_instruction,
@@ -222,42 +139,54 @@ pub(crate) fn build_resume_continue_execute_prompt(
 
 pub(crate) fn build_resume_continue_execute_prompt_from_context(
     state: &AppState,
+    task: &ClaimedTask,
     user_text: &str,
     resume_context: &Value,
-) -> String {
-    build_resume_continue_execute_prompt_from_parts(state, user_text, resume_context, "", None)
+) -> Result<String, crate::bootstrap::RequiredPromptLoadError> {
+    build_resume_continue_execute_prompt_from_parts(
+        state,
+        task,
+        user_text,
+        resume_context,
+        "",
+        None,
+    )
 }
 
 fn build_resume_followup_discussion_prompt_from_parts(
     state: &AppState,
+    task: &ClaimedTask,
     user_text: &str,
     resume_context: &Value,
-) -> String {
+) -> Result<String, crate::bootstrap::RequiredPromptLoadError> {
     let resume_context_json =
         serde_json::to_string_pretty(resume_context).unwrap_or_else(|_| resume_context.to_string());
-    let (prompt_template, _) = crate::bootstrap::load_prompt_template_for_state(
+    let (prompt_template, _) = crate::bootstrap::load_required_prompt_template_for_state(
         state,
         crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_LOGICAL_PATH,
-        crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_TEMPLATE,
-    );
-    crate::render_prompt_template(
+    )?;
+    let request_language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_text);
+    Ok(crate::render_prompt_template(
         &prompt_template,
         &[
             ("__USER_TEXT__", user_text.trim()),
             ("__RESUME_CONTEXT__", &resume_context_json),
+            ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
             (
                 "__CONFIG_RESPONSE_LANGUAGE__",
                 &state.policy.command_intent.default_locale,
             ),
         ],
-    )
+    ))
 }
 
 pub(crate) fn build_resume_followup_discussion_prompt(
     state: &AppState,
+    task: &ClaimedTask,
     payload: &Value,
     fallback_user_text: &str,
-) -> String {
+) -> Result<String, crate::bootstrap::RequiredPromptLoadError> {
     let user_text = payload
         .get("resume_user_text")
         .and_then(|v| v.as_str())
@@ -267,15 +196,16 @@ pub(crate) fn build_resume_followup_discussion_prompt(
         .get("resume_context")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    build_resume_followup_discussion_prompt_from_parts(state, user_text, &resume_context)
+    build_resume_followup_discussion_prompt_from_parts(state, task, user_text, &resume_context)
 }
 
 pub(crate) fn build_resume_followup_discussion_prompt_from_context(
     state: &AppState,
+    task: &ClaimedTask,
     user_text: &str,
     resume_context: &Value,
-) -> String {
-    build_resume_followup_discussion_prompt_from_parts(state, user_text, resume_context)
+) -> Result<String, crate::bootstrap::RequiredPromptLoadError> {
+    build_resume_followup_discussion_prompt_from_parts(state, task, user_text, resume_context)
 }
 
 fn chat_act_goal_from_prompt(prompt_with_memory: &str) -> String {
@@ -283,6 +213,36 @@ fn chat_act_goal_from_prompt(prompt_with_memory: &str) -> String {
         "{}\n\nMode hint: chat_act. Complete required actions first, then return a concise user-facing reply that confirms results naturally.",
         prompt_with_memory
     )
+}
+
+fn fuzzy_locator_clarify_question(
+    state: &crate::AppState,
+    route: &crate::RouteResult,
+) -> Option<String> {
+    let candidates =
+        crate::post_route_policy::fuzzy_locator_candidates_from_route_reason(&route.route_reason);
+    if candidates.is_empty() {
+        return None;
+    }
+    let candidate_block = candidates
+        .iter()
+        .enumerate()
+        .map(|(idx, value)| format!("{}. {}", idx + 1, value))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let header = if state
+        .policy
+        .command_intent
+        .default_locale
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("en")
+    {
+        "I found multiple matching candidates. Reply with the number or the full path:"
+    } else {
+        "我找到了多个匹配候选，请直接回复序号或完整路径："
+    };
+    Some(format!("{header}\n{candidate_block}"))
 }
 
 fn preferred_route_clarify_question(
@@ -298,6 +258,13 @@ fn preferred_route_clarify_question(
     // 一次 LLM 调用。只要 normalizer 已经给出 clarify_question，就直接复用，
     // 把"这一轮澄清问题由谁出"收敛到单一入口。
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let question = route.clarify_question.trim();
+    if !question.is_empty() {
+        return Some(question.to_string());
+    }
+    if let Some(question) = fuzzy_locator_clarify_question(state, route) {
+        return Some(question);
+    }
     let missing_locator = route.output_contract.locator_hint.trim().is_empty();
     if route.output_contract.delivery_required && missing_locator {
         return Some(crate::i18n_t_with_default(
@@ -319,8 +286,7 @@ fn preferred_route_clarify_question(
             "Please provide the specific file name or path to read.",
         ));
     }
-    let question = route.clarify_question.trim();
-    (!question.is_empty()).then(|| question.to_string())
+    None
 }
 
 fn chat_route_resolution_context(
@@ -371,6 +337,38 @@ fn chat_user_request<'a>(resolved_prompt: &'a str, execution_user_request: &'a s
     }
 }
 
+fn task_payload_text(task: &ClaimedTask) -> Option<String> {
+    crate::task_payload_value(task)?
+        .get("text")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+async fn execute_via_planner_loop(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt_with_memory: &str,
+    execution_user_request: &str,
+    ask_mode: &crate::AskMode,
+    agent_run_context: Option<crate::agent_engine::AgentRunContext>,
+) -> Result<AskReply, String> {
+    let planner_goal = if ask_mode.finalize_chat_wrapped() {
+        chat_act_goal_from_prompt(prompt_with_memory)
+    } else {
+        prompt_with_memory.to_string()
+    };
+    crate::agent_engine::run_agent_with_tools(
+        state,
+        task,
+        &planner_goal,
+        execution_user_request,
+        agent_run_context,
+    )
+    .await
+}
+
 pub(crate) async fn execute_ask_routed(
     state: &AppState,
     task: &ClaimedTask,
@@ -380,37 +378,37 @@ pub(crate) async fn execute_ask_routed(
     execution_user_request: &str,
     agent_mode: bool,
     resume_force_chat: bool,
-    normalizer_mode: Option<RoutedMode>,
+    route_ask_mode: Option<crate::AskMode>,
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Result<AskReply, String> {
-    // Phase 2.7: legacy `route_request_mode` (second-LLM router) was removed. All callers
-    // pass `Some(route_result.routed_mode)` derived from the normalizer; if for some reason
-    // a caller drops it, default to AskClarify rather than burning another LLM round-trip.
-    let (routed_mode, override_reason) = if resume_force_chat {
-        (RoutedMode::Chat, Some("resume_force_chat"))
-    } else if let Some(m) = normalizer_mode {
-        (m, None)
+    // Phase 2.7: legacy `route_request_mode` (second-LLM router) was removed. Callers now
+    // pass the folded route ask_mode directly; if for some reason a caller drops it, default
+    // to AskClarify rather than burning another LLM round-trip.
+    let route_ask_mode_for_log = route_ask_mode.clone();
+    let (ask_mode, override_reason) = if resume_force_chat {
+        (
+            crate::AskMode::from_routed_mode(RoutedMode::Chat),
+            Some("resume_force_chat"),
+        )
+    } else if let Some(mode) = route_ask_mode {
+        (mode, None)
     } else if agent_mode {
         (
-            RoutedMode::AskClarify,
-            Some("normalizer_mode=None and agent_mode=true"),
+            crate::AskMode::from_routed_mode(RoutedMode::AskClarify),
+            Some("route_ask_mode=None and agent_mode=true"),
         )
     } else {
         (
-            RoutedMode::Chat,
-            Some("normalizer_mode=None and agent_mode=false"),
+            crate::AskMode::from_routed_mode(RoutedMode::Chat),
+            Some("route_ask_mode=None and agent_mode=false"),
         )
     };
-    // Phase 3.2 Stage C5：本地推导 ask_mode 用于分发；execute_ask_routed 入参
-    // normalizer_mode 是纯 RoutedMode（不带 classifier_direct/resume_* 这种 worker
-    // 层 flag），因此 from_routed_mode 严格等价 routed_mode。日志仍打 routed_mode
-    // 字段以保持与已有 dashboard / grep 模式兼容；ask_mode 在 Stage D 替换。
-    let ask_mode = crate::AskMode::from_routed_mode(routed_mode);
+    let routed_mode = ask_mode.to_routed_mode();
     tracing::info!(
         "{} worker_once: ask task_id={} normalizer_mode={:?} routed_mode={:?} agent_mode={} override={}",
         crate::highlight_tag("routing"),
         task.task_id,
-        normalizer_mode,
+        route_ask_mode_for_log,
         routed_mode,
         agent_mode,
         override_reason.unwrap_or("")
@@ -435,27 +433,16 @@ pub(crate) async fn execute_ask_routed(
             {
                 return Ok(AskReply::non_llm(direct_answer));
             }
-            // Phase 1.5: 如果 normalizer 已经在第一轮 LLM 里给出可直接发给
-            // 用户的回复候选，并且通过 `direct_chat_reply_from_normalizer` 里
-            // 的 4 条护栏，就直接复用，跳过第二次 chat LLM。
-            if let Some(direct_answer) = direct_chat_reply_from_normalizer(agent_run_context.as_ref())
-            {
-                tracing::info!(
-                    "chat_direct_reply_from_normalizer_hit task_id={} len={}",
-                    task.task_id,
-                    direct_answer.chars().count()
-                );
-                return Ok(AskReply::non_llm(direct_answer));
-            }
             let chat_prompt_context = chat_prompt_context_with_route_resolution(
                 chat_prompt_context,
                 agent_run_context.as_ref(),
             );
-            let resolved_chat_prompt = crate::bootstrap::load_prompt_template_for_state_with_meta(
-                state,
-                crate::CHAT_RESPONSE_PROMPT_LOGICAL_PATH,
-                crate::CHAT_RESPONSE_PROMPT_TEMPLATE,
-            );
+            let resolved_chat_prompt =
+                crate::bootstrap::load_required_prompt_template_for_state_with_meta(
+                    state,
+                    crate::CHAT_RESPONSE_PROMPT_LOGICAL_PATH,
+                )
+                .map_err(|e| e.to_string())?;
             let chat_prompt_template = resolved_chat_prompt.template;
             let chat_prompt_source = resolved_chat_prompt.source;
             let chat_prompt_version = resolved_chat_prompt.version;
@@ -469,6 +456,13 @@ pub(crate) async fn execute_ask_routed(
             );
             let task_persona_prompt = state.task_persona_prompt(task);
             let chat_user_request = chat_user_request(resolved_prompt, execution_user_request);
+            let current_turn_user_request =
+                task_payload_text(task).unwrap_or_else(|| chat_user_request.to_string());
+            let request_language_hint = crate::language_policy::task_response_language_hint(
+                state,
+                task,
+                &current_turn_user_request,
+            );
             let chat_prompt = crate::render_prompt_template(
                 &chat_prompt_template,
                 &[
@@ -478,11 +472,8 @@ pub(crate) async fn execute_ask_routed(
                         "__CONFIG_RESPONSE_LANGUAGE__",
                         &state.policy.command_intent.default_locale,
                     ),
-                    (
-                        "__REQUEST_LANGUAGE_HINT__",
-                        chat_request_language_hint(chat_user_request),
-                    ),
-                    ("__REQUEST__", chat_user_request),
+                    ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
+                    ("__REQUEST__", &current_turn_user_request),
                 ],
             );
             crate::llm_gateway::run_with_fallback_with_prompt_source(
@@ -495,26 +486,13 @@ pub(crate) async fn execute_ask_routed(
             .map(crate::AskReply::llm)
             .map_err(|e| e.to_string())
         }
-        crate::AskMode::Act {
-            finalize: crate::ActFinalizeStyle::Plain,
-        } => {
-            crate::agent_engine::run_agent_with_tools(
+        crate::AskMode::Act { .. } => {
+            execute_via_planner_loop(
                 state,
                 task,
                 prompt_with_memory,
                 execution_user_request,
-                agent_run_context.clone(),
-            )
-            .await
-        }
-        crate::AskMode::Act {
-            finalize: crate::ActFinalizeStyle::ChatWrapped,
-        } => {
-            crate::agent_engine::run_agent_with_tools(
-                state,
-                task,
-                &chat_act_goal_from_prompt(prompt_with_memory),
-                execution_user_request,
+                &ask_mode,
                 agent_run_context.clone(),
             )
             .await
@@ -556,7 +534,7 @@ pub(crate) async fn execute_ask_routed(
         }
         // Phase 3.2 Stage C5：execute_ask_routed 入参 normalizer_mode 是 RoutedMode
         // （4 个变体），经 from_routed_mode 派生只会得到上面 4 个 entry，
-        // ClassifierDirect / ResumeFollowupDiscussion / ResumeContinue 不在此入口。
+        // ResumeFollowupDiscussion / ResumeContinue 不在此入口。
         // 防御性地兜底回 chat 路径（与历史 fallback 一致：normalizer_mode 缺失也会
         // 走 Chat），同时打 warn 便于发现误用。
         other => {
@@ -620,8 +598,9 @@ pub(crate) async fn analyze_attached_images_for_ask(
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_prompt_context_with_route_resolution, chat_request_language_hint, chat_user_request,
-        direct_same_or_different_answer_from_recent_replies,
+        chat_prompt_context_with_route_resolution, chat_user_request,
+        direct_same_or_different_answer_from_recent_replies, preferred_route_clarify_question,
+        task_payload_text,
     };
 
     #[test]
@@ -678,16 +657,133 @@ mod tests {
     }
 
     #[test]
-    fn chat_request_language_hint_prefers_current_request_language() {
-        assert_eq!(chat_request_language_hint("写个两句短诗"), "zh-CN");
+    fn task_payload_text_preserves_raw_current_turn_for_chat_language_hint() {
+        let task = crate::ClaimedTask {
+            task_id: "task".to_string(),
+            user_id: 1,
+            chat_id: 1,
+            user_key: None,
+            channel: "ui".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: serde_json::json!({"text":"先只看登录模块"}).to_string(),
+        };
+        assert_eq!(task_payload_text(&task).as_deref(), Some("先只看登录模块"));
+    }
+
+    #[test]
+    fn response_language_hint_prefers_current_request_language() {
         assert_eq!(
-            chat_request_language_hint("do not run anything, just tell me a very short joke"),
+            crate::language_policy::preferred_response_language_hint("写个两句短诗", None),
+            "zh-CN"
+        );
+        assert_eq!(
+            crate::language_policy::preferred_response_language_hint(
+                "do not run anything, just tell me a very short joke",
+                None
+            ),
             "en"
         );
         assert_eq!(
-            chat_request_language_hint("用 English 解释 README"),
+            crate::language_policy::preferred_response_language_hint(
+                "用 English 解释 README",
+                None
+            ),
             "mixed"
         );
-        assert_eq!(chat_request_language_hint("12345"), "config_default");
+        assert_eq!(
+            crate::language_policy::preferred_response_language_hint("12345", None),
+            "config_default"
+        );
+    }
+
+    #[test]
+    fn preferred_route_clarify_question_respects_explicit_route_question_before_generic_fallback() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::AskClarify,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            resolved_intent: "看看那个目录下面都有什么".to_string(),
+            needs_clarify: true,
+            clarify_question: "请提供具体要查看的目录名或路径。".to_string(),
+            route_reason: "fresh_deictic_missing_locator:directory_lookup".to_string(),
+            route_confidence: Some(0.95),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Free,
+                requires_content_evidence: true,
+                locator_kind: crate::OutputLocatorKind::Path,
+                ..Default::default()
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route.clone()),
+            ..Default::default()
+        };
+        assert_eq!(
+            preferred_route_clarify_question(&state, Some(&ctx)).as_deref(),
+            Some("请提供具体要查看的目录名或路径。")
+        );
+
+        route.clarify_question.clear();
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        assert_eq!(
+            preferred_route_clarify_question(&state, Some(&ctx)).as_deref(),
+            Some("Please provide the specific file name or path to read.")
+        );
+    }
+
+    #[test]
+    fn preferred_route_clarify_question_uses_fuzzy_locator_candidates_without_llm() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::AskClarify,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
+            needs_clarify: true,
+            clarify_question: String::new(),
+            route_reason: "deterministic_contract:generic_filename_scalar_extract; fuzzy_locator_candidates=/tmp/a/Cargo.toml | /tmp/b/Cargo.toml".to_string(),
+            route_confidence: Some(0.95),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                locator_kind: crate::OutputLocatorKind::Filename,
+                ..Default::default()
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let clarify = preferred_route_clarify_question(&state, Some(&ctx))
+            .expect("fuzzy locator clarify should be synthesized");
+        assert!(clarify.contains("/tmp/a/Cargo.toml"));
+        assert!(clarify.contains("/tmp/b/Cargo.toml"));
+        assert!(clarify.contains("1."));
+        assert!(clarify.contains("2."));
     }
 }

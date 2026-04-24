@@ -282,7 +282,10 @@ pub(crate) async fn parse_schedule_intent(
             ("__SKILLS_CATALOG__", &skill_catalog),
             ("__SKILL_CONTRACTS__", &skill_contracts),
             ("__MEMORY_CONTEXT__", &memory_context),
-            ("__CONFIG_RESPONSE_LANGUAGE__", &state.policy.schedule.locale),
+            (
+                "__CONFIG_RESPONSE_LANGUAGE__",
+                &state.policy.schedule.locale,
+            ),
             ("__REQUEST__", request),
         ],
     );
@@ -312,7 +315,27 @@ pub(crate) async fn parse_schedule_intent(
         }
     };
 
-    let parsed: ScheduleIntentOutput = crate::parse_llm_json_extract_or_any(&llm_out)?;
+    let parsed = match crate::prompt_utils::validate_against_schema::<ScheduleIntentOutput>(
+        &llm_out,
+        crate::prompt_utils::PromptSchemaId::ScheduleIntent,
+    ) {
+        Ok(validated) => {
+            if !validated.raw_parse_ok {
+                warn!(
+                    "parse_schedule_intent schema_parse_recovery: task_id={} schema_normalized={}",
+                    task.task_id, validated.schema_normalized
+                );
+            }
+            validated.value
+        }
+        Err(err) => {
+            warn!(
+                "parse_schedule_intent schema_validation_failed: task_id={} err={}",
+                task.task_id, err
+            );
+            return None;
+        }
+    };
     if parsed.needs_clarify && !parsed.clarify_question.trim().is_empty() {
         return Some(parsed);
     }
@@ -482,7 +505,8 @@ pub(crate) fn schedule_timezone_from_intent(state: &AppState, intent_tz: &str) -
 
 fn schedule_t(state: &AppState, key: &str) -> String {
     state
-        .policy.schedule
+        .policy
+        .schedule
         .i18n_dict
         .get(key)
         .cloned()
@@ -684,10 +708,7 @@ pub(crate) async fn try_handle_schedule_request(
     );
     match kind.as_str() {
         "list" => {
-            let db = state
-                .core.db
-                .get()
-                .map_err(|e| format!("db pool: {e}"))?;
+            let db = state.core.db.get().map_err(|e| format!("db pool: {e}"))?;
             let mut stmt = db
                 .prepare(
                     "SELECT job_id, schedule_type, time_of_day, weekday, every_minutes, timezone, enabled, next_run_at, task_kind, task_payload_json
@@ -757,10 +778,7 @@ pub(crate) async fn try_handle_schedule_request(
             }
         }
         "delete" => {
-            let db = state
-                .core.db
-                .get()
-                .map_err(|e| format!("db pool: {e}"))?;
+            let db = state.core.db.get().map_err(|e| format!("db pool: {e}"))?;
             let target = intent.target_job_id.trim();
             let (affected, bulk_mode) = if target.is_empty() {
                 (
@@ -807,10 +825,7 @@ pub(crate) async fn try_handle_schedule_request(
         }
         "pause" | "resume" => {
             let enabled = if kind == "resume" { 1 } else { 0 };
-            let db = state
-                .core.db
-                .get()
-                .map_err(|e| format!("db pool: {e}"))?;
+            let db = state.core.db.get().map_err(|e| format!("db pool: {e}"))?;
             let target = intent.target_job_id.trim();
             let (affected, bulk_mode) = if target.is_empty() {
                 (
@@ -997,10 +1012,7 @@ pub(crate) async fn try_handle_schedule_request(
 
             let job_id = format!("job_{}", &Uuid::new_v4().simple().to_string()[..10]);
             let created_at = crate::now_ts();
-            let db = state
-                .core.db
-                .get()
-                .map_err(|e| format!("db pool: {e}"))?;
+            let db = state.core.db.get().map_err(|e| format!("db pool: {e}"))?;
             db.execute(
                 "INSERT INTO scheduled_jobs (
                     job_id, user_id, chat_id, channel, external_user_id, external_chat_id, user_key, schedule_type, run_at, time_of_day, weekday, every_minutes, cron_expr,
@@ -1508,6 +1520,97 @@ output_kind = "text"
         assert!(
             !s.contains("\"direction\":\"both\""),
             "schedule_intent_prompt must not spell default direction both in examples"
+        );
+    }
+
+    #[test]
+    fn schedule_intent_schema_drift() {
+        const SCHEMA_RAW: &str =
+            include_str!("../../../prompts/schemas/schedule_intent.schema.json");
+        let schema: serde_json::Value = serde_json::from_str(SCHEMA_RAW)
+            .expect("schedule_intent.schema.json must be valid JSON");
+        let properties = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema.properties must be an object");
+        for field in [
+            "kind",
+            "timezone",
+            "schedule",
+            "task",
+            "target_job_id",
+            "raw",
+            "confidence",
+            "reason",
+            "needs_clarify",
+            "clarify_question",
+        ] {
+            assert!(
+                properties.contains_key(field),
+                "schema missing parser field `{field}` under properties — sync prompts/schemas/schedule_intent.schema.json with ScheduleIntentOutput",
+            );
+        }
+
+        let schedule_props = properties
+            .get("schedule")
+            .and_then(|v| v.get("properties"))
+            .and_then(|v| v.as_object())
+            .expect("schedule.properties must be an object");
+        for field in ["type", "run_at", "time", "weekday", "every_minutes", "cron"] {
+            assert!(
+                schedule_props.contains_key(field),
+                "schema missing nested schedule field `{field}`",
+            );
+        }
+
+        let task_props = properties
+            .get("task")
+            .and_then(|v| v.get("properties"))
+            .and_then(|v| v.as_object())
+            .expect("task.properties must be an object");
+        for field in ["kind", "payload"] {
+            assert!(
+                task_props.contains_key(field),
+                "schema missing nested task field `{field}`",
+            );
+        }
+
+        let probe = serde_json::json!({
+            "kind": "create",
+            "timezone": "Asia/Shanghai",
+            "schedule": {
+                "type": "daily",
+                "run_at": "",
+                "time": "08:00",
+                "weekday": 1,
+                "every_minutes": 0,
+                "cron": ""
+            },
+            "task": {
+                "kind": "run_skill",
+                "payload": {
+                    "skill_name": "weather",
+                    "args": {}
+                }
+            },
+            "target_job_id": "",
+            "raw": "每天 8 点看天气",
+            "confidence": 0.9,
+            "reason": "daily weather schedule",
+            "needs_clarify": false,
+            "clarify_question": ""
+        });
+        let validated = crate::prompt_utils::validate_against_schema::<serde_json::Value>(
+            &probe.to_string(),
+            crate::prompt_utils::PromptSchemaId::ScheduleIntent,
+        )
+        .expect("schedule intent probe should validate");
+        assert_eq!(
+            validated
+                .value
+                .pointer("/task/kind")
+                .and_then(|v| v.as_str()),
+            Some("run_skill")
         );
     }
 

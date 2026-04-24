@@ -53,3 +53,53 @@ chat_act|act_fixture_release_checklist_cn||读一下 scripts/nl_tests/fixtures/d
 chat_act|act_fixture_model_io_en||look at scripts/nl_tests/fixtures/device_local/logs/model_io.log and briefly tell me whether there was any recovery after failure
 act|act_fixture_package_name_en||read scripts/nl_tests/fixtures/device_local/package.json and output only the name field
 chat_act|act_fixture_config_purpose_cn||看一下 scripts/nl_tests/fixtures/device_local/configs/app_config.toml，然后用一句大白话说它主要配置了什么
+act|act_hidden_count_cn||数一下当前目录里以点开头的隐藏文件有几个，只输出数字
+act|act_document_recent_two_cn||列出 document 目录最近修改的 2 个文件名，只输出文件名
+act|act_logs_recent_two_cn||列出 logs 目录最近修改的 2 个文件名，只输出文件名
+act|act_config_allow_path_outside_workspace_cn||读取 configs/config.toml 里的 tools.allow_path_outside_workspace，只输出值
+act|act_config_top_keys_cn||读取 configs/config.toml 的顶层键名，只输出键名列表
+chat_act|chat_act_read_config_tail_summary_cn||读取 configs/config.toml 最后 5 行，再用一句话说明这段主要在配什么
+chat_act|chat_act_restart_script_head_cn||读取 scripts/restart_clawd_latest.sh 前 15 行，再一句话说它大概是做什么的
+file|file_send_config_explicit_cn||把 configs/config.toml 直接发给我，不要贴正文
+failure|failure_send_missing_config_cn||把 configs/definitely_missing_case_full_001.toml 发给我，不要贴正文
+act|act_scripts_child_count_cn||数一下 scripts 目录直接子项有多少个，只输出数字
+act|act_top_dirs_names_cn||列出当前目录顶层文件夹名，只输出列表
+chat_act|chat_act_current_dir_partition_cn||先看当前目录顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么分区
+act|act_recent_commit_subject_cn||只告诉我最近一次 git 提交的标题，不要解释
+act|act_toml_paths_cn||找出仓库里 5 个代表性的 toml 文件，只输出路径列表
+chat_act|chat_act_json_transform_table_cn||把这个 JSON 数组按 score 从高到低排序，并转成 markdown 表格：[{"name":"delta","score":4},{"name":"beta","score":11},{"name":"alpha","score":7}]
+chat_act|chat_act_local_health_brief_cn||访问 http://127.0.0.1:8787/v1/health，简短告诉我结果
+chat_act|chat_act_service_status_brief_cn2||看看 telegramd 现在是不是在运行，用一句话回答
+chat_act|chat_act_package_manager_brief_cn||看看当前机器识别到的包管理器，再一句话说最可能日常会用哪个
+chat_act|chat_act_sqlite_tables_brief_cn||看看 data/db-basic-contract.sqlite 里有哪些表，再一句话说这更像业务库还是测试库
+act|act_branch_scalar_cn||只输出当前 git 分支名，不要解释
+chat_act|chat_act_git_dirty_brief_cn||检查这个仓库有没有未提交改动，用一句话告诉我
+chat_act|chat_act_logs_recent_judgment_cn2||列出 logs 目录最近修改的 2 个文件，再告诉我这更像运行日志还是测试残留
+chat_act|chat_act_document_role_cn2||列出 document 目录前 5 个文件，再一句话说这些更像说明文档还是运行产物
+chat_act|chat_act_hidden_files_brief_cn2||看看当前目录有没有隐藏文件，再一句话说这类文件通常是干什么的
+chat_act|chat_act_compare_readme_agents_cn2||比较 README.md 和 AGENTS.md 哪个更大，再用一句通俗话解释原因
+act|act_hidden_count_en2||count how many hidden entries starting with a dot exist in the current directory, output only the number
+act|act_document_recent_two_en||list the 2 most recently modified files under document and output only the file names
+act|act_logs_recent_two_en||list the 2 most recently modified files under logs and output only the file names
+act|act_config_allow_path_outside_workspace_en||read tools.allow_path_outside_workspace from configs/config.toml and output only the value
+act|act_config_top_keys_en||read the top-level keys from configs/config.toml and output only the key names
+chat_act|chat_act_read_config_tail_summary_en||read the last 5 lines of configs/config.toml and tell me in one sentence what this part mainly configures
+chat_act|chat_act_restart_script_head_en||read the first 15 lines of scripts/restart_clawd_latest.sh and briefly say what it mainly does
+file|file_send_config_explicit_en||send me configs/config.toml directly and do not paste the content
+failure|failure_send_missing_config_en||send me configs/definitely_missing_case_full_002.toml and do not paste the content
+act|act_scripts_child_count_en||count the direct children under scripts and output only the number
+act|act_top_dirs_names_en||list the top-level directories in the current workspace and output only the names
+chat_act|chat_act_current_dir_partition_en||look at the top-level directories here and explain in one short sentence how this repo is roughly organized
+act|act_recent_commit_subject_en||tell me only the title of the most recent git commit
+act|act_toml_paths_en||find 5 representative toml files in this repo and output only the paths
+chat_act|chat_act_json_transform_table_en2||sort this JSON array by score descending and render it as a markdown table: [{"name":"delta","score":4},{"name":"beta","score":11},{"name":"alpha","score":7}]
+chat_act|chat_act_local_health_brief_en2||call http://127.0.0.1:8787/v1/health and briefly tell me the result
+chat_act|chat_act_service_status_brief_en2||check whether telegramd is running and answer in one short sentence
+chat_act|chat_act_package_manager_brief_en2||check which package manager is recognized on this machine and briefly say which one is most likely the everyday default
+chat_act|chat_act_sqlite_tables_brief_en2||list the tables in data/db-basic-contract.sqlite and briefly say whether this looks more like an app DB or a test DB
+act|act_branch_scalar_en2||output only the current git branch name
+chat_act|chat_act_git_dirty_brief_en2||check whether this repo has uncommitted changes and answer in one short sentence
+chat_act|chat_act_logs_recent_judgment_en2||list the 2 most recently modified files under logs and then tell me whether this looks more like runtime logs or test leftovers
+chat_act|chat_act_document_role_en2||list the first 5 files under document and then say in one short sentence whether they look more like docs or generated outputs
+chat_act|chat_act_hidden_files_brief_en2||check whether the current directory has hidden files and then explain in one short sentence what such files are usually for
+chat_act|chat_act_compare_readme_agents_en2||compare README.md and AGENTS.md, tell me which one is larger, and briefly explain why that might be

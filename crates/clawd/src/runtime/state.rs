@@ -139,9 +139,8 @@ impl CoreServices {
         base.llm_providers = vec![
             crate::providers::fixture_replay::build_fixture_replay_runtime("vendor-fixture-test"),
         ];
-        base.active_provider_type = Some(
-            crate::providers::fixture_replay::FIXTURE_REPLAY_PROVIDER_TYPE.to_string(),
-        );
+        base.active_provider_type =
+            Some(crate::providers::fixture_replay::FIXTURE_REPLAY_PROVIDER_TYPE.to_string());
         base
     }
 }
@@ -208,7 +207,6 @@ pub(crate) struct PolicyConfig {
     pub(crate) command_intent: CommandIntentRuntime,
     pub(crate) schedule: ScheduleRuntime,
 }
-
 
 impl PolicyConfig {
     pub(crate) fn persona_prompt_string(&self) -> String {
@@ -309,7 +307,7 @@ pub(crate) struct TaskMetricsRegistry {
     /// 与 `llm_calls_per_task` / `llm_elapsed_per_task` 是同一份数据的不同维度：
     /// 总量用前两个表，而"哪个 prompt 把额度烧光了"用这个表。诊断用。
     /// 外层 key = task_id；内层 key = label（如 `normalizer` / `plan` /
-    /// `plan_repair` / `chat` / `classifier_direct` / `observed` / `nl2cmd`...）。
+    /// `plan_repair` / `chat` / `delivery_classifier` / `observed` / `nl2cmd`...）。
     /// 标签由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
     pub(crate) llm_by_prompt_per_task:
         Arc<Mutex<HashMap<String, HashMap<String, LlmPromptBucket>>>>,
@@ -552,7 +550,7 @@ impl AppState {
     /// fixture-replay 测试是不必要的依赖。这里只装 [`REQUIRED_BUILTIN_SKILLS`]
     /// 全集，最小、`integrity-clean` 且独立于 workspace 文件系统。
     ///
-    /// 概念辨析：`normalize / classifier_direct / nl2cmd` 等是 **prompt label**
+    /// 概念辨析：`normalize / delivery_classifier / nl2cmd` 等是 **prompt label**
     /// （走 `crates/clawd/configs/prompts/...`），不是 skill；它们的接入由后续
     /// `bootstrap::prompts::install_prompt_layers_to_workspace` 配套 helper
     /// 处理，本 helper 不涉及。
@@ -626,11 +624,129 @@ impl AppState {
             .map(std::path::Path::to_path_buf)
             .expect("workspace root must exist (CARGO_MANIFEST_DIR is crates/clawd)");
         debug_assert!(
-            workspace_root.join("prompts/layers/manifest.toml").is_file(),
+            workspace_root
+                .join("prompts/layers/manifest.toml")
+                .is_file(),
             "expected layered prompt manifest at workspace root: {}",
             workspace_root.display(),
         );
         self.skill_rt.workspace_root = workspace_root;
+        self
+    }
+
+    /// §7.5 replay harness helper：按真实 workspace 的 `configs/config.toml` +
+    /// `configs/skills_registry.toml` 装载完整 skill views，保证 capability map /
+    /// planner-visible skills 与真录 case 对齐。
+    #[cfg(test)]
+    pub(crate) fn with_real_skill_registry(mut self) -> Self {
+        let config_path = self.skill_rt.workspace_root.join("configs/config.toml");
+        let config_path_str = config_path.to_string_lossy().to_string();
+        let config = AppConfig::load(&config_path_str)
+            .expect("load real configs/config.toml for fixture-replay test");
+        let views = build_skill_views(
+            &self.skill_rt.workspace_root,
+            config.skills.registry_path.as_deref(),
+            &config.skills.skill_switches,
+            &config.skills.skills_list,
+        )
+        .expect("build real skill views for fixture-replay test");
+        let snapshot = SkillViewsSnapshot {
+            registry: views.registry,
+            skills_list: Arc::new(views.execution_skills),
+        };
+        *self.core.skill_views_snapshot.write().unwrap() = Arc::new(snapshot);
+        self.reload_ctx.config_path_for_reload = config_path_str;
+        self.reload_ctx.registry_path_for_reload = config.skills.registry_path.clone();
+        self.reload_ctx.skill_switches_for_reload = Arc::new(config.skills.skill_switches.clone());
+        self.reload_ctx.initial_skills_list_for_reload = config.skills.skills_list.clone();
+        self
+    }
+
+    /// §7.5 replay harness helper：把测试态 `AppState` 的 policy / tools /
+    /// locator / prompt vendor 对齐到真实 `configs/config.toml`。
+    ///
+    /// 为什么要单独做这一步：
+    ///   * `PolicyConfig::test_default()` 里的 persona / schedule / command_intent /
+    ///     memory 都是极简空壳，正常会让 normalizer prompt 少掉一大块 runtime
+    ///     片段，导致回放 hash 全 miss。
+    ///   * fixture provider 的 `config.name` 也需要伪装成真实 vendor（例如
+    ///     `vendor-minimax`），否则 layered prompt 会走错 vendor patch。
+    #[cfg(test)]
+    pub(crate) fn with_real_runtime_policy(mut self) -> Self {
+        let config_path = self.skill_rt.workspace_root.join("configs/config.toml");
+        let config_path_str = config_path.to_string_lossy().to_string();
+        let config = AppConfig::load(&config_path_str)
+            .expect("load real configs/config.toml for fixture-replay test policy");
+        let workspace_root = self.skill_rt.workspace_root.clone();
+        let tools_policy = ToolsPolicy::from_config(&config.tools)
+            .expect("build tools policy from real config for fixture-replay test");
+        let memory_runtime =
+            crate::bootstrap::load_memory_runtime_config(&workspace_root, &config.memory);
+        let command_intent =
+            crate::bootstrap::load_command_intent_runtime(&workspace_root, &config.command_intent);
+        let schedule = crate::bootstrap::load_schedule_runtime(
+            &workspace_root,
+            &config.schedule,
+            config.llm.selected_vendor.as_deref(),
+        )
+        .expect("load real schedule prompts for fixture-replay test policy");
+        let persona_prompt = crate::bootstrap::load_persona_prompt(
+            &workspace_root,
+            config.llm.selected_vendor.as_deref(),
+            &config.persona,
+        );
+        let default_locator_search_dir = {
+            let raw = config.routing.default_locator_search_dir.trim();
+            if raw.is_empty() {
+                workspace_root.clone()
+            } else {
+                let path = Path::new(raw);
+                if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    workspace_root.join(path)
+                }
+            }
+        };
+        let fixture_vendor = config
+            .llm
+            .selected_vendor
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("default");
+
+        self.core.llm_providers = vec![
+            crate::providers::fixture_replay::build_fixture_replay_runtime(&format!(
+                "vendor-{fixture_vendor}"
+            )),
+        ];
+        self.core.active_provider_type =
+            Some(crate::providers::fixture_replay::FIXTURE_REPLAY_PROVIDER_TYPE.to_string());
+        self.skill_rt.skill_timeout_seconds = config.skills.skill_timeout_seconds;
+        self.skill_rt.skill_runner_path = workspace_root.join("target/release/skill-runner");
+        self.skill_rt.tools_policy = Arc::new(tools_policy);
+        self.skill_rt.cmd_timeout_seconds = config.tools.cmd_timeout_seconds.max(1);
+        self.skill_rt.max_cmd_length = config.tools.max_cmd_length.max(16);
+        self.skill_rt.default_locator_search_dir = default_locator_search_dir;
+        self.skill_rt.locator_scan_max_depth = config.routing.locator_scan_max_depth;
+        self.skill_rt.locator_scan_max_files = config.routing.locator_scan_max_files.max(1);
+        self.policy = PolicyConfig {
+            maintenance: config.maintenance.clone(),
+            memory: memory_runtime,
+            routing: config.routing.clone(),
+            self_extension: config.self_extension.clone(),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
+                config.limits.global_rpm,
+                config.limits.user_rpm,
+            ))),
+            allow_path_outside_workspace: config.tools.allow_path_outside_workspace,
+            allow_sudo: config.tools.allow_sudo,
+            persona_prompt: Arc::new(RwLock::new(persona_prompt)),
+            command_intent,
+            schedule,
+        };
+        self.reload_ctx.config_path_for_reload = config_path_str;
         self
     }
 
@@ -647,7 +763,9 @@ impl AppState {
     ///   1. `INIT_SQL`（`migrations/001_init.sql`）—— 建 users/tasks/audit_logs/
     ///      memories/long_term_memories/scheduled_jobs + 必要 index；
     ///   2. [`crate::ensure_memory_schema`] —— memory 链路 ALTER 升级（幂等）；
-    ///   3. [`crate::ensure_channel_schema`] —— tasks/scheduled_jobs/memories
+    ///   3. [`crate::repo::ensure_key_auth_schema`] —— user_key / auth_keys /
+    ///      channel_bindings 等 auth 相关列与表（幂等）；
+    ///   4. [`crate::ensure_channel_schema`] —— tasks/scheduled_jobs/memories
     ///      上 `channel` / `external_*_id` 列（幂等：列存在即 skip）。
     ///
     /// 注意 `migrations/001_init.sql` **不**含 FK 约束：
@@ -665,6 +783,8 @@ impl AppState {
         conn.execute_batch(crate::INIT_SQL)
             .expect("apply migrations/001_init.sql to test main db");
         crate::ensure_memory_schema(&conn).expect("ensure_memory_schema for test main db");
+        crate::repo::ensure_key_auth_schema(&conn)
+            .expect("ensure_key_auth_schema for test main db");
         crate::ensure_channel_schema(&conn).expect("ensure_channel_schema for test main db");
         drop(conn);
         self
@@ -699,10 +819,11 @@ impl AppState {
             .get()
             .expect("acquire test main-db connection for tasks seed");
         let now = crate::now_ts();
+        let user_key = format!("anon:{user_id}:{chat_id}");
         conn.execute(
-            "INSERT INTO tasks (task_id, user_id, chat_id, channel, kind, payload_json, status, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, 'ui', 'ask', ?4, 'queued', ?5, ?5)",
-            rusqlite::params![task_id, user_id, chat_id, payload_json, now],
+            "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, kind, payload_json, status, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'ui', 'ask', ?5, 'queued', ?6, ?6)",
+            rusqlite::params![task_id, user_id, chat_id, user_key, payload_json, now],
         )
         .expect("INSERT INTO tasks for fixture-replay e2e seed");
     }
@@ -826,7 +947,11 @@ impl AppState {
     }
 
     pub(crate) fn clear_task_llm_call_count(&self, task_id: &str) {
-        self.metrics.llm_calls_per_task.lock().unwrap().remove(task_id);
+        self.metrics
+            .llm_calls_per_task
+            .lock()
+            .unwrap()
+            .remove(task_id);
         self.metrics
             .llm_elapsed_per_task
             .lock()
@@ -1212,9 +1337,7 @@ mod llm_provider_runtime_tests {
     //! （一旦 set 就锁死，会让其它测试拿不到默认 EnvBroker）。
     use super::*;
     use claw_core::config::{LlmProviderConfig, LlmProviderParams};
-    use claw_core::secrets::{
-        SecretValue, SecretsBroker, SecretsError,
-    };
+    use claw_core::secrets::{SecretValue, SecretsBroker, SecretsError};
 
     fn make_provider(name: &str, api_key: &str) -> LlmProviderRuntime {
         LlmProviderRuntime {
@@ -1287,7 +1410,10 @@ mod llm_provider_runtime_tests {
             value: "broker-issued-key".to_string(),
         };
         let key = provider.api_key_using(&broker);
-        assert_eq!(&*key, "broker-issued-key", "broker value must take priority");
+        assert_eq!(
+            &*key, "broker-issued-key",
+            "broker value must take priority"
+        );
         assert!(
             matches!(key, std::borrow::Cow::Owned(_)),
             "broker hit must produce Cow::Owned to detach from broker lifetime"
@@ -1352,7 +1478,10 @@ mod llm_provider_runtime_tests {
         //   - env 没设 → fallback 到 config
         //   - env 设了 → broker 接管
         // 关键是 `api_key()` 不能 panic / 返回空字符串（除非 config 本身就空）。
-        assert!(!key.is_empty(), "api_key must not be empty when config has value");
+        assert!(
+            !key.is_empty(),
+            "api_key must not be empty when config has value"
+        );
     }
 
     #[test]

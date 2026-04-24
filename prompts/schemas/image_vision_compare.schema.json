@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/schemas/image_vision_compare.schema.json",
+  "title": "Image Vision Compare Output",
+  "description": "Schema for the JSON object returned by `prompts/image_vision_action_compare.md` and consumed by `crates/skills/image_vision/src/main.rs::parse_structured_narrative_action_output` for the `compare` action.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "similarities",
+    "differences",
+    "notable_changes",
+    "uncertainties"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "similarities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "differences": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "notable_changes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

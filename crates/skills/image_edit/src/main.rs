@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -11,6 +12,11 @@ use reqwest::blocking::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::Sha1;
+
+const IMAGE_REFERENCE_RESOLVER_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/image_reference_resolver.schema.json");
+
+static IMAGE_REFERENCE_RESOLVER_SCHEMA: OnceLock<Value> = OnceLock::new();
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -365,17 +371,78 @@ fn render_image_reference_prompt(
         .replace("__CANDIDATES__", &lines)
 }
 
+fn image_reference_resolver_schema() -> &'static Value {
+    IMAGE_REFERENCE_RESOLVER_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(IMAGE_REFERENCE_RESOLVER_SCHEMA_RAW)
+            .expect("image_reference_resolver schema must be valid JSON")
+    })
+}
+
+fn schema_requires_field(schema: &Value, name: &str) -> bool {
+    schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|fields| fields.iter().any(|field| field.as_str() == Some(name)))
+        .unwrap_or(false)
+}
+
+fn schema_declared_fields(schema: &Value) -> Option<&serde_json::Map<String, Value>> {
+    schema.get("properties")?.as_object()
+}
+
+fn schema_allows_additional_properties(schema: &Value) -> bool {
+    schema
+        .get("additionalProperties")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+fn schema_integer_in_range(schema: &Value, name: &str, value: i64) -> bool {
+    let property = match schema.get("properties").and_then(|v| v.get(name)) {
+        Some(property) => property,
+        None => return false,
+    };
+    if property.get("type").and_then(|v| v.as_str()) != Some("integer") {
+        return false;
+    }
+    let minimum = property
+        .get("minimum")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(i64::MIN);
+    let maximum = property
+        .get("maximum")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(i64::MAX);
+    value >= minimum && value <= maximum
+}
+
+fn parse_selected_index_from_json_value(value: &Value) -> Option<i64> {
+    let schema = image_reference_resolver_schema();
+    let object = value.as_object()?;
+    if !schema_allows_additional_properties(schema) {
+        let declared_fields = schema_declared_fields(schema)?;
+        if object.keys().any(|key| !declared_fields.contains_key(key)) {
+            return None;
+        }
+    }
+    if schema_requires_field(schema, "selected_index") && !object.contains_key("selected_index") {
+        return None;
+    }
+    let selected_index = object.get("selected_index")?.as_i64()?;
+    schema_integer_in_range(schema, "selected_index", selected_index).then_some(selected_index)
+}
+
 fn parse_llm_selected_index(raw: &str) -> Option<i64> {
     let t = raw.trim();
     if let Ok(v) = serde_json::from_str::<Value>(t) {
-        return v.get("selected_index").and_then(|x| x.as_i64());
+        return parse_selected_index_from_json_value(&v);
     }
     let start = t.find('{')?;
     let end = t.rfind('}')?;
     if end > start {
         let slice = t.get(start..=end)?;
         let v: Value = serde_json::from_str(slice).ok()?;
-        return v.get("selected_index").and_then(|x| x.as_i64());
+        return parse_selected_index_from_json_value(&v);
     }
     None
 }
@@ -1844,10 +1911,7 @@ fn load_root_config() -> RootConfig {
 }
 
 fn env_non_empty(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    claw_core::secrets::env_non_empty_resolved_or_none(key)
 }
 
 fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
@@ -2255,5 +2319,23 @@ mod tests {
             extract_qwen_output_image_url(&v),
             Some("https://example.com/demo.png")
         );
+    }
+
+    #[test]
+    fn parse_llm_selected_index_accepts_schema_valid_json() {
+        assert_eq!(parse_llm_selected_index(r#"{"selected_index":2}"#), Some(2));
+        assert_eq!(
+            parse_llm_selected_index(r#"answer {"selected_index":0}"#),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn parse_llm_selected_index_rejects_extra_fields_and_out_of_range_values() {
+        assert_eq!(
+            parse_llm_selected_index(r#"{"selected_index":1,"reason":"extra"}"#),
+            None
+        );
+        assert_eq!(parse_llm_selected_index(r#"{"selected_index":-2}"#), None);
     }
 }

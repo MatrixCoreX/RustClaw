@@ -133,7 +133,8 @@ pub(crate) async fn send_telegram_message(
             );
         }
         let resp = state
-            .core.http_client
+            .core
+            .http_client
             .post(&url)
             .json(&json!({
                 "chat_id": chat_id,
@@ -164,7 +165,11 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
     if phone_number_id.is_empty() {
         return Err("whatsapp phone_number_id is empty".to_string());
     }
-    let base = state.channels.whatsapp_api_base.trim().trim_end_matches('/');
+    let base = state
+        .channels
+        .whatsapp_api_base
+        .trim()
+        .trim_end_matches('/');
     if base.is_empty() {
         return Err("whatsapp api_base is empty".to_string());
     }
@@ -197,7 +202,8 @@ pub(crate) async fn send_whatsapp_cloud_text_message(
             );
         }
         let resp = state
-            .core.http_client
+            .core
+            .http_client
             .post(&url)
             .bearer_auth(token)
             .json(&json!({
@@ -262,7 +268,8 @@ pub(crate) async fn send_whatsapp_web_bridge_text_message(
             );
         }
         let resp = state
-            .core.http_client
+            .core
+            .http_client
             .post(&url)
             .json(&json!({
                 "to": to,
@@ -344,7 +351,8 @@ pub(crate) async fn send_wechat_text_message(
             chunk
         };
         let mut req = state
-            .core.http_client
+            .core
+            .http_client
             .post(&url)
             .header("Content-Type", "application/json")
             .header("AuthorizationType", "ilink_bot_token")
@@ -620,7 +628,8 @@ pub(crate) async fn send_feishu_text_message(
             chunk
         };
         let resp = state
-            .core.http_client
+            .core
+            .http_client
             .post(&url)
             .header("Authorization", format!("Bearer {}", token))
             .json(&json!({
@@ -677,7 +686,8 @@ pub(crate) async fn send_lark_text_message(
             chunk
         };
         let resp = state
-            .core.http_client
+            .core
+            .http_client
             .post(&url)
             .header("Authorization", format!("Bearer {}", token))
             .json(&json!({

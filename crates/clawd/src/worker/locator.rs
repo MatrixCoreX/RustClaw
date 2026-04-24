@@ -64,6 +64,14 @@ pub(crate) fn try_resolve_implicit_locator_path(
     ) {
         return Some(resolved);
     }
+    if let Some(resolved) = resolve_direct_child_filename_token_target(
+        &state.skill_rt.workspace_root,
+        &state.skill_rt.default_locator_search_dir,
+        &filename_tokens,
+        state.skill_rt.locator_scan_max_files,
+    ) {
+        return Some(resolved);
+    }
     let roots = implicit_locator_search_roots(
         &state.skill_rt.workspace_root,
         &state.skill_rt.default_locator_search_dir,
@@ -109,17 +117,44 @@ fn resolve_explicit_workspace_child_target(
     keywords: &[String],
     filename_tokens: &[String],
 ) -> Option<LocatorAutoResolution> {
-    let direct = try_resolve_implicit_direct_child_locator(default_locator_search_dir, keywords)
-        .or_else(|| {
+    let direct = if !filename_tokens.is_empty() {
+        try_resolve_implicit_direct_child_locator(workspace_root, keywords).or_else(|| {
             (workspace_root != default_locator_search_dir)
-                .then(|| try_resolve_implicit_direct_child_locator(workspace_root, keywords))
+                .then(|| {
+                    try_resolve_implicit_direct_child_locator(default_locator_search_dir, keywords)
+                })
                 .flatten()
-        })?;
+        })
+    } else {
+        try_resolve_implicit_direct_child_locator(default_locator_search_dir, keywords).or_else(
+            || {
+                (workspace_root != default_locator_search_dir)
+                    .then(|| try_resolve_implicit_direct_child_locator(workspace_root, keywords))
+                    .flatten()
+            },
+        )
+    }?;
     let direct_path = PathBuf::from(&direct);
     if !direct_child_path_compatible_with_filename_tokens(&direct_path, filename_tokens) {
         return None;
     }
     Some(LocatorAutoResolution::Direct(direct))
+}
+
+fn resolve_direct_child_filename_token_target(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    filename_tokens: &[String],
+    max_files: usize,
+) -> Option<LocatorAutoResolution> {
+    if filename_tokens.is_empty() {
+        return None;
+    }
+    let mut roots = vec![workspace_root.to_path_buf()];
+    if workspace_root != default_locator_search_dir {
+        roots.push(default_locator_search_dir.to_path_buf());
+    }
+    try_resolve_implicit_locator_path_in_roots(&roots, &[], filename_tokens, 0, max_files)
 }
 
 fn resolve_workspace_root_path(workspace_root: &Path) -> String {
@@ -1023,6 +1058,38 @@ mod tests {
                 );
             }
             other => panic!("expected direct root README match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn direct_child_filename_precheck_beats_context_root_for_unique_workspace_readme() {
+        let workspace = TempDirGuard::new("direct_child_precheck_workspace");
+        let fixture_dir = workspace.path.join("fixtures/device_local");
+        fs::create_dir_all(&fixture_dir).expect("create fixture dir");
+        fs::write(workspace.path.join("README.md"), "# root\n").expect("write root README");
+        fs::write(fixture_dir.join("README.md"), "# fixture\n").expect("write fixture README");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace.path.clone();
+        state.skill_rt.default_locator_search_dir = fixture_dir.clone();
+        let out = super::try_resolve_implicit_locator_path(
+            &state,
+            "README.md",
+            "README.md",
+            crate::OutputLocatorKind::Filename,
+            Some(fixture_dir.to_string_lossy().as_ref()),
+        );
+        match out {
+            Some(super::LocatorAutoResolution::Direct(path)) => {
+                assert!(
+                    path.ends_with("/README.md"),
+                    "unexpected direct path: {path}"
+                );
+                assert!(
+                    !path.contains("/fixtures/device_local/README.md"),
+                    "context root unexpectedly won: {path}"
+                );
+            }
+            other => panic!("expected direct workspace README match, got {other:?}"),
         }
     }
 

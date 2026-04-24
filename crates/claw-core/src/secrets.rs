@@ -1,12 +1,16 @@
-//! §P4.4 secrets 短期 token：地基 trait + 默认 env 后端。
+//! §P4.4 secrets 短期 token：broker 地基 + 本地一次性 token 发放/兑换 helper。
 //!
 //! **本模块的边界**
 //!
-//! 本模块只负责"按 secret 名查到一段凭证"，不负责：
-//! - **颁发短期 token**（由 clawd 启动时根据 manifest 在 broker 之上包装一层
-//!   token broker —— 见 §P4.4 待办）；
-//! - **跨进程注入**（runner spawn 前把 token 塞进子进程 env 是 §E1.b 的事）；
-//! - **审计 / 轮转**（清算谁拿了 token、什么时候过期）。
+//! 本模块负责两层能力：
+//! - broker 地基：按 secret 名查到一段凭证；
+//! - 本地一次性 token：把明文 secret 临时换成短期 token，并在子进程内兑换回
+//!   明文，避免把真实 secret 直接塞进 child env。
+//!
+//! 仍然**不**负责：
+//! - 跨主机 / 外部 STS / KMS / vault 的真正 secrets manager；
+//! - 审计 / 长期轮转（这里只做本地短期票据与过期清理）；
+//! - spawn 本身（runner spawn 前把 token 塞进子进程 env 仍由 clawd 路径完成）。
 //!
 //! 这是地基中的地基，独立可验证。
 //!
@@ -28,11 +32,17 @@
 //! - 默认实现 [`EnvSecretsBroker`] 把 secret 名按"全大写 + 可选前缀"映射到
 //!   环境变量；空值视为不存在（避免被误用为 `Some("")`）。
 
+use std::collections::HashMap;
 use std::env;
 use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::skill_registry::Capability;
 
@@ -43,6 +53,15 @@ use crate::skill_registry::Capability;
 #[derive(Clone, PartialEq, Eq)]
 pub struct SecretValue {
     inner: String,
+}
+
+const SECRET_TOKEN_PREFIX: &str = "rustclaw-secret://v1/";
+const SECRET_TOKEN_STORE_DIR_ENV: &str = "RUSTCLAW_SECRET_TOKEN_DIR";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SecretTokenRecord {
+    value: String,
+    expires_at_epoch_ms: u64,
 }
 
 impl SecretValue {
@@ -97,6 +116,26 @@ pub enum SecretsError {
         #[source]
         source: std::io::Error,
     },
+}
+
+#[derive(Debug, Error)]
+pub enum SecretTokenError {
+    #[error("secret token store IO failed at `{path}`: {source}")]
+    StoreIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("secret token record at `{path}` is invalid JSON: {source}")]
+    InvalidRecord {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("secret token `{token}` not found or already redeemed")]
+    Missing { token: String },
+    #[error("secret token `{token}` is expired")]
+    Expired { token: String },
 }
 
 /// secrets 后端契约。dyn-safe：`&self`、不带泛型方法、不需要 `Sized`。
@@ -185,7 +224,15 @@ pub fn validate_secret_name(name: &str) -> Result<(), SecretsError> {
     }
     // 与 Capability::parse 同源的"裸 vendor"反模式拒绝集合。
     const KNOWN_VENDORS: &[&str] = &[
-        "openai", "google", "gemini", "anthropic", "claude", "grok", "xai", "deepseek", "qwen",
+        "openai",
+        "google",
+        "gemini",
+        "anthropic",
+        "claude",
+        "grok",
+        "xai",
+        "deepseek",
+        "qwen",
         "minimax",
     ];
     for vendor in KNOWN_VENDORS {
@@ -258,6 +305,173 @@ impl SecretsBroker for EnvSecretsBroker {
     fn label(&self) -> &str {
         "env"
     }
+}
+
+fn now_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+pub fn secret_token_store_dir() -> PathBuf {
+    env::var(SECRET_TOKEN_STORE_DIR_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| env::temp_dir().join("rustclaw-secret-tokens"))
+}
+
+fn token_record_path(store_dir: &Path, token: &str) -> PathBuf {
+    store_dir.join(format!("{token}.json"))
+}
+
+fn ensure_store_dir(store_dir: &Path) -> Result<(), SecretTokenError> {
+    fs::create_dir_all(store_dir).map_err(|source| SecretTokenError::StoreIo {
+        path: store_dir.to_path_buf(),
+        source,
+    })
+}
+
+fn resolved_secret_env_cache() -> &'static Mutex<HashMap<String, String>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cleanup_expired_secret_tokens(store_dir: &Path) {
+    let now = now_epoch_ms();
+    let Ok(entries) = fs::read_dir(store_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(record) = serde_json::from_str::<SecretTokenRecord>(&raw) else {
+            continue;
+        };
+        if record.expires_at_epoch_ms <= now {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+fn issue_secret_token_value_in_dir(
+    store_dir: &Path,
+    secret: &SecretValue,
+    ttl: Duration,
+) -> Result<String, SecretTokenError> {
+    ensure_store_dir(store_dir)?;
+    cleanup_expired_secret_tokens(store_dir);
+    let token = Uuid::new_v4().to_string();
+    let path = token_record_path(store_dir, &token);
+    let ttl_ms = ttl.as_millis().min(u128::from(u64::MAX)) as u64;
+    let record = SecretTokenRecord {
+        value: secret.expose().to_string(),
+        expires_at_epoch_ms: now_epoch_ms().saturating_add(ttl_ms.max(1)),
+    };
+    let payload = serde_json::to_vec(&record).expect("secret token record must serialize");
+    fs::write(&path, payload).map_err(|source| SecretTokenError::StoreIo {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(format!("{SECRET_TOKEN_PREFIX}{token}"))
+}
+
+pub fn issue_secret_token_value(
+    secret: &SecretValue,
+    ttl: Duration,
+) -> Result<String, SecretTokenError> {
+    issue_secret_token_value_in_dir(&secret_token_store_dir(), secret, ttl)
+}
+
+pub fn issue_secret_env_tokens(
+    secret_envs: &[(String, SecretValue)],
+    ttl: Duration,
+) -> Result<Vec<(String, String)>, SecretTokenError> {
+    let store_dir = secret_token_store_dir();
+    let mut out = Vec::with_capacity(secret_envs.len());
+    for (env_name, secret) in secret_envs {
+        out.push((
+            env_name.clone(),
+            issue_secret_token_value_in_dir(&store_dir, secret, ttl)?,
+        ));
+    }
+    Ok(out)
+}
+
+fn redeem_secret_token_reference_in_dir(
+    store_dir: &Path,
+    value: &str,
+) -> Result<Option<String>, SecretTokenError> {
+    let Some(token) = value.strip_prefix(SECRET_TOKEN_PREFIX) else {
+        return Ok(None);
+    };
+    let path = token_record_path(store_dir, token);
+    let claimed = store_dir.join(format!("{token}.claim-{}", Uuid::new_v4()));
+    fs::rename(&path, &claimed).map_err(|source| match source.kind() {
+        std::io::ErrorKind::NotFound => SecretTokenError::Missing {
+            token: token.to_string(),
+        },
+        _ => SecretTokenError::StoreIo {
+            path: path.clone(),
+            source,
+        },
+    })?;
+    let raw = fs::read_to_string(&claimed).map_err(|source| SecretTokenError::StoreIo {
+        path: claimed.clone(),
+        source,
+    })?;
+    let _ = fs::remove_file(&claimed);
+    let record = serde_json::from_str::<SecretTokenRecord>(&raw).map_err(|source| {
+        SecretTokenError::InvalidRecord {
+            path: claimed.clone(),
+            source,
+        }
+    })?;
+    if record.expires_at_epoch_ms <= now_epoch_ms() {
+        return Err(SecretTokenError::Expired {
+            token: token.to_string(),
+        });
+    }
+    Ok(Some(record.value))
+}
+
+pub fn redeem_secret_token_reference(value: &str) -> Result<Option<String>, SecretTokenError> {
+    redeem_secret_token_reference_in_dir(&secret_token_store_dir(), value)
+}
+
+pub fn env_non_empty_resolved(key: &str) -> Result<Option<String>, SecretTokenError> {
+    if let Ok(cache) = resolved_secret_env_cache().lock() {
+        if let Some(value) = cache.get(key) {
+            return Ok(Some(value.clone()));
+        }
+    }
+    let Some(raw) = env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    if let Some(redeemed) = redeem_secret_token_reference(&raw)? {
+        let trimmed = redeemed.trim().to_string();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        if let Ok(mut cache) = resolved_secret_env_cache().lock() {
+            cache.insert(key.to_string(), trimmed.clone());
+        }
+        return Ok(Some(trimmed));
+    }
+    Ok(Some(raw))
+}
+
+pub fn env_non_empty_resolved_or_none(key: &str) -> Option<String> {
+    env_non_empty_resolved(key).ok().flatten()
 }
 
 // ============================================================================
@@ -482,7 +696,10 @@ mod tests {
         unsafe { env::set_var(&env_var, "") };
         let result = broker.lookup(&canonical).unwrap();
         unsafe { env::remove_var(&env_var) };
-        assert!(result.is_none(), "empty env value should be treated as None");
+        assert!(
+            result.is_none(),
+            "empty env value should be treated as None"
+        );
     }
 
     #[test]
@@ -531,6 +748,76 @@ mod tests {
     fn env_broker_label_is_stable() {
         let broker = EnvSecretsBroker::new();
         assert_eq!(broker.label(), "env");
+    }
+
+    fn fresh_token_store_dir(suffix: &str) -> PathBuf {
+        env::temp_dir().join(format!(
+            "rustclaw-secret-token-test-{}-{}",
+            std::process::id(),
+            suffix
+        ))
+    }
+
+    #[test]
+    fn issue_and_redeem_secret_token_round_trips_once() {
+        let dir = fresh_token_store_dir("roundtrip");
+        let token = issue_secret_token_value_in_dir(
+            &dir,
+            &SecretValue::new("secret-123"),
+            Duration::from_secs(60),
+        )
+        .expect("token issue");
+        let first = redeem_secret_token_reference_in_dir(&dir, &token)
+            .expect("first redeem")
+            .expect("first redeem should yield value");
+        assert_eq!(first, "secret-123");
+        let second = redeem_secret_token_reference_in_dir(&dir, &token).unwrap_err();
+        assert!(matches!(second, SecretTokenError::Missing { .. }));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn expired_secret_token_is_rejected() {
+        let dir = fresh_token_store_dir("expired");
+        let token = issue_secret_token_value_in_dir(
+            &dir,
+            &SecretValue::new("secret-123"),
+            Duration::from_millis(1),
+        )
+        .expect("token issue");
+        std::thread::sleep(Duration::from_millis(5));
+        let err = redeem_secret_token_reference_in_dir(&dir, &token).unwrap_err();
+        assert!(matches!(err, SecretTokenError::Expired { .. }));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn env_non_empty_resolved_redeems_token_and_caches_by_env_name() {
+        let dir = fresh_token_store_dir("env-cache");
+        let previous_dir = env::var(SECRET_TOKEN_STORE_DIR_ENV).ok();
+        let key = fresh_var("token_env").to_ascii_uppercase();
+        let token = issue_secret_token_value_in_dir(
+            &dir,
+            &SecretValue::new("token-secret"),
+            Duration::from_secs(60),
+        )
+        .expect("token issue");
+        unsafe { env::set_var(SECRET_TOKEN_STORE_DIR_ENV, &dir) };
+        unsafe { env::set_var(&key, &token) };
+        let first = env_non_empty_resolved(&key)
+            .expect("first resolve")
+            .expect("first resolve value");
+        let second = env_non_empty_resolved(&key)
+            .expect("second resolve")
+            .expect("second resolve value");
+        assert_eq!(first, "token-secret");
+        assert_eq!(second, "token-secret");
+        unsafe { env::remove_var(&key) };
+        match previous_dir {
+            Some(value) => unsafe { env::set_var(SECRET_TOKEN_STORE_DIR_ENV, value) },
+            None => unsafe { env::remove_var(SECRET_TOKEN_STORE_DIR_ENV) },
+        }
+        let _ = fs::remove_dir_all(dir);
     }
 
     /// 验证 trait 是 dyn-safe：能放进 `Box<dyn SecretsBroker>`，便于运行期注入。
@@ -590,7 +877,10 @@ mod tests {
             Capability::ExecSudo,
         ];
         let out = provision_secret_envs(&broker, &caps).unwrap();
-        assert!(out.is_empty(), "non-secret caps must not produce env entries");
+        assert!(
+            out.is_empty(),
+            "non-secret caps must not produce env entries"
+        );
     }
 
     #[test]
@@ -652,7 +942,8 @@ mod tests {
 
     #[test]
     fn provision_propagates_backend_io_error_immediately() {
-        let broker = MockBroker::new(&[("text_openai_api_key", "v")]).fail_on("image_edit_qwen_api_key");
+        let broker =
+            MockBroker::new(&[("text_openai_api_key", "v")]).fail_on("image_edit_qwen_api_key");
         let caps = vec![
             Capability::Secrets("text_openai_api_key".to_string()),
             Capability::Secrets("image_edit_qwen_api_key".to_string()),
@@ -803,10 +1094,7 @@ mod tests {
         // provision_secret_envs 必须能取出对应 SecretValue。
         let n_text = text_secret_name_for_vendor("openai");
         let n_img = image_generation_secret_name_for_vendor("minimax");
-        let broker = MockBroker::new(&[
-            (n_text.as_str(), "text-key"),
-            (n_img.as_str(), "img-key"),
-        ]);
+        let broker = MockBroker::new(&[(n_text.as_str(), "text-key"), (n_img.as_str(), "img-key")]);
         let caps = vec![
             Capability::Secrets(n_text.clone()),
             Capability::Secrets(n_img.clone()),

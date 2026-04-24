@@ -62,6 +62,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "single_plan_execution (agent_engine.planning)",
     ),
     (
+        "prompts/lightweight_execution_prompt.md",
+        "lightweight_execution (agent_engine.planning)",
+    ),
+    (
         "prompts/loop_incremental_plan_prompt.md",
         "loop_incremental_plan (agent_engine.planning)",
     ),
@@ -72,14 +76,6 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
     (
         "prompts/observed_answer_fallback_prompt.md",
         "observed_answer_fallback (finalize.observed)",
-    ),
-    (
-        "prompts/chat_skill_system_prompt.md",
-        "chat_skill_system (skills.builtin.chat)",
-    ),
-    (
-        "prompts/chat_skill_joke_system_prompt.md",
-        "chat_skill_joke_system (skills.builtin.chat)",
     ),
 ];
 
@@ -288,18 +284,75 @@ pub(crate) fn load_prompt_template_for_vendor(
     )
 }
 
+pub(crate) fn load_required_prompt_template_for_vendor(
+    workspace_root: &Path,
+    selected_vendor: Option<&str>,
+    rel_path: &str,
+) -> Result<(String, String), RequiredPromptLoadError> {
+    let resolved = load_required_prompt_template_for_vendor_with_meta(
+        workspace_root,
+        selected_vendor,
+        rel_path,
+    )?;
+    Ok((resolved.template, resolved.source))
+}
+
 pub(crate) fn load_prompt_template_for_state(
     state: &AppState,
     rel_path: &str,
     default_template: &str,
 ) -> (String, String) {
-    let vendor = active_prompt_vendor_name(state);
-    prompt_layers::load_prompt_template_for_vendor(
-        &state.skill_rt.workspace_root,
+    let resolved = load_prompt_template_for_state_with_meta(state, rel_path, default_template);
+    (resolved.template, resolved.source)
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RequiredPromptLoadError {
+    pub logical_path: String,
+    pub resolved_source: String,
+    pub vendor: String,
+}
+
+impl std::fmt::Display for RequiredPromptLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "required prompt missing from disk/manifest: logical_path={} resolved_source={} vendor={}",
+            self.logical_path, self.resolved_source, self.vendor
+        )
+    }
+}
+
+impl std::error::Error for RequiredPromptLoadError {}
+
+pub(crate) fn load_required_prompt_template_for_state(
+    state: &AppState,
+    rel_path: &str,
+) -> Result<(String, String), RequiredPromptLoadError> {
+    let resolved = load_required_prompt_template_for_state_with_meta(state, rel_path)?;
+    Ok((resolved.template, resolved.source))
+}
+
+pub(crate) fn load_required_prompt_template_for_vendor_with_meta(
+    workspace_root: &Path,
+    selected_vendor: Option<&str>,
+    rel_path: &str,
+) -> Result<ResolvedPromptTemplate, RequiredPromptLoadError> {
+    let vendor = prompt_vendor_name_from_selected_vendor(selected_vendor);
+    let resolved = prompt_layers::load_prompt_template_for_vendor_with_meta(
+        workspace_root,
         &vendor,
         rel_path,
-        default_template,
-    )
+        "",
+    );
+    if resolved.template.trim().is_empty() {
+        return Err(RequiredPromptLoadError {
+            logical_path: rel_path.to_string(),
+            resolved_source: resolved.source,
+            vendor,
+        });
+    }
+    Ok(resolved)
 }
 
 /// §3.5a: 带 prompt version 元数据的加载入口。
@@ -317,6 +370,17 @@ pub(crate) fn load_prompt_template_for_state_with_meta(
         &vendor,
         rel_path,
         default_template,
+    )
+}
+
+pub(crate) fn load_required_prompt_template_for_state_with_meta(
+    state: &AppState,
+    rel_path: &str,
+) -> Result<ResolvedPromptTemplate, RequiredPromptLoadError> {
+    load_required_prompt_template_for_vendor_with_meta(
+        &state.skill_rt.workspace_root,
+        Some(&active_prompt_vendor_name(state)),
+        rel_path,
     )
 }
 
@@ -398,24 +462,40 @@ pub(crate) fn reload_runtime_prompts_impl(
             let vendor = new_config.llm.selected_vendor.clone();
             let new_persona =
                 load_persona_prompt(&workspace_root, vendor.as_deref(), &new_config.persona);
-            let new_schedule = super::config_loaders::load_schedule_runtime(
+            match super::config_loaders::load_schedule_runtime(
                 &workspace_root,
                 &new_config.schedule,
                 vendor.as_deref(),
-            );
-            let new_intent_template = new_schedule.intent_prompt_template_string();
-            let new_rules_template = new_schedule.intent_rules_template_string();
-            let pa = new_persona.chars().count();
-            let sia = new_intent_template.chars().count();
-            let sra = new_rules_template.chars().count();
-            policy.replace_persona_prompt(new_persona);
-            policy
-                .schedule
-                .replace_intent_prompt_template(new_intent_template);
-            policy
-                .schedule
-                .replace_intent_rules_template(new_rules_template);
-            (pa, sia, sra, true, vendor)
+            ) {
+                Ok(new_schedule) => {
+                    let new_intent_template = new_schedule.intent_prompt_template_string();
+                    let new_rules_template = new_schedule.intent_rules_template_string();
+                    let pa = new_persona.chars().count();
+                    let sia = new_intent_template.chars().count();
+                    let sra = new_rules_template.chars().count();
+                    policy.replace_persona_prompt(new_persona);
+                    policy
+                        .schedule
+                        .replace_intent_prompt_template(new_intent_template);
+                    policy
+                        .schedule
+                        .replace_intent_rules_template(new_rules_template);
+                    (pa, sia, sra, true, vendor)
+                }
+                Err(err) => {
+                    warn!(
+                        "prompt_hot_reload: schedule prompt reload failed, keeping current schedule prompts: err={}",
+                        err
+                    );
+                    (
+                        persona_chars_before,
+                        schedule_intent_chars_before,
+                        schedule_rules_chars_before,
+                        false,
+                        vendor,
+                    )
+                }
+            }
         }
         Err(err) => {
             warn!(
@@ -627,6 +707,34 @@ selected_model  = "gpt-4o-mini"
             cloned_policy.schedule.intent_rules_template_string(),
             "RULES_V1"
         );
+    }
+
+    #[test]
+    fn reload_runtime_prompts_keeps_schedule_when_schedule_prompt_missing() {
+        let root = temp_workspace("schedule_missing");
+        write_minimal_config(&root, "PERSONA_V1");
+
+        let policy = PolicyConfig::test_default();
+        policy.replace_persona_prompt("PERSONA_KEEP".to_string());
+        policy
+            .schedule
+            .replace_intent_prompt_template("SCHEDULE_KEEP".to_string());
+        policy
+            .schedule
+            .replace_intent_rules_template("RULES_KEEP".to_string());
+
+        let cfg_path = root.join("configs/config.toml");
+        std::fs::remove_file(root.join("prompts/schedule_intent_prompt.md"))
+            .expect("remove schedule prompt");
+
+        let report = reload_runtime_prompts_impl(&root, &policy, cfg_path.to_str().unwrap());
+        assert!(!report.config_reread_ok);
+        assert_eq!(policy.persona_prompt_string(), "PERSONA_KEEP");
+        assert_eq!(
+            policy.schedule.intent_prompt_template_string(),
+            "SCHEDULE_KEEP"
+        );
+        assert_eq!(policy.schedule.intent_rules_template_string(), "RULES_KEEP");
     }
 
     #[test]

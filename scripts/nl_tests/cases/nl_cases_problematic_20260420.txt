@@ -1,0 +1,122 @@
+# Problem catalog collected from 2026-04-20 targeted NL reruns.
+# This file is a mixed-suite catalog, not a directly runnable single-suite case file.
+# Line shapes:
+#   manual|case_name|tags|prompt
+#   clarify|case_name|turn1|turn2
+#   context_chain|case_name|turn1|turn2|turn3
+
+# Fixed on 2026-04-20.
+# Original symptom: turn2 gave a whole-log summary instead of "最后 5 行".
+# Root cause was planner path degrading to full `read_file`; runtime now rewrites explicit
+# head/tail/range requests onto `system_basic.read_range`.
+# Evidence:
+#   scripts/nl_suite_logs/skill_batch_clarify/20260420_205400/run.log
+#   scripts/nl_suite_logs/clarify_fix_20260420/20260420_222104/run.log
+clarify|clarify_tail_model_io_log_batch|看看那个模型日志最后 5 行|scripts/nl_tests/fixtures/device_local/logs/model_io.log
+
+# Fixed on 2026-04-21.
+# Original symptom:
+# - turn1 should have listed `document` directory entries, but returned a generic denial because
+#   `intent_normalizer` schema validation rejected a misplaced `execution_recipe.locator_hint`
+#   / `direct_reply_*` shape from MiniMax.
+# - later rerun showed turn3 ordinal binding correctly resolved to `logs/clawd.log`, but planner
+#   still leaked an old existing path (`document/hello_from_manual_test.sh`) into the final
+#   `read_range` step.
+# Root cause and fix:
+# - canonicalize misplaced `execution_recipe.locator_hint` / `direct_reply_*` before schema validation
+# - when current turn already resolved a concrete file target and the plan is a single-target
+#   file-read chain, planning normalize now prefers that current `auto_locator` file over stale
+#   existing paths from history
+# Evidence:
+#   scripts/nl_suite_logs/followup_focus_20260420/20260420_215927/run.log
+#   scripts/nl_suite_logs/followup_fix_20260420/20260420_222141/run.log
+#   scripts/nl_suite_logs/followup_frame_scope_fix_debug_rerun2/20260421_000121/run.log
+context_chain|followup_switch_dir_then_ordinal|先列出 document 目录下前 5 个文件名|那 logs 目录下前 5 个文件名呢|就第二个，看看最后 2 行
+
+# Fixed on 2026-04-20.
+# Original symptom: directory listing request explicitly asked for "前 5 个文件名", but turn1
+# returned many more than 5 entries because planner wrapped full `list_dir` output in a
+# `respond "{{last_output}}"` shell without runtime truncation.
+# Evidence:
+#   scripts/nl_suite_logs/followup_fix_20260420/20260420_222141/run.log
+#   scripts/nl_suite_logs/followup_fix_20260420_rerun/20260420_223443/run.log
+manual|followup_switch_dir_then_ordinal_first|count_overrun,list_limit|先列出 document 目录下前 5 个文件名
+
+# Fixed on 2026-04-21.
+# Original symptom: turn1 internal normalizer still tried to bind "那个 model io log" to stale
+# historical path `/tmp/rustclaw-workspace/.../model_io.log`, then only after runtime guard
+# backed off to clarify.
+# Root cause and fix:
+# - fresh deictic clarify guard already prevented wrong user-visible execution
+# - route-stage memory injection still polluted the normalizer with historical alias facts
+# - route memory is now suppressed for fresh deictic requests that have no explicit path and no
+#   immediate concrete anchor, so the stale historical path no longer enters the routing trace
+# Evidence:
+#   scripts/nl_suite_logs/clarify_focus_20260420/20260420_215413/run.log
+#   scripts/nl_suite_logs/modelio_deictic_fix_20260421_rerun/20260421_001543/run.log
+clarify|clarify_deictic_model_io_tail|看一下那个 model io log 最后 4 行，再一句话说有什么现象|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/model_io.log
+
+# Fixed on 2026-04-21.
+# Original symptom: in the aborted broad rerun, turn1 directly answered via historical alias
+# binding instead of clarifying; the same case was nondeterministic across runs.
+# Root cause and fix:
+# - fresh deictic filename wrapper now forces locator clarify unless immediate context already
+#   binds one concrete target
+# - route memory is also suppressed for fresh deictic requests with no explicit path / no
+#   immediate anchor, so historical alias facts stop biasing the normalizer
+# Evidence:
+#   scripts/nl_suite_logs/dynamic_guard_clarify_rerun/20260420_215119/run.log
+#   scripts/nl_suite_logs/readme_deictic_fix_20260421/20260421_001019/run.log
+clarify|clarify_deictic_readme_again|读一下那个 README 开头，然后一句话总结|/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md
+
+# Fixed on 2026-04-21.
+# Original symptom:
+# - turn1 often returned a compact / numbered visible listing instead of raw newline output
+# - old frame logic preferred journal/raw listing over the visible assistant answer, so turn2
+#   `看最后一个最后 2 行` drifted back to directory-level semantics
+# - turn3 `一句话说它更像日志还是清单` was then either lost, or later got re-overridden by
+#   `ContentExcerptSummary` defaulting and answered as a generic tail-log summary
+# Root cause and fix:
+# - `ordered_entries` now prefers the visible assistant listing block over raw journal spill
+# - list turns are classified back to `FollowupOpKind::List` before read-defaulting
+# - `SelectOrderedEntry` now outranks `ChangeSlice`, and the persisted frame also supports the
+#   composed delta `SelectOrderedEntryAndSlice`
+# - `post_route_policy` no longer re-defaults follow-up judgment prompts (`更像` / `more like`)
+#   back to `ContentExcerptSummary`
+# Evidence:
+#   scripts/nl_suite_logs/followup_shape_probe_20260421/20260421_001958/run.log
+#   scripts/nl_suite_logs/followup_reference_focus_20260421_rerun10/20260421_105520/run.log
+context_chain|followup_logs_last_tail_shape|先列出 logs 目录下前 5 个文件名|看最后一个最后 2 行|一句话说它更像日志还是清单
+
+# Performance-pathology sample.
+# Symptom: user-visible answer was correct, but the case took ~90s and spent ~57.6s inside `single_plan_execution_prompt`
+# for a trivially bounded existence check that already had an auto-resolved concrete path.
+# Evidence: scripts/nl_suite_logs/skill_batch_single_turn/20260420_205400/summary.jsonl
+manual|act_find_service_file_batch|perf_slow,planner_heavy|检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径
+
+# Fixed on 2026-04-21.
+# Original symptom: after turn2 correctly delivered `clawd.log`, turn3 `不是这个，发上一个`
+# still normalized back to `clawd.log`.
+# Root cause and fix:
+# - relative-selection rewrite text used to inject both the newly selected target
+#   (`act_plan.log`) and the raw negation phrase into the same normalizer request
+# - `SelectRelativeEntry` now synthesizes an explicit resolved intent that switches the concrete
+#   target without replaying the contradictory negation phrase
+# Evidence:
+#   scripts/nl_suite_logs/followup_frame_live_probe_20260421/20260421_003536/run.log
+#   scripts/nl_suite_logs/followup_reference_more_20260421/20260421_105750/run.log
+context_chain|followup_logs_send_then_prev|先列出 logs 目录下前 4 个文件名|把第二个发给我|不是这个，发上一个
+
+# Fixed on 2026-04-21.
+# Original symptom: after `先读一下 README.md 前 4 行` and `把这个文件发给我`, turn3
+# `只说这个文件名` was misread as a new directory-scope request, switched to current workspace,
+# then listed top-level entries instead of reusing the current bound file target.
+# Root cause and fix:
+# - delivery-shaped follow-up frames did not allow same-target reuse for basename-only output asks
+# - persisted-frame delta layer now has a narrow same-target basename-only branch
+# - the direct route emits a deterministic direct reply candidate from the bound target basename,
+#   so this follow-up no longer falls into `SwitchScope`
+# Evidence:
+#   scripts/nl_suite_logs/followup_read_send_same_20260421/20260421_110252/run.log
+#   scripts/nl_suite_logs/followup_read_send_same_fix_20260421/20260421_111019/run.log
+context_chain|followup_read_then_send_same_file|先读一下 README.md 前 4 行|把这个文件发给我|只说这个文件名

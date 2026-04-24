@@ -83,10 +83,8 @@ where
 /// 配置 + broker secrets，是子进程的**唯一**真实 env 来源。
 ///
 /// §E2 step2 边界澄清：本函数只对 **spawn-path** 生效（即 `kind="runner"` 的外部
-/// skill），对 **builtin skill**（`chat` / `read_file` / `write_file` / `run_cmd` 等
+/// skill），对 **builtin skill**（`read_file` / `write_file` / `run_cmd` 等
 /// 内嵌实现）完全无效——它们运行在 clawd 自身进程里，自然继承 clawd 的 env。
-/// 所以 strict 模式下 `chat` 的 LLM 凭据仍然走 `LlmProviderRuntime`（toml + env
-/// 加载），不经 `SecretsBroker`。让 chat 也走 broker 是 §P4.4 E3 的范畴。
 pub(crate) struct StrictEnvReport {
     pub(crate) preserved: Vec<String>,
     pub(crate) stripped_count: usize,
@@ -223,6 +221,18 @@ fn task_is_admin(state: &AppState, task: &ClaimedTask) -> bool {
         .unwrap_or(false)
 }
 
+pub(crate) fn task_allows_sudo(state: &AppState, task: Option<&ClaimedTask>) -> bool {
+    state.policy.allow_sudo && task.map(|task| task_is_admin(state, task)).unwrap_or(false)
+}
+
+pub(crate) fn task_allows_path_outside_workspace(
+    state: &AppState,
+    task: Option<&ClaimedTask>,
+) -> bool {
+    state.policy.allow_path_outside_workspace
+        && task.map(|task| task_is_admin(state, task)).unwrap_or(false)
+}
+
 fn text_contains_cjk(text: &str) -> bool {
     text.chars().any(|ch| {
         matches!(
@@ -313,7 +323,8 @@ fn config_requires_web_admin_message(state: &AppState, task: &ClaimedTask) -> St
         }
         RequestReplyLanguage::ConfigDefault => {
             if state
-                .policy.schedule
+                .policy
+                .schedule
                 .locale
                 .trim()
                 .to_ascii_lowercase()
@@ -465,7 +476,9 @@ fn run_cmd_targets_config_mutation(workspace_root: &Path, command: &str) -> bool
 
 fn skill_attempts_config_mutation(state: &AppState, skill_name: &str, args: &Value) -> bool {
     match skill_name {
-        "write_file" => args_path_targets_configs_dir(&state.skill_rt.workspace_root, args, "path", true),
+        "write_file" => {
+            args_path_targets_configs_dir(&state.skill_rt.workspace_root, args, "path", true)
+        }
         "remove_file" | "make_dir" => {
             args_path_targets_configs_dir(&state.skill_rt.workspace_root, args, "path", false)
         }
@@ -520,34 +533,6 @@ fn ensure_config_mutation_allowed(
     Err(config_requires_web_admin_message(state, task))
 }
 
-fn inject_skill_persona_context(
-    state: &AppState,
-    task: &ClaimedTask,
-    skill_name: &str,
-    args: Value,
-) -> Value {
-    if state.resolve_canonical_skill_name(skill_name) != "chat" {
-        return args;
-    }
-    let mut obj = match args {
-        Value::Object(map) => map,
-        other => return other,
-    };
-    if obj.contains_key("persona_prompt") {
-        return Value::Object(obj);
-    }
-    let persona_prompt = state.task_persona_prompt(task);
-    let trimmed = persona_prompt.trim();
-    if trimmed.is_empty() {
-        return Value::Object(obj);
-    }
-    obj.insert(
-        "persona_prompt".to_string(),
-        Value::String(trimmed.to_string()),
-    );
-    Value::Object(obj)
-}
-
 /// §P4.1 fallback：当 `SkillsRegistry` 还没装载（启动早期 / 某些测试 stub）时
 /// 用这个常量名单兜底"哪些 skill 是 builtin（in-process）"。**真正生效的是
 /// `AppState::is_builtin_skill`**——它优先从 registry 拿 kind，failure 才退到这里。
@@ -566,13 +551,6 @@ pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
             | "make_dir"
             | "remove_file"
             | "schedule"
-            // Phase 2.2: chat 并入 clawd 内部，享受 LLM gateway 治理
-            // （fallback / circuit breaker / 预算 / model_io.log）。
-            // chat-skill 二进制保留，外部 caller 仍可独立 spawn，但 clawd
-            // 内部 dispatch 一律走 builtin 实现，不再起子进程。
-            // §E2 step2：因为 chat 是 builtin，§E2 step1 的 env_clear 隔离对它无效；
-            // 它的 LLM 凭据仍走 LlmProviderRuntime，broker 接管推迟到 §P4.4 E3。
-            | "chat"
     )
 }
 
@@ -589,7 +567,8 @@ pub(crate) async fn run_skill_with_runner_outcome(
 
     let policy_token = format!("skill:{skill_name}");
     if !state
-        .skill_rt.tools_policy
+        .skill_rt
+        .tools_policy
         .is_allowed(&policy_token, state.core.active_provider_type.as_deref())
     {
         return Err(format!("blocked by policy: {policy_token}"));
@@ -660,15 +639,16 @@ pub(crate) async fn run_skill_with_runner_outcome(
         });
 
     let _permit = state
-        .skill_rt.skill_semaphore
+        .skill_rt
+        .skill_semaphore
         .clone()
         .acquire_owned()
         .await
         .map_err(|err| format!("skill semaphore closed: {err}"))?;
 
-    let args = inject_skill_persona_context(state, task, &skill_name, args);
     let args = inject_skill_memory_context(state, task, &skill_name, args);
-    let args = ensure_default_output_dir_for_skill_args(&state.skill_rt.workspace_root, &skill_name, args);
+    let args =
+        ensure_default_output_dir_for_skill_args(&state.skill_rt.workspace_root, &skill_name, args);
     let source = match task_runtime_channel(state, task) {
         RuntimeChannel::Whatsapp => "whatsapp",
         RuntimeChannel::Telegram => "telegram",
@@ -769,21 +749,19 @@ mod tests {
     use super::{
         collect_whitelisted_env_pairs, extract_task_request_text, is_recoverable_skill_error,
         normalize_skill_error_for_user, request_reply_language, skill_runner_env_strict_enabled,
-        task_request_locale_tag, RequestReplyLanguage, READ_FILE_NOT_FOUND_PREFIX,
-        SKILL_RUNNER_ENV_WHITELIST,
+        task_allows_path_outside_workspace, task_allows_sudo, task_request_locale_tag,
+        RequestReplyLanguage, READ_FILE_NOT_FOUND_PREFIX, SKILL_RUNNER_ENV_WHITELIST,
     };
     use crate::{
-        runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime, ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+        runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime,
+        ScheduleRuntime, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
     };
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
+    use claw_core::config::{AgentConfig, ToolsConfig};
+    use rusqlite::params;
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
-    
+
     use std::sync::{Arc, RwLock};
-    
-    
 
     fn test_state(locale: &str) -> AppState {
         let agents_by_id = HashMap::from([(
@@ -794,31 +772,31 @@ mod tests {
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: None,
-                                skills_list: Arc::new(HashSet::new()),
-                            }))),
+                    registry: None,
+                    skills_list: Arc::new(HashSet::new()),
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig {
                 command_intent: CommandIntentRuntime {
-                                all_result_suffixes: Vec::new(),
-                                default_locale: locale.to_string(),
-                                verify_enforce_enabled: false,
-                            },
+                    all_result_suffixes: Vec::new(),
+                    default_locale: locale.to_string(),
+                    verify_enforce_enabled: false,
+                },
                 schedule: ScheduleRuntime {
-                                timezone: "Asia/Shanghai".to_string(),
-                                intent_prompt_template: Arc::new(RwLock::new(String::new())),
-                                intent_prompt_source: String::new(),
-                                intent_rules_template: Arc::new(RwLock::new(String::new())),
-                                locale: locale.to_string(),
-                                i18n_dict: HashMap::new(),
-                            },
+                    timezone: "Asia/Shanghai".to_string(),
+                    intent_prompt_template: Arc::new(RwLock::new(String::new())),
+                    intent_prompt_source: String::new(),
+                    intent_rules_template: Arc::new(RwLock::new(String::new())),
+                    locale: locale.to_string(),
+                    i18n_dict: HashMap::new(),
+                },
                 ..crate::PolicyConfig::test_default()
             },
             worker: crate::WorkerConfig::test_default(),
@@ -841,6 +819,18 @@ mod tests {
             kind: "ask".to_string(),
             payload_json: payload.to_string(),
         }
+    }
+
+    fn insert_auth_key(state: &AppState, user_key: &str, role: &str) {
+        let db = state.core.db.get().expect("db pool");
+        db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+            .expect("create auth schema");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, ?2, 1, '123', NULL)",
+            params![user_key, role],
+        )
+        .expect("insert auth key");
     }
 
     #[test]
@@ -911,6 +901,32 @@ mod tests {
     }
 
     #[test]
+    fn task_allows_privileged_tools_for_admin_only() {
+        let mut state = test_state("zh-CN");
+        state.policy.allow_sudo = true;
+        state.policy.allow_path_outside_workspace = true;
+
+        insert_auth_key(&state, "rk-admin", "admin");
+        insert_auth_key(&state, "rk-user", "user");
+
+        let mut admin_task = test_task(json!({ "text": "run privileged command" }));
+        admin_task.user_key = Some("rk-admin".to_string());
+        assert!(task_allows_sudo(&state, Some(&admin_task)));
+        assert!(task_allows_path_outside_workspace(
+            &state,
+            Some(&admin_task)
+        ));
+
+        let mut user_task = test_task(json!({ "text": "run privileged command" }));
+        user_task.user_key = Some("rk-user".to_string());
+        assert!(!task_allows_sudo(&state, Some(&user_task)));
+        assert!(!task_allows_path_outside_workspace(
+            &state,
+            Some(&user_task)
+        ));
+    }
+
+    #[test]
     fn read_file_not_found_is_recoverable() {
         let err = format!("{}/etc/missing", READ_FILE_NOT_FOUND_PREFIX);
         assert!(is_recoverable_skill_error("read_file", &err));
@@ -941,9 +957,18 @@ mod tests {
 
     #[test]
     fn other_skill_errors_are_not_recoverable() {
-        assert!(!is_recoverable_skill_error("git_basic", "fatal: not a git repository"));
-        assert!(!is_recoverable_skill_error("system_basic", "command not found"));
-        assert!(!is_recoverable_skill_error("read_file", "some random error"));
+        assert!(!is_recoverable_skill_error(
+            "git_basic",
+            "fatal: not a git repository"
+        ));
+        assert!(!is_recoverable_skill_error(
+            "system_basic",
+            "command not found"
+        ));
+        assert!(!is_recoverable_skill_error(
+            "read_file",
+            "some random error"
+        ));
     }
 
     // §E2 step1 ===============================================================
@@ -1118,17 +1143,12 @@ pub(crate) async fn run_skill_with_runner_once(
     } else {
         serde_json::json!({})
     };
-    let llm_skill = canonical_skill_name == "chat";
-    let user_key_for_skill = if llm_skill {
-        Value::Null
-    } else {
-        task.user_key
-            .clone()
-            .map(Value::String)
-            .unwrap_or(Value::Null)
-    };
-    let skill_context =
-        build_runner_skill_context(state, task, source, llm_skill, credential_context);
+    let user_key_for_skill = task
+        .user_key
+        .clone()
+        .map(Value::String)
+        .unwrap_or(Value::Null);
+    let skill_context = build_runner_skill_context(state, task, source, credential_context);
     let req_line = serde_json::json!({
         "request_id": task.task_id,
         "user_id": task.user_id,
@@ -1177,10 +1197,8 @@ pub(crate) async fn run_skill_with_runner_once(
                 pairs
             }
             Err(claw_core::secrets::ProvisionError::MissingSecrets { missing }) => {
-                let env_names: Vec<String> = missing
-                    .iter()
-                    .map(|n| n.to_ascii_uppercase())
-                    .collect();
+                let env_names: Vec<String> =
+                    missing.iter().map(|n| n.to_ascii_uppercase()).collect();
                 tracing::error!(
                     "skill_dispatch skill={} missing_secrets={:?} broker={} — refuse to spawn",
                     canonical_skill_name,
@@ -1210,6 +1228,32 @@ pub(crate) async fn run_skill_with_runner_once(
     };
 
     let selected_openai_model = crate::llm_gateway::selected_openai_model(state, Some(task));
+    let secret_token_ttl = Duration::from_secs(300);
+    let tokenized_secret_envs =
+        match claw_core::secrets::issue_secret_env_tokens(&secret_envs, secret_token_ttl) {
+            Ok(pairs) => pairs,
+            Err(err) => {
+                return Err(format!(
+                "skill `{canonical_skill_name}` failed to issue short-lived secret tokens: {err}"
+            ));
+            }
+        };
+    let selected_openai_api_key = crate::llm_gateway::selected_openai_api_key(state, Some(task));
+    let openai_api_key_token = if selected_openai_api_key.trim().is_empty() {
+        None
+    } else {
+        match claw_core::secrets::issue_secret_token_value(
+            &claw_core::secrets::SecretValue::new(selected_openai_api_key),
+            secret_token_ttl,
+        ) {
+            Ok(token) => Some(token),
+            Err(err) => {
+                return Err(format!(
+                    "skill `{canonical_skill_name}` failed to mint OPENAI_API_KEY token: {err}"
+                ));
+            }
+        }
+    };
     let mut cmd = Command::new(&state.skill_rt.skill_runner_path);
     // §E2 step1: 严格模式下先 env_clear + 白名单，让后续 `.env(...)` / secrets 注入
     // 成为子进程 env 的唯一来源。默认 OFF，行为与历史一致。
@@ -1223,8 +1267,10 @@ pub(crate) async fn run_skill_with_runner_once(
     }
     cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env(
-            "OPENAI_API_KEY",
-            crate::llm_gateway::selected_openai_api_key(state, Some(task)),
+            "RUSTCLAW_SECRET_TOKEN_DIR",
+            claw_core::secrets::secret_token_store_dir()
+                .display()
+                .to_string(),
         )
         .env(
             "OPENAI_BASE_URL",
@@ -1232,7 +1278,10 @@ pub(crate) async fn run_skill_with_runner_once(
         )
         .env("OPENAI_MODEL", selected_openai_model.clone())
         .env("CHAT_SKILL_MODEL", selected_openai_model)
-        .env("WORKSPACE_ROOT", state.skill_rt.workspace_root.display().to_string())
+        .env(
+            "WORKSPACE_ROOT",
+            state.skill_rt.workspace_root.display().to_string(),
+        )
         .env(
             "RUSTCLAW_LOCATOR_SCAN_MAX_DEPTH",
             state.skill_rt.locator_scan_max_depth.to_string(),
@@ -1241,11 +1290,16 @@ pub(crate) async fn run_skill_with_runner_once(
             "RUSTCLAW_LOCATOR_SCAN_MAX_FILES",
             state.skill_rt.locator_scan_max_files.to_string(),
         );
-    // §E1.b: secrets 在最后注入，确保覆盖任何上面无意命中的同名硬编码键
-    // （目前没有，但留给以后清理 OPENAI_API_KEY 等硬编码时不会被静默覆盖）。
-    for (env_name, secret) in &secret_envs {
-        cmd.env(env_name, secret.expose());
+    if let Some(token) = &openai_api_key_token {
+        cmd.env("OPENAI_API_KEY", token);
     }
+    // §E1.b: secrets 在最后注入，确保覆盖任何上面无意命中的同名硬编码键
+    // （目前已经覆盖 OPENAI_API_KEY：这里与 manifest secrets.* 一起统一变成
+    // 短期 token，而不是把明文 secret 直接塞进 child env）。
+    for (env_name, token) in &tokenized_secret_envs {
+        cmd.env(env_name, token);
+    }
+    cmd.current_dir(&state.skill_rt.workspace_root);
     let mut child = cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -1337,7 +1391,6 @@ pub(crate) fn build_runner_skill_context(
     state: &AppState,
     task: &ClaimedTask,
     source: &str,
-    llm_skill: bool,
     credential_context: Value,
 ) -> Value {
     let mut ctx = serde_json::Map::new();
@@ -1345,14 +1398,10 @@ pub(crate) fn build_runner_skill_context(
     ctx.insert("kind".to_string(), Value::String("run_skill".to_string()));
     ctx.insert(
         "user_key".to_string(),
-        if llm_skill {
-            Value::Null
-        } else {
-            task.user_key
-                .clone()
-                .map(Value::String)
-                .unwrap_or(Value::Null)
-        },
+        task.user_key
+            .clone()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
     );
     ctx.insert("exchange_credentials".to_string(), credential_context);
     let locale_tag = task_request_locale_tag(state, task);

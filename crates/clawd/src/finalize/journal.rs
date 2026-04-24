@@ -37,10 +37,8 @@ pub(crate) fn ensure_task_metrics(
         journal.record_used_evidence_ids_count(0);
     }
     if journal.task_metrics.delivery_consistent.is_none() {
-        journal.record_delivery_consistent(delivery_payload_consistent(
-            answer_text,
-            answer_messages,
-        ));
+        journal
+            .record_delivery_consistent(delivery_payload_consistent(answer_text, answer_messages));
     }
 }
 

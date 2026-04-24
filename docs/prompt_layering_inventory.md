@@ -33,6 +33,7 @@
 
 - `prompts/agent_tool_spec.md`
 - `prompts/single_plan_execution_prompt.md`
+- `prompts/lightweight_execution_prompt.md`
 - `prompts/loop_incremental_plan_prompt.md`
 - `prompts/plan_repair_prompt.md`
 
@@ -62,7 +63,11 @@
 - `prompts/clarify_question_prompt.md`
 - `prompts/resume_followup_discussion_prompt.md`
 - `prompts/resume_continue_execute_prompt.md`
-- `prompts/resume_followup_intent_prompt.md`
+
+说明：
+
+- `prompts/resume_followup_intent_prompt.md` 仍保留在 manifest 中，但当前 ask 主链已改为
+  unified `intent_normalizer_prompt.md`，因此它属于 legacy overlay，不再是活跃调用点。
 
 共通规则包括：
 
@@ -95,8 +100,6 @@
 - `prompts/schedule_intent_rules.md`
 - `prompts/voice_chat_prompt.md`
 - `prompts/voice_mode_intent_prompt.md`
-- `prompts/chat_skill_system_prompt.md`
-- `prompts/chat_skill_joke_system_prompt.md`
 - `prompts/audio_transcribe_prompt.md`
 - `prompts/image_reference_resolver_prompt.md`
 - `prompts/image_output_rewrite_prompt.md`
@@ -106,7 +109,7 @@
 - `prompts/image_vision_action_*`
 - `prompts/personas/*.md`（逻辑路径；实际正文位于 `prompts/layers/overlays/personas/*.md`）
 
-这些 prompt 现在也通过 manifest 进入统一分层，相关独立进程（`telegramd`、`chat-skill`、`audio-transcribe-skill`、`image-edit-skill`、`image-vision-skill`）改为复用同一套共享解析 helper。
+这些 prompt 现在也通过 manifest 进入统一分层，相关独立进程（`telegramd`、`audio-transcribe-skill`、`image-edit-skill`、`image-vision-skill`）改为复用同一套共享解析 helper。
 
 ### Vendor 特化内容
 

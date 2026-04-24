@@ -31,8 +31,8 @@ use super::{
 };
 use crate::{
     runtime::{AgentRuntimeConfig, SkillViewsSnapshot},
-    AppState, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, ScheduleRuntime, ToolsPolicy,
+    AppState, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    OutputSemanticKind, ScheduleRuntime, ToolsPolicy,
 };
 
 struct TempDirGuard {
@@ -98,26 +98,26 @@ fn test_state_with_i18n(translations: &[(&str, &str)]) -> AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                        registry: None,
-                        skills_list: Arc::new(HashSet::new()),
-                    }))),
+                registry: None,
+                skills_list: Arc::new(HashSet::new()),
+            }))),
             ..crate::CoreServices::test_default()
         },
         skill_rt: crate::SkillRuntime {
             tools_policy: Arc::new(
-                        ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                    ),
+                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+            ),
             ..crate::SkillRuntime::test_default()
         },
         policy: crate::PolicyConfig {
             schedule: ScheduleRuntime {
-                        timezone: "Asia/Shanghai".to_string(),
-                        intent_prompt_template: Arc::new(RwLock::new(String::new())),
-                        intent_prompt_source: String::new(),
-                        intent_rules_template: Arc::new(RwLock::new(String::new())),
-                        locale: "zh-CN".to_string(),
-                        i18n_dict,
-                    },
+                timezone: "Asia/Shanghai".to_string(),
+                intent_prompt_template: Arc::new(RwLock::new(String::new())),
+                intent_prompt_source: String::new(),
+                intent_rules_template: Arc::new(RwLock::new(String::new())),
+                locale: "zh-CN".to_string(),
+                i18n_dict,
+            },
             ..crate::PolicyConfig::test_default()
         },
         worker: crate::WorkerConfig {
@@ -127,7 +127,7 @@ fn test_state_with_i18n(translations: &[(&str, &str)]) -> AppState {
         metrics: crate::TaskMetricsRegistry::default(),
         channels: crate::ChannelConfig::default(),
         reload_ctx: crate::ReloadContext::default(),
-            ask_states: crate::AskStateRegistry::default(),
+        ask_states: crate::AskStateRegistry::default(),
     }
 }
 
@@ -338,6 +338,41 @@ fn intercept_response_payload_localizes_missing_directory_message_to_english_req
         messages,
         vec!["Directory not found at the provided path.".to_string()]
     );
+}
+
+#[test]
+fn intercept_response_payload_preserves_existing_file_token_before_re_resolving_hint() {
+    let mut state = test_state_with_i18n(&[]);
+    let isolated = TempDirGuard::new("preserve_existing_file_token");
+    state.skill_rt.workspace_root = isolated.path().to_path_buf();
+    state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
+
+    let selected = isolated.path().join("logs").join("clawd.log");
+    let sibling = isolated.path().join("archive").join("clawd.log");
+    write_text_file(&selected);
+    write_text_file(&sibling);
+    let selected = selected.canonicalize().expect("canonical selected");
+
+    let contract = IntentOutputContract {
+        delivery_required: true,
+        response_shape: OutputResponseShape::FileToken,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "clawd.log".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let existing = format!("FILE:{}", selected.display());
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "第二个",
+        true,
+        &contract,
+        existing.clone(),
+        vec![existing.clone()],
+    );
+
+    assert_eq!(text, existing);
+    assert_eq!(messages, vec![text]);
 }
 
 // Single-file delivery resolution rules.
@@ -652,6 +687,56 @@ fn rule3_filename_only_bare_stem_multiple_extensions_requires_confirmation() {
                 .canonicalize()
                 .expect("canonical abcd.txt"),
         ]))
+    );
+}
+
+#[test]
+fn rule3_filename_only_bare_stem_prefers_unique_project_root_direct_child() {
+    let system_root = TempDirGuard::new("rule3_system_stem_direct_child");
+    let project_root = TempDirGuard::new("rule3_project_stem_direct_child");
+    let root_target = project_root.path().join("README.md");
+    let nested_target = project_root.path().join("docs/README.md");
+    write_text_file(&root_target);
+    write_text_file(&nested_target);
+
+    let resolved = resolve_file_delivery_target(
+        "把 readme 发给我",
+        system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::Resolved(
+            root_target.canonicalize().expect("canonical root readme")
+        ))
+    );
+}
+
+#[test]
+fn rule3_filename_only_exact_name_prefers_unique_project_root_direct_child() {
+    let system_root = TempDirGuard::new("rule3_system_exact_direct_child");
+    let project_root = TempDirGuard::new("rule3_project_exact_direct_child");
+    let root_target = project_root.path().join("README.md");
+    let nested_target = project_root.path().join("docs/README.md");
+    write_text_file(&root_target);
+    write_text_file(&nested_target);
+
+    let resolved = resolve_file_delivery_target(
+        "把 README.md 发给我",
+        system_root.path(),
+        project_root.path(),
+        3,
+        200,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::Resolved(
+            root_target.canonicalize().expect("canonical root readme")
+        ))
     );
 }
 
@@ -1187,6 +1272,12 @@ fn ascii_bare_filename_stem_candidates_are_extracted_without_action_words() {
 }
 
 #[test]
+fn bare_filename_stem_candidates_survive_inline_punctuation() {
+    let out = extract_bare_filename_stem_candidates("看一下 readme，然后用一句话说它是干什么的");
+    assert!(out.iter().any(|v| v == "readme"));
+}
+
+#[test]
 fn chinese_directory_name_hint_is_extracted() {
     assert_eq!(
         directory_lookup_input_from_hint("日志"),
@@ -1223,6 +1314,37 @@ fn chinese_directory_and_file_pair_is_extracted() {
     assert_eq!(
         extract_directory_and_file_pair("在 项目资料 目录下找 日报.md"),
         Some(("项目资料".to_string(), "日报.md".to_string()))
+    );
+}
+
+#[test]
+fn english_directory_and_file_pair_is_extracted_for_filename_and_bare_stem() {
+    assert_eq!(
+        extract_directory_and_file_pair(
+            "In scripts/nl_tests/fixtures/locator_smart/case_only, where is report.md? just output the path"
+        ),
+        Some((
+            "scripts/nl_tests/fixtures/locator_smart/case_only".to_string(),
+            "report.md".to_string()
+        ))
+    );
+    assert_eq!(
+        extract_directory_and_file_pair(
+            "In scripts/nl_tests/fixtures/locator_smart/stem_unique, where is abcd? just the path"
+        ),
+        Some((
+            "scripts/nl_tests/fixtures/locator_smart/stem_unique".to_string(),
+            "abcd".to_string()
+        ))
+    );
+}
+
+#[test]
+fn command_phrase_is_not_misread_as_directory_and_file_pair() {
+    assert_eq!(extract_directory_and_file_pair("执行 pwd"), None);
+    assert_eq!(
+        extract_directory_and_file_pair("执行 pwd，然后告诉我结果"),
+        None
     );
 }
 

@@ -123,8 +123,7 @@ impl CircuitBreaker {
         let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
         inner.consecutive_failures = inner.consecutive_failures.saturating_add(1);
         let was_half_open = inner.state == State::HalfOpen;
-        let should_open =
-            was_half_open || inner.consecutive_failures >= FAILURE_THRESHOLD;
+        let should_open = was_half_open || inner.consecutive_failures >= FAILURE_THRESHOLD;
         if should_open {
             if was_half_open {
                 inner.current_cooldown_ms =

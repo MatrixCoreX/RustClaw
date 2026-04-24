@@ -27,7 +27,7 @@ pub(crate) enum AskState {
     Routing,
     /// 路由判定需要追问（`AskMode::is_clarify_only()`）。
     Clarifying,
-    /// 路由结论是直接 LLM 直答（chat / classifier_direct）。
+    /// 路由结论是直接 LLM 直答（chat）。
     Chatting,
     /// 路由结论是恢复执行已暂停 task。
     ResumeExecuting,
@@ -373,7 +373,10 @@ mod tests {
     fn now_unix_ms_is_monotonic_enough() {
         let a = super::now_unix_ms();
         let b = super::now_unix_ms();
-        assert!(b >= a, "now_unix_ms should be non-decreasing in same call sequence");
+        assert!(
+            b >= a,
+            "now_unix_ms should be non-decreasing in same call sequence"
+        );
         assert!(a > 0, "now_unix_ms should be positive after UNIX_EPOCH");
     }
 }

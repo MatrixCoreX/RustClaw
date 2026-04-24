@@ -115,6 +115,7 @@
             "workspace_project_summary",
             "project_overview",
             "workspace_overview_summary",
+            "scalar",
             "scalar_count",
             "count",
             "quantity_comparison",
@@ -126,6 +127,15 @@
             "recent_scalar_equality_check",
             "same_or_different",
             "equality_check",
+            "sqlite_table_listing",
+            "sqlite_tables_listing",
+            "sqlite_tables_summary",
+            "sqlite_table_names_only",
+            "sqlite_table_names",
+            "sqlite_names_only",
+            "sqlite_database_kind_judgment",
+            "sqlite_db_kind",
+            "database_kind_judgment",
             ""
           ]
         },
@@ -207,6 +217,51 @@
       "minimum": 0.0,
       "maximum": 1.0,
       "default": 0.0
+    },
+    "turn_type": {
+      "type": "string",
+      "description": "Optional turn taxonomy classification for task-state patching and run-control handling.",
+      "enum": [
+        "task_request",
+        "task_append",
+        "task_replace",
+        "task_correct",
+        "task_scope_update",
+        "run_control",
+        "approval_decision",
+        "status_query",
+        "feedback_or_error",
+        "preference_or_memory",
+        ""
+      ],
+      "default": ""
+    },
+    "target_task_policy": {
+      "type": "string",
+      "description": "Optional policy describing how this turn should attach to the current active task.",
+      "enum": [
+        "reuse_active",
+        "replace_active",
+        "pause_and_queue",
+        "standalone",
+        ""
+      ],
+      "default": ""
+    },
+    "should_interrupt_active_run": {
+      "type": "boolean",
+      "description": "True when this turn should interrupt a currently running execution before applying the new turn semantics.",
+      "default": false
+    },
+    "state_patch": {
+      "description": "Optional structured state/task patch payload for corrections, appended constraints, approvals, and similar turn-level updates.",
+      "type": ["object", "null"],
+      "default": null
+    },
+    "attachment_processing_required": {
+      "type": "boolean",
+      "description": "True when the turn includes attachments/media that must be normalized before planner/chat handling.",
+      "default": false
     }
   }
 }

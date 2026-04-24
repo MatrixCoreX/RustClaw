@@ -198,6 +198,7 @@ version = "0.1.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "claw-core",
  "hex",
  "reqwest 0.12.28",
  "serde",
@@ -426,18 +427,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
  "rand_core 0.10.1",
-]
-
-[[package]]
-name = "chat-skill"
-version = "0.1.5"
-dependencies = [
- "anyhow",
- "claw-core",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -972,6 +961,7 @@ name = "extension-manager-skill"
 version = "0.1.5"
 dependencies = [
  "anyhow",
+ "claw-core",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -1694,6 +1684,7 @@ version = "0.1.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "claw-core",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

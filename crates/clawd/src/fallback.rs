@@ -151,9 +151,7 @@ pub(crate) fn all_clarify_fallback_texts(state: &AppState) -> Vec<String> {
 }
 
 /// 底层 helper：直接接受 `i18n_dict`，不依赖 `AppState`，便于单测。
-pub(crate) fn all_clarify_fallback_texts_from_dict(
-    dict: &HashMap<String, String>,
-) -> Vec<String> {
+pub(crate) fn all_clarify_fallback_texts_from_dict(dict: &HashMap<String, String>) -> Vec<String> {
     let mut out: Vec<String> = ClarifyFallbackSource::all()
         .iter()
         .map(|src| lookup_or_default(dict, src.i18n_key(), src.default_en()))
@@ -188,11 +186,7 @@ pub(crate) fn is_known_clarify_fallback_text_with_dict(
         .any(|known| known == trimmed)
 }
 
-fn lookup_or_default(
-    dict: &HashMap<String, String>,
-    key: &str,
-    default_text: &str,
-) -> String {
+fn lookup_or_default(dict: &HashMap<String, String>, key: &str, default_text: &str) -> String {
     dict.get(key)
         .cloned()
         .unwrap_or_else(|| default_text.to_string())
@@ -257,7 +251,8 @@ mod tests {
         let mut dict = HashMap::new();
         dict.insert(
             LEGACY_SUPER_FALLBACK_KEY.to_string(),
-            "我需要确认一下：你这条消息是针对哪件事情？请补充目标或上下文，我立刻继续处理。".to_string(),
+            "我需要确认一下：你这条消息是针对哪件事情？请补充目标或上下文，我立刻继续处理。"
+                .to_string(),
         );
         assert!(is_known_clarify_fallback_text_with_dict(
             &dict,

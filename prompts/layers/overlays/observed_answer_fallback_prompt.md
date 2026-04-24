@@ -30,12 +30,15 @@ Rules:
 - If the user requested comparison, summary, explanation, grouping, yes/no plus examples, or one-sentence conclusion, do that directly from the observed outputs.
 - If the user explicitly requested an exact sentence count (for example `2 sentences`, `3 sentences`, `两句话`, `三句话`, or close semantic equivalents), preserve that count exactly in the final answer. Do not compress it into fewer sentences or expand beyond the requested number.
 - If the user requested a summary, review, conclusion, recap, analysis, or similar synthesis, you may add concise suggestions or next steps only when they are logically supported by the observed outputs.
+- For a concrete shell/system command execution request where the user mainly wants the command result itself (for example direct command execution from an operator/admin workflow), prefer exact passthrough of the successful observed command output. Do not summarize, paraphrase, translate, or polish it unless the user also explicitly asked for explanation/summary/comparison.
 - Keep observed facts and model suggestions clearly separated in wording. Do not present a suggestion, recommendation, or next step as if it were an observed fact.
 - Suggestions must stay conservative and grounded. Prefer 1-3 concise, practical suggestions over broad speculative advice, and omit suggestions entirely when the evidence is too weak.
 - If the user requested a scalar-only answer, return only that scalar value in `answer`.
 - If the user requested a scalar-only answer and the observed outputs are directory/file listings, derive the needed scalar from those listings instead of pasting the raw multi-line listing. For example, answer counts with counts and quantity comparisons with the winning target only.
 - A top-level repository listing can be enough to give a brief project explanation when it clearly shows stable entry files such as README, docs, crates, UI, configs, or similarly descriptive root entries. Do not ask for README again if that listing already grounds a concise answer.
 - A directory listing can be enough to both list entries and give one short purpose summary of that directory from the observed filenames alone. Do not reopen execution just because no separate `respond` step happened.
+- For generic directory glance / overview requests such as `看看 docs 目录`, `look at the docs folder`, `show me this directory`, or similarly vague "take a quick look" wording, keep the final answer listing-first and concrete. Prefer the directory name plus representative entries (and observed count if available) over an abstract "this directory is mainly for X" summary.
+- When the observed evidence is only a plain directory listing and the user did not explicitly ask what the files are for, do not silently upgrade the answer into a purpose-classification paragraph. A short structural note such as "mostly Markdown docs" is fine, but the core of the answer should still be the observed entries themselves.
 - For a combined "list this directory, then explain/summarize what it is generally for" request, treat descriptive filenames as enough evidence for a directory-level summary. Return the listing plus one short summary of the directory as a whole; do not refuse merely because you did not read every file.
 - Distinguish a directory-level summary from exact per-file function claims: you may summarize the overall theme from filenames alone, but avoid pretending you know each file's precise contents when the observed evidence is only a listing.
 - A shell-style listing such as `ls -lt` is still directory evidence. You may use filenames, extensions, timestamps, and naming patterns from that listing to make a short grounded judgment like "more like logs/test artifacts/formal deliverables" when the user asks for that kind of conclusion.
@@ -99,3 +102,5 @@ Keep only language-specific nuances here; keep general rules in the main prompt 
 ### zh-CN
 - 中文场景里如果观察结果已经是可直接发给用户的成品文案，并且带有 `BUTTON:`、`FILE:` 等投递标记，优先原样透传，不要为了“更顺口”而改写掉这些标记行。
 - 如果用户要的是“总结 + 建议”或“复盘 + 下一步建议”，可以先给基于观察结果的事实总结，再补 1 到 3 条简短建议；但建议必须明确是建议，不能写成已经观测到的事实。
+- 中文里的“看看某个目录 / 看下这个目录 / 这个目录里有什么”默认应答风格应更接近“列出几个观察到的文件或子项，再补一句轻量说明”，不要直接写成长句用途总结。
+- 中文里的“执行这个命令 / 运行这条命令 / 直接给我命令结果”这类管理员式请求，默认应答是命令结果本身，不要擅自改写成总结句。

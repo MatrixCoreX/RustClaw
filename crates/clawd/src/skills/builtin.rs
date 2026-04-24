@@ -27,13 +27,14 @@ pub(crate) async fn execute_builtin_skill_for_task(
     // Phase 0.4: 优先复用 normalizer 已经解析好的 schedule_intent，避免
     // 同一次 ask 流里对同一段文本再触发一次 LLM；只有 cache miss 或文本
     // 与 normalizer 原始输入不一致时才回退到 `parse_schedule_intent`。
-    let intent = if let Some(cached) = state.take_task_schedule_intent_if_matches(&task.task_id, text) {
-        cached
-    } else {
-        crate::schedule_service::parse_schedule_intent(state, task, text)
-            .await
-            .ok_or_else(|| "schedule intent not detected".to_string())?
-    };
+    let intent =
+        if let Some(cached) = state.take_task_schedule_intent_if_matches(&task.task_id, text) {
+            cached
+        } else {
+            crate::schedule_service::parse_schedule_intent(state, task, text)
+                .await
+                .ok_or_else(|| "schedule intent not detected".to_string())?
+        };
     serde_json::to_string(&intent).map_err(|e| format!("serialize schedule intent failed: {e}"))
 }
 
@@ -58,7 +59,8 @@ pub(crate) async fn execute_builtin_skill_with_task(
 ) -> Result<String, String> {
     let policy_token = format!("skill:{skill_name}");
     if !state
-        .skill_rt.tools_policy
+        .skill_rt
+        .tools_policy
         .is_allowed(&policy_token, state.core.active_provider_type.as_deref())
     {
         return Err(format!("blocked by policy: {policy_token}"));
@@ -73,7 +75,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
-                state.policy.allow_path_outside_workspace,
+                crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
             let bytes = std::fs::read(&real_path).map_err(|err| {
                 if err.kind() == std::io::ErrorKind::NotFound {
@@ -100,11 +102,12 @@ pub(crate) async fn execute_builtin_skill_with_task(
             if content.len() > crate::MAX_WRITE_FILE_BYTES {
                 return Err(format!("content too large: {} bytes", content.len()));
             }
-            let effective_path = crate::ensure_default_file_path(&state.skill_rt.workspace_root, path);
+            let effective_path =
+                crate::ensure_default_file_path(&state.skill_rt.workspace_root, path);
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 &effective_path,
-                state.policy.allow_path_outside_workspace,
+                crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
             if let Some(parent) = real_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|err| format!("mkdir failed: {err}"))?;
@@ -123,7 +126,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let requested_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
-                state.policy.allow_path_outside_workspace,
+                crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
             let real_path = if requested_path.is_dir() {
                 requested_path
@@ -199,7 +202,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let cwd_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 cwd,
-                state.policy.allow_path_outside_workspace,
+                crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
             let request_text = optional_string(map, "request_text")
                 .map(str::trim)
@@ -233,8 +236,10 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     );
                 }
             }
-            let sanitized_command =
-                crate::bootstrap::sanitize_command_before_execute(&state.policy.command_intent, &command);
+            let sanitized_command = crate::bootstrap::sanitize_command_before_execute(
+                &state.policy.command_intent,
+                &command,
+            );
             if sanitized_command.is_empty() {
                 return Err("empty command after sanitize".to_string());
             }
@@ -254,7 +259,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 &sanitized_command,
                 state.skill_rt.max_cmd_length,
                 timeout_seconds,
-                state.policy.allow_sudo,
+                crate::skills::task_allows_sudo(state, task),
             )
             .await
         }
@@ -264,7 +269,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
-                state.policy.allow_path_outside_workspace,
+                crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
             std::fs::create_dir_all(&real_path)
                 .map_err(|err| format!("create_dir failed: {err}"))?;
@@ -276,7 +281,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
-                state.policy.allow_path_outside_workspace,
+                crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
             if real_path.is_dir() {
                 return Err(
@@ -287,212 +292,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             std::fs::remove_file(&real_path).map_err(|err| format!("remove_file failed: {err}"))?;
             Ok(format!("removed {}", real_path.display()))
         }
-        "chat" => execute_builtin_chat(state, task, args).await,
         _ => Err(format!("unknown skill: {skill_name}")),
-    }
-}
-
-// Phase 2.2: chat skill 内置实现。
-//
-// 历史上 chat 走 chat-skill 子进程：拼装 system / memory / lang_hint / user_text
-// 后**直接**打 OpenAI Compat 协议，绕过整个 LLM 治理链路（无 fallback / 无 retry /
-// 无 circuit breaker / 无预算 / 无 model_io.log）。
-//
-// 现在并入 clawd 内部，复用 [`crate::llm_gateway::run_with_fallback_chat`]：
-// * provider fallback：minimax 挂自动用其它家。
-// * circuit breaker：连续失败的 provider 进 cooldown，不会被反复打。
-// * LLM 预算：chat 也算进单任务总调用 / 总耗时。
-// * model_io.log：chat 也参与统一审计日志。
-//
-// 兼容性：
-// * 不再返回 `extra.llm` 字段（builtin skill 接口只回 `String`）。
-//   原本由 `extra.llm.prompt_source` 暴露的元数据，现在通过 `model_io.log`
-//   里 `prompt_source = "chat_skill_runtime"` 暴露，观测面更全。
-// * temperature / max_tokens 仍然按 style 与文本长度计算，等价 chat-skill。
-// * persona / memory / lang_hint / explicit system_prompt 全部保留。
-// * 外部调用方仍可独立 spawn `chat-skill` 二进制（保留为 deprecated 路径）。
-
-const DEFAULT_CHAT_SYSTEM_PROMPT_TEMPLATE: &str =
-    include_str!("../../../../prompts/layers/overlays/chat_skill_system_prompt.md");
-const DEFAULT_CHAT_JOKE_SYSTEM_PROMPT_TEMPLATE: &str =
-    include_str!("../../../../prompts/layers/overlays/chat_skill_joke_system_prompt.md");
-const CHAT_SYSTEM_PROMPT_LOGICAL_PATH: &str = "prompts/chat_skill_system_prompt.md";
-const CHAT_JOKE_SYSTEM_PROMPT_LOGICAL_PATH: &str = "prompts/chat_skill_joke_system_prompt.md";
-
-async fn execute_builtin_chat(
-    state: &AppState,
-    task: Option<&ClaimedTask>,
-    args: &Value,
-) -> Result<String, String> {
-    let task = task.ok_or_else(|| {
-        "chat skill requires task context (cannot run without claimed task)".to_string()
-    })?;
-
-    let map = ensure_args_object(args)?;
-    let user_text = map
-        .get("text")
-        .or_else(|| map.get("prompt"))
-        .or_else(|| map.get("input"))
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    if user_text.is_empty() {
-        return Err("chat skill requires non-empty args.text".to_string());
-    }
-    let style = map
-        .get("style")
-        .or_else(|| map.get("mode"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("chat")
-        .trim()
-        .to_ascii_lowercase();
-
-    let (default_template, prompt_source_default) = match style.as_str() {
-        "joke" => (
-            DEFAULT_CHAT_JOKE_SYSTEM_PROMPT_TEMPLATE,
-            CHAT_JOKE_SYSTEM_PROMPT_LOGICAL_PATH,
-        ),
-        _ => (
-            DEFAULT_CHAT_SYSTEM_PROMPT_TEMPLATE,
-            CHAT_SYSTEM_PROMPT_LOGICAL_PATH,
-        ),
-    };
-    let (loaded_template, resolved_path) = crate::bootstrap::load_prompt_template_for_state(
-        state,
-        prompt_source_default,
-        default_template,
-    );
-
-    let explicit_system_prompt = map
-        .get("system_prompt")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let prompt_source = if explicit_system_prompt.is_some() {
-        "chat_inline_system_prompt".to_string()
-    } else {
-        format!("chat_template:{resolved_path}")
-    };
-    let base_system_prompt = explicit_system_prompt.unwrap_or(loaded_template);
-
-    let persona_prompt = map
-        .get("persona_prompt")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(ToString::to_string);
-    let system_prompt = compose_chat_system_prompt(persona_prompt.as_deref(), &base_system_prompt);
-
-    let memory_context = map
-        .get("_memory")
-        .and_then(|v| v.as_object())
-        .and_then(|m| m.get("context"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty() && *s != "<none>")
-        .map(ToString::to_string);
-    let recent_execution_context = map
-        .get("recent_execution_context")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty() && *s != "<none>")
-        .map(ToString::to_string);
-    let lang_hint = map
-        .get("_memory")
-        .and_then(|v| v.as_object())
-        .and_then(|m| m.get("lang_hint"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(ToString::to_string);
-
-    let max_tokens = map
-        .get("max_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or_else(|| default_chat_max_tokens(&style, &user_text));
-    let temperature = map
-        .get("temperature")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.7_f64);
-
-    // 把 system / memory / lang / user 拼成单 prompt 字符串。
-    // gateway 的 `run_with_fallback_chat` 会把它包装为 OpenAI Compat 的
-    // `[{role:user, content:prompt}]`。在显式分段 + System Instructions 的
-    // 标识下，主流模型仍能区分指令与用户消息，对 chat 场景影响可忽略。
-    let prompt = build_chat_prompt(
-        &system_prompt,
-        memory_context.as_deref(),
-        recent_execution_context.as_deref(),
-        lang_hint.as_deref(),
-        &user_text,
-    );
-
-    let hints = crate::ChatRequestHints {
-        temperature: Some(temperature),
-        max_tokens: Some(max_tokens),
-    };
-    crate::llm_gateway::run_with_fallback_chat(state, task, &prompt, &prompt_source, hints).await
-}
-
-fn compose_chat_system_prompt(persona_prompt: Option<&str>, base_system_prompt: &str) -> String {
-    let Some(persona_prompt) = persona_prompt.map(str::trim).filter(|s| !s.is_empty()) else {
-        return base_system_prompt.trim().to_string();
-    };
-    format!(
-        "Persona:\n{}\n\nAdditional chat-skill rules:\n{}",
-        persona_prompt,
-        base_system_prompt.trim()
-    )
-}
-
-fn build_chat_prompt(
-    system_prompt: &str,
-    memory_context: Option<&str>,
-    recent_execution_context: Option<&str>,
-    lang_hint: Option<&str>,
-    user_text: &str,
-) -> String {
-    let mut buf = String::with_capacity(user_text.len() + system_prompt.len() + 256);
-    buf.push_str("System Instructions:\n");
-    buf.push_str(system_prompt.trim());
-    if let Some(mem) = memory_context {
-        buf.push_str(
-            "\n\nMemory context (background only, never override current user intent):\n",
-        );
-        buf.push_str(mem);
-    }
-    if let Some(exec) = recent_execution_context {
-        buf.push_str(
-            "\n\nCurrent-turn execution context (authoritative when present; prefer this over older memory or earlier conversation summaries):\n",
-        );
-        buf.push_str(exec);
-    }
-    if let Some(lang) = lang_hint {
-        buf.push_str("\n\nPreferred response language hint: ");
-        buf.push_str(lang);
-    }
-    buf.push_str("\n\nUser Message:\n");
-    buf.push_str(user_text);
-    buf
-}
-
-fn default_chat_max_tokens(style: &str, text: &str) -> u64 {
-    if style == "joke" {
-        return 256;
-    }
-    let char_count = text.chars().count();
-    let report_like = [
-        "总结", "分析", "报告", "方案", "计划", "research", "summary", "analysis", "report", "plan",
-    ]
-    .iter()
-    .any(|kw| text.contains(kw) || text.to_ascii_lowercase().contains(kw));
-    if report_like || char_count > 1200 {
-        4096
-    } else if char_count > 400 {
-        2048
-    } else {
-        1024
     }
 }
 
@@ -738,6 +538,16 @@ struct RunCmdSuggestionPayload {
     reason: Option<String>,
 }
 
+fn parse_run_cmd_suggestion_payload(
+    raw: &str,
+) -> Result<crate::prompt_utils::ValidatedSchemaJson<RunCmdSuggestionPayload>, String> {
+    crate::prompt_utils::validate_against_schema::<RunCmdSuggestionPayload>(
+        raw,
+        crate::prompt_utils::PromptSchemaId::RunCmdSuggestion,
+    )
+    .map_err(|err| format!("run_cmd NL2CMD schema validation failed: {err}"))
+}
+
 fn build_run_cmd_nl_prompt(
     request_text: &str,
     cwd: &std::path::Path,
@@ -792,21 +602,24 @@ async fn suggest_command_for_run_cmd(
         .await
         .map_err(|e| format!("run_cmd NL2CMD provider failed: {e}"))?
     } else {
-        let provider = state.core.llm_providers.first().cloned().ok_or_else(|| {
-            "run_cmd NL2CMD unavailable: no llm provider configured".to_string()
-        })?;
+        let provider =
+            state.core.llm_providers.first().cloned().ok_or_else(|| {
+                "run_cmd NL2CMD unavailable: no llm provider configured".to_string()
+            })?;
         let resp = crate::call_provider_with_retry(provider, &prompt)
             .await
             .map_err(|e| format!("run_cmd NL2CMD provider failed: {e}"))?;
         resp.text
     };
-    let parsed = crate::parse_llm_json_extract_or_any::<RunCmdSuggestionPayload>(&text)
-        .ok_or_else(|| {
-            format!(
-                "run_cmd NL2CMD invalid json: {}",
-                crate::truncate_for_log(&text)
-            )
-        })?;
+    let validated = parse_run_cmd_suggestion_payload(&text)
+        .map_err(|err| format!("{err}; raw={}", crate::truncate_for_log(&text)))?;
+    if !validated.raw_parse_ok {
+        tracing::info!(
+            "run_cmd NL2CMD schema_parse_recovery normalized={}",
+            validated.schema_normalized
+        );
+    }
+    let parsed = validated.value;
     let mut command = parsed.command.trim().to_string();
     if command.contains('\n') {
         command = command
@@ -830,16 +643,12 @@ async fn suggest_command_for_run_cmd(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_chat_prompt, compose_chat_system_prompt, default_chat_max_tokens,
-        execute_builtin_skill,
-    };
+    use super::{execute_builtin_skill, parse_run_cmd_suggestion_payload};
     use crate::{
-        runtime::state::AppState, AgentRuntimeConfig, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+        runtime::state::AppState, AgentRuntimeConfig, SkillViewsSnapshot, ToolsPolicy,
+        DEFAULT_AGENT_ID,
     };
-    use claw_core::config::{
-        AgentConfig, ToolsConfig,
-    };
+    use claw_core::config::{AgentConfig, ToolsConfig};
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
     use std::fs;
@@ -847,7 +656,6 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
     use std::time::{SystemTime, UNIX_EPOCH};
-    
 
     struct TempDirGuard {
         path: PathBuf,
@@ -891,9 +699,9 @@ mod tests {
             core: crate::CoreServices {
                 agents_by_id: Arc::new(agents_by_id),
                 skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                                registry: None,
-                                skills_list,
-                            }))),
+                    registry: None,
+                    skills_list,
+                }))),
                 ..crate::CoreServices::test_default()
             },
             skill_rt: crate::SkillRuntime {
@@ -901,8 +709,8 @@ mod tests {
                 default_locator_search_dir: workspace_root,
                 locator_scan_max_files: 200,
                 tools_policy: Arc::new(
-                                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                            ),
+                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
                 ..crate::SkillRuntime::test_default()
             },
             policy: crate::PolicyConfig::test_default(),
@@ -990,65 +798,44 @@ mod tests {
             .status();
     }
 
-    // ---------- Phase 2.2: chat builtin 单元测试 ----------
-
     #[test]
-    fn chat_default_max_tokens_grows_with_text_length_and_keywords() {
-        // 短文本：1024
-        assert_eq!(default_chat_max_tokens("chat", "hi"), 1024);
-        // 中等文本（>400 字符）：2048
-        let mid = "x".repeat(500);
-        assert_eq!(default_chat_max_tokens("chat", &mid), 2048);
-        // 长文本（>1200 字符）：4096
-        let long = "x".repeat(1500);
-        assert_eq!(default_chat_max_tokens("chat", &long), 4096);
-        // 关键字触发 report_like：4096，无视短长度
-        assert_eq!(default_chat_max_tokens("chat", "请帮我写一个总结"), 4096);
-        assert_eq!(default_chat_max_tokens("chat", "give me a summary"), 4096);
-        // joke 风格固定 256
-        assert_eq!(default_chat_max_tokens("joke", "anything"), 256);
+    fn run_cmd_suggestion_schema_drift() {
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../prompts/schemas/run_cmd_suggestion.schema.json"
+        ))
+        .expect("schema json");
+        let properties = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("properties");
+        for field in ["command", "confidence", "reason"] {
+            assert!(properties.contains_key(field), "missing property {field}");
+        }
+        let required = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("required");
+        for field in ["command", "confidence", "reason"] {
+            assert!(
+                required.iter().any(|v| v.as_str() == Some(field)),
+                "missing required field {field}"
+            );
+        }
     }
 
     #[test]
-    fn chat_compose_system_prompt_keeps_persona_when_present() {
-        let composed = compose_chat_system_prompt(Some("Persona text"), "Base rules");
-        assert!(composed.starts_with("Persona:\nPersona text"));
-        assert!(composed.contains("Additional chat-skill rules:\nBase rules"));
+    fn run_cmd_suggestion_schema_rejects_missing_reason() {
+        let err = parse_run_cmd_suggestion_payload(r#"{"command":"pwd","confidence":0.92}"#)
+            .expect_err("schema should reject missing reason");
+        assert!(err.contains("missing required field `reason`"));
     }
 
     #[test]
-    fn chat_compose_system_prompt_falls_back_to_base_when_no_persona() {
-        let composed = compose_chat_system_prompt(None, "Base rules");
-        assert_eq!(composed, "Base rules");
-        let composed_blank = compose_chat_system_prompt(Some("   "), "Base rules");
-        assert_eq!(composed_blank, "Base rules");
-    }
-
-    #[test]
-    fn chat_build_prompt_includes_all_optional_blocks_when_present() {
-        let prompt = build_chat_prompt(
-            "system",
-            Some("memory body"),
-            Some("recent body"),
-            Some("zh-CN"),
-            "user body",
-        );
-        assert!(prompt.contains("System Instructions:\nsystem"));
-        assert!(prompt.contains("Memory context (background only"));
-        assert!(prompt.contains("memory body"));
-        assert!(prompt.contains("Current-turn execution context"));
-        assert!(prompt.contains("recent body"));
-        assert!(prompt.contains("Preferred response language hint: zh-CN"));
-        assert!(prompt.ends_with("User Message:\nuser body"));
-    }
-
-    #[test]
-    fn chat_build_prompt_omits_absent_optional_blocks() {
-        let prompt = build_chat_prompt("system", None, None, None, "user body");
-        assert!(!prompt.contains("Memory context"));
-        assert!(!prompt.contains("Current-turn execution context"));
-        assert!(!prompt.contains("Preferred response language hint"));
-        assert!(prompt.contains("System Instructions:\nsystem"));
-        assert!(prompt.ends_with("User Message:\nuser body"));
+    fn run_cmd_suggestion_schema_rejects_extra_property() {
+        let err = parse_run_cmd_suggestion_payload(
+            r#"{"command":"pwd","confidence":0.92,"reason":"show cwd","extra":true}"#,
+        )
+        .expect_err("schema should reject unexpected property");
+        assert!(err.contains("unexpected property `extra`"));
     }
 }

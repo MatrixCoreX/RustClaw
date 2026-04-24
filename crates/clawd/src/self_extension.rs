@@ -200,7 +200,8 @@ async fn run_extension_manager(
     args: &Value,
 ) -> Result<Value, String> {
     let _permit = state
-        .skill_rt.skill_semaphore
+        .skill_rt
+        .skill_semaphore
         .clone()
         .acquire_owned()
         .await

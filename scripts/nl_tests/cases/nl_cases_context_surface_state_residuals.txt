@@ -1,0 +1,13 @@
+# Focused three-turn follow-up/context regressions for surface/state refactors.
+# Format: case_name|turn1|turn2|turn3
+
+context_fixture_readme_delivery_basename|先读一下 scripts/nl_tests/fixtures/device_local/README.md 前 4 行|把这个文件发给我|只说文件名
+context_fixture_config_scalar_then_delivery|先去 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 里找 app.name，只把值给我|把这个文件发给我|只说文件名
+context_fixture_archive_list_then_first_delivery|先看一下 scripts/nl_tests/fixtures/device_local/docs/archive 里有什么|把第一个发给我|只说文件名
+context_switch_readme_to_service_notes|先读一下 scripts/nl_tests/fixtures/device_local/README.md 开头 4 行|那 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 呢，开头 4 行|上一个更像说明文还是日志
+context_sqlite_then_model_log_compare|先看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 有哪些表|再看一下 scripts/nl_tests/fixtures/device_local/logs/model_io.log 最后 4 行|上一个更像结构定义还是运行记录
+context_case_only_report_then_delivery|先去 scripts/nl_tests/fixtures/locator_smart/case_only 找 report.md，只输出路径|把这个文件发给我|只说文件名
+context_stem_unique_then_delivery|先去 scripts/nl_tests/fixtures/locator_smart/stem_unique 找 abcd，只输出路径|把这个文件发给我|只说文件名
+context_docs_then_logs_switch_second|先列出 scripts/nl_tests/fixtures/device_local/docs 目录下的名字|那 scripts/nl_tests/fixtures/device_local/logs 目录下前 2 个名字呢|就第二个，只说名字
+context_release_delivery_repeat|先把 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md 发给我|只说文件名|再发一次
+context_sqlite_tables_then_second_name|先看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 有哪些表|就第二个，只说名字|那上一个呢，也只说名字

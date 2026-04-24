@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/schemas/image_vision_screenshot_summary.schema.json",
+  "title": "Image Vision Screenshot Summary Output",
+  "description": "Schema for the JSON object returned by `prompts/image_vision_action_screenshot_summary.md` and consumed by `crates/skills/image_vision/src/main.rs::parse_structured_narrative_action_output` for the `screenshot_summary` action.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "purpose",
+    "critical_text",
+    "warnings",
+    "next_actions",
+    "uncertainties"
+  ],
+  "properties": {
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "critical_text": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

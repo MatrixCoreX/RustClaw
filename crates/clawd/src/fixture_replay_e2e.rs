@@ -154,7 +154,7 @@ pub(crate) struct LoadedCase {
 ///     [`crate::llm_gateway::classify_prompt_source`] 标签必须在本次任务里
 ///     至少被调用过一次。来源是 `state.task_llm_by_prompt(task_id)` 的 key
 ///     集（HashMap，无调用顺序）。允许值：`normalizer` / `plan` /
-///     `plan_repair` / `classifier_direct` / `observed` / `clarify` /
+///     `plan_repair` / `delivery_classifier` / `observed` / `clarify` /
 ///     `intent_meta` / `schedule` / `nl2cmd` / `self_extension` / `memory` /
 ///     `verifier` / `chat` / `semantic_judge` / `router_legacy` / `other`。
 ///     未来若需要"按顺序"断言，需在 `state.metrics` 加事件序列字段 —— 当前
@@ -176,6 +176,28 @@ pub(crate) struct LoadedCase {
 ///     `failure` / `clarify` / `resume_failure`）。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct ExpectedPriorTurn {
+    pub user_text: String,
+    pub assistant_text: String,
+    pub updated_at: String,
+
+    #[serde(
+        default = "default_prior_turn_final_status",
+        skip_serializing_if = "is_default_prior_turn_final_status"
+    )]
+    pub final_status: String,
+}
+
+fn default_prior_turn_final_status() -> String {
+    "success".to_string()
+}
+
+fn is_default_prior_turn_final_status(v: &String) -> bool {
+    v == "success"
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ExpectedCase {
     pub case: String,
 
@@ -186,10 +208,19 @@ pub(crate) struct ExpectedCase {
 
     pub freeze_now: String,
 
-    #[serde(default = "default_user_id", skip_serializing_if = "is_default_user_id")]
+    #[serde(
+        default = "default_user_id",
+        skip_serializing_if = "is_default_user_id"
+    )]
     pub user_id: i64,
-    #[serde(default = "default_chat_id", skip_serializing_if = "is_default_chat_id")]
+    #[serde(
+        default = "default_chat_id",
+        skip_serializing_if = "is_default_chat_id"
+    )]
     pub chat_id: i64,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prior_turns: Vec<ExpectedPriorTurn>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub expected_final_answer_contains: Vec<String>,
@@ -249,9 +280,9 @@ impl ExpectedCase {
                 path.display()
             )
         })?;
-        parsed.validate_against_dir(case_dir).map_err(|e| {
-            format!("{} validate expected.json failed: {e}", path.display())
-        })?;
+        parsed
+            .validate_against_dir(case_dir)
+            .map_err(|e| format!("{} validate expected.json failed: {e}", path.display()))?;
         Ok(Some(parsed))
     }
 
@@ -265,12 +296,7 @@ impl ExpectedCase {
         let dir_name = case_dir
             .file_name()
             .and_then(|n| n.to_str())
-            .ok_or_else(|| {
-                format!(
-                    "case dir name not utf8: {}",
-                    case_dir.display()
-                )
-            })?;
+            .ok_or_else(|| format!("case dir name not utf8: {}", case_dir.display()))?;
         if self.case != dir_name {
             return Err(format!(
                 "expected.case = {:?} but lives under directory {:?}",
@@ -287,21 +313,46 @@ impl ExpectedCase {
                     .to_string(),
             );
         }
-        if let (Some(exact), Some(min)) = (self.expected_llm_call_count, self.expected_min_llm_call_count) {
+        for (idx, prior_turn) in self.prior_turns.iter().enumerate() {
+            if prior_turn.user_text.is_empty() {
+                return Err(format!("prior_turns[{idx}].user_text must not be empty"));
+            }
+            if prior_turn.assistant_text.is_empty() {
+                return Err(format!(
+                    "prior_turns[{idx}].assistant_text must not be empty"
+                ));
+            }
+            if prior_turn.updated_at.is_empty() {
+                return Err(format!("prior_turns[{idx}].updated_at must not be empty"));
+            }
+            if prior_turn.final_status.is_empty() {
+                return Err(format!("prior_turns[{idx}].final_status must not be empty"));
+            }
+        }
+        if let (Some(exact), Some(min)) = (
+            self.expected_llm_call_count,
+            self.expected_min_llm_call_count,
+        ) {
             if exact < min {
                 return Err(format!(
                     "expected_llm_call_count ({exact}) < expected_min_llm_call_count ({min})"
                 ));
             }
         }
-        if let (Some(exact), Some(max)) = (self.expected_llm_call_count, self.expected_max_llm_call_count) {
+        if let (Some(exact), Some(max)) = (
+            self.expected_llm_call_count,
+            self.expected_max_llm_call_count,
+        ) {
             if exact > max {
                 return Err(format!(
                     "expected_llm_call_count ({exact}) > expected_max_llm_call_count ({max})"
                 ));
             }
         }
-        if let (Some(min), Some(max)) = (self.expected_min_llm_call_count, self.expected_max_llm_call_count) {
+        if let (Some(min), Some(max)) = (
+            self.expected_min_llm_call_count,
+            self.expected_max_llm_call_count,
+        ) {
             if min > max {
                 return Err(format!(
                     "expected_min_llm_call_count ({min}) > expected_max_llm_call_count ({max})"
@@ -341,11 +392,36 @@ pub(crate) struct ReplayOutcome {
     pub prompt_sources_invoked: std::collections::BTreeSet<String>,
 }
 
+fn build_fixture_ask_payload_json(text: &str, call_id: &str) -> String {
+    serde_json::json!({
+        "text": text,
+        "agent_mode": true,
+        "channel": "ui",
+        "agent_id": crate::DEFAULT_AGENT_ID,
+        "call_id": call_id,
+    })
+    .to_string()
+}
+
+fn build_fixture_result_json(text: &str, final_status: &str) -> String {
+    serde_json::json!({
+        "text": text,
+        "task_journal": {
+            "summary": {
+                "final_answer": text,
+                "final_status": final_status,
+            }
+        }
+    })
+    .to_string()
+}
+
 /// §7.5 Step 4.b.2.6：从 `AppState` + DB 抽出 [`ReplayOutcome`]。
 ///
-/// **必须**在 `process_ask_task` 返回之后、清理 metrics 之前调用。读取 DB
-/// 失败 / `result_json` 不是合法 JSON / status 列缺失都视为 `Err`，
-/// 让 harness 立刻 panic 而不是给出半残数据。
+/// 优先读 `tasks.result_json.task_journal.summary.task_metrics`；如果当前任务还没
+/// finalize 到 DB，再回退读 `AppState` 里的 live metrics 桶。读取 DB 失败 /
+/// `result_json` 不是合法 JSON / status 列缺失都视为 `Err`，让 harness 立刻
+/// panic 而不是给出半残数据。
 pub(crate) fn extract_outcome_from_state(
     state: &crate::AppState,
     task_id: &str,
@@ -372,6 +448,8 @@ pub(crate) fn extract_outcome_from_state(
     let mut final_answer_text = None;
     let mut final_status = None;
     let mut fallback_source = None;
+    let mut journal_llm_call_count = None;
+    let mut journal_prompt_sources_invoked = None;
     if let Some(text) = &result_json_text {
         let parsed: serde_json::Value = serde_json::from_str(text).map_err(|e| {
             format!(
@@ -379,9 +457,7 @@ pub(crate) fn extract_outcome_from_state(
                 crate::truncate_for_log(text)
             )
         })?;
-        let summary = parsed
-            .get("task_journal")
-            .and_then(|j| j.get("summary"));
+        let summary = parsed.get("task_journal").and_then(|j| j.get("summary"));
         if let Some(summary) = summary {
             final_answer_text = summary
                 .get("final_answer")
@@ -396,14 +472,29 @@ pub(crate) fn extract_outcome_from_state(
                 .and_then(|f| f.get("fallback"))
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
+            let task_metrics = summary.get("task_metrics");
+            journal_llm_call_count = task_metrics
+                .and_then(|m| m.get("llm_calls_per_task"))
+                .and_then(|v| v.as_u64());
+            journal_prompt_sources_invoked = task_metrics
+                .and_then(|m| m.get("by_prompt"))
+                .and_then(|v| v.as_object())
+                .map(|map| {
+                    map.keys()
+                        .cloned()
+                        .collect::<std::collections::BTreeSet<_>>()
+                });
         }
     }
 
-    let llm_call_count = state.task_llm_call_count(task_id);
-    let prompt_sources_invoked = state
-        .task_llm_by_prompt(task_id)
-        .into_keys()
-        .collect::<std::collections::BTreeSet<_>>();
+    let llm_call_count =
+        journal_llm_call_count.unwrap_or_else(|| state.task_llm_call_count(task_id));
+    let prompt_sources_invoked = journal_prompt_sources_invoked.unwrap_or_else(|| {
+        state
+            .task_llm_by_prompt(task_id)
+            .into_keys()
+            .collect::<std::collections::BTreeSet<_>>()
+    });
 
     Ok(ReplayOutcome {
         task_id: task_id.to_string(),
@@ -552,8 +643,7 @@ pub(crate) async fn run_replay_case(case_name: &str) -> Result<Vec<String>, Stri
             case_dir.display()
         ));
     }
-    let calls_path =
-        case_dir.join(crate::providers::fixture_replay::FIXTURE_CALLS_FILENAME);
+    let calls_path = case_dir.join(crate::providers::fixture_replay::FIXTURE_CALLS_FILENAME);
     if !calls_path.is_file() {
         return Err(format!(
             "fixture {} missing in {} (run scripts/regen_fixture.sh)",
@@ -571,29 +661,87 @@ pub(crate) async fn run_replay_case(case_name: &str) -> Result<Vec<String>, Stri
         })?;
 
     let state = crate::AppState::test_default_with_fixture_provider()
-        .with_minimal_builtin_registry()
         .with_prompt_layers_installed()
+        .with_real_skill_registry()
+        .with_real_runtime_policy()
         .with_seeded_db_schema();
 
-    let task_id = format!(
-        "fixture-replay-{}-{}",
-        case_name,
-        uuid::Uuid::new_v4()
-    );
-    let payload_value = serde_json::json!({
-        "text": expected.user_text,
-        "channel": "ui",
-        "agent_id": crate::DEFAULT_AGENT_ID,
-        "call_id": task_id,
-    });
-    let payload_text = payload_value.to_string();
+    {
+        let user_key = format!("anon:{}:{}", expected.user_id, expected.chat_id);
+        for (idx, prior_turn) in expected.prior_turns.iter().enumerate() {
+            let prior_task_id = format!("fixture-history-{case_name}-{idx}");
+            let payload_text =
+                build_fixture_ask_payload_json(&prior_turn.user_text, &prior_task_id);
+            let result_json =
+                build_fixture_result_json(&prior_turn.assistant_text, &prior_turn.final_status);
+            state
+                .core
+                .db
+                .get()
+                .map_err(|e| format!("acquire main-db conn for prior_turns[{idx}] seed: {e}"))?
+                .execute(
+                    "INSERT INTO tasks (task_id, user_id, chat_id, user_key, channel, kind, payload_json, status, result_json, error_text, created_at, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, 'ui', 'ask', ?5, 'succeeded', ?6, NULL, ?7, ?7)",
+                    rusqlite::params![
+                        prior_task_id,
+                        expected.user_id,
+                        expected.chat_id,
+                        user_key,
+                        payload_text,
+                        result_json,
+                        prior_turn.updated_at,
+                    ],
+                )
+                .map_err(|e| format!("seed prior_turns[{idx}] failed: {e}"))?;
+
+            crate::memory::service::insert_memory(
+                &state,
+                expected.user_id,
+                expected.chat_id,
+                Some(&user_key),
+                "ui",
+                None,
+                crate::memory::MEMORY_ROLE_USER,
+                &prior_turn.user_text,
+                state.policy.memory.item_max_chars.max(256),
+            )
+            .map_err(|e| format!("seed prior_turns[{idx}] user memory failed: {e}"))?;
+
+            let assistant_memory_text = if state.policy.memory.mark_llm_reply_in_short_term {
+                format!(
+                    "{}{}",
+                    crate::memory::LLM_SHORT_TERM_MEMORY_PREFIX,
+                    prior_turn.assistant_text
+                )
+            } else {
+                prior_turn.assistant_text.clone()
+            };
+            crate::memory::service::insert_memory_with_kind(
+                &state,
+                expected.user_id,
+                expected.chat_id,
+                Some(&user_key),
+                "ui",
+                None,
+                crate::memory::MEMORY_ROLE_ASSISTANT,
+                &assistant_memory_text,
+                state.policy.memory.item_max_chars.max(256),
+                crate::memory::MemoryWriteKind::AssistantOutcome,
+            )
+            .map_err(|e| format!("seed prior_turns[{idx}] assistant memory failed: {e}"))?;
+        }
+    }
+
+    let task_id = format!("fixture-replay-{}-{}", case_name, uuid::Uuid::new_v4());
+    let payload_text = build_fixture_ask_payload_json(&expected.user_text, &task_id);
     state.seed_ask_task_row(&task_id, expected.user_id, expected.chat_id, &payload_text);
 
+    let user_key = format!("anon:{}:{}", expected.user_id, expected.chat_id);
     let task = crate::ClaimedTask {
         task_id: task_id.clone(),
         user_id: expected.user_id,
         chat_id: expected.chat_id,
-        user_key: None,
+        user_key: Some(user_key),
         channel: "ui".to_string(),
         external_user_id: None,
         external_chat_id: None,
@@ -847,7 +995,12 @@ mod tests {
 
         let log = format!(
             "{}\n{}\n{}\n{}\n",
-            make_verbose(&hash_a, prompt_a, "intent_normalizer", "{\"intent\":\"ask\"}"),
+            make_verbose(
+                &hash_a,
+                prompt_a,
+                "intent_normalizer",
+                "{\"intent\":\"ask\"}"
+            ),
             slim_line,
             errored,
             make_verbose(&hash_b, prompt_b, "chat_response", "Hello, world!"),
@@ -856,7 +1009,8 @@ mod tests {
         // 2) Convert 出 RecordedCall；只应留 2 条。
         let recs = convert_model_io_log_to_fixture(&log).expect("convert ok");
         assert_eq!(recs.len(), 2, "verbose+ok 行有 2 条，其它必须被过滤");
-        let hashes: std::collections::HashSet<_> = recs.iter().map(|r| r.prompt_hash.clone()).collect();
+        let hashes: std::collections::HashSet<_> =
+            recs.iter().map(|r| r.prompt_hash.clone()).collect();
         assert!(hashes.contains(&hash_a));
         assert!(hashes.contains(&hash_b));
 
@@ -882,7 +1036,11 @@ mod tests {
         let runtime = build_fixture_replay_runtime("vendor-fixture-loop");
 
         let resp_a = provider
-            .call(runtime.clone(), prompt_a.to_string(), ChatRequestHints::default())
+            .call(
+                runtime.clone(),
+                prompt_a.to_string(),
+                ChatRequestHints::default(),
+            )
             .await
             .expect("loop hit a");
         assert_eq!(resp_a.text, "{\"intent\":\"ask\"}");
@@ -929,9 +1087,8 @@ mod tests {
 
         let case = std::env::var(CASE_ENV)
             .unwrap_or_else(|_| panic!("{CASE_ENV} env required (case name under fixture root)"));
-        let log_path = std::env::var(LOG_ENV).unwrap_or_else(|_| {
-            panic!("{LOG_ENV} env required (path to model_io.log to convert)")
-        });
+        let log_path = std::env::var(LOG_ENV)
+            .unwrap_or_else(|_| panic!("{LOG_ENV} env required (path to model_io.log to convert)"));
         let truthy = |v: String| {
             matches!(
                 v.trim().to_ascii_lowercase().as_str(),
@@ -941,9 +1098,8 @@ mod tests {
         let force = std::env::var(FORCE_ENV).map(truthy).unwrap_or(false);
         let dry_run = std::env::var(DRY_ENV).map(truthy).unwrap_or(false);
 
-        let log_text = std::fs::read_to_string(&log_path).unwrap_or_else(|e| {
-            panic!("read log file {log_path:?} failed: {e}")
-        });
+        let log_text = std::fs::read_to_string(&log_path)
+            .unwrap_or_else(|e| panic!("read log file {log_path:?} failed: {e}"));
         let root = fixture_workspace_root();
         let summary = regen_fixture_from_log(&log_text, &case, &root, dry_run, force)
             .unwrap_or_else(|e| panic!("regen_fixture_from_log failed: {e}"));
@@ -1062,8 +1218,7 @@ mod tests {
                 case,
                 "2026-04-19T12:00:00+08:00",
             );
-            let runtime =
-                build_fixture_replay_runtime(&format!("vendor-fixture-{case}"));
+            let runtime = build_fixture_replay_runtime(&format!("vendor-fixture-{case}"));
             let mut hit = 0usize;
             let mut drift = 0usize;
             for rec in &loaded.records {
@@ -1210,7 +1365,10 @@ mod tests {
             "expected exactly 1 fixture provider, got {}",
             providers.len()
         );
-        assert_eq!(providers[0].config.provider_type, FIXTURE_REPLAY_PROVIDER_TYPE);
+        assert_eq!(
+            providers[0].config.provider_type,
+            FIXTURE_REPLAY_PROVIDER_TYPE
+        );
 
         let dispatch = PROVIDER_IMPLS
             .iter()
@@ -1243,8 +1401,8 @@ mod tests {
     async fn step4b2_1_self_check_minimal_builtin_registry_satisfies_integrity() {
         use claw_core::skill_registry::REQUIRED_BUILTIN_SKILLS;
 
-        let state = crate::AppState::test_default_with_fixture_provider()
-            .with_minimal_builtin_registry();
+        let state =
+            crate::AppState::test_default_with_fixture_provider().with_minimal_builtin_registry();
 
         let registry = state
             .get_skills_registry()
@@ -1273,6 +1431,36 @@ mod tests {
             REQUIRED_BUILTIN_SKILLS.len(),
             "skills_list snapshot must equal enabled builtin set, got {:?}",
             skills_list,
+        );
+    }
+
+    #[test]
+    fn step4b2_1b_real_runtime_policy_aligns_prompt_vendor_and_runtime_payloads() {
+        let state = crate::AppState::test_default_with_fixture_provider()
+            .with_prompt_layers_installed()
+            .with_real_runtime_policy();
+
+        assert_eq!(
+            crate::active_prompt_vendor_name(&state),
+            "minimax",
+            "fixture replay should reuse the real selected vendor so layered prompt patches match recorded prompts"
+        );
+        assert!(
+            !state.policy.persona_prompt_string().trim().is_empty(),
+            "real runtime policy must load persona prompt text"
+        );
+        assert!(
+            !state
+                .policy
+                .schedule
+                .intent_rules_template_string()
+                .trim()
+                .is_empty(),
+            "real runtime policy must load schedule rules template"
+        );
+        assert_eq!(
+            state.skill_rt.default_locator_search_dir, state.skill_rt.workspace_root,
+            "routing.default_locator_search_dir='.' should resolve to workspace root in test too"
         );
     }
 
@@ -1435,6 +1623,10 @@ mod tests {
         assert_eq!(parsed.user_text, "ping");
         assert_eq!(parsed.user_id, 1, "default user_id must be 1");
         assert_eq!(parsed.chat_id, 1, "default chat_id must be 1");
+        assert!(
+            parsed.prior_turns.is_empty(),
+            "_example should stay the smallest possible single-turn fixture"
+        );
         assert_eq!(parsed.expected_final_answer_contains, vec!["pong"]);
         assert_eq!(parsed.expected_min_llm_call_count, Some(1));
         assert_eq!(parsed.expected_max_llm_call_count, Some(4));
@@ -1451,8 +1643,8 @@ mod tests {
             r#"{"case":"WRONG","user_text":"u","freeze_now":"2026-04-19T12:00:00+08:00"}"#,
         )
         .unwrap();
-        let err = ExpectedCase::load_for_case(&tmp)
-            .expect_err("case-name mismatch must Err, not Ok");
+        let err =
+            ExpectedCase::load_for_case(&tmp).expect_err("case-name mismatch must Err, not Ok");
         assert!(
             err.contains("WRONG") && err.contains("validate"),
             "err must name the offending case + the validation step. Got: {err}"
@@ -1468,20 +1660,44 @@ mod tests {
         let dir_name = tmp.file_name().unwrap().to_string_lossy().into_owned();
         std::fs::write(
             tmp.join(FIXTURE_EXPECTED_FILENAME),
-            format!(
-                r#"{{"case":"{dir_name}","user_text":"u","freeze_now":""}}"#
-            ),
+            format!(r#"{{"case":"{dir_name}","user_text":"u","freeze_now":""}}"#),
         )
         .unwrap();
-        let err = ExpectedCase::load_for_case(&tmp)
-            .expect_err("empty freeze_now must Err");
+        let err = ExpectedCase::load_for_case(&tmp).expect_err("empty freeze_now must Err");
         assert!(
             err.contains("freeze_now"),
             "err must name the offending field. Got: {err}"
         );
         let _ = std::fs::remove_dir_all(&tmp);
 
-        // 反例 3：expected_llm_call_count 与 max 矛盾 → 报错。
+        // 反例 3：prior_turns.updated_at 空 → 报错。
+        let tmp = std::env::temp_dir().join(format!(
+            "rustclaw_test_expected_prior_turn_updated_at_empty_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let dir_name = tmp.file_name().unwrap().to_string_lossy().into_owned();
+        std::fs::write(
+            tmp.join(FIXTURE_EXPECTED_FILENAME),
+            format!(
+                r#"{{
+                    "case":"{dir_name}",
+                    "user_text":"u",
+                    "freeze_now":"2026-04-19T12:00:00+08:00",
+                    "prior_turns":[{{"user_text":"p1","assistant_text":"a1","updated_at":""}}]
+                }}"#
+            ),
+        )
+        .unwrap();
+        let err =
+            ExpectedCase::load_for_case(&tmp).expect_err("empty prior_turn updated_at must Err");
+        assert!(
+            err.contains("prior_turns[0].updated_at"),
+            "err must name the offending nested field. Got: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        // 反例 4：expected_llm_call_count 与 max 矛盾 → 报错。
         let tmp = std::env::temp_dir().join(format!(
             "rustclaw_test_expected_count_conflict_{}",
             uuid::Uuid::new_v4()
@@ -1495,15 +1711,14 @@ mod tests {
             ),
         )
         .unwrap();
-        let err = ExpectedCase::load_for_case(&tmp)
-            .expect_err("exact > max must Err");
+        let err = ExpectedCase::load_for_case(&tmp).expect_err("exact > max must Err");
         assert!(
             err.contains("expected_llm_call_count") && err.contains("expected_max_llm_call_count"),
             "err must name both bounds. Got: {err}"
         );
         let _ = std::fs::remove_dir_all(&tmp);
 
-        // 反例 4：unknown field → deny_unknown_fields trip → parse 失败。
+        // 反例 5：unknown field → deny_unknown_fields trip → parse 失败。
         let tmp = std::env::temp_dir().join(format!(
             "rustclaw_test_expected_unknown_field_{}",
             uuid::Uuid::new_v4()
@@ -1608,7 +1823,6 @@ mod tests {
     ///     失败说明聚合到一条 panic 里（避免一条挂掉就掩盖后面的）；
     ///   * 0 条真 case 但被显式要求跑（`--ignored`）→ panic 提示用户先录。
     #[tokio::test]
-    #[ignore = "Step 4.b.2.6.b 等待用户在本地真录 ≥ 9 条 case；body 已就绪，录完后 unignore 即可"]
     async fn e2e_per_case_replay_with_process_ask_task() {
         let _lock = fixture_env_lock();
 
@@ -1738,6 +1952,7 @@ mod tests {
             freeze_now: "2026-04-19T12:00:00+08:00".to_string(),
             user_id: 1,
             chat_id: 1,
+            prior_turns: vec![],
             expected_final_answer_contains: vec!["pong".to_string()],
             expected_final_answer_not_contains: vec!["error".to_string()],
             expected_llm_call_count: Some(2),
@@ -1779,6 +1994,7 @@ mod tests {
             freeze_now: "2026-04-19T12:00:00+08:00".to_string(),
             user_id: 1,
             chat_id: 1,
+            prior_turns: vec![],
             expected_final_answer_contains: vec!["pong".to_string()],
             expected_final_answer_not_contains: vec!["error".to_string()],
             expected_llm_call_count: Some(5),
@@ -1837,6 +2053,7 @@ mod tests {
             freeze_now: "2026-04-19T12:00:00+08:00".to_string(),
             user_id: 1,
             chat_id: 1,
+            prior_turns: vec![],
             expected_final_answer_contains: vec![],
             expected_final_answer_not_contains: vec![],
             expected_llm_call_count: None,

@@ -310,7 +310,8 @@ mod tests {
 
 pub(crate) fn oldest_running_task_age_seconds(state: &AppState) -> anyhow::Result<u64> {
     let db = state
-        .core.db
+        .core
+        .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 

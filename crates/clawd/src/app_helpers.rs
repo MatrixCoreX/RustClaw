@@ -16,11 +16,6 @@ pub(crate) const TASK_STATUS_FAILED: &str = "failed";
 pub(crate) const TASK_STATUS_CANCELED: &str = "canceled";
 pub(crate) const TASK_STATUS_TIMEOUT: &str = "timeout";
 
-pub(crate) const CLASSIFIER_DIRECT_SOURCES: &[&str] = &[
-    "voice_mode_intent_detect",
-    "voice_mode_intent_detect_regression",
-];
-
 pub(crate) const RESUME_CONTINUE_SOURCES: &[&str] = &["resume_continue_execute"];
 
 pub(crate) fn parse_task_status(raw: &str) -> TaskStatus {
@@ -58,7 +53,8 @@ pub(crate) fn parse_resume_context_error(error_text: &str) -> Option<(String, Va
 
 pub(crate) fn i18n_t_with_default(state: &AppState, key: &str, default_text: &str) -> String {
     state
-        .policy.schedule
+        .policy
+        .schedule
         .i18n_dict
         .get(key)
         .cloned()
@@ -154,7 +150,8 @@ pub(crate) fn main_flow_rules(state: &AppState) -> &'static MainFlowRules {
     static RULES: OnceLock<MainFlowRules> = OnceLock::new();
     RULES.get_or_init(|| {
         let path = state
-            .skill_rt.workspace_root
+            .skill_rt
+            .workspace_root
             .join("configs/hard_rules/main_flow.toml");
         let path_str = path.to_string_lossy().to_string();
         load_main_flow_rules(&path_str)

@@ -80,8 +80,12 @@ pub fn load_prompt_template_for_vendor(
     rel_path: &str,
     default_template: &str,
 ) -> (String, String) {
-    let resolved =
-        load_prompt_template_for_vendor_with_meta(workspace_root, vendor, rel_path, default_template);
+    let resolved = load_prompt_template_for_vendor_with_meta(
+        workspace_root,
+        vendor,
+        rel_path,
+        default_template,
+    );
     (resolved.template, resolved.source)
 }
 
@@ -260,7 +264,7 @@ fn load_layered_prompt_template_for_vendor_with_meta(
         if version.is_none() {
             version = extract_prompt_version(&raw);
         }
-        parts.push(strip_legacy_vendor_tuning(&raw).trim().to_string());
+        parts.push(normalize_prompt_part_body(&raw));
     }
     if let Some(patch_rel) = entry.vendor_patch.as_deref() {
         for candidate in vendor_patch_candidates(vendor, patch_rel) {
@@ -268,7 +272,7 @@ fn load_layered_prompt_template_for_vendor_with_meta(
                 if version.is_none() {
                     version = extract_prompt_version(&raw);
                 }
-                parts.push(strip_legacy_vendor_tuning(&raw).trim().to_string());
+                parts.push(normalize_prompt_part_body(&raw));
                 break;
             }
         }
@@ -278,10 +282,9 @@ fn load_layered_prompt_template_for_vendor_with_meta(
         if version.is_none() {
             version = extract_prompt_version(&raw);
         }
-        parts.push(strip_legacy_vendor_tuning(&raw).trim().to_string());
+        parts.push(normalize_prompt_part_body(&raw));
     }
-    let parts_filtered: Vec<String> =
-        parts.into_iter().filter(|s| !s.is_empty()).collect();
+    let parts_filtered: Vec<String> = parts.into_iter().filter(|s| !s.is_empty()).collect();
     let rendered = compose_prompt_parts(parts_filtered)?;
     Some((
         rendered,
@@ -306,19 +309,19 @@ fn load_layered_skill_prompt_with_meta(
         if version.is_none() {
             version = extract_prompt_version(&base_raw);
         }
-        parts.push(strip_legacy_vendor_tuning(&base_raw).trim().to_string());
+        parts.push(normalize_prompt_part_body(&base_raw));
     }
     let default_skill_raw = read_prompt_part_raw(workspace_root, &default_skill_rel)?;
     if version.is_none() {
         version = extract_prompt_version(&default_skill_raw);
     }
-    parts.push(strip_legacy_vendor_tuning(&default_skill_raw).trim().to_string());
+    parts.push(normalize_prompt_part_body(&default_skill_raw));
     for candidate in vendor_patch_candidates(vendor, &format!("skills/{skill_name}")) {
         if let Some(patch_raw) = read_optional_prompt_part_raw(workspace_root, &candidate) {
             if version.is_none() {
                 version = extract_prompt_version(&patch_raw);
             }
-            parts.push(strip_legacy_vendor_tuning(&patch_raw).trim().to_string());
+            parts.push(normalize_prompt_part_body(&patch_raw));
             break;
         }
     }
@@ -341,9 +344,11 @@ fn read_prompt_part_raw(workspace_root: &Path, rel_path: &str) -> Option<String>
 }
 
 fn read_optional_prompt_part_raw(workspace_root: &Path, rel_path: &str) -> Option<String> {
-    std::fs::read_to_string(workspace_root.join(rel_path))
-        .ok()
-        .filter(|text| !text.trim().is_empty())
+    read_prompt_part_raw(workspace_root, rel_path)
+}
+
+fn normalize_prompt_part_body(text: &str) -> String {
+    strip_legacy_vendor_tuning(text).trim().to_string()
 }
 
 fn strip_legacy_vendor_tuning(text: &str) -> String {
@@ -655,12 +660,8 @@ overlay = []
             "<!-- version: 2026-04-17.1 -->\n\nBody",
         );
 
-        let resolved = load_prompt_template_for_vendor_with_meta(
-            &root,
-            "openai",
-            "prompts/versioned.md",
-            "",
-        );
+        let resolved =
+            load_prompt_template_for_vendor_with_meta(&root, "openai", "prompts/versioned.md", "");
         assert_eq!(resolved.version.as_deref(), Some("2026-04-17.1"));
         assert!(resolved.template.contains("Body"));
 

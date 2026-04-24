@@ -65,7 +65,10 @@ pub(crate) fn recover_stale_running_tasks_on_startup(
 }
 
 fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Result<Vec<String>> {
-    let timeout_secs = state.worker.worker_running_no_progress_timeout_seconds.max(60);
+    let timeout_secs = state
+        .worker
+        .worker_running_no_progress_timeout_seconds
+        .max(60);
     let now = now_ts_u64() as i64;
     let stale_before = now.saturating_sub(timeout_secs as i64);
     let stale_note = format!(
@@ -119,10 +122,14 @@ fn recover_stale_running_tasks_by_no_progress(state: &AppState) -> anyhow::Resul
 
 pub(crate) fn maybe_recover_stale_running_tasks_runtime(state: &AppState) -> anyhow::Result<()> {
     let now = now_ts_u64();
-    let interval = state.worker.worker_running_recovery_check_interval_seconds.max(10);
+    let interval = state
+        .worker
+        .worker_running_recovery_check_interval_seconds
+        .max(10);
     {
         let mut guard = state
-            .worker.last_running_recovery_check_ts
+            .worker
+            .last_running_recovery_check_ts
             .lock()
             .map_err(|_| anyhow!("running recovery lock poisoned"))?;
         if now.saturating_sub(*guard) < interval {
@@ -360,7 +367,8 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
     // 这里清理也走 audit_db，避免在主库 writer 锁上和任务回收争抢。
     {
         let audit_db = state
-            .core.audit_db
+            .core
+            .audit_db
             .get()
             .map_err(|e| anyhow!("audit db pool: {e}"))?;
         let audit_cutoff = now - (state.policy.maintenance.audit_retention_days as i64 * 86400);
@@ -419,7 +427,11 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
     // model_io.log：不再每次 append 后做全量 prune（会 O(N²) 磁盘）。
     // 改由这里按 cleanup 节拍把跨天的行迁到 `model_io.log.YYYY-MM-DD` 归档，
     // 主文件只保留当天；同时清理超过 keep_days 的旧归档。
-    let model_io_path = state.skill_rt.workspace_root.join("logs").join("model_io.log");
+    let model_io_path = state
+        .skill_rt
+        .workspace_root
+        .join("logs")
+        .join("model_io.log");
     if let Err(err) = crate::providers::rotate_model_io_log_daily(
         &model_io_path,
         crate::providers::MODEL_IO_LOG_KEEP_DAYS,

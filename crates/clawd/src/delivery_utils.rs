@@ -16,6 +16,9 @@ mod types;
 use self::directory_lookup::try_handle_directory_lookup_request;
 use self::file_delivery::enforce_file_delivery_locator_contract;
 pub(crate) use self::file_delivery::scan_filename_matches_with_limit;
+pub(crate) use self::locator::extract_bare_filename_stem_candidates;
+pub(crate) use self::locator::extract_directory_and_file_pair;
+pub(crate) use self::locator::extract_filename_candidates;
 pub(crate) use self::message_media::{
     collect_recent_image_candidates, extract_file_path_from_delivery_token,
     normalize_delivery_message, trim_path_token,

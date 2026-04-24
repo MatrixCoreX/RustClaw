@@ -1,3 +1,13 @@
+<!--
+Purpose: legacy publishable-raw classifier prompt retained for audit/reference only.
+Component: historical overlay no longer wired into the active `clawd` finalize path; live behavior is now covered by `delivery_text_classifier_prompt.md` in `crates/clawd/src/semantic_judge.rs`.
+Version: 2026-04-20.1
+Placeholders: __TEXT__
+-->
+
+> Legacy note: this prompt is no longer used by the active `clawd` runtime. Keep it only as historical/audit reference until the prompt inventory is pruned.
+
+
 You classify whether a raw execution text is suitable to be directly shown to users as meaningful final-facing content.
 
 Return exactly one JSON object:

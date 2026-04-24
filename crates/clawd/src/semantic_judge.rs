@@ -23,8 +23,6 @@ use serde::Deserialize;
 
 use crate::{llm_gateway, AppState, ClaimedTask};
 
-const DELIVERY_TEXT_CLASSIFIER_PROMPT_TEMPLATE: &str =
-    include_str!("../../../prompts/layers/overlays/delivery_text_classifier_prompt.md");
 const DELIVERY_TEXT_CLASSIFIER_PROMPT_LOGICAL_PATH: &str =
     "prompts/delivery_text_classifier_prompt.md";
 
@@ -110,11 +108,20 @@ async fn classify_delivery_text_with_llm(
             return Some(cached.clone());
         }
     }
-    let resolved = crate::load_prompt_template_for_state_with_meta(
+    let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
         state,
         DELIVERY_TEXT_CLASSIFIER_PROMPT_LOGICAL_PATH,
-        DELIVERY_TEXT_CLASSIFIER_PROMPT_TEMPLATE,
-    );
+    ) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            tracing::info!(
+                "delivery_text_classifier prompt_missing task_id={} err={}",
+                task.task_id,
+                err
+            );
+            return None;
+        }
+    };
     let prompt = crate::render_prompt_template(&resolved.template, &[("__TEXT__", trimmed)]);
     crate::log_prompt_render_with_version(
         state,
@@ -129,12 +136,29 @@ async fn classify_delivery_text_with_llm(
         llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &prompt_source)
             .await
             .ok()?;
-    let trimmed_out = llm_out.trim();
-    let parsed_raw = serde_json::from_str::<DeliveryTextClassifierOut>(trimmed_out).ok();
-    let parsed = parsed_raw.or_else(|| {
-        crate::extract_first_json_object_any(&llm_out)
-            .and_then(|json| serde_json::from_str::<DeliveryTextClassifierOut>(&json).ok())
-    })?;
+    let parsed = match crate::prompt_utils::validate_against_schema::<DeliveryTextClassifierOut>(
+        &llm_out,
+        crate::prompt_utils::PromptSchemaId::DeliveryTextClassifier,
+    ) {
+        Ok(validated) => {
+            if !validated.raw_parse_ok {
+                tracing::info!(
+                    "delivery_text_classifier schema_parse_recovery task_id={} schema_normalized={}",
+                    task.task_id,
+                    validated.schema_normalized
+                );
+            }
+            validated.value
+        }
+        Err(err) => {
+            tracing::info!(
+                "delivery_text_classifier schema_validation_failed task_id={} err={}",
+                task.task_id,
+                err
+            );
+            return None;
+        }
+    };
     let normalized = DeliveryTextClassifierOut {
         is_meta_instruction: parsed.is_meta_instruction,
         meta_reason: parsed.meta_reason,
@@ -201,7 +225,8 @@ fn is_publishable_raw_deterministic_guard(s: &str) -> bool {
 ///
 /// 与 `is_publishable_raw` 的关系：本函数 = 前者的"deterministic guard 部分"，
 /// 即不含长度短路（>180 字直接 true）也不发任何 LLM 请求。
-pub(crate) fn is_publishable_raw_local(s: &str) -> bool {
+#[cfg(test)]
+fn is_publishable_raw_local(s: &str) -> bool {
     is_publishable_raw_deterministic_guard(s)
 }
 
@@ -248,7 +273,9 @@ pub(crate) fn looks_like_meta_respond_directive_local(text: &str) -> bool {
     }
 
     // 中文："请阅读 ... 并 + 总结/告诉/回复/输出"，"请检查 ... 后告诉/告知"
-    if trimmed.starts_with("请阅读") || trimmed.starts_with("请检查") || trimmed.starts_with("请查看")
+    if trimmed.starts_with("请阅读")
+        || trimmed.starts_with("请检查")
+        || trimmed.starts_with("请查看")
     {
         for tail in ["并总结", "并告诉", "并回复", "并输出", "后告诉", "后告知"] {
             if trimmed.contains(tail) {
@@ -267,7 +294,9 @@ pub(crate) fn looks_like_meta_respond_directive_local(text: &str) -> bool {
         "让我先",
         "请稍等",
     ];
-    if ZH_PROCESS_LEADS.iter().any(|lead| trimmed.starts_with(lead))
+    if ZH_PROCESS_LEADS
+        .iter()
+        .any(|lead| trimmed.starts_with(lead))
         && ["分析", "检查", "查看", "读取", "处理", "确认"]
             .iter()
             .any(|w| trimmed.contains(w))
@@ -293,10 +322,22 @@ pub(crate) fn looks_like_meta_respond_directive_local(text: &str) -> bool {
     }
 
     // 英文："i will / i'll / let me + analyze/check/read/look at/process ..."
-    const EN_PROCESS_LEADS: &[&str] = &["i will ", "i'll ", "let me ", "next i will ", "next, i will "];
+    const EN_PROCESS_LEADS: &[&str] = &[
+        "i will ",
+        "i'll ",
+        "let me ",
+        "next i will ",
+        "next, i will ",
+    ];
     if EN_PROCESS_LEADS.iter().any(|lead| lower.starts_with(lead))
         && [
-            "analyze", "check", "read", "look at", "process", "investigate", "examine",
+            "analyze",
+            "check",
+            "read",
+            "look at",
+            "process",
+            "investigate",
+            "examine",
         ]
         .iter()
         .any(|w| lower.contains(w))
@@ -338,6 +379,50 @@ mod tests {
         is_publishable_raw_local, looks_like_meta_respond_directive_local,
         normalize_classifier_text,
     };
+    use serde_json::Value;
+
+    #[test]
+    fn delivery_text_classifier_schema_drift() {
+        const SCHEMA_RAW: &str =
+            include_str!("../../../prompts/schemas/delivery_text_classifier.schema.json");
+        let schema: Value = serde_json::from_str(SCHEMA_RAW)
+            .expect("delivery_text_classifier.schema.json must be valid JSON");
+        let properties = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema.properties must be an object");
+        for field in [
+            "is_meta_instruction",
+            "meta_reason",
+            "meta_confidence",
+            "publishable",
+            "publishable_reason",
+            "publishable_confidence",
+        ] {
+            assert!(
+                properties.contains_key(field),
+                "schema missing parser field `{field}` under properties — sync prompts/schemas/delivery_text_classifier.schema.json with DeliveryTextClassifierOut",
+            );
+        }
+
+        let probe = serde_json::json!({
+            "is_meta_instruction": false,
+            "meta_reason": "user_facing_result",
+            "meta_confidence": 0.8,
+            "publishable": true,
+            "publishable_reason": "meaningful_result",
+            "publishable_confidence": 0.9
+        });
+        let validated = crate::prompt_utils::validate_against_schema::<Value>(
+            &probe.to_string(),
+            crate::prompt_utils::PromptSchemaId::DeliveryTextClassifier,
+        )
+        .expect("classifier probe should validate");
+        assert_eq!(
+            validated.value.get("publishable").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
 
     #[test]
     fn normalize_collapses_whitespace_and_trims_trailing_punct() {
@@ -358,17 +443,18 @@ mod tests {
 
     #[test]
     fn normalize_preserves_internal_punctuation() {
-        assert_eq!(
-            normalize_classifier_text("This is, fine."),
-            "This is, fine"
-        );
+        assert_eq!(normalize_classifier_text("This is, fine."), "This is, fine");
     }
 
     #[test]
     fn local_meta_respond_zh_tell_user_patterns() {
-        assert!(looks_like_meta_respond_directive_local("请告诉用户当前进度"));
+        assert!(looks_like_meta_respond_directive_local(
+            "请告诉用户当前进度"
+        ));
         assert!(looks_like_meta_respond_directive_local("麻烦回复用户结果"));
-        assert!(looks_like_meta_respond_directive_local("请通知对方失败原因"));
+        assert!(looks_like_meta_respond_directive_local(
+            "请通知对方失败原因"
+        ));
         assert!(looks_like_meta_respond_directive_local("请你告知用户错误"));
     }
 
@@ -387,15 +473,25 @@ mod tests {
 
     #[test]
     fn local_meta_respond_zh_process_phrases() {
-        assert!(looks_like_meta_respond_directive_local("下一步我会分析这份日志"));
-        assert!(looks_like_meta_respond_directive_local("我先检查一下文件内容"));
-        assert!(looks_like_meta_respond_directive_local("让我先读取一下数据"));
-        assert!(looks_like_meta_respond_directive_local("请稍等，我先确认配置"));
+        assert!(looks_like_meta_respond_directive_local(
+            "下一步我会分析这份日志"
+        ));
+        assert!(looks_like_meta_respond_directive_local(
+            "我先检查一下文件内容"
+        ));
+        assert!(looks_like_meta_respond_directive_local(
+            "让我先读取一下数据"
+        ));
+        assert!(looks_like_meta_respond_directive_local(
+            "请稍等，我先确认配置"
+        ));
     }
 
     #[test]
     fn local_meta_respond_en_tell_user_patterns() {
-        assert!(looks_like_meta_respond_directive_local("Tell the user the progress."));
+        assert!(looks_like_meta_respond_directive_local(
+            "Tell the user the progress."
+        ));
         assert!(looks_like_meta_respond_directive_local(
             "Please reply to the user with the result."
         ));
@@ -412,7 +508,9 @@ mod tests {
         assert!(looks_like_meta_respond_directive_local(
             "I will analyze this file first."
         ));
-        assert!(looks_like_meta_respond_directive_local("Let me read the log."));
+        assert!(looks_like_meta_respond_directive_local(
+            "Let me read the log."
+        ));
         assert!(looks_like_meta_respond_directive_local(
             "I'll check the configuration."
         ));
@@ -423,7 +521,9 @@ mod tests {
         // 真实答案不应被误判
         assert!(!looks_like_meta_respond_directive_local("已完成"));
         assert!(!looks_like_meta_respond_directive_local("没找到该文件"));
-        assert!(!looks_like_meta_respond_directive_local("当前用户名是 alice"));
+        assert!(!looks_like_meta_respond_directive_local(
+            "当前用户名是 alice"
+        ));
         assert!(!looks_like_meta_respond_directive_local(
             "Docker 容器和虚拟机的主要区别在于资源隔离和性能。"
         ));
@@ -431,8 +531,12 @@ mod tests {
             "The container shares the host kernel."
         ));
         // delivery token 不应误判
-        assert!(!looks_like_meta_respond_directive_local("FILE:/tmp/output.md"));
-        assert!(!looks_like_meta_respond_directive_local("IMAGE_FILE:/tmp/x.png"));
+        assert!(!looks_like_meta_respond_directive_local(
+            "FILE:/tmp/output.md"
+        ));
+        assert!(!looks_like_meta_respond_directive_local(
+            "IMAGE_FILE:/tmp/x.png"
+        ));
     }
 
     #[test]
@@ -456,8 +560,12 @@ mod tests {
 
     #[test]
     fn local_publishable_accepts_real_content() {
-        assert!(is_publishable_raw_local("已完成任务，结果保存在 /tmp/out.md"));
-        assert!(is_publishable_raw_local("The result is 42 with confidence 0.97."));
+        assert!(is_publishable_raw_local(
+            "已完成任务，结果保存在 /tmp/out.md"
+        ));
+        assert!(is_publishable_raw_local(
+            "The result is 42 with confidence 0.97."
+        ));
         assert!(is_publishable_raw_local("没找到该文件"));
     }
 }

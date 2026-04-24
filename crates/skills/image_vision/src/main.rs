@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -142,6 +143,50 @@ enum ImageSource {
     Base64(String),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ImageDescribeOut {
+    summary: String,
+    #[serde(default)]
+    objects: Vec<String>,
+    #[serde(default)]
+    visible_text: Vec<String>,
+    #[serde(default)]
+    uncertainties: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ImageCompareOut {
+    summary: String,
+    #[serde(default)]
+    similarities: Vec<String>,
+    #[serde(default)]
+    differences: Vec<String>,
+    #[serde(default)]
+    notable_changes: Vec<String>,
+    #[serde(default)]
+    uncertainties: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ImageScreenshotSummaryOut {
+    purpose: String,
+    #[serde(default)]
+    critical_text: Vec<String>,
+    #[serde(default)]
+    warnings: Vec<String>,
+    #[serde(default)]
+    next_actions: Vec<String>,
+    #[serde(default)]
+    uncertainties: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+enum StructuredNarrativeActionOutput {
+    Describe(ImageDescribeOut),
+    Compare(ImageCompareOut),
+    ScreenshotSummary(ImageScreenshotSummaryOut),
+}
+
 fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -272,6 +317,13 @@ fn execute(
             max_input_bytes,
         ) {
             Ok((text, model, model_kind)) => {
+                let structured = parse_structured_narrative_action_output(action.as_str(), &text);
+                let text = structured
+                    .as_ref()
+                    .map(|out| {
+                        render_structured_narrative_action_output(out, response_language.as_deref())
+                    })
+                    .unwrap_or(text);
                 let text = maybe_rewrite_image_vision_text_for_target_language(
                     cfg,
                     workspace_root,
@@ -280,13 +332,17 @@ fn execute(
                     text,
                     timeout_seconds,
                 );
-                let extra = json!({
+                let mut extra = json!({
                     "provider": vendor_name(vendor),
                     "model": model,
                     "model_kind": model_kind,
                     "latency_ms": 0,
-                    "outputs": [{"type":"text","preview": truncate(&text, 800)}]
+                    "outputs": [{"type":"text","preview": truncate(&text, 800)}],
+                    "schema_validated": structured.is_some()
                 });
+                if let Some(structured) = structured {
+                    extra["structured"] = structured.to_json_value();
+                }
                 return Ok((text, extra));
             }
             Err(err) => last_err = err,
@@ -427,10 +483,377 @@ fn language_from_json_value(v: &Value) -> Option<String> {
         .filter(|s| !s.is_empty() && s.to_ascii_lowercase() != "unknown")
 }
 
+fn language_infer_schema() -> &'static Value {
+    LANGUAGE_INFER_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(LANGUAGE_INFER_SCHEMA_RAW)
+            .expect("language_infer schema must be valid JSON")
+    })
+}
+
+fn image_describe_schema() -> &'static Value {
+    IMAGE_DESCRIBE_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(IMAGE_DESCRIBE_SCHEMA_RAW)
+            .expect("image_describe schema must be valid JSON")
+    })
+}
+
+fn image_compare_schema() -> &'static Value {
+    IMAGE_COMPARE_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(IMAGE_COMPARE_SCHEMA_RAW)
+            .expect("image_compare schema must be valid JSON")
+    })
+}
+
+fn image_screenshot_summary_schema() -> &'static Value {
+    IMAGE_SCREENSHOT_SUMMARY_SCHEMA.get_or_init(|| {
+        serde_json::from_str::<Value>(IMAGE_SCREENSHOT_SUMMARY_SCHEMA_RAW)
+            .expect("image_screenshot_summary schema must be valid JSON")
+    })
+}
+
+fn schema_requires_field(schema: &Value, name: &str) -> bool {
+    schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|fields| fields.iter().any(|field| field.as_str() == Some(name)))
+        .unwrap_or(false)
+}
+
+fn schema_declared_fields(schema: &Value) -> Option<&serde_json::Map<String, Value>> {
+    schema.get("properties")?.as_object()
+}
+
+fn schema_allows_additional_properties(schema: &Value) -> bool {
+    schema
+        .get("additionalProperties")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+fn schema_string_is_valid(schema: &Value, name: &str, value: &str) -> bool {
+    let property = match schema.get("properties").and_then(|v| v.get(name)) {
+        Some(property) => property,
+        None => return false,
+    };
+    if property.get("type").and_then(|v| v.as_str()) != Some("string") {
+        return false;
+    }
+    let min_length = property
+        .get("minLength")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    value.chars().count() >= min_length
+}
+
+fn parse_schema_validated_json_object(
+    raw: &str,
+    schema: &Value,
+    label: &str,
+) -> Result<Value, String> {
+    let trimmed = raw.trim();
+    let candidate = if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        value
+    } else {
+        let start = trimmed
+            .find('{')
+            .ok_or_else(|| format!("{label} is not valid JSON"))?;
+        let end = trimmed
+            .rfind('}')
+            .ok_or_else(|| format!("{label} is not valid JSON"))?;
+        if end <= start {
+            return Err(format!("{label} is not valid JSON"));
+        }
+        serde_json::from_str::<Value>(&trimmed[start..=end])
+            .map_err(|err| format!("{label} JSON parse failed: {err}"))?
+    };
+    validate_value_against_schema(&candidate, schema, "$")
+        .map_err(|err| format!("{label} schema invalid: {err}"))?;
+    Ok(candidate)
+}
+
+fn validate_value_against_schema(value: &Value, schema: &Value, path: &str) -> Result<(), String> {
+    if let Some(kind) = schema.get("type").and_then(|v| v.as_str()) {
+        match kind {
+            "object" => {
+                let object = value
+                    .as_object()
+                    .ok_or_else(|| format!("{path}: expected object"))?;
+                let declared_fields = schema_declared_fields(schema);
+                if !schema_allows_additional_properties(schema) {
+                    let declared = declared_fields
+                        .ok_or_else(|| format!("{path}: schema missing properties"))?;
+                    if let Some(extra) = object.keys().find(|key| !declared.contains_key(*key)) {
+                        return Err(format!("{path}.{extra}: unexpected field"));
+                    }
+                }
+                if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
+                    for field in required.iter().filter_map(|v| v.as_str()) {
+                        if !object.contains_key(field) {
+                            return Err(format!("{path}.{field}: missing required field"));
+                        }
+                    }
+                }
+                if let Some(properties) = declared_fields {
+                    for (field, property_schema) in properties {
+                        if let Some(field_value) = object.get(field) {
+                            validate_value_against_schema(
+                                field_value,
+                                property_schema,
+                                &format!("{path}.{field}"),
+                            )?;
+                        }
+                    }
+                }
+            }
+            "array" => {
+                let items = value
+                    .as_array()
+                    .ok_or_else(|| format!("{path}: expected array"))?;
+                if let Some(item_schema) = schema.get("items") {
+                    for (idx, item) in items.iter().enumerate() {
+                        validate_value_against_schema(
+                            item,
+                            item_schema,
+                            &format!("{path}[{idx}]"),
+                        )?;
+                    }
+                }
+            }
+            "string" => {
+                let s = value
+                    .as_str()
+                    .ok_or_else(|| format!("{path}: expected string"))?;
+                let min_length = schema
+                    .get("minLength")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                if s.chars().count() < min_length {
+                    return Err(format!("{path}: shorter than minLength {min_length}"));
+                }
+            }
+            other => return Err(format!("{path}: unsupported schema type {other}")),
+        }
+    }
+    Ok(())
+}
+
+fn parse_structured_narrative_action_output(
+    action: &str,
+    raw: &str,
+) -> Option<StructuredNarrativeActionOutput> {
+    let (schema, label) = match action {
+        "describe" => (image_describe_schema(), "image describe output"),
+        "compare" => (image_compare_schema(), "image compare output"),
+        "screenshot_summary" => (
+            image_screenshot_summary_schema(),
+            "image screenshot summary output",
+        ),
+        _ => return None,
+    };
+    let candidate = parse_schema_validated_json_object(raw, schema, label).ok()?;
+    match action {
+        "describe" => serde_json::from_value::<ImageDescribeOut>(candidate)
+            .ok()
+            .map(StructuredNarrativeActionOutput::Describe),
+        "compare" => serde_json::from_value::<ImageCompareOut>(candidate)
+            .ok()
+            .map(StructuredNarrativeActionOutput::Compare),
+        "screenshot_summary" => serde_json::from_value::<ImageScreenshotSummaryOut>(candidate)
+            .ok()
+            .map(StructuredNarrativeActionOutput::ScreenshotSummary),
+        _ => None,
+    }
+}
+
+fn contains_cjk(text: &str) -> bool {
+    text.chars()
+        .any(|ch| ('\u{4E00}'..='\u{9FFF}').contains(&ch))
+}
+
+fn should_use_zh_labels(response_language: Option<&str>, primary_text: &str) -> bool {
+    response_language
+        .map(|lang| lang.trim().to_ascii_lowercase().starts_with("zh"))
+        .unwrap_or_else(|| contains_cjk(primary_text))
+}
+
+fn list_separator(use_zh: bool) -> &'static str {
+    if use_zh {
+        "、"
+    } else {
+        ", "
+    }
+}
+
+fn join_non_empty_items(items: &[String], separator: &str) -> Option<String> {
+    let filtered = items
+        .iter()
+        .map(|item| item.trim())
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>();
+    if filtered.is_empty() {
+        None
+    } else {
+        Some(filtered.join(separator))
+    }
+}
+
+fn push_labeled_list(lines: &mut Vec<String>, label: &str, items: &[String], separator: &str) {
+    if let Some(joined) = join_non_empty_items(items, separator) {
+        lines.push(format!("{label}{joined}"));
+    }
+}
+
+fn render_structured_narrative_action_output(
+    output: &StructuredNarrativeActionOutput,
+    response_language: Option<&str>,
+) -> String {
+    let primary_text = match output {
+        StructuredNarrativeActionOutput::Describe(out) => out.summary.as_str(),
+        StructuredNarrativeActionOutput::Compare(out) => out.summary.as_str(),
+        StructuredNarrativeActionOutput::ScreenshotSummary(out) => out.purpose.as_str(),
+    };
+    let use_zh = should_use_zh_labels(response_language, primary_text);
+    let separator = list_separator(use_zh);
+    let mut lines = Vec::new();
+    match output {
+        StructuredNarrativeActionOutput::Describe(out) => {
+            lines.push(out.summary.trim().to_string());
+            push_labeled_list(
+                &mut lines,
+                if use_zh { "对象：" } else { "Objects: " },
+                &out.objects,
+                separator,
+            );
+            push_labeled_list(
+                &mut lines,
+                if use_zh {
+                    "可见文字："
+                } else {
+                    "Visible text: "
+                },
+                &out.visible_text,
+                separator,
+            );
+            push_labeled_list(
+                &mut lines,
+                if use_zh {
+                    "不确定点："
+                } else {
+                    "Uncertainties: "
+                },
+                &out.uncertainties,
+                separator,
+            );
+        }
+        StructuredNarrativeActionOutput::Compare(out) => {
+            lines.push(out.summary.trim().to_string());
+            push_labeled_list(
+                &mut lines,
+                if use_zh {
+                    "相同点："
+                } else {
+                    "Similarities: "
+                },
+                &out.similarities,
+                separator,
+            );
+            push_labeled_list(
+                &mut lines,
+                if use_zh { "差异：" } else { "Differences: " },
+                &out.differences,
+                separator,
+            );
+            push_labeled_list(
+                &mut lines,
+                if use_zh {
+                    "显著变化："
+                } else {
+                    "Notable changes: "
+                },
+                &out.notable_changes,
+                separator,
+            );
+            push_labeled_list(
+                &mut lines,
+                if use_zh {
+                    "不确定点："
+                } else {
+                    "Uncertainties: "
+                },
+                &out.uncertainties,
+                separator,
+            );
+        }
+        StructuredNarrativeActionOutput::ScreenshotSummary(out) => {
+            lines.push(format!(
+                "{}{}",
+                if use_zh { "用途：" } else { "Purpose: " },
+                out.purpose.trim()
+            ));
+            push_labeled_list(
+                &mut lines,
+                if use_zh {
+                    "关键信息："
+                } else {
+                    "Critical text: "
+                },
+                &out.critical_text,
+                separator,
+            );
+            push_labeled_list(
+                &mut lines,
+                if use_zh { "警告：" } else { "Warnings: " },
+                &out.warnings,
+                separator,
+            );
+            push_labeled_list(
+                &mut lines,
+                if use_zh {
+                    "下一步："
+                } else {
+                    "Next actions: "
+                },
+                &out.next_actions,
+                separator,
+            );
+            push_labeled_list(
+                &mut lines,
+                if use_zh {
+                    "不确定点："
+                } else {
+                    "Uncertainties: "
+                },
+                &out.uncertainties,
+                separator,
+            );
+        }
+    }
+    lines.join("\n")
+}
+
+fn parse_language_choice_from_json_value(v: &Value) -> Option<String> {
+    let schema = language_infer_schema();
+    let object = v.as_object()?;
+    if !schema_allows_additional_properties(schema) {
+        let declared_fields = schema_declared_fields(schema)?;
+        if object.keys().any(|key| !declared_fields.contains_key(key)) {
+            return None;
+        }
+    }
+    if schema_requires_field(schema, "language") && !object.contains_key("language") {
+        return None;
+    }
+    let language = object.get("language")?.as_str()?.trim();
+    if !schema_string_is_valid(schema, "language", language) {
+        return None;
+    }
+    language_from_json_value(v)
+}
+
 fn parse_language_choice_from_llm(raw: &str) -> Option<String> {
     let t = raw.trim();
     if let Ok(v) = serde_json::from_str::<Value>(t) {
-        return language_from_json_value(&v);
+        return parse_language_choice_from_json_value(&v);
     }
     let start = t.find('{')?;
     let end = t.rfind('}')?;
@@ -439,7 +862,7 @@ fn parse_language_choice_from_llm(raw: &str) -> Option<String> {
     }
     let slice = &t[start..=end];
     let v: Value = serde_json::from_str(slice).ok()?;
-    language_from_json_value(&v)
+    parse_language_choice_from_json_value(&v)
 }
 
 fn preferred_prompt_vendor(cfg: &RootConfig) -> &str {
@@ -794,6 +1217,35 @@ const DEFAULT_IMAGE_VISION_ACTION_FALLBACK_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/image_vision_action_fallback.md");
 const DEFAULT_LANGUAGE_INFER_PROMPT_TEMPLATE: &str =
     include_str!("../../../../prompts/layers/overlays/language_infer_prompt.md");
+const LANGUAGE_INFER_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/language_infer.schema.json");
+const IMAGE_DESCRIBE_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/image_vision_describe.schema.json");
+const IMAGE_COMPARE_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/image_vision_compare.schema.json");
+const IMAGE_SCREENSHOT_SUMMARY_SCHEMA_RAW: &str =
+    include_str!("../../../../prompts/schemas/image_vision_screenshot_summary.schema.json");
+
+static LANGUAGE_INFER_SCHEMA: OnceLock<Value> = OnceLock::new();
+static IMAGE_DESCRIBE_SCHEMA: OnceLock<Value> = OnceLock::new();
+static IMAGE_COMPARE_SCHEMA: OnceLock<Value> = OnceLock::new();
+static IMAGE_SCREENSHOT_SUMMARY_SCHEMA: OnceLock<Value> = OnceLock::new();
+
+impl StructuredNarrativeActionOutput {
+    fn to_json_value(&self) -> Value {
+        match self {
+            StructuredNarrativeActionOutput::Describe(out) => {
+                serde_json::to_value(out).unwrap_or(Value::Null)
+            }
+            StructuredNarrativeActionOutput::Compare(out) => {
+                serde_json::to_value(out).unwrap_or(Value::Null)
+            }
+            StructuredNarrativeActionOutput::ScreenshotSummary(out) => {
+                serde_json::to_value(out).unwrap_or(Value::Null)
+            }
+        }
+    }
+}
 
 fn call_vendor_vision(
     vendor: VendorKind,
@@ -1156,10 +1608,7 @@ fn load_root_config() -> RootConfig {
 }
 
 fn env_non_empty(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    claw_core::secrets::env_non_empty_resolved_or_none(key)
 }
 
 fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
@@ -1404,5 +1853,114 @@ mod tests {
         let (mime, data) = split_image_data("data:image/jpeg;base64,abc");
         assert_eq!(mime, "image/jpeg");
         assert_eq!(data, "abc");
+    }
+
+    #[test]
+    fn parse_language_choice_accepts_schema_valid_json() {
+        assert_eq!(
+            parse_language_choice_from_llm(r#"{"language":"Chinese (Simplified)"}"#).as_deref(),
+            Some("Chinese (Simplified)")
+        );
+        assert_eq!(
+            parse_language_choice_from_llm(r#"answer {"language":"English"}"#).as_deref(),
+            Some("English")
+        );
+    }
+
+    #[test]
+    fn parse_language_choice_rejects_extra_fields_and_unknown() {
+        assert_eq!(
+            parse_language_choice_from_llm(r#"{"language":"English","confidence":0.9}"#),
+            None
+        );
+        assert_eq!(
+            parse_language_choice_from_llm(r#"{"language":"unknown"}"#),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_structured_narrative_action_output_accepts_describe_json() {
+        let raw = r#"{
+            "summary":"A Rust logo on a white background.",
+            "objects":["logo","text"],
+            "visible_text":["Rust"],
+            "uncertainties":[]
+        }"#;
+        let parsed =
+            parse_structured_narrative_action_output("describe", raw).expect("describe parse");
+        match parsed {
+            StructuredNarrativeActionOutput::Describe(out) => {
+                assert_eq!(out.summary, "A Rust logo on a white background.");
+                assert_eq!(out.visible_text, vec!["Rust"]);
+            }
+            _ => panic!("expected describe output"),
+        }
+    }
+
+    #[test]
+    fn parse_structured_narrative_action_output_accepts_compare_json() {
+        let raw = r#"{
+            "summary":"The two screenshots are largely the same.",
+            "similarities":["same layout"],
+            "differences":["different button color"],
+            "notable_changes":["one button is highlighted"],
+            "uncertainties":[]
+        }"#;
+        let parsed =
+            parse_structured_narrative_action_output("compare", raw).expect("compare parse");
+        match parsed {
+            StructuredNarrativeActionOutput::Compare(out) => {
+                assert_eq!(out.differences, vec!["different button color"]);
+            }
+            _ => panic!("expected compare output"),
+        }
+    }
+
+    #[test]
+    fn parse_structured_narrative_action_output_accepts_screenshot_summary_json() {
+        let raw = r#"{
+            "purpose":"A settings page.",
+            "critical_text":["Privacy settings"],
+            "warnings":["Unsaved changes"],
+            "next_actions":["Review settings"],
+            "uncertainties":[]
+        }"#;
+        let parsed = parse_structured_narrative_action_output("screenshot_summary", raw)
+            .expect("screenshot summary parse");
+        match parsed {
+            StructuredNarrativeActionOutput::ScreenshotSummary(out) => {
+                assert_eq!(out.warnings, vec!["Unsaved changes"]);
+            }
+            _ => panic!("expected screenshot summary output"),
+        }
+    }
+
+    #[test]
+    fn parse_structured_narrative_action_output_rejects_extra_fields() {
+        let raw = r#"{
+            "summary":"A Rust logo on a white background.",
+            "objects":["logo","text"],
+            "visible_text":["Rust"],
+            "uncertainties":[],
+            "unexpected":"drift"
+        }"#;
+        assert!(parse_structured_narrative_action_output("describe", raw).is_none());
+    }
+
+    #[test]
+    fn render_structured_narrative_action_output_uses_zh_labels() {
+        let output =
+            StructuredNarrativeActionOutput::ScreenshotSummary(ImageScreenshotSummaryOut {
+                purpose: "设置页面".to_string(),
+                critical_text: vec!["隐私设置".to_string()],
+                warnings: vec!["有未保存更改".to_string()],
+                next_actions: vec!["检查后保存".to_string()],
+                uncertainties: vec![],
+            });
+        let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"));
+        assert!(rendered.contains("用途：设置页面"));
+        assert!(rendered.contains("关键信息：隐私设置"));
+        assert!(rendered.contains("警告：有未保存更改"));
     }
 }

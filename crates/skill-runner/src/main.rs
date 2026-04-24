@@ -251,8 +251,8 @@ mod tests {
 
     #[test]
     fn runner_bin_name_passes_through_when_already_suffixed() {
-        assert_eq!(runner_bin_name("chat-skill").unwrap(), "chat-skill");
-        assert_eq!(runner_bin_name("chat_skill").unwrap(), "chat-skill");
+        assert_eq!(runner_bin_name("demo-skill").unwrap(), "demo-skill");
+        assert_eq!(runner_bin_name("demo_skill").unwrap(), "demo-skill");
     }
 
     #[test]

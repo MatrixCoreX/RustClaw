@@ -35,7 +35,6 @@ RUN cargo build --release \
     -p audio-synthesize-skill \
     -p audio-transcribe-skill \
     -p browser-web-skill \
-    -p chat-skill \
     -p config-guard-skill \
     -p crypto-skill \
     -p db-basic-skill \

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/schedule_intent.schema.json",
+  "title": "ScheduleIntentOutput",
+  "description": "Schema for the JSON object returned by `prompts/schedule_intent_prompt.md`. Mirrors `ScheduleIntentOutput` / `ScheduleIntentSchedule` / `ScheduleIntentTask` in `crates/clawd/src/runtime/types.rs`, and is enforced by `schedule_intent_schema_drift` in `crates/clawd/src/schedule_service.rs`.\n\nThis parser turns natural-language scheduling requests into a normalized schedule envelope. `task.payload` remains intentionally free-form because per-skill argument shape is validated by the skill registry/runtime, not by the schedule parser schema.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "kind",
+    "timezone",
+    "schedule",
+    "task",
+    "target_job_id",
+    "raw",
+    "confidence",
+    "reason",
+    "needs_clarify",
+    "clarify_question"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["none", "create", "list", "delete", "pause", "resume"]
+    },
+    "timezone": {
+      "type": "string"
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "run_at", "time", "weekday", "every_minutes", "cron"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["once", "daily", "weekly", "interval", "cron"]
+        },
+        "run_at": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        },
+        "weekday": {
+          "type": "integer"
+        },
+        "every_minutes": {
+          "type": "integer"
+        },
+        "cron": {
+          "type": "string"
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kind", "payload"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["ask", "run_skill"]
+        },
+        "payload": {
+          "type": "object",
+          "description": "Free-form task payload. For `run_skill`, runtime later validates `skill_name` and `args` against the live registry."
+        }
+      }
+    },
+    "target_job_id": {
+      "type": "string"
+    },
+    "raw": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "reason": {
+      "type": "string"
+    },
+    "needs_clarify": {
+      "type": "boolean"
+    },
+    "clarify_question": {
+      "type": "string"
+    }
+  }
+}

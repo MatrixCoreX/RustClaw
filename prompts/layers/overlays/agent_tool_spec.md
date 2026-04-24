@@ -75,7 +75,7 @@ Skill behavior notes (file/path):
 - `{{s1.path}}`, `{{s2.path}}`, ...: the concrete saved/read path recorded for an earlier step when available.
 - `{{last_written_file_path}}`: the most recent concrete file path produced by a write step when available.
 - When a later step depends on more than one earlier result, prefer step-specific placeholders over reusing `{{last_output}}` everywhere.
-- Do not invent derived placeholders or object fields such as `{{last_output.foo}}`, `{{last_output.hidden_entries}}`, or similar unsupported forms. If you need to transform/filter a previous output, add an explicit `call_skill(chat)` step to do that transformation.
+- Do not invent derived placeholders or object fields such as `{{last_output.foo}}`, `{{last_output.hidden_entries}}`, or similar unsupported forms. If you need a runtime-grounded final answer derived from previous observed output, prefer `{"type":"synthesize_answer","evidence_refs":[...]}` plus a terminal `respond`; do not call a chat skill for free-form generation or evidence-to-answer synthesis.
 
 ### image_generate
 - required: `prompt`
@@ -215,8 +215,8 @@ Skill behavior notes (file/path):
 - optional: `action` (default `quote`)
 - supports China A-share real-time quote lookup only; data source is Sina Finance
 - only use this skill for quote/price/realtime market requests, not for general stock knowledge questions
-- if the user is asking for a stock code, company-code mapping, listing info, or "what is the stock code of company X", prefer `chat`
-- for quote/price/realtime requests, a configured company name or alias such as `China Mobile` may be passed to `stock`; for stock-code questions still prefer `chat`
+- if the user is asking for a stock code, company-code mapping, listing info, or "what is the stock code of company X", answer via `respond` from general knowledge unless they ask for a real-time quote.
+- for quote/price/realtime requests, a configured company name or alias such as `China Mobile` may be passed to `stock`; for stock-code questions still prefer direct `respond`.
 
 ### weather
 - weather lookup; data source is Open-Meteo, no API key required; output language is controlled by `configs/i18n/weather.<locale>.toml` and `configs/weather.toml`, and may be overridden by `locale` / `lang` or `context.locale`.
@@ -228,7 +228,7 @@ Skill behavior notes (file/path):
   - `days` or `forecast_days` (>=1): when provided, return a **daily forecast for the next N days**; if it exceeds the upstream limit, cap it and report `forecast_days_requested` / `forecast_days_applied` / `forecast_days_capped` in `extra`; if omitted, return **current** weather only. If both are present, `days` wins.
   - `locale` or `lang` (for example `zh-CN`, `en-US`): output language.
 - parameter normalization: when the user provides a non-English city/place name, convert it to the corresponding English name before calling `weather` and write that into `city/location/place/q` so geocoding is less likely to fail.
-- use this skill for current-weather and next-days / one-week forecast requests; for pure climate knowledge or casual chat, prefer `chat`.
+- use this skill for current-weather and next-days / one-week forecast requests; for pure climate knowledge or casual chat, use direct `respond`.
 
 ### map_merchant
 - multi-provider merchant recommendation skill; supports `amap` and `google`, with default provider selected by `configs/map_merchant.toml`.
@@ -287,7 +287,7 @@ Skill behavior notes (file/path):
   - phrases like `导入知识库`、`建立知识库`、`建索引`、`收录这些文档` usually map to `action="ingest"`.
   - phrases like `查知识库`、`搜知识库`、`在某个库里找`、`从资料库里查` usually map to `action="search"`.
   - phrases like `列出知识库`、`看看有哪些库`、`现在有几个知识库` usually map to `action="list_namespaces"` or `action="stats"`.
-  - do not use `kb` for one-off direct file reading, ad hoc filesystem search, or open-ended Q&A when no indexed namespace is involved; prefer `read_file` / `fs_search` / `chat` as appropriate.
+  - do not use `kb` for one-off direct file reading, ad hoc filesystem search, or open-ended Q&A when no indexed namespace is involved; prefer `read_file` / `fs_search` / direct `respond` as appropriate.
   - if the user asks to search a knowledge base but does not specify which namespace and current context does not bind exactly one namespace, ask a concise clarification instead of guessing.
   - if the user asks to ingest files into a knowledge base and provides a concrete folder/path but no namespace, you may derive a short namespace from the folder name only when it is obvious and unambiguous; otherwise ask a concise clarification.
   - if the user asks to inspect a namespace but does not name it and there is not exactly one obvious namespace in context, ask a concise clarification.
@@ -297,13 +297,6 @@ Skill behavior notes (file/path):
 - required: `action="compile"`, `text`
 - use this skill to compile a human scheduling description into a structured schedule plan; it performs semantic compilation only and does not execute scheduling directly.
 - the result is a JSON string whose field contract matches `ScheduleIntentOutput` (`kind/timezone/schedule/task/target_job_id/confidence`).
-
-### chat
-- required: `text`
-- optional: `style` (`chat|joke`), `system_prompt`, `max_tokens`, `temperature`
-- default behavior:
-  - for joke/chitchat intents, prefer `{"type":"call_skill","skill":"chat","args":{"text":"<user_request>","style":"joke|chat"}}`
-  - do not route text joke/chitchat to `audio_synthesize` unless user explicitly asks for voice/audio output
 
 #### rss_fetch JSON-schema style contract (strict)
 - Base shape:

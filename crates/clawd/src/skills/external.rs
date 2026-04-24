@@ -285,7 +285,10 @@ async fn execute_external_local_script(
         cmd.arg(arg);
     }
     cmd.current_dir(&bundle_dir)
-        .env("WORKSPACE_ROOT", state.skill_rt.workspace_root.display().to_string())
+        .env(
+            "WORKSPACE_ROOT",
+            state.skill_rt.workspace_root.display().to_string(),
+        )
         .env("RUSTCLAW_IMPORTED_SKILL", canonical_skill_name)
         .env("RUSTCLAW_TASK_ID", task.task_id.clone())
         .stdin(std::process::Stdio::null())
@@ -426,7 +429,7 @@ async fn execute_external_local_shell_recipe(
         &command,
         state.skill_rt.max_cmd_length,
         timeout_secs,
-        state.policy.allow_sudo,
+        crate::skills::task_allows_sudo(state, Some(task)),
     )
     .await
     {
@@ -591,7 +594,8 @@ async fn execute_external_http_json(
 
     let timeout = Duration::from_secs(timeout_secs);
     let mut req = state
-        .core.http_client
+        .core
+        .http_client
         .post(endpoint)
         .json(&body)
         .timeout(timeout);
