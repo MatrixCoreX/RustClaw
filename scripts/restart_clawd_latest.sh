@@ -8,6 +8,9 @@ PID_FILE="${ROOT_DIR}/.pids/clawd.pid"
 LOG_FILE="${RUSTCLAW_CLAWD_LOG_FILE:-${ROOT_DIR}/logs/clawd.run.log}"
 
 cd "${ROOT_DIR}"
+# shellcheck source=/dev/null
+source "${ROOT_DIR}/scripts/version_info.sh"
+print_rustclaw_version "${ROOT_DIR}"
 mkdir -p "$(dirname "${PID_FILE}")"
 mkdir -p "$(dirname "${LOG_FILE}")"
 
