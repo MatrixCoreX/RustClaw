@@ -904,7 +904,9 @@ mod tests {
     #[test]
     fn test_normalize_user_visible_text_strips_inline_subtask_prefix() {
         assert_eq!(
-            crate::finalize::normalize_user_visible_text("subtask#1 skill(run_cmd): success testuser"),
+            crate::finalize::normalize_user_visible_text(
+                "subtask#1 skill(run_cmd): success testuser",
+            ),
             "testuser"
         );
     }

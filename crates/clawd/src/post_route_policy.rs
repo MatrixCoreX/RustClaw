@@ -465,7 +465,10 @@ pub(crate) fn apply_post_route_policy_with_surface(
             .requires_content_evidence = true;
     }
 
-    if auto_locator_resolved_direct && path_scoped_content_request {
+    if auto_locator_resolved_direct
+        && path_scoped_content_request
+        && !execution_route_result.needs_clarify
+    {
         execution_route_result.needs_clarify = false;
         if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
             execution_route_result.set_routed_mode(
@@ -759,7 +762,7 @@ mod tests {
     }
 
     #[test]
-    fn filename_scope_with_direct_auto_locator_escalates_back_to_execution() {
+    fn filename_scope_with_direct_auto_locator_does_not_override_clarify() {
         let mut route = route_result();
         route.routed_mode = RoutedMode::AskClarify;
         route.needs_clarify = true;
@@ -776,14 +779,36 @@ mod tests {
         );
         assert!(matches!(
             result.execution_route_result.routed_mode,
-            RoutedMode::Act
+            RoutedMode::AskClarify
         ));
-        assert!(!result.execution_route_result.needs_clarify);
-        assert!(!matches!(
+        assert!(result.execution_route_result.needs_clarify);
+        assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
+    }
+
+    #[test]
+    fn current_workspace_auto_locator_does_not_override_clarify() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::AskClarify;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::AskClarify);
+        route.needs_clarify = true;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        let result = apply_post_route_policy(
+            route,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            LocatorResolution::Direct("/tmp/workspace".to_string()),
+        );
+        assert!(matches!(
             result.execution_route_result.routed_mode,
             RoutedMode::AskClarify
         ));
-        assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
+        assert!(result.execution_route_result.needs_clarify);
+        assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/workspace"));
     }
 
     #[test]
