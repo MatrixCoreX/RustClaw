@@ -1705,7 +1705,7 @@ mod tests {
     }
 
     #[test]
-    fn fuzzy_locator_candidates_short_circuit_to_deterministic_question() {
+    fn fuzzy_locator_candidates_short_circuit_to_structured_question() {
         let route = clarify_route(crate::OutputLocatorKind::Filename);
         let state = crate::AppState::test_default_with_fixture_provider();
         let candidates = vec![
