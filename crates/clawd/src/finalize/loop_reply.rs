@@ -798,6 +798,23 @@ fn direct_structured_observed_answer(
     ) {
         return None;
     }
+    if route.output_contract.requires_content_evidence
+        && loop_state
+            .executed_step_results
+            .iter()
+            .filter(|step| {
+                step.is_ok()
+                    && step
+                        .output
+                        .as_deref()
+                        .map(str::trim)
+                        .is_some_and(|output| !output.is_empty())
+            })
+            .count()
+            > 1
+    {
+        return None;
+    }
     let answer = state
         .and_then(|state| {
             crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
@@ -2099,6 +2116,46 @@ mod tests {
         assert_eq!(
             summary.disposition,
             Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn direct_structured_observed_answer_skips_multi_evidence_content_routes() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"react-example","value":"react-example","value_type":"string"}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"extract_field","exists":true,"field_path":"package.name","value_text":"clawd","value":"clawd","value_type":"string"}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        assert!(
+            direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .is_none()
         );
     }
 

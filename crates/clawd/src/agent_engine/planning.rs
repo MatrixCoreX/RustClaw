@@ -1445,6 +1445,7 @@ fn normalize_planned_actions(
     let actions = rewrite_service_status_probe_actions(route_result, actions);
     let actions = rewrite_http_probe_actions(route_result, actions);
     let actions = rewrite_sqlite3_run_cmd_to_db_basic(actions);
+    let actions = normalize_system_basic_schema_aliases(actions);
     let actions = rewrite_path_batch_size_facts_to_compare_paths(route_result, actions);
     let actions =
         rewrite_recent_artifacts_list_dir_to_inventory_dir(route_result, &request_surface, actions);
@@ -1485,6 +1486,86 @@ fn rewrite_sqlite3_run_cmd_to_db_basic(actions: Vec<AgentAction>) -> Vec<AgentAc
                         args,
                     })
                     .unwrap_or(AgentAction::CallSkill { skill, args })
+            }
+            other => other,
+        })
+        .collect()
+}
+
+fn string_list_from_value(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        Some(Value::String(item)) => {
+            let item = item.trim();
+            if item.is_empty() {
+                Vec::new()
+            } else {
+                vec![item.to_string()]
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn normalize_system_basic_args(mut args: Value) -> Value {
+    let Some(obj) = args.as_object_mut() else {
+        return args;
+    };
+    let action_name = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match action_name.as_str() {
+        "read" | "read_file" => {
+            obj.insert(
+                "action".to_string(),
+                Value::String("read_range".to_string()),
+            );
+        }
+        "path_batch_facts" => {
+            if !obj.contains_key("paths") {
+                if let Some(paths) = obj.remove("targets").or_else(|| obj.remove("target_paths")) {
+                    obj.insert("paths".to_string(), paths);
+                }
+            }
+        }
+        "compare_paths" => {
+            if obj.contains_key("left_path") && obj.contains_key("right_path") {
+                return args;
+            }
+            let paths = string_list_from_value(obj.get("paths"))
+                .into_iter()
+                .chain(string_list_from_value(obj.get("targets")))
+                .collect::<Vec<_>>();
+            if paths.len() >= 2 {
+                obj.entry("left_path".to_string())
+                    .or_insert_with(|| Value::String(paths[0].clone()));
+                obj.entry("right_path".to_string())
+                    .or_insert_with(|| Value::String(paths[1].clone()));
+            }
+        }
+        _ => {}
+    }
+    args
+}
+
+fn normalize_system_basic_schema_aliases(actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args } if skill == "system_basic" => {
+                AgentAction::CallSkill {
+                    skill,
+                    args: normalize_system_basic_args(args),
+                }
             }
             other => other,
         })
@@ -3205,7 +3286,8 @@ mod tests {
         classify_planning_prompt_class, inject_synthesize_answer_for_bare_placeholder_respond,
         is_bare_last_output_placeholder, looks_health_check_request,
         looks_like_pre_observation_hallucinated_concrete_content, normalize_planned_actions,
-        plan_repair_reason, rewrite_extract_field_alias_args, rewrite_http_probe_actions,
+        normalize_system_basic_schema_aliases, plan_repair_reason,
+        rewrite_extract_field_alias_args, rewrite_http_probe_actions,
         rewrite_path_batch_size_facts_to_compare_paths,
         rewrite_pre_observation_concrete_respond_to_placeholder,
         rewrite_service_status_probe_actions, rewrite_sqlite3_run_cmd_to_db_basic,
@@ -4315,6 +4397,97 @@ mod tests {
                 assert!(pair.contains(&Some("AGENTS.md")));
             }
             other => panic!("expected system_basic compare_paths action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_basic_targets_alias_is_normalized_before_path_batch_compare_rewrite() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "path_batch_facts",
+                "targets": ["README.md", "AGENTS.md"],
+                "facts": ["size"]
+            }),
+        }];
+
+        let normalized = normalize_system_basic_schema_aliases(actions);
+        let rewritten = rewrite_path_batch_size_facts_to_compare_paths(None, normalized);
+        assert_eq!(rewritten.len(), 1);
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("compare_paths")
+                );
+                let left = args.get("left_path").and_then(|value| value.as_str());
+                let right = args.get("right_path").and_then(|value| value.as_str());
+                let pair = [left, right];
+                assert!(pair.contains(&Some("README.md")));
+                assert!(pair.contains(&Some("AGENTS.md")));
+            }
+            other => panic!("expected system_basic compare_paths action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_basic_compare_paths_targets_alias_sets_left_and_right_paths() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "compare_paths",
+                "targets": ["README.md", "AGENTS.md"],
+            }),
+        }];
+
+        let normalized = normalize_system_basic_schema_aliases(actions);
+        assert_eq!(normalized.len(), 1);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("compare_paths")
+                );
+                assert_eq!(
+                    args.get("left_path").and_then(|value| value.as_str()),
+                    Some("README.md")
+                );
+                assert_eq!(
+                    args.get("right_path").and_then(|value| value.as_str()),
+                    Some("AGENTS.md")
+                );
+            }
+            other => panic!("expected system_basic compare_paths action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_basic_read_alias_is_normalized_to_read_range() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "read",
+                "path": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            }),
+        }];
+
+        let normalized = normalize_system_basic_schema_aliases(actions);
+        assert_eq!(normalized.len(), 1);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("read_range")
+                );
+                assert_eq!(
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some("scripts/nl_tests/fixtures/device_local/docs/release_checklist.md")
+                );
+            }
+            other => panic!("expected system_basic read_range action, got {other:?}"),
         }
     }
 
