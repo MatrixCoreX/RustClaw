@@ -305,7 +305,7 @@ fn structured_doc_filename_scalar_locator_resolution(
 fn route_supports_structured_doc_filename_scalar_resolution(
     route_result: &crate::RouteResult,
 ) -> bool {
-    crate::route_reason_starts_with_deterministic_contract(
+    crate::route_reason_starts_with_route_contract(
         &route_result.route_reason,
         "generic_filename_scalar_extract",
     )
@@ -1274,7 +1274,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
             needs_clarify: false,
-            route_reason: "deterministic_contract:generic_filename_scalar_extract".to_string(),
+            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
             route_confidence: Some(0.98),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
@@ -1316,7 +1316,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
             needs_clarify: false,
-            route_reason: "deterministic_contract:generic_filename_scalar_extract".to_string(),
+            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
             route_confidence: Some(0.98),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
@@ -1358,7 +1358,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
             needs_clarify: false,
-            route_reason: "deterministic_contract:generic_filename_scalar_extract".to_string(),
+            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
             route_confidence: Some(0.98),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
@@ -1421,7 +1421,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 package.json 里的 name 字段，只输出值".to_string(),
             needs_clarify: false,
-            route_reason: "deterministic_contract:generic_filename_scalar_extract".to_string(),
+            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
             route_confidence: Some(0.98),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
@@ -1472,7 +1472,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "去 package.json 里找 name，只把值给我".to_string(),
             needs_clarify: false,
-            route_reason: "deterministic_contract:generic_filename_scalar_extract".to_string(),
+            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
             route_confidence: Some(0.98),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
@@ -1525,7 +1525,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 package.json 里的 name 字段，只输出值".to_string(),
             needs_clarify: false,
-            route_reason: "deterministic_contract:generic_filename_scalar_extract".to_string(),
+            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
             route_confidence: Some(0.98),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
