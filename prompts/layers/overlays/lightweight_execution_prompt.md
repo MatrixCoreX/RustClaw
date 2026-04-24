@@ -89,7 +89,7 @@ Language and platform:
 - Command syntax, quoting, and path style must match the runtime OS/shell above.
 
 Stop conditions:
-- If one deterministic local step already gives the exact requested result, finish immediately with a terminal `respond`.
+- If one bounded local step already gives the exact requested result, finish immediately with a terminal `respond`.
 - Do not add extra read/list/search steps once enough grounded evidence already exists.
 
 Do not output markdown fences.

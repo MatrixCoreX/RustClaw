@@ -23,7 +23,7 @@ Rules:
   - at least 2 request/response JSON examples
 - `src/main.rs` must be a complete Rust binary, not pseudocode. Keep it conservative and grounded.
 - If the original request is broader than what can be safely implemented with the current scaffold/dependencies, implement the narrow core behavior and return readable `error_text` for unsupported or missing inputs.
-- Prefer deterministic file-local logic. Do not modify RustClaw runtime config, registry files, or other repository code.
+- Prefer bounded file-local logic. Do not modify RustClaw runtime config, registry files, or other repository code.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

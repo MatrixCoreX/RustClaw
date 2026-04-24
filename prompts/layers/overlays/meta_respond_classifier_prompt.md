@@ -22,7 +22,7 @@ Decision policy:
 1.2) Template-like wrappers that mainly embed runtime placeholders such as `{{last_output}}`, `{{s1.output}}`, or similar raw execution variables are usually meta scaffolding unless the surrounding text already forms a real final answer after substitution.
 1.3) Clarification/confirmation reopeners are meta-like when they mainly ask for a path, filename, target, scope, or permission to execute instead of directly answering the task. This includes texts whose main communicative role is “please provide the path/target” or “should I execute now?” rather than a final result.
 2) `is_meta_instruction=false` when the text is substantive user-facing content, actionable final answer, concrete file token (`FILE:` / `IMAGE_FILE:`), or explicit completion result.
-3) Judge by semantics and communicative role, not by deterministic keyword matching.
+3) Judge by semantics and communicative role, not by fixed keyword matching.
 4) Be conservative: if uncertain, prefer `false` (do not suppress a potentially valid user-facing response).
 5) `reason` should be short, e.g. `process_guidance_fragment`, `user_facing_result`, `delivery_token`, `ambiguous_keep`.
 

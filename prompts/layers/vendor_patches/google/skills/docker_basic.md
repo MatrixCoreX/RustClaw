@@ -6,7 +6,7 @@ Vendor tuning for Google/Gemini models:
 - Use only declared capabilities and keep args minimal and standalone.
 - Prefer the narrowest tool/skill that can complete the subtask.
 - Avoid injecting unrelated prior context unless the user explicitly asks for grounding in it.
-- Optimize for deterministic planner consumption.
+- Optimize for structured planner consumption.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
