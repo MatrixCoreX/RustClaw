@@ -102,9 +102,9 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     /// Terminal mode: chat / act / ask_clarify / chat_act. Used to skip the separate router LLM.
     pub(crate) routed_mode: RoutedMode,
-    /// Phase 1.5: `chat` 模式下 normalizer 可以顺手给出直接回复候选，
-    /// 命中 4 条护栏就可以跳过第二次 LLM（`chat_response_prompt`）。
-    /// 未命中或为空时走原链路，无损回退。
+    /// Deprecated planner-first compatibility fields. The normalizer parser
+    /// still accepts them from old prompts/models, but runtime no longer uses
+    /// them to short-circuit the chat/planner response pass.
     pub(crate) direct_reply_candidate: String,
     pub(crate) direct_reply_confidence: f64,
     pub(crate) turn_analysis: Option<TurnAnalysis>,
@@ -1012,8 +1012,9 @@ pub(crate) async fn run_intent_normalizer(
         let mut reason = out.reason;
         let had_normalizer_direct_reply =
             !out.direct_reply_candidate.trim().is_empty() || out.direct_reply_confidence > 0.0;
-        // Planner-first: normalizer 可以继续输出兼容字段，但主链不再消费
-        // direct reply 候选，避免普通 chat 在 planner/runtime 之前被隐性短路。
+        // Planner-first: normalizer can still output these deprecated
+        // compatibility fields, but the main path must not consume them as
+        // direct-reply authority before the chat/planner response pass.
         let mut direct_reply_candidate = String::new();
         let mut direct_reply_confidence = 0.0;
         let mut resolved_user_intent = if resolved.is_empty() {
