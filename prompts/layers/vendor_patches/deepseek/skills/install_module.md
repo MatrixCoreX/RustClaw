@@ -6,7 +6,7 @@ Vendor tuning for DeepSeek models:
 - Use only declared capabilities and keep args minimal and explicit.
 - Prefer the narrowest tool/skill that can finish the subtask correctly.
 - Avoid injecting unrelated context unless explicitly required.
-- Optimize for deterministic planner/parser compatibility.
+- Optimize for structured planner/parser compatibility.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

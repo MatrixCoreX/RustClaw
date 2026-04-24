@@ -33,7 +33,7 @@ pub(crate) enum AskState {
     ResumeExecuting,
     /// 路由结论是讨论已暂停 task（非执行）。
     ResumeDiscussing,
-    /// 路由结论是 schedule deterministic 短路。
+    /// 路由结论是 schedule 本地短路。
     ScheduleDirect,
     /// agent loop 执行中（含 plan / execute / verify 子循环，本轮先不细分）。
     Executing,
