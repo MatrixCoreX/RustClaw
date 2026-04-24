@@ -17,11 +17,11 @@
 
 当前代码已具备以下前置基础：
 
-1. [finalizer.rs](/tmp/rustclaw-workspace/crates/clawd/src/finalizer.rs) 已定义 `FinalizerSchemaOut`、`finalizer_contract_ok`、路径绑定与结构化回退判据。
-2. [final_synthesis.rs](/tmp/rustclaw-workspace/crates/clawd/src/agent_engine/final_synthesis.rs) 已在 `observed_read` 与通用收尾路径消费 finalizer 结构化输出。
-3. [verifier.rs](/tmp/rustclaw-workspace/crates/clawd/src/verifier.rs) 已覆盖 `SkillNotVisible`、`MissingRequiredArg`、`ConfirmationRequired`、`PrimaryFallbackConflict`、`RouteClarifyRequired` 等校验项。
-4. [prepare_round.rs](/tmp/rustclaw-workspace/crates/clawd/src/agent_engine/prepare_round.rs) 已支持基于 `verify_enforce_enabled` 在 observe-only 与 enforce 两种模式之间切换。
-5. [task_journal.rs](/tmp/rustclaw-workspace/crates/clawd/src/task_journal.rs) 已具备 route / plan / verify / step trace 的记录能力。
+1. [finalizer.rs](../crates/clawd/src/finalizer.rs) 已定义 `FinalizerSchemaOut`、`finalizer_contract_ok`、路径绑定与结构化回退判据。
+2. [final_synthesis.rs](../crates/clawd/src/agent_engine/final_synthesis.rs) 已在 `observed_read` 与通用收尾路径消费 finalizer 结构化输出。
+3. [verifier.rs](../crates/clawd/src/verifier.rs) 已覆盖 `SkillNotVisible`、`MissingRequiredArg`、`ConfirmationRequired`、`PrimaryFallbackConflict`、`RouteClarifyRequired` 等校验项。
+4. [prepare_round.rs](../crates/clawd/src/agent_engine/prepare_round.rs) 已支持基于 `verify_enforce_enabled` 在 observe-only 与 enforce 两种模式之间切换。
+5. [task_journal.rs](../crates/clawd/src/task_journal.rs) 已具备 route / plan / verify / step trace 的记录能力。
 
 ## 4. V1 只解决什么
 
@@ -160,15 +160,15 @@
 
 ### WP1：指标与观察面
 
-1. 在 [task_journal.rs](/tmp/rustclaw-workspace/crates/clawd/src/task_journal.rs) 增加 finalizer 结果摘要、证据使用情况、交付一致性、LLM 调用计数摘要。
-2. 在 [final_synthesis.rs](/tmp/rustclaw-workspace/crates/clawd/src/agent_engine/final_synthesis.rs) 统一写入 contract 判定结果，避免日志和结果对象各记一套。
-3. 在 [llm_gateway.rs](/tmp/rustclaw-workspace/crates/clawd/src/llm_gateway.rs)、[usage.rs](/tmp/rustclaw-workspace/crates/clawd/src/providers/usage.rs) 补任务级 LLM 调用汇总入口。
+1. 在 [task_journal.rs](../crates/clawd/src/task_journal.rs) 增加 finalizer 结果摘要、证据使用情况、交付一致性、LLM 调用计数摘要。
+2. 在 [final_synthesis.rs](../crates/clawd/src/agent_engine/final_synthesis.rs) 统一写入 contract 判定结果，避免日志和结果对象各记一套。
+3. 在 [llm_gateway.rs](../crates/clawd/src/llm_gateway.rs)、[usage.rs](../crates/clawd/src/providers/usage.rs) 补任务级 LLM 调用汇总入口。
 
 ### WP2：V1 收口
 
-1. 在 [finalizer.rs](/tmp/rustclaw-workspace/crates/clawd/src/finalizer.rs) 统一“合格完成 / 可回退 / 必须失败”的判据。
-2. 在 [delivery_utils.rs](/tmp/rustclaw-workspace/crates/clawd/src/delivery_utils.rs) 及其子模块中固化 `text/messages/FILE token` 的单一出口裁剪。
-3. 在 [verifier.rs](/tmp/rustclaw-workspace/crates/clawd/src/verifier.rs)、[prepare_round.rs](/tmp/rustclaw-workspace/crates/clawd/src/agent_engine/prepare_round.rs) 明确低风险 enforce 范围与用户提示文案。
+1. 在 [finalizer.rs](../crates/clawd/src/finalizer.rs) 统一“合格完成 / 可回退 / 必须失败”的判据。
+2. 在 [delivery_utils.rs](../crates/clawd/src/delivery_utils.rs) 及其子模块中固化 `text/messages/FILE token` 的单一出口裁剪。
+3. 在 [verifier.rs](../crates/clawd/src/verifier.rs)、[prepare_round.rs](../crates/clawd/src/agent_engine/prepare_round.rs) 明确低风险 enforce 范围与用户提示文案。
 
 ## 9. 建议按 2 个 PR 推进
 

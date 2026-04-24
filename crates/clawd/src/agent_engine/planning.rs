@@ -2003,12 +2003,22 @@ fn rewrite_single_target_file_read_to_auto_locator(
 }
 
 fn rewrite_explicit_read_file_range_requests(
-    _route_result: Option<&RouteResult>,
+    route_result: Option<&RouteResult>,
     request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     user_text: &str,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
-    let Some(range_request) = requested_read_range(request_surface, user_text) else {
+    let Some(range_request) = requested_read_range(request_surface, user_text).or_else(|| {
+        route_result.and_then(|route| {
+            let resolved_intent = route.resolved_intent.trim();
+            if resolved_intent.is_empty() || resolved_intent == user_text.trim() {
+                return None;
+            }
+            let resolved_surface =
+                crate::intent::surface_signals::analyze_prompt_surface(resolved_intent);
+            requested_read_range(&resolved_surface, resolved_intent)
+        })
+    }) else {
         return actions;
     };
 

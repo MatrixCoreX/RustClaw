@@ -201,13 +201,13 @@
 ### WP3：V2 证据化
 
 1. 在 `crates/clawd/src/agent_engine` 引入最小 Evidence Ledger 结构体和 step-to-evidence 映射。
-2. 让 [final_synthesis.rs](/tmp/rustclaw-workspace/crates/clawd/src/agent_engine/final_synthesis.rs) 优先消费 evidence block，而不是原始松散文本。
+2. 让 [final_synthesis.rs](../crates/clawd/src/agent_engine/final_synthesis.rs) 优先消费 evidence block，而不是原始松散文本。
 3. 第一批只覆盖 `read_file`、抽取、file delivery 三类高价值场景。
 
 ### WP4：Registry 驱动
 
-1. 在 [skill_registry.rs](/tmp/rustclaw-workspace/crates/claw-core/src/skill_registry.rs) 暴露 planner / verifier 可直接消费的轻量契约访问接口。
-2. 在 [intent_router.rs](/tmp/rustclaw-workspace/crates/clawd/src/intent_router.rs)、[post_route_policy.rs](/tmp/rustclaw-workspace/crates/clawd/src/post_route_policy.rs)、`crates/clawd/src/agent_engine/planning.rs` 优先消费 schema 与 risk 字段来决定 clarify / execute / confirm。
+1. 在 [skill_registry.rs](../crates/claw-core/src/skill_registry.rs) 暴露 planner / verifier 可直接消费的轻量契约访问接口。
+2. 在 [intent_router.rs](../crates/clawd/src/intent_router.rs)、[post_route_policy.rs](../crates/clawd/src/post_route_policy.rs)、`crates/clawd/src/agent_engine/planning.rs` 优先消费 schema 与 risk 字段来决定 clarify / execute / confirm。
 3. 清理 prompt 中与 registry 重复、且容易漂移的技能契约描述。
 
 ## 9. 建议按 2 个 PR 推进

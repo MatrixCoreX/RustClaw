@@ -1488,7 +1488,7 @@ mod tests {
                 locator_kind: OutputLocatorKind::Path,
                 delivery_intent: crate::OutputDeliveryIntent::None,
                 semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-                locator_hint: "/tmp/rustclaw-home/old/logs/model_io.log".to_string(),
+                locator_hint: "/tmp/rustclaw-workspace/old/logs/model_io.log".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
             direct_reply_candidate: String::new(),
