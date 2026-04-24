@@ -1277,7 +1277,6 @@ pub(crate) async fn run_skill_with_runner_once(
             crate::llm_gateway::selected_openai_base_url(state, Some(task)),
         )
         .env("OPENAI_MODEL", selected_openai_model.clone())
-        .env("CHAT_SKILL_MODEL", selected_openai_model)
         .env(
             "WORKSPACE_ROOT",
             state.skill_rt.workspace_root.display().to_string(),
