@@ -1459,7 +1459,6 @@ fn normalize_planned_actions(
         actions,
     );
     let actions = rewrite_extract_field_alias_args(actions);
-    let actions = prune_optional_extract_field_actions_for_workspace_summary(route_result, actions);
     let actions = prune_unscoped_workspace_summary_evidence_for_scope(route_result, actions);
     let actions = strip_unrequested_workspace_artifact_mutations(route_result, loop_state, actions);
     let actions = inject_unscoped_workspace_text_evidence_reads(state, route_result, actions);
@@ -2139,21 +2138,6 @@ fn path_matches_workspace_scope_hint(path: &str, scope_hint: &str) -> bool {
         .is_some_and(|name| name.eq_ignore_ascii_case(scope_hint))
 }
 
-fn action_is_optional_extract_field(action: &AgentAction) -> bool {
-    match action {
-        AgentAction::CallSkill { skill, args } if skill == "system_basic" => args
-            .get("action")
-            .and_then(|value| value.as_str())
-            .is_some_and(|action| {
-                matches!(
-                    action.trim().to_ascii_lowercase().as_str(),
-                    "extract_field" | "extract_fields"
-                )
-            }),
-        _ => false,
-    }
-}
-
 fn route_requests_structured_scalar_compare(route: &RouteResult) -> bool {
     !route.needs_clarify
         && !route.output_contract.delivery_required
@@ -2227,38 +2211,6 @@ fn append_synthesize_answer_for_structured_scalar_compare(
         evidence_refs.join(",")
     );
     rewritten
-}
-
-fn prune_optional_extract_field_actions_for_workspace_summary(
-    route_result: Option<&RouteResult>,
-    actions: Vec<AgentAction>,
-) -> Vec<AgentAction> {
-    let Some(route) = route_result else {
-        return actions;
-    };
-    if route.needs_clarify
-        || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::WorkspaceProjectSummary
-        || !actions.iter().any(action_is_workspace_summary_evidence)
-        || !actions.iter().any(action_is_optional_extract_field)
-    {
-        return actions;
-    }
-    let original_len = actions.len();
-    let pruned = actions
-        .into_iter()
-        .filter(|action| !action_is_optional_extract_field(action))
-        .collect::<Vec<_>>();
-    if !pruned.iter().any(action_is_workspace_summary_evidence) {
-        return pruned;
-    }
-    if pruned.len() != original_len {
-        info!(
-            "plan_prune_workspace_summary_extract_fields removed={}",
-            original_len.saturating_sub(pruned.len())
-        );
-    }
-    pruned
 }
 
 fn prune_unscoped_workspace_summary_evidence_for_scope(
@@ -4655,11 +4607,19 @@ mod tests {
     }
 
     #[test]
-    fn workspace_summary_prunes_optional_extract_field_steps_when_read_evidence_exists() {
+    fn workspace_summary_keeps_requested_structured_field_evidence() {
         let actions = vec![
             AgentAction::CallSkill {
                 skill: "list_dir".to_string(),
                 args: serde_json::json!({ "path": "." }),
+            },
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "extract_field",
+                    "path": "UI/package.json",
+                    "field_path": "name"
+                }),
             },
             AgentAction::CallSkill {
                 skill: "system_basic".to_string(),
@@ -4667,69 +4627,36 @@ mod tests {
                     "action": "read_range",
                     "path": "README.md",
                     "mode": "head",
-                    "n": 20
+                    "n": 10
                 }),
             },
-            AgentAction::CallSkill {
-                skill: "system_basic".to_string(),
-                args: serde_json::json!({
-                    "action": "extract_field",
-                    "path": "Cargo.toml",
-                    "field_path": "package.name"
-                }),
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec![
+                    "step_1".to_string(),
+                    "step_2".to_string(),
+                    "step_3".to_string(),
+                ],
             },
         ];
-        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
         route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
-        route.resolved_intent = "Summarize this repository for me".to_string();
+        route.resolved_intent =
+            "先看顶层目录，再读 UI/package.json 的 name，最后一句话判断 UI 定位".to_string();
 
-        let pruned = super::prune_optional_extract_field_actions_for_workspace_summary(
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
             Some(&route),
+            &LoopState::new(2),
+            &route.resolved_intent,
+            None,
             actions,
         );
-        assert_eq!(pruned.len(), 2);
-        assert!(pruned
-            .iter()
-            .all(|action| !super::action_is_optional_extract_field(action)));
-    }
-
-    #[test]
-    fn workspace_summary_prunes_multi_extract_fields_when_read_evidence_exists() {
-        let actions = vec![
-            AgentAction::CallSkill {
-                skill: "list_dir".to_string(),
-                args: serde_json::json!({ "path": "." }),
-            },
-            AgentAction::CallSkill {
-                skill: "read_file".to_string(),
-                args: serde_json::json!({ "path": "README.md" }),
-            },
-            AgentAction::CallSkill {
-                skill: "system_basic".to_string(),
-                args: serde_json::json!({
-                    "action": "extract_fields",
-                    "path": "Cargo.toml",
-                    "field_paths": [
-                        "package.name",
-                        "package.version",
-                        "package.description",
-                        "workspace.package.description"
-                    ]
-                }),
-            },
-        ];
-        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
-        route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
-        route.resolved_intent = "帮我总结这个仓库".to_string();
-
-        let pruned = super::prune_optional_extract_field_actions_for_workspace_summary(
-            Some(&route),
-            actions,
-        );
-        assert_eq!(pruned.len(), 2);
-        assert!(pruned
-            .iter()
-            .all(|action| !super::action_is_optional_extract_field(action)));
+        assert!(normalized.iter().any(|action| matches!(
+            action,
+            AgentAction::CallSkill { skill, args }
+                if skill == "system_basic"
+                    && args.get("action").and_then(|value| value.as_str()) == Some("extract_field")
+        )));
     }
 
     #[test]
