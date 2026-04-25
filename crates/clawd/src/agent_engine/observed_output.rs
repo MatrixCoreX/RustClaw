@@ -1147,6 +1147,50 @@ fn numeric_scalar_value(value: &serde_json::Value, display_text: &str) -> Option
         .or_else(|| display_text.parse::<f64>().ok())
 }
 
+fn structured_scalar_observation_from_parts(
+    display_text: String,
+    numeric_value: Option<f64>,
+) -> Option<StructuredScalarObservation> {
+    let display_text = display_text.trim().to_string();
+    if display_text.is_empty() {
+        return None;
+    }
+    Some(StructuredScalarObservation {
+        normalized_key: normalized_scalar_equality_key(&display_text),
+        numeric_value,
+        display_text,
+    })
+}
+
+fn structured_scalar_observation_from_json_scalar(
+    value: &serde_json::Value,
+) -> Option<StructuredScalarObservation> {
+    let display_text = value_scalar_text(value)?;
+    structured_scalar_observation_from_parts(
+        display_text.clone(),
+        numeric_scalar_value(value, &display_text),
+    )
+}
+
+fn toml_scalar_text_and_numeric(value: &toml::Value) -> Option<(String, Option<f64>)> {
+    match value {
+        toml::Value::String(v) => Some((v.trim().to_string(), None)),
+        toml::Value::Integer(v) => Some((v.to_string(), Some(*v as f64))),
+        toml::Value::Float(v) => Some((v.to_string(), Some(*v))),
+        toml::Value::Boolean(v) => Some((v.to_string(), None)),
+        toml::Value::Datetime(v) => Some((v.to_string(), None)),
+        _ => None,
+    }
+    .filter(|(text, _)| !text.trim().is_empty())
+}
+
+fn structured_scalar_observation_from_toml_scalar(
+    value: &toml::Value,
+) -> Option<StructuredScalarObservation> {
+    let (display_text, numeric_value) = toml_scalar_text_and_numeric(value)?;
+    structured_scalar_observation_from_parts(display_text, numeric_value)
+}
+
 fn structured_scalar_observation_from_extract_item(
     value: &serde_json::Value,
 ) -> Option<StructuredScalarObservation> {
@@ -1170,6 +1214,42 @@ fn structured_scalar_observation_from_extract_item(
         numeric_value: numeric_scalar_value(raw_value, &display_text),
         display_text,
     })
+}
+
+fn route_mentions_name_field(route: &crate::RouteResult) -> bool {
+    let text = route.resolved_intent.to_ascii_lowercase();
+    text.contains("name") || route.resolved_intent.contains("名称")
+}
+
+fn route_mentions_package_name_field(route: &crate::RouteResult) -> bool {
+    let text = route.resolved_intent.to_ascii_lowercase();
+    text.contains("package.name") || text.contains("package name")
+}
+
+fn structured_scalar_observation_from_read_file_body(
+    route: &crate::RouteResult,
+    body: &str,
+) -> Option<StructuredScalarObservation> {
+    if !route_mentions_name_field(route) {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+        return value
+            .get("name")
+            .and_then(structured_scalar_observation_from_json_scalar);
+    }
+    let value = toml::from_str::<toml::Value>(body).ok()?;
+    if route_mentions_package_name_field(route) {
+        return value
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(structured_scalar_observation_from_toml_scalar);
+    }
+    value
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .or_else(|| value.get("name"))
+        .and_then(structured_scalar_observation_from_toml_scalar)
 }
 
 fn structured_scalar_observation_from_step(
@@ -1211,12 +1291,36 @@ fn recent_structured_scalar_observations(
     recent
 }
 
+fn recent_read_file_scalar_observations(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    limit: usize,
+) -> Vec<StructuredScalarObservation> {
+    let mut recent = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "read_file")
+        .filter_map(|step| {
+            step.output
+                .as_deref()
+                .and_then(|body| structured_scalar_observation_from_read_file_body(route, body))
+        })
+        .take(limit.max(1))
+        .collect::<Vec<_>>();
+    recent.reverse();
+    recent
+}
+
 fn structured_scalar_pair_direct_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
     prefer_english: bool,
 ) -> Option<String> {
-    let observations = recent_structured_scalar_observations(loop_state, 2);
+    let mut observations = recent_structured_scalar_observations(loop_state, 2);
+    if observations.len() < 2 {
+        observations = recent_read_file_scalar_observations(route, loop_state, 2);
+    }
     if observations.len() < 2 {
         return None;
     }
@@ -1280,6 +1384,39 @@ fn structured_scalar_pair_direct_answer(
         }
         _ => None,
     }
+}
+
+pub(crate) fn recent_structured_scalar_observation_count(loop_state: &LoopState) -> usize {
+    recent_structured_scalar_observations(loop_state, 2).len()
+}
+
+pub(crate) fn extract_structured_scalar_pair_direct_answer(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    structured_scalar_pair_direct_answer(route, loop_state, false)
+}
+
+pub(crate) fn extract_structured_scalar_pair_direct_answer_i18n(
+    loop_state: &LoopState,
+    state: &AppState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let prefer_english = match current_turn_request_text(Some(route), agent_run_context)
+        .map(observed_request_language_hint)
+    {
+        Some("en") => true,
+        Some("zh") => false,
+        _ => state
+            .policy
+            .command_intent
+            .default_locale
+            .to_ascii_lowercase()
+            .starts_with("en"),
+    };
+    structured_scalar_pair_direct_answer(route, loop_state, prefer_english)
 }
 
 fn text_contains_cjk(text: &str) -> bool {
@@ -1682,9 +1819,41 @@ fn system_basic_structured_doc_value(skill: &str, body: &str) -> Option<serde_js
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     matches!(
         value.get("action").and_then(|v| v.as_str()),
-        Some("extract_fields" | "structured_keys")
+        Some("extract_field" | "extract_fields" | "structured_keys")
     )
     .then_some(value)
+}
+
+fn system_basic_structured_doc_observed_body(skill: &str, body: &str) -> Option<String> {
+    let value = system_basic_structured_doc_value(skill, body)?;
+    match value.get("action").and_then(|v| v.as_str()) {
+        Some("extract_field") => {
+            let field_path = value
+                .get("field_path")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .unwrap_or("requested field");
+            Some(structured_field_display_line(
+                field_path,
+                value.get("value").unwrap_or(&serde_json::Value::Null),
+                value.get("value_text").and_then(|v| v.as_str()),
+                value
+                    .get("exists")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                true,
+            ))
+        }
+        Some("extract_fields") => extract_fields_direct_answer_candidate(
+            &value,
+            Some(crate::OutputResponseShape::Free),
+            true,
+        )
+        .or_else(|| Some(body.to_string())),
+        Some("structured_keys") => Some(body.to_string()),
+        _ => None,
+    }
 }
 
 fn service_control_direct_answer_candidate(
@@ -4759,8 +4928,8 @@ fn observed_step_body(step: &crate::executor::StepExecutionResult) -> Option<Str
     if let Some(normalized) = structured_observed_body(&step.skill, body) {
         return Some(normalized);
     }
-    if system_basic_structured_doc_value(&step.skill, body).is_some() {
-        return Some(body.to_string());
+    if let Some(normalized) = system_basic_structured_doc_observed_body(&step.skill, body) {
+        return Some(normalized);
     }
     (crate::finalize::classify_observed_content_status(body)
         == crate::finalize::ObservedContentStatus::ContentAvailable)
@@ -4868,6 +5037,28 @@ pub(crate) async fn synthesize_answer_from_observed_output(
     let observed_entries = observed_output_entries(loop_state);
     if observed_entries.is_empty() {
         return None;
+    }
+    if let Some(answer) =
+        extract_structured_scalar_pair_direct_answer_i18n(loop_state, state, agent_run_context)
+            .filter(|answer| !answer.trim().is_empty())
+    {
+        return Some((
+            answer,
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                parsed: false,
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                confidence: Some(1.0),
+                used_evidence_ids_count: 2,
+                evidence_quotes_count: 0,
+                ..Default::default()
+            },
+        ));
     }
     let observed_block = observed_entries.join("\n\n");
     let resolved_intent = resolved_user_intent(agent_run_context, user_text);
@@ -5062,6 +5253,26 @@ mod tests {
     }
 
     #[test]
+    fn observed_entries_include_structured_extract_field_outputs() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"react-example","value":"react-example","value_type":"string"}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "system_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"package.name","value_text":"clawd","value":"clawd","value_type":"string"}"#,
+        ));
+
+        let entries = observed_output_entries(&loop_state);
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].contains("name: react-example"));
+        assert!(entries[1].contains("package.name: clawd"));
+    }
+
+    #[test]
     fn direct_scalar_ignores_shell_locale_warning_noise() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5198,6 +5409,67 @@ mod tests {
             )
             .as_deref(),
             Some("same")
+        );
+    }
+
+    #[test]
+    fn structured_pair_answer_extracts_name_fields_from_read_file_outputs() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "read_file",
+            r#"{"name":"react-example","version":"0.0.0"}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "read_file",
+            r#"[package]
+name = "clawd"
+version.workspace = true
+"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent:
+                "读取 UI/package.json 里的 name 字段，再读取 crates/clawd/Cargo.toml 里的 package.name 字段，最后用一行输出：前者、后者、一样或不一样"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "route_contract:same_or_different".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::RecentScalarEqualityCheck,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            super::extract_structured_scalar_pair_direct_answer(
+                &loop_state,
+                Some(&agent_run_context)
+            )
+            .as_deref(),
+            Some("不一样")
         );
     }
 

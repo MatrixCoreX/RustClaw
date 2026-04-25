@@ -12,6 +12,8 @@ use serde_json::{json, Map, Value};
 struct Req {
     request_id: String,
     args: Value,
+    #[serde(default)]
+    context: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -52,7 +54,8 @@ fn handle(req: Req) -> Resp {
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    let result = execute_action(&workspace_root, req.args);
+    let allow_path_outside_workspace = context_allows_path_outside_workspace(req.context.as_ref());
+    let result = execute_action(&workspace_root, req.args, allow_path_outside_workspace);
     match result {
         Ok(text) => Resp {
             request_id: req.request_id,
@@ -71,7 +74,11 @@ fn handle(req: Req) -> Resp {
     }
 }
 
-fn execute_action(workspace_root: &Path, args: Value) -> Result<String, String> {
+fn execute_action(
+    workspace_root: &Path,
+    args: Value,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -83,23 +90,34 @@ fn execute_action(workspace_root: &Path, args: Value) -> Result<String, String> 
 
     match action.as_str() {
         "info" => system_info(workspace_root),
-        "inventory_dir" => inventory_dir(workspace_root, obj),
-        "count_inventory" => count_inventory(workspace_root, obj),
-        "workspace_glance" => workspace_glance(workspace_root, obj),
-        "tree_summary" => tree_summary(workspace_root, obj),
-        "dir_compare" => dir_compare(workspace_root, obj),
-        "extract_field" => extract_field(workspace_root, obj),
-        "extract_fields" => extract_fields(workspace_root, obj),
-        "structured_keys" => structured_keys(workspace_root, obj),
-        "find_path" => find_path(workspace_root, obj),
-        "read_range" => read_range(workspace_root, obj),
-        "compare_paths" => compare_paths(workspace_root, obj),
-        "path_batch_facts" => path_batch_facts(workspace_root, obj),
+        "inventory_dir" => inventory_dir(workspace_root, obj, allow_path_outside_workspace),
+        "count_inventory" => count_inventory(workspace_root, obj, allow_path_outside_workspace),
+        "workspace_glance" => workspace_glance(workspace_root, obj, allow_path_outside_workspace),
+        "tree_summary" => tree_summary(workspace_root, obj, allow_path_outside_workspace),
+        "dir_compare" => dir_compare(workspace_root, obj, allow_path_outside_workspace),
+        "extract_field" => extract_field(workspace_root, obj, allow_path_outside_workspace),
+        "extract_fields" => extract_fields(workspace_root, obj, allow_path_outside_workspace),
+        "structured_keys" => structured_keys(workspace_root, obj, allow_path_outside_workspace),
+        "find_path" => find_path(workspace_root, obj, allow_path_outside_workspace),
+        "read_range" => read_range(workspace_root, obj, allow_path_outside_workspace),
+        "compare_paths" => compare_paths(workspace_root, obj, allow_path_outside_workspace),
+        "path_batch_facts" => path_batch_facts(workspace_root, obj, allow_path_outside_workspace),
         "diagnose_runtime" => diagnose_runtime(workspace_root, obj),
         other => Err(format!(
             "unknown action: {other}; allowed: info|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|find_path|read_range|compare_paths|path_batch_facts|diagnose_runtime"
         )),
     }
+}
+
+fn context_allows_path_outside_workspace(context: Option<&Value>) -> bool {
+    context
+        .and_then(|ctx| {
+            ctx.get("permissions")
+                .and_then(|permissions| permissions.get("allow_path_outside_workspace"))
+                .or_else(|| ctx.get("allow_path_outside_workspace"))
+        })
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn system_info(workspace_root: &Path) -> Result<String, String> {
@@ -140,9 +158,13 @@ fn memory_rss_bytes() -> Option<u64> {
     memory_rss_bytes_platform()
 }
 
-fn inventory_dir(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn inventory_dir(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let path = obj.get("path").and_then(Value::as_str).unwrap_or(".");
-    let real = resolve_path(workspace_root, path)?;
+    let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let include_hidden = bool_arg(obj, "include_hidden", false);
     let files_only = bool_arg(obj, "files_only", false);
     let dirs_only = bool_arg(obj, "dirs_only", false);
@@ -253,9 +275,13 @@ fn inventory_dir(workspace_root: &Path, obj: &Map<String, Value>) -> Result<Stri
     .to_string())
 }
 
-fn count_inventory(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn count_inventory(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let path = obj.get("path").and_then(Value::as_str).unwrap_or(".");
-    let real = resolve_path(workspace_root, path)?;
+    let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let include_hidden = bool_arg(obj, "include_hidden", false);
     let recursive = bool_arg(obj, "recursive", false);
     let count_files = bool_arg(obj, "count_files", true);
@@ -334,9 +360,13 @@ fn count_inventory(workspace_root: &Path, obj: &Map<String, Value>) -> Result<St
     .to_string())
 }
 
-fn workspace_glance(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn workspace_glance(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let path = obj.get("path").and_then(Value::as_str).unwrap_or(".");
-    let real = resolve_path(workspace_root, path)?;
+    let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let include_hidden = bool_arg(obj, "include_hidden", false);
     let max_entries = u64_arg(obj, "max_entries", 20).clamp(1, 100) as usize;
     let mut entries = Vec::new();
@@ -415,9 +445,13 @@ fn workspace_glance(workspace_root: &Path, obj: &Map<String, Value>) -> Result<S
     .to_string())
 }
 
-fn tree_summary(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn tree_summary(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let path = obj.get("path").and_then(Value::as_str).unwrap_or(".");
-    let real = resolve_path(workspace_root, path)?;
+    let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let include_hidden = bool_arg(obj, "include_hidden", false);
     let max_depth = u64_arg(obj, "max_depth", 2).clamp(1, 6) as usize;
     let max_children_per_dir = u64_arg(obj, "max_children_per_dir", 12).clamp(1, 50) as usize;
@@ -451,11 +485,15 @@ fn tree_summary(workspace_root: &Path, obj: &Map<String, Value>) -> Result<Strin
     .to_string())
 }
 
-fn dir_compare(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn dir_compare(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let left = required_str(obj, "left_path")?;
     let right = required_str(obj, "right_path")?;
-    let left_real = resolve_path(workspace_root, left)?;
-    let right_real = resolve_path(workspace_root, right)?;
+    let left_real = resolve_path(workspace_root, left, allow_path_outside_workspace)?;
+    let right_real = resolve_path(workspace_root, right, allow_path_outside_workspace)?;
     let include_hidden = bool_arg(obj, "include_hidden", false);
     let recursive = bool_arg(obj, "recursive", false);
     let max_diffs = u64_arg(obj, "max_diffs", 100).clamp(1, 500) as usize;
@@ -536,10 +574,14 @@ fn dir_compare(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String
     .to_string())
 }
 
-fn extract_field(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn extract_field(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let path = required_str(obj, "path")?;
     let field_path = required_str(obj, "field_path")?;
-    let real = resolve_path(workspace_root, path)?;
+    let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let (format, root_value) =
         parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
 
@@ -568,9 +610,13 @@ fn extract_field(workspace_root: &Path, obj: &Map<String, Value>) -> Result<Stri
     .to_string())
 }
 
-fn extract_fields(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn extract_fields(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let path = required_str(obj, "path")?;
-    let real = resolve_path(workspace_root, path)?;
+    let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let field_paths = string_list_arg(obj, "field_paths");
     if field_paths.is_empty() {
         return Err("field_paths is required".to_string());
@@ -610,9 +656,13 @@ fn extract_fields(workspace_root: &Path, obj: &Map<String, Value>) -> Result<Str
     .to_string())
 }
 
-fn structured_keys(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn structured_keys(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let path = required_str(obj, "path")?;
-    let real = resolve_path(workspace_root, path)?;
+    let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let field_path = obj.get("field_path").and_then(Value::as_str).unwrap_or("");
     let max_keys = u64_arg(obj, "max_keys", 200).clamp(1, 1000) as usize;
     let (format, root_value) =
@@ -701,9 +751,13 @@ fn structured_keys(workspace_root: &Path, obj: &Map<String, Value>) -> Result<St
     }
 }
 
-fn find_path(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn find_path(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let root = obj.get("root").and_then(Value::as_str).unwrap_or(".");
-    let real_root = resolve_path(workspace_root, root)?;
+    let real_root = resolve_path(workspace_root, root, allow_path_outside_workspace)?;
     let needle = obj
         .get("name")
         .or_else(|| obj.get("pattern"))
@@ -771,9 +825,13 @@ fn find_path(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, 
     .to_string())
 }
 
-fn read_range(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn read_range(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let path = required_str(obj, "path")?;
-    let real = resolve_path(workspace_root, path)?;
+    let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let text = std::fs::read_to_string(&real).map_err(|err| format!("read file failed: {err}"))?;
     let lines: Vec<&str> = text.lines().collect();
     let total_lines = lines.len();
@@ -834,11 +892,15 @@ fn read_range(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String,
     .to_string())
 }
 
-fn compare_paths(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn compare_paths(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let left = required_str(obj, "left_path")?;
     let right = required_str(obj, "right_path")?;
-    let left_real = resolve_path(workspace_root, left)?;
-    let right_real = resolve_path(workspace_root, right)?;
+    let left_real = resolve_path(workspace_root, left, allow_path_outside_workspace)?;
+    let right_real = resolve_path(workspace_root, right, allow_path_outside_workspace)?;
     let left_meta =
         std::fs::metadata(&left_real).map_err(|err| format!("left metadata failed: {err}"))?;
     let right_meta =
@@ -875,7 +937,11 @@ fn compare_paths(workspace_root: &Path, obj: &Map<String, Value>) -> Result<Stri
     .to_string())
 }
 
-fn path_batch_facts(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn path_batch_facts(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> Result<String, String> {
     let paths = string_list_arg(obj, "paths");
     if paths.is_empty() {
         return Err("paths is required".to_string());
@@ -884,7 +950,7 @@ fn path_batch_facts(workspace_root: &Path, obj: &Map<String, Value>) -> Result<S
     let mut facts = Vec::new();
 
     for path in paths {
-        let real = resolve_path(workspace_root, &path)?;
+        let real = resolve_path(workspace_root, &path, allow_path_outside_workspace)?;
         match std::fs::metadata(&real) {
             Ok(meta) => facts.push(json!({
                 "path": path,
@@ -1494,8 +1560,20 @@ fn same_file_content(left: &Path, right: &Path) -> Result<bool, String> {
     Ok(left_bytes == right_bytes)
 }
 
-fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
+fn resolve_path(
+    workspace_root: &Path,
+    input: &str,
+    allow_path_outside_workspace: bool,
+) -> Result<PathBuf, String> {
     let raw = Path::new(input);
+    if allow_path_outside_workspace {
+        return if raw.is_absolute() {
+            Ok(raw.to_path_buf())
+        } else {
+            Ok(workspace_root.join(raw))
+        };
+    }
+
     let mut normalized = PathBuf::new();
     for comp in raw.components() {
         match comp {
@@ -1505,11 +1583,21 @@ fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
         }
     }
 
-    if raw.is_absolute() {
-        return Ok(normalized);
+    let candidate = if raw.is_absolute() {
+        normalized
+    } else {
+        workspace_root.join(normalized)
+    };
+    let normalized_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let normalized_candidate = candidate
+        .canonicalize()
+        .unwrap_or_else(|_| candidate.clone());
+    if !normalized_candidate.starts_with(normalized_root) {
+        return Err("path is outside workspace".to_string());
     }
-
-    Ok(workspace_root.join(normalized))
+    Ok(candidate)
 }
 
 fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), String> {
@@ -1542,4 +1630,50 @@ fn to_rel(root: &Path, p: &Path) -> String {
 
 fn system_time_to_ts(st: SystemTime) -> Option<u64> {
     st.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(name: &str) -> PathBuf {
+        let mut root = std::env::temp_dir();
+        root.push(format!(
+            "rustclaw_system_basic_{name}_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create temp root");
+        root
+    }
+
+    #[test]
+    fn resolve_path_blocks_absolute_outside_workspace_without_permission() {
+        let root = temp_root("deny_abs");
+        let denied = resolve_path(&root, "/etc/passwd", false).expect_err("should deny");
+        assert_eq!(denied, "path is outside workspace");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_path_allows_absolute_outside_workspace_with_permission() {
+        let root = temp_root("allow_abs");
+        let resolved = resolve_path(&root, "/etc/passwd", true).expect("should allow");
+        assert_eq!(resolved, PathBuf::from("/etc/passwd"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn context_permission_reads_nested_or_legacy_flag() {
+        assert!(context_allows_path_outside_workspace(Some(&json!({
+            "permissions": {"allow_path_outside_workspace": true}
+        }))));
+        assert!(context_allows_path_outside_workspace(Some(&json!({
+            "allow_path_outside_workspace": true
+        }))));
+        assert!(!context_allows_path_outside_workspace(Some(&json!({
+            "permissions": {"allow_path_outside_workspace": false}
+        }))));
+        assert!(!context_allows_path_outside_workspace(None));
+    }
 }

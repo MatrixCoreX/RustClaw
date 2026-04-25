@@ -26,6 +26,25 @@ const CLARIFY_QUESTION_PROMPT_LOGICAL_PATH: &str = "prompts/clarify_question_pro
 const INTENT_NORMALIZER_PROMPT_LOGICAL_PATH: &str = "prompts/intent_normalizer_prompt.md";
 const ROUTING_POLICY_PERSONA_PROMPT: &str = "Neutral routing policy classifier. Ignore style/persona preferences and optimize for correct intent resolution, clarification, and guard decisions.";
 
+fn render_auth_policy_context(state: &AppState, task: &ClaimedTask) -> String {
+    let auth_role = task
+        .user_key
+        .as_deref()
+        .and_then(|user_key| {
+            crate::resolve_auth_identity_by_key(state, user_key)
+                .ok()
+                .flatten()
+        })
+        .map(|identity| identity.role)
+        .unwrap_or_else(|| "unknown".to_string());
+    format!(
+        "current_auth_role: {auth_role}\nallow_path_outside_workspace_for_task: {}\nallow_sudo_for_task: {}\nworkspace_root: {}",
+        crate::skills::task_allows_path_outside_workspace(state, Some(task)),
+        crate::skills::task_allows_sudo(state, Some(task)),
+        state.skill_rt.workspace_root.display()
+    )
+}
+
 #[derive(Debug)]
 struct RouteDecision {
     mode: RoutedMode,
@@ -1030,10 +1049,12 @@ pub(crate) async fn run_intent_normalizer(
             .and_then(|snapshot| snapshot.conversation_state.as_ref())
             .and_then(|conversation_state| conversation_state.locale_hint.as_deref()),
     );
+    let auth_policy_context = render_auth_policy_context(state, task);
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
             ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
+            ("__AUTH_POLICY_CONTEXT__", &auth_policy_context),
             ("__CAPABILITY_MAP__", &route_view.capability_map),
             (
                 "__SELF_EXTENSION_RUNTIME__",

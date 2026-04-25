@@ -1395,6 +1395,22 @@ pub(crate) fn build_runner_skill_context(
     let mut ctx = serde_json::Map::new();
     ctx.insert("source".to_string(), Value::String(source.to_string()));
     ctx.insert("kind".to_string(), Value::String("run_skill".to_string()));
+    let auth_role = current_task_auth_role(state, task).unwrap_or_else(|| "unknown".to_string());
+    let allow_path_outside_workspace = task_allows_path_outside_workspace(state, Some(task));
+    let allow_sudo = task_allows_sudo(state, Some(task));
+    ctx.insert("auth_role".to_string(), Value::String(auth_role));
+    ctx.insert(
+        "allow_path_outside_workspace".to_string(),
+        Value::Bool(allow_path_outside_workspace),
+    );
+    ctx.insert("allow_sudo".to_string(), Value::Bool(allow_sudo));
+    ctx.insert(
+        "permissions".to_string(),
+        serde_json::json!({
+            "allow_path_outside_workspace": allow_path_outside_workspace,
+            "allow_sudo": allow_sudo,
+        }),
+    );
     ctx.insert(
         "user_key".to_string(),
         task.user_key

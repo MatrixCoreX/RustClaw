@@ -240,6 +240,18 @@ fn is_publishable_raw_local(s: &str) -> bool {
 /// 设计取舍：宁可漏判也不要误判成 meta（误判会丢真实答案；漏判只是浪费
 /// 一个 plan step，由 finalize 层兜底）。所以模式列表保守，只匹配高置信
 /// 关键词组合。
+fn utf8_prefix_chars(text: &str, max_chars: usize) -> &str {
+    let end = text
+        .char_indices()
+        .nth(max_chars)
+        .map_or(text.len(), |(idx, _)| idx);
+    &text[..end]
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
 pub(crate) fn looks_like_meta_respond_directive_local(text: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -259,7 +271,7 @@ pub(crate) fn looks_like_meta_respond_directive_local(text: &str) -> bool {
         if !trimmed.starts_with(lead) {
             continue;
         }
-        let head = &trimmed[..trimmed.len().min(lead.len() + 60)];
+        let head = utf8_prefix_chars(trimmed, lead.chars().count() + 60);
         for verb in ZH_VERBS {
             if !head.contains(verb) {
                 continue;
@@ -282,6 +294,12 @@ pub(crate) fn looks_like_meta_respond_directive_local(text: &str) -> bool {
                 return true;
             }
         }
+    }
+    if trimmed.starts_with("请根据")
+        && contains_any(trimmed, &["前一步", "前两步", "上一步", "上述", "以上"])
+        && contains_any(trimmed, &["告诉", "回答", "回复", "输出"])
+    {
+        return true;
     }
 
     // 中文："下一步我会 / 我将继续 / 请稍等 + 我先 / 让我先 + 分析/检查/查看/读取"
@@ -468,6 +486,13 @@ mod tests {
         ));
         assert!(looks_like_meta_respond_directive_local(
             "请查看配置后告知差异"
+        ));
+    }
+
+    #[test]
+    fn local_meta_respond_zh_previous_step_directive_is_utf8_safe() {
+        assert!(looks_like_meta_respond_directive_local(
+            "请根据前两步读取的结果告诉我 UI/package.json 中的 name 字段值以及 crates/clawd/Cargo.toml 中的 package.name 字段值，比较两者是否相同，然后输出一行：前者、后者、一样或不一样"
         ));
     }
 
