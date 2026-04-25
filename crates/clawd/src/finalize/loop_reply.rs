@@ -798,6 +798,37 @@ fn direct_structured_observed_answer(
     ) {
         return None;
     }
+    if let Some(answer) = state
+        .and_then(|state| {
+            crate::agent_engine::observed_output::extract_structured_scalar_pair_direct_answer_i18n(
+                loop_state,
+                state,
+                agent_run_context,
+            )
+        })
+        .or_else(|| {
+            crate::agent_engine::observed_output::extract_structured_scalar_pair_direct_answer(
+                loop_state,
+                agent_run_context,
+            )
+        })
+    {
+        return Some((
+            answer,
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                contract_ok: true,
+                used_evidence_ids_count: 2,
+                ..Default::default()
+            },
+        ));
+    }
+    if crate::agent_engine::observed_output::recent_structured_scalar_observation_count(loop_state)
+        > 1
+    {
+        return None;
+    }
     if route.output_contract.requires_content_evidence
         && loop_state
             .executed_step_results
@@ -963,6 +994,88 @@ fn looks_like_raw_command_snapshot(answer: &str) -> bool {
 
 fn route_explicitly_requests_command_result(route: &crate::RouteResult) -> bool {
     route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+}
+
+fn error_looks_like_os_permission_denied(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("permission denied") || lower.contains("os error 13")
+}
+
+fn content_evidence_step_failure_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !route_requires_content_evidence(agent_run_context) {
+        return None;
+    }
+    if loop_state.executed_step_results.iter().any(|step| {
+        step.is_ok()
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+            && step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| !output.is_empty())
+    }) {
+        return None;
+    }
+
+    let failed_step = loop_state.executed_step_results.iter().rev().find(|step| {
+        !step.is_ok()
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+    })?;
+    let error = failed_step.error.as_deref().map(str::trim)?;
+    if error.is_empty() {
+        return None;
+    }
+
+    let locator = agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .map(|route| route.output_contract.locator_hint.trim())
+        .filter(|locator| !locator.is_empty());
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let answer = match (prefer_english, locator) {
+        (true, Some(locator)) => {
+            format!("Tried to access `{locator}`, but execution failed: {error}.")
+        }
+        (true, None) => format!("The `{}` step failed: {error}.", failed_step.skill.trim()),
+        (false, Some(locator)) => {
+            format!("已尝试访问 `{locator}`，但执行失败：{error}。")
+        }
+        (false, None) => format!("`{}` 步骤执行失败：{error}。", failed_step.skill.trim()),
+    };
+    let answer = if error_looks_like_os_permission_denied(error) {
+        if prefer_english {
+            format!("{answer} The `clawd` process does not have sudo/root permission to access it.")
+        } else {
+            format!("{answer}`clawd` 进程当前没有 sudo/root 权限，所以无法访问。")
+        }
+    } else {
+        answer
+    };
+
+    Some((
+        answer,
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::AllowFallback),
+            contract_ok: true,
+            completion_ok: Some(false),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: 1,
+            ..Default::default()
+        },
+    ))
 }
 
 fn pending_confirmation_resume_payload(
@@ -1279,6 +1392,28 @@ pub(crate) async fn finalize_loop_reply(
     normalize_file_token_delivery_from_auto_locator(&mut loop_state, agent_run_context);
     enforce_delivery_output_contract(state, task, user_text, &mut loop_state, agent_run_context);
 
+    if let Some((error_answer, summary)) =
+        content_evidence_step_failure_answer(state, user_text, &loop_state, agent_run_context)
+    {
+        let delivery_messages = vec![error_answer.clone()];
+        let delivery_consistent =
+            crate::task_journal::delivery_payload_consistent(&error_answer, &delivery_messages);
+        let journal = build_loop_journal(
+            task,
+            user_text,
+            &loop_state,
+            agent_run_context,
+            Some(summary),
+            delivery_consistent,
+            &error_answer,
+            crate::task_journal::TaskJournalFinalStatus::Failure,
+        );
+        return Ok(AskReply::non_llm(error_answer.clone())
+            .with_messages(delivery_messages)
+            .with_task_journal(journal)
+            .with_failure(error_answer));
+    }
+
     let has_authoritative_delivery = !loop_state.delivery_messages.is_empty();
     if finalizer_requires_clarify(
         finalizer_summary.as_ref(),
@@ -1467,8 +1602,9 @@ mod tests {
 
     use super::{
         attach_execution_recipe_closeout_to_delivery, auto_requested_success_marker,
-        direct_non_builtin_skill_raw_answer, direct_publishable_observed_answer,
-        direct_scalar_observed_answer, direct_structured_observed_answer,
+        content_evidence_step_failure_answer, direct_non_builtin_skill_raw_answer,
+        direct_publishable_observed_answer, direct_scalar_observed_answer,
+        direct_structured_observed_answer,
         discard_raw_passthrough_delivery_when_structured_answer_available,
         ensure_requested_success_marker_visible, execution_recipe_closeout_note,
         finalize_loop_reply, finalizer_requires_clarify, has_missing_file_search_evidence,
@@ -1681,6 +1817,89 @@ mod tests {
             finalizer_summary(crate::finalize::FinalizerDisposition::QualifiedCompletion);
         assert!(!finalizer_requires_clarify(Some(&qualified), true, false));
         assert!(!finalizer_requires_clarify(None, false, false));
+    }
+
+    #[test]
+    fn content_evidence_step_failure_answer_reports_real_error() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_hint = "/etc/shadow".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some("read file failed: Permission denied (os error 13)".to_string()),
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let (answer, summary) = content_evidence_step_failure_answer(
+            &state,
+            "读 /etc/shadow 第一行",
+            &loop_state,
+            Some(&agent_run_context),
+        )
+        .expect("content evidence failure should be publishable");
+
+        assert!(answer.contains("`/etc/shadow`"));
+        assert!(answer.contains("Permission denied"));
+        assert!(answer.contains("`clawd` 进程当前没有 sudo/root 权限"));
+        assert_eq!(summary.grounded_ok, Some(true));
+        assert_eq!(summary.completion_ok, Some(false));
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_returns_failure_for_content_evidence_step_error() {
+        let state = test_state();
+        let task = claimed_task("task-content-error-finalize");
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_hint = "/etc/shadow".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.last_user_visible_respond =
+            Some("我拿到结果了，但没整理出确定答案。".to_string());
+        loop_state
+            .delivery_messages
+            .push("我拿到结果了，但没整理出确定答案。".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some("read file failed: Permission denied (os error 13)".to_string()),
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "读 /etc/shadow 第一行",
+            loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("finalize should return a user-visible failure");
+
+        assert!(reply.text.contains("`/etc/shadow`"));
+        assert!(reply.text.contains("Permission denied"));
+        assert!(reply.text.contains("`clawd` 进程当前没有 sudo/root 权限"));
+        assert!(reply.should_fail_task);
+        assert_eq!(reply.messages, vec![reply.text.clone()]);
     }
 
     #[test]
@@ -2157,6 +2376,87 @@ mod tests {
             direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn direct_structured_observed_answer_skips_ambiguous_multi_structured_scalars() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"react-example","value":"react-example","value_type":"string"}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"extract_field","exists":true,"field_path":"package.name","value_text":"clawd","value":"clawd","value_type":"string"}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = false;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        assert!(
+            direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn direct_structured_observed_answer_keeps_semantic_pair_answer() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"react-example","value":"react-example","value_type":"string"}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"extract_field","exists":true,"field_path":"package.name","value_text":"clawd","value":"clawd","value_type":"string"}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let (answer, summary) =
+            direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("semantic pair answer should be direct");
+        assert_eq!(answer, "不一样");
+        assert_eq!(summary.used_evidence_ids_count, 2);
     }
 
     #[test]

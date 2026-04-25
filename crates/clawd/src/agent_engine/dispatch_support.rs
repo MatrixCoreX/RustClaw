@@ -786,7 +786,18 @@ pub(super) async fn handle_synthesize_answer_action(
                 crate::truncate_for_agent_trace(&err)
             ));
             loop_state.executed_step_results.push(step_execution);
-            Err(err)
+            *executed_actions += 1;
+            loop_state.total_steps_executed += 1;
+            info!(
+                "synthesize_answer_failed_defer_to_finalize task_id={} round={} step={} error={}",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                crate::truncate_for_log(&err)
+            );
+            Ok(ActionLoopDecision::StopRound(
+                "synthesize_answer_failed".to_string(),
+            ))
         }
     }
 }
