@@ -411,6 +411,18 @@ prompt_file = "prompts/skills/transform.md"
 output_kind = "text"
 
 [[skills]]
+name = "invest_copy"
+enabled = true
+kind = "runner"
+aliases = ["investment_copy", "invest_style", "copy_invest"]
+timeout_seconds = 90
+prompt_file = "prompts/skills/invest_copy.md"
+output_kind = "text"
+risk_level = "medium"
+auto_invocable = false
+retryable = true
+
+[[skills]]
 name = "web_search_extract"
 enabled = true
 kind = "runner"

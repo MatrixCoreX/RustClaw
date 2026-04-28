@@ -1,0 +1,16 @@
+{
+  "case": "act_find_service_file",
+  "description": "Single-turn act path lookup should stay on the execution route and return the service file path.",
+  "user_text": "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
+  "freeze_now": "2026-04-19T12:00:00+08:00",
+  "expected_final_answer_contains": [
+    "rustclaw.service",
+    "/home/guagua/rustclaw/rustclaw.service"
+  ],
+  "expected_llm_call_count": 2,
+  "expected_prompt_sources": [
+    "normalizer",
+    "plan"
+  ],
+  "expected_final_status": "success"
+}

@@ -1,0 +1,16 @@
+{
+  "case": "act_whoami_only",
+  "description": "Username lookup should remain a compact scalar answer.",
+  "user_text": "只输出当前用户名，不要解释",
+  "freeze_now": "2026-04-19T12:00:00+08:00",
+  "expected_final_answer_contains": [
+    "guagua"
+  ],
+  "expected_llm_call_count": 3,
+  "expected_prompt_sources": [
+    "normalizer",
+    "plan",
+    "chat"
+  ],
+  "expected_final_status": "success"
+}

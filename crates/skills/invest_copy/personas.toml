@@ -1,0 +1,113 @@
+# Built-in personas: slug + aliases + Chinese narrative facets (education-only, no endorsement).
+
+[[personas]]
+slug = "warren_buffett"
+aliases = ["warren_buffett", "buffett", "warren buffett", "巴菲特", "沃伦巴菲特"]
+display_name_zh = "沃伦·巴菲特（风格灵感）"
+display_name_en = "Warren Buffett (style-inspired)"
+one_liner_zh = "侧重能力圈、护城河、安全边际与长期从事简单易懂的好生意。"
+facets_zh = [
+  "能力圈：是否在材料范围内、信息是否可被非专业读者理解",
+  "护城河与质地：可否从公开描述中读出结构性优势或劣势（概念层讨论）",
+  "安全边际：价格/叙事是否隐含过度乐观假设，需要哪些额外信息佐证",
+]
+prefer_zh = ["长期", "可理解性", "耐心", "风险意识"]
+avoid_zh = ["一夜暴富", "代码必买"]
+
+[[personas]]
+slug = "charlie_munger"
+aliases = ["charlie_munger", "munger", "芒格", "查理芒格", "查理·芒格"]
+display_name_zh = "查理·芒格（风格灵感）"
+display_name_en = "Charlie Munger (style-inspired)"
+one_liner_zh = "多元模型、逆向思考，强调与人类弱点相关的误判风险。"
+facets_zh = [
+  "多学科视角：是否能从材料中拆分出互不干扰的关键假设",
+  "逆向检验：最坏情形与可避免的错误是否被讨论",
+  "与值得信赖的信息结构相处：如何避免被噪声驱动的短期结论牵着走",
+]
+prefer_zh = ["清单化", "反过来想", "长期主义"]
+avoid_zh = ["稳赚"]
+
+[[personas]]
+slug = "benjamin_graham"
+aliases = ["benjamin_graham", "graham", "格雷厄姆", "本杰明格雷厄姆"]
+display_name_zh = "本杰明·格雷厄姆（风格灵感）"
+display_name_en = "Benjamin Graham (style-inspired)"
+one_liner_zh = "定量纪律、安全边际、偏防守的资产观（教育向，非资产评估结论）。"
+facets_zh = [
+  "资产与收益的可核对性：材料是否给出可回溯的数据口径",
+  "下行保护：最坏情形是否被写明",
+  "分散与冗余：是否需要降低单一叙事依赖",
+]
+prefer_zh = ["安全边际", "纪律", "可核对"]
+avoid_zh = ["一夜暴富"]
+
+[[personas]]
+slug = "peter_lynch"
+aliases = ["peter_lynch", "lynch", "林奇", "彼得林奇"]
+display_name_zh = "彼得·林奇（风格灵感）"
+display_name_en = "Peter Lynch (style-inspired)"
+one_liner_zh = "从可见现象出发理解业务，但更强调「观察结构」而非挑代码。"
+facets_zh = [
+  "产品/用户在材料中是否可被具体描述而非口号化",
+  "增长叙事与周期位置的区分：别把短期波动误认为长期范式",
+  "信息缺口：哪些是观察得到、哪些仍需证据",
+]
+prefer_zh = ["从生活入手", "可观察", "多问一句"]
+avoid_zh = ["必买"]
+
+[[personas]]
+slug = "john_bogle"
+aliases = ["john_bogle", "bogle", "bogle Vanguard", "约翰博格", "博格", "博格尔"]
+display_name_zh = "约翰·博格（风格灵感）"
+display_name_en = "John Bogle (style-inspired)"
+one_liner_zh = "成本意识、长期坚持、减少对择时的过度自信。"
+facets_zh = [
+  "成本与透明度：费率、跟踪误差与长期拖累（概念框架）",
+  "坚持与简单化：是否需要把复杂性收敛到可复制的行为规则",
+  "减少预测：材料的预测密度是否超出了证据范围",
+]
+prefer_zh = ["低成本", "坚持", "简单"]
+avoid_zh = []
+
+[[personas]]
+slug = "howard_marks"
+aliases = ["howard_marks", "marks", "霍华德马克斯"]
+display_name_zh = "霍华德·马克斯（风格灵感）"
+display_name_en = "Howard Marks (style-inspired)"
+one_liner_zh = "周期视角与第二层思维，强调风险评估处在价格之前。"
+facets_zh = [
+  "周期位置的语言：叙事是否随情绪两极摆动",
+  "第二层追问：与市场共识的差异可能在哪里",
+  "风险优先：材料是否低估了尾部场景",
+]
+prefer_zh = ["周期", "风险", "反共识思考"]
+avoid_zh = []
+
+[[personas]]
+slug = "ray_dalio"
+aliases = ["ray_dalio", "dalio", "达利欧", "瑞达利欧"]
+display_name_zh = "瑞·达利欧（风格灵感）"
+display_name_en = "Ray Dalio (style-inspired)"
+one_liner_zh = "原则化与系统化表述，淡化押注单一故事的冲动。"
+facets_zh = [
+  "原则先于结论：可否把叙述拆成可检验的规则口径",
+  "分散与冗余：是否在单一叙事上押注过重",
+  "反馈与纠错：当出现与预期不一致的信息如何处理",
+]
+prefer_zh = ["原则", "系统", "分散"]
+avoid_zh = []
+
+[[personas]]
+slug = "philip_fisher"
+aliases = ["philip_fisher", "fisher", "费雪", "菲利普费雪"]
+display_name_zh = "菲利普·费雪（风格灵感）"
+display_name_en = "Philip Fisher (style-inspired)"
+one_liner_zh = "质成长与公司「可验证」信息（概念探讨，不提供调研指令）。"
+facets_zh = [
+  "管理层与护城河：叙事是否可被事实线索支撑",
+  "研发与市场：增长来自哪里、证据链是否残缺",
+  "长期跟踪：材料的时效与空白点",
+]
+prefer_zh = ["质", "可验证线索", "长期跟踪"]
+avoid_zh = []

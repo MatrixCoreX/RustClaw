@@ -121,6 +121,62 @@ submit_task_with_options() {
     -d "$body"
 }
 
+build_client_like_telegram_submit_body() {
+  local prompt="$1"
+  local agent_mode="${2:-true}"
+  local source="${3:-}"
+  local external_user_id="${4:-$USER_ID}"
+  local external_chat_id="${5:-$CHAT_ID}"
+  python3 - "$USER_ID" "$CHAT_ID" "$prompt" "$agent_mode" "$source" "$(normalized_user_key)" "$external_user_id" "$external_chat_id" <<'PY'
+import json
+import sys
+
+user_id = int(sys.argv[1])
+chat_id = int(sys.argv[2])
+prompt = sys.argv[3]
+agent_mode_raw = (sys.argv[4] or "").strip().lower()
+source = (sys.argv[5] or "").strip()
+user_key = (sys.argv[6] or "").strip()
+external_user_id = (sys.argv[7] or str(user_id)).strip()
+external_chat_id = (sys.argv[8] or str(chat_id)).strip()
+agent_mode = False if agent_mode_raw in ("0", "false", "no") else True
+payload = {
+    "text": prompt,
+    "agent_mode": agent_mode,
+}
+if source:
+    payload["source"] = source
+body = {
+    "user_id": user_id,
+    "chat_id": chat_id,
+    "channel": "telegram",
+    "external_user_id": external_user_id,
+    "external_chat_id": external_chat_id,
+    "kind": "ask",
+    "payload": payload,
+}
+if user_key:
+    body["user_key"] = user_key
+print(json.dumps(body, ensure_ascii=False))
+PY
+}
+
+submit_client_like_telegram_task() {
+  local prompt="$1"
+  local agent_mode="${2:-true}"
+  local source="${3:-}"
+  local external_user_id="${4:-$USER_ID}"
+  local external_chat_id="${5:-$CHAT_ID}"
+  local body
+  local -a auth_args=()
+  body="$(build_client_like_telegram_submit_body "$prompt" "$agent_mode" "$source" "$external_user_id" "$external_chat_id")"
+  array_from_command_lines auth_args curl_auth_args
+  curl -sS -X POST "${BASE_URL}/v1/tasks" \
+    -H "Content-Type: application/json" \
+    "${auth_args[@]}" \
+    -d "$body"
+}
+
 build_submit_run_skill_body() {
   local skill_name="$1"
   local args_json="${2:-}"

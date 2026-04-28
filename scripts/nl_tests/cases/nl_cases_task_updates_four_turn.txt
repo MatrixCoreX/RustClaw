@@ -1,0 +1,11 @@
+# Four-turn task-update cases: each row is case_name|turn1|turn2|turn3|turn4.
+# These cases model users splitting one complete requirement across several messages.
+
+task_updates4_cn_split_plan|帮我写个方案|面向老板|不要太技术|控制在 80 字内，只输出正文
+task_updates4_cn_append_then_correct|帮我写一句部署说明，提到 Python 3.10|面向新手|不对，Python 改成 3.11|只输出最后一句
+task_updates4_cn_replace_then_scope|帮我写一篇 RustClaw 长文|算了，改成上线前检查清单|只看登录和渠道接入|只保留三条
+task_updates4_cn_scope_then_format|帮我总结这个仓库|先只看 UI 部分|面向非技术用户|用 markdown 表格输出两行
+task_updates4_en_split_note|Write a short RustClaw setup note|Make it for non-technical users|Keep it non-technical|Limit it to 40 words and output only the body
+task_updates4_en_append_then_correct|Write one deployment sentence mentioning Python 3.10|Make it beginner-friendly|Correction: use Python 3.11 instead|Output only the final sentence
+task_updates4_en_replace_then_scope|Write a long RustClaw introduction|Actually change it into a pre-release checklist|Focus only on login and channel setup|Keep exactly three bullets
+task_updates4_en_scope_then_format|Summarize this repository|Focus only on the UI part|Make it friendly for non-technical users|Output a two-row markdown table
