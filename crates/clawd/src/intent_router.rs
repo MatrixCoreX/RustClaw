@@ -555,12 +555,13 @@ fn parse_execution_recipe_hint(
 ) -> Option<crate::execution_recipe::ExecutionRecipeSpec> {
     // 关键语义（B1 修复）：
     //   - `out == None`           → normalizer 没在响应里给出 execution_recipe 字段，
-    //                               说明 LLM 没决断；下游应 fallback 到 keyword detect。
+    //                               说明 LLM 没决断；planner-first 主链不再用本地
+    //                               keyword detect 代替 LLM 决策。
     //   - `out == Some` 且 kind != none → normalizer 显式给出 ops loop spec，照用。
     //   - `out == Some` 且 kind == none → normalizer 显式说"这不是 ops loop"，
     //                               同样应被信任。返回 Some(default spec)（kind=None,
     //                               runtime.is_active()=false），让下游知道 normalizer
-    //                               已分类过，不要再用 keyword detect 误升级。
+    //                               已分类过，不要再被 legacy local detector 误升级。
     //
     // 这块逻辑是为了修复 act 类只读任务（如 `pwd`）被长期记忆里残留的
     // "configs/" "verify" 等关键字误升级为 OpsClosedLoop config_change，
@@ -827,81 +828,6 @@ fn output_contract_allows_chat_only_task_mutation(output_contract: &IntentOutput
         && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
 }
 
-fn prompt_looks_like_task_replace_instruction(prompt: &str) -> bool {
-    let trimmed = prompt.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    const ZH_HINTS: &[&str] = &[
-        "改成",
-        "改为",
-        "换成",
-        "换成",
-        "换成",
-        "算了",
-        "别写",
-        "不要写",
-        "改做",
-        "改写成",
-    ];
-    if ZH_HINTS.iter().any(|hint| trimmed.contains(hint)) {
-        return true;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    [
-        "instead",
-        "replace it with",
-        "change it to",
-        "turn it into",
-        "make it ",
-        "switch it to",
-    ]
-    .iter()
-    .any(|hint| lower.contains(hint))
-}
-
-fn parse_failed_active_task_replace_fallback(
-    prompt: &str,
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-) -> Option<IntentNormalizerOutput> {
-    active_primary_task_prompt(session_snapshot)?;
-    let trimmed = prompt.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(trimmed);
-    if !active_task_turn_can_reuse_semantic_patch(&surface)
-        || !prompt_looks_like_task_replace_instruction(trimmed)
-    {
-        return None;
-    }
-    Some(IntentNormalizerOutput {
-        resolved_user_intent: trimmed.to_string(),
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        reason: "normalizer_parse_failed; active_task_replace_fallback".to_string(),
-        confidence: 0.0,
-        output_contract: IntentOutputContract::default(),
-        execution_recipe_hint: None,
-        routed_mode: RoutedMode::Chat,
-        direct_reply_candidate: String::new(),
-        direct_reply_confidence: 0.0,
-        turn_analysis: Some(TurnAnalysis {
-            turn_type: Some(TurnType::TaskReplace),
-            target_task_policy: Some(TargetTaskPolicy::ReplaceActive),
-            should_interrupt_active_run: false,
-            state_patch: None,
-            attachment_processing_required: false,
-        }),
-    })
-}
-
 fn render_self_extension_runtime(state: &AppState) -> String {
     serde_json::to_string_pretty(&json!({
         "enabled": state.policy.self_extension.enabled,
@@ -1061,7 +987,9 @@ fn render_compact_intent_normalizer_prompt(
         "Compact intent normalizer. Output one raw JSON object only. No markdown.".to_string(),
     );
     parts.push("Prefer mode=chat for greetings, confirmations, memory-only requests, and pure discussion. Use ask_clarify only when a required target/action is truly missing.".to_string());
-    parts.push("For recall questions, use exact values from RECENT/MEMORY. If found, put the value in resolved_user_intent and set needs_clarify=false.".to_string());
+    parts.push("Current REQUEST overrides RECENT/MEMORY. Prior assistant refusals, tool failures, or capability claims in history are not authoritative for a fresh self-contained request.".to_string());
+    parts.push("If REQUEST asks for observable local/system/workspace state, filesystem inspection, command output, file content, directory listing, counts, or extracting a value, choose mode=\"act\" or mode=\"chat_act\". Do not claim the assistant cannot execute; the runtime has tools and the AUTH block describes permission.".to_string());
+    parts.push("For recall questions, use exact values from RECENT/MEMORY. If found, put the value in resolved_user_intent, set needs_clarify=false, and set mode=\"chat\". Never invent mode=\"recall\".".to_string());
     parts.push("For requests that depend on prior context, copy the relevant RECENT/MEMORY facts into resolved_user_intent so the next stage has enough context.".to_string());
     parts.push("Keep resolved_user_intent concise; preserve exact IDs, but summarize long user text instead of copying it.".to_string());
     parts.push(compact_prompt_slot(
@@ -1075,7 +1003,7 @@ fn render_compact_intent_normalizer_prompt(
         120,
     ));
     parts.push(compact_prompt_slot("AUTH", auth_policy_context, 100));
-    parts.push("Required keys: resolved_user_intent, needs_clarify, clarify_question, reason, confidence, mode. If unsure: mode=\"chat\", needs_clarify=false.".to_string());
+    parts.push("Required keys: resolved_user_intent, needs_clarify, clarify_question, reason, confidence, mode. If unsure: use mode=\"chat\" only for non-observable discussion; use mode=\"act\" for clear observable local/system/workspace requests.".to_string());
     parts.push("For ordinary chat, greetings, and confirmations: mode=\"chat\", needs_clarify=false, turn_type=\"\". Never use turn_type=\"chat\".".to_string());
     parts.push(compact_prompt_slot(
         "MEMORY",
@@ -1184,17 +1112,31 @@ fn normalize_intent_normalizer_scalar_types_for_schema(obj: &mut serde_json::Map
     {
         obj.insert("clarify_question".to_string(), Value::String(String::new()));
     }
-    if let Some(confidence) = obj.get("confidence").and_then(|value| value.as_str()) {
-        let normalized = confidence.trim().to_ascii_lowercase();
-        let numeric = match normalized.as_str() {
-            "high" => Some(0.9),
-            "medium" => Some(0.6),
-            "low" => Some(0.3),
-            _ => normalized.parse::<f64>().ok(),
-        };
-        if let Some(numeric) = numeric {
-            obj.insert("confidence".to_string(), Value::from(numeric));
+    normalize_confidence_field(obj, "confidence");
+    normalize_confidence_field(obj, "direct_reply_confidence");
+}
+
+fn normalize_confidence_field(obj: &mut serde_json::Map<String, Value>, key: &str) {
+    let numeric = match obj.get(key) {
+        Some(Value::String(confidence)) => {
+            let normalized = confidence.trim().to_ascii_lowercase();
+            match normalized.as_str() {
+                "high" => Some(0.9),
+                "medium" => Some(0.6),
+                "low" => Some(0.3),
+                _ => normalized.parse::<f64>().ok(),
+            }
         }
+        Some(value) => value.as_f64(),
+        None => None,
+    };
+    if let Some(numeric) = numeric.filter(|value| value.is_finite()) {
+        let normalized = if numeric > 1.0 && numeric <= 100.0 {
+            numeric / 100.0
+        } else {
+            numeric
+        };
+        obj.insert(key.to_string(), Value::from(normalized.clamp(0.0, 1.0)));
     }
 }
 
@@ -1221,6 +1163,12 @@ fn normalize_intent_normalizer_top_level_for_schema(obj: &mut serde_json::Map<St
         .or_insert_with(|| Value::from(0.8));
     obj.entry("mode".to_string())
         .or_insert_with(|| Value::String("chat".to_string()));
+    if let Some(mode) = obj.get("mode").and_then(|v| v.as_str()) {
+        let normalized = mode.trim().to_ascii_lowercase();
+        if matches!(normalized.as_str(), "recall" | "memory_recall") {
+            obj.insert("mode".to_string(), Value::String("chat".to_string()));
+        }
+    }
     obj.entry("output_contract".to_string())
         .or_insert_with(|| serde_json::json!({}));
     obj.entry("execution_recipe".to_string())
@@ -1842,15 +1790,6 @@ pub(crate) async fn run_intent_normalizer(
     );
     // Planner-first: do not synthesize Act/ChatAct locally on parser failure.
     let _ = (resume_context, binding_context);
-    if let Some(recovered) = parse_failed_active_task_replace_fallback(req, session_snapshot) {
-        info!(
-            "{} intent_normalizer task_id={} parse_failed_active_task_replace_fallback input={}",
-            crate::highlight_tag("routing"),
-            task.task_id,
-            crate::truncate_for_log(req)
-        );
-        return recovered;
-    }
     let fallback = empty_ask_clarify_decision(req, "normalizer_parse_failed");
     normalizer_output_from_fallback(req, "parse_failed_safe_clarify", fallback)
 }
@@ -2020,9 +1959,10 @@ pub(crate) async fn generate_or_reuse_clarify_question(
     candidate_context: Option<&str>,
     preferred_question: Option<&str>,
     policy: ClarifyQuestionPolicy,
-    // §7.2: 上游必须显式声明"我现在为什么走 SafeFallback"。
-    // policy=SafeFallback 时用此 source 渲染特化文案 + 上报 tracing；
-    // policy=AllowModel 时本参数被忽略（走真 LLM 路径）。
+    // 上游必须显式声明"我现在为什么走 SafeFallback"。
+    // policy=SafeFallback 时优先让 LLM 按结构化上下文生成用户可见澄清；
+    // 只有 LLM 本身不可用等硬失败才落到该 source 的最小安全模板。
+    // policy=AllowModel 时本参数仅作为诊断上下文。
     default_source: crate::fallback::ClarifyFallbackSource,
 ) -> String {
     let preferred = preferred_question
@@ -2032,13 +1972,38 @@ pub(crate) async fn generate_or_reuse_clarify_question(
     if let Some(question) = preferred {
         return question;
     }
-    if matches!(policy, ClarifyQuestionPolicy::SafeFallback) {
+    if matches!(policy, ClarifyQuestionPolicy::SafeFallback)
+        && !safe_fallback_source_should_try_llm(default_source)
+    {
         return crate::fallback::render_clarify_fallback(
             state,
             &task.task_id,
             default_source,
             None,
         );
+    }
+    if matches!(policy, ClarifyQuestionPolicy::SafeFallback) {
+        let request_language_hint =
+            crate::language_policy::task_response_language_hint(state, task, user_request);
+        tracing::info!(
+            task_id = %task.task_id,
+            fallback_source = default_source.as_metric_label(),
+            "safe_fallback_try_llm_response_composer"
+        );
+        let contract = crate::fallback::UserResponseContract::clarify_from_fallback_source(
+            default_source,
+            user_request,
+            resolver_reason,
+            candidate_context,
+            &request_language_hint,
+        );
+        return crate::fallback::compose_user_response_from_contract(
+            state,
+            task,
+            &contract,
+            default_source,
+        )
+        .await;
     }
     generate_clarify_question(
         state,
@@ -2048,6 +2013,13 @@ pub(crate) async fn generate_or_reuse_clarify_question(
         candidate_context,
     )
     .await
+}
+
+fn safe_fallback_source_should_try_llm(source: crate::fallback::ClarifyFallbackSource) -> bool {
+    !matches!(
+        source,
+        crate::fallback::ClarifyFallbackSource::LlmUnavailable
+    )
 }
 
 /// Parses normalizer mode string. chat_act is secondary: only when user explicitly asked for action + narrated summary.
@@ -2106,11 +2078,51 @@ mod tests {
     }
 
     #[test]
+    fn normalizer_schema_normalization_maps_recall_mode_to_chat() {
+        let raw = r#"{"resolved_user_intent":"client-like-continuous-123","needs_clarify":false,"clarify_question":"","reason":"recent memory recall","confidence":1.0,"mode":"recall"}"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
+        assert_eq!(
+            value.get("resolved_user_intent").and_then(|v| v.as_str()),
+            Some("client-like-continuous-123")
+        );
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_accepts_percent_confidence() {
+        let raw = r#"{"resolved_user_intent":"检查当前目录隐藏文件","needs_clarify":false,"clarify_question":"","reason":"local inspection","confidence":100,"direct_reply_confidence":"75","mode":"act"}"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert_eq!(value.get("confidence").and_then(|v| v.as_f64()), Some(1.0));
+        assert_eq!(
+            value
+                .get("direct_reply_confidence")
+                .and_then(|v| v.as_f64()),
+            Some(0.75)
+        );
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+    }
+
+    #[test]
+    fn safe_fallback_tries_llm_except_when_model_unavailable() {
+        assert!(!super::safe_fallback_source_should_try_llm(
+            crate::fallback::ClarifyFallbackSource::LlmUnavailable
+        ));
+        assert!(super::safe_fallback_source_should_try_llm(
+            crate::fallback::ClarifyFallbackSource::IntentUnresolved
+        ));
+        assert!(super::safe_fallback_source_should_try_llm(
+            crate::fallback::ClarifyFallbackSource::SynthesisEmpty
+        ));
+    }
+
+    #[test]
     fn parse_execution_recipe_hint_missing_profile_falls_back_to_default_spec() {
-        // 历史语义：profile 缺失 → None（让下游 fallback 到 keyword detect）
+        // 历史语义：profile 缺失 → None（曾让下游 fallback 到 keyword detect）
         // B1 修复后：normalizer 显式回了 execution_recipe 字段（即使 profile 缺）就视为
-        // 已分类，返回 default spec（kind=None, inactive），不再 fallback 到 keyword。
-        // 这样可以避免 keyword detect 因 STABLE_FACTS 污染而误升级 read-only 任务。
+        // 已分类，返回 default spec（kind=None, inactive），不再触发本地补判。
+        // 这样可以避免 legacy local detector 因 STABLE_FACTS 污染而误升级 read-only 任务。
         let spec = parse_execution_recipe_hint(Some(IntentExecutionRecipeOut {
             kind: "ops_closed_loop".to_string(),
             profile: String::new(),
@@ -2127,15 +2139,15 @@ mod tests {
         // 期望：返回 Some(default spec) → initial_execution_recipe_spec 用 default spec
         // → runtime.is_active()=false → plan_repair_reason 不会触发
         // ops_closed_loop_apply_requires_mutation。
-        // 反例：返回 None → 下游 fallback 到 detect_execution_recipe（keyword 启发式）
-        // → 长期记忆里残留的 "configs/" "verify" 关键字会把任务误升级为
+        // 反例：历史版本里返回 None 会让下游 fallback 到 keyword 启发式；
+        // 长期记忆里残留的 "configs/" "verify" 关键字会把任务误升级为
         // OpsClosedLoop config_change，让 read-only 的 `pwd` 任务跑挂。
         let spec = parse_execution_recipe_hint(Some(IntentExecutionRecipeOut {
             kind: "none".to_string(),
             profile: "none".to_string(),
             target_scope: "unknown".to_string(),
         }))
-        .expect("explicit kind=none should still be Some so detect_execution_recipe is bypassed");
+        .expect("explicit kind=none should still be Some so local fallback remains bypassed");
         assert_eq!(spec.kind, ExecutionRecipeKind::None);
         assert!(
             !crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(spec).is_active(),
@@ -2144,9 +2156,9 @@ mod tests {
     }
 
     #[test]
-    fn parse_execution_recipe_hint_missing_field_falls_back_to_keyword_detect() {
+    fn parse_execution_recipe_hint_missing_field_leaves_no_recipe_hint() {
         // 当 normalizer 完全没在响应里给出 execution_recipe 字段时（None），
-        // 下游应该 fallback 到 keyword detect。这是历史行为，需要保留。
+        // 只表示 LLM 没给出 recipe hint；主链不再用本地关键词检测补判。
         assert!(parse_execution_recipe_hint(None).is_none());
     }
 
@@ -2371,50 +2383,6 @@ mod tests {
             false,
             RoutedMode::AskClarify,
         ));
-    }
-
-    #[test]
-    fn parse_failed_active_task_replace_fallback_recovers_replace_turn() {
-        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
-            conversation_state: Some(crate::conversation_state::ConversationState {
-                last_primary_task_prompt: Some("帮我写一篇 RustClaw 长文".to_string()),
-                ..crate::conversation_state::ConversationState::default()
-            }),
-            active_followup_frame: None,
-            active_clarify_state: None,
-            active_observed_facts: None,
-        };
-        let recovered = super::parse_failed_active_task_replace_fallback(
-            "算了，别写长文了，改成三条短要点",
-            Some(&snapshot),
-        )
-        .expect("should recover active task replace");
-        assert_eq!(recovered.routed_mode, RoutedMode::Chat);
-        assert!(!recovered.needs_clarify);
-        let analysis = recovered.turn_analysis.expect("turn analysis");
-        assert_eq!(analysis.turn_type, Some(TurnType::TaskReplace));
-        assert_eq!(
-            analysis.target_task_policy,
-            Some(TargetTaskPolicy::ReplaceActive)
-        );
-    }
-
-    #[test]
-    fn parse_failed_active_task_replace_fallback_skips_unrelated_new_requests() {
-        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
-            conversation_state: Some(crate::conversation_state::ConversationState {
-                last_primary_task_prompt: Some("Write a launch memo about RustClaw".to_string()),
-                ..crate::conversation_state::ConversationState::default()
-            }),
-            active_followup_frame: None,
-            active_clarify_state: None,
-            active_observed_facts: None,
-        };
-        assert!(super::parse_failed_active_task_replace_fallback(
-            "先帮我查一下今天的会议",
-            Some(&snapshot),
-        )
-        .is_none());
     }
 
     #[test]

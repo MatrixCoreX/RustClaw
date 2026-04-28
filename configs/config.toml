@@ -200,6 +200,22 @@ models = [
 ]
 timeout_seconds = 60
 
+# 用途/Purpose: Xiaomi MiMo 提供商连接与模型池（OpenAI-compatible，兼容 Anthropic 协议）.
+# 建议修改/Recommended change: 默认为 OpenAI-compatible；如切换 Anthropic-compatible，
+# 将 api_format 设为 "anthropic_claude" 并把 base_url 改为
+# "https://token-plan-sgp.xiaomimimo.com/anthropic".
+# 风险/Risk: base_url、api_format、模型名必须与小米 MiMo 当前网关保持一致.
+[llm.mimo]
+api_key = ""
+base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
+max_concurrency = 1
+model = "mimo-v2.5-pro"
+models = [
+    "mimo-v2.5-pro",
+    "mimo-v2.5",
+]
+timeout_seconds = 60
+
 # 用途/Purpose: 自定义 OpenAI-compatible 提供商.
 # 建议修改/Recommended change: 可改，适合接入私有网关.
 # 风险/Risk: 协议不兼容会出现模型列表可见但调用失败.

@@ -234,6 +234,8 @@ pub fn validate_secret_name(name: &str) -> Result<(), SecretsError> {
         "deepseek",
         "qwen",
         "minimax",
+        "mimo",
+        "xiaomi",
     ];
     for vendor in KNOWN_VENDORS {
         if raw == format!("{vendor}_api_key") || raw == *vendor {
@@ -1012,6 +1014,7 @@ mod tests {
             text_secret_name_for_vendor("MINIMAX"),
             "text_minimax_api_key"
         );
+        assert_eq!(text_secret_name_for_vendor("MiMo"), "text_mimo_api_key");
     }
 
     #[test]
@@ -1046,6 +1049,8 @@ mod tests {
             "deepseek",
             "qwen",
             "minimax",
+            "mimo",
+            "xiaomi",
         ];
         for v in vendors {
             for name in [

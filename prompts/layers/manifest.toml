@@ -58,6 +58,15 @@ overlay = ["prompts/layers/overlays/clarify_question_prompt.md"]
 vendor_patch = "recovery/common.md"
 
 [[prompts]]
+logical_path = "prompts/user_response_composer_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/recovery/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/user_response_composer_prompt.md"]
+vendor_patch = "recovery/common.md"
+
+[[prompts]]
 logical_path = "prompts/resume_followup_discussion_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",

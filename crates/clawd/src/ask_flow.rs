@@ -310,7 +310,7 @@ fn chat_route_resolution_context(
         return None;
     }
     Some(format!(
-        "### ROUTE_RESOLUTION\nTreat the following route resolution as authoritative for this turn. If older memory or unrelated assistant history conflicts with it, prefer this resolution unless the user explicitly asks about older history.\n{}\n",
+        "### ROUTE_RESOLUTION\nTreat the following route resolution as authoritative for this turn. It is resolved context, not missing context. If older memory or unrelated assistant history conflicts with it, prefer this resolution unless the user explicitly asks about older history.\n{}\n",
         lines.join("\n")
     ))
 }
@@ -322,7 +322,8 @@ fn chat_prompt_context_with_route_resolution(
     let Some(route_context) = chat_route_resolution_context(agent_run_context) else {
         return chat_prompt_context.to_string();
     };
-    if chat_prompt_context.trim().is_empty() {
+    let trimmed_context = chat_prompt_context.trim();
+    if trimmed_context.is_empty() || trimmed_context == "<none>" {
         route_context
     } else {
         format!("{chat_prompt_context}\n\n{route_context}")
@@ -335,6 +336,15 @@ fn chat_user_request<'a>(resolved_prompt: &'a str, execution_user_request: &'a s
     } else {
         resolved_prompt
     }
+}
+
+fn chat_request_for_prompt(original_user_request: &str, semantic_request: &str) -> String {
+    let original = original_user_request.trim();
+    let semantic = semantic_request.trim();
+    if original.is_empty() || original == semantic {
+        return semantic.to_string();
+    }
+    format!("Original user request:\n{original}\n\nResolved semantic intent:\n{semantic}")
 }
 
 fn task_payload_text(task: &ClaimedTask) -> Option<String> {
@@ -463,7 +473,8 @@ pub(crate) async fn execute_ask_routed(
                 task,
                 &current_turn_user_request,
             );
-            let request_for_chat_prompt = chat_user_request.to_string();
+            let request_for_chat_prompt =
+                chat_request_for_prompt(&current_turn_user_request, chat_user_request);
             let chat_prompt = crate::render_prompt_template(
                 &chat_prompt_template,
                 &[
@@ -599,7 +610,7 @@ pub(crate) async fn analyze_attached_images_for_ask(
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_prompt_context_with_route_resolution, chat_user_request,
+        chat_prompt_context_with_route_resolution, chat_request_for_prompt, chat_user_request,
         direct_same_or_different_answer_from_recent_replies, preferred_route_clarify_question,
         task_payload_text,
     };
@@ -644,6 +655,38 @@ mod tests {
     }
 
     #[test]
+    fn chat_prompt_context_replaces_empty_placeholder_with_route_resolution() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            resolved_intent: "client-like-continuous-20260428_144029".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(0.94),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let rendered = chat_prompt_context_with_route_resolution("<none>", Some(&ctx));
+        assert!(!rendered.contains("<none>"));
+        assert!(rendered.contains("### ROUTE_RESOLUTION"));
+        assert!(rendered.contains("client-like-continuous-20260428_144029"));
+    }
+
+    #[test]
     fn same_or_different_direct_answer_normalizes_exact_scalar_matches() {
         let replies = vec!["  Value \n".to_string(), "value".to_string()];
         let answer = direct_same_or_different_answer_from_recent_replies(false, &replies);
@@ -655,6 +698,18 @@ mod tests {
         let prompt = r#"sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
         let resolved = "Sort the provided JSON array by score in descending order and output as a markdown table";
         assert_eq!(chat_user_request(resolved, prompt), prompt);
+    }
+
+    #[test]
+    fn chat_request_for_prompt_keeps_original_constraints_and_semantic_anchor() {
+        let request = chat_request_for_prompt(
+            "刚才我让你记住的测试编号是什么？只回答编号。",
+            "client-like-continuous-20260428_144029",
+        );
+        assert!(request.contains("Original user request:"));
+        assert!(request.contains("只回答编号"));
+        assert!(request.contains("Resolved semantic intent:"));
+        assert!(request.contains("client-like-continuous-20260428_144029"));
     }
 
     #[test]

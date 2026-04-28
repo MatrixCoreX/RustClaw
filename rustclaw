@@ -51,7 +51,7 @@ Usage / 用法:
     # Start services / 启动服务（可选配置与通道）
   rustclaw -start [vendor] [model] [release] [channels]
     # Start with vendor/model / 按厂商与模型启动
-  rustclaw -start --vendor <openai|google|anthropic|grok|qwen|custom> [--model <name>] [--profile release] [--channels <...>] [--quick] [--skip-setup] [--with-ui] [--force-ui-rebuild]
+  rustclaw -start --vendor <openai|google|anthropic|grok|deepseek|qwen|minimax|mimo|custom> [--model <name>] [--profile release] [--channels <...>] [--quick] [--skip-setup] [--with-ui] [--force-ui-rebuild]
     # Full start options / 完整启动参数
   rustclaw -stop
     # Stop all RustClaw processes / 停止所有 RustClaw 进程
@@ -88,7 +88,7 @@ Quick start / 免配置快速启动:
 
 Parameters / 参数说明:
   -start / -restart (or start / restart):
-    vendor     : openai | google | anthropic | grok | qwen | custom  (LLM vendor / 模型厂商)
+    vendor     : openai | google | anthropic | grok | deepseek | qwen | minimax | mimo | custom  (LLM vendor / 模型厂商)
     model      : model override string  (模型名覆盖)
     profile    : release  (构建配置 / 当前仅支持 release)
     channels   : telegram | whatsapp_web | both | whatsapp_cloud | all  (通道)
@@ -199,7 +199,7 @@ cmd_start() {
       telegram|whatsapp_web|both|whatsapp_cloud|all)
         channels="$arg"
         ;;
-      openai|google|anthropic|grok|qwen|custom)
+      openai|google|anthropic|grok|deepseek|qwen|minimax|mimo|custom)
         vendor="$arg"
         ;;
       -q)
@@ -238,7 +238,7 @@ cmd_start() {
     echo "Invalid profile: $profile"
     exit 1
   fi
-  if [[ -n "$vendor" && ! "$vendor" =~ ^(openai|google|anthropic|grok|qwen|custom)$ ]]; then
+  if [[ -n "$vendor" && ! "$vendor" =~ ^(openai|google|anthropic|grok|deepseek|qwen|minimax|mimo|custom)$ ]]; then
     echo "Invalid vendor: $vendor"
     exit 1
   fi

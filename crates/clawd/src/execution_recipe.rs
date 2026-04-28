@@ -696,6 +696,9 @@ fn inherited_clarify_rewrite_request_text(route: &RouteResult) -> Option<String>
     }
 }
 
+// Legacy lexical detector retained for targeted regression tests and offline analysis only.
+// The planner-first runtime path must rely on the normalizer's explicit execution_recipe_hint.
+#[allow(dead_code)]
 pub(crate) fn detect_execution_recipe(
     route_result: Option<&RouteResult>,
     goal: &str,

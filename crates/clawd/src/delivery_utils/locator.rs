@@ -313,6 +313,9 @@ pub(crate) fn extract_directory_and_file_pair(text: &str) -> Option<(String, Str
         }
         let file = bare_candidates[0].clone();
         if let Some(directory_hint) = extract_directory_name_hint(text) {
+            if normalize_locator_text(&file) == normalize_locator_text(&directory_hint) {
+                return None;
+            }
             return Some((directory_hint, file));
         }
         return None;

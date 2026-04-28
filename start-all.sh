@@ -48,7 +48,7 @@ PID_DIR="$SCRIPT_DIR/.pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 # Optional args:
-#   ./start-all.sh <vendor(openai|google|anthropic|grok|deepseek|qwen|minimax|custom)> [model] [release] [channels]
+#   ./start-all.sh <vendor(openai|google|anthropic|grok|deepseek|qwen|minimax|mimo|custom)> [model] [release] [channels]
 # channels:
 #   telegram | whatsapp_web | both | whatsapp_cloud | all
 SELECTED_VENDOR_ARG="${1:-}"

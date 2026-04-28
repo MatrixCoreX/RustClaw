@@ -27,7 +27,7 @@ pub fn normalize_prompt_vendor_name(raw: &str) -> String {
     match raw.trim().to_ascii_lowercase().as_str() {
         "anthropic" | "claude" => "claude".to_string(),
         "google" | "gemini" => "google".to_string(),
-        "openai" => "openai".to_string(),
+        "openai" | "mimo" | "xiaomi" => "openai".to_string(),
         "grok" | "xai" => "grok".to_string(),
         "deepseek" => "deepseek".to_string(),
         "qwen" => "qwen".to_string(),
