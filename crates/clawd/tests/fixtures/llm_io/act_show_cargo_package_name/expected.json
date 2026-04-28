@@ -1,0 +1,14 @@
+{
+  "case": "act_show_cargo_package_name",
+  "description": "Explicit Cargo.toml scalar reads now bypass the normalizer and resolve package.name from observed extract_field output.",
+  "user_text": "读取 crates/clawd/Cargo.toml 的 package.name，只输出值",
+  "freeze_now": "2026-04-19T12:00:00+08:00",
+  "expected_final_answer_contains": [
+    "clawd"
+  ],
+  "expected_llm_call_count": 1,
+  "expected_prompt_sources": [
+    "plan"
+  ],
+  "expected_final_status": "success"
+}

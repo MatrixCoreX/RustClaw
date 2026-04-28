@@ -997,6 +997,348 @@ fn normalize_schedule_intent_from_normalizer(
     Some(intent)
 }
 
+fn intent_normalizer_max_prompt_bytes(state: &AppState, task: &ClaimedTask) -> usize {
+    let providers = state.task_llm_providers(task);
+    if providers.is_empty() {
+        return 192 * 1024;
+    }
+    let min_tokens = providers
+        .iter()
+        .map(|provider| crate::memory::service::estimate_context_window_tokens(provider.as_ref()))
+        .min()
+        .unwrap_or(32_000);
+    let any_minimax = providers.iter().any(|provider| {
+        provider
+            .config
+            .model
+            .to_ascii_lowercase()
+            .contains("minimax")
+    });
+    if any_minimax {
+        // Observed MiniMax OpenAI-compat response: context window exceeds limit (2013).
+        return 3_300;
+    }
+    min_tokens
+        .saturating_sub(1_400)
+        .max(512)
+        .saturating_mul(2)
+        .min(512 * 1024)
+        .max(2_048)
+}
+
+fn intent_normalizer_uses_compact_prompt(state: &AppState, task: &ClaimedTask) -> bool {
+    state.task_llm_providers(task).iter().any(|provider| {
+        provider
+            .config
+            .model
+            .to_ascii_lowercase()
+            .contains("minimax")
+    })
+}
+
+fn compact_prompt_slot(label: &str, value: &str, max_bytes: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "<none>" {
+        return format!("{label}: <none>");
+    }
+    let visible = crate::providers::utf8_safe_prefix(trimmed, max_bytes);
+    if visible.len() < trimmed.len() {
+        format!("{label}: {visible}...(truncated)")
+    } else {
+        format!("{label}: {visible}")
+    }
+}
+
+fn render_compact_intent_normalizer_prompt(
+    route_view: &crate::task_context_builder::RouteContextView,
+    _context_bundle: &crate::task_context_builder::TaskContextBundle,
+    auth_policy_context: &str,
+    request_language_hint: &str,
+    req: &str,
+) -> String {
+    let mut parts = Vec::new();
+    parts.push(
+        "Compact intent normalizer. Output one raw JSON object only. No markdown.".to_string(),
+    );
+    parts.push("Prefer mode=chat for greetings, confirmations, memory-only requests, and pure discussion. Use ask_clarify only when a required target/action is truly missing.".to_string());
+    parts.push("For recall questions, use exact values from RECENT/MEMORY. If found, put the value in resolved_user_intent and set needs_clarify=false.".to_string());
+    parts.push("For requests that depend on prior context, copy the relevant RECENT/MEMORY facts into resolved_user_intent so the next stage has enough context.".to_string());
+    parts.push("Keep resolved_user_intent concise; preserve exact IDs, but summarize long user text instead of copying it.".to_string());
+    parts.push(compact_prompt_slot(
+        "ACTIVE_TASK",
+        &route_view.active_task_context,
+        120,
+    ));
+    parts.push(compact_prompt_slot(
+        "HINTS",
+        &route_view.request_surface_hints,
+        120,
+    ));
+    parts.push(compact_prompt_slot("AUTH", auth_policy_context, 100));
+    parts.push("Required keys: resolved_user_intent, needs_clarify, clarify_question, reason, confidence, mode. If unsure: mode=\"chat\", needs_clarify=false.".to_string());
+    parts.push("For ordinary chat, greetings, and confirmations: mode=\"chat\", needs_clarify=false, turn_type=\"\". Never use turn_type=\"chat\".".to_string());
+    parts.push(compact_prompt_slot(
+        "MEMORY",
+        &route_view.memory_context,
+        440,
+    ));
+    parts.push(compact_prompt_slot(
+        "RECENT",
+        &route_view.recent_turns_full,
+        1040,
+    ));
+    parts.push(compact_prompt_slot("LAST", &route_view.last_turn_full, 180));
+    parts.push(compact_prompt_slot(
+        "ASSISTANT",
+        &route_view.recent_assistant_replies,
+        120,
+    ));
+    parts.push(format!("LANG={}", request_language_hint));
+    parts.push(compact_prompt_slot("REQUEST", req, 480));
+    parts.join("\n")
+}
+
+fn normalize_intent_normalizer_raw_for_schema(raw: &str, req: &str) -> String {
+    let Ok(mut value) = serde_json::from_str::<Value>(raw) else {
+        return normalize_plain_intent_normalizer_text_for_schema(raw, req);
+    };
+    let Some(obj) = value.as_object_mut() else {
+        let text = value
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| raw.trim());
+        return normalize_plain_intent_normalizer_text_for_schema(text, req);
+    };
+    if obj
+        .get("resolved_user_intent")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+        && !req.trim().is_empty()
+    {
+        obj.insert(
+            "resolved_user_intent".to_string(),
+            Value::String(req.trim().to_string()),
+        );
+    }
+    normalize_intent_normalizer_top_level_for_schema(obj);
+    normalize_intent_normalizer_scalar_types_for_schema(obj);
+    if let Some(turn_type) = obj.get("turn_type").and_then(|v| v.as_str()) {
+        let normalized = turn_type.trim().to_ascii_lowercase();
+        let valid = matches!(
+            normalized.as_str(),
+            "" | "task_request"
+                | "task_append"
+                | "task_replace"
+                | "task_correct"
+                | "task_scope_update"
+                | "run_control"
+                | "approval_decision"
+                | "status_query"
+                | "feedback_or_error"
+                | "preference_or_memory"
+        );
+        if !valid {
+            obj.insert("turn_type".to_string(), Value::String(String::new()));
+        }
+    }
+    if let Some(target_task_policy) = obj.get("target_task_policy").and_then(|v| v.as_str()) {
+        let normalized = target_task_policy.trim().to_ascii_lowercase();
+        let valid = matches!(
+            normalized.as_str(),
+            "" | "reuse_active" | "replace_active" | "pause_and_queue" | "standalone"
+        );
+        if !valid {
+            obj.insert(
+                "target_task_policy".to_string(),
+                Value::String(String::new()),
+            );
+        }
+    }
+    normalize_output_contract_for_schema(obj);
+    serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string())
+}
+
+fn normalize_plain_intent_normalizer_text_for_schema(raw: &str, req: &str) -> String {
+    let text = raw.trim();
+    if text.is_empty() {
+        return raw.to_string();
+    }
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "resolved_user_intent".to_string(),
+        Value::String(if text.is_empty() { req.trim() } else { text }.to_string()),
+    );
+    normalize_intent_normalizer_top_level_for_schema(&mut obj);
+    normalize_intent_normalizer_scalar_types_for_schema(&mut obj);
+    normalize_output_contract_for_schema(&mut obj);
+    serde_json::to_string(&Value::Object(obj)).unwrap_or_else(|_| raw.to_string())
+}
+
+fn normalize_intent_normalizer_scalar_types_for_schema(obj: &mut serde_json::Map<String, Value>) {
+    if obj
+        .get("clarify_question")
+        .is_some_and(|value| value.is_null())
+    {
+        obj.insert("clarify_question".to_string(), Value::String(String::new()));
+    }
+    if let Some(confidence) = obj.get("confidence").and_then(|value| value.as_str()) {
+        let normalized = confidence.trim().to_ascii_lowercase();
+        let numeric = match normalized.as_str() {
+            "high" => Some(0.9),
+            "medium" => Some(0.6),
+            "low" => Some(0.3),
+            _ => normalized.parse::<f64>().ok(),
+        };
+        if let Some(numeric) = numeric {
+            obj.insert("confidence".to_string(), Value::from(numeric));
+        }
+    }
+}
+
+fn normalize_intent_normalizer_top_level_for_schema(obj: &mut serde_json::Map<String, Value>) {
+    obj.entry("resume_behavior".to_string())
+        .or_insert_with(|| Value::String("none".to_string()));
+    obj.entry("schedule_kind".to_string())
+        .or_insert_with(|| Value::String("none".to_string()));
+    obj.entry("schedule_intent".to_string())
+        .or_insert(Value::Null);
+    obj.entry("wants_file_delivery".to_string())
+        .or_insert(Value::Bool(false));
+    obj.entry("should_refresh_long_term_memory".to_string())
+        .or_insert(Value::Bool(false));
+    obj.entry("agent_display_name_hint".to_string())
+        .or_insert_with(|| Value::String(String::new()));
+    obj.entry("needs_clarify".to_string())
+        .or_insert(Value::Bool(false));
+    obj.entry("clarify_question".to_string())
+        .or_insert_with(|| Value::String(String::new()));
+    obj.entry("reason".to_string())
+        .or_insert_with(|| Value::String(String::new()));
+    obj.entry("confidence".to_string())
+        .or_insert_with(|| Value::from(0.8));
+    obj.entry("mode".to_string())
+        .or_insert_with(|| Value::String("chat".to_string()));
+    obj.entry("output_contract".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    obj.entry("execution_recipe".to_string())
+        .or_insert_with(|| {
+            serde_json::json!({
+                "kind": "none",
+                "profile": "none",
+                "target_scope": "none"
+            })
+        });
+    obj.entry("turn_type".to_string())
+        .or_insert_with(|| Value::String(String::new()));
+    obj.entry("target_task_policy".to_string())
+        .or_insert_with(|| Value::String(String::new()));
+    obj.entry("should_interrupt_active_run".to_string())
+        .or_insert(Value::Bool(false));
+    obj.entry("state_patch".to_string()).or_insert(Value::Null);
+    obj.entry("attachment_processing_required".to_string())
+        .or_insert(Value::Bool(false));
+}
+
+fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>) {
+    let Some(contract) = obj
+        .get_mut("output_contract")
+        .and_then(|v| v.as_object_mut())
+    else {
+        return;
+    };
+    contract.retain(|key, _| {
+        matches!(
+            key.as_str(),
+            "response_shape"
+                | "requires_content_evidence"
+                | "delivery_required"
+                | "locator_kind"
+                | "delivery_intent"
+                | "semantic_kind"
+                | "locator_hint"
+                | "self_extension"
+        )
+    });
+    contract
+        .entry("response_shape".to_string())
+        .or_insert_with(|| Value::String("free".to_string()));
+    contract
+        .entry("requires_content_evidence".to_string())
+        .or_insert(Value::Bool(false));
+    contract
+        .entry("delivery_required".to_string())
+        .or_insert(Value::Bool(false));
+    contract
+        .entry("locator_kind".to_string())
+        .or_insert_with(|| Value::String("none".to_string()));
+    contract
+        .entry("delivery_intent".to_string())
+        .or_insert_with(|| Value::String("none".to_string()));
+    contract
+        .entry("semantic_kind".to_string())
+        .or_insert_with(|| Value::String("none".to_string()));
+    contract
+        .entry("locator_hint".to_string())
+        .or_insert_with(|| Value::String(String::new()));
+    let self_extension = contract
+        .entry("self_extension".to_string())
+        .or_insert_with(|| {
+            serde_json::json!({
+                "mode": "none",
+                "trigger": "none",
+                "execute_now": false
+            })
+        });
+    if let Some(self_extension) = self_extension.as_object_mut() {
+        self_extension.retain(|key, _| matches!(key.as_str(), "mode" | "trigger" | "execute_now"));
+        self_extension
+            .entry("mode".to_string())
+            .or_insert_with(|| Value::String("none".to_string()));
+        self_extension
+            .entry("trigger".to_string())
+            .or_insert_with(|| Value::String("none".to_string()));
+        self_extension
+            .entry("execute_now".to_string())
+            .or_insert(Value::Bool(false));
+    }
+}
+
+fn cap_intent_normalizer_prompt_for_llm_budget(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: String,
+) -> String {
+    let max_bytes = intent_normalizer_max_prompt_bytes(state, task);
+    if prompt.len() <= max_bytes {
+        return prompt;
+    }
+    warn!(
+        "intent_normalizer_prompt oversized vs provider budget — truncating head+tail task_id={} bytes_before={} bytes_budget={}",
+        task.task_id,
+        prompt.len(),
+        max_bytes
+    );
+    let head_take = (max_bytes * 45) / 100;
+    let tail_take = (max_bytes * 45) / 100;
+    let note_budget = max_bytes
+        .saturating_sub(head_take)
+        .saturating_sub(tail_take)
+        .max(32);
+    let note = format!(
+        "\n\n[RustClaw: omitted {} bytes of middle context to fit provider window]\n\n",
+        prompt
+            .len()
+            .saturating_sub(head_take.saturating_add(tail_take))
+    );
+    let head = crate::providers::utf8_safe_prefix(&prompt, head_take);
+    let note = crate::providers::utf8_safe_prefix(&note, note_budget);
+    let tail = crate::providers::utf8_safe_suffix(&prompt, tail_take);
+    format!("{head}{note}{tail}")
+}
+
 /// Unified intent normalizer: one LLM call for resume decision + intent completion + schedule classification + needs_clarify + routed_mode.
 pub(crate) async fn run_intent_normalizer(
     state: &AppState,
@@ -1050,50 +1392,65 @@ pub(crate) async fn run_intent_normalizer(
             .and_then(|conversation_state| conversation_state.locale_hint.as_deref()),
     );
     let auth_policy_context = render_auth_policy_context(state, task);
-    let prompt = crate::render_prompt_template(
-        &prompt_template,
-        &[
-            ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
-            ("__AUTH_POLICY_CONTEXT__", &auth_policy_context),
-            ("__CAPABILITY_MAP__", &route_view.capability_map),
-            (
-                "__SELF_EXTENSION_RUNTIME__",
-                &render_self_extension_runtime(state),
-            ),
-            (
-                "__RESUME_CONTEXT__",
-                &context_bundle.raw_sources.resume_context,
-            ),
-            (
-                "__BINDING_CONTEXT__",
-                &context_bundle.raw_sources.binding_context,
-            ),
-            ("__ACTIVE_TASK_CONTEXT__", &route_view.active_task_context),
-            (
-                "__REQUEST_SURFACE_HINTS__",
-                &route_view.request_surface_hints,
-            ),
-            (
-                "__RECENT_EXECUTION_CONTEXT__",
-                &route_view.recent_execution_context,
-            ),
-            ("__MEMORY_CONTEXT__", &route_view.memory_context),
-            ("__RECENT_TURNS_FULL__", &route_view.recent_turns_full),
-            ("__LAST_TURN_FULL__", &route_view.last_turn_full),
-            (
-                "__RECENT_ASSISTANT_REPLIES__",
-                &route_view.recent_assistant_replies,
-            ),
-            ("__NOW__", &context_bundle.raw_sources.now_iso),
-            ("__TIMEZONE__", &context_bundle.raw_sources.timezone),
-            (
-                "__SCHEDULE_RULES__",
-                &context_bundle.raw_sources.schedule_rules,
-            ),
-            ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
-            ("__REQUEST__", req),
-        ],
-    );
+    let prompt = if intent_normalizer_uses_compact_prompt(state, task) {
+        warn!(
+            "intent_normalizer using compact prompt for small-context provider: task_id={}",
+            task.task_id
+        );
+        render_compact_intent_normalizer_prompt(
+            route_view,
+            &context_bundle,
+            &auth_policy_context,
+            &request_language_hint,
+            req,
+        )
+    } else {
+        crate::render_prompt_template(
+            &prompt_template,
+            &[
+                ("__PERSONA_PROMPT__", ROUTING_POLICY_PERSONA_PROMPT),
+                ("__AUTH_POLICY_CONTEXT__", &auth_policy_context),
+                ("__CAPABILITY_MAP__", &route_view.capability_map),
+                (
+                    "__SELF_EXTENSION_RUNTIME__",
+                    &render_self_extension_runtime(state),
+                ),
+                (
+                    "__RESUME_CONTEXT__",
+                    &context_bundle.raw_sources.resume_context,
+                ),
+                (
+                    "__BINDING_CONTEXT__",
+                    &context_bundle.raw_sources.binding_context,
+                ),
+                ("__ACTIVE_TASK_CONTEXT__", &route_view.active_task_context),
+                (
+                    "__REQUEST_SURFACE_HINTS__",
+                    &route_view.request_surface_hints,
+                ),
+                (
+                    "__RECENT_EXECUTION_CONTEXT__",
+                    &route_view.recent_execution_context,
+                ),
+                ("__MEMORY_CONTEXT__", &route_view.memory_context),
+                ("__RECENT_TURNS_FULL__", &route_view.recent_turns_full),
+                ("__LAST_TURN_FULL__", &route_view.last_turn_full),
+                (
+                    "__RECENT_ASSISTANT_REPLIES__",
+                    &route_view.recent_assistant_replies,
+                ),
+                ("__NOW__", &context_bundle.raw_sources.now_iso),
+                ("__TIMEZONE__", &context_bundle.raw_sources.timezone),
+                (
+                    "__SCHEDULE_RULES__",
+                    &context_bundle.raw_sources.schedule_rules,
+                ),
+                ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
+                ("__REQUEST__", req),
+            ],
+        )
+    };
+    let prompt = cap_intent_normalizer_prompt_for_llm_budget(state, task, prompt);
     crate::log_prompt_render_with_version(
         state,
         &task.task_id,
@@ -1123,8 +1480,9 @@ pub(crate) async fn run_intent_normalizer(
             return normalizer_output_from_fallback(req, "llm_failed_safe_clarify", fallback);
         }
     };
+    let llm_out_for_parse = normalize_intent_normalizer_raw_for_schema(&llm_out, req);
     let parsed = crate::prompt_utils::validate_against_schema::<IntentNormalizerOut>(
-        &llm_out,
+        &llm_out_for_parse,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
     );
     if let Ok(validated) = &parsed {
@@ -1141,8 +1499,10 @@ pub(crate) async fn run_intent_normalizer(
         Ok(validated) => Some(validated.value),
         Err(err) => {
             warn!(
-                "intent_normalizer schema parse failed, falling back to safe clarify: task_id={} err={}",
-                task.task_id, err
+                "intent_normalizer schema parse failed, falling back to safe clarify: task_id={} err={} normalized_raw={}",
+                task.task_id,
+                err,
+                crate::truncate_for_log(&llm_out_for_parse)
             );
             None
         }
@@ -1441,11 +1801,11 @@ pub(crate) async fn run_intent_normalizer(
                 clarify_question.clone()
             };
             info!(
-                    "{} intent_normalizer task_id={} bare_path_no_verb_override needs_clarify=true clarify_question={}",
-                    crate::highlight_tag("routing"),
-                    task.task_id,
-                    crate::truncate_for_log(&q)
-                );
+                "{} intent_normalizer task_id={} bare_path_no_verb_override needs_clarify=true clarify_question={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                crate::truncate_for_log(&q)
+            );
             (true, q)
         } else {
             (needs_clarify, clarify_question)

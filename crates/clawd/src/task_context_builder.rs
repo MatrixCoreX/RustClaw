@@ -369,6 +369,62 @@ fn classify_route_context_budget(
     }
 }
 
+fn build_route_memory_context(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_request: &str,
+    route_budget: RouteContextBudgetTier,
+) -> String {
+    if !state.policy.memory.route_memory_enabled
+        || matches!(route_budget, RouteContextBudgetTier::None)
+    {
+        return "<none>".to_string();
+    }
+
+    let (recent_limit, include_long_term, include_preferences, max_chars) = match route_budget {
+        RouteContextBudgetTier::Full => (
+            state.policy.memory.prompt_recall_limit.max(1),
+            true,
+            true,
+            state
+                .policy
+                .memory
+                .route_trigger_budget_chars
+                .max(384)
+                .min(state.policy.memory.route_memory_max_chars.max(384)),
+        ),
+        RouteContextBudgetTier::AnchorOnly => (
+            1,
+            true,
+            false,
+            state
+                .policy
+                .memory
+                .route_trigger_budget_chars
+                .max(384)
+                .min(640)
+                .min(state.policy.memory.route_memory_max_chars.max(384)),
+        ),
+        RouteContextBudgetTier::None => unreachable!(),
+    };
+
+    let structured = memory::service::recall_structured_memory_context(
+        state,
+        task.user_key.as_deref(),
+        task.user_id,
+        task.chat_id,
+        user_request,
+        recent_limit,
+        include_long_term,
+        include_preferences,
+    );
+    memory::service::structured_memory_context_block(
+        &structured,
+        memory::retrieval::MemoryContextMode::Route,
+        max_chars,
+    )
+}
+
 fn route_uses_structured_bound_scalar_read(route_result: &RouteResult) -> bool {
     route_result.ask_mode.is_plain_act()
         && route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar
@@ -566,9 +622,15 @@ pub(crate) fn build_route_task_context_bundle(
                 3,
                 220,
             ),
-            RouteContextBudgetTier::AnchorOnly | RouteContextBudgetTier::None => {
-                "<none>".to_string()
-            }
+            RouteContextBudgetTier::AnchorOnly => memory::build_recent_assistant_replies_context(
+                state,
+                task.user_key.as_deref(),
+                task.user_id,
+                task.chat_id,
+                2,
+                160,
+            ),
+            RouteContextBudgetTier::None => "<none>".to_string(),
         },
         recent_turns_full: match route_budget {
             RouteContextBudgetTier::Full => memory::build_recent_turns_full_context(
@@ -580,37 +642,18 @@ pub(crate) fn build_route_task_context_bundle(
                 560,
                 6400,
             ),
-            RouteContextBudgetTier::AnchorOnly | RouteContextBudgetTier::None => {
-                "<none>".to_string()
-            }
+            RouteContextBudgetTier::AnchorOnly => memory::build_recent_turns_full_context(
+                state,
+                task.user_key.as_deref(),
+                task.user_id,
+                task.chat_id,
+                4,
+                220,
+                1400,
+            ),
+            RouteContextBudgetTier::None => "<none>".to_string(),
         },
-        memory_context: match route_budget {
-            RouteContextBudgetTier::Full if state.policy.memory.route_memory_enabled => {
-                let structured = memory::service::recall_structured_memory_context(
-                    state,
-                    task.user_key.as_deref(),
-                    task.user_id,
-                    task.chat_id,
-                    user_request,
-                    state.policy.memory.prompt_recall_limit.max(1),
-                    true,
-                    true,
-                );
-                memory::service::structured_memory_context_block(
-                    &structured,
-                    memory::retrieval::MemoryContextMode::Route,
-                    state
-                        .policy
-                        .memory
-                        .route_trigger_budget_chars
-                        .max(384)
-                        .min(state.policy.memory.route_memory_max_chars.max(384)),
-                )
-            }
-            RouteContextBudgetTier::Full
-            | RouteContextBudgetTier::AnchorOnly
-            | RouteContextBudgetTier::None => "<none>".to_string(),
-        },
+        memory_context: build_route_memory_context(state, task, user_request, route_budget),
         last_turn_full: match route_budget {
             RouteContextBudgetTier::Full => memory::build_last_turn_full_context(
                 state,
@@ -620,9 +663,15 @@ pub(crate) fn build_route_task_context_bundle(
                 1200,
                 2400,
             ),
-            RouteContextBudgetTier::AnchorOnly | RouteContextBudgetTier::None => {
-                "<none>".to_string()
-            }
+            RouteContextBudgetTier::AnchorOnly => memory::build_last_turn_full_context(
+                state,
+                task.user_key.as_deref(),
+                task.user_id,
+                task.chat_id,
+                800,
+                1200,
+            ),
+            RouteContextBudgetTier::None => "<none>".to_string(),
         },
     };
     TaskContextBundle {

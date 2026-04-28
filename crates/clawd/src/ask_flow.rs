@@ -463,6 +463,7 @@ pub(crate) async fn execute_ask_routed(
                 task,
                 &current_turn_user_request,
             );
+            let request_for_chat_prompt = chat_user_request.to_string();
             let chat_prompt = crate::render_prompt_template(
                 &chat_prompt_template,
                 &[
@@ -473,7 +474,7 @@ pub(crate) async fn execute_ask_routed(
                         &state.policy.command_intent.default_locale,
                     ),
                     ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
-                    ("__REQUEST__", &current_turn_user_request),
+                    ("__REQUEST__", &request_for_chat_prompt),
                 ],
             );
             crate::llm_gateway::run_with_fallback_with_prompt_source(

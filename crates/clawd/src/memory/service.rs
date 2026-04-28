@@ -89,9 +89,9 @@ pub(crate) fn prepare_prompt_with_memory_for_mode(
 ) -> PromptMemoryContext {
     let recent_limit = match mode {
         PromptMemoryBudgetMode::Full => state.policy.memory.prompt_recall_limit.max(1),
-        PromptMemoryBudgetMode::Light => 0,
+        PromptMemoryBudgetMode::Light => 1,
     };
-    let include_long_term = matches!(mode, PromptMemoryBudgetMode::Full);
+    let include_long_term = true;
     let include_preferences = matches!(mode, PromptMemoryBudgetMode::Full);
     let include_indexed = matches!(mode, PromptMemoryBudgetMode::Full);
     let structured = recall_structured_memory_context_with_options(
@@ -271,7 +271,7 @@ pub(crate) fn dynamic_chat_memory_budget_chars(
         .map(|provider| estimate_context_window_tokens(provider.as_ref()))
         .min()
         .unwrap_or(32_000)
-        .max(8_000);
+        .max(512);
     // Reserve output and control prompt overhead to keep headroom for provider formatting.
     let output_reserve_tokens = 4_096usize.min(min_context_tokens / 3).max(768);
     let fixed_overhead_tokens = 1_200usize;
@@ -297,16 +297,18 @@ pub(crate) fn dynamic_chat_memory_budget_chars(
     dynamic_budget
 }
 
-fn estimate_context_window_tokens(provider: &LlmProviderRuntime) -> usize {
+pub(crate) fn estimate_context_window_tokens(provider: &LlmProviderRuntime) -> usize {
     let model = provider.config.model.trim().to_ascii_lowercase();
     if let Some(explicit) = extract_model_k_or_m_capacity_tokens(&model) {
-        return explicit.max(8_000);
+        return explicit.max(512);
     }
     match provider.config.provider_type.as_str() {
         "anthropic_claude" => 200_000,
         "google_gemini" => 256_000,
         "openai_compat" => {
-            if model.contains("gpt-4.1")
+            if model.contains("minimax") {
+                2_013
+            } else if model.contains("gpt-4.1")
                 || model.contains("gpt-4o")
                 || model.contains("o3")
                 || model.contains("o4")

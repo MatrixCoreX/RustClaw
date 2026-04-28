@@ -230,6 +230,16 @@ Skill behavior notes (file/path):
 - parameter normalization: when the user provides a non-English city/place name, convert it to the corresponding English name before calling `weather` and write that into `city/location/place/q` so geocoding is less likely to fail.
 - use this skill for current-weather and next-days / one-week forecast requests; for pure climate knowledge or casual chat, use direct `respond`.
 
+### invest_copy
+- summarizes user-provided pasted text (`data`) using the **deployment default OpenAI-compatible LLM** (same creds injected as `OPENAI_*` for other skills—aligned with clawd `openai_compat` routing) unless `use_heuristic=true` (offline rule-based stubs, no LLM).
+- **Orchestration (recommended)** when fresh web text is needed: first call `http_basic`, `web_search_extract`, `browser_web`, `rss_fetch`, or `doc_parse`, then pass the fetched body into `invest_copy` as `data` (often `{{last_output}}` from the immediately previous step).
+- action: `draft` (default) or `list_investors`.
+- required for `draft`:
+  - `data` **or** `material` **or** `user_data` (same body; minimum length enforced)
+  - `person`: slug (`warren_buffett`, …) or known alias (`巴菲特`, …)
+- optional for `draft`: `brief` / `focus`, `source_note` / `data_source`, `channel` (`short` | `article`), `compliance` (`light` | `standard`), `locale` / `language` / `lang`, `use_heuristic` (bool; default false)
+- Do **not** use this skill for buy/sell instructions, guaranteed-return claims, or impersonation of the named investor; refusal behavior is deterministic when content matches disallowed solicitation patterns.
+
 ### map_merchant
 - multi-provider merchant recommendation skill; supports `amap` and `google`, with default provider selected by `configs/map_merchant.toml`.
 - required (choose one):

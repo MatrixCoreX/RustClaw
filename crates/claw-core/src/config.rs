@@ -1340,6 +1340,7 @@ fn default_skills_list() -> Vec<String> {
         "weather".to_string(),
         "doc_parse".to_string(),
         "transform".to_string(),
+        "invest_copy".to_string(),
         "web_search_extract".to_string(),
         "kb".to_string(),
         "browser_web".to_string(),
