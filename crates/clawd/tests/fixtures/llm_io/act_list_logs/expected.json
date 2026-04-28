@@ -1,0 +1,16 @@
+{
+  "case": "act_list_logs",
+  "description": "Directory inventory currently collapses to a compact count-style answer after execution + chat finalization.",
+  "user_text": "列出 logs 目录下的前 10 个文件名，不要读内容",
+  "freeze_now": "2026-04-19T12:00:00+08:00",
+  "expected_final_answer_contains": [
+    "10"
+  ],
+  "expected_llm_call_count": 3,
+  "expected_prompt_sources": [
+    "normalizer",
+    "plan",
+    "chat"
+  ],
+  "expected_final_status": "success"
+}

@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CASE_DIR="${SCRIPT_DIR}/cases"
 
 ALL_SUITES=(
+  client_like_continuous
   manual
   compound_single
   task_updates
@@ -35,6 +36,7 @@ Usage:
   bash scripts/nl_tests/run_suite.sh --list
 
 Suites:
+  client_like_continuous
   manual
   compound_single
   task_updates
@@ -56,15 +58,15 @@ Suites:
   clarify_context_prompt
 
 Categories:
-  smoke         -> manual, clarify
+  smoke         -> client_like_continuous, manual, clarify
   single_turn   -> manual, compound_single, multistep_mixed, text_match, full
   multi_turn    -> task_updates, task_updates4, clarify, clarify_hard, context_chain
   multi_instruction -> compound_single, task_updates, task_updates4
   regression    -> trace, resume
   guard         -> dynamic_guard, sensitive_flows
   ops           -> ops_closed_loop, long_tail_flows
-  core          -> manual, text_match, trace, resume, clarify, context_chain
-  all           -> manual, text_match, full, trace, resume, clarify, clarify_hard, context_chain, dynamic_guard
+  core          -> client_like_continuous, manual, text_match, trace, resume, clarify, context_chain
+  all           -> client_like_continuous, manual, text_match, full, trace, resume, clarify, clarify_hard, context_chain, dynamic_guard
 
 Examples:
   bash scripts/nl_tests/run_suite.sh manual
@@ -89,6 +91,7 @@ EOF
 print_available() {
   cat <<'EOF'
 Available suites:
+  - client_like_continuous
   - manual
   - compound_single
   - task_updates
@@ -155,6 +158,13 @@ run_mode_manual() {
   bash "${SCRIPT_DIR}/run_manual_test.sh" \
     --case-file "${CASE_DIR}/nl_cases_manual.txt" \
     --log-root "${ROOT_DIR}/scripts/nl_suite_logs/manual" \
+    "$@"
+}
+
+run_mode_client_like_continuous() {
+  run_wrapped_suite \
+    "client_like_continuous" \
+    bash "${SCRIPT_DIR}/run_client_like_continuous_suite.sh" \
     "$@"
 }
 
@@ -307,7 +317,7 @@ suite_accepts_value_option() {
   case "$option" in
     --base-url|--user-id|--chat-id|--user-key)
       case "$suite" in
-        manual|text_match|full|trace|resume|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        client_like_continuous|manual|text_match|full|trace|resume|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
         compound_single|task_updates|task_updates4)
@@ -320,14 +330,14 @@ suite_accepts_value_option() {
       ;;
     --wait-seconds)
       case "$suite" in
-        manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        client_like_continuous|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
       esac
       ;;
     --poll-seconds)
       case "$suite" in
-        manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+        client_like_continuous|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
           return 0
           ;;
       esac
@@ -356,7 +366,7 @@ suite_accepts_flag_option() {
       ;;
     --prompt-reply-only)
       case "$suite" in
-        manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|clarify|clarify_hard|context_chain|clarify_context_prompt)
+        client_like_continuous|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|clarify|clarify_hard|context_chain|clarify_context_prompt)
           return 0
           ;;
       esac
@@ -409,6 +419,9 @@ run_one_suite() {
   shift
   filter_pass_through_for_suite "$suite" "$@"
   case "$suite" in
+    client_like_continuous)
+      run_mode_client_like_continuous "${FILTERED_SUITE_ARGS[@]}"
+      ;;
     manual)
       run_mode_manual "${FILTERED_SUITE_ARGS[@]}"
       ;;
@@ -488,10 +501,11 @@ add_suite() {
 expand_selector() {
   local selector="$1"
   case "$selector" in
-    manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+    client_like_continuous|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
       add_suite "$selector"
       ;;
     smoke)
+      add_suite client_like_continuous
       add_suite manual
       add_suite clarify
       ;;
@@ -527,6 +541,7 @@ expand_selector() {
       add_suite long_tail_flows
       ;;
     core)
+      add_suite client_like_continuous
       add_suite manual
       add_suite compound_single
       add_suite task_updates
@@ -539,7 +554,7 @@ expand_selector() {
       ;;
     all)
       local suite
-      for suite in manual compound_single task_updates task_updates4 multistep_mixed text_match full trace resume clarify clarify_hard context_chain dynamic_guard; do
+      for suite in client_like_continuous manual compound_single task_updates task_updates4 multistep_mixed text_match full trace resume clarify clarify_hard context_chain dynamic_guard; do
         add_suite "$suite"
       done
       ;;

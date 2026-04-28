@@ -24,6 +24,7 @@ members = [
     "crates/skills/fs_search",
     "crates/skills/git_basic",
     "crates/skills/health_check",
+    "crates/skills/invest_copy",
     "crates/skills/http_basic",
     "crates/skills/image_edit",
     "crates/skills/image_generate",

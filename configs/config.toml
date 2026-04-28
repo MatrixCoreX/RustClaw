@@ -339,6 +339,7 @@ skills_list = [
     "docker_basic",
     "fs_search",
     "rss_fetch",
+
     "image_vision",
     "image_generate",
     "image_edit",
@@ -355,6 +356,7 @@ skills_list = [
     "weather",
     "doc_parse",
     "transform",
+    "invest_copy",
     "web_search_extract",
     "kb",
     "browser_web",

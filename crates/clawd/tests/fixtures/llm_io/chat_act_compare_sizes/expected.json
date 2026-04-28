@@ -1,0 +1,14 @@
+{
+  "case": "chat_act_compare_sizes",
+  "description": "Current compare-size route goes through normalizer + planner + observed finalizer fallback; assert the full 3-call structure only.",
+  "user_text": "比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因",
+  "freeze_now": "2026-04-19T12:00:00+08:00",
+  "expected_min_llm_call_count": 3,
+  "expected_max_llm_call_count": 3,
+  "expected_prompt_sources": [
+    "normalizer",
+    "observed",
+    "plan"
+  ],
+  "expected_final_status": "success"
+}

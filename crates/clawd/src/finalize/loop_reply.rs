@@ -996,6 +996,246 @@ fn route_explicitly_requests_command_result(route: &crate::RouteResult) -> bool 
     route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
 }
 
+const EXECUTION_SUMMARY_MAX_STEPS: usize = 4;
+const EXECUTION_SUMMARY_ARGS_MAX_CHARS: usize = 180;
+const EXECUTION_SUMMARY_OUTPUT_MAX_CHARS: usize = 420;
+
+fn should_attach_execution_summary(agent_run_context: Option<&AgentRunContext>) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if route_explicitly_requests_command_result(route) {
+        return false;
+    }
+    !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+    )
+}
+
+fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
+    let text = text.trim();
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    if max_chars <= 3 {
+        return "...".to_string();
+    }
+    let mut truncated = text
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
+}
+
+fn execution_summary_value_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value.trim().to_string(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        serde_json::Value::Null => String::new(),
+        _ => value.to_string(),
+    }
+}
+
+fn execution_summary_arg_is_sensitive(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    [
+        "secret", "token", "key", "password", "passwd", "cookie", "auth",
+    ]
+    .iter()
+    .any(|needle| key.contains(needle))
+}
+
+fn safe_execution_args_summary(args: &serde_json::Value, max_chars: usize) -> String {
+    let Some(object) = args.as_object() else {
+        return String::new();
+    };
+    let mut parts = Vec::new();
+    for key in [
+        "action",
+        "command",
+        "cmd",
+        "path",
+        "file_path",
+        "target",
+        "target_path",
+        "dir",
+        "directory",
+        "field",
+        "field_path",
+        "query",
+        "pattern",
+        "url",
+        "limit",
+        "name",
+    ] {
+        if execution_summary_arg_is_sensitive(key) {
+            continue;
+        }
+        let Some(value) = object.get(key) else {
+            continue;
+        };
+        let value = execution_summary_value_to_string(value);
+        if value.is_empty() {
+            continue;
+        }
+        parts.push(format!("{key}={}", truncate_with_ellipsis(&value, 56)));
+    }
+    truncate_with_ellipsis(&parts.join(", "), max_chars)
+}
+
+fn plan_step_for_execution<'a>(
+    loop_state: &'a LoopState,
+    step_id: &str,
+) -> Option<&'a crate::PlanStep> {
+    loop_state
+        .round_traces
+        .iter()
+        .filter_map(|trace| trace.plan_result.as_ref())
+        .flat_map(|plan| plan.steps.iter())
+        .find(|step| step.step_id == step_id)
+}
+
+fn command_arg_from_plan_step(plan_step: Option<&crate::PlanStep>) -> Option<String> {
+    let args = &plan_step?.args;
+    args.get("command")
+        .or_else(|| args.get("cmd"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| truncate_with_ellipsis(value, 140))
+}
+
+fn execution_summary_invocation_label(
+    step: &crate::executor::StepExecutionResult,
+    plan_step: Option<&crate::PlanStep>,
+) -> String {
+    if let Some(command) = command_arg_from_plan_step(plan_step) {
+        return format!("命令 `{command}`");
+    }
+
+    let action_type = plan_step
+        .map(|step| step.action_type.as_str())
+        .unwrap_or("call_skill");
+    let kind = if action_type == "call_tool" {
+        "工具"
+    } else {
+        "技能"
+    };
+    let skill = plan_step
+        .map(|step| step.skill.as_str())
+        .unwrap_or(step.skill.as_str());
+    let args = plan_step
+        .map(|step| safe_execution_args_summary(&step.args, EXECUTION_SUMMARY_ARGS_MAX_CHARS))
+        .unwrap_or_default();
+    if args.is_empty() {
+        format!("{kind} `{skill}`")
+    } else {
+        format!("{kind} `{skill}`（{args}）")
+    }
+}
+
+fn output_text_from_execution_result(
+    step: &crate::executor::StepExecutionResult,
+) -> Option<String> {
+    let raw = if step.is_ok() {
+        step.output.as_deref()
+    } else {
+        step.error.as_deref().or(step.output.as_deref())
+    }?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if let Some(text) = value
+            .get("text")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(text.to_string());
+        }
+        if let Some(text) = value
+            .get("stdout")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(text.to_string());
+        }
+        if let Some(text) = value
+            .get("error_text")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(text.to_string());
+        }
+    }
+    Some(trimmed.to_string())
+}
+
+fn build_execution_summary_message(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    if !should_attach_execution_summary(agent_run_context) {
+        return None;
+    }
+    let steps = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "think" | "synthesize_answer"
+            ) && output_text_from_execution_result(step).is_some()
+        })
+        .collect::<Vec<_>>();
+    if steps.is_empty() {
+        return None;
+    }
+
+    let mut lines = vec!["**执行过程**".to_string()];
+    for (index, step) in steps.iter().take(EXECUTION_SUMMARY_MAX_STEPS).enumerate() {
+        let plan_step = plan_step_for_execution(loop_state, &step.step_id);
+        let output = output_text_from_execution_result(step)?.replace("```", "'''");
+        let output = truncate_with_ellipsis(&output, EXECUTION_SUMMARY_OUTPUT_MAX_CHARS);
+        let status_label = if step.is_ok() { "输出" } else { "错误" };
+        lines.push(format!(
+            "{}. 调用{}",
+            index + 1,
+            execution_summary_invocation_label(step, plan_step)
+        ));
+        lines.push(format!("   {status_label}："));
+        lines.push("```text".to_string());
+        lines.push(output);
+        lines.push("```".to_string());
+    }
+    let omitted = steps.len().saturating_sub(EXECUTION_SUMMARY_MAX_STEPS);
+    if omitted > 0 {
+        lines.push(format!("...（还有 {omitted} 个执行步骤已省略）"));
+    }
+    Some(lines.join("\n"))
+}
+
+fn attach_execution_summary_to_delivery(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery_messages: &mut Vec<String>,
+) {
+    let Some(summary) = build_execution_summary_message(loop_state, agent_run_context) else {
+        return;
+    };
+    if delivery_messages.iter().any(|message| message == &summary) {
+        return;
+    }
+    delivery_messages.insert(0, summary);
+}
+
 fn error_looks_like_os_permission_denied(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("permission denied") || lower.contains("os error 13")
@@ -1543,6 +1783,7 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
     );
     ensure_requested_success_marker_visible(agent_run_context, &mut delivery_deduped);
+    attach_execution_summary_to_delivery(&loop_state, agent_run_context, &mut delivery_deduped);
 
     let final_text = delivery_deduped.last().cloned().unwrap_or_default();
 
@@ -1601,7 +1842,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        attach_execution_recipe_closeout_to_delivery, auto_requested_success_marker,
+        attach_execution_recipe_closeout_to_delivery, attach_execution_summary_to_delivery,
+        auto_requested_success_marker, build_execution_summary_message,
         content_evidence_step_failure_answer, direct_non_builtin_skill_raw_answer,
         direct_publishable_observed_answer, direct_scalar_observed_answer,
         direct_structured_observed_answer,
@@ -1758,6 +2000,121 @@ mod tests {
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.requires_content_evidence = false;
         route
+    }
+
+    fn plan_result_with_steps(steps: Vec<crate::PlanStep>) -> crate::PlanResult {
+        crate::PlanResult {
+            goal: "test goal".to_string(),
+            missing_slots: Vec::new(),
+            needs_confirmation: false,
+            steps,
+            planner_notes: String::new(),
+            plan_kind: crate::PlanKind::Single,
+            raw_plan_text: String::new(),
+        }
+    }
+
+    fn ok_step_result(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
+        StepExecutionResult {
+            step_id: step_id.to_string(),
+            skill: skill.to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(output.to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        }
+    }
+
+    #[test]
+    fn execution_summary_attaches_before_final_delivery_without_changing_final_text() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "list recent logs".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: serde_json::json!({"command": "ls -t logs | head -2"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "model_io.log\nact_plan.log\n",
+        ));
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+        let mut delivery = vec!["这更像运行日志。".to_string()];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), &mut delivery);
+
+        assert_eq!(delivery.len(), 2);
+        assert!(delivery[0].contains("**执行过程**"));
+        assert!(delivery[0].contains("命令 `ls -t logs | head -2`"));
+        assert!(delivery[0].contains("model_io.log"));
+        assert!(delivery[0].contains("act_plan.log"));
+        assert_eq!(
+            delivery.last().map(String::as_str),
+            Some("这更像运行日志。")
+        );
+        assert!(crate::task_journal::delivery_payload_consistent(
+            "这更像运行日志。",
+            &delivery
+        ));
+    }
+
+    #[test]
+    fn execution_summary_skips_raw_command_output_route() {
+        let mut route = free_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "/home/guagua/rustclaw\n",
+        ));
+
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx)).is_none());
+    }
+
+    #[test]
+    fn execution_summary_truncates_long_outputs_with_ascii_ellipsis() {
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        let long_output = format!("{}END", "x".repeat(1000));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "system_basic",
+            &long_output,
+        ));
+
+        let summary =
+            build_execution_summary_message(&loop_state, Some(&ctx)).expect("execution summary");
+
+        assert!(summary.contains("..."));
+        assert!(!summary.contains("END"));
+        assert!(
+            summary.len() < 700,
+            "summary should stay compact, got {} chars",
+            summary.len()
+        );
     }
 
     #[test]
