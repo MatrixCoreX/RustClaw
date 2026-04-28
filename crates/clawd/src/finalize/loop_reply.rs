@@ -159,7 +159,7 @@ fn normalize_file_token_delivery_from_auto_locator(
     }
 }
 
-fn enforce_delivery_output_contract(
+async fn enforce_delivery_output_contract(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
@@ -246,18 +246,23 @@ fn enforce_delivery_output_contract(
                     reason,
                     crate::truncate_for_log(&normalized_text),
                 );
-                let hint = format!(
-                    "shape={:?},kind={:?},reason={}",
-                    route.output_contract.response_shape,
-                    route.output_contract.semantic_kind,
-                    reason
+                let language_hint =
+                    crate::language_policy::task_response_language_hint(state, task, user_text);
+                let contract = crate::fallback::UserResponseContract::verify_rejected(
+                    user_text,
+                    &route.resolved_intent,
+                    &format!("{:?}", route.output_contract.response_shape),
+                    &format!("{:?}", route.output_contract.semantic_kind),
+                    reason,
+                    &language_hint,
                 );
-                let fallback_text = crate::fallback::render_clarify_fallback(
+                let fallback_text = crate::fallback::compose_user_response_from_contract(
                     state,
-                    &task.task_id,
+                    task,
+                    &contract,
                     crate::fallback::ClarifyFallbackSource::VerifyRejected,
-                    Some(&hint),
                 );
+                let fallback_text = fallback_text.await;
                 normalized_text = fallback_text.clone();
                 normalized_messages = vec![fallback_text];
             }
@@ -529,7 +534,15 @@ fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
     }
 }
 
-fn execution_recipe_budget_exhausted_message(
+fn route_resolved_intent(agent_run_context: Option<&AgentRunContext>) -> String {
+    agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .map(|route| route.resolved_intent.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_default()
+}
+
+fn execution_recipe_budget_exhausted_default_message(
     state: &AppState,
     user_text: &str,
     loop_state: &crate::agent_engine::LoopState,
@@ -547,7 +560,48 @@ fn execution_recipe_budget_exhausted_message(
     )
 }
 
-fn execution_recipe_missing_success_marker_message(
+async fn execution_recipe_budget_exhausted_message(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> String {
+    let default_text =
+        execution_recipe_budget_exhausted_default_message(state, user_text, loop_state);
+    let repair_count = loop_state.execution_recipe.repair_count.to_string();
+    let max_repairs = loop_state.execution_recipe.max_repairs.to_string();
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
+    let contract = crate::fallback::UserResponseContract::tool_failure(
+        "execution_recipe_repair_budget_exhausted",
+        user_text,
+        &route_resolved_intent(agent_run_context),
+        vec![
+            "closed_loop_stage: inspect/apply/validate".to_string(),
+            format!("repair_count: {repair_count}"),
+            format!("max_repairs: {max_repairs}"),
+            "result_validated: false".to_string(),
+        ],
+        vec![
+            "Do not mark the run as successful.".to_string(),
+            "Do not claim validation passed.".to_string(),
+            "Explain the blocker and ask for permission to continue with a different approach or more context."
+                .to_string(),
+        ],
+        "brief_failure_with_next_step",
+        &language_hint,
+    );
+    crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
+        &default_text,
+    )
+    .await
+}
+
+fn execution_recipe_missing_success_marker_default_message(
     state: &AppState,
     user_text: &str,
     marker: &str,
@@ -561,6 +615,44 @@ fn execution_recipe_missing_success_marker_message(
         prefer_english,
         &[("marker", marker)],
     )
+}
+
+async fn execution_recipe_missing_success_marker_message(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    marker: &str,
+    agent_run_context: Option<&AgentRunContext>,
+) -> String {
+    let default_text =
+        execution_recipe_missing_success_marker_default_message(state, user_text, marker);
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
+    let contract = crate::fallback::UserResponseContract::tool_failure(
+        "execution_recipe_missing_success_marker",
+        user_text,
+        &route_resolved_intent(agent_run_context),
+        vec![
+            format!("required_success_marker: {marker}"),
+            "marker_observed: false".to_string(),
+            "result_marked_success: false".to_string(),
+        ],
+        vec![
+            "Do not mark the run as successful.".to_string(),
+            "Do not invent the required verification marker.".to_string(),
+            "Explain that the required verification signal is missing and offer to continue verification."
+                .to_string(),
+        ],
+        "brief_failure_with_next_step",
+        &language_hint,
+    );
+    crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
+        &default_text,
+    )
+    .await
 }
 
 fn execution_recipe_profile_closeout_label(
@@ -1199,7 +1291,7 @@ fn build_execution_summary_message(
         return None;
     }
 
-    let mut lines = vec!["**执行过程**".to_string()];
+    let mut lines = vec![crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX.to_string()];
     for (index, step) in steps.iter().take(EXECUTION_SUMMARY_MAX_STEPS).enumerate() {
         let plan_step = plan_step_for_execution(loop_state, &step.step_id);
         let output = output_text_from_execution_result(step)?.replace("```", "'''");
@@ -1488,7 +1580,14 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if loop_state.last_stop_signal.as_deref() == Some("recipe_repair_budget_exhausted") {
-        let message = execution_recipe_budget_exhausted_message(state, user_text, &loop_state);
+        let message = execution_recipe_budget_exhausted_message(
+            state,
+            task,
+            user_text,
+            &loop_state,
+            agent_run_context,
+        )
+        .await;
         let delivery_messages = vec![message.clone()];
         let delivery_consistent =
             crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
@@ -1630,7 +1729,8 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     normalize_file_token_delivery_from_auto_locator(&mut loop_state, agent_run_context);
-    enforce_delivery_output_contract(state, task, user_text, &mut loop_state, agent_run_context);
+    enforce_delivery_output_contract(state, task, user_text, &mut loop_state, agent_run_context)
+        .await;
 
     if let Some((error_answer, summary)) =
         content_evidence_step_failure_answer(state, user_text, &loop_state, agent_run_context)
@@ -1755,7 +1855,14 @@ pub(crate) async fn finalize_loop_reply(
     if let Some(marker) =
         missing_requested_success_marker(agent_run_context, &loop_state, &delivery_deduped)
     {
-        let message = execution_recipe_missing_success_marker_message(state, user_text, marker);
+        let message = execution_recipe_missing_success_marker_message(
+            state,
+            task,
+            user_text,
+            marker,
+            agent_run_context,
+        )
+        .await;
         let delivery_messages = vec![message.clone()];
         let delivery_consistent =
             crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);

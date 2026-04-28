@@ -143,6 +143,8 @@ impl Capability {
                         "deepseek",
                         "qwen",
                         "minimax",
+                        "mimo",
+                        "xiaomi",
                     ];
                     for vendor in KNOWN_VENDORS {
                         if name == &format!("{vendor}_api_key") || name == *vendor {

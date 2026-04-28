@@ -89,7 +89,10 @@ fn matches_provider_override(name: &str, provider_type: &str, override_name: &st
     let vendor_name = provider_name
         .strip_prefix("vendor-")
         .unwrap_or(provider_name.as_str());
-    wanted == provider_name || wanted == provider_type || wanted == vendor_name
+    wanted == provider_name
+        || wanted == provider_type
+        || wanted == vendor_name
+        || (wanted == "xiaomi" && vendor_name == "mimo")
 }
 
 pub(crate) fn build_providers(config: &AppConfig) -> Vec<Arc<LlmProviderRuntime>> {
@@ -138,7 +141,7 @@ fn build_providers_with_overrides(
         .iter()
         .filter_map(|p| {
             if let Some(name) = provider_override {
-                // Accept override by vendor alias (openai/google/anthropic/grok/deepseek/qwen/minimax/custom),
+                // Accept override by vendor alias (openai/google/anthropic/grok/deepseek/qwen/minimax/mimo/custom),
                 // provider runtime name (vendor-xxx), or provider type.
                 if !matches_provider_override(&p.name, &p.provider_type, name) {
                     return None;
@@ -182,8 +185,9 @@ fn build_providers_with_overrides(
     providers
 }
 
-/// `[llm.minimax]` 的 `api_format`：未配置或为空时默认 `openai_compat`；显式 `anthropic_claude` 等则走 Anthropic Messages。
-fn minimax_synthesized_provider_type(v: &LlmVendorConfig) -> &'static str {
+/// 双协议 vendor 的 `api_format`：未配置或为空时默认 `openai_compat`；显式
+/// `anthropic_claude` 等则走 Anthropic Messages。
+fn api_format_synthesized_provider_type(vendor_name: &str, v: &LlmVendorConfig) -> &'static str {
     let Some(raw) = v.api_format.as_ref() else {
         return "openai_compat";
     };
@@ -198,7 +202,8 @@ fn minimax_synthesized_provider_type(v: &LlmVendorConfig) -> &'static str {
         return "openai_compat";
     }
     warn!(
-        "llm.minimax api_format={:?} is not recognized (expected openai_compat or anthropic_claude); defaulting to openai_compat",
+        "llm.{} api_format={:?} is not recognized (expected openai_compat or anthropic_claude); defaulting to openai_compat",
+        vendor_name,
         v.api_format
     );
     "openai_compat"
@@ -346,7 +351,7 @@ fn synthesize_llm_providers(
             } else {
                 &v.model
             };
-            let provider_type = minimax_synthesized_provider_type(v).to_string();
+            let provider_type = api_format_synthesized_provider_type("minimax", v).to_string();
             out.push(LlmProviderConfig {
                 name: "vendor-minimax".to_string(),
                 provider_type,
@@ -354,6 +359,28 @@ fn synthesize_llm_providers(
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
                 priority: 7,
+                timeout_seconds: v.timeout_seconds,
+                max_concurrency: v.max_concurrency,
+                params: v.params.clone(),
+            });
+        }
+    }
+
+    if let Some(v) = &config.llm.mimo {
+        if selected_vendor.is_none() || selected_vendor == Some("mimo") {
+            let model = if selected_vendor == Some("mimo") {
+                selected_model.unwrap_or(&v.model)
+            } else {
+                &v.model
+            };
+            let provider_type = api_format_synthesized_provider_type("mimo", v).to_string();
+            out.push(LlmProviderConfig {
+                name: "vendor-mimo".to_string(),
+                provider_type,
+                base_url: v.base_url.clone(),
+                api_key: v.api_key.clone(),
+                model: model.to_string(),
+                priority: 8,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
                 params: v.params.clone(),
@@ -374,7 +401,7 @@ fn synthesize_llm_providers(
                 base_url: v.base_url.clone(),
                 api_key: v.api_key.clone(),
                 model: model.to_string(),
-                priority: 8,
+                priority: 9,
                 timeout_seconds: v.timeout_seconds,
                 max_concurrency: v.max_concurrency,
                 params: v.params.clone(),
@@ -561,6 +588,7 @@ async fn run_with_fallback_with_hints(
                 return Ok(cleaned_text);
             }
             Err(err) => {
+                let error_kind = err.observability_kind();
                 if err.should_trip_breaker() {
                     provider.breaker.note_failure();
                 } else if err.should_reset_breaker() {
@@ -571,7 +599,7 @@ async fn run_with_fallback_with_hints(
                 }
                 last_error = format!("provider={provider_name} failed: {err}");
                 warn!(
-                    "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={} error={}",
+                    "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={} error_kind={} error={}",
                     crate::highlight_tag("llm"),
                     task.task_id,
                     task.user_id,
@@ -581,6 +609,7 @@ async fn run_with_fallback_with_hints(
                     model_kind,
                     provider_name,
                     prompt_source,
+                    error_kind,
                     crate::truncate_for_log(&last_error)
                 );
                 crate::append_model_io_log(
@@ -609,7 +638,8 @@ async fn run_with_fallback_with_hints(
                             "provider": provider.config.name,
                             "model": provider.config.model,
                             "model_kind": model_kind,
-                            "status": "failed"
+                            "status": "failed",
+                            "error_kind": error_kind
                         })
                         .to_string(),
                     ),
@@ -731,6 +761,16 @@ mod tests {
             "minimax"
         ));
         assert!(matches_provider_override(
+            "vendor-mimo",
+            "openai_compat",
+            "mimo"
+        ));
+        assert!(matches_provider_override(
+            "vendor-mimo",
+            "openai_compat",
+            "xiaomi"
+        ));
+        assert!(matches_provider_override(
             "vendor-openai",
             "openai_compat",
             "openai"
@@ -771,6 +811,43 @@ mod tests {
             .expect("minimax provider should be synthesized");
 
         assert_eq!(minimax.provider_type, "openai_compat");
+    }
+
+    #[test]
+    fn mimo_uses_openai_compat_runtime_when_selected() {
+        let path = repo_config_path();
+        let mut config = AppConfig::load(path.to_str().expect("utf-8 path"))
+            .expect("config fixture should load");
+        config.llm.selected_vendor = Some("mimo".to_string());
+        config.llm.selected_model = Some("mimo-v2.5-pro".to_string());
+
+        let providers = synthesize_llm_providers(&config, None, None);
+        let mimo = providers
+            .iter()
+            .find(|provider| provider.name == "vendor-mimo")
+            .expect("mimo provider should be synthesized");
+
+        assert_eq!(mimo.provider_type, "openai_compat");
+    }
+
+    #[test]
+    fn mimo_respects_api_format_anthropic() {
+        let path = repo_config_path();
+        let mut config = AppConfig::load(path.to_str().expect("utf-8 path"))
+            .expect("config fixture should load");
+        config.llm.selected_vendor = Some("mimo".to_string());
+        config.llm.selected_model = Some("mimo-v2.5-pro".to_string());
+        if let Some(ref mut mimo) = config.llm.mimo {
+            mimo.api_format = Some("anthropic_claude".to_string());
+        }
+
+        let providers = synthesize_llm_providers(&config, None, None);
+        let mimo = providers
+            .iter()
+            .find(|provider| provider.name == "vendor-mimo")
+            .expect("mimo provider should be synthesized");
+
+        assert_eq!(mimo.provider_type, "anthropic_claude");
     }
 
     #[test]

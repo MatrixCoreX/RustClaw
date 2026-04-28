@@ -91,7 +91,7 @@ from pathlib import Path
 cfg_path = Path("configs/config.toml")
 cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
 llm = cfg.get("llm", {})
-vendors = ["openai", "google", "anthropic", "grok", "deepseek", "qwen", "minimax", "custom"]
+vendors = ["openai", "google", "anthropic", "grok", "deepseek", "qwen", "minimax", "mimo", "custom"]
 rows = []
 for vendor in vendors:
     section = llm.get(vendor)

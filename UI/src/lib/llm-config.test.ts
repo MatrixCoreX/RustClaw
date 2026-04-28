@@ -94,3 +94,26 @@ test("marks minimax api format edits as unsaved", () => {
     true,
   );
 });
+
+test("marks mimo api format edits as unsaved", () => {
+  assert.equal(
+    hasUnsavedLlmDraftChanges({
+      selectedVendor: "mimo",
+      selectedModel: "mimo-v2.5-pro",
+      vendors: [
+        {
+          name: "mimo",
+          base_url: "https://token-plan-sgp.xiaomimimo.com/v1",
+          api_key: "same-key",
+          api_format: "openai_compat",
+        },
+      ],
+      draftVendor: "mimo",
+      draftModel: "mimo-v2.5-pro",
+      draftBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+      draftApiKey: "same-key",
+      draftApiFormat: "anthropic_claude",
+    }),
+    true,
+  );
+});

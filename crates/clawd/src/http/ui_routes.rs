@@ -6832,7 +6832,7 @@ fn upsert_string_key_in_section(
     out
 }
 
-fn llm_vendor_names() -> [&'static str; 8] {
+fn llm_vendor_names() -> [&'static str; 9] {
     [
         "openai",
         "google",
@@ -6841,8 +6841,16 @@ fn llm_vendor_names() -> [&'static str; 8] {
         "deepseek",
         "qwen",
         "minimax",
+        "mimo",
         "custom",
     ]
+}
+
+fn llm_vendor_supports_api_format(vendor_name: &str) -> bool {
+    matches!(
+        vendor_name.trim().to_ascii_lowercase().as_str(),
+        "minimax" | "mimo"
+    )
 }
 
 fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
@@ -6883,8 +6891,8 @@ fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
             .map(str::trim)
             .unwrap_or("")
             .to_string();
-        let api_format = if vendor_name == "minimax" {
-            normalize_minimax_api_format(vendor.get("api_format").and_then(|v| v.as_str()))
+        let api_format = if llm_vendor_supports_api_format(vendor_name) {
+            normalize_llm_api_format(vendor.get("api_format").and_then(|v| v.as_str()))
         } else {
             String::new()
         };
@@ -6917,7 +6925,7 @@ fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {
     vendors
 }
 
-fn normalize_minimax_api_format(raw: Option<&str>) -> String {
+fn normalize_llm_api_format(raw: Option<&str>) -> String {
     let fmt = raw.unwrap_or("").trim();
     if fmt.eq_ignore_ascii_case("anthropic") || fmt.eq_ignore_ascii_case("anthropic_claude") {
         "anthropic_claude".to_string()
@@ -6965,8 +6973,8 @@ fn saved_llm_vendor_runtime_fields(
         .map(str::trim)
         .unwrap_or("")
         .to_string();
-    let provider_type = if selected_vendor.trim().eq_ignore_ascii_case("minimax") {
-        normalize_minimax_api_format(
+    let provider_type = if llm_vendor_supports_api_format(selected_vendor) {
+        normalize_llm_api_format(
             vendor
                 .and_then(|v| v.get("api_format"))
                 .and_then(|v| v.as_str()),
@@ -6978,8 +6986,8 @@ fn saved_llm_vendor_runtime_fields(
 }
 
 fn llm_provider_type_for_vendor(selected_vendor: &str, vendor_api_format: Option<&str>) -> String {
-    if selected_vendor.trim().eq_ignore_ascii_case("minimax") {
-        normalize_minimax_api_format(vendor_api_format)
+    if llm_vendor_supports_api_format(selected_vendor) {
+        normalize_llm_api_format(vendor_api_format)
     } else if selected_vendor.trim().eq_ignore_ascii_case("google") {
         "google_gemini".to_string()
     } else if selected_vendor.trim().eq_ignore_ascii_case("anthropic") {
@@ -7032,7 +7040,7 @@ fn llm_runtime_differs(
 ) -> bool {
     runtime_vendor.trim() != selected_vendor.trim()
         || runtime_model.trim() != selected_model.trim()
-        || (selected_vendor.trim().eq_ignore_ascii_case("minimax")
+        || (llm_vendor_supports_api_format(selected_vendor)
             && runtime_provider_type.trim() != saved_provider_type.trim())
         || runtime_base_url.trim() != saved_base_url.trim()
         || runtime_api_key.trim() != saved_api_key.trim()
@@ -7475,11 +7483,11 @@ async fn update_llm_config(
         "api_key",
         &format!("api_key = {:?}", vendor_api_key),
     );
-    let final_updated = if selected_vendor == "minimax" {
-        let vendor_api_format = normalize_minimax_api_format(req.vendor_api_format.as_deref());
+    let final_updated = if llm_vendor_supports_api_format(&selected_vendor) {
+        let vendor_api_format = normalize_llm_api_format(req.vendor_api_format.as_deref());
         upsert_string_key_in_section(
             &updated_api_key,
-            "llm.minimax",
+            &format!("llm.{selected_vendor}"),
             "api_format",
             &format!("api_format = {:?}", vendor_api_format),
         )
@@ -8490,6 +8498,22 @@ custom_keep = "yes"
     }
 
     #[test]
+    fn llm_runtime_differs_when_only_mimo_provider_type_changes() {
+        assert!(llm_runtime_differs(
+            "mimo",
+            "mimo-v2.5-pro",
+            "anthropic_claude",
+            "https://token-plan-sgp.xiaomimimo.com/v1",
+            "same-key",
+            "mimo",
+            "mimo-v2.5-pro",
+            "openai_compat",
+            "https://token-plan-sgp.xiaomimimo.com/v1",
+            "same-key",
+        ));
+    }
+
+    #[test]
     fn collect_llm_vendor_info_defaults_minimax_api_format_to_openai() {
         let parsed = toml::from_str::<toml::Value>(
             r#"
@@ -8514,6 +8538,35 @@ models = ["MiniMax-M2.7"]
 
         assert_eq!(
             minimax.get("api_format").and_then(|v| v.as_str()),
+            Some("openai_compat")
+        );
+    }
+
+    #[test]
+    fn collect_llm_vendor_info_defaults_mimo_api_format_to_openai() {
+        let parsed = toml::from_str::<toml::Value>(
+            r#"
+[llm]
+selected_vendor = "mimo"
+selected_model = "mimo-v2.5-pro"
+
+[llm.mimo]
+api_key = ""
+base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
+model = "mimo-v2.5-pro"
+models = ["mimo-v2.5-pro"]
+"#,
+        )
+        .expect("parse");
+
+        let vendors = collect_llm_vendor_info(&parsed);
+        let mimo = vendors
+            .iter()
+            .find(|vendor| vendor.get("name").and_then(|v| v.as_str()) == Some("mimo"))
+            .expect("mimo vendor");
+
+        assert_eq!(
+            mimo.get("api_format").and_then(|v| v.as_str()),
             Some("openai_compat")
         );
     }

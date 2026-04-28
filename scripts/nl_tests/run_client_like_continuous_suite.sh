@@ -18,6 +18,10 @@ WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-240}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/client_like_continuous"
 PROMPT_REPLY_ONLY=0
+CASE_FILE_VALUE=""
+CASE_LIMIT_VALUE=""
+CASE_START_VALUE="${CASE_START:-1}"
+RUN_BUILTIN_SMOKE=1
 RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
 TEST_ID="${CLIENT_LIKE_TEST_ID:-client-like-continuous-${RUN_STAMP}}"
 
@@ -43,6 +47,12 @@ Options:
   --wait-seconds N           max wait per turn. Default: 240
   --poll-seconds N           poll interval seconds. Default: 1
   --log-root PATH            log output root
+  --case-file PATH           append prompts from a case file into the same client-like conversation
+  --full-nl                  shorthand for --case-file scripts/nl_tests/cases/nl_cases_full.txt
+  --case-limit N             max appended cases from --case-file/--full-nl
+  --case-start N             start from the Nth appended case. Use with --skip-smoke and the same
+                             --external-chat-id/--external-user-id to resume after provider failure.
+  --skip-smoke               run only the case file prompts, without the built-in 5-turn memory smoke
   --prompt-reply-only        print only prompt and reply snippets
   -h, --help                 show this help
 EOF
@@ -100,6 +110,26 @@ while [[ $# -gt 0 ]]; do
     --log-root)
       LOG_ROOT="${2:-}"
       shift 2
+      ;;
+    --case-file)
+      CASE_FILE_VALUE="${2:-}"
+      shift 2
+      ;;
+    --full-nl)
+      CASE_FILE_VALUE="${ROOT_DIR}/scripts/nl_tests/cases/nl_cases_full.txt"
+      shift
+      ;;
+    --case-limit)
+      CASE_LIMIT_VALUE="${2:-}"
+      shift 2
+      ;;
+    --case-start)
+      CASE_START_VALUE="${2:-}"
+      shift 2
+      ;;
+    --skip-smoke)
+      RUN_BUILTIN_SMOKE=0
+      shift
       ;;
     --prompt-reply-only)
       PROMPT_REPLY_ONLY=1
@@ -225,12 +255,14 @@ PY
 
 result_has_bad_fallback() {
   local file="$1"
-  python3 - "$file" <<'PY'
+  local prompt="${2:-}"
+  python3 - "$file" "$prompt" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+prompt = sys.argv[2].lower()
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
 texts = [
@@ -243,16 +275,92 @@ for item in result.get("messages") or []:
     elif isinstance(item, dict):
         texts.append(str(item.get("text") or ""))
 joined = "\n".join(texts).lower()
-markers = [
-    "模型暂时不可用",
-    "当前大模型服务暂时不可用",
-    "我没看出这条消息要做什么",
+hard_markers = [
     "intent_unresolved",
     "context window exceeds limit",
     "invalid params",
     "http 400",
 ]
-raise SystemExit(0 if any(marker in joined for marker in markers) else 1)
+soft_markers = [
+    "模型暂时不可用",
+    "当前大模型服务暂时不可用",
+    "我没看出这条消息要做什么",
+]
+if any(marker in joined for marker in hard_markers):
+    raise SystemExit(0)
+for marker in soft_markers:
+    if marker in joined and marker not in prompt:
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+assert_reply_scalar_equals() {
+  local file="$1"
+  local expected="$2"
+  python3 - "$file" "$expected" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected = sys.argv[2].strip()
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+texts = []
+if str(result.get("text") or "").strip():
+    texts.append(str(result.get("text") or "").strip())
+for item in result.get("messages") or []:
+    if isinstance(item, str) and item.strip():
+        texts.append(item.strip())
+    elif isinstance(item, dict) and str(item.get("text") or "").strip():
+        texts.append(str(item.get("text") or "").strip())
+text = (texts[-1] if texts else str(data.get("error_text") or "")).strip()
+normalized = re.sub(r"^[`'\"\s]+|[`'\"\s]+$", "", text)
+if normalized != expected:
+    raise SystemExit(f"expected scalar reply {expected!r}, got {text!r}")
+PY
+}
+
+assert_reply_concise_summary() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+texts = []
+if str(result.get("text") or "").strip():
+    texts.append(str(result.get("text") or "").strip())
+for item in result.get("messages") or []:
+    if isinstance(item, str) and item.strip():
+        texts.append(item.strip())
+    elif isinstance(item, dict) and str(item.get("text") or "").strip():
+        texts.append(str(item.get("text") or "").strip())
+text = (texts[-1] if texts else str(data.get("error_text") or "")).strip()
+bad_markers = ["缺少的验证信息", "下一步建议", "请问", "?", "？"]
+if any(marker in text for marker in bad_markers):
+    raise SystemExit(f"summary reply looks like clarification or advice: {text!r}")
+if "\n" in text or len(text) > 180:
+    raise SystemExit(f"expected one concise summary sentence, got {text!r}")
+continuity_markers = [
+    "连续",
+    "多轮",
+    "同一会话",
+    "同一个会话",
+    "上下文",
+    "真实客户端",
+    "recent_turns",
+    "memory_context",
+    "conversation",
+    "context",
+]
+if not any(marker in text for marker in continuity_markers):
+    raise SystemExit(f"summary reply lost the continuous-session topic: {text!r}")
 PY
 }
 
@@ -322,7 +430,7 @@ submit_turn() {
     print_log_hints "$task_id" >&2
     return 1
   fi
-  if result_has_bad_fallback "$out_file"; then
+  if result_has_bad_fallback "$out_file" "$prompt"; then
     echo "Turn ${turn} returned bad fallback/unavailable text." >&2
     print_log_hints "$task_id" >&2
     return 1
@@ -335,14 +443,60 @@ submit_turn() {
   fi
 }
 
+load_case_rows() {
+  local case_file="$1"
+  local case_limit="$2"
+  local case_start="$3"
+  python3 - "$case_file" "$case_limit" "$case_start" <<'PY'
+import sys
+from pathlib import Path
+
+case_file = Path(sys.argv[1])
+limit_raw = sys.argv[2].strip()
+start_raw = sys.argv[3].strip()
+limit = int(limit_raw) if limit_raw else 0
+start = int(start_raw) if start_raw else 1
+if start < 1:
+    raise SystemExit(f"case_start must be >= 1, got {start}")
+seen = 0
+emitted = 0
+for raw in case_file.read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    parts = line.split("|", 4)
+    if len(parts) < 4:
+        continue
+    suite, name, tags, prompt = parts[:4]
+    expect = ""
+    if len(parts) >= 5:
+        extra = parts[4].strip()
+        if extra.startswith("expect="):
+            expect = extra[len("expect="):]
+    seen += 1
+    if seen < start:
+        continue
+    emitted += 1
+    print("\t".join([
+        str(seen),
+        name.replace("\t", " "),
+        prompt.replace("\t", " "),
+        expect.replace("\t", " "),
+    ]))
+    if limit and emitted >= limit:
+        break
+PY
+}
+
 verify_db_state() {
-  python3 - "$DB_PATH_VALUE" "${TASK_IDS[@]}" <<'PY'
+  python3 - "$DB_PATH_VALUE" "$TEST_ID" "${TASK_IDS[@]}" <<'PY'
 import sqlite3
 import sys
 from pathlib import Path
 
 db_path = Path(sys.argv[1])
-task_ids = sys.argv[2:]
+test_id = sys.argv[2]
+task_ids = sys.argv[3:]
 if not db_path.exists():
     raise SystemExit(f"database not found: {db_path}")
 if not task_ids:
@@ -392,6 +546,19 @@ if memories_count <= 0:
 if conversation_states_count <= 0:
     raise SystemExit("expected conversation_states to be written for client-like continuous conversation")
 
+test_id_memory_count = count(
+    "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ? AND content LIKE ?",
+    (chat_id, user_id, f"%{test_id}%"),
+)
+if test_id_memory_count <= 0:
+    raise SystemExit("expected short-term memory to contain the suite test id")
+execution_summary_leak_count = count(
+    "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ? AND content LIKE ?",
+    (chat_id, user_id, "%**执行过程**%"),
+)
+if execution_summary_leak_count > 0:
+    raise SystemExit("execution summary leaked into short-term memory")
+
 print(
     "DB_VERIFY_OK "
     f"effective_user_id={user_id} effective_chat_id={chat_id} user_key_present={bool(user_key)} "
@@ -418,6 +585,18 @@ USER_KEY="$USER_KEY_VALUE"
 MAX_WAIT_SECONDS="$WAIT_SECONDS_VALUE"
 POLL_INTERVAL_SECONDS="$POLL_SECONDS_VALUE"
 DB_PATH_VALUE="$(resolve_db_path)"
+if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
+  if [[ ! -f "$CASE_FILE_VALUE" ]]; then
+    echo "Case file not found: $CASE_FILE_VALUE" >&2
+    exit 2
+  fi
+  CASE_FILE_VALUE="$(python3 - "$CASE_FILE_VALUE" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).resolve())
+PY
+)"
+fi
 
 health_check || {
   echo "clawd is not healthy at ${BASE_URL}. Start clawd first or pass --base-url." >&2
@@ -438,6 +617,9 @@ echo "external_user_id=${EXTERNAL_USER_ID_VALUE}"
 echo "external_chat_id=${EXTERNAL_CHAT_ID_VALUE}"
 echo "test_id=${TEST_ID}"
 echo "log_dir=${RUN_DIR}"
+echo "case_file=${CASE_FILE_VALUE:-<none>}"
+echo "case_limit=${CASE_LIMIT_VALUE:-<none>}"
+echo "case_start=${CASE_START_VALUE:-1}"
 
 read -r -d '' HEAVY_CONTEXT_PROMPT <<'EOF' || true
 请记住下面这段较长的上下文，后续我会基于它继续问问题。不要执行外部工具，只需要用中文确认已收到。
@@ -459,14 +641,45 @@ EXPECTED_MARKERS=(
   ""
   ""
   "$TEST_ID"
-  "连续"
+  ""
 )
 
-for idx in "${!PROMPTS[@]}"; do
-  turn=$((idx + 1))
-  submit_turn "$turn" "${PROMPTS[$idx]}" "${RUN_DIR}/turn_${turn}.json" "${EXPECTED_MARKERS[$idx]}"
-done
+turn=0
+if [[ "$RUN_BUILTIN_SMOKE" -eq 1 ]]; then
+  for idx in "${!PROMPTS[@]}"; do
+    turn=$((turn + 1))
+    submit_turn "$turn" "${PROMPTS[$idx]}" "${RUN_DIR}/turn_${turn}.json" "${EXPECTED_MARKERS[$idx]}"
+    if [[ "$turn" -eq 4 ]]; then
+      assert_reply_scalar_equals "${RUN_DIR}/turn_${turn}.json" "$TEST_ID"
+    elif [[ "$turn" -eq 5 ]]; then
+      assert_reply_concise_summary "${RUN_DIR}/turn_${turn}.json"
+    fi
+  done
+fi
 
-verify_db_state
+if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
+  while IFS=$'\t' read -r case_index case_name case_prompt case_expect; do
+    [[ -n "${case_index:-}" ]] || continue
+    turn=$((turn + 1))
+    echo "[CASE ${case_index}] name=${case_name}"
+    if ! submit_turn "$turn" "$case_prompt" "${RUN_DIR}/turn_${turn}_case_${case_index}.json" "${case_expect:-}"; then
+      echo "RESUME_HINT bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file ${CASE_FILE_VALUE} --case-start ${case_index} --skip-smoke --external-user-id ${EXTERNAL_USER_ID_VALUE} --external-chat-id ${EXTERNAL_CHAT_ID_VALUE} --prompt-reply-only" >&2
+      exit 1
+    fi
+  done < <(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE")
+fi
 
-echo "CLIENT_LIKE_CONTINUOUS_SUITE_OK turns=${#PROMPTS[@]} log_dir=${RUN_DIR}"
+if [[ "$turn" -eq 0 ]]; then
+  echo "No turns were run. Remove --skip-smoke or pass --case-file/--full-nl." >&2
+  exit 2
+fi
+
+if [[ "$RUN_BUILTIN_SMOKE" -eq 1 ]]; then
+  verify_db_state
+else
+  if [[ "${#TASK_IDS[@]}" -gt 0 ]]; then
+    echo "DB_VERIFY_SKIPPED reason=skip_smoke_without_test_id_memory_assertion tasks=${#TASK_IDS[@]}"
+  fi
+fi
+
+echo "CLIENT_LIKE_CONTINUOUS_SUITE_OK turns=${turn} log_dir=${RUN_DIR}"

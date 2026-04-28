@@ -43,7 +43,22 @@ fn should_skip_ask_memory_pair(
     }
     answer_messages
         .iter()
+        .filter(|message| !crate::finalize::is_execution_summary_message(message))
         .any(|message| crate::fallback::is_known_clarify_fallback_text(state, message))
+}
+
+fn assistant_memory_source_text(answer_text: &str, answer_messages: &[String]) -> String {
+    let publishable_messages = answer_messages
+        .iter()
+        .map(|message| message.trim())
+        .filter(|message| !message.is_empty())
+        .filter(|message| !crate::finalize::is_execution_summary_message(message))
+        .collect::<Vec<_>>();
+    if publishable_messages.is_empty() {
+        answer_text.trim().to_string()
+    } else {
+        publishable_messages.join("\n")
+    }
 }
 
 fn journal_has_missing_file_search_evidence(
@@ -132,11 +147,7 @@ fn insert_ask_memory_pair(
         prompt,
         state.policy.memory.item_max_chars.max(256),
     );
-    let assistant_source_text = if answer_messages.is_empty() {
-        answer_text.to_string()
-    } else {
-        answer_messages.join("\n")
-    };
+    let assistant_source_text = assistant_memory_source_text(answer_text, answer_messages);
     let assistant_memory_text = if is_llm_reply && state.policy.memory.mark_llm_reply_in_short_term
     {
         format!(
@@ -654,7 +665,7 @@ pub(crate) async fn finalize_ask_result(
 
 #[cfg(test)]
 mod tests {
-    use super::journal_has_missing_file_search_evidence;
+    use super::{assistant_memory_source_text, journal_has_missing_file_search_evidence};
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
 
@@ -713,6 +724,19 @@ mod tests {
     }
 
     // ensure_journal_task_metrics_* tests 已搬移到 finalize/journal.rs（Stage 3.1）。
+
+    #[test]
+    fn assistant_memory_source_text_filters_execution_summary() {
+        let messages = vec![
+            "**执行过程**\n1. 调用命令 `pwd`\n   输出：\n```text\n/tmp\n```".to_string(),
+            "最终答案".to_string(),
+        ];
+
+        assert_eq!(
+            assistant_memory_source_text("最终答案", &messages),
+            "最终答案"
+        );
+    }
 
     #[test]
     fn journal_missing_file_search_evidence_detects_zero_match_fs_search() {

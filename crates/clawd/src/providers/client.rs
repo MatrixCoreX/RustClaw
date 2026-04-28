@@ -185,6 +185,35 @@ impl ProviderError {
     pub(crate) fn should_reset_breaker(&self) -> bool {
         self.breaker_impact == BreakerImpact::Healthy
     }
+
+    pub(crate) fn observability_kind(&self) -> &'static str {
+        let lower = self.message.to_ascii_lowercase();
+        if lower.contains("timeout") || lower.contains("timed out") {
+            return "timeout";
+        }
+        if is_quota_exhausted_429(&self.message) {
+            return "quota_exhausted";
+        }
+        if lower.contains("rate_limit")
+            || lower.contains("rate limit")
+            || lower.contains("429")
+            || lower.contains("too many requests")
+        {
+            return "rate_limited";
+        }
+        match (
+            self.breaker_impact,
+            self.raw_response.is_some(),
+            self.retryable,
+        ) {
+            (BreakerImpact::Failure, false, true) => "transport_retryable",
+            (BreakerImpact::Failure, true, true) => "provider_retryable_response",
+            (BreakerImpact::Healthy, true, true) => "provider_retryable_business",
+            (BreakerImpact::Healthy, true, false) => "provider_non_retryable_business",
+            (BreakerImpact::Neutral, false, false) => "local_non_retryable",
+            _ => "provider_error",
+        }
+    }
 }
 
 pub(crate) fn is_quota_exhausted_429(body_text: &str) -> bool {
@@ -401,6 +430,7 @@ mod tests {
         let retryable = ProviderError::retryable("timeout".to_string(), Value::Null);
         assert!(retryable.should_trip_breaker());
         assert!(!retryable.should_reset_breaker());
+        assert_eq!(retryable.observability_kind(), "timeout");
 
         let rate_limited = ProviderError::rate_limited_with_response(
             "http 429".to_string(),
@@ -410,6 +440,15 @@ mod tests {
         );
         assert!(!rate_limited.should_trip_breaker());
         assert!(rate_limited.should_reset_breaker());
+        assert_eq!(rate_limited.observability_kind(), "rate_limited");
+
+        let quota = ProviderError::quota_exhausted_with_response(
+            "http 429 rate_limit_error usage limit exceeded".to_string(),
+            Value::Null,
+            "{}".to_string(),
+            None,
+        );
+        assert_eq!(quota.observability_kind(), "quota_exhausted");
 
         let business = ProviderError::non_retryable_with_response(
             "http 400".to_string(),
@@ -419,10 +458,15 @@ mod tests {
         );
         assert!(!business.should_trip_breaker());
         assert!(business.should_reset_breaker());
+        assert_eq!(
+            business.observability_kind(),
+            "provider_non_retryable_business"
+        );
 
         let local = ProviderError::non_retryable("unsupported".to_string(), Value::Null);
         assert!(!local.should_trip_breaker());
         assert!(!local.should_reset_breaker());
+        assert_eq!(local.observability_kind(), "local_non_retryable");
 
         assert_eq!(retryable.breaker_impact, BreakerImpact::Failure);
         assert_eq!(rate_limited.breaker_impact, BreakerImpact::Healthy);

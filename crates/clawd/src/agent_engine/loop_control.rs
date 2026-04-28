@@ -1,4 +1,4 @@
-use tracing::info;
+use tracing::{info, warn};
 
 use super::{
     ensure_task_running, execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions,
@@ -351,15 +351,15 @@ fn initial_execution_recipe_spec(
     if let Some(spec) = agent_run_context.and_then(|ctx| ctx.execution_recipe_hint) {
         return spec;
     }
-    let recipe_user_text = agent_run_context
-        .and_then(|ctx| ctx.user_request.as_deref())
-        .filter(|text| !text.trim().is_empty())
-        .unwrap_or(user_text);
-    crate::execution_recipe::detect_execution_recipe(
-        agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
-        goal,
-        recipe_user_text,
-    )
+    let _ = (goal, user_text);
+    warn!(
+        "execution_recipe_no_hint_bypass_local_detector route_available={} user_request_available={}",
+        agent_run_context.and_then(|ctx| ctx.route_result.as_ref()).is_some(),
+        agent_run_context
+            .and_then(|ctx| ctx.user_request.as_deref())
+            .is_some_and(|text| !text.trim().is_empty())
+    );
+    crate::execution_recipe::ExecutionRecipeSpec::default()
 }
 
 pub(super) async fn run_agent_with_loop(

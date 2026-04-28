@@ -1024,6 +1024,8 @@ mod tests {
             // 以下都不在白名单，必须被剥离
             ("OPENAI_API_KEY", "sk-fake-leak"),
             ("MINIMAX_API_KEY", "sk-fake-leak2"),
+            ("MIMO_API_KEY", "sk-fake-leak3"),
+            ("XIAOMI_API_KEY", "sk-fake-leak4"),
             ("RUSTCLAW_USER_KEY", "rk-leak"),
             ("DATABASE_URL", "postgres://leak"),
             ("AWS_ACCESS_KEY_ID", "AKIA..."),
@@ -1061,6 +1063,8 @@ mod tests {
         let banned = [
             "OPENAI_API_KEY",
             "MINIMAX_API_KEY",
+            "MIMO_API_KEY",
+            "XIAOMI_API_KEY",
             "QWEN_API_KEY",
             "ANTHROPIC_API_KEY",
             "RUSTCLAW_USER_KEY",

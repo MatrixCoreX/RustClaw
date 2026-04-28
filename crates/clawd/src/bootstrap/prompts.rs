@@ -77,6 +77,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "prompts/observed_answer_fallback_prompt.md",
         "observed_answer_fallback (finalize.observed)",
     ),
+    (
+        "prompts/user_response_composer_prompt.md",
+        "user_response_composer (fallback.response)",
+    ),
 ];
 
 /// §3.5b: 启动期 prompt 校验单条记录。

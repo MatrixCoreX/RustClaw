@@ -18,6 +18,296 @@
 use std::collections::HashMap;
 
 use crate::AppState;
+use serde_json::json;
+
+pub(crate) const USER_RESPONSE_COMPOSER_PROMPT_LOGICAL_PATH: &str =
+    "prompts/user_response_composer_prompt.md";
+
+/// 用户可见回复的结构化意图类型。
+///
+/// 代码负责填事实与边界；具体怎么对用户说，后续交给 LLM composer。
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UserResponseKind {
+    Clarify,
+    PolicyBlock,
+    ToolFailure,
+    LlmUnavailable,
+    SchemaInvalid,
+    FinalAnswer,
+}
+
+impl UserResponseKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Clarify => "clarify",
+            Self::PolicyBlock => "policy_block",
+            Self::ToolFailure => "tool_failure",
+            Self::LlmUnavailable => "llm_unavailable",
+            Self::SchemaInvalid => "schema_invalid",
+            Self::FinalAnswer => "final_answer",
+        }
+    }
+}
+
+/// LLM 回复/澄清 composer 的最小 contract。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct UserResponseContract {
+    pub(crate) kind: UserResponseKind,
+    pub(crate) reason_code: String,
+    pub(crate) missing_slots: Vec<String>,
+    pub(crate) observed_facts: Vec<String>,
+    pub(crate) policy_boundary: Vec<String>,
+    pub(crate) original_user_request: String,
+    pub(crate) resolved_user_intent: String,
+    pub(crate) response_shape: String,
+    pub(crate) language_hint: String,
+}
+
+impl Default for UserResponseKind {
+    fn default() -> Self {
+        Self::FinalAnswer
+    }
+}
+
+impl UserResponseContract {
+    pub(crate) fn clarify_from_fallback_source(
+        source: ClarifyFallbackSource,
+        original_user_request: &str,
+        resolver_reason: &str,
+        candidate_context: Option<&str>,
+        language_hint: &str,
+    ) -> Self {
+        let mut observed_facts = Vec::new();
+        let reason = resolver_reason.trim();
+        if !reason.is_empty() {
+            observed_facts.push(format!("resolver_reason: {reason}"));
+        }
+        if let Some(context) = candidate_context
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            observed_facts.push(format!("candidate_context: {context}"));
+        }
+        Self {
+            kind: UserResponseKind::Clarify,
+            reason_code: source.as_metric_label().to_string(),
+            missing_slots: vec![source.as_metric_label().to_string()],
+            observed_facts,
+            policy_boundary: vec![
+                "Do not expose internal route reasons, schema names, prompt names, or raw provider errors."
+                    .to_string(),
+                "Ask one concise, situation-specific clarification or recovery question.".to_string(),
+            ],
+            original_user_request: original_user_request.trim().to_string(),
+            resolved_user_intent: String::new(),
+            response_shape: "one_short_clarification".to_string(),
+            language_hint: language_hint.trim().to_string(),
+        }
+    }
+
+    pub(crate) fn verify_rejected(
+        original_user_request: &str,
+        resolved_user_intent: &str,
+        response_shape: &str,
+        semantic_kind: &str,
+        verifier_reason: &str,
+        language_hint: &str,
+    ) -> Self {
+        let mut observed_facts = Vec::new();
+        let reason = verifier_reason.trim();
+        if !reason.is_empty() {
+            observed_facts.push(format!("verifier_reason: {reason}"));
+        }
+        if !response_shape.trim().is_empty() {
+            observed_facts.push(format!("expected_response_shape: {response_shape}"));
+        }
+        if !semantic_kind.trim().is_empty() {
+            observed_facts.push(format!("expected_semantic_kind: {semantic_kind}"));
+        }
+        Self {
+            kind: UserResponseKind::SchemaInvalid,
+            reason_code: ClarifyFallbackSource::VerifyRejected
+                .as_metric_label()
+                .to_string(),
+            missing_slots: vec!["valid_final_answer_matching_user_requested_shape".to_string()],
+            observed_facts,
+            policy_boundary: vec![
+                "Do not expose internal verifier names, schema names, prompt names, or raw model output."
+                    .to_string(),
+                "Ask for the smallest missing delivery constraint only if the correct answer cannot be safely reshaped."
+                    .to_string(),
+                "If the user requested an exact output shape, acknowledge that shape in natural language without adding internal details."
+                    .to_string(),
+            ],
+            original_user_request: original_user_request.trim().to_string(),
+            resolved_user_intent: resolved_user_intent.trim().to_string(),
+            response_shape: "one_short_clarification".to_string(),
+            language_hint: language_hint.trim().to_string(),
+        }
+    }
+
+    pub(crate) fn tool_failure(
+        reason_code: &str,
+        original_user_request: &str,
+        resolved_user_intent: &str,
+        observed_facts: Vec<String>,
+        policy_boundary: Vec<String>,
+        response_shape: &str,
+        language_hint: &str,
+    ) -> Self {
+        Self {
+            kind: UserResponseKind::ToolFailure,
+            reason_code: reason_code.trim().to_string(),
+            missing_slots: Vec::new(),
+            observed_facts,
+            policy_boundary,
+            original_user_request: original_user_request.trim().to_string(),
+            resolved_user_intent: resolved_user_intent.trim().to_string(),
+            response_shape: response_shape.trim().to_string(),
+            language_hint: language_hint.trim().to_string(),
+        }
+    }
+
+    pub(crate) fn to_prompt_context_block(&self) -> String {
+        let value = json!({
+            "kind": self.kind.as_str(),
+            "reason_code": &self.reason_code,
+            "missing_slots": &self.missing_slots,
+            "observed_facts": &self.observed_facts,
+            "policy_boundary": &self.policy_boundary,
+            "original_user_request": &self.original_user_request,
+            "resolved_user_intent": &self.resolved_user_intent,
+            "response_shape": &self.response_shape,
+            "language_hint": &self.language_hint,
+        });
+        let body = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+        format!("### USER_RESPONSE_CONTRACT\n{body}")
+    }
+}
+
+pub(crate) async fn compose_user_response_from_contract(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    contract: &UserResponseContract,
+    fallback_source: ClarifyFallbackSource,
+) -> String {
+    compose_user_response_from_contract_impl(state, task, contract, fallback_source, None).await
+}
+
+pub(crate) async fn compose_user_response_from_contract_with_default(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    contract: &UserResponseContract,
+    fallback_source: ClarifyFallbackSource,
+    default_text: &str,
+) -> String {
+    compose_user_response_from_contract_impl(
+        state,
+        task,
+        contract,
+        fallback_source,
+        Some(default_text),
+    )
+    .await
+}
+
+async fn compose_user_response_from_contract_impl(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    contract: &UserResponseContract,
+    fallback_source: ClarifyFallbackSource,
+    default_text: Option<&str>,
+) -> String {
+    let default_text = default_text
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let (prompt_template, prompt_source) =
+        match crate::bootstrap::load_required_prompt_template_for_state(
+            state,
+            USER_RESPONSE_COMPOSER_PROMPT_LOGICAL_PATH,
+        ) {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                tracing::warn!(
+                    "user_response_composer prompt load failed, fallback default: task_id={} err={}",
+                    task.task_id,
+                    err
+                );
+                if let Some(default_text) = default_text {
+                    return default_text.to_string();
+                }
+                return render_clarify_fallback(
+                    state,
+                    &task.task_id,
+                    ClarifyFallbackSource::LlmUnavailable,
+                    Some(&err.to_string()),
+                );
+            }
+        };
+    let prompt = crate::render_prompt_template(
+        &prompt_template,
+        &[
+            (
+                "__USER_RESPONSE_CONTRACT__",
+                &contract.to_prompt_context_block(),
+            ),
+            (
+                "__CONFIG_RESPONSE_LANGUAGE__",
+                &state.policy.command_intent.default_locale,
+            ),
+        ],
+    );
+    crate::log_prompt_render(
+        state,
+        &task.task_id,
+        "user_response_composer_prompt",
+        &prompt_source,
+        None,
+    );
+    match crate::llm_gateway::run_with_fallback_with_prompt_source(
+        state,
+        task,
+        &prompt,
+        &prompt_source,
+    )
+    .await
+    {
+        Ok(reply) => {
+            let trimmed = reply.trim();
+            if trimmed.is_empty() {
+                if let Some(default_text) = default_text {
+                    return default_text.to_string();
+                }
+                render_clarify_fallback(
+                    state,
+                    &task.task_id,
+                    ClarifyFallbackSource::EmptyResponse,
+                    None,
+                )
+            } else {
+                trimmed.to_string()
+            }
+        }
+        Err(err) => {
+            tracing::warn!(
+                "user_response_composer llm failed, fallback default: task_id={} err={}",
+                task.task_id,
+                err
+            );
+            if let Some(default_text) = default_text {
+                return default_text.to_string();
+            }
+            let hint = format!("source={},err={err}", fallback_source.as_metric_label());
+            render_clarify_fallback(
+                state,
+                &task.task_id,
+                ClarifyFallbackSource::LlmUnavailable,
+                Some(&hint),
+            )
+        }
+    }
+}
 
 /// 失败时给用户的兜底答案 source 分类，决定 i18n 文案 + tracing label。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +503,46 @@ mod tests {
             .map(|s| s.i18n_key())
             .collect();
         assert_eq!(keys.len(), ClarifyFallbackSource::all().len());
+    }
+
+    #[test]
+    fn user_response_contract_renders_structured_clarify_context() {
+        let contract = UserResponseContract::clarify_from_fallback_source(
+            ClarifyFallbackSource::IntentUnresolved,
+            "看一下这个",
+            "missing target",
+            Some("candidate_context"),
+            "zh-CN",
+        );
+        let block = contract.to_prompt_context_block();
+        assert!(block.contains("USER_RESPONSE_CONTRACT"));
+        assert!(block.contains("\"kind\": \"clarify\""));
+        assert!(block.contains("\"reason_code\": \"intent_unresolved\""));
+        assert!(block.contains("\"original_user_request\": \"看一下这个\""));
+        assert!(block.contains("\"language_hint\": \"zh-CN\""));
+        assert!(block.contains("candidate_context"));
+    }
+
+    #[test]
+    fn user_response_contract_renders_structured_tool_failure_context() {
+        let contract = UserResponseContract::tool_failure(
+            "execution_recipe_missing_success_marker",
+            "继续验证直到出现 OK",
+            "Validate until the required success marker appears.",
+            vec![
+                "required_success_marker: OK".to_string(),
+                "marker_observed: false".to_string(),
+            ],
+            vec!["Do not mark the run as successful.".to_string()],
+            "brief_failure_with_next_step",
+            "zh-CN",
+        );
+        let block = contract.to_prompt_context_block();
+        assert!(block.contains("\"kind\": \"tool_failure\""));
+        assert!(block.contains("\"reason_code\": \"execution_recipe_missing_success_marker\""));
+        assert!(block.contains("required_success_marker: OK"));
+        assert!(block.contains("brief_failure_with_next_step"));
+        assert!(block.contains("Do not mark the run as successful."));
     }
 
     /// 每个 source 的英文默认文案非空，且 i18n key 都在

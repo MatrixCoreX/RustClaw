@@ -169,19 +169,14 @@ fn should_handle_self_extension(state: &AppState, route: &crate::RouteResult) ->
 }
 
 fn should_bypass_self_extension_for_execution_recipe(
-    route: &crate::RouteResult,
-    request: &str,
-    execution_user_request: &str,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> bool {
-    !matches!(
-        crate::execution_recipe::detect_execution_recipe(
-            Some(route),
-            request,
-            execution_user_request
+    execution_recipe_hint.is_some_and(|spec| {
+        !matches!(
+            spec.kind,
+            crate::execution_recipe::ExecutionRecipeKind::None
         )
-        .kind,
-        crate::execution_recipe::ExecutionRecipeKind::None
-    )
+    })
 }
 
 fn runtime_source(state: &AppState, task: &ClaimedTask) -> &'static str {
@@ -581,6 +576,101 @@ fn localized_permanent_reload_failure(
     }
 }
 
+async fn compose_permanent_extension_failure_reply(
+    state: Option<&AppState>,
+    task: Option<&ClaimedTask>,
+    language: ReplyLanguage,
+    reason_code: &str,
+    request: &str,
+    skill_name: &str,
+    phase: &str,
+    detail: &str,
+    default_text: &str,
+) -> String {
+    let (Some(state), Some(task)) = (state, task) else {
+        return default_text.to_string();
+    };
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, request);
+    let mut observed_facts = vec![
+        format!("skill_path: external_skills/{skill_name}"),
+        format!("failure_phase: {phase}"),
+    ];
+    if !detail.trim().is_empty() {
+        observed_facts.push(format!("failure_detail: {}", detail.trim()));
+    }
+    let response_shape = match language {
+        ReplyLanguage::ZhCn | ReplyLanguage::En => "brief_failure_with_next_step",
+    };
+    let contract = crate::fallback::UserResponseContract::tool_failure(
+        reason_code,
+        request,
+        request,
+        observed_facts,
+        vec![
+            "Do not claim the external skill is ready for runtime use unless runtime enablement and reload completed.".to_string(),
+            "Do not expose internal skill-runner traces, build logs, or registry internals beyond the provided failure detail.".to_string(),
+            "Explain the blocked phase and give one concrete next step.".to_string(),
+        ],
+        response_shape,
+        &language_hint,
+    );
+    crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
+        default_text,
+    )
+    .await
+}
+
+async fn compose_temporary_extension_failure_reply(
+    state: Option<&AppState>,
+    task: Option<&ClaimedTask>,
+    language: ReplyLanguage,
+    reason_code: &str,
+    request: &str,
+    phase: &str,
+    detail: &str,
+    default_text: &str,
+) -> String {
+    let (Some(state), Some(task)) = (state, task) else {
+        return default_text.to_string();
+    };
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, request);
+    let mut observed_facts = vec![
+        "extension_type: temporary_fix".to_string(),
+        format!("failure_phase: {phase}"),
+    ];
+    if !detail.trim().is_empty() {
+        observed_facts.push(format!("failure_detail: {}", detail.trim()));
+    }
+    let response_shape = match language {
+        ReplyLanguage::ZhCn | ReplyLanguage::En => "brief_failure_with_next_step",
+    };
+    let contract = crate::fallback::UserResponseContract::tool_failure(
+        reason_code,
+        request,
+        request,
+        observed_facts,
+        vec![
+            "Do not claim the temporary fix was executed successfully unless execution output confirms it.".to_string(),
+            "Do not expose internal manager traces, generated script internals, or raw build logs beyond the provided failure detail.".to_string(),
+            "Explain the blocked phase and give one concrete next step.".to_string(),
+        ],
+        response_shape,
+        &language_hint,
+    );
+    crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
+        default_text,
+    )
+    .await
+}
+
 async fn handle_temporary_fix(
     state: &AppState,
     task: &ClaimedTask,
@@ -590,6 +680,7 @@ async fn handle_temporary_fix(
 ) -> Result<AskReply, String> {
     handle_temporary_fix_with(
         Some(state),
+        Some(task),
         &state.policy.self_extension,
         request,
         execute_now,
@@ -601,6 +692,7 @@ async fn handle_temporary_fix(
 
 async fn handle_temporary_fix_with<Run, Fut>(
     state: Option<&AppState>,
+    task: Option<&ClaimedTask>,
     runtime: &claw_core::config::SelfExtensionConfig,
     request: &str,
     execute_now: bool,
@@ -617,11 +709,20 @@ where
     });
     let plan_value = run(plan_args).await?;
     if !skill_status_ok(&plan_value) {
-        return Ok(AskReply::non_llm(localized_extension_failure(
+        let detail = skill_error_text(&plan_value);
+        let default_text = localized_extension_failure(state, language, &detail);
+        let reply = compose_temporary_extension_failure_reply(
             state,
+            task,
             language,
-            &skill_error_text(&plan_value),
-        )));
+            "self_extension_temporary_plan_failure",
+            request,
+            "temporary_fix_plan",
+            &detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     }
     let Some(plan) = plan_from_skill_output(&plan_value) else {
         let fallback = plan_value
@@ -663,11 +764,20 @@ where
     });
     let execute_value = run(execute_args.clone()).await?;
     if !skill_status_ok(&execute_value) {
-        return Ok(AskReply::non_llm(localized_extension_failure(
+        let detail = skill_error_text(&execute_value);
+        let default_text = localized_extension_failure(state, language, &detail);
+        let reply = compose_temporary_extension_failure_reply(
             state,
+            task,
             language,
-            &skill_error_text(&execute_value),
-        )));
+            "self_extension_temporary_execute_failure",
+            request,
+            "temporary_fix_execute",
+            &detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     }
     if let Some(output) = extract_best_execution_output(&execute_value) {
         return Ok(AskReply::non_llm(output));
@@ -698,6 +808,7 @@ async fn handle_permanent_extension(
 ) -> Result<AskReply, String> {
     handle_permanent_extension_with(
         Some(state),
+        Some(task),
         &state.policy.self_extension,
         request,
         execute_now,
@@ -710,6 +821,7 @@ async fn handle_permanent_extension(
 
 async fn handle_permanent_extension_with<Run, Fut, Reload>(
     state: Option<&AppState>,
+    task: Option<&ClaimedTask>,
     runtime: &claw_core::config::SelfExtensionConfig,
     request: &str,
     execute_now: bool,
@@ -775,14 +887,22 @@ where
     });
     let implement_value = run(implement_args).await?;
     if !skill_status_ok(&implement_value) {
-        return Ok(AskReply::non_llm(
-            localized_permanent_materialization_failure(
-                state,
-                language,
-                skill_name,
-                &skill_error_text(&implement_value),
-            ),
-        ));
+        let detail = skill_error_text(&implement_value);
+        let default_text =
+            localized_permanent_materialization_failure(state, language, skill_name, &detail);
+        let reply = compose_permanent_extension_failure_reply(
+            state,
+            task,
+            language,
+            "self_extension_materialization_failure",
+            request,
+            skill_name,
+            "implement_external_skill",
+            &detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     }
     let validate_args = json!({
         "action": "validate_external_skill",
@@ -791,12 +911,22 @@ where
     });
     let validate_value = run(validate_args).await?;
     if !skill_status_ok(&validate_value) {
-        return Ok(AskReply::non_llm(localized_permanent_validation_failure(
+        let detail = skill_error_text(&validate_value);
+        let default_text =
+            localized_permanent_validation_failure(state, language, skill_name, &detail);
+        let reply = compose_permanent_extension_failure_reply(
             state,
+            task,
             language,
+            "self_extension_validation_failure",
+            request,
             skill_name,
-            &skill_error_text(&validate_value),
-        )));
+            "validate_external_skill",
+            &detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     }
     if !runtime.allow_runtime_enable {
         return Ok(AskReply::non_llm(localized_permanent_plan_reply(
@@ -811,12 +941,22 @@ where
     });
     let register_value = run(register_args).await?;
     if !skill_status_ok(&register_value) {
-        return Ok(AskReply::non_llm(localized_permanent_registration_failure(
+        let detail = skill_error_text(&register_value);
+        let default_text =
+            localized_permanent_registration_failure(state, language, skill_name, &detail);
+        let reply = compose_permanent_extension_failure_reply(
             state,
+            task,
             language,
+            "self_extension_registration_failure",
+            request,
             skill_name,
-            &skill_error_text(&register_value),
-        )));
+            "register_external_skill",
+            &detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     }
 
     let enable_args = json!({
@@ -826,17 +966,37 @@ where
     });
     let enable_value = run(enable_args).await?;
     if !skill_status_ok(&enable_value) {
-        return Ok(AskReply::non_llm(localized_permanent_enable_failure(
+        let detail = skill_error_text(&enable_value);
+        let default_text = localized_permanent_enable_failure(state, language, skill_name, &detail);
+        let reply = compose_permanent_extension_failure_reply(
             state,
+            task,
             language,
+            "self_extension_enable_failure",
+            request,
             skill_name,
-            &skill_error_text(&enable_value),
-        )));
+            "enable_external_skill",
+            &detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     }
     if let Err(err) = reload() {
-        return Ok(AskReply::non_llm(localized_permanent_reload_failure(
-            state, language, skill_name, &err,
-        )));
+        let default_text = localized_permanent_reload_failure(state, language, skill_name, &err);
+        let reply = compose_permanent_extension_failure_reply(
+            state,
+            task,
+            language,
+            "self_extension_reload_failure",
+            request,
+            skill_name,
+            "reload_skill_views",
+            &err,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     }
     return Ok(AskReply::non_llm(
         localized_permanent_runtime_enabled_reply(state, language, skill_name),
@@ -858,7 +1018,9 @@ pub(crate) async fn maybe_handle_ask_self_extension(
     }
 
     let request = effective_request(resolved_prompt, execution_user_request, route);
-    if should_bypass_self_extension_for_execution_recipe(route, &request, execution_user_request) {
+    if should_bypass_self_extension_for_execution_recipe(
+        agent_run_context.and_then(|ctx| ctx.execution_recipe_hint),
+    ) {
         tracing::info!(
             "{} self_extension bypassed for active execution recipe task_id={} route_mode={:?}",
             crate::highlight_tag("self_extension"),
@@ -991,74 +1153,24 @@ mod tests {
 
     #[test]
     fn ops_closed_loop_request_bypasses_self_extension() {
-        let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "verify local http service; if verification fails, repair config and re-verify until passing".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                self_extension: crate::SelfExtensionContract {
-                    mode: crate::SelfExtensionMode::TemporaryFix,
-                    trigger: crate::SelfExtensionTrigger::ExplicitUserRequest,
-                    execute_now: false,
-                },
-                ..Default::default()
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        assert!(should_bypass_self_extension_for_execution_recipe(
-            &route,
-            "verify local http service; if verification fails, repair document/index.html and re-verify until passing",
-            "Do not modify any file or process before the first verification attempt. First verify the local static HTTP service. If that fails, repair document/index.html and verify again until it passes."
-        ));
+        assert!(should_bypass_self_extension_for_execution_recipe(Some(
+            crate::execution_recipe::ExecutionRecipeSpec {
+                kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                inspect_first: true,
+                validation_required: true,
+                max_repairs: 2,
+            }
+        )));
     }
 
     #[test]
     fn plain_temporary_fix_request_does_not_bypass_self_extension() {
-        let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "solve this with a temporary script".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                self_extension: crate::SelfExtensionContract {
-                    mode: crate::SelfExtensionMode::TemporaryFix,
-                    trigger: crate::SelfExtensionTrigger::ExplicitUserRequest,
-                    execute_now: false,
-                },
-                ..Default::default()
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        assert!(!should_bypass_self_extension_for_execution_recipe(
-            &route,
-            "solve this with a temporary script",
-            "Write a small temporary script to process this file."
-        ));
+        assert!(!should_bypass_self_extension_for_execution_recipe(Some(
+            crate::execution_recipe::ExecutionRecipeSpec::default()
+        )));
+        assert!(!should_bypass_self_extension_for_execution_recipe(None));
     }
 
     #[test]
@@ -1153,6 +1265,7 @@ mod tests {
         let seen_actions_closure = seen_actions.clone();
         let reply = run_async(handle_temporary_fix_with(
             None,
+            None,
             &runtime,
             "Use a temporary script to parse the input.",
             true,
@@ -1220,6 +1333,7 @@ mod tests {
         let responses_closure = responses.clone();
         let reply = run_async(handle_temporary_fix_with(
             None,
+            None,
             &runtime,
             "Use a temporary script to parse the input.",
             true,
@@ -1275,6 +1389,7 @@ mod tests {
         let responses_closure = responses.clone();
         let reload_count_closure = reload_count.clone();
         let reply = run_async(handle_permanent_extension_with(
+            None,
             None,
             &runtime,
             "Do not use existing skills. Create and enable a reusable ping skill.",

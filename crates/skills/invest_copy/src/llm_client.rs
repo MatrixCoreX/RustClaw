@@ -35,6 +35,8 @@ struct LlmTables {
     #[serde(default)]
     minimax: Option<VendorRow>,
     #[serde(default)]
+    mimo: Option<VendorRow>,
+    #[serde(default)]
     deepseek: Option<VendorRow>,
     #[serde(default)]
     qwen: Option<VendorRow>,
@@ -116,17 +118,21 @@ pub fn resolve_llm_credentials() -> Result<LlmCreds, String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "[llm].selected_vendor 未设置，且 OPENAI_API_KEY 为空".to_string())?;
-    let vnorm = vendor.to_ascii_lowercase();
+    let vnorm = match vendor.to_ascii_lowercase().as_str() {
+        "xiaomi" => "mimo".to_string(),
+        other => other.to_string(),
+    };
     let row = match vnorm.as_str() {
         "openai" => cfg.llm.openai,
         "minimax" => cfg.llm.minimax,
+        "mimo" | "xiaomi" => cfg.llm.mimo,
         "deepseek" => cfg.llm.deepseek,
         "qwen" => cfg.llm.qwen,
         "custom" => cfg.llm.custom,
         "grok" => cfg.llm.grok,
         _ => {
             return Err(format!(
-                "invest_copy 当前仅从 config 支持 openai_compat 类厂商（openai/minimax/deepseek/qwen/custom/grok），当前为 `{vendor}`；可改用环境变量 OPENAI_* 或 args.use_heuristic=true"
+                "invest_copy 当前仅从 config 支持 openai_compat 类厂商（openai/minimax/mimo/deepseek/qwen/custom/grok），当前为 `{vendor}`；可改用环境变量 OPENAI_* 或 args.use_heuristic=true"
             ));
         }
     }

@@ -601,6 +601,8 @@ pub struct LlmConfig {
     #[serde(default)]
     pub minimax: Option<LlmVendorConfig>,
     #[serde(default)]
+    pub mimo: Option<LlmVendorConfig>,
+    #[serde(default)]
     pub custom: Option<LlmVendorConfig>,
     // Legacy flat provider list, kept for backward compatibility.
     #[serde(default)]
@@ -619,7 +621,8 @@ pub struct LlmVendorConfig {
     pub timeout_seconds: u64,
     #[serde(default = "default_llm_max_concurrency")]
     pub max_concurrency: usize,
-    /// 仅 `[llm.minimax]` 使用：clawd 合成 `vendor-minimax` 时的协议。未填或空字符串默认 `openai_compat`；`anthropic_claude`（及别名）走 Anthropic Messages。其它厂商忽略。
+    /// 支持双协议的厂商使用：clawd 合成 `vendor-*` 时的协议。未填或空字符串默认
+    /// `openai_compat`；`anthropic_claude`（及别名）走 Anthropic Messages。其它厂商忽略。
     #[serde(default)]
     pub api_format: Option<String>,
     /// Phase 2.5: per-vendor 默认参数，从 toml 子表 `[llm.<vendor>.params]` 读取，
@@ -2161,6 +2164,8 @@ fn apply_env_overrides(app: &mut AppConfig) {
     apply_llm_vendor_api_key_env(&mut app.llm.deepseek, "DEEPSEEK_API_KEY");
     apply_llm_vendor_api_key_env(&mut app.llm.qwen, "QWEN_API_KEY");
     apply_llm_vendor_api_key_env(&mut app.llm.minimax, "MINIMAX_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.mimo, "XIAOMI_API_KEY");
+    apply_llm_vendor_api_key_env(&mut app.llm.mimo, "MIMO_API_KEY");
     apply_llm_vendor_api_key_env(&mut app.llm.custom, "CUSTOM_API_KEY");
 
     apply_string_env(&mut app.telegram.bot_token, "TELEGRAM_BOT_TOKEN");

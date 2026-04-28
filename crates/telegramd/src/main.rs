@@ -5376,6 +5376,7 @@ fn show_model_config(state: &BotState) -> anyhow::Result<String> {
         "grok",
         "qwen",
         "minimax",
+        "mimo",
         "custom",
     ];
     let mut lines = vec![
@@ -5415,7 +5416,15 @@ fn show_model_config(state: &BotState) -> anyhow::Result<String> {
 fn is_supported_model_vendor(vendor: &str) -> bool {
     matches!(
         vendor,
-        "openai" | "google" | "anthropic" | "grok" | "qwen" | "minimax" | "custom"
+        "openai"
+            | "google"
+            | "anthropic"
+            | "grok"
+            | "deepseek"
+            | "qwen"
+            | "minimax"
+            | "mimo"
+            | "custom"
     )
 }
 
@@ -5427,6 +5436,7 @@ fn default_base_url_for_vendor(vendor: &str) -> &'static str {
         "grok" => "https://api.x.ai/v1",
         "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "minimax" => "https://api.minimax.io/v1",
+        "mimo" => "https://token-plan-sgp.xiaomimimo.com/v1",
         "custom" => "https://api.example.com/v1",
         _ => "https://api.example.com/v1",
     }
@@ -5701,6 +5711,21 @@ selected_model = "gpt-4o-mini"
         assert_eq!(
             minimax.get("base_url").and_then(|x| x.as_str()),
             Some("https://api.minimax.io/v1")
+        );
+    }
+
+    #[test]
+    fn apply_model_config_mimo_uses_expected_default_base_url() {
+        let mut v: TomlValue = toml::from_str("[llm]\n").expect("parse");
+        apply_model_config_value(&mut v, "mimo", "mimo-v2.5-pro").expect("apply");
+        let mimo = v
+            .get("llm")
+            .and_then(|x| x.get("mimo"))
+            .and_then(|x| x.as_table())
+            .expect("mimo");
+        assert_eq!(
+            mimo.get("base_url").and_then(|x| x.as_str()),
+            Some("https://token-plan-sgp.xiaomimimo.com/v1")
         );
     }
 }

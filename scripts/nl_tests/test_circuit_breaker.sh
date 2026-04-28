@@ -56,8 +56,8 @@ Pre-requisites:
   - clawd must be running (default base url ${BASE_URL})
   - At least 2 vendors must have api_key set (in config.toml or via env vars
     ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / MINIMAX_API_KEY /
-    GOOGLE_API_KEY / GROK_API_KEY / QWEN_API_KEY) — otherwise nothing can
-    fall back over and this script will refuse to run.
+    GOOGLE_API_KEY / GROK_API_KEY / QWEN_API_KEY / MIMO_API_KEY / XIAOMI_API_KEY)
+    — otherwise nothing can fall back over and this script will refuse to run.
 EOF
 }
 
@@ -99,6 +99,7 @@ env_keys = {
     "google":    "GOOGLE_API_KEY",
     "grok":      "GROK_API_KEY",
     "minimax":   "MINIMAX_API_KEY",
+    "mimo":      "MIMO_API_KEY",
     "openai":    "OPENAI_API_KEY",
     "qwen":      "QWEN_API_KEY",
     "custom":    "CUSTOM_API_KEY",
@@ -109,6 +110,8 @@ for name, env_var in env_keys.items():
     section = llm.get(name) or {}
     has_cfg = bool((section.get("api_key") or "").strip())
     has_env = bool((os.environ.get(env_var) or "").strip())
+    if name == "mimo":
+        has_env = has_env or bool((os.environ.get("XIAOMI_API_KEY") or "").strip())
     if has_cfg or has_env:
         usable.append(name)
 
