@@ -185,6 +185,8 @@ interface LlmConfigResponse {
   restart_required: boolean;
 }
 
+const llmVendorSupportsApiFormat = (vendor?: string | null) => vendor === "minimax" || vendor === "mimo";
+
 interface LlmTestResponse {
   success: boolean;
   vendor: string;
@@ -1883,7 +1885,7 @@ export default function App() {
       const selectedVendor = body.data.vendors.find((vendor) => vendor.name === (body.data.selected_vendor || ""));
       setLlmDraftBaseUrl(selectedVendor?.base_url || "");
       setLlmDraftApiKey(selectedVendor?.api_key || "");
-      setLlmDraftApiFormat(selectedVendor?.name === "minimax" ? (selectedVendor.api_format || "openai_compat") : "");
+      setLlmDraftApiFormat(llmVendorSupportsApiFormat(selectedVendor?.name) ? (selectedVendor?.api_format || "openai_compat") : "");
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       setLlmConfigError(message);
@@ -2218,7 +2220,7 @@ export default function App() {
           selected_model: llmDraftModel,
           vendor_base_url: llmDraftBaseUrl,
           vendor_api_key: llmDraftApiKey.trim(),
-          vendor_api_format: llmDraftVendor === "minimax" ? llmDraftApiFormat : undefined,
+          vendor_api_format: llmVendorSupportsApiFormat(llmDraftVendor) ? llmDraftApiFormat : undefined,
         }),
       });
       const body = (await res.json()) as ApiResponse<{
@@ -2265,7 +2267,7 @@ export default function App() {
           selected_model: llmDraftModel,
           vendor_base_url: llmDraftBaseUrl,
           vendor_api_key: llmDraftApiKey.trim(),
-          vendor_api_format: llmDraftVendor === "minimax" ? llmDraftApiFormat : undefined,
+          vendor_api_format: llmVendorSupportsApiFormat(llmDraftVendor) ? llmDraftApiFormat : undefined,
         }),
       });
       const body = (await res.json()) as ApiResponse<LlmTestResponse>;
@@ -3469,7 +3471,7 @@ export default function App() {
     setLlmDraftModel(nextModel);
     setLlmDraftBaseUrl(vendorInfo.base_url || "");
     setLlmDraftApiKey(vendorInfo.api_key || "");
-    setLlmDraftApiFormat(vendorInfo.name === "minimax" ? (vendorInfo.api_format || "openai_compat") : "");
+    setLlmDraftApiFormat(llmVendorSupportsApiFormat(vendorInfo.name) ? (vendorInfo.api_format || "openai_compat") : "");
   };
 
   const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
@@ -4924,7 +4926,11 @@ export default function App() {
                           <option value="">{t("请选择厂商", "Select a vendor")}</option>
                           {(llmConfigData?.vendors ?? []).map((vendor) => (
                             <option key={vendor.name} value={vendor.name}>
-                              {vendor.name === "custom" ? t("custom（自定义）", "custom (Custom)") : vendor.name}
+                              {vendor.name === "custom"
+                                ? t("custom（自定义）", "custom (Custom)")
+                                : vendor.name === "mimo"
+                                  ? "mimo (Xiaomi MiMo)"
+                                  : vendor.name}
                             </option>
                           ))}
                         </select>
@@ -4965,7 +4971,7 @@ export default function App() {
                         />
                       </label>
 
-                      {selectedLlmVendorInfo?.name === "minimax" ? (
+                      {llmVendorSupportsApiFormat(selectedLlmVendorInfo?.name) ? (
                         <label className="block space-y-2">
                           <span className="text-xs uppercase tracking-widest text-white/50">{t("接口协议", "Protocol")}</span>
                           <select
@@ -4994,7 +5000,7 @@ export default function App() {
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
-                      {selectedLlmVendorInfo?.name === "minimax" ? (
+                      {llmVendorSupportsApiFormat(selectedLlmVendorInfo?.name) ? (
                         <label className="block space-y-2">
                           <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
                           <input
@@ -5009,20 +5015,7 @@ export default function App() {
                         </label>
                       ) : null}
 
-                      {selectedLlmVendorInfo?.name !== "minimax" ? (
-                        <label className="block space-y-2">
-                          <span className="text-xs uppercase tracking-widest text-white/50">API Key</span>
-                          <input
-                            type="text"
-                            className="theme-input"
-                            value={llmDraftApiKey}
-                            onChange={(e) => setLlmDraftApiKey(e.target.value)}
-                            placeholder="sk-..."
-                            autoComplete="off"
-                            disabled={!selectedLlmVendorInfo}
-                          />
-                        </label>
-                      ) : <div />}
+                      {llmVendorSupportsApiFormat(selectedLlmVendorInfo?.name) ? <div /> : null}
                     </div>
 
                     {llmConfigError ? (

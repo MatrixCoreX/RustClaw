@@ -32,6 +32,23 @@ fn minimax_default_model(value: &toml::Value) -> String {
         .to_string()
 }
 
+fn mimo_models(value: &toml::Value) -> Vec<String> {
+    value["llm"]["mimo"]["models"]
+        .as_array()
+        .expect("mimo models")
+        .iter()
+        .filter_map(|item| item.as_str())
+        .map(str::to_string)
+        .collect()
+}
+
+fn mimo_default_model(value: &toml::Value) -> String {
+    value["llm"]["mimo"]["model"]
+        .as_str()
+        .expect("mimo default model")
+        .to_string()
+}
+
 fn prompts_strict_validation(value: &toml::Value) -> bool {
     value["prompts"]["strict_validation_at_startup"]
         .as_bool()
@@ -96,6 +113,31 @@ fn minimax_templates_allow_the_repo_default_model() {
         minimax_default_model(&root_config),
         minimax_default_model(&docker_config),
         "root and docker minimax defaults should stay aligned",
+    );
+}
+
+#[test]
+fn mimo_templates_allow_the_repo_default_model() {
+    let root = workspace_root();
+    let root_config = parse_toml(&root.join("configs/config.toml"));
+    let docker_config = parse_toml(&root.join("docker/config/config.toml"));
+
+    let root_model = mimo_default_model(&root_config);
+    let root_models = mimo_models(&root_config);
+    let docker_models = mimo_models(&docker_config);
+
+    assert!(
+        root_models.iter().any(|model| model == &root_model),
+        "root mimo models should include default model {root_model}, got {root_models:?}"
+    );
+    assert!(
+        docker_models.iter().any(|model| model == &root_model),
+        "docker mimo models should include root default model {root_model}, got {docker_models:?}"
+    );
+    assert_eq!(
+        root_model,
+        mimo_default_model(&docker_config),
+        "root and docker mimo defaults should stay aligned",
     );
 }
 

@@ -61,6 +61,14 @@ pub(crate) fn should_attempt_observed_fallback(
     has_tool_or_skill_output || has_recoverable_failure_context
 }
 
+pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX: &str = "**执行过程**";
+
+pub(crate) fn is_execution_summary_message(message: &str) -> bool {
+    message
+        .trim_start()
+        .starts_with(EXECUTION_SUMMARY_MESSAGE_PREFIX)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ObservedOutputKind {
     Empty,

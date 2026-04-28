@@ -256,11 +256,21 @@ pub(crate) fn derive_observed_facts_from_ask_outcome_with_surface(
     request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> ObservedFacts {
     let mut combined = answer_text.trim().to_string();
-    if !answer_messages.is_empty() {
+    let publishable_messages = answer_messages
+        .iter()
+        .filter(|message| !crate::finalize::is_execution_summary_message(message))
+        .collect::<Vec<_>>();
+    if !publishable_messages.is_empty() {
         if !combined.is_empty() {
             combined.push('\n');
         }
-        combined.push_str(&answer_messages.join("\n"));
+        combined.push_str(
+            &publishable_messages
+                .iter()
+                .map(|message| message.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
     }
 
     let mut ordered_entries = crate::followup_frame::extract_ordered_entries_from_text(&combined);
@@ -273,7 +283,7 @@ pub(crate) fn derive_observed_facts_from_ask_outcome_with_surface(
         .into_iter()
         .filter_map(|token| crate::delivery_utils::extract_file_path_from_delivery_token(&token))
         .collect::<Vec<_>>();
-    for message in answer_messages {
+    for message in publishable_messages {
         delivery_targets.extend(
             crate::extract_delivery_file_tokens(message)
                 .into_iter()
@@ -393,6 +403,28 @@ mod tests {
             facts.delivery_targets,
             vec!["/tmp/a.log".to_string(), "/tmp/b.log".to_string()]
         );
+    }
+
+    #[test]
+    fn ignores_execution_summary_messages_for_observed_facts() {
+        let journal = crate::task_journal::TaskJournal::new("send");
+        let facts = derive_observed_facts_from_ask_outcome(
+            "1. real.log\nFILE:/tmp/real.log",
+            &[
+                "**执行过程**\n1. wrong.log\nFILE:/tmp/wrong.log".to_string(),
+                "2. final.log".to_string(),
+            ],
+            &journal,
+            &dummy_route_result(),
+        );
+
+        assert_eq!(facts.delivery_targets, vec!["/tmp/real.log".to_string()]);
+        assert!(facts.ordered_entries.contains(&"real.log".to_string()));
+        assert!(facts.ordered_entries.contains(&"final.log".to_string()));
+        assert!(!facts.ordered_entries.contains(&"wrong.log".to_string()));
+        assert!(!facts
+            .delivery_targets
+            .contains(&"/tmp/wrong.log".to_string()));
     }
 
     #[test]

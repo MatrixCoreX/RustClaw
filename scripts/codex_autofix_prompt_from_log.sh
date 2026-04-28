@@ -31,7 +31,7 @@ Options:
   --lines <n>          Max log lines to search for task markers (default: 3000)
   --tasks <n>          Consider only the last n task log blocks (default: 10)
   --context <n>        Extra lines before/after the task range (default: 30)
-  --vendor <name>      Optional: scope to vendor (qwen|minimax|openai|google|claude)
+  --vendor <name>      Optional: scope to vendor (qwen|minimax|mimo|openai|google|claude)
   --prompt <name>      Optional: prompt file stem, e.g. chat_response_prompt
   --model <name>       Pass a specific Codex model
   --dangerous          Use codex --dangerously-bypass-approvals-and-sandbox

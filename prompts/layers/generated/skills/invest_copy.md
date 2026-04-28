@@ -13,7 +13,7 @@
 - **非**该公众人物撰文或背书。**离线模式**（`use_heuristic`）无语义生成，仅规则选句+模板。
 
 ## Config Entry Points (from interface)
-- **LLM**：与主程序一致——经 `skill-runner` 时优先使用注入的 `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`（对应运行中第一个 `openai_compat` provider）。单独跑二进制且无环境变量时，尝试读取 **`WORKSPACE_ROOT`/当前目录向上的** `configs/config.toml` 中 `[llm.selected_vendor]` 与 `[llm.<vendor>]`（支持 `openai`、`minimax`、`deepseek`、`qwen`、`custom`、`grok` 等 OpenAI 兼容段；需在该段填写 **`api_key`**）。
+- **LLM**：与主程序一致——经 `skill-runner` 时优先使用注入的 `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`（对应运行中第一个 `openai_compat` provider）。单独跑二进制且无环境变量时，尝试读取 **`WORKSPACE_ROOT`/当前目录向上的** `configs/config.toml` 中 `[llm.selected_vendor]` 与 `[llm.<vendor>]`（支持 `openai`、`minimax`、`mimo`、`deepseek`、`qwen`、`custom`、`grok` 等 OpenAI 兼容段；需在该段填写 **`api_key`**）。
 - **人物**：`personas.toml` 编译进二进制，无运行时热加载。
 
 ## Actions (from interface)

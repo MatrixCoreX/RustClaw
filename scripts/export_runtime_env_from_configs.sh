@@ -92,6 +92,7 @@ for vendor, env_name in [
     ("deepseek", "DEEPSEEK_API_KEY"),
     ("qwen", "QWEN_API_KEY"),
     ("minimax", "MINIMAX_API_KEY"),
+    ("mimo", "MIMO_API_KEY"),
     ("custom", "CUSTOM_API_KEY"),
 ]:
     emit(env_name, value(llm, vendor, "api_key"))

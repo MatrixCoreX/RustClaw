@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# 一键切换主模型为 qwen 或 minimax，仅修改当前目录下 configs/config.toml 中 [llm] 的 selected_vendor / selected_model，
-# 模型名使用配置文件里该厂商已有的 model 配置，不改动其他内容。
+# Switch the primary LLM vendor by updating [llm].selected_vendor / selected_model
+# in configs/config.toml. The model is read from the selected vendor's existing
+# [llm.<vendor>].model entry; no other fields are modified.
 set -euo pipefail
 
 ROOT_DIR="$(pwd)"
 CONFIG_PATH="$ROOT_DIR/configs/config.toml"
 
 usage() {
-    echo "Usage: $0 <qwen|minimax>"
-    echo "  使用配置文件现有 [llm.qwen] / [llm.minimax] 的 model，切换主模型为该厂商。"
+    echo "Usage: $0 <qwen|minimax|mimo>"
+    echo "  Switch to the current model configured under [llm.<vendor>]."
     exit 1
 }
 
@@ -18,12 +19,12 @@ fi
 
 VENDOR="${1,,}"
 case "$VENDOR" in
-    qwen|minimax) ;;
-    *) echo "Error: 仅支持 qwen 或 minimax"; usage ;;
+    qwen|minimax|mimo) ;;
+    *) echo "Error: supported vendors: qwen, minimax, mimo"; usage ;;
 esac
 
 if [[ ! -f "$CONFIG_PATH" ]]; then
-    echo "Error: 配置文件不存在: $CONFIG_PATH"
+    echo "Error: config file not found: $CONFIG_PATH"
     exit 1
 fi
 
@@ -36,8 +37,8 @@ from pathlib import Path
 def main():
     config_path = Path(sys.argv[1])
     vendor = sys.argv[2].strip().lower()
-    if vendor not in ("qwen", "minimax"):
-        print("Error: 仅支持 qwen 或 minimax", file=sys.stderr)
+    if vendor not in ("qwen", "minimax", "mimo"):
+        print("Error: supported vendors: qwen, minimax, mimo", file=sys.stderr)
         sys.exit(1)
 
     raw = config_path.read_text(encoding="utf-8")
@@ -47,13 +48,13 @@ def main():
     if isinstance(llm, dict) and vendor in llm and isinstance(llm[vendor], dict):
         model = (llm[vendor].get("model") or "").strip()
     else:
-        print(f"Error: 配置中未找到 [llm.{vendor}] 或 model", file=sys.stderr)
+        print(f"Error: [llm.{vendor}] or model not found in config", file=sys.stderr)
         sys.exit(1)
     if not model:
-        print(f"Error: [llm.{vendor}] 的 model 为空", file=sys.stderr)
+        print(f"Error: [llm.{vendor}].model is empty", file=sys.stderr)
         sys.exit(1)
 
-    # 只处理 [llm] 段（第一个 [llm] 到下一个 [ 或文件末尾），仅改 selected_model / selected_vendor 两行
+    # Only update selected_model / selected_vendor inside the top-level [llm] section.
     llm_section_re = re.compile(r"^\[llm\]\s*$", re.MULTILINE)
     match = llm_section_re.search(raw)
     if not match:
@@ -65,7 +66,7 @@ def main():
     section = raw[start:end]
 
     def replace_in_section(text, key, new_val):
-        # 匹配 key = "..." 或 key = '...'
+        # Match key = "..." or key = '...'.
         pat = re.compile(
             r"^(\s*" + re.escape(key) + r"\s*=\s*)([\"'])[^\"']*\2(\s*(?:#.*)?)$",
             re.MULTILINE,
@@ -75,15 +76,20 @@ def main():
     new_section = replace_in_section(section, "selected_model", model)
     new_section = replace_in_section(new_section, "selected_vendor", vendor)
     if new_section == section:
-        print("Warning: 在 [llm] 段内未匹配到 selected_model/selected_vendor，未修改文件", file=sys.stderr)
+        current_vendor = str(llm.get("selected_vendor") or "").strip().lower()
+        current_model = str(llm.get("selected_model") or "").strip()
+        if current_vendor == vendor and current_model == model:
+            print(f"Primary LLM already selected: selected_vendor={vendor}, selected_model={model}")
+            return
+        print("Warning: selected_model/selected_vendor not found in [llm]; config was not modified", file=sys.stderr)
         sys.exit(1)
 
     new_raw = raw[:start] + new_section + raw[end:]
     config_path.write_text(new_raw, encoding="utf-8")
-    print(f"已切换主模型: selected_vendor={vendor}, selected_model={model}")
+    print(f"Primary LLM switched: selected_vendor={vendor}, selected_model={model}")
 
 if __name__ == "__main__":
     main()
 PY
 
-echo "完成。重启 clawd 后生效。"
+echo "Done. Restart clawd to apply the change."

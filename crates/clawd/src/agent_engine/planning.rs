@@ -904,6 +904,9 @@ fn synthesize_ops_http_repair_fallback_actions(
             }
         }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+        warn!(
+            "plan_repair_legacy_local_fallback_candidate kind=ops_http_validate_then_repair phase=inspect"
+        );
         return Some((actions, raw_plan_text));
     }
     if !matches!(
@@ -935,6 +938,9 @@ fn synthesize_ops_http_repair_fallback_actions(
         ]
     }))
     .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    warn!(
+        "plan_repair_legacy_local_fallback_candidate kind=ops_http_validate_then_repair phase=apply_or_repair"
+    );
     Some((actions, raw_plan_text))
 }
 
@@ -955,6 +961,7 @@ fn synthesize_health_check_fallback_actions(
         ]
     }))
     .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    warn!("plan_repair_legacy_local_fallback_candidate kind=health_check");
     Some((actions, raw_plan_text))
 }
 
