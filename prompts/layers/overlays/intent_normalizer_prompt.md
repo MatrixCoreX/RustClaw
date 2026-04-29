@@ -1,7 +1,7 @@
 <!--
 Purpose: unified front-door understanding layer. In one pass it handles resume binding, intent completion, schedule-intent detection, and clarification need.
 Component: clawd (`crates/clawd/src/intent_router.rs`) `run_intent_normalizer`
-Version: 2026-04-29.2
+Version: 2026-04-29.3
 Template variables are rendered by clawd. Keep variable names out of comments so metadata does not expand into duplicated runtime context.
 -->
 
@@ -42,7 +42,7 @@ Output-contract authority:
 
 2) **Intent completion**: Rewrite the current user message into a complete, context-grounded intent.
   - Use __RECENT_EXECUTION_CONTEXT__ and __MEMORY_CONTEXT__ to resolve short/follow-up messages (pronouns, "continue", "this one", numbers, yes/no).
-  - Use __REQUEST_SURFACE_HINTS__ as current-turn structural hints extracted from the user message itself (for example a detected child-directory hint like `docs`, an exact requested sentence count such as `3`, an explicit read-range hint like `head:4` or `range:12-18`, a requested listing limit, a compare-target pair like `README.md | AGENTS.md`, an output/table shape, or a workspace-child listing shape). Prefer these current-turn hints over generic background context when grounding locator scope. Treat them as lightweight evidence, not as a separate routing authority.
+  - Use __REQUEST_SURFACE_HINTS__ as current-turn structural hints extracted from the user message itself (for example a detected child-directory hint like `docs`, an exact requested sentence count such as `3`, an explicit read-range hint like `head:4` or `range:12-18`, a requested listing limit, or a compare-target pair like `README.md | AGENTS.md`). Prefer these current-turn hints over generic background context when grounding locator scope and numeric parameters. Treat them as lightweight evidence, not as a separate routing authority; semantic output shape and task meaning must come from this LLM-normalized contract, not from a local phrase-classifier hint.
   - Use the Active task context section as the primary semantic anchor for short task follow-ups, corrections, scope changes, and output-shape refinements when it contains a last primary task prompt/output. This context describes the active user task, not a file/path locator and not an execution target by itself.
   - If the Active task context section is available and the current message semantically changes only the active task's constraints, scope, facts, deliverable shape, tone, length, count, or output format, keep the turn attached to that task: set `target_task_policy="reuse_active"` for additive/corrective/scope/output refinements, or `target_task_policy="replace_active"` only when the main deliverable/goal is clearly replaced. Do not ask for clarification merely because the short follow-up omits the earlier task text.
   - If the active task already has a last primary output and the current message asks to reshape that output (for example produce only one sentence, keep only N points, change tone, or remove headings), classify it as a task follow-up with `mode="chat"`, `needs_clarify=false`, and no tool execution unless the current message explicitly requests fresh inspection or external/local evidence.

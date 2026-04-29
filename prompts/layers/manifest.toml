@@ -85,15 +85,6 @@ overlay = ["prompts/layers/overlays/resume_continue_execute_prompt.md"]
 vendor_patch = "recovery/common.md"
 
 [[prompts]]
-logical_path = "prompts/resume_followup_intent_prompt.md"
-base = [
-  "prompts/layers/base/system_truth.md",
-  "prompts/layers/base/recovery/common_rules.md",
-]
-overlay = ["prompts/layers/overlays/resume_followup_intent_prompt.md"]
-vendor_patch = "recovery/common.md"
-
-[[prompts]]
 logical_path = "prompts/chat_response_prompt.md"
 base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/chat_response_prompt.md"]
@@ -251,16 +242,6 @@ logical_path = "prompts/personas/reviewer.md"
 base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/personas/reviewer.md"]
 vendor_patch = "text/common.md"
-
-[[prompts]]
-logical_path = "prompts/meta_respond_classifier_prompt.md"
-base = ["prompts/layers/base/system_truth.md"]
-overlay = ["prompts/layers/overlays/meta_respond_classifier_prompt.md"]
-
-[[prompts]]
-logical_path = "prompts/publishable_raw_classifier_prompt.md"
-base = ["prompts/layers/base/system_truth.md"]
-overlay = ["prompts/layers/overlays/publishable_raw_classifier_prompt.md"]
 
 [[prompts]]
 logical_path = "prompts/delivery_text_classifier_prompt.md"

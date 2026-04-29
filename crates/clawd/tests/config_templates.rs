@@ -188,7 +188,6 @@ fn strict_json_overlay_prompts_are_classified_in_schema_inventory() {
         "image_vision_action_extract_with_schema.md",
         "image_vision_action_fallback.md",
         "image_vision_prompt.md",
-        "resume_followup_intent_prompt.md",
     ]
     .into_iter()
     .map(str::to_string)
