@@ -701,154 +701,6 @@ fn delivery_success_terminal_reply(state: &AppState, actions: &[AgentAction]) ->
     resolved.is_file()
 }
 
-fn should_rewrite_service_status_run_cmd_probe(
-    route_result: Option<&RouteResult>,
-    actions: &[AgentAction],
-) -> bool {
-    let Some(route_result) = route_result else {
-        return false;
-    };
-    if route_result.needs_clarify
-        || route_result.output_contract.delivery_required
-        || !route_result.is_execute_gate()
-    {
-        return false;
-    }
-    let target = route_result.output_contract.locator_hint.trim();
-    if target.is_empty() {
-        return false;
-    }
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput {
-        return false;
-    }
-    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus {
-        return false;
-    }
-    let Some(AgentAction::CallSkill { skill, args }) = actions.first() else {
-        return false;
-    };
-    if skill != "run_cmd" {
-        return false;
-    }
-    let command = args
-        .get("command")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .unwrap_or_default();
-    let command_lower = command.to_ascii_lowercase();
-    let target_lower = target.to_ascii_lowercase();
-    (command_lower.contains("ps aux")
-        || command_lower.contains("ps -")
-        || command_lower.contains("pgrep")
-        || command_lower.contains("grep -i"))
-        && command_lower.contains(&target_lower)
-}
-
-fn rewrite_service_status_probe_actions(
-    route_result: Option<&RouteResult>,
-    actions: Vec<AgentAction>,
-) -> Vec<AgentAction> {
-    if !should_rewrite_service_status_run_cmd_probe(route_result, &actions) {
-        return actions;
-    }
-    let Some(route_result) = route_result else {
-        return actions;
-    };
-    let target = route_result.output_contract.locator_hint.trim();
-    let mut rewritten = actions;
-    if let Some(first) = rewritten.first_mut() {
-        *first = AgentAction::CallSkill {
-            skill: "service_control".to_string(),
-            args: serde_json::json!({
-                "action": "status",
-                "target": target,
-            }),
-        };
-    }
-    info!(
-        "plan_rewrite_service_status_probe target={} intent={}",
-        target,
-        crate::truncate_for_log(&route_result.resolved_intent)
-    );
-    rewritten
-}
-
-fn extract_http_probe_url(command: &str) -> Option<String> {
-    command
-        .split_whitespace()
-        .map(|token| {
-            token
-                .trim_matches(|ch: char| {
-                    ch.is_whitespace()
-                        || matches!(
-                            ch,
-                            '"' | '\'' | '`' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}'
-                        )
-                })
-                .to_string()
-        })
-        .find(|token| token.starts_with("http://") || token.starts_with("https://"))
-}
-
-fn should_rewrite_http_probe_run_cmd(
-    route_result: Option<&RouteResult>,
-    actions: &[AgentAction],
-) -> bool {
-    let Some(route_result) = route_result else {
-        return false;
-    };
-    if route_result.needs_clarify
-        || route_result.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
-    {
-        return false;
-    }
-    let Some(AgentAction::CallSkill { skill, args }) = actions.first() else {
-        return false;
-    };
-    if skill != "run_cmd" {
-        return false;
-    }
-    let command = args
-        .get("command")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .unwrap_or_default();
-    let command_lower = command.to_ascii_lowercase();
-    !run_cmd_likely_mutates(command)
-        && (command_lower.contains("curl ") || command_lower.contains("wget "))
-        && extract_http_probe_url(command).is_some()
-}
-
-fn rewrite_http_probe_actions(
-    route_result: Option<&RouteResult>,
-    actions: Vec<AgentAction>,
-) -> Vec<AgentAction> {
-    if !should_rewrite_http_probe_run_cmd(route_result, &actions) {
-        return actions;
-    }
-    let Some(AgentAction::CallSkill { args, .. }) = actions.first() else {
-        return actions;
-    };
-    let Some(command) = args.get("command").and_then(|value| value.as_str()) else {
-        return actions;
-    };
-    let Some(url) = extract_http_probe_url(command) else {
-        return actions;
-    };
-    let mut rewritten = actions;
-    if let Some(first) = rewritten.first_mut() {
-        *first = AgentAction::CallSkill {
-            skill: "http_basic".to_string(),
-            args: serde_json::json!({
-                "action": "get",
-                "url": url,
-            }),
-        };
-    }
-    info!("plan_rewrite_http_probe url={url}");
-    rewritten
-}
-
 fn observation_only_plan_missing_user_answer(
     state: &AppState,
     route_result: &RouteResult,
@@ -1263,8 +1115,6 @@ fn normalize_planned_actions(
         strip_terminal_discussion_for_observed_finalize(route_result, loop_state, actions);
     let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
-    let actions = rewrite_service_status_probe_actions(route_result, actions);
-    let actions = rewrite_http_probe_actions(route_result, actions);
     let actions = rewrite_sqlite3_run_cmd_to_db_basic(actions);
     let actions = normalize_system_basic_schema_aliases(actions);
     let actions = rewrite_path_batch_size_facts_to_compare_paths(route_result, actions);
@@ -2909,10 +2759,9 @@ mod tests {
         classify_planning_prompt_class, inject_synthesize_answer_for_bare_placeholder_respond,
         is_bare_last_output_placeholder, looks_like_pre_observation_hallucinated_concrete_content,
         normalize_planned_actions, normalize_system_basic_schema_aliases, plan_repair_reason,
-        rewrite_extract_field_alias_args, rewrite_http_probe_actions,
-        rewrite_path_batch_size_facts_to_compare_paths,
+        rewrite_extract_field_alias_args, rewrite_path_batch_size_facts_to_compare_paths,
         rewrite_pre_observation_concrete_respond_to_placeholder,
-        rewrite_service_status_probe_actions, rewrite_sqlite3_run_cmd_to_db_basic,
+        rewrite_sqlite3_run_cmd_to_db_basic,
         rewrite_terminal_placeholder_respond_to_synthesize_answer, round1_prompt_spec_for_class,
         should_force_actionable_plan_repair,
         strip_terminal_discussion_for_direct_skill_passthrough,
@@ -3340,103 +3189,6 @@ mod tests {
         let mut route = route_result(RoutedMode::Act, false, OutputResponseShape::FileToken);
         route.output_contract.delivery_required = true;
         route
-    }
-
-    #[test]
-    fn service_status_probe_rewrites_run_cmd_grep_to_service_control() {
-        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
-        route.resolved_intent = "检查 telegramd 进程是否正在运行，并用一句话解释状态".to_string();
-        route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-        route.output_contract.locator_hint = "telegramd".to_string();
-        let actions = vec![AgentAction::CallSkill {
-            skill: "run_cmd".to_string(),
-            args: json!({ "command": "ps aux | grep -i telegramd | grep -v grep" }),
-        }];
-
-        let rewritten = rewrite_service_status_probe_actions(Some(&route), actions);
-        assert!(matches!(
-            &rewritten[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "service_control"
-                    && args.get("action").and_then(|v| v.as_str()) == Some("status")
-                    && args.get("target").and_then(|v| v.as_str()) == Some("telegramd")
-        ));
-    }
-
-    #[test]
-    fn explicit_command_request_keeps_run_cmd_probe() {
-        let mut route = route_result(RoutedMode::Act, false, OutputResponseShape::Free);
-        route.resolved_intent =
-            "执行命令 ps aux | grep -i telegramd | grep -v grep，并直接回复执行结果".to_string();
-        route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-        route.output_contract.locator_hint = "telegramd".to_string();
-        let actions = vec![AgentAction::CallSkill {
-            skill: "run_cmd".to_string(),
-            args: json!({ "command": "ps aux | grep -i telegramd | grep -v grep" }),
-        }];
-
-        let rewritten = rewrite_service_status_probe_actions(Some(&route), actions.clone());
-        assert!(matches!(
-            &rewritten[0],
-            AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
-        ));
-    }
-
-    #[test]
-    fn english_status_probe_rewrites_run_cmd_to_service_control() {
-        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
-        route.resolved_intent =
-            "Check whether telegramd is running and briefly explain the status".to_string();
-        route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-        route.output_contract.locator_hint = "telegramd".to_string();
-        let actions = vec![AgentAction::CallSkill {
-            skill: "run_cmd".to_string(),
-            args: json!({ "command": "pgrep -fa telegramd" }),
-        }];
-
-        let rewritten = rewrite_service_status_probe_actions(Some(&route), actions);
-        assert!(matches!(
-            &rewritten[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "service_control"
-                    && args.get("action").and_then(|v| v.as_str()) == Some("status")
-                    && args.get("target").and_then(|v| v.as_str()) == Some("telegramd")
-        ));
-    }
-
-    #[test]
-    fn http_probe_run_cmd_rewrites_to_http_basic() {
-        let route = route_result(RoutedMode::Act, false, OutputResponseShape::Free);
-        let actions = vec![AgentAction::CallSkill {
-            skill: "run_cmd".to_string(),
-            args: json!({ "command": "curl -s http://127.0.0.1:62078/" }),
-        }];
-
-        let rewritten = rewrite_http_probe_actions(Some(&route), actions);
-        assert!(matches!(
-            &rewritten[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "http_basic"
-                    && args.get("action").and_then(|v| v.as_str()) == Some("get")
-                    && args.get("url").and_then(|v| v.as_str()) == Some("http://127.0.0.1:62078/")
-        ));
-    }
-
-    #[test]
-    fn mutating_http_run_cmd_does_not_rewrite_to_http_basic() {
-        let route = route_result(RoutedMode::Act, false, OutputResponseShape::Free);
-        let actions = vec![AgentAction::CallSkill {
-            skill: "run_cmd".to_string(),
-            args: json!({
-                "command": "cd /tmp/demo && nohup python3 -m http.server 62078 --bind 127.0.0.1 > /dev/null 2>&1 & sleep 2 && curl -s http://127.0.0.1:62078/"
-            }),
-        }];
-
-        let rewritten = rewrite_http_probe_actions(Some(&route), actions.clone());
-        assert!(matches!(
-            &rewritten[0],
-            AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
-        ));
     }
 
     #[test]
