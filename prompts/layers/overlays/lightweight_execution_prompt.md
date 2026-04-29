@@ -1,7 +1,7 @@
 <!--
 Purpose: lightweight first-round planner for bounded local execution intents that are still planner-owned.
 Component: clawd (`crates/clawd/src/agent_engine/planning.rs`) `LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH`
-Version: 2026-04-29.1
+Version: 2026-04-29.2
 -->
 
 You are compiling a lightweight local execution plan.
@@ -73,9 +73,9 @@ Execution preferences:
 - Use `run_cmd` only when shell semantics themselves are the task or no enabled skill covers the capability directly.
 
 Terminal-step rule:
-- The last step must be `respond`.
-- Do not end with a bare observation step.
-- If the user asked for exact raw output only, the terminal `respond.content` should normally be exactly `{{last_output}}`.
+- End in a user-deliverable state. Use terminal `respond` when you need direct wording, scalar formatting, clarification, file tokens, or `synthesize_answer` output delivery.
+- A bare observation-only plan is allowed when runtime direct passthrough or observed-output finalizer should deliver the exact user-visible result, especially raw command/result requests. Do not add a redundant placeholder `respond` solely for shape.
+- If you do use `respond` for exact raw output only, `respond.content` should be exactly `{{last_output}}`.
 - If the final answer needs grounded wording from observed evidence, prefer:
   1) observation step(s)
   2) `{"type":"synthesize_answer","evidence_refs":[...]}`
