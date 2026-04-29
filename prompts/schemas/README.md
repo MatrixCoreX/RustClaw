@@ -117,9 +117,9 @@ What remains intentionally out of that fixed-schema backlog:
 - Mixed dispatcher prompts such as `image_vision_prompt.md`, where only some
   action branches map to repo-owned fixed schemas and those fixed branches are
   already covered by dedicated child schemas.
-- Legacy/dead overlays such as `resume_followup_intent_prompt.md` and
-  `image_vision_action_fallback.md`, which are no longer authoritative online
-  JSON contracts and therefore should not be counted as active schema debt.
+- Legacy/dead overlays such as `image_vision_action_fallback.md`, which are no
+  longer authoritative online JSON contracts and therefore should not be
+  counted as active schema debt.
 
 To keep this inventory honest, `crates/clawd/tests/config_templates.rs` now
 contains a guard test that scans overlay prompts for strict JSON markers and
